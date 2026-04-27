@@ -79,11 +79,13 @@ jobs:
       # checks usually catch this, but MySQL on first boot is slow.
       - name: Wait for databases
         run: |
-          for i in {1..30}; do
-            python -c "import psycopg2,pymysql; \
-psycopg2.connect('$SQLLENS_TEST_POSTGRES_URL').close(); \
-pymysql.connect(host='127.0.0.1',user='sqllens',password='sqllens',database='sqllens').close(); \
-print('ready')" && break || true
+          for i in $(seq 1 30); do
+            python <<'PY' && break
+          import psycopg2, pymysql, os
+          psycopg2.connect(os.environ['SQLLENS_TEST_POSTGRES_URL']).close()
+          pymysql.connect(host='127.0.0.1', user='sqllens', password='sqllens', database='sqllens').close()
+          print('ready')
+          PY
             sleep 2
           done
 
