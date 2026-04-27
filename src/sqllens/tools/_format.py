@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
 """Utilities for converting agent UI components into MCP-friendly text.
 
 The agent yields a stream of ``UiComponent`` objects (status cards, text,

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
 """FastMCP server wiring.
 
 Phase 1 spike: minimal stdio server with two tools, no auth, single DB.

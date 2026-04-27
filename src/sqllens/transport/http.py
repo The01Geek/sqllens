@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
 """Streamable HTTP transport for SQL Lens.
 
 The MCP Python SDK's ``FastMCP.streamable_http_app()`` returns a Starlette app

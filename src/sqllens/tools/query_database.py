@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
 """``query_database`` MCP tool implementation."""
 
 from __future__ import annotations

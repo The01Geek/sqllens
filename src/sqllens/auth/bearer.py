@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
 """Static bearer-token authentication.
 
 A single token string is configured at startup; clients send it in the

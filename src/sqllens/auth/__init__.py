@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
 """Authentication strategies. v1 ships ``none`` and ``bearer``; ``jwt`` is scaffolded.
 
 Use ``build_authenticator(cfg.auth)`` to get the right strategy for a config.

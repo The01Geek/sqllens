@@ -141,5 +141,5 @@ Open from day 1. See [CONTRIBUTING.md](CONTRIBUTING.md). Bug reports and feature
 
 ## License
 
-Pending. See [LICENSES/](LICENSES/) for third-party attributions.
+[Apache 2.0](LICENSE). See [`NOTICE`](NOTICE) for copyright and [`LICENSES/`](LICENSES/) for third-party attributions.
 

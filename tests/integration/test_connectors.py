@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
 """Integration tests for the Postgres and MySQL SqlRunner adapters.
 
 These tests run against **real** Postgres and MySQL instances. They're gated

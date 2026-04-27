@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
 """JWT authentication — verifier-only.
 
 This module is **scaffolded for Phase 4**. The full JWT design (claim mapping,

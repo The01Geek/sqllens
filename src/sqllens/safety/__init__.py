@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
 """SQL safety guards (read-only enforcement, row caps, query timeouts)."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
 """Read-only SQL enforcement.
 
 The agent generates SQL from natural language; before that SQL is executed, we

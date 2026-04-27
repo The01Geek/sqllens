@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
 """Integration test fixtures for SQL Lens HTTP transport.
 
 The fixtures here spin up a real uvicorn server in a thread, pointed at the

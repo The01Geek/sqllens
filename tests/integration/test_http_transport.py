@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
 """End-to-end Streamable HTTP transport tests.
 
 Each test launches a real uvicorn server bound to a random port, pointed at

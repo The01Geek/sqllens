@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
 """Open-access mode. Use only on loopback or behind a trusted reverse proxy."""
 
 from __future__ import annotations

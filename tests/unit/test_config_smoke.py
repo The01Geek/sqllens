@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
 """Smoke tests for the config loader. Phase 1 only proves the schema parses."""
 
 from __future__ import annotations
