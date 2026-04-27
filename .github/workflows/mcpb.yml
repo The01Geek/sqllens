@@ -1,0 +1,83 @@
+name: MCPB
+
+# Build platform-specific .mcpb bundles. We have to build per-platform because
+# ChromaDB pulls in onnxruntime, which has native wheels per OS/arch.
+#
+# Triggers:
+# - tag pushes (v*) → build all platforms, attach to the matching GH release
+# - workflow_dispatch → manual rebuilds without re-tagging
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # to attach assets to the release
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform_tag }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform_tag: linux-x86_64
+          - os: macos-13           # x86_64 runner
+            platform_tag: darwin-x86_64
+          - os: macos-latest       # arm64 runner
+            platform_tag: darwin-arm64
+          - os: windows-latest
+            platform_tag: win32-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build .mcpb (POSIX)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          ./mcpb/build.sh "${{ matrix.platform_tag }}"
+
+      - name: Build .mcpb (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # The build.sh is bash-only; Git Bash on the windows-latest runner
+          # provides a POSIX-enough shell to execute it.
+          ./mcpb/build.sh "${{ matrix.platform_tag }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcpb-${{ matrix.platform_tag }}
+          path: dist/*.mcpb
+          if-no-files-found: error
+
+  attach:
+    name: Attach to release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Attach .mcpb files to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.mcpb

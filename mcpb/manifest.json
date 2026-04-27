@@ -1,0 +1,86 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
+  "manifest_version": "0.4",
+  "name": "sqllens",
+  "display_name": "SQL Lens",
+  "version": "__VERSION__",
+  "description": "Ask any database questions in plain English. Translates natural language to SQL and runs it. Read-only by default.",
+  "author": {
+    "name": "Daniel Radman",
+    "url": "https://github.com/The01Geek/sqllens"
+  },
+  "homepage": "https://github.com/The01Geek/sqllens",
+  "documentation": "https://github.com/The01Geek/sqllens#readme",
+  "support": "https://github.com/The01Geek/sqllens/issues",
+  "keywords": ["sql", "nl2sql", "database", "analytics", "mcp"],
+  "server": {
+    "type": "python",
+    "entry_point": "server/launcher.py",
+    "mcp_config": {
+      "command": "python3",
+      "args": ["${__dirname}/server/launcher.py"],
+      "env": {
+        "PYTHONPATH": "${__dirname}/server/vendor",
+        "PYTHONNOUSERSITE": "1",
+        "SQLLENS_SERVER__TRANSPORT": "stdio",
+        "SQLLENS_DATABASE__URL": "${user_config.database_url}",
+        "SQLLENS_DATABASE__NAME": "${user_config.database_name}",
+        "SQLLENS_DATABASE__READ_ONLY": "${user_config.read_only}",
+        "SQLLENS_LLM__API_KEY": "${user_config.anthropic_api_key}",
+        "SQLLENS_LLM__MODEL": "${user_config.model}",
+        "SQLLENS_MEMORY__PERSIST_DIR": "${user_config.memory_dir}"
+      }
+    }
+  },
+  "user_config": {
+    "database_url": {
+      "type": "string",
+      "title": "Database URL",
+      "description": "SQLAlchemy-style DSN. Examples: sqlite:///path/to/db.sqlite, postgresql://user:pw@host:5432/db, mysql+pymysql://user:pw@host:3306/db",
+      "required": true
+    },
+    "database_name": {
+      "type": "string",
+      "title": "Database display name",
+      "description": "Human-readable name shown via list_data_sources. Defaults to 'primary'.",
+      "default": "primary",
+      "required": false
+    },
+    "read_only": {
+      "type": "boolean",
+      "title": "Enforce read-only",
+      "description": "Reject any non-SELECT SQL the agent generates. Strongly recommended.",
+      "default": true,
+      "required": false
+    },
+    "anthropic_api_key": {
+      "type": "string",
+      "title": "Anthropic API key",
+      "description": "Get one at https://console.anthropic.com/. Stored in your OS keychain.",
+      "sensitive": true,
+      "required": true
+    },
+    "model": {
+      "type": "string",
+      "title": "Anthropic model",
+      "description": "Model id passed to the Anthropic SDK.",
+      "default": "claude-sonnet-4-5-20250929",
+      "required": false
+    },
+    "memory_dir": {
+      "type": "directory",
+      "title": "Memory directory",
+      "description": "Where the agent's vector memory (ChromaDB) is persisted across sessions.",
+      "default": "${HOME}/.sqllens/chroma",
+      "required": true
+    }
+  },
+  "tools_generated": true,
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "runtimes": {
+      "python": ">=3.11"
+    },
+    "platforms": ["darwin", "linux", "win32"]
+  }
+}

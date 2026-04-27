@@ -1,0 +1,50 @@
+"""Static bearer-token authentication.
+
+A single token string is configured at startup; clients send it in the
+``Authorization: Bearer <token>`` header. Constant-time comparison.
+
+This is the simplest auth mode that's actually useful — drop-in for
+single-tenant deployments behind a reverse proxy or for personal use.
+"""
+
+from __future__ import annotations
+
+import hmac
+from collections.abc import Mapping
+
+from sqllens.auth.base import AuthContext, Authenticator, AuthError
+
+
+class BearerTokenAuthenticator(Authenticator):
+    """Compare the request's bearer token against a configured value."""
+
+    def __init__(self, expected_token: str) -> None:
+        if not expected_token:
+            raise ValueError("bearer token must not be empty")
+        # Hold the comparison value as bytes so hmac.compare_digest gets a
+        # consistent type and we don't allocate on every request.
+        self._expected = expected_token.encode("utf-8")
+
+    async def authenticate(self, headers: Mapping[str, str]) -> AuthContext:
+        token = _extract_bearer(headers)
+        if token is None:
+            raise AuthError("missing or malformed Authorization header")
+        if not hmac.compare_digest(token.encode("utf-8"), self._expected):
+            raise AuthError("invalid bearer token")
+        return AuthContext(subject="bearer")
+
+
+def _extract_bearer(headers: Mapping[str, str]) -> str | None:
+    """Pull the token out of ``Authorization: Bearer <token>``.
+
+    Header lookup is case-insensitive; we accept the canonical form and the
+    common ``authorization`` lower-case variant.
+    """
+    raw = headers.get("Authorization") or headers.get("authorization")
+    if not raw:
+        return None
+    parts = raw.split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    token = parts[1].strip()
+    return token or None

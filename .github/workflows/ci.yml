@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    name: Lint + unit + transport (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - run: pip install -e ".[dev,all]"
+      - run: ruff check .
+      # Skip the connectors marker — those need real DB service containers
+      # and run in the dedicated job below.
+      - run: pytest -q -m "not connectors"
+
+  connectors:
+    name: Connector tests (Postgres + MySQL)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sqllens
+          POSTGRES_PASSWORD: sqllens
+          POSTGRES_DB: sqllens
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sqllens"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: sqllens
+          MYSQL_DATABASE: sqllens
+          MYSQL_USER: sqllens
+          MYSQL_PASSWORD: sqllens
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -psqllens --silent"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      SQLLENS_TEST_POSTGRES_URL: postgresql://sqllens:sqllens@127.0.0.1:5432/sqllens
+      SQLLENS_TEST_MYSQL_URL: mysql+pymysql://sqllens:sqllens@127.0.0.1:3306/sqllens
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -e ".[dev,all]"
+
+      # Wait for both DBs to accept ``SELECT 1``. Service-container health
+      # checks usually catch this, but MySQL on first boot is slow.
+      - name: Wait for databases
+        run: |
+          for i in {1..30}; do
+            python -c "import psycopg2,pymysql; \
+psycopg2.connect('$SQLLENS_TEST_POSTGRES_URL').close(); \
+pymysql.connect(host='127.0.0.1',user='sqllens',password='sqllens',database='sqllens').close(); \
+print('ready')" && break || true
+            sleep 2
+          done
+
+      - run: pytest -q -m connectors -v
