@@ -14,7 +14,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/sqllens
 
 jobs:
   build-and-push:
@@ -30,6 +29,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # OCI image references must be all lowercase. ``github.repository_owner``
+      # preserves the user's GitHub case, so we lowercase it here once and use
+      # the result for every reference downstream (metadata, build, sign, sbom).
+      - name: Compute lowercase image name
+        run: echo "IMAGE_NAME=${REPO,,}" >> "$GITHUB_ENV"
+        env:
+          REPO: ${{ github.repository_owner }}/sqllens
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
