@@ -44,13 +44,19 @@ sed "s/__VERSION__/$VERSION/" mcpb/manifest.json > "$STAGE/manifest.json"
 # ───────── vendor pip dependencies ─────────
 # --target installs everything (sqllens + transitive deps) into vendor/.
 # Native wheels matching the build host are picked up automatically.
+#
+# We install from the current directory ("``.``") rather than a ``file://``
+# URL because Git Bash on Windows runners reports MSYS-style paths
+# (``/d/a/sqllens/sqllens``) that pip's Windows-native Python can't resolve.
+# Running pip from inside the repo with a relative target sidesteps the
+# whole path-translation problem.
 echo "→ vendoring sqllens + dependencies for $PLATFORM_TAG"
-python3 -m pip install \
+( cd "$REPO_ROOT" && python3 -m pip install \
     --upgrade \
     --target "$STAGE/server/vendor" \
     --no-cache-dir \
     --quiet \
-    "sqllens[postgres,mysql] @ file://$REPO_ROOT"
+    ".[postgres,mysql]" )
 
 # Trim *.dist-info/RECORD which contain absolute paths and bloat the bundle.
 find "$STAGE/server/vendor" -name "RECORD" -delete 2>/dev/null || true
