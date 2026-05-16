@@ -48,7 +48,7 @@ Defines the language model SQL Lens uses to translate questions into SQL.
 |---|---|---|
 | `provider` | String | Only `anthropic` is supported at present. |
 | `model` | String | A Claude model identifier, for example `claude-sonnet-4-5-20250929`. |
-| `api_key` | String | Your Anthropic API key. Prefer setting this with the `SQLLENS_LLM__API_KEY` environment variable so the key stays out of the file. |
+| `api_key` | String | Your Anthropic API key. Prefer setting this with the `SQLLENS_LLM__API_KEY` environment variable so the key stays out of the file. Optional during `sqllens validate`; required by `sqllens serve`. |
 
 ## Section: `[memory]`
 
@@ -96,7 +96,9 @@ Before starting the server, run:
 sqllens validate -c path/to/sqllens.toml
 ```
 
-The command exits with a clear error message if any required field is missing or has the wrong type. Validation requires `llm.api_key` to be set somewhere, so export `SQLLENS_LLM__API_KEY` first if your file deliberately leaves the key blank.
+The command exits with a clear error message if any required field is missing or has the wrong type. `llm.api_key` is **not** required for validation: when the key is absent, the summary line marks it explicitly as `llm: anthropic / <model> (api_key NOT SET)` and validation still exits successfully. The key is enforced when you run `sqllens serve`.
+
+If `sqllens.toml` starts with a UTF-8 byte-order mark (BOM), validation reports it by name and prints rewrite commands for PowerShell 7+, PowerShell 5.1, and bash. PowerShell 5.1's `Set-Content -Encoding utf8` and `Out-File -Encoding utf8` both add a BOM; use `Set-Content -Encoding utf8NoBOM` (PowerShell 7+) or `[System.IO.File]::WriteAllText(...)` to write a BOM-free file.
 
 ## See also
 
