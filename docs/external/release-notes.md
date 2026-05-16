@@ -8,7 +8,7 @@ This page lists user-visible changes in each released version of SQL Lens. For t
 
 ## Unreleased
 
-No user-visible changes yet.
+- **Fix: Access-denied errors on every query under Claude Desktop on Windows** — SQL Lens previously wrote per-query scratch CSVs into its current working directory, which under Claude Desktop on Windows is the launcher's install folder and is not writable by the user. Every query failed with `[WinError 5] Access is denied`. Scratch files are now written into your user temp directory regardless of how the server is launched, so Claude Desktop on Windows works out of the box without the `.cmd` wrapper workaround. (#21)
 
 ## 0.0.2 — 2026-04-28
 

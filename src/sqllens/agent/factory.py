@@ -7,6 +7,8 @@ This module is the boundary between the agent framework (``sqllens.agent.core``,
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from urllib.parse import urlparse
 
 from sqllens.agent import Agent, RequestContext, ToolRegistry, User, UserResolver
@@ -17,6 +19,7 @@ from sqllens.agent.integrations import (
     PostgresRunner,
     SqliteRunner,
 )
+from sqllens.agent.integrations.local import LocalFileSystem
 from sqllens.agent.integrations.mysql import MySQLRunner
 from sqllens.agent.tools import (
     RunSqlTool,
@@ -55,9 +58,18 @@ def build_agent(cfg: Config) -> Agent:
         collection_name=cfg.memory.collection,
     )
 
+    # Anchor RunSqlTool's scratch CSV writes to an absolute, user-writable temp
+    # directory. The default LocalFileSystem() resolves "." against process CWD,
+    # which is non-writable under some MCP launchers (e.g. Claude Desktop on
+    # Windows installs under Program Files / Local\AnthropicClaude).
+    scratch_fs = LocalFileSystem(str(Path(tempfile.gettempdir()) / "sqllens"))
+
     tools = ToolRegistry()
     access = [DEFAULT_USER_GROUP]
-    tools.register_local_tool(RunSqlTool(sql_runner=sql_runner), access_groups=access)
+    tools.register_local_tool(
+        RunSqlTool(sql_runner=sql_runner, file_system=scratch_fs),
+        access_groups=access,
+    )
     tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
     tools.register_local_tool(SearchSavedCorrectToolUsesTool(), access_groups=access)
 
