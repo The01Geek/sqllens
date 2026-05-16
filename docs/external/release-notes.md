@@ -4,7 +4,7 @@ This page lists user-visible changes in each released version of SQL Lens. For t
 
 ## Unreleased
 
-No user-visible changes yet.
+- **[Improvement] Ship stdio Claude Desktop example and add Windows config path to README** — A new `examples/mcp-clients/claude_desktop_stdio.json` snippet steers Claude Desktop users onto the recommended stdio launch pattern, and the existing HTTP example is renamed to `claude_desktop_http.json` to make the two variants explicit. The README and getting-started guide now list the Windows config path `%APPDATA%\Claude\claude_desktop_config.json` alongside the macOS path, and point Windows users at the dedicated install guide that documents the `.cmd` launcher workaround. (#22)
 
 ## 0.0.2 — 2026-04-28
 
