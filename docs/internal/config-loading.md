@@ -4,7 +4,7 @@ How `sqllens` resolves its runtime configuration, and where the current implemen
 
 ## Resolution order
 
-`Config.load()` ([src/sqllens/config.py:119](../../src/sqllens/config.py#L119)) builds a `Config` instance from three sources, in this priority (highest wins):
+`Config.load()` ([src/sqllens/config.py:125](../../src/sqllens/config.py#L125)) builds a `Config` instance from three sources, in this priority (highest wins):
 
 1. **`init_settings`** — kwargs passed programmatically (used only by tests).
 2. **`env_settings`** — environment variables with prefix `SQLLENS_`, nested fields delimited by `__`. E.g. `SQLLENS_LLM__API_KEY`, `SQLLENS_DATABASE__URL`.
@@ -31,6 +31,14 @@ Top-level keys (all required to be present in the merged config, though most hav
 | `[server]` | — | `transport` defaults to `"stdio"`. `host`/`port` only used for `transport = "http"`. |
 
 `extra = "forbid"` is set on the top-level `Config`, so unknown keys raise a `ValidationError` rather than being silently dropped.
+
+### Sub-models are `BaseModel`, not `BaseSettings`
+
+Only the top-level `Config` inherits from `pydantic_settings.BaseSettings`. The five sub-sections (`DatabaseConfig`, `LLMConfig`, `MemoryConfig`, `AuthConfig`, `ServerConfig`) are plain `pydantic.BaseModel`.
+
+This matters: a nested `BaseSettings` spins up its own env-resolution source independent of the parent. That source has no prefix, so it silently pulls in any process-level env var matching a sub-field name — `MODE`, `HOST`, `PORT`, `TRANSPORT`, `URL`, `NAME`, etc. A stray `MODE=...` in the environment was enough to fail `Config.load` with an `AuthConfig.mode` enum error.
+
+Keeping sub-models as `BaseModel` makes the parent `Config` the only env-aware layer; nested fields are reachable solely via the `SQLLENS_<SECTION>__<FIELD>` spelling. See [tests/unit/test_config_env_isolation.py](../../tests/unit/test_config_env_isolation.py) for the regression suite and #26 for the original bug.
 
 ## CLI entry points
 
@@ -72,7 +80,7 @@ The two approaches aren't mutually exclusive; the structural fix is cleaner but 
 
 ## Adding a new config field
 
-1. Add the field to the appropriate `*Config` class in [config.py](../../src/sqllens/config.py).
+1. Add the field to the appropriate `*Config` class in [config.py](../../src/sqllens/config.py). New sub-section models must inherit from `pydantic.BaseModel`, not `BaseSettings` — see [Sub-models are BaseModel, not BaseSettings](#sub-models-are-basemodel-not-basesettings).
 2. If it's required, set `Field(..., description=...)`. If optional, give it a default.
 3. Update the `_SAMPLE_CONFIG` template at the bottom of [cli.py](../../src/sqllens/cli.py#L85) so `sqllens init` writes a working starter that includes it.
 4. Document the corresponding env var spelling (top-level fields: `SQLLENS_FOO`; nested: `SQLLENS_SECTION__FOO`).
