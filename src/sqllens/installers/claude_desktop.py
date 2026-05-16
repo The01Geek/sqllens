@@ -528,9 +528,10 @@ def run_install(
         ) from exc
 
     # Only mutate the user's JSON when the merge would actually change it.
-    # Skips redundant `.bak.<ts>` files on idempotent re-runs.
-    json_changed = json_after_serialized != _read_text_or_none(options.config_path)
-    if json_changed:
+    # Compare parsed dicts (not serialized bytes) so we don't re-normalize a
+    # user's hand-formatted JSON (different indent, CRLF, no trailing newline)
+    # on every run.
+    if json_after != json_before:
         try:
             backup_path: Path | None = make_backup_path(options.config_path, now_fn())
             shutil.copy2(options.config_path, backup_path)
