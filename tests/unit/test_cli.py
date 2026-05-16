@@ -27,7 +27,6 @@ def test_version_subcommand_prints_version_and_exits_zero() -> None:
 
 def test_no_args_prints_help() -> None:
     result = runner.invoke(app, [])
-    # Typer with no_args_is_help=True exits with code 2 and renders help.
     assert "Natural-language SQL analytics over MCP." in result.stdout
     assert "serve" in result.stdout
     assert "init" in result.stdout

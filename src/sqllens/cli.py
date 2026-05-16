@@ -37,7 +37,7 @@ def main(
         help="Show the version and exit.",
     ),
 ) -> None:
-    """Natural-language SQL analytics over MCP."""
+    pass
 
 
 @app.command()
