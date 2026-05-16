@@ -4,6 +4,19 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+- `examples/mcp-clients/claude_desktop_stdio.json` snippet so Claude
+  Desktop users land on the recommended stdio launch pattern by default.
+- README and getting-started guide now surface the Windows config path
+  (`%APPDATA%\Claude\claude_desktop_config.json`) alongside the macOS
+  path, and link the Windows-specific install runbook that documents the
+  `.cmd` launcher workaround for the non-writable CWD issue (#10).
+
+### Changed
+- Renamed `examples/mcp-clients/claude_desktop.json` →
+  `claude_desktop_http.json` to disambiguate the HTTP and stdio
+  transports now that both example shapes ship.
+
 ## [0.0.2] - 2026-04-28
 
 ### Fixed

@@ -72,9 +72,9 @@ Env vars beat TOML — the convention containerized deploys expect.
 Drop one of these into the appropriate config file:
 
 - **Cursor** (`~/.cursor/mcp.json`) — see [`examples/mcp-clients/cursor.json`](examples/mcp-clients/cursor.json)
-- **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS) — see [`examples/mcp-clients/claude_desktop.json`](examples/mcp-clients/claude_desktop.json)
+- **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows). **Windows users:** do not copy the stdio example verbatim — follow [`docs/internal/claude-desktop-windows-install.md`](docs/internal/claude-desktop-windows-install.md), which wraps `sqllens` in a `.cmd` launcher to work around the non-writable working-directory issue tracked in #10. On macOS, stdio is recommended (simpler than HTTP, no port management): [`examples/mcp-clients/claude_desktop_stdio.json`](examples/mcp-clients/claude_desktop_stdio.json). HTTP variant: [`examples/mcp-clients/claude_desktop_http.json`](examples/mcp-clients/claude_desktop_http.json).
 - **Windsurf** — see [`examples/mcp-clients/windsurf.json`](examples/mcp-clients/windsurf.json)
-- **stdio variant** (no HTTP server, IDE launches the process) — see [`examples/mcp-clients/stdio-cursor.json`](examples/mcp-clients/stdio-cursor.json)
+- **stdio variant for other IDEs** (no HTTP server, IDE launches the process) — see [`examples/mcp-clients/stdio-cursor.json`](examples/mcp-clients/stdio-cursor.json)
 
 For interactive testing, use the [official MCP Inspector](https://github.com/modelcontextprotocol/inspector):
 
