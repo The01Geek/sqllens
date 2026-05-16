@@ -2,6 +2,8 @@
 
 Runbook for connecting SQL Lens to Claude Desktop on a fresh Windows machine. Walked through end-to-end on 2026-05-16; every gotcha that bit us is flagged inline.
 
+> **Updated 2026-05-16 (issue #10 / PR #21):** `RunSqlTool` no longer resolves its scratch directory against process CWD — it now writes to `tempfile.gettempdir() / "sqllens"` (under the user profile on Windows), independent of how `sqllens.exe` was launched. As a result, the `.cmd` wrapper in step 6 is **no longer required to dodge `[WinError 5] Access is denied`**. The runbook keeps the `.cmd` form as the default path because it's the most ergonomic way to bundle the config path + executable path into a single command Claude Desktop can invoke, but a "no wrapper" variant is documented inline below if you prefer.
+
 > Substitute your Windows username (the folder under `C:\Users\`) wherever the runbook says `USERNAME`. Substitute your real Anthropic API key for `sk-ant-...`.
 
 ## Prerequisites
@@ -88,24 +90,25 @@ where.exe sqllens
 
 Note the full path (e.g. `C:\Users\USERNAME\AppData\Local\Programs\Python\Python313\Scripts\sqllens.exe`). Claude Desktop launches child processes outside your shell, so PATH lookups are flaky — we use the absolute path next.
 
-## 6. Write a `.cmd` launcher (CWD workaround)
+## 6. Write a `.cmd` launcher
 
-> **Gotcha:** Claude Desktop's `mcpServers` config schema only honors `command`, `args`, and `env`. A `cwd` field is silently ignored. On Windows, the launched process inherits Claude.exe's install directory as its CWD, which is **not writable** by the user.
+> **Historical context:** Earlier versions of SQL Lens (pre-issue #10) defaulted `RunSqlTool`'s scratch directory to `Path(".")`, resolved against process CWD. On Windows, Claude Desktop launches child processes inheriting Claude.exe's install directory as their CWD — under `Program Files` or `Local\AnthropicClaude`, neither user-writable. Every query failed with `[WinError 5] Access is denied: '<16-hex-chars>'`, and the agent confidently misattributed it ("the database file has the wrong permissions" — completely misleading). The `.cmd` wrapper below was the canonical workaround: `cd` into a writable folder before exec'ing `sqllens.exe`.
 >
-> SQL Lens's `RunSqlTool` writes a per-query scratch CSV under `<CWD>/<sha256(user.id)[:16]>/`, so every query fails with `[WinError 5] Access is denied: '<16-hex-chars>'`. The agent doesn't know what to do with that error and tends to invent plausible-sounding nonsense like "the database file has the wrong permissions" — completely misleading.
+> **As of issue #10 / PR #21, the `.cmd` wrapper is no longer required to make `run_sql` work.** Scratch CSVs now land in `%LOCALAPPDATA%\Temp\sqllens\<hash>\`, which is always user-writable regardless of launcher CWD.
 >
-> Workaround: launch via a tiny `.cmd` batch file that `cd`s into a writable folder before exec'ing `sqllens.exe`.
+> We still recommend the `.cmd` form because Claude Desktop's `mcpServers` schema only supports a single `command` plus `args` array — bundling the executable path + `-c <config>` into a `.cmd` is the cleanest way to keep the JSON readable. If you'd rather skip the wrapper, see the "Direct-exe variant" callout at the end of this step.
 
 ```powershell
 $bat = @'
 @echo off
-cd /d C:\Users\USERNAME\sqllens
 "C:\Users\USERNAME\AppData\Local\Programs\Python\Python313\Scripts\sqllens.exe" serve -c C:\Users\USERNAME\sqllens\sqllens.toml
 '@
 [System.IO.File]::WriteAllText("$env:USERPROFILE\sqllens\run-sqllens.cmd", $bat)
 ```
 
-Adjust both the `cd` target and the `sqllens.exe` path to match your machine.
+Adjust the `sqllens.exe` path to match your machine. The previous `cd /d ...` line is no longer needed and has been removed.
+
+> **Direct-exe variant (no wrapper):** Skip the `.cmd` entirely and configure Claude Desktop's `mcpServers.sqllens` block with `"command": "C:\\Users\\USERNAME\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\sqllens.exe"` and `"args": ["serve", "-c", "C:\\Users\\USERNAME\\sqllens\\sqllens.toml"]`. Functionally identical to the wrapper; just shifts the executable + config path into the JSON config. Double-escape every backslash in JSON.
 
 ## 7. Configure Claude Desktop
 
@@ -152,7 +155,7 @@ Reopen from the Start menu.
 - Bottom-right of the chat input → MCP indicator should show `sqllens` with 2 tools (`query_database`, `list_data_sources`).
 - New chat: *"Using sqllens, how many albums did AC/DC release in the chinook database?"*
 - Approve the tool call when prompted. **First query takes 30–60 seconds** — ChromaDB downloads ~80 MB of embedding model weights into `C:\Users\USERNAME\sqllens\chroma\`. Subsequent queries are fast.
-- After success, a `C:\Users\USERNAME\sqllens\<16-hex-chars>\` directory will appear containing `query_results_*.csv`. That's the agent's scratch space — harmless, safe to delete periodically.
+- After success, a `%LOCALAPPDATA%\Temp\sqllens\<16-hex-chars>\` directory (typically `C:\Users\USERNAME\AppData\Local\Temp\sqllens\<hash>\`) will contain `query_results_*.csv`. That's the agent's scratch space — harmless, reclaimed by Disk Cleanup on its normal schedule, safe to delete manually anytime.
 
 Expected answer: 2 albums.
 
@@ -171,16 +174,16 @@ Edit `C:\Users\USERNAME\sqllens\sqllens.toml`, swap `[database].url` for your re
 | Symptom | Where to look |
 |---|---|
 | `sqllens` doesn't appear in Claude Desktop's MCP list | `%APPDATA%\Claude\logs\mcp.log` — JSON typo or missing executable |
-| Server connects, but every query says "experiencing access issues" / "database permissions" | `%APPDATA%\Claude\logs\mcp-server-sqllens.log` — look for `[WinError 5] Access is denied`. Means the `.cmd` CWD workaround in step 6 didn't take effect. |
+| Server connects, but every query says "experiencing access issues" / "database permissions" | `%APPDATA%\Claude\logs\mcp-server-sqllens.log` — look for `[WinError 5] Access is denied`. Pre-PR #21 this meant the `.cmd` CWD workaround in step 6 didn't take effect; on current versions of SQL Lens it likely points at a real ACL problem on `%LOCALAPPDATA%\Temp\sqllens\` (rare — investigate the path manually). |
 | Generic "An unexpected error occurred while processing your message" | Anthropic API hiccup (check status.anthropic.com), or the server raised an unhandled exception. Same per-server log. |
 | First query hangs forever | ChromaDB downloading embeddings on first run. Allow ~80 MB / a minute. Confirm internet access to `huggingface.co`. |
 
 ## Known rough edges (codebase, not setup)
 
-These are real bugs we worked around in this runbook. Fixing them in the codebase would shorten the steps significantly:
+These are real bugs we worked around in this runbook. Fixing them in the codebase would shorten the steps further:
 
-- **`RunSqlTool` defaults its scratch directory to `Path(".")`** — fragile across any launcher whose CWD isn't writable. Drives the entire `.cmd` workaround in step 6.
+- ~~**`RunSqlTool` defaults its scratch directory to `Path(".")`**~~ — **fixed in issue #10 / PR #21.** Scratch now lives under `tempfile.gettempdir() / "sqllens"`. The `.cmd` wrapper in step 6 is retained for JSON-config ergonomics, not correctness.
 - **`sqllens validate` requires `llm.api_key`** — secrets should be optional during structural validation.
 - **`sqllens --version` flag is missing** — only the subcommand form works.
 - **Config loader doesn't detect UTF-8 BOM** — emits an opaque parser error instead of a clear "your file has a BOM" message.
-- **Agent invents explanations for tool errors** — when `run_sql` returns a `WinError 5`, the agent confidently misattributes it to "database permissions" instead of surfacing the verbatim error.
+- **Agent invents explanations for tool errors** — when `run_sql` returns any internal error, the agent confidently misattributes it (e.g. to "database permissions") instead of surfacing the verbatim error string. Independent of the scratch-dir fix.
