@@ -104,9 +104,9 @@ Because SQL Lens is single-tenant, the `_get_user_directory()` hash always evalu
 
 Alternative: replace `LocalFileSystem` in `RunSqlTool` with a thin scratch-only helper that just writes to a single absolute directory, no user logic.
 
-### 2. Tool error → LLM confabulation
+### 2. Tool error → LLM confabulation (mitigated by system prompt)
 
-When `write_file` raises (or any other `RunSqlTool` internal step fails), the LLM receives only `f"Error executing query: {str(e)}"`. The model isn't directed to surface the verbatim error and tends to invent plausible-sounding root causes that mislead the user. Either prepend a directive to the error string ("report this error verbatim; do not invent root causes") or surface tool-internal errors as a distinct category from SQL-execution errors at the protocol level.
+When `write_file` raises (or any other `RunSqlTool` internal step fails), the LLM receives the bare `str(e)` via `ToolResult.error` (the agent loop forwards `result.error` on failure, not `result_for_llm` — the `"Error executing query: "` prefix is stripped before the model sees it). The default system prompt now carries a `Tool Errors:` directive (added in [src/sqllens/agent/core/system_prompt/default.py](../../src/sqllens/agent/core/system_prompt/default.py)) that instructs the model to quote that string verbatim inside a fenced code block and ask the user how to proceed, instead of paraphrasing or speculating about root causes. This is a prompt-level mitigation — the model is no longer told nothing about failures — but it doesn't change the protocol: tool-internal errors and SQL-execution errors are still flattened into the same `ToolResult.error` channel, and a future change could split them so the agent (and any UI layer) can react differently.
 
 ### 3. No cleanup
 
