@@ -10,7 +10,7 @@ CWD before invoking the server (workaround for issue #10), and merges a
 ``mcpServers`` entry into ``claude_desktop_config.json`` while preserving any
 existing ``preferences`` and sibling servers.
 
-The module is intentionally CLI-side concern, not under ``sqllens.tools``
+The module is intentionally a CLI-side concern, not under ``sqllens.tools``
 which is reserved for MCP tool wrappers.
 """
 
@@ -24,12 +24,16 @@ import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import Any
 
-# ---------------------------------------------------------------------------
-# Result / option dataclasses
-# ---------------------------------------------------------------------------
+PLATFORM_WIN = "win32"
+PLATFORM_MAC = "darwin"
+PLATFORM_LINUX_PREFIX = "linux"
+
+
+def is_windows(platform_name: str) -> bool:
+    return platform_name == PLATFORM_WIN
 
 
 @dataclass(frozen=True)
@@ -62,15 +66,23 @@ class InstallResult:
     toml_content: str
     cmd_path: Path | None
     cmd_content: str | None
-    json_before: dict[str, Any]
     json_after: dict[str, Any]
     json_diff: str
     backup_path: Path | None
     toml_written: bool
     cmd_written: bool
-    json_written: bool
     dry_run: bool
     preserved_sibling_servers: int
+
+    @property
+    def platform_label(self) -> str:
+        if is_windows(self.platform_name):
+            return "Windows"
+        if self.platform_name == PLATFORM_MAC:
+            return "macOS"
+        if self.platform_name.startswith(PLATFORM_LINUX_PREFIX):
+            return "Linux"
+        return self.platform_name
 
 
 @dataclass(frozen=True)
@@ -86,14 +98,9 @@ class InstallError(Exception):
     """Raised for any installer-level failure surfaced to the CLI."""
 
 
-# ---------------------------------------------------------------------------
-# Platform-aware path defaults
-# ---------------------------------------------------------------------------
-
-
 def default_working_dir(platform_name: str, env: Mapping[str, str]) -> Path:
     """Default writable directory for ``sqllens.toml`` and the launcher."""
-    if platform_name == "win32":
+    if is_windows(platform_name):
         user_profile = env.get("USERPROFILE")
         base = Path(user_profile) if user_profile else Path.home()
         return base / "sqllens"
@@ -107,12 +114,12 @@ def default_memory_dir(platform_name: str, env: Mapping[str, str]) -> Path:
 
 def default_config_path(platform_name: str, env: Mapping[str, str]) -> Path | None:
     """Detected ``claude_desktop_config.json`` location, or None on unknown platforms."""
-    if platform_name == "win32":
+    if is_windows(platform_name):
         appdata = env.get("APPDATA")
         if not appdata:
             return None
         return Path(appdata) / "Claude" / "claude_desktop_config.json"
-    if platform_name == "darwin":
+    if platform_name == PLATFORM_MAC:
         return (
             Path.home()
             / "Library"
@@ -120,7 +127,7 @@ def default_config_path(platform_name: str, env: Mapping[str, str]) -> Path | No
             / "Claude"
             / "claude_desktop_config.json"
         )
-    if platform_name.startswith("linux"):
+    if platform_name.startswith(PLATFORM_LINUX_PREFIX):
         return Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
     return None
 
@@ -149,11 +156,6 @@ def derive_default_name(db_url: str) -> str:
     return stem or "sqllens"
 
 
-# ---------------------------------------------------------------------------
-# Executable resolution
-# ---------------------------------------------------------------------------
-
-
 def resolve_invocation(
     *,
     platform_name: str,
@@ -166,7 +168,7 @@ def resolve_invocation(
     ``<python> -m sqllens`` when the script isn't installed in a globally
     discoverable location.
     """
-    exe_name = "sqllens.exe" if platform_name == "win32" else "sqllens"
+    exe_name = "sqllens.exe" if is_windows(platform_name) else "sqllens"
     found = which(exe_name) or which("sqllens")
     if found:
         return _Invocation(command=found)
@@ -175,11 +177,6 @@ def resolve_invocation(
         args_prefix=["-m", "sqllens"],
         used_python_module_fallback=True,
     )
-
-
-# ---------------------------------------------------------------------------
-# Artifact generation
-# ---------------------------------------------------------------------------
 
 
 def generate_toml(
@@ -277,11 +274,6 @@ def _cmd_quote(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
 
 
-# ---------------------------------------------------------------------------
-# JSON merge / backup
-# ---------------------------------------------------------------------------
-
-
 def build_mcp_entry(
     *,
     server_command: str,
@@ -309,7 +301,7 @@ def merge_into_mcp_servers(
     installer with the same name produces stable JSON.
     """
     if existing is None:
-        new = {}
+        new: dict[str, Any] = {}
     else:
         new = json.loads(json.dumps(existing))
     servers = new.setdefault("mcpServers", {})
@@ -326,11 +318,6 @@ def make_backup_path(json_path: Path, now: datetime) -> Path:
     """Compute the timestamped ``.bak`` path the installer writes before mutation."""
     stamp = now.strftime("%Y%m%d%H%M%S")
     return json_path.with_name(json_path.name + f".bak.{stamp}")
-
-
-# ---------------------------------------------------------------------------
-# Post-write validation
-# ---------------------------------------------------------------------------
 
 
 def validate_toml(toml_path: Path, *, api_key: str) -> None:
@@ -358,11 +345,6 @@ def _restore_env(key: str, previous: str | None) -> None:
         os.environ[key] = previous
 
 
-# ---------------------------------------------------------------------------
-# Top-level resolver and orchestrator
-# ---------------------------------------------------------------------------
-
-
 def resolve_options(
     *,
     db_url: str,
@@ -377,9 +359,6 @@ def resolve_options(
     env: Mapping[str, str],
 ) -> InstallOptions:
     """Fill in OS-specific defaults and turn raw CLI args into ``InstallOptions``."""
-    if not db_url:
-        raise InstallError("--db is required (SQLAlchemy DSN).")
-
     resolved_api_key = api_key or env.get("SQLLENS_LLM__API_KEY")
     if not resolved_api_key:
         raise InstallError(
@@ -430,12 +409,6 @@ def run_install(
     """
     now_fn = now or (lambda: datetime.now(tz=UTC))
 
-    if not options.config_path.exists():
-        raise InstallError(
-            f"Claude Desktop config not found at {options.config_path}; "
-            "install Claude Desktop or pass --config-path."
-        )
-
     invocation = resolve_invocation(platform_name=platform_name, which=which)
 
     toml_path = options.working_dir / "sqllens.toml"
@@ -447,9 +420,7 @@ def run_install(
         memory_dir=options.memory_dir,
     )
 
-    if platform_name == "win32":
-        # Build server invocation that runs *inside* the launcher: command +
-        # args_prefix + ["serve", "-c", toml]. The JSON points at the .cmd.
+    if is_windows(platform_name):
         embedded_args = [*invocation.args_prefix, "serve", "-c", str(toml_path)]
         cmd_path: Path | None = options.working_dir / "run-sqllens.cmd"
         cmd_content: str | None = generate_cmd_launcher(
@@ -471,11 +442,11 @@ def run_install(
         api_key=options.api_key,
     )
 
-    json_before = _read_json_safely(options.config_path)
+    json_before = _read_existing_config(options.config_path)
     json_after, preserved_siblings = merge_into_mcp_servers(
         json_before, name=options.name, entry=entry
     )
-
+    json_after_serialized = json.dumps(json_after, indent=2) + "\n"
     json_diff = _unified_json_diff(json_before, json_after, str(options.config_path))
 
     if dry_run:
@@ -488,20 +459,18 @@ def run_install(
             toml_content=toml_content,
             cmd_path=cmd_path,
             cmd_content=cmd_content,
-            json_before=json_before,
             json_after=json_after,
             json_diff=json_diff,
             backup_path=None,
             toml_written=False,
             cmd_written=False,
-            json_written=False,
             dry_run=True,
             preserved_sibling_servers=preserved_siblings,
         )
 
     options.working_dir.mkdir(parents=True, exist_ok=True)
 
-    existing_toml = toml_path.read_text(encoding="utf-8") if toml_path.exists() else None
+    existing_toml = _read_text_or_none(toml_path)
     toml_changed = existing_toml != toml_content
     if toml_changed and existing_toml is not None and not force:
         raise InstallError(
@@ -512,10 +481,9 @@ def run_install(
 
     cmd_written = False
     if cmd_path is not None and cmd_content is not None:
-        existing_cmd = cmd_path.read_text(encoding="utf-8") if cmd_path.exists() else None
+        existing_cmd = _read_text_or_none(cmd_path)
         cmd_changed = existing_cmd != cmd_content
         if cmd_changed and existing_cmd is not None and not force:
-            # Revert TOML to keep half-applied state out of the user's working dir.
             _revert_toml(toml_path, existing_toml)
             raise InstallError(
                 f"{cmd_path} already exists with different content. Pass --force to overwrite."
@@ -524,7 +492,6 @@ def run_install(
             cmd_path.write_text(cmd_content, encoding="utf-8")
             cmd_written = True
 
-    # Validate the just-written TOML before touching the user's JSON.
     try:
         validate_toml(toml_path, api_key=options.api_key)
     except Exception as exc:
@@ -536,10 +503,7 @@ def run_install(
 
     backup_path = make_backup_path(options.config_path, now_fn())
     shutil.copy2(options.config_path, backup_path)
-
-    options.config_path.write_text(
-        json.dumps(json_after, indent=2) + "\n", encoding="utf-8"
-    )
+    options.config_path.write_text(json_after_serialized, encoding="utf-8")
 
     return InstallResult(
         options=options,
@@ -550,21 +514,29 @@ def run_install(
         toml_content=toml_content,
         cmd_path=cmd_path,
         cmd_content=cmd_content,
-        json_before=json_before,
         json_after=json_after,
         json_diff=json_diff,
         backup_path=backup_path,
         toml_written=toml_changed,
         cmd_written=cmd_written,
-        json_written=True,
         dry_run=False,
         preserved_sibling_servers=preserved_siblings,
     )
 
 
-def _read_json_safely(path: Path) -> dict[str, Any]:
-    """Load JSON from *path*, or raise ``InstallError`` if malformed."""
-    raw = path.read_text(encoding="utf-8")
+def _read_existing_config(path: Path) -> dict[str, Any]:
+    """Load Claude Desktop's config JSON, mapping a missing file to a clear error.
+
+    AC #9 requires a specific actionable message when the file doesn't exist,
+    so a `FileNotFoundError` from the user's machine is translated here.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise InstallError(
+            f"Claude Desktop config not found at {path}; "
+            "install Claude Desktop or pass --config-path."
+        ) from exc
     if not raw.strip():
         return {}
     try:
@@ -576,6 +548,13 @@ def _read_json_safely(path: Path) -> dict[str, Any]:
     if not isinstance(loaded, dict):
         raise InstallError(f"{path} does not contain a JSON object at the top level.")
     return loaded
+
+
+def _read_text_or_none(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
 
 
 def _revert_toml(toml_path: Path, original: str | None) -> None:
@@ -598,17 +577,56 @@ def _unified_json_diff(before: dict[str, Any], after: dict[str, Any], label: str
     )
 
 
-# ---------------------------------------------------------------------------
-# Public re-export — pure-Windows path used by tests for cross-platform assert
-# ---------------------------------------------------------------------------
+def format_install_result(result: InstallResult) -> list[str]:
+    """Render *result* as a list of Rich-markup lines for the CLI to print.
 
-
-def windows_default_working_dir_repr(env: Mapping[str, str]) -> str:
-    """Return the Windows-style default working-dir string from *env*.
-
-    Helper used in tests that need to verify Windows path detection while the
-    test process itself runs on Linux/macOS (where joining ``Path`` would
-    produce POSIX separators).
+    Lives here (not in cli.py) so the formatter has access to the same
+    platform constants and dataclass internals it describes, and so the CLI
+    layer stays a thin parse/dispatch shell.
     """
-    user_profile = env.get("USERPROFILE", "")
-    return str(PureWindowsPath(user_profile) / "sqllens")
+    opts = result.options
+    lines: list[str] = [
+        f"Detected platform: [bold]{result.platform_label}[/bold]",
+        f"Claude Desktop config:  {opts.config_path}",
+        f"Working directory:      {opts.working_dir}",
+    ]
+
+    if result.dry_run:
+        lines.append("\n[bold]Dry run — nothing written.[/bold]")
+        lines.append(f"\nWould write: {opts.working_dir / 'sqllens.toml'}")
+        lines.append("\n[bold]sqllens.toml:[/bold]")
+        lines.append(result.toml_content)
+        if result.cmd_path is not None and result.cmd_content is not None:
+            lines.append(f"\nWould write: {result.cmd_path}")
+            lines.append("\n[bold]run-sqllens.cmd:[/bold]")
+            lines.append(result.cmd_content)
+        lines.append("\n[bold]claude_desktop_config.json diff:[/bold]")
+        lines.append(result.json_diff or "(no change)")
+        return lines
+
+    toml_path = opts.working_dir / "sqllens.toml"
+    if result.toml_written:
+        lines.append(f"  - wrote {toml_path} (BOM-free UTF-8)")
+    else:
+        lines.append(f"  - sqllens.toml unchanged at {toml_path}")
+    if result.cmd_path is not None:
+        if result.cmd_written:
+            lines.append(f"  - wrote {result.cmd_path} (CWD launcher workaround for issue #10)")
+        else:
+            lines.append(f"  - {result.cmd_path} unchanged")
+    if result.used_python_module_fallback:
+        lines.append("  - 'sqllens' was not found on PATH; using 'python -m sqllens' fallback")
+    server_word = "server" if result.preserved_sibling_servers == 1 else "servers"
+    lines.append(
+        f"Merged '{opts.name}' into mcpServers "
+        f"(preserved {result.preserved_sibling_servers} existing {server_word}, "
+        "preferences untouched)."
+    )
+    if result.backup_path is not None:
+        lines.append(f"Backup written: {result.backup_path}")
+    lines.append(
+        "\n[yellow]Note:[/yellow] the API key is stored in plaintext in "
+        f"{opts.config_path} (Claude Desktop's design)."
+    )
+    lines.append("\nDone. Restart Claude Desktop to pick up the new server.")
+    return lines

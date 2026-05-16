@@ -9,6 +9,7 @@ glue (via Typer's CliRunner). No real Claude Desktop, network, or DB access.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 from datetime import UTC, datetime
@@ -37,35 +38,6 @@ from sqllens.installers.claude_desktop import (
 
 BOM = b"\xef\xbb\xbf"
 FAKE_KEY = "sk-ant-test-fake"
-
-# Hostile-env pollution: some CI runners export unprefixed names (MODE, HOST,
-# PORT, BEARER_TOKEN, ...) that nested sqllens BaseSettings sub-models read
-# without the SQLLENS_ prefix. Scrub them so Config.load round-trips work.
-_LEAKY_ENV_KEYS = (
-    "MODE",
-    "HOST",
-    "PORT",
-    "URL",
-    "NAME",
-    "API_KEY",
-    "PROVIDER",
-    "MODEL",
-    "PERSIST_DIR",
-    "COLLECTION",
-    "SIMILARITY_THRESHOLD",
-    "READ_ONLY",
-    "BEARER_TOKEN",
-    "JWT_JWKS_URL",
-    "JWT_ISSUER",
-    "JWT_AUDIENCE",
-    "TRANSPORT",
-)
-
-
-@pytest.fixture(autouse=True)
-def _scrub_leaky_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in _LEAKY_ENV_KEYS:
-        monkeypatch.delenv(key, raising=False)
 
 
 # ---------------------------------------------------------------------------
@@ -482,8 +454,8 @@ class TestRunInstall:
         self, base_options: InstallOptions, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
-        opts = InstallOptions(
-            **{**base_options.__dict__, "config_path": tmp_path / "does-not-exist.json"}
+        opts = dataclasses.replace(
+            base_options, config_path=tmp_path / "does-not-exist.json"
         )
         with pytest.raises(InstallError, match="Claude Desktop config not found"):
             run_install(
@@ -531,8 +503,8 @@ class TestRunInstall:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
-        # Construct a bogus DSN that Config.load will accept syntactically but
-        # let's instead simulate by patching Config.load via the module path:
+        # Patch the validator to raise so we exercise the revert path without
+        # crafting a malformed TOML.
         original_json = fake_config_json.read_text(encoding="utf-8")
         from sqllens.installers import claude_desktop as installer_mod
 

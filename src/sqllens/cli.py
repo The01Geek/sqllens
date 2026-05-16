@@ -8,15 +8,11 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
 
 from sqllens import __version__
-
-if TYPE_CHECKING:
-    from sqllens.installers.claude_desktop import InstallResult
 
 app = typer.Typer(
     name="sqllens",
@@ -159,6 +155,7 @@ def claude_desktop_install(
     """Generate sqllens.toml, merge the server into Claude Desktop's MCP config."""
     from sqllens.installers.claude_desktop import (
         InstallError,
+        format_install_result,
         resolve_options,
         run_install,
     )
@@ -181,62 +178,8 @@ def claude_desktop_install(
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
-    _print_install_result(result)
-
-
-def _print_install_result(result: InstallResult) -> None:
-    opts = result.options
-    if result.platform_name == "win32":
-        platform_label = "Windows"
-    elif result.platform_name == "darwin":
-        platform_label = "macOS"
-    elif result.platform_name.startswith("linux"):
-        platform_label = "Linux"
-    else:
-        platform_label = result.platform_name
-    console.print(f"Detected platform: [bold]{platform_label}[/bold]")
-    console.print(f"Claude Desktop config:  {opts.config_path}")
-    console.print(f"Working directory:      {opts.working_dir}")
-
-    if result.dry_run:
-        console.print("\n[bold]Dry run — nothing written.[/bold]")
-        console.print(f"\nWould write: {opts.working_dir / 'sqllens.toml'}")
-        console.print("\n[bold]sqllens.toml:[/bold]")
-        console.print(result.toml_content)
-        if result.cmd_path is not None and result.cmd_content is not None:
-            console.print(f"\nWould write: {result.cmd_path}")
-            console.print("\n[bold]run-sqllens.cmd:[/bold]")
-            console.print(result.cmd_content)
-        console.print("\n[bold]claude_desktop_config.json diff:[/bold]")
-        console.print(result.json_diff or "(no change)")
-        return
-
-    if result.toml_written:
-        console.print(f"  - wrote {opts.working_dir / 'sqllens.toml'} (BOM-free UTF-8)")
-    else:
-        console.print(f"  - sqllens.toml unchanged at {opts.working_dir / 'sqllens.toml'}")
-    if result.cmd_path is not None:
-        if result.cmd_written:
-            console.print(f"  - wrote {result.cmd_path} (CWD launcher workaround for issue #10)")
-        else:
-            console.print(f"  - {result.cmd_path} unchanged")
-    if result.used_python_module_fallback:
-        console.print(
-            "  - 'sqllens' was not found on PATH; using 'python -m sqllens' fallback"
-        )
-    server_word = "server" if result.preserved_sibling_servers == 1 else "servers"
-    console.print(
-        f"Merged '{opts.name}' into mcpServers "
-        f"(preserved {result.preserved_sibling_servers} existing {server_word}, "
-        "preferences untouched)."
-    )
-    if result.backup_path is not None:
-        console.print(f"Backup written: {result.backup_path}")
-    console.print(
-        "\n[yellow]Note:[/yellow] the API key is stored in plaintext in "
-        f"{opts.config_path} (Claude Desktop's design)."
-    )
-    console.print("\nDone. Restart Claude Desktop to pick up the new server.")
+    for line in format_install_result(result):
+        console.print(line)
 
 
 _SAMPLE_CONFIG = """\
