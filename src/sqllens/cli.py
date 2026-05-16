@@ -63,7 +63,8 @@ def serve(
     if cfg.llm.api_key is None:
         console.print(
             "[red]Missing LLM API key.[/red] Set [bold]SQLLENS_LLM__API_KEY[/bold] "
-            "in your environment, or add [bold]api_key[/bold] under [llm] in sqllens.toml."
+            "in your environment, or add [bold]api_key[/bold] under "
+            "[bold]\\[llm][/bold] in sqllens.toml."
         )
         raise typer.Exit(code=2)
     run(cfg)

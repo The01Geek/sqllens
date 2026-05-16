@@ -30,3 +30,4 @@ def test_serve_exits_when_api_key_missing(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 2
     assert "SQLLENS_LLM__API_KEY" in result.output
     assert "api_key" in result.output
+    assert "[llm]" in result.output
