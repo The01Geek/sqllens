@@ -4,7 +4,9 @@ This page lists user-visible changes in each released version of SQL Lens. For t
 
 ## Unreleased
 
-No user-visible changes yet.
+### May 16, 2026
+
+- **[Improvement] `sqllens validate` no longer requires `llm.api_key`** — Structural validation of `sqllens.toml` now succeeds without an Anthropic API key set, so you can lint a configuration file before provisioning credentials. The key is still required when you run `sqllens serve`, which now exits with a clear message naming both the `SQLLENS_LLM__API_KEY` environment variable and the `[llm].api_key` TOML field if it is missing. The entire `[llm]` section may now be omitted from `sqllens.toml`. (#23)
 
 ## 0.0.2 — 2026-04-28
 

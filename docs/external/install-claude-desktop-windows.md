@@ -72,13 +72,12 @@ Get-Content $env:USERPROFILE\sqllens\sqllens.toml -Encoding Byte -TotalCount 4
 ## 4. Validate the configuration (optional)
 
 ```powershell
-$env:SQLLENS_LLM__API_KEY = "sk-ant-..."
 sqllens validate -c $env:USERPROFILE\sqllens\sqllens.toml
 ```
 
-The `sqllens validate` command requires `llm.api_key` to be set somewhere, even if you keep the key out of TOML and supply it as an environment variable later. The export above scopes only to the current PowerShell window and does not need to be persisted.
-
 The expected final line of output is `Config OK`.
+
+**Note:** `sqllens validate` performs structural validation only. It does not require `llm.api_key` to be set. The API key is checked later, when you run `sqllens serve` (or when Claude Desktop launches the server in step 7).
 
 ## 5. Find the absolute path to `sqllens.exe`
 

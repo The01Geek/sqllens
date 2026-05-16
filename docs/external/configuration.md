@@ -48,7 +48,9 @@ Defines the language model SQL Lens uses to translate questions into SQL.
 |---|---|---|
 | `provider` | String | Only `anthropic` is supported at present. |
 | `model` | String | A Claude model identifier, for example `claude-sonnet-4-5-20250929`. |
-| `api_key` | String | Your Anthropic API key. Prefer setting this with the `SQLLENS_LLM__API_KEY` environment variable so the key stays out of the file. |
+| `api_key` | String | Your Anthropic API key. Prefer setting this with the `SQLLENS_LLM__API_KEY` environment variable so the key stays out of the file. The key is required when you run `sqllens serve`, but is not required by `sqllens validate`. |
+
+The entire `[llm]` section is optional. If omitted, the defaults above apply, and the API key is read from `SQLLENS_LLM__API_KEY`.
 
 ## Section: `[memory]`
 
@@ -96,7 +98,7 @@ Before starting the server, run:
 sqllens validate -c path/to/sqllens.toml
 ```
 
-The command exits with a clear error message if any required field is missing or has the wrong type. Validation requires `llm.api_key` to be set somewhere, so export `SQLLENS_LLM__API_KEY` first if your file deliberately leaves the key blank.
+The command exits with a clear error message if any required field is missing or has the wrong type. Validation is structural only and does not require `llm.api_key` to be set. The API key is checked later, when you run `sqllens serve`, which exits with a clear message naming both the `SQLLENS_LLM__API_KEY` environment variable and the `[llm].api_key` TOML field if it is missing.
 
 ## See also
 

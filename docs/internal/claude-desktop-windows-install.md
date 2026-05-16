@@ -72,13 +72,12 @@ Get-Content $env:USERPROFILE\sqllens\sqllens.toml -Encoding Byte -TotalCount 4
 ## 4. Validate the config (optional)
 
 ```powershell
-$env:SQLLENS_LLM__API_KEY = "sk-ant-..."
 sqllens validate -c $env:USERPROFILE\sqllens\sqllens.toml
 ```
 
-> **Gotcha:** `sqllens validate` requires `llm.api_key` to be set somewhere — even though the runbook deliberately keeps the key out of TOML and sets it via env later. The env var above scopes only to the current PowerShell window; you don't need to persist it.
-
 Expected output ends with `Config OK`.
+
+> `sqllens validate` performs **structural** TOML validation only — it does not require `llm.api_key`. The key is checked later by `sqllens serve` (see [#11](https://github.com/The01Geek/sqllens/issues/11) / [PR #23](https://github.com/The01Geek/sqllens/pull/23)).
 
 ## 5. Find the absolute path to `sqllens.exe`
 
@@ -180,7 +179,7 @@ Edit `C:\Users\USERNAME\sqllens\sqllens.toml`, swap `[database].url` for your re
 These are real bugs we worked around in this runbook. Fixing them in the codebase would shorten the steps significantly:
 
 - **`RunSqlTool` defaults its scratch directory to `Path(".")`** — fragile across any launcher whose CWD isn't writable. Drives the entire `.cmd` workaround in step 6.
-- **`sqllens validate` requires `llm.api_key`** — secrets should be optional during structural validation.
+- ~~**`sqllens validate` requires `llm.api_key`**~~ — fixed in [#11](https://github.com/The01Geek/sqllens/issues/11) / [PR #23](https://github.com/The01Geek/sqllens/pull/23): `LLMConfig.api_key` is now optional at the schema level; `sqllens serve` checks for the key and exits with a clear message if it's missing.
 - **`sqllens --version` flag is missing** — only the subcommand form works.
 - **Config loader doesn't detect UTF-8 BOM** — emits an opaque parser error instead of a clear "your file has a BOM" message.
 - **Agent invents explanations for tool errors** — when `run_sql` returns a `WinError 5`, the agent confidently misattributes it to "database permissions" instead of surfacing the verbatim error.
