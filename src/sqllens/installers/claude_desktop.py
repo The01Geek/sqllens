@@ -16,6 +16,7 @@ which is reserved for MCP tool wrappers.
 
 from __future__ import annotations
 
+import copy
 import difflib
 import json
 import os
@@ -141,10 +142,13 @@ def derive_default_name(db_url: str) -> str:
     """
     try:
         from sqlalchemy.engine.url import make_url
-
+        from sqlalchemy.exc import ArgumentError
+    except ImportError:
+        return "sqllens"
+    try:
         url = make_url(db_url)
         database = url.database or ""
-    except Exception:
+    except (ArgumentError, ValueError, AttributeError):
         return "sqllens"
     if not database:
         return "sqllens"
@@ -264,11 +268,21 @@ def generate_cmd_launcher(
     )
 
 
+_CMD_QUOTE_TRIGGERS = (" ", "\t", "&", "(", ")", "%", "^", "<", ">", "|", "!", ";", ",")
+
+
 def _cmd_quote(value: str) -> str:
-    """Quote *value* for inclusion in a Windows ``.cmd`` line."""
+    """Quote *value* for inclusion in a Windows ``.cmd`` line.
+
+    Trigger set covers the cmd.exe metacharacters that change parsing outside
+    quotes: ``& ( ) ^ < > |`` redirection/grouping, ``%`` and ``!`` expansion,
+    plus ``; ,`` token splitting and whitespace. Inside quotes only ``%``,
+    ``!`` (if delayed expansion is on), and ``"`` remain special — those are
+    handled by the outer-quote wrap and the inner ``"`` doubling.
+    """
     if not value:
         return '""'
-    needs_quotes = any(ch in value for ch in (" ", "\t", "&", "(", ")", "%"))
+    needs_quotes = any(ch in value for ch in _CMD_QUOTE_TRIGGERS)
     if not needs_quotes and '"' not in value:
         return value
     return '"' + value.replace('"', '""') + '"'
@@ -303,7 +317,7 @@ def merge_into_mcp_servers(
     if existing is None:
         new: dict[str, Any] = {}
     else:
-        new = json.loads(json.dumps(existing))
+        new = copy.deepcopy(dict(existing))
     servers = new.setdefault("mcpServers", {})
     if not isinstance(servers, dict):
         raise InstallError(
@@ -330,8 +344,8 @@ def validate_toml(toml_path: Path, *, api_key: str) -> None:
 
     previous_key = os.environ.get("SQLLENS_LLM__API_KEY")
     previous_cfg = os.environ.get("SQLLENS_CONFIG")
-    os.environ["SQLLENS_LLM__API_KEY"] = api_key
     try:
+        os.environ["SQLLENS_LLM__API_KEY"] = api_key
         Config.load(toml_path)
     finally:
         _restore_env("SQLLENS_LLM__API_KEY", previous_key)
@@ -468,7 +482,12 @@ def run_install(
             preserved_sibling_servers=preserved_siblings,
         )
 
-    options.working_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        options.working_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise InstallError(
+            f"Could not create working directory {options.working_dir}: {exc}"
+        ) from exc
 
     existing_toml = _read_text_or_none(toml_path)
     toml_changed = existing_toml != toml_content
@@ -477,7 +496,10 @@ def run_install(
             f"{toml_path} already exists with different content. Pass --force to overwrite."
         )
     if toml_changed:
-        toml_path.write_text(toml_content, encoding="utf-8")
+        try:
+            toml_path.write_text(toml_content, encoding="utf-8")
+        except OSError as exc:
+            raise InstallError(f"Could not write {toml_path}: {exc}") from exc
 
     cmd_written = False
     if cmd_path is not None and cmd_content is not None:
@@ -489,7 +511,11 @@ def run_install(
                 f"{cmd_path} already exists with different content. Pass --force to overwrite."
             )
         if cmd_changed:
-            cmd_path.write_text(cmd_content, encoding="utf-8")
+            try:
+                cmd_path.write_text(cmd_content, encoding="utf-8")
+            except OSError as exc:
+                _revert_toml(toml_path, existing_toml)
+                raise InstallError(f"Could not write {cmd_path}: {exc}") from exc
             cmd_written = True
 
     try:
@@ -498,12 +524,23 @@ def run_install(
         _revert_toml(toml_path, existing_toml)
         raise InstallError(
             f"Generated sqllens.toml failed validation; aborting before touching "
-            f"{options.config_path}. Cause: {exc}"
+            f"{options.config_path}.\n  Cause: {type(exc).__name__}: {exc}"
         ) from exc
 
-    backup_path = make_backup_path(options.config_path, now_fn())
-    shutil.copy2(options.config_path, backup_path)
-    options.config_path.write_text(json_after_serialized, encoding="utf-8")
+    # Only mutate the user's JSON when the merge would actually change it.
+    # Skips redundant `.bak.<ts>` files on idempotent re-runs.
+    json_changed = json_after_serialized != _read_text_or_none(options.config_path)
+    if json_changed:
+        try:
+            backup_path: Path | None = make_backup_path(options.config_path, now_fn())
+            shutil.copy2(options.config_path, backup_path)
+            options.config_path.write_text(json_after_serialized, encoding="utf-8")
+        except OSError as exc:
+            raise InstallError(
+                f"Failed to update {options.config_path}: {exc}"
+            ) from exc
+    else:
+        backup_path = None
 
     return InstallResult(
         options=options,
@@ -617,12 +654,17 @@ def format_install_result(result: InstallResult) -> list[str]:
     if result.used_python_module_fallback:
         lines.append("  - 'sqllens' was not found on PATH; using 'python -m sqllens' fallback")
     server_word = "server" if result.preserved_sibling_servers == 1 else "servers"
-    lines.append(
-        f"Merged '{opts.name}' into mcpServers "
-        f"(preserved {result.preserved_sibling_servers} existing {server_word}, "
-        "preferences untouched)."
-    )
-    if result.backup_path is not None:
+    if result.backup_path is None:
+        lines.append(
+            f"mcpServers['{opts.name}'] unchanged "
+            f"({result.preserved_sibling_servers} sibling {server_word} preserved)."
+        )
+    else:
+        lines.append(
+            f"Merged '{opts.name}' into mcpServers "
+            f"(preserved {result.preserved_sibling_servers} existing {server_word}, "
+            "preferences untouched)."
+        )
         lines.append(f"Backup written: {result.backup_path}")
     lines.append(
         "\n[yellow]Note:[/yellow] the API key is stored in plaintext in "

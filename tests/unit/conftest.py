@@ -32,6 +32,9 @@ _LEAKY_ENV_KEYS = (
     "JWT_ISSUER",
     "JWT_AUDIENCE",
     "TRANSPORT",
+    # Config.load mutates SQLLENS_CONFIG as a side effect; scrub between tests
+    # so a path set by one test doesn't poison Config.load() in another.
+    "SQLLENS_CONFIG",
 )
 
 

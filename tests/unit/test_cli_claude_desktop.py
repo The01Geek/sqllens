@@ -383,7 +383,7 @@ class TestRunInstall:
         self, base_options: InstallOptions, fake_config_json: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
-        run_install(
+        first = run_install(
             base_options,
             dry_run=False,
             force=False,
@@ -392,7 +392,9 @@ class TestRunInstall:
             now=_fixed_now,
         )
         first_json = json.loads(fake_config_json.read_text(encoding="utf-8"))
-        run_install(
+        assert first.toml_written is True
+        assert first.backup_path is not None
+        second = run_install(
             base_options,
             dry_run=False,
             force=False,
@@ -404,6 +406,11 @@ class TestRunInstall:
         assert first_json == second_json
         # One entry for sqllens, one for other-server — never doubled.
         assert list(second_json["mcpServers"].keys()) == ["other-server", "demo"]
+        # No-op rerun must not produce a second backup file or rewrite the TOML.
+        assert second.toml_written is False
+        assert second.backup_path is None
+        bak_files = list(fake_config_json.parent.glob("claude_desktop_config.json.bak.*"))
+        assert len(bak_files) == 1
 
     def test_dry_run_writes_nothing(
         self, base_options: InstallOptions, fake_config_json: Path, monkeypatch: pytest.MonkeyPatch
@@ -509,7 +516,10 @@ class TestRunInstall:
         from sqllens.installers import claude_desktop as installer_mod
 
         def boom(*_: object, **__: object) -> None:
-            raise RuntimeError("synthetic validation failure")
+            # ValueError stays in pydantic's family (ValidationError inherits
+            # from it), so the test exercises the same broad-catch behaviour
+            # the production code will hit.
+            raise ValueError("synthetic validation failure")
 
         monkeypatch.setattr(installer_mod, "validate_toml", boom)
 
@@ -526,6 +536,89 @@ class TestRunInstall:
         assert fake_config_json.read_text(encoding="utf-8") == original_json
         # TOML reverted (didn't exist before, so it should be gone).
         assert not (base_options.working_dir / "sqllens.toml").exists()
+
+    def test_validation_failure_with_existing_toml_restores_original(
+        self,
+        base_options: InstallOptions,
+        fake_config_json: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Exercises _revert_toml's "restore original" branch (not the unlink one).
+        monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
+        base_options.working_dir.mkdir(parents=True, exist_ok=True)
+        hand_edited = "# user hand-edited\nfoo = 1\n"
+        toml_path = base_options.working_dir / "sqllens.toml"
+        toml_path.write_text(hand_edited, encoding="utf-8")
+        original_json = fake_config_json.read_text(encoding="utf-8")
+        from sqllens.installers import claude_desktop as installer_mod
+
+        def boom(*_: object, **__: object) -> None:
+            raise ValueError("synthetic validation failure")
+
+        monkeypatch.setattr(installer_mod, "validate_toml", boom)
+        with pytest.raises(InstallError, match="failed validation"):
+            run_install(
+                base_options,
+                dry_run=False,
+                force=True,  # allow overwrite, then we expect a revert
+                platform_name="linux",
+                which=lambda _: "/usr/local/bin/sqllens",
+                now=_fixed_now,
+            )
+        # User's hand-edited TOML must come back, not the generated one.
+        assert toml_path.read_text(encoding="utf-8") == hand_edited
+        assert fake_config_json.read_text(encoding="utf-8") == original_json
+
+    def test_cmd_conflict_reverts_toml(
+        self,
+        base_options: InstallOptions,
+        fake_config_json: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # If a hand-edited .cmd blocks the install, the just-written TOML must
+        # not be left orphaned in the working dir.
+        monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
+        base_options.working_dir.mkdir(parents=True, exist_ok=True)
+        cmd_path = base_options.working_dir / "run-sqllens.cmd"
+        cmd_path.write_text("@echo off\r\necho hand edited\r\n", encoding="utf-8")
+        toml_path = base_options.working_dir / "sqllens.toml"
+        assert not toml_path.exists()  # fresh
+        with pytest.raises(InstallError, match="already exists with different content"):
+            run_install(
+                base_options,
+                dry_run=False,
+                force=False,
+                platform_name="win32",
+                which=lambda _: r"C:\Python\Scripts\sqllens.exe",
+                now=_fixed_now,
+            )
+        # TOML must be reverted (didn't exist before, so it should be unlinked).
+        assert not toml_path.exists()
+        # JSON must be untouched.
+        assert fake_config_json.read_text(encoding="utf-8").strip().startswith("{")
+
+    def test_windows_python_module_fallback_in_cmd_launcher(
+        self,
+        base_options: InstallOptions,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # The {Windows + sqllens not on PATH} combination must embed
+        # "python -m sqllens" into the .cmd body, not bare "python".
+        monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
+        result = run_install(
+            base_options,
+            dry_run=False,
+            force=False,
+            platform_name="win32",
+            which=lambda _: None,
+            now=_fixed_now,
+        )
+        assert result.cmd_content is not None
+        assert "-m sqllens" in result.cmd_content
+        assert "serve -c" in result.cmd_content
+        # The .cmd should also CRLF-terminate every line, not just the first.
+        assert result.cmd_content.count("\r\n") == 3
+        assert "\n" not in result.cmd_content.replace("\r\n", "")
 
 
 # ---------------------------------------------------------------------------
