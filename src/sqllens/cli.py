@@ -177,6 +177,13 @@ def claude_desktop_install(
     except InstallError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
+    except Exception as exc:
+        console.print(
+            f"[red]Unexpected error:[/red] {type(exc).__name__}: {exc}\n"
+            "This is likely a bug — please file an issue at "
+            "https://github.com/The01Geek/sqllens/issues"
+        )
+        raise
 
     for line in format_install_result(result):
         console.print(line)

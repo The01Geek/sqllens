@@ -95,7 +95,7 @@ The validate-then-mutate order also means: if a user has already written a worki
 
 ## `--dry-run`
 
-`--dry-run` returns an `InstallResult` with `toml_written = False`, `cmd_written = False`, `backup_path = None`, and a populated unified diff in `json_diff`. `format_install_result` renders the TOML body, the launcher body (if any), and the JSON diff to stdout. No filesystem writes happen.
+`--dry-run` returns an `InstallResult` with `toml_written = False`, `cmd_written = False`, and `backup_path = None`. `json_diff` is populated on every run (it's a derived view of `json_before` vs `json_after`); `--dry-run` simply renders that diff to stdout via `format_install_result` instead of committing the write. No filesystem writes happen.
 
 This is the recommended way to inspect what the installer *would* do against an already-configured machine without committing.
 

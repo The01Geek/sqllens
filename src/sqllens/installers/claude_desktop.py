@@ -61,7 +61,6 @@ class InstallResult:
 
     options: InstallOptions
     platform_name: str
-    used_python_module_fallback: bool
     server_command: str
     server_args: list[str]
     toml_content: str
@@ -74,6 +73,11 @@ class InstallResult:
     cmd_written: bool
     dry_run: bool
     preserved_sibling_servers: int
+    args_prefix: list[str] = field(default_factory=list)
+
+    @property
+    def used_python_module_fallback(self) -> bool:
+        return bool(self.args_prefix)
 
     @property
     def platform_label(self) -> str:
@@ -92,7 +96,10 @@ class _Invocation:
 
     command: str
     args_prefix: list[str] = field(default_factory=list)
-    used_python_module_fallback: bool = False
+
+    @property
+    def used_python_module_fallback(self) -> bool:
+        return bool(self.args_prefix)
 
 
 class InstallError(Exception):
@@ -140,15 +147,13 @@ def derive_default_name(db_url: str) -> str:
     For other backends, use the database segment of the URL. Falls back to
     ``sqllens`` for anything unparseable.
     """
-    try:
-        from sqlalchemy.engine.url import make_url
-        from sqlalchemy.exc import ArgumentError
-    except ImportError:
-        return "sqllens"
+    from sqlalchemy.engine.url import make_url
+    from sqlalchemy.exc import ArgumentError
+
     try:
         url = make_url(db_url)
         database = url.database or ""
-    except (ArgumentError, ValueError, AttributeError):
+    except (ArgumentError, ValueError):
         return "sqllens"
     if not database:
         return "sqllens"
@@ -179,7 +184,6 @@ def resolve_invocation(
     return _Invocation(
         command=sys_executable,
         args_prefix=["-m", "sqllens"],
-        used_python_module_fallback=True,
     )
 
 
@@ -258,7 +262,9 @@ def generate_cmd_launcher(
     directory, which isn't user-writable. The agent's scratch CSV path resolves
     against CWD, so without this workaround every query fails with WinError 5.
 
-    Remove once issue #10 lands.
+    Once the scratch-storage rework in issue #10 lands and the agent stops
+    relying on CWD, this helper and the Windows branch in ``run_install`` can
+    be deleted in one change.
     """
     quoted_args = " ".join(_cmd_quote(arg) for arg in server_args)
     return (
@@ -321,7 +327,8 @@ def merge_into_mcp_servers(
     servers = new.setdefault("mcpServers", {})
     if not isinstance(servers, dict):
         raise InstallError(
-            "claude_desktop_config.json has a non-object 'mcpServers' value; refusing to merge"
+            f"claude_desktop_config.json has a non-object 'mcpServers' value "
+            f"(got {type(servers).__name__}); refusing to merge"
         )
     siblings = sum(1 for k in servers if k != name)
     servers[name] = entry
@@ -467,7 +474,6 @@ def run_install(
         return InstallResult(
             options=options,
             platform_name=platform_name,
-            used_python_module_fallback=invocation.used_python_module_fallback,
             server_command=json_command,
             server_args=json_args,
             toml_content=toml_content,
@@ -480,6 +486,7 @@ def run_install(
             cmd_written=False,
             dry_run=True,
             preserved_sibling_servers=preserved_siblings,
+            args_prefix=list(invocation.args_prefix),
         )
 
     try:
@@ -502,6 +509,7 @@ def run_install(
             raise InstallError(f"Could not write {toml_path}: {exc}") from exc
 
     cmd_written = False
+    existing_cmd: str | None = None
     if cmd_path is not None and cmd_content is not None:
         existing_cmd = _read_text_or_none(cmd_path)
         cmd_changed = existing_cmd != cmd_content
@@ -515,13 +523,21 @@ def run_install(
                 cmd_path.write_text(cmd_content, encoding="utf-8")
             except OSError as exc:
                 _revert_toml(toml_path, existing_toml)
-                raise InstallError(f"Could not write {cmd_path}: {exc}") from exc
+                raise InstallError(
+                    f"Could not write {cmd_path}: {exc}. Pass --force to overwrite."
+                ) from exc
             cmd_written = True
 
+    # pydantic's ValidationError and tomllib.TOMLDecodeError both subclass
+    # ValueError; OSError covers filesystem hiccups in Config.load. A broader
+    # catch would mislabel unrelated bugs (ImportError, MemoryError, ...) as
+    # "TOML validation failure".
     try:
         validate_toml(toml_path, api_key=options.api_key)
-    except Exception as exc:
+    except (ValueError, OSError) as exc:
         _revert_toml(toml_path, existing_toml)
+        if cmd_path is not None and cmd_written:
+            _revert_cmd(cmd_path, existing_cmd)
         raise InstallError(
             f"Generated sqllens.toml failed validation; aborting before touching "
             f"{options.config_path}.\n  Cause: {type(exc).__name__}: {exc}"
@@ -531,22 +547,26 @@ def run_install(
     # Compare parsed dicts (not serialized bytes) so we don't re-normalize a
     # user's hand-formatted JSON (different indent, CRLF, no trailing newline)
     # on every run.
+    backup_path: Path | None = None
     if json_after != json_before:
         try:
-            backup_path: Path | None = make_backup_path(options.config_path, now_fn())
+            backup_path = make_backup_path(options.config_path, now_fn())
             shutil.copy2(options.config_path, backup_path)
+        except OSError as exc:
+            raise InstallError(
+                f"Failed to back up {options.config_path}: {exc}"
+            ) from exc
+        try:
             options.config_path.write_text(json_after_serialized, encoding="utf-8")
         except OSError as exc:
             raise InstallError(
-                f"Failed to update {options.config_path}: {exc}"
+                f"Failed to write {options.config_path}: {exc}. "
+                f"Restore the original with: cp {backup_path} {options.config_path}"
             ) from exc
-    else:
-        backup_path = None
 
     return InstallResult(
         options=options,
         platform_name=platform_name,
-        used_python_module_fallback=invocation.used_python_module_fallback,
         server_command=json_command,
         server_args=json_args,
         toml_content=toml_content,
@@ -559,14 +579,16 @@ def run_install(
         cmd_written=cmd_written,
         dry_run=False,
         preserved_sibling_servers=preserved_siblings,
+        args_prefix=list(invocation.args_prefix),
     )
 
 
 def _read_existing_config(path: Path) -> dict[str, Any]:
     """Load Claude Desktop's config JSON, mapping a missing file to a clear error.
 
-    AC #9 requires a specific actionable message when the file doesn't exist,
-    so a `FileNotFoundError` from the user's machine is translated here.
+    A `FileNotFoundError` is translated into an actionable `InstallError` so
+    the user gets "install Claude Desktop or pass --config-path" instead of
+    a raw traceback.
     """
     try:
         raw = path.read_text(encoding="utf-8")
@@ -593,6 +615,8 @@ def _read_text_or_none(path: Path) -> str | None:
         return path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return None
+    except OSError as exc:
+        raise InstallError(f"Could not read {path}: {exc}") from exc
 
 
 def _revert_toml(toml_path: Path, original: str | None) -> None:
@@ -600,6 +624,13 @@ def _revert_toml(toml_path: Path, original: str | None) -> None:
         toml_path.unlink(missing_ok=True)
     else:
         toml_path.write_text(original, encoding="utf-8")
+
+
+def _revert_cmd(cmd_path: Path, original: str | None) -> None:
+    if original is None:
+        cmd_path.unlink(missing_ok=True)
+    else:
+        cmd_path.write_text(original, encoding="utf-8")
 
 
 def _unified_json_diff(before: dict[str, Any], after: dict[str, Any], label: str) -> str:
