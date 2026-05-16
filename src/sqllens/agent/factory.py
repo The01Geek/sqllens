@@ -47,10 +47,12 @@ class _StaticUserResolver(UserResolver):
 
 def build_agent(cfg: Config) -> Agent:
     """Wire the agent from config. One call per process; the agent is reusable."""
-    # ``cli.serve`` exits 2 before reaching here, but non-CLI callers (HTTP transport,
-    # programmatic embedders, tests) must also surface a clear message — otherwise a
-    # ``None`` slips into ``get_secret_value()`` and reaches the MCP client as a bare
-    # ``AttributeError``, which CLAUDE.md forbids.
+    # Every CLI-launched transport already exits 2 in ``cli.serve`` before reaching
+    # here. This guard catches the residual bypass paths — programmatic embedders
+    # and tests that call ``build_agent`` directly — so a ``None`` key surfaces as
+    # an actionable ``ValueError`` instead of slipping into ``get_secret_value()``
+    # and reaching the MCP client as a bare ``AttributeError``, which CLAUDE.md
+    # forbids.
     if cfg.llm.api_key is None:
         raise ValueError(API_KEY_MISSING_MESSAGE)
     llm = AnthropicLlmService(

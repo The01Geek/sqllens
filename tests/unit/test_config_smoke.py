@@ -35,7 +35,7 @@ def _clean_config_env(monkeypatch) -> None:
         "PROVIDER", "API_KEY", "MODEL",                   # LLMConfig
         "PERSIST_DIR", "COLLECTION", "SIMILARITY_THRESHOLD",  # MemoryConfig
         "MODE", "BEARER_TOKEN",                           # AuthConfig
-        "JWT_JWKS_URL", "JWT_ISSUER", "JWT_AUDIENCE",
+        "JWT_JWKS_URL", "JWT_ISSUER", "JWT_AUDIENCE",     # AuthConfig (cont.)
         "TRANSPORT", "HOST", "PORT",                      # ServerConfig
     ):
         monkeypatch.delenv(name, raising=False)
@@ -240,3 +240,51 @@ def test_failed_load_does_not_leak_sqllens_config(tmp_path: Path, monkeypatch) -
     import os
 
     assert os.environ.get("SQLLENS_CONFIG") is None
+
+
+def test_bom_prefixed_and_malformed_toml_prefers_bom_message(tmp_path: Path) -> None:
+    # The realistic PowerShell 5.1 case: a user runs ``Add-Content`` (which writes
+    # a BOM on first call) on a TOML that *also* has a typo. The BOM message wins
+    # because the BOM is the actionable thing — fix it and the inner parse error
+    # surfaces on the next attempt.
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_bytes(b"\xef\xbb\xbf" + b"this is not valid toml = = =\n")
+    with pytest.raises(ValueError) as exc:
+        Config.load(cfg_path)
+    assert "UTF-8 BOM" in str(exc.value)
+
+
+def test_cli_validate_fails_on_plain_malformed_toml(tmp_path: Path) -> None:
+    # Exercises the ``rich.markup.escape`` call on the validate error path. Without
+    # the escape, pydantic's ``[type=missing, …]`` substrings would be eaten by
+    # rich as markup tags and silently disappear from CLI output.
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text("this is not valid toml = = =\n")
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 2
+    assert "Invalid" in result.stdout
+
+
+def test_build_agent_raises_when_api_key_missing(tmp_path: Path) -> None:
+    # Defense-in-depth contract: ``cli.serve`` gates ``None`` already, but
+    # programmatic embedders / tests that build an Agent directly must get a
+    # clear ``ValueError`` instead of an ``AttributeError`` from ``None.get_secret_value()``.
+    # The factory imports a heavy stack (Anthropic SDK, Chroma, etc.) — guard the
+    # import in case those optional deps aren't installed in some CI matrix slot.
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [llm]
+            """
+        )
+    )
+    cfg = Config.load(cfg_path)
+    from sqllens.agent.factory import build_agent
+
+    with pytest.raises(ValueError, match=r"llm\.api_key is not set"):
+        build_agent(cfg)
