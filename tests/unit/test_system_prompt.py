@@ -26,6 +26,8 @@ async def test_tool_error_directive_present() -> None:
     assert "verbatim" in prompt
     assert "fenced code block" in prompt
     assert "ask the user" in prompt
+    assert "do NOT paraphrase" in prompt
+    assert "speculate" in prompt
 
 
 async def test_explicit_base_prompt_bypasses_builder() -> None:
