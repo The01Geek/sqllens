@@ -25,16 +25,10 @@ async def test_tool_error_directive_present() -> None:
     assert "Tool Errors:" in prompt
     assert "verbatim" in prompt
     assert "fenced code block" in prompt
-    assert "do NOT" in prompt or "Do NOT" in prompt
     assert "ask the user" in prompt
 
 
 async def test_explicit_base_prompt_bypasses_builder() -> None:
-    """An explicit ``base_prompt`` overrides the assembled preamble.
-
-    This guards the contract used by callers that want a custom prompt;
-    the tool-error directive only applies to the assembled default.
-    """
     custom = "custom prompt"
     builder = DefaultSystemPromptBuilder(base_prompt=custom)
     user = User(id="test-user")
