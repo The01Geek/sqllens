@@ -4,7 +4,7 @@ This page lists user-visible changes in each released version of SQL Lens. For t
 
 ## Unreleased
 
-No user-visible changes yet.
+- **[Feature] `--version` flag on the sqllens CLI** — Running `sqllens --version` now prints the installed version and exits, matching common CLI conventions. The existing `sqllens version` subcommand is preserved. (#19)
 
 ## 0.0.2 — 2026-04-28
 
