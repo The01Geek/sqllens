@@ -51,8 +51,7 @@ class LLMConfig(BaseModel):
     """LLM provider settings. v1: Anthropic only."""
 
     provider: Literal["anthropic"] = "anthropic"
-    # Optional in the schema so ``sqllens validate`` can lint structurally without
-    # a runtime secret. ``sqllens serve`` enforces presence before building the agent.
+    # Enforced at serve-time, not load-time, so ``validate`` can lint without secrets.
     api_key: SecretStr | None = Field(default=None, description="Anthropic API key")
     model: str = Field(default="claude-sonnet-4-5-20250929", description="Anthropic model id")
 
@@ -112,8 +111,6 @@ class Config(BaseSettings):
     )
 
     database: DatabaseConfig
-    # ``LLMConfig`` has defaults for every field now (``api_key`` is checked
-    # by the CLI at serve-time), so the whole section may be omitted from TOML.
     llm: LLMConfig = Field(default_factory=lambda: LLMConfig())
     memory: MemoryConfig = Field(default_factory=lambda: MemoryConfig())
     auth: AuthConfig = Field(default_factory=lambda: AuthConfig())

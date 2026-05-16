@@ -132,35 +132,20 @@ def test_bom_free_malformed_toml_preserves_original_error(tmp_path: Path) -> Non
     assert "UTF-8 BOM" not in str(exc.value)
 
 
-def test_missing_api_key_loads_under_validate_path(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "toml_body",
+    [
+        '[database]\nurl = "sqlite:///./demo.db"\n[llm]\n',
+        '[database]\nurl = "sqlite:///./demo.db"\n',
+    ],
+    ids=["empty-llm-table", "no-llm-table"],
+)
+def test_missing_api_key_loads(tmp_path: Path, toml_body: str) -> None:
     cfg_path = tmp_path / "sqllens.toml"
-    cfg_path.write_text(
-        textwrap.dedent(
-            """\
-            [database]
-            url = "sqlite:///./demo.db"
-
-            [llm]
-            """
-        )
-    )
+    cfg_path.write_text(toml_body)
     cfg = Config.load(cfg_path)
     assert cfg.llm.api_key is None
     assert cfg.llm.provider == "anthropic"
-
-
-def test_missing_llm_table_loads(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "sqllens.toml"
-    cfg_path.write_text(
-        textwrap.dedent(
-            """\
-            [database]
-            url = "sqlite:///./demo.db"
-            """
-        )
-    )
-    cfg = Config.load(cfg_path)
-    assert cfg.llm.api_key is None
     assert cfg.llm.model == "claude-sonnet-4-5-20250929"
 
 

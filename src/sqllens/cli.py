@@ -15,9 +15,6 @@ from rich.markup import escape
 
 from sqllens import __version__
 
-# Error message body for the serve-time ``llm.api_key`` precondition. Kept as a
-# module-level constant so tests can match the substrings without hard-coding
-# fragile phrasing inline.
 _API_KEY_MISSING_MESSAGE = (
     "llm.api_key is not set. Either set SQLLENS_LLM__API_KEY in your environment, "
     'or add `api_key = "..."` to the [llm] section of sqllens.toml.'
