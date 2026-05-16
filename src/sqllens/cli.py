@@ -14,11 +14,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from sqllens import __version__
-
-_API_KEY_MISSING_MESSAGE = (
-    "llm.api_key is not set. Either set SQLLENS_LLM__API_KEY in your environment, "
-    'or add `api_key = "..."` to the [llm] section of sqllens.toml.'
-)
+from sqllens.config import API_KEY_MISSING_MESSAGE
 
 app = typer.Typer(
     name="sqllens",
@@ -88,7 +84,7 @@ def serve(
         console.print(f"[red]Config error:[/red] {escape(str(e))}")
         raise typer.Exit(code=2) from e
     if cfg.llm.api_key is None:
-        console.print(f"[red]Config error:[/red] {escape(_API_KEY_MISSING_MESSAGE)}")
+        console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
         raise typer.Exit(code=2)
     run(cfg)
 

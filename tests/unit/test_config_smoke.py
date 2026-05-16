@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import textwrap
-import tomllib
 from pathlib import Path
 
 import pytest
@@ -18,15 +17,27 @@ from sqllens.config import Config
 
 @pytest.fixture(autouse=True)
 def _clean_config_env(monkeypatch) -> None:
-    # ``Config.load`` mutates ``SQLLENS_CONFIG`` and previous tests may have set
-    # ``SQLLENS_LLM__API_KEY`` — wipe both so each test starts from a clean slate.
+    # ``Config.load`` reads ``SQLLENS_CONFIG`` to locate a TOML; previous tests may
+    # have set ``SQLLENS_LLM__API_KEY``. Wipe both so each test starts from a clean
+    # slate.
     monkeypatch.delenv("SQLLENS_CONFIG", raising=False)
     monkeypatch.delenv("SQLLENS_LLM__API_KEY", raising=False)
-    # Sub-configs (``AuthConfig``, ``ServerConfig``) are ``BaseSettings`` without
-    # an env_prefix, so they will pick up bare names like ``MODE`` or ``PORT`` if
-    # the surrounding shell has them set. GitHub-hosted runners set ``MODE=``,
-    # which then fails the ``Literal`` validation on ``auth.mode``.
-    for name in ("MODE", "HOST", "PORT", "TRANSPORT"):
+    # Every sub-config (``DatabaseConfig``, ``LLMConfig``, ``MemoryConfig``,
+    # ``AuthConfig``, ``ServerConfig``) is a ``BaseSettings`` *without* an
+    # ``env_prefix`` — so it will pick up bare names from the surrounding shell.
+    # GitHub-hosted runners happen not to set these today, but a developer's
+    # local shell easily could (``MODEL=…``, ``PORT=…``, ``URL=…``), which would
+    # silently override the test's TOML or fail ``Literal`` validation.
+    # Enumerated rather than wildcarded so a typo in a sub-config field name
+    # surfaces as a missing-clear instead of a phantom pass.
+    for name in (
+        "URL", "NAME", "READ_ONLY",                       # DatabaseConfig
+        "PROVIDER", "API_KEY", "MODEL",                   # LLMConfig
+        "PERSIST_DIR", "COLLECTION", "SIMILARITY_THRESHOLD",  # MemoryConfig
+        "MODE", "BEARER_TOKEN",                           # AuthConfig
+        "JWT_JWKS_URL", "JWT_ISSUER", "JWT_AUDIENCE",
+        "TRANSPORT", "HOST", "PORT",                      # ServerConfig
+    ):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -127,8 +138,10 @@ def test_bom_prefixed_toml_raises_actionable_error(tmp_path: Path) -> None:
 def test_bom_free_malformed_toml_preserves_original_error(tmp_path: Path) -> None:
     cfg_path = tmp_path / "sqllens.toml"
     # Garbage that tomllib will reject but with no BOM — the BOM message must not fire.
+    # We assert on ``Exception`` + message-shape rather than the concrete tomllib
+    # type because a future pydantic-settings upgrade could wrap the inner error.
     cfg_path.write_text("this is not valid toml = = =\n")
-    with pytest.raises(tomllib.TOMLDecodeError) as exc:
+    with pytest.raises(Exception) as exc:
         Config.load(cfg_path)
     assert "UTF-8 BOM" not in str(exc.value)
 
@@ -187,3 +200,43 @@ def test_cli_serve_fails_without_api_key(tmp_path: Path) -> None:
     assert "llm.api_key" in result.stdout
     assert "SQLLENS_LLM__API_KEY" in result.stdout
     assert "[llm]" in result.stdout
+
+
+def test_env_api_key_satisfies_missing_toml_key(tmp_path: Path, monkeypatch) -> None:
+    # Documented Windows-runbook flow: TOML omits ``api_key``, env var supplies it.
+    # ``Config.load`` should yield a usable ``cfg.llm.api_key`` and ``validate``
+    # should print the model line *without* the ``(api_key NOT SET)`` suffix.
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [llm]
+            """
+        )
+    )
+    monkeypatch.setenv("SQLLENS_LLM__API_KEY", "sk-ant-from-env")
+    cfg = Config.load(cfg_path)
+    assert cfg.llm.api_key is not None
+    assert cfg.llm.api_key.get_secret_value() == "sk-ant-from-env"
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 0, result.stdout
+    assert "api_key NOT SET" not in result.stdout
+
+
+def test_failed_load_does_not_leak_sqllens_config(tmp_path: Path, monkeypatch) -> None:
+    # A failed ``Config.load(path)`` must restore ``SQLLENS_CONFIG`` to its prior
+    # value so a follow-up ``Config.load(None)`` in the same process doesn't pick
+    # up the bad path.
+    monkeypatch.delenv("SQLLENS_CONFIG", raising=False)
+    bad = tmp_path / "bad.toml"
+    bad.write_bytes(b"\xef\xbb\xbf[database]\nurl = \"sqlite:///./demo.db\"\n")
+    with pytest.raises(ValueError):
+        Config.load(bad)
+    import os
+
+    assert os.environ.get("SQLLENS_CONFIG") is None

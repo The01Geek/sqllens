@@ -52,6 +52,9 @@ class LLMConfig(BaseModel):
 
     provider: Literal["anthropic"] = "anthropic"
     # Enforced at serve-time, not load-time, so ``validate`` can lint without secrets.
+    # The two enforcement sites are ``cli.serve`` (CLI exit 2 before ``run``) and
+    # ``agent.factory.build_agent`` (ValueError for non-CLI callers like the HTTP
+    # transport). Both raise ``API_KEY_MISSING_MESSAGE`` below.
     api_key: SecretStr | None = Field(default=None, description="Anthropic API key")
     model: str = Field(default="claude-sonnet-4-5-20250929", description="Anthropic model id")
 
@@ -143,19 +146,29 @@ class Config(BaseSettings):
         If ``path`` is given it takes precedence over ``SQLLENS_CONFIG`` and the
         default ``./sqllens.toml`` location.
         """
+        # Stash + restore so a failed load doesn't pollute SQLLENS_CONFIG for any
+        # subsequent in-process ``Config.load()`` call (tests, programmatic embedders).
+        prior = os.environ.get("SQLLENS_CONFIG")
         if path is not None:
             os.environ["SQLLENS_CONFIG"] = str(path)
         try:
-            return cls()
-        except Exception as exc:
-            # Re-translate the opaque "Invalid statement (at line 1, column 1)"
-            # that ``tomllib`` emits for BOM-prefixed files into actionable text.
-            # Only swap the message when the resolved TOML actually starts with
-            # a BOM — any other parse error keeps its original message.
-            resolved = _resolved_toml_path()
-            if resolved is not None and _has_utf8_bom(resolved):
-                raise ValueError(_bom_error_message(resolved)) from exc
-            raise
+            try:
+                return cls()
+            except Exception as exc:
+                # Re-translate the opaque "Invalid statement (at line 1, column 1)"
+                # that ``tomllib`` emits for BOM-prefixed files into actionable text.
+                # Only swap the message when the resolved TOML actually starts with
+                # a BOM — any other parse error keeps its original message.
+                resolved = _resolved_toml_path()
+                if resolved is not None and _has_utf8_bom(resolved):
+                    raise ValueError(_bom_error_message(resolved)) from exc
+                raise
+        finally:
+            if path is not None:
+                if prior is None:
+                    os.environ.pop("SQLLENS_CONFIG", None)
+                else:
+                    os.environ["SQLLENS_CONFIG"] = prior
 
 
 def _resolved_toml_path() -> Path | None:
@@ -167,29 +180,48 @@ def _resolved_toml_path() -> Path | None:
     return default if default.exists() else None
 
 
+API_KEY_MISSING_MESSAGE = (
+    "llm.api_key is not set. Either set SQLLENS_LLM__API_KEY in your environment, "
+    'or add `api_key = "..."` to the [llm] section of sqllens.toml.'
+)
+"""Shared by ``cli.serve`` (exits 2 before agent build) and ``agent.factory.build_agent``
+(raises before dereferencing the secret) so non-CLI callers — HTTP transport, tests,
+programmatic embedders — get the same error instead of an opaque ``AttributeError``."""
+
+
 _UTF8_BOM = b"\xef\xbb\xbf"
 
 
 def _has_utf8_bom(path: Path) -> bool:
     """Return True if ``path`` begins with the UTF-8 BOM byte sequence.
 
-    Returns False when the file is missing or not readable — the caller is
-    responsible for surfacing the underlying error from its own path.
+    Returns False on any ``OSError`` from opening the file (missing, permission
+    denied, ``NotADirectoryError`` from a path like ``/etc/hosts/whatever``, …).
+    The caller re-raises the original pydantic/tomllib error from its own path,
+    so swallowing here is safe.
     """
     try:
         with path.open("rb") as f:
             return f.read(3) == _UTF8_BOM
-    except (FileNotFoundError, PermissionError, IsADirectoryError):
+    except OSError:
         return False
 
 
 def _bom_error_message(path: Path) -> str:
+    # Shell-quote the path in the bash recipe so paths containing spaces produce a
+    # copy-pasteable command. PowerShell branches use their own quoting already.
+    import shlex
+
+    quoted = shlex.quote(str(path))
     return (
         f"{path} starts with a UTF-8 BOM, which Python's TOML parser rejects.\n"
         "Rewrite the file without a BOM, e.g.:\n"
         f"  PowerShell 7+:   Set-Content {path} -Encoding utf8NoBOM -Value $contents\n"
         f"  PowerShell 5.1:  [System.IO.File]::WriteAllText('{path}', $contents, "
         "[System.Text.UTF8Encoding]::new($false))\n"
-        f"  bash:            iconv -f UTF-8 -t UTF-8 {path} | sed '1s/^\\xEF\\xBB\\xBF//' > "
-        f"{path}.tmp && mv {path}.tmp {path}"
+        f"  bash (GNU sed):  iconv -f UTF-8 -t UTF-8 {quoted} | sed '1s/^\\xEF\\xBB\\xBF//' > "
+        f"{quoted}.tmp && mv {quoted}.tmp {quoted}\n"
+        f"  bash (BSD/macOS sed lacks \\xNN escapes — use Python instead): "
+        f"python3 -c 'import sys,pathlib; p=pathlib.Path(sys.argv[1]); "
+        f"p.write_bytes(p.read_bytes().lstrip(b\"\\xef\\xbb\\xbf\"))' {quoted}"
     )
