@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import textwrap
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -127,7 +128,7 @@ def test_bom_free_malformed_toml_preserves_original_error(tmp_path: Path) -> Non
     cfg_path = tmp_path / "sqllens.toml"
     # Garbage that tomllib will reject but with no BOM — the BOM message must not fire.
     cfg_path.write_text("this is not valid toml = = =\n")
-    with pytest.raises(Exception) as exc:
+    with pytest.raises(tomllib.TOMLDecodeError) as exc:
         Config.load(cfg_path)
     assert "UTF-8 BOM" not in str(exc.value)
 

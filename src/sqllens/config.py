@@ -147,14 +147,14 @@ class Config(BaseSettings):
             os.environ["SQLLENS_CONFIG"] = str(path)
         try:
             return cls()
-        except Exception:
+        except Exception as exc:
             # Re-translate the opaque "Invalid statement (at line 1, column 1)"
             # that ``tomllib`` emits for BOM-prefixed files into actionable text.
             # Only swap the message when the resolved TOML actually starts with
             # a BOM — any other parse error keeps its original message.
             resolved = _resolved_toml_path()
             if resolved is not None and _has_utf8_bom(resolved):
-                raise ValueError(_bom_error_message(resolved)) from None
+                raise ValueError(_bom_error_message(resolved)) from exc
             raise
 
 
@@ -171,11 +171,15 @@ _UTF8_BOM = b"\xef\xbb\xbf"
 
 
 def _has_utf8_bom(path: Path) -> bool:
-    """Return True if ``path`` begins with the UTF-8 BOM byte sequence."""
+    """Return True if ``path`` begins with the UTF-8 BOM byte sequence.
+
+    Returns False when the file is missing or not readable — the caller is
+    responsible for surfacing the underlying error from its own path.
+    """
     try:
         with path.open("rb") as f:
             return f.read(3) == _UTF8_BOM
-    except OSError:
+    except (FileNotFoundError, PermissionError, IsADirectoryError):
         return False
 
 
