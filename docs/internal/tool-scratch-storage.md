@@ -74,7 +74,7 @@ The process CWD that `Path(".")` resolves against is set by whoever launched the
 | Docker | `WORKDIR` from the image | `/<workdir>/<hash>/...` | Works (writable by design), but irrelevant location |
 | MCPB bundle | varies per OS | varies | Inherits whichever OS-level CWD applies |
 
-The first two rows fail outright. The agent doesn't surface the underlying `WinError 5` clearly — `RunSqlTool.execute()` catches the exception, returns `error_message = f"Error executing query: {str(e)}"` as `result_for_llm`, and the LLM tends to confabulate user-facing explanations like "the database file has the wrong permissions" or "the database connection is misconfigured". Both are wrong; both are misleading.
+The first two rows fail outright. `RunSqlTool.execute()` catches the underlying exception and returns `error_message = f"Error executing query: {str(e)}"` as `result_for_llm`. Historically, the LLM then confabulated user-facing explanations like "the database file has the wrong permissions" or "the database connection is misconfigured" — both wrong, both misleading. The default system prompt now contains a `Tool Errors:` directive (see [src/sqllens/agent/core/system_prompt/default.py](../../src/sqllens/agent/core/system_prompt/default.py)) that tells the model to quote the tool's `result_for_llm` verbatim inside a fenced code block and ask the user how to proceed — so the raw `[WinError 5] Access is denied …` line should now reach the user instead of an invented root cause. The underlying CWD bug still needs fixing; the directive only changes how the failure is reported.
 
 The middle four rows technically work but are surprising — most users don't expect a 16-hex-char folder to appear in their repo or shell folder after each query.
 
@@ -98,9 +98,9 @@ Because SQL Lens is single-tenant, the `_get_user_directory()` hash always evalu
 
 Alternative: replace `LocalFileSystem` in `RunSqlTool`'s default with a thin scratch-only helper that just writes to a single absolute directory, no user logic.
 
-### 3. Tool error → LLM confabulation
+### 3. Tool error → LLM confabulation (mitigated by system prompt)
 
-When `write_file` raises (or any other `RunSqlTool` internal step fails), the LLM receives only `f"Error executing query: {str(e)}"`. The model isn't directed to surface the verbatim error and tends to invent plausible-sounding root causes that mislead the user. Either prepend a directive to the error string ("report this error verbatim; do not invent root causes") or surface tool-internal errors as a distinct category from SQL-execution errors at the protocol level.
+When `write_file` raises (or any other `RunSqlTool` internal step fails), the LLM still receives only `f"Error executing query: {str(e)}"` as `result_for_llm`. The default system prompt now carries a `Tool Errors:` directive (added in [src/sqllens/agent/core/system_prompt/default.py](../../src/sqllens/agent/core/system_prompt/default.py)) that instructs the model to quote that string verbatim inside a fenced code block and ask the user how to proceed, instead of paraphrasing or speculating about root causes. This is a prompt-level mitigation — the model is no longer told nothing about failures — but it doesn't change the protocol: tool-internal errors and SQL-execution errors are still both flattened into the same `result_for_llm` shape, and a future change could split them so the agent (and any UI layer) can react differently.
 
 ### 4. No cleanup
 

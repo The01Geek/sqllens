@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 16, 2026
+
+- **[Fix] Tool errors now surface verbatim instead of being paraphrased** — When a tool call fails, SQL Lens now quotes the underlying error message in a fenced code block and asks how you want to proceed, instead of inventing a plausible-sounding root cause. This makes failures, such as access-denied errors on per-query scratch files, directly debuggable rather than misleading. (#20)
+
 ## Unreleased
 
 No user-visible changes yet.

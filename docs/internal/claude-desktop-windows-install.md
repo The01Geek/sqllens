@@ -92,7 +92,7 @@ Note the full path (e.g. `C:\Users\USERNAME\AppData\Local\Programs\Python\Python
 
 > **Gotcha:** Claude Desktop's `mcpServers` config schema only honors `command`, `args`, and `env`. A `cwd` field is silently ignored. On Windows, the launched process inherits Claude.exe's install directory as its CWD, which is **not writable** by the user.
 >
-> SQL Lens's `RunSqlTool` writes a per-query scratch CSV under `<CWD>/<sha256(user.id)[:16]>/`, so every query fails with `[WinError 5] Access is denied: '<16-hex-chars>'`. The agent doesn't know what to do with that error and tends to invent plausible-sounding nonsense like "the database file has the wrong permissions" — completely misleading.
+> SQL Lens's `RunSqlTool` writes a per-query scratch CSV under `<CWD>/<sha256(user.id)[:16]>/`, so every query fails with `[WinError 5] Access is denied: '<16-hex-chars>'`. Historically the agent then invented plausible-sounding nonsense like "the database file has the wrong permissions" — completely misleading. The system prompt now carries a `Tool Errors:` directive that tells the model to quote tool failures verbatim instead of paraphrasing, so the underlying `[WinError 5] …` line should reach the user. The CWD fragility itself is unchanged; the `.cmd` workaround below is still required.
 >
 > Workaround: launch via a tiny `.cmd` batch file that `cd`s into a writable folder before exec'ing `sqllens.exe`.
 
@@ -183,4 +183,4 @@ These are real bugs we worked around in this runbook. Fixing them in the codebas
 - **`sqllens validate` requires `llm.api_key`** — secrets should be optional during structural validation.
 - **`sqllens --version` flag is missing** — only the subcommand form works.
 - **Config loader doesn't detect UTF-8 BOM** — emits an opaque parser error instead of a clear "your file has a BOM" message.
-- **Agent invents explanations for tool errors** — when `run_sql` returns a `WinError 5`, the agent confidently misattributes it to "database permissions" instead of surfacing the verbatim error.
+- **Tool errors get flattened into `Error executing query: …`** — `RunSqlTool` wraps every internal failure (including `WinError 5`) into the same `result_for_llm` shape as a SQL execution error. The default system prompt now contains a `Tool Errors:` directive that tells the model to quote that string verbatim instead of paraphrasing, so the `WinError 5` line should reach the user; a protocol-level split between tool-internal and SQL-execution errors would still let the agent and UI react differently.
