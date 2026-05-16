@@ -14,10 +14,8 @@ Runbook for connecting SQL Lens to Claude Desktop on a fresh Windows machine. Wa
 
 ```powershell
 pip install "sqllens[all]"
-sqllens version
+sqllens --version
 ```
-
-> The CLI uses `sqllens version` (subcommand), not `sqllens --version` (flag). The flag form will error.
 
 If `sqllens` is "not recognized" after install, close and reopen PowerShell so the new `Scripts\` directory takes effect.
 
@@ -181,6 +179,5 @@ These are real bugs we worked around in this runbook. Fixing them in the codebas
 
 - **`RunSqlTool` defaults its scratch directory to `Path(".")`** — fragile across any launcher whose CWD isn't writable. Drives the entire `.cmd` workaround in step 6.
 - **`sqllens validate` requires `llm.api_key`** — secrets should be optional during structural validation.
-- **`sqllens --version` flag is missing** — only the subcommand form works.
 - **Config loader doesn't detect UTF-8 BOM** — emits an opaque parser error instead of a clear "your file has a BOM" message.
 - **Agent invents explanations for tool errors** — when `run_sql` returns a `WinError 5`, the agent confidently misattributes it to "database permissions" instead of surfacing the verbatim error.

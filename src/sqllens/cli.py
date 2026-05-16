@@ -21,6 +21,25 @@ app = typer.Typer(
 console = Console()
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f"sqllens {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the version and exit.",
+    ),
+) -> None:
+    """Natural-language SQL analytics over MCP."""
+
+
 @app.command()
 def version() -> None:
     """Print the installed version."""
