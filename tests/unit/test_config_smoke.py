@@ -32,6 +32,22 @@ def test_loads_minimal_toml(tmp_path: Path) -> None:
     assert cfg.server.transport == "stdio"
 
 
+def test_loads_without_api_key(tmp_path: Path, monkeypatch) -> None:
+    """validate should accept a TOML that omits llm.api_key (secrets belong in env)."""
+    monkeypatch.delenv("SQLLENS_LLM__API_KEY", raising=False)
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+            """
+        )
+    )
+    cfg = Config.load(cfg_path)
+    assert cfg.llm.api_key is None
+
+
 def test_env_var_override(tmp_path: Path, monkeypatch) -> None:
     cfg_path = tmp_path / "sqllens.toml"
     cfg_path.write_text(

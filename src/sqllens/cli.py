@@ -60,6 +60,12 @@ def serve(
     except Exception as e:
         console.print(f"[red]Config error:[/red] {e}")
         raise typer.Exit(code=2) from e
+    if cfg.llm.api_key is None:
+        console.print(
+            "[red]Missing LLM API key.[/red] Set [bold]SQLLENS_LLM__API_KEY[/bold] "
+            "in your environment, or add [bold]api_key[/bold] under [llm] in sqllens.toml."
+        )
+        raise typer.Exit(code=2)
     run(cfg)
 
 

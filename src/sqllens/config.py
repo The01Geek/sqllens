@@ -45,7 +45,12 @@ class LLMConfig(BaseSettings):
     """LLM provider settings. v1: Anthropic only."""
 
     provider: Literal["anthropic"] = "anthropic"
-    api_key: SecretStr = Field(..., description="Anthropic API key")
+    api_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Anthropic API key. Required at serve time; may be omitted for sqllens validate."
+        ),
+    )
     model: str = Field(default="claude-sonnet-4-5-20250929", description="Anthropic model id")
 
 
@@ -91,7 +96,7 @@ class Config(BaseSettings):
     )
 
     database: DatabaseConfig
-    llm: LLMConfig
+    llm: LLMConfig = Field(default_factory=lambda: LLMConfig())
     memory: MemoryConfig = Field(default_factory=lambda: MemoryConfig())
     auth: AuthConfig = Field(default_factory=lambda: AuthConfig())
     server: ServerConfig = Field(default_factory=lambda: ServerConfig())

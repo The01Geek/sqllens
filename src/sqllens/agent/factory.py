@@ -43,6 +43,8 @@ class _StaticUserResolver(UserResolver):
 
 def build_agent(cfg: Config) -> Agent:
     """Wire the agent from config. One call per process; the agent is reusable."""
+    if cfg.llm.api_key is None:
+        raise ValueError("llm.api_key is required to build an agent")
     llm = AnthropicLlmService(
         model=cfg.llm.model,
         api_key=cfg.llm.api_key.get_secret_value(),
