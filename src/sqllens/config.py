@@ -51,7 +51,9 @@ class LLMConfig(BaseModel):
     """LLM provider settings. v1: Anthropic only."""
 
     provider: Literal["anthropic"] = "anthropic"
-    api_key: SecretStr = Field(..., description="Anthropic API key")
+    # Optional in the schema so ``sqllens validate`` can lint structurally without
+    # a runtime secret. ``sqllens serve`` enforces presence before building the agent.
+    api_key: SecretStr | None = Field(default=None, description="Anthropic API key")
     model: str = Field(default="claude-sonnet-4-5-20250929", description="Anthropic model id")
 
 
@@ -110,7 +112,9 @@ class Config(BaseSettings):
     )
 
     database: DatabaseConfig
-    llm: LLMConfig
+    # ``LLMConfig`` has defaults for every field now (``api_key`` is checked
+    # by the CLI at serve-time), so the whole section may be omitted from TOML.
+    llm: LLMConfig = Field(default_factory=lambda: LLMConfig())
     memory: MemoryConfig = Field(default_factory=lambda: MemoryConfig())
     auth: AuthConfig = Field(default_factory=lambda: AuthConfig())
     server: ServerConfig = Field(default_factory=lambda: ServerConfig())
@@ -144,7 +148,17 @@ class Config(BaseSettings):
         """
         if path is not None:
             os.environ["SQLLENS_CONFIG"] = str(path)
-        return cls()
+        try:
+            return cls()
+        except Exception:
+            # Re-translate the opaque "Invalid statement (at line 1, column 1)"
+            # that ``tomllib`` emits for BOM-prefixed files into actionable text.
+            # Only swap the message when the resolved TOML actually starts with
+            # a BOM — any other parse error keeps its original message.
+            resolved = _resolved_toml_path()
+            if resolved is not None and _has_utf8_bom(resolved):
+                raise ValueError(_bom_error_message(resolved)) from None
+            raise
 
 
 def _resolved_toml_path() -> Path | None:
@@ -154,3 +168,27 @@ def _resolved_toml_path() -> Path | None:
         return p if p.exists() else None
     default = Path("./sqllens.toml")
     return default if default.exists() else None
+
+
+_UTF8_BOM = b"\xef\xbb\xbf"
+
+
+def _has_utf8_bom(path: Path) -> bool:
+    """Return True if ``path`` begins with the UTF-8 BOM byte sequence."""
+    try:
+        with path.open("rb") as f:
+            return f.read(3) == _UTF8_BOM
+    except OSError:
+        return False
+
+
+def _bom_error_message(path: Path) -> str:
+    return (
+        f"{path} starts with a UTF-8 BOM, which Python's TOML parser rejects.\n"
+        "Rewrite the file without a BOM, e.g.:\n"
+        f"  PowerShell 7+:   Set-Content {path} -Encoding utf8NoBOM -Value $contents\n"
+        f"  PowerShell 5.1:  [System.IO.File]::WriteAllText('{path}', $contents, "
+        "[System.Text.UTF8Encoding]::new($false))\n"
+        f"  bash:            iconv -f UTF-8 -t UTF-8 {path} | sed '1s/^\\xEF\\xBB\\xBF//' > "
+        f"{path}.tmp && mv {path}.tmp {path}"
+    )

@@ -8,7 +8,25 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
+import pytest
+from typer.testing import CliRunner
+
+from sqllens import cli
 from sqllens.config import Config
+
+
+@pytest.fixture(autouse=True)
+def _clean_config_env(monkeypatch) -> None:
+    # ``Config.load`` mutates ``SQLLENS_CONFIG`` and previous tests may have set
+    # ``SQLLENS_LLM__API_KEY`` — wipe both so each test starts from a clean slate.
+    monkeypatch.delenv("SQLLENS_CONFIG", raising=False)
+    monkeypatch.delenv("SQLLENS_LLM__API_KEY", raising=False)
+    # Sub-configs (``AuthConfig``, ``ServerConfig``) are ``BaseSettings`` without
+    # an env_prefix, so they will pick up bare names like ``MODE`` or ``PORT`` if
+    # the surrounding shell has them set. GitHub-hosted runners set ``MODE=``,
+    # which then fails the ``Literal`` validation on ``auth.mode``.
+    for name in ("MODE", "HOST", "PORT", "TRANSPORT"):
+        monkeypatch.delenv(name, raising=False)
 
 
 def test_loads_minimal_toml(tmp_path: Path) -> None:
@@ -86,3 +104,100 @@ def test_agent_defaults_when_section_omitted(tmp_path: Path) -> None:
     )
     cfg = Config.load(cfg_path)
     assert cfg.agent.max_tool_iterations == 20
+
+
+def test_bom_prefixed_toml_raises_actionable_error(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_bytes(
+        b"\xef\xbb\xbf"
+        + b'[database]\nurl = "sqlite:///./demo.db"\n[llm]\napi_key = "sk-ant-test"\n'
+    )
+    with pytest.raises(ValueError) as exc:
+        Config.load(cfg_path)
+    msg = str(exc.value)
+    assert "UTF-8 BOM" in msg
+    assert str(cfg_path) in msg
+    # All three rewrite paths called out in the issue must be in the message.
+    assert "PowerShell 7+" in msg
+    assert "PowerShell 5.1" in msg
+    assert "iconv" in msg
+
+
+def test_bom_free_malformed_toml_preserves_original_error(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "sqllens.toml"
+    # Garbage that tomllib will reject but with no BOM — the BOM message must not fire.
+    cfg_path.write_text("this is not valid toml = = =\n")
+    with pytest.raises(Exception) as exc:
+        Config.load(cfg_path)
+    assert "UTF-8 BOM" not in str(exc.value)
+
+
+def test_missing_api_key_loads_under_validate_path(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [llm]
+            """
+        )
+    )
+    cfg = Config.load(cfg_path)
+    assert cfg.llm.api_key is None
+    assert cfg.llm.provider == "anthropic"
+
+
+def test_missing_llm_table_loads(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+            """
+        )
+    )
+    cfg = Config.load(cfg_path)
+    assert cfg.llm.api_key is None
+    assert cfg.llm.model == "claude-sonnet-4-5-20250929"
+
+
+def test_cli_validate_exits_zero_without_api_key(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [llm]
+            """
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 0, result.stdout
+    assert "Config OK" in result.stdout
+    assert "api_key NOT SET" in result.stdout
+
+
+def test_cli_serve_fails_without_api_key(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [llm]
+            """
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["serve", "-c", str(cfg_path)])
+    assert result.exit_code == 2
+    assert "llm.api_key" in result.stdout
+    assert "SQLLENS_LLM__API_KEY" in result.stdout
+    assert "[llm]" in result.stdout

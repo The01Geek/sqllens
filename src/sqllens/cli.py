@@ -11,8 +11,17 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 
 from sqllens import __version__
+
+# Error message body for the serve-time ``llm.api_key`` precondition. Kept as a
+# module-level constant so tests can match the substrings without hard-coding
+# fragile phrasing inline.
+_API_KEY_MISSING_MESSAGE = (
+    "llm.api_key is not set. Either set SQLLENS_LLM__API_KEY in your environment, "
+    'or add `api_key = "..."` to the [llm] section of sqllens.toml.'
+)
 
 app = typer.Typer(
     name="sqllens",
@@ -79,8 +88,11 @@ def serve(
     try:
         cfg = Config.load(config)
     except Exception as e:
-        console.print(f"[red]Config error:[/red] {e}")
+        console.print(f"[red]Config error:[/red] {escape(str(e))}")
         raise typer.Exit(code=2) from e
+    if cfg.llm.api_key is None:
+        console.print(f"[red]Config error:[/red] {escape(_API_KEY_MISSING_MESSAGE)}")
+        raise typer.Exit(code=2)
     run(cfg)
 
 
@@ -94,11 +106,12 @@ def validate(
     try:
         cfg = Config.load(config)
     except Exception as e:
-        console.print(f"[red]Invalid:[/red] {e}")
+        console.print(f"[red]Invalid:[/red] {escape(str(e))}")
         raise typer.Exit(code=2) from e
     console.print("[green]Config OK[/green]")
     console.print(f"  database: {cfg.database.name} ({cfg.database.url.split('://')[0]})")
-    console.print(f"  llm:      {cfg.llm.provider} / {cfg.llm.model}")
+    llm_suffix = "" if cfg.llm.api_key is not None else " (api_key NOT SET)"
+    console.print(f"  llm:      {cfg.llm.provider} / {cfg.llm.model}{llm_suffix}")
     console.print(f"  auth:     {cfg.auth.mode}")
     console.print(f"  transport: {cfg.server.transport}")
 
