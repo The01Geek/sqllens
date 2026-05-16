@@ -1,0 +1,90 @@
+# .github/project-config.yml
+# ============================================
+# Project Automation Configuration
+# ============================================
+# Edit these values to match your project.
+# See .claude/plugins/devflow/README.md for documentation on each field.
+
+# GitHub Project board number (from your project URL).
+# https://github.com/users/The01Geek/projects/4
+project_number: "4"
+
+# Branch that PRs target by default
+base_branch: "main"
+
+# Claude model to use for AI-powered workflows
+# Workflows may override this individually if needed
+claude_model: "claude-opus-4-7"
+
+# Project board status field values (must match your GitHub Project exactly)
+statuses:
+  draft: "Draft"
+  in_progress: "In Progress"
+  ai_pr_drafted: "AI PR Drafted"
+  released: "Released"
+  closed: "Closed"
+
+# Documentation paths (relative to repo root).
+# This repo currently has only docs/internal/. The external/ path is reserved
+# for /devflow:docs-bootstrap-external — run that skill once after install if
+# you want WikiWizard's external-docs pass to write anywhere.
+docs:
+  internal: "docs/internal/"
+  external: "docs/external/"
+
+# GitHub App ID for project automation (Radman AI default: 3102164).
+app_id: "3102164"
+
+# Bot account login (for distinguishing AI-authored PRs from human ones).
+bot_login: "radman-ai"
+
+# Claude action settings
+claude:
+  # Bot logins allowed to trigger the Claude action (comma-separated).
+  # `claude` is Anthropic's GitHub App identity; `radman-ai` is the
+  # Radman AI default App's bot identity.
+  allowed_bots: "claude,radman-ai"
+  # Marker line used to identify the persistent /implement workpad comment on issues.
+  # The /implement skill finds and edits exactly one comment per issue whose body
+  # starts with this marker, instead of creating a new comment per run.
+  workpad_marker: "<!-- devflow:workpad -->"
+
+# WikiWizard settings
+wikiwizard:
+  claude_model: "claude-sonnet-4-6"
+  documented_label: "Documented"
+  release_notes_file: "docs/external/release-notes.md"
+  allowed_bots: "claude,radman-ai"
+
+# DevFlow retrospective settings
+# Consumed by the /devflow-weekly skill (locally-run orchestrator, not a GitHub Actions workflow).
+# retrospective_model and audit_model are optional --model overrides the orchestrator passes
+# to its subagents. All other keys govern thresholds/behaviour of the weekly loop.
+# See .claude/plugins/devflow/README.md
+devflow_retrospective:
+  enabled: true
+  retrospective_model: "claude-sonnet-4-6"
+  audit_model: "claude-opus-4-7"
+  # Repetition gate. status == regressed always bypasses this.
+  min_occurrences: 2
+  # Skip audit if the youngest audit PR is younger than this (createdAt-based).
+  cooldown_days: 3
+  # Soft cap on PRs processed per scheduled retrospective run. Saturation
+  # above this opens a notice issue but doesn't abort — the oldest N are
+  # processed, the rest roll into next week.
+  max_prs_per_run: 500
+  # Optional override; defaults to claude.allowed_bots if unset.
+  # watched_authors: ["radman-ai"]
+
+# Per-workflow enable/disable toggles
+workflows:
+  claude: true
+  WikiWizard: true
+  close-released-items: false
+  comment-on-draft-issues: false
+  move-to-in-progress: false
+  sync-pr-status-to-issue: false
+  request-review-on-ready: false
+  security_audit: false
+  screenshots: false
+  tests: false

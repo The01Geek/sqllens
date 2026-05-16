@@ -6,45 +6,224 @@ on:
   pull_request_review_comment:
     types: [created]
   issues:
-    types: [opened, assigned]
+    types: [opened]
   pull_request_review:
     types: [submitted]
 
 jobs:
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.extract.outputs.enabled }}
+      base_branch: ${{ steps.extract.outputs.base_branch }}
+      claude_model: ${{ steps.extract.outputs.claude_model }}
+      allowed_bots: ${{ steps.extract.outputs.allowed_bots }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: cfg
+        uses: ./.github/actions/read-project-config
+      - id: extract
+        env:
+          CONFIG_JSON: ${{ steps.cfg.outputs.json }}
+        run: |
+          set -euo pipefail
+          {
+            echo "enabled=$(echo "$CONFIG_JSON" | jq -r '.workflows.claude // false')"
+            echo "base_branch=$(echo "$CONFIG_JSON" | jq -r '.base_branch')"
+            echo "claude_model=$(echo "$CONFIG_JSON" | jq -r '.claude_model')"
+            echo "allowed_bots=$(echo "$CONFIG_JSON" | jq -r '.claude.allowed_bots')"
+          } >> "$GITHUB_OUTPUT"
+
   claude:
+    needs: config
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      needs.config.outputs.enabled == 'true' &&
+      (
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      )
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: read
-      issues: read
+      contents: write
+      pull-requests: write
+      issues: write
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project (editable, with dev + all DB drivers)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,all]"
 
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: ${{ needs.config.outputs.allowed_bots }}
 
           # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
             actions: read
+
+          # Register the official plugin marketplace plus this repo's own
+          # local marketplace. `./` resolves to the workflow's checkout root
+          # (where .claude-plugin/marketplace.json lives), so PR-branch changes
+          # to the marketplace or .claude/plugins/devflow/** are exercised by
+          # claude.yml on the PR that introduces them — a git-URL entry would
+          # always resolve to main. Local-path marketplaces are supported by
+          # claude-code-action since v1.0.28 (we pin @v1, the floating major).
+          plugin_marketplaces: |
+            https://github.com/anthropics/claude-plugins-official.git
+            ./
+
+          # Install plugins so skills like /pr-review-toolkit and /devflow:* are available
+          plugins: |
+            pr-review-toolkit@claude-plugins-official
+            code-review@claude-plugins-official
+            feature-dev@claude-plugins-official
+            superpowers@claude-plugins-official
+            claude-md-management@claude-plugins-official
+            devflow@devflow-marketplace
+
+          base_branch: ${{ needs.config.outputs.base_branch }}
+          claude_args: >-
+            --model ${{ needs.config.outputs.claude_model }}
+            --allowed-tools
+            "Read,
+            Write,
+            Edit,
+            Glob,
+            Grep,
+            LS,
+            Skill,
+            Agent,
+            TodoWrite,
+            EnterPlanMode,
+            ExitPlanMode,
+            WebFetch,
+            WebSearch,
+            Bash(git add:*),
+            Bash(git commit:*),
+            Bash(git push:*),
+            Bash(git pull:*),
+            Bash(git fetch:*),
+            Bash(git status:*),
+            Bash(git diff:*),
+            Bash(git log:*),
+            Bash(git show:*),
+            Bash(git checkout:*),
+            Bash(git branch:*),
+            Bash(git stash:*),
+            Bash(git rm:*),
+            Bash(git mv:*),
+            Bash(git restore:*),
+            Bash(git revert:*),
+            Bash(git blame:*),
+            Bash(git ls-files:*),
+            Bash(git rev-parse:*),
+            Bash(git merge-base:*),
+            Bash(gh pr create:*),
+            Bash(gh pr edit:*),
+            Bash(gh pr comment:*),
+            Bash(gh pr diff:*),
+            Bash(gh pr view:*),
+            Bash(gh pr review:*),
+            Bash(gh pr ready:*),
+            Bash(gh pr list:*),
+            Bash(gh pr checks:*),
+            Bash(gh pr status:*),
+            Bash(gh pr reopen:*),
+            Bash(gh issue view:*),
+            Bash(gh issue comment:*),
+            Bash(gh issue list:*),
+            Bash(gh issue edit:*),
+            Bash(gh issue create:*),
+            Bash(gh issue reopen:*),
+            Bash(gh issue status:*),
+            Bash(gh search:*),
+            Bash(gh label list:*),
+            Bash(gh repo view:*),
+            Bash(gh run view:*),
+            Bash(gh run list:*),
+            Bash(gh workflow view:*),
+            Bash(gh workflow list:*),
+            Bash(gh api:*),
+            Bash(jq:*),
+            Bash(.claude/plugins/devflow/scripts/config-get.sh:*),
+            Bash(.claude/plugins/devflow/scripts/workpad.py:*),
+            Bash(.claude/plugins/devflow/scripts/parse-acs.py:*),
+            Bash(.claude/plugins/devflow/scripts/branch-for-issue.py:*),
+            Bash(pip install:*),
+            Bash(pip:*),
+            Bash(python:*),
+            Bash(python3:*),
+            Bash(python -m:*),
+            Bash(python3 -m:*),
+            Bash(ruff:*),
+            Bash(ruff check:*),
+            Bash(ruff format:*),
+            Bash(pytest:*),
+            Bash(mypy:*),
+            Bash(sqllens:*),
+            Bash(grep:*),
+            Bash(rg:*),
+            Bash(find:*),
+            Bash(wc:*),
+            Bash(sort:*),
+            Bash(uniq:*),
+            Bash(cut:*),
+            Bash(tr:*),
+            Bash(xargs:*),
+            Bash(awk:*),
+            Bash(sed:*),
+            Bash(diff:*),
+            Bash(comm:*),
+            Bash(cat:*),
+            Bash(head:*),
+            Bash(tail:*),
+            Bash(less:*),
+            Bash(ls:*),
+            Bash(tree:*),
+            Bash(file:*),
+            Bash(stat:*),
+            Bash(date:*),
+            Bash(pwd:*),
+            Bash(realpath:*),
+            Bash(dirname:*),
+            Bash(basename:*),
+            Bash(which:*),
+            Bash(type:*),
+            Bash(env:*),
+            Bash(echo:*),
+            Bash(printf:*),
+            Bash(test:*),
+            Bash(touch:*),
+            Bash(mkdir:*),
+            Bash(rmdir:*),
+            Bash(rm:*),
+            Bash(mv:*),
+            Bash(cp:*),
+            Bash(tee:*)"
+          # assignee_trigger: "claude"
+          # label_trigger: "claude"
 
           # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
           # prompt: 'Update the pull request description to include a summary of changes.'
 
           # Optional: Add claude_args to customize behavior and configuration
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr *)'
-
+          # or https://docs.claude.com/en/docs/claude-code/sdk#command-line for available options
