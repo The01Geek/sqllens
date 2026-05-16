@@ -14,12 +14,10 @@ In PowerShell:
 
 ```powershell
 pip install "sqllens[all]"
-sqllens version
+sqllens --version
 ```
 
 If `sqllens` is reported as "not recognized" after install, close and reopen PowerShell so the new `Scripts` directory takes effect.
-
-Note: The version subcommand is `sqllens version`. The `--version` flag is not supported.
 
 ## 2. Prepare a working folder and the demo database
 
