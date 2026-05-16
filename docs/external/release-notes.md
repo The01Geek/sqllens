@@ -4,6 +4,7 @@ This page lists user-visible changes in each released version of SQL Lens. For t
 
 ## May 16, 2026
 
+- **[Feature] One-command Claude Desktop setup** — Connecting SQL Lens to Claude Desktop is now a single command: `sqllens claude-desktop install --db <url>`. The installer writes a configuration file, merges an entry into Claude Desktop's settings while preserving any existing preferences and other MCP servers, and saves a timestamped backup of the settings file before changing it. On Windows, the installer also generates the launcher script that was previously assembled by hand. Run with `--dry-run` to preview the changes before they are written. Works on Windows, macOS, and Linux. (#25)
 - **[Fix] Tool errors now surface verbatim instead of being paraphrased** — When a tool call fails, SQL Lens now quotes the underlying error message in a fenced code block and asks how you want to proceed, instead of inventing a plausible-sounding root cause. This makes failures, such as access-denied errors on per-query scratch files, directly debuggable rather than misleading. (#20)
 
 ## Unreleased
