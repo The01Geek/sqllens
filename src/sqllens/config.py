@@ -87,6 +87,19 @@ class ServerConfig(BaseModel):
     port: int = 8765
 
 
+class AgentRuntimeConfig(BaseModel):
+    """Agent runtime knobs exposed to deployers.
+
+    Only fields that operators legitimately tune per deployment live here;
+    the rest of the framework's ``AgentConfig`` keeps its built-in defaults.
+    """
+
+    # Default raised from the framework's 10 — real-world schema exploration
+    # (catalog lookups + memory searches + final query) routinely needs more
+    # than 10 tool calls on untrained databases. Upper bound caps runaway loops.
+    max_tool_iterations: int = Field(default=20, ge=1, le=100)
+
+
 class Config(BaseSettings):
     """Top-level config object."""
 
@@ -101,6 +114,7 @@ class Config(BaseSettings):
     memory: MemoryConfig = Field(default_factory=lambda: MemoryConfig())
     auth: AuthConfig = Field(default_factory=lambda: AuthConfig())
     server: ServerConfig = Field(default_factory=lambda: ServerConfig())
+    agent: AgentRuntimeConfig = Field(default_factory=lambda: AgentRuntimeConfig())
 
     @classmethod
     def settings_customise_sources(
