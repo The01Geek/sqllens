@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 from sqllens.agent import Agent, RequestContext, ToolRegistry, User, UserResolver
 from sqllens.agent.capabilities.sql_runner import SqlRunner
+from sqllens.agent.core import AgentConfig
 from sqllens.agent.integrations import (
     AnthropicLlmService,
     ChromaAgentMemory,
@@ -78,6 +79,10 @@ def build_agent(cfg: Config) -> Agent:
         tool_registry=tools,
         user_resolver=_StaticUserResolver(),
         agent_memory=memory,
+        # Framework's AgentConfig defaults max_tool_iterations=10, which truncates
+        # mid-exploration on untrained schemas. Surface the knob via config so
+        # operators can raise it without patching code.
+        config=AgentConfig(max_tool_iterations=cfg.agent.max_tool_iterations),
     )
 
 
