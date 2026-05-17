@@ -26,7 +26,7 @@ That single `claude-desktop install` call:
 
 - creates `C:\Users\USERNAME\sqllens\` if needed;
 - writes a BOM-free `C:\Users\USERNAME\sqllens\sqllens.toml`;
-- writes a `C:\Users\USERNAME\sqllens\run-sqllens.cmd` launcher (bundles `command + args` into Claude Desktop's single-`command` schema; was previously load-bearing for issue #10, see [tool-scratch-storage.md](tool-scratch-storage.md));
+- writes a `C:\Users\USERNAME\sqllens\run-sqllens.cmd` launcher (bundles `command + args` into Claude Desktop's single-`command` schema; was previously load-bearing for issue #10, see [tool-scratch-storage.md](../agent/tool-scratch-storage.md));
 - round-trips the TOML through `Config.load()` to catch typos before touching Claude's JSON;
 - merges an `mcpServers["chinook"]` entry into `%APPDATA%\Claude\claude_desktop_config.json`, preserving `preferences` and every sibling server;
 - writes a timestamped `.bak.YYYYMMDDHHMMSS` next to the JSON before mutating it.

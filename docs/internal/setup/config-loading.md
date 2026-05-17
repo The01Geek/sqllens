@@ -1,10 +1,10 @@
 # Config loading and error handling
 
-How `sqllens` resolves its runtime configuration, and where the current implementation surfaces unclear errors. This is the source-of-truth reference for [src/sqllens/config.py](../../src/sqllens/config.py) and its callers.
+How `sqllens` resolves its runtime configuration, and where the current implementation surfaces unclear errors. This is the source-of-truth reference for [src/sqllens/config.py](../../../src/sqllens/config.py) and its callers.
 
 ## Resolution order
 
-`Config.load()` ([src/sqllens/config.py:125](../../src/sqllens/config.py#L125)) builds a `Config` instance from three sources, in this priority (highest wins):
+`Config.load()` ([src/sqllens/config.py:125](../../../src/sqllens/config.py#L125)) builds a `Config` instance from three sources, in this priority (highest wins):
 
 1. **`init_settings`** — kwargs passed programmatically (used only by tests).
 2. **`env_settings`** — environment variables with prefix `SQLLENS_`, nested fields delimited by `__`. E.g. `SQLLENS_LLM__API_KEY`, `SQLLENS_DATABASE__URL`.
@@ -38,14 +38,14 @@ Only the top-level `Config` inherits from `pydantic_settings.BaseSettings`. The 
 
 This matters: a nested `BaseSettings` spins up its own env-resolution source independent of the parent. That source has no prefix, so it silently pulls in any process-level env var matching a sub-field name — `MODE`, `HOST`, `PORT`, `TRANSPORT`, `URL`, `NAME`, etc. A stray `MODE=...` in the environment was enough to fail `Config.load` with an `AuthConfig.mode` enum error.
 
-Keeping sub-models as `BaseModel` makes the parent `Config` the only env-aware layer; nested fields are reachable solely via the `SQLLENS_<SECTION>__<FIELD>` spelling. See [tests/unit/test_config_env_isolation.py](../../tests/unit/test_config_env_isolation.py) for the regression suite and #26 for the original bug.
+Keeping sub-models as `BaseModel` makes the parent `Config` the only env-aware layer; nested fields are reachable solely via the `SQLLENS_<SECTION>__<FIELD>` spelling. See [tests/unit/test_config_env_isolation.py](../../../tests/unit/test_config_env_isolation.py) for the regression suite and #26 for the original bug.
 
 ## CLI entry points
 
 Two commands load config:
 
-- `sqllens serve` (`serve` command in [src/sqllens/cli.py](../../src/sqllens/cli.py)) — calls `Config.load(config)`. On exception, prints `Config error: <msg>` and exits 2.
-- `sqllens validate` (`validate` command in [src/sqllens/cli.py](../../src/sqllens/cli.py)) — calls `Config.load(config)` and prints a one-line summary on success. On exception, prints `Invalid: <msg>` and exits 2.
+- `sqllens serve` (`serve` command in [src/sqllens/cli.py](../../../src/sqllens/cli.py)) — calls `Config.load(config)`. On exception, prints `Config error: <msg>` and exits 2.
+- `sqllens validate` (`validate` command in [src/sqllens/cli.py](../../../src/sqllens/cli.py)) — calls `Config.load(config)` and prints a one-line summary on success. On exception, prints `Invalid: <msg>` and exits 2.
 
 `validate` performs **structural** validation only — it doesn't open the database, doesn't ping the LLM, doesn't bind a port. Secrets are explicitly *not* required: `llm.api_key` is optional in the schema, and the only enforcement is in `sqllens serve` (see below).
 
@@ -55,7 +55,7 @@ Two commands load config:
 
 Python's `tomllib` raises `TOMLDecodeError: Invalid statement (at line 1, column 1)` if the file starts with a UTF-8 BOM (`0xEF 0xBB 0xBF`). The TOML body can be entirely valid and that opaque error still fires.
 
-`Config.load()` wraps the inner pydantic-settings call in a `try/except`: when an exception fires, it peeks the resolved TOML file's first three bytes and — if they match the BOM signature — re-raises as a `ValueError` with actionable rewrite commands for PowerShell 7+, PowerShell 5.1, and bash/iconv. Implementation lives in [src/sqllens/config.py](../../src/sqllens/config.py) (`_has_utf8_bom`, `_bom_error_message`).
+`Config.load()` wraps the inner pydantic-settings call in a `try/except`: when an exception fires, it peeks the resolved TOML file's first three bytes and — if they match the BOM signature — re-raises as a `ValueError` with actionable rewrite commands for PowerShell 7+, PowerShell 5.1, and bash/iconv. Implementation lives in [src/sqllens/config.py](../../../src/sqllens/config.py) (`_has_utf8_bom`, `_bom_error_message`).
 
 PowerShell on Windows trips this constantly:
 - `Set-Content -Encoding utf8` (PS 5.1) — adds BOM
@@ -71,9 +71,9 @@ Mitigation: `sqllens claude-desktop install` always writes BOM-free UTF-8 via Py
 
 `LLMConfig.api_key` is `SecretStr | None` with a default of `None`, so a TOML containing `[llm]` with no `api_key` (or omitting the `[llm]` table entirely) loads cleanly. `sqllens validate` exits 0 and flags the missing secret in the summary line: `llm:      anthropic / claude-sonnet-4-5-20250929 (api_key NOT SET)`.
 
-`sqllens serve` enforces the precondition in [src/sqllens/cli.py](../../src/sqllens/cli.py) immediately after `Config.load`: if `cfg.llm.api_key is None` it exits 2 with `Config error: llm.api_key is not set. Either set SQLLENS_LLM__API_KEY in your environment, or add api_key = "..." to the [llm] section of sqllens.toml.` This keeps `validate` as a real pre-flight lint command and `serve` as the runtime-readiness check.
+`sqllens serve` enforces the precondition in [src/sqllens/cli.py](../../../src/sqllens/cli.py) immediately after `Config.load`: if `cfg.llm.api_key is None` it exits 2 with `Config error: llm.api_key is not set. Either set SQLLENS_LLM__API_KEY in your environment, or add api_key = "..." to the [llm] section of sqllens.toml.` This keeps `validate` as a real pre-flight lint command and `serve` as the runtime-readiness check.
 
-The agent factory ([src/sqllens/agent/factory.py](../../src/sqllens/agent/factory.py)) still calls `cfg.llm.api_key.get_secret_value()` unchanged — that's a defensive second layer; the CLI is the authoritative gate.
+The agent factory ([src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py)) still calls `cfg.llm.api_key.get_secret_value()` unchanged — that's a defensive second layer; the CLI is the authoritative gate.
 
 ### Error rendering note
 
@@ -81,11 +81,11 @@ CLI error printing routes the variable part through `rich.markup.escape` so mess
 
 ## Adding a new config field
 
-1. Add the field to the appropriate `*Config` class in [config.py](../../src/sqllens/config.py). New sub-section models must inherit from `pydantic.BaseModel`, not `BaseSettings` — see [Sub-models are BaseModel, not BaseSettings](#sub-models-are-basemodel-not-basesettings).
+1. Add the field to the appropriate `*Config` class in [config.py](../../../src/sqllens/config.py). New sub-section models must inherit from `pydantic.BaseModel`, not `BaseSettings` — see [Sub-models are BaseModel, not BaseSettings](#sub-models-are-basemodel-not-basesettings).
 2. If it's required, set `Field(..., description=...)`. If optional, give it a default.
-3. Update the `_SAMPLE_CONFIG` template at the bottom of [cli.py](../../src/sqllens/cli.py) so `sqllens init` writes a working starter that includes it.
+3. Update the `_SAMPLE_CONFIG` template at the bottom of [cli.py](../../../src/sqllens/cli.py) so `sqllens init` writes a working starter that includes it.
 4. Document the corresponding env var spelling (top-level fields: `SQLLENS_FOO`; nested: `SQLLENS_SECTION__FOO`).
-5. If the field affects connector behaviour, also document it in the runbook ([claude-desktop-windows-install.md](claude-desktop-windows-install.md)) under "Point at a real database".
-6. If the field would benefit from being emitted by `sqllens claude-desktop install`, extend `generate_toml` in [src/sqllens/installers/claude_desktop.py](../../src/sqllens/installers/claude_desktop.py) and surface a corresponding CLI flag in [cli.py](../../src/sqllens/cli.py). See [claude-desktop-installer.md](claude-desktop-installer.md) for the installer's CLI surface.
+5. If the field affects connector behaviour, also document it in the runbook ([claude-desktop-windows-install.md](../installation/claude-desktop-windows-install.md)) under "Point at a real database".
+6. If the field would benefit from being emitted by `sqllens claude-desktop install`, extend `generate_toml` in [src/sqllens/installers/claude_desktop.py](../../../src/sqllens/installers/claude_desktop.py) and surface a corresponding CLI flag in [cli.py](../../../src/sqllens/cli.py). See [claude-desktop-installer.md](../installation/claude-desktop-installer.md) for the installer's CLI surface.
 
 `extra = "forbid"` means old configs will hard-fail on a removed field. Bump the changelog if you remove anything.
