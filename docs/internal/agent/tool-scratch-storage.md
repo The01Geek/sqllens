@@ -1,10 +1,10 @@
 # Tool scratch storage (RunSqlTool & LocalFileSystem)
 
-How `RunSqlTool` persists per-query CSVs to disk, how the `LocalFileSystem` capability resolves paths, and where scratch lands on each OS. Source-of-truth reference for [src/sqllens/agent/tools/run_sql.py](../../src/sqllens/agent/tools/run_sql.py) and [src/sqllens/agent/integrations/local/file_system.py](../../src/sqllens/agent/integrations/local/file_system.py).
+How `RunSqlTool` persists per-query CSVs to disk, how the `LocalFileSystem` capability resolves paths, and where scratch lands on each OS. Source-of-truth reference for [src/sqllens/agent/tools/run_sql.py](../../../src/sqllens/agent/tools/run_sql.py) and [src/sqllens/agent/integrations/local/file_system.py](../../../src/sqllens/agent/integrations/local/file_system.py).
 
 ## What gets written, and when
 
-`RunSqlTool.execute()` ([src/sqllens/agent/tools/run_sql.py](../../src/sqllens/agent/tools/run_sql.py)) does the following on every successful `SELECT`:
+`RunSqlTool.execute()` ([src/sqllens/agent/tools/run_sql.py](../../../src/sqllens/agent/tools/run_sql.py)) does the following on every successful `SELECT`:
 
 1. Runs the SQL via the injected `SqlRunner` and gets a `pd.DataFrame`.
 2. Generates a short random file id (`uuid4().hex[:8]`).
@@ -15,13 +15,13 @@ Non-`SELECT` queries don't write anything; they return a row-count summary only.
 
 ## The `FileSystem` capability
 
-The abstract interface is in [src/sqllens/agent/capabilities/file_system/base.py](../../src/sqllens/agent/capabilities/file_system/base.py): seven async methods covering `list_files`, `read_file`, `write_file`, `exists`, `is_directory`, `search_files`, `run_bash`.
+The abstract interface is in [src/sqllens/agent/capabilities/file_system/base.py](../../../src/sqllens/agent/capabilities/file_system/base.py): seven async methods covering `list_files`, `read_file`, `write_file`, `exists`, `is_directory`, `search_files`, `run_bash`.
 
 `RunSqlTool` only uses `write_file`. The wider interface is honored because the upstream framework expects the capability to be substitutable (e.g. a sandboxed or S3-backed implementation), and we kept the contract intact.
 
 ## `LocalFileSystem` semantics
 
-The on-disk implementation is at [src/sqllens/agent/integrations/local/file_system.py](../../src/sqllens/agent/integrations/local/file_system.py) (`class LocalFileSystem`).
+The on-disk implementation is at [src/sqllens/agent/integrations/local/file_system.py](../../../src/sqllens/agent/integrations/local/file_system.py) (`class LocalFileSystem`).
 
 - Constructor: `LocalFileSystem(working_directory: str = ".")`. The default is **a literal dot**, resolved relative to the process CWD at every call — but in SQL Lens we never use the default; see [How `RunSqlTool` gets wired](#how-runsqltool-gets-wired) below.
 - For every operation, `_get_user_directory(context)` derives a subfolder from `sha256(context.user.id)[:16]` (16 hex chars), creates it via `mkdir(parents=True, exist_ok=True)`, and returns it.
@@ -38,7 +38,7 @@ With the wiring in `factory.py` (below), `<configured-working-dir>` is always `t
 
 ## Why the per-user hash is dead weight in SQL Lens
 
-`LocalFileSystem` was lifted from a multi-tenant upstream framework where many users share one server. SQL Lens is **single-tenant by design** ([CLAUDE.md](../../CLAUDE.md) "What not to add"). The user identity is hardcoded by `_StaticUserResolver` in [src/sqllens/agent/factory.py](../../src/sqllens/agent/factory.py):
+`LocalFileSystem` was lifted from a multi-tenant upstream framework where many users share one server. SQL Lens is **single-tenant by design** ([CLAUDE.md](../../../CLAUDE.md) "What not to add"). The user identity is hardcoded by `_StaticUserResolver` in [src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py):
 
 ```python
 class _StaticUserResolver(UserResolver):
@@ -53,7 +53,7 @@ Because `user.id` is the same string for every request, `sha256(user.id)[:16]` a
 
 ## How `RunSqlTool` gets wired
 
-[src/sqllens/agent/factory.py](../../src/sqllens/agent/factory.py) (`build_agent`) registers the tool with an **explicit, absolute scratch root**:
+[src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py) (`build_agent`) registers the tool with an **explicit, absolute scratch root**:
 
 ```python
 scratch_fs = LocalFileSystem(str(Path(tempfile.gettempdir()) / "sqllens"))
@@ -63,7 +63,7 @@ tools.register_local_tool(
 )
 ```
 
-The `file_system=` kwarg is mandatory — without it, `RunSqlTool.__init__` would fall through to `LocalFileSystem()` (the dot-CWD default) and reintroduce the launcher-CWD bug fixed by issue #10. A regression test in [tests/unit/test_factory_wiring.py](../../tests/unit/test_factory_wiring.py) asserts the wiring shape so a future re-lift or refactor that drops the kwarg fails on Linux CI before it ships.
+The `file_system=` kwarg is mandatory — without it, `RunSqlTool.__init__` would fall through to `LocalFileSystem()` (the dot-CWD default) and reintroduce the launcher-CWD bug fixed by issue #10. A regression test in [tests/unit/test_factory_wiring.py](../../../tests/unit/test_factory_wiring.py) asserts the wiring shape so a future re-lift or refactor that drops the kwarg fails on Linux CI before it ships.
 
 `RunSqlTool` is the **only consumer of `LocalFileSystem`** in the pruned codebase.
 
@@ -92,9 +92,9 @@ Before issue #10, `factory.py` registered `RunSqlTool` without passing `file_sys
 | Docker | `WORKDIR` from the image | Worked (writable by design), but irrelevant location |
 | MCPB bundle | varies per OS | Inherited whichever OS-level CWD applied |
 
-The first two rows failed outright. The Windows install runbook used to require a `.cmd` wrapper that `cd`'d into a writable folder before exec'ing `sqllens.exe`; that workaround is no longer required for this specific bug (see [claude-desktop-windows-install.md](claude-desktop-windows-install.md) for any remaining launcher-quoting reasons it may still be useful).
+The first two rows failed outright. The Windows install runbook used to require a `.cmd` wrapper that `cd`'d into a writable folder before exec'ing `sqllens.exe`; that workaround is no longer required for this specific bug (see [claude-desktop-windows-install.md](../installation/claude-desktop-windows-install.md) for any remaining launcher-quoting reasons it may still be useful).
 
-`sqllens claude-desktop install` (see [claude-desktop-installer.md](claude-desktop-installer.md)) still emits a `run-sqllens.cmd` launcher on Windows for backwards compatibility with the historical setup; with issue #10 resolved, the launcher is no longer load-bearing for scratch-file access and the installer's Windows branch can be deleted in favour of the same plain-`command` path used on macOS / Linux.
+`sqllens claude-desktop install` (see [claude-desktop-installer.md](../installation/claude-desktop-installer.md)) still emits a `run-sqllens.cmd` launcher on Windows for backwards compatibility with the historical setup; with issue #10 resolved, the launcher is no longer load-bearing for scratch-file access and the installer's Windows branch can be deleted in favour of the same plain-`command` path used on macOS / Linux.
 
 The error-confabulation behavior described above — `RunSqlTool.execute()` catches the exception, returns `f"Error executing query: {str(e)}"` as `result_for_llm`, and the LLM invents plausible-sounding root causes — is a **separate rough edge** that is *not* fixed by the scratch-dir change. See [Known rough edges](#known-rough-edges) below.
 
@@ -108,7 +108,7 @@ Alternative: replace `LocalFileSystem` in `RunSqlTool` with a thin scratch-only 
 
 ### 2. Tool error → LLM confabulation (mitigated by system prompt)
 
-When `write_file` raises (or any other `RunSqlTool` internal step fails), the LLM receives the bare `str(e)` via `ToolResult.error` (the agent loop forwards `result.error` on failure, not `result_for_llm` — the `"Error executing query: "` prefix is stripped before the model sees it). The default system prompt now carries a `Tool Errors:` directive (added in [src/sqllens/agent/core/system_prompt/default.py](../../src/sqllens/agent/core/system_prompt/default.py)) that instructs the model to quote that string verbatim inside a fenced code block and ask the user how to proceed, instead of paraphrasing or speculating about root causes. This is a prompt-level mitigation — the model is no longer told nothing about failures — but it doesn't change the protocol: tool-internal errors and SQL-execution errors are still flattened into the same `ToolResult.error` channel, and a future change could split them so the agent (and any UI layer) can react differently.
+When `write_file` raises (or any other `RunSqlTool` internal step fails), the LLM receives the bare `str(e)` via `ToolResult.error` (the agent loop forwards `result.error` on failure, not `result_for_llm` — the `"Error executing query: "` prefix is stripped before the model sees it). The default system prompt now carries a `Tool Errors:` directive (added in [src/sqllens/agent/core/system_prompt/default.py](../../../src/sqllens/agent/core/system_prompt/default.py)) that instructs the model to quote that string verbatim inside a fenced code block and ask the user how to proceed, instead of paraphrasing or speculating about root causes. This is a prompt-level mitigation — the model is no longer told nothing about failures — but it doesn't change the protocol: tool-internal errors and SQL-execution errors are still flattened into the same `ToolResult.error` channel, and a future change could split them so the agent (and any UI layer) can react differently.
 
 ### 3. No cleanup
 
