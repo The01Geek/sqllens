@@ -117,7 +117,7 @@ curl.exe -L -o chinook.db https://github.com/The01Geek/sqllens/raw/main/examples
 
 ### 3. Write `sqllens.toml` (BOM-free)
 
-> **Gotcha:** PowerShell 5.1's `Set-Content -Encoding utf8` and `Out-File -Encoding utf8` both prepend a UTF-8 BOM. Python's `tomllib` rejects BOMs with the cryptic error `Invalid statement (at line 1, column 1)`. Use .NET's `File.WriteAllText`, which writes BOM-less UTF-8 by default.
+> **Gotcha:** PowerShell 5.1's `Set-Content -Encoding utf8` and `Out-File -Encoding utf8` both prepend a UTF-8 BOM. Python's `tomllib` rejects BOMs. SQL Lens detects this and prints an actionable error naming "UTF-8 BOM" plus rewrite commands — if you see that, follow the suggestion. Below we use .NET's `File.WriteAllText`, which writes BOM-less UTF-8 by default and sidesteps the problem.
 
 ```powershell
 $toml = @'
@@ -156,11 +156,10 @@ Get-Content $env:USERPROFILE\sqllens\sqllens.toml -Encoding Byte -TotalCount 4
 ### 4. Validate the config (optional)
 
 ```powershell
-$env:SQLLENS_LLM__API_KEY = "sk-ant-..."
 sqllens validate -c $env:USERPROFILE\sqllens\sqllens.toml
 ```
 
-> **Gotcha:** `sqllens validate` requires `llm.api_key` to be set somewhere — even though the runbook deliberately keeps the key out of TOML and sets it via env later. The env var above scopes only to the current PowerShell window; you don't need to persist it.
+`sqllens validate` performs structural validation only — it does not require `llm.api_key` to be set. When the key is absent the summary marks it explicitly: `llm:      anthropic / ... (api_key NOT SET)`. The key is enforced later by `sqllens serve` and supplied via the `SQLLENS_LLM__API_KEY` env var configured in step 7.
 
 Expected output ends with `Config OK`.
 
@@ -238,6 +237,9 @@ Reopen from the Start menu, then proceed to [Verify](#verify) above.
 These are real bugs the manual runbook used to work around. The installer hides most of them; the underlying issues remain worth fixing in the codebase:
 
 - ~~**`RunSqlTool` defaults its scratch directory to `Path(".")`**~~ — **fixed in issue #10 / PR #21.** Scratch now lives under `tempfile.gettempdir() / "sqllens"`. The installer's `.cmd` launcher on Windows is retained for JSON-config ergonomics (single `command` + `args` shape) but is no longer load-bearing for correctness — the Windows branch can be deleted in a follow-up.
-- **`sqllens validate` requires `llm.api_key`** — secrets should be optional during structural validation. The installer works around this by temporarily injecting the key into the env during its own validation step.
-- **Config loader doesn't detect UTF-8 BOM** — emits an opaque parser error instead of a clear "your file has a BOM" message. The installer sidesteps this by always writing BOM-free, but a hand-written file still hits the trap.
 - **Tool errors get flattened into a single channel** — `RunSqlTool` wraps every internal failure into a `ToolResult` with `success=False` and `error = str(e)`. The agent loop forwards `result.error` to the LLM on failure (the `Error executing query: …` prefix lives on `result_for_llm` but is dropped by the agent). The default system prompt now contains a `Tool Errors:` directive (issue #14 / PR #20) that tells the model to quote that string verbatim instead of paraphrasing, so the underlying message reaches the user; a protocol-level split between tool-internal and SQL-execution errors would still let the agent and UI react differently.
+
+Already addressed (kept here for runbook readers comparing against older docs):
+
+- ~~**`sqllens validate` requires `llm.api_key`**~~ — `api_key` is now optional during structural validation; serve-time enforces it.
+- ~~**Config loader doesn't detect UTF-8 BOM**~~ — loader now prints a targeted message naming "UTF-8 BOM" plus rewrite commands.
