@@ -21,7 +21,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -29,8 +29,14 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 
+# Sub-section models are BaseModel, not BaseSettings: a nested BaseSettings would
+# spin up its own unprefixed env_settings source and silently consume bare env
+# vars (MODE, HOST, URL, ...) that happen to match its field names. The parent
+# Config is the only env-aware layer and resolves nested fields via the
+# SQLLENS_<SECTION>__<FIELD> spelling.
 
-class DatabaseConfig(BaseSettings):
+
+class DatabaseConfig(BaseModel):
     """Single-database connection settings."""
 
     url: str = Field(
@@ -41,7 +47,7 @@ class DatabaseConfig(BaseSettings):
     read_only: bool = Field(default=True, description="Reject non-SELECT statements via SQL parser")
 
 
-class LLMConfig(BaseSettings):
+class LLMConfig(BaseModel):
     """LLM provider settings. v1: Anthropic only."""
 
     provider: Literal["anthropic"] = "anthropic"
@@ -49,7 +55,7 @@ class LLMConfig(BaseSettings):
     model: str = Field(default="claude-sonnet-4-5-20250929", description="Anthropic model id")
 
 
-class MemoryConfig(BaseSettings):
+class MemoryConfig(BaseModel):
     """Vector memory (ChromaDB) settings."""
 
     persist_dir: Path = Field(
@@ -62,7 +68,7 @@ class MemoryConfig(BaseSettings):
     )
 
 
-class AuthConfig(BaseSettings):
+class AuthConfig(BaseModel):
     """Authentication mode."""
 
     mode: Literal["none", "bearer", "jwt"] = "none"
@@ -73,7 +79,7 @@ class AuthConfig(BaseSettings):
     jwt_audience: str | None = None
 
 
-class ServerConfig(BaseSettings):
+class ServerConfig(BaseModel):
     """Transport + bind settings."""
 
     transport: Literal["stdio", "http"] = "stdio"

@@ -19,10 +19,8 @@ pip install "sqllens[all]"
 Confirm the install:
 
 ```bash
-sqllens version
+sqllens --version
 ```
-
-Note: The version subcommand is `sqllens version`. The `--version` flag is not supported.
 
 ## 2. Run the bundled demo
 

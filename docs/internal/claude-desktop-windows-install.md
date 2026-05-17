@@ -102,10 +102,8 @@ Use these steps only if `sqllens claude-desktop install` is unavailable (e.g. ru
 
 ```powershell
 pip install "sqllens[all]"
-sqllens version
+sqllens --version
 ```
-
-> The CLI uses `sqllens version` (subcommand), not `sqllens --version` (flag). The flag form will error.
 
 If `sqllens` is "not recognized" after install, close and reopen PowerShell so the new `Scripts\` directory takes effect.
 
@@ -241,6 +239,5 @@ These are real bugs the manual runbook used to work around. The installer hides 
 
 - ~~**`RunSqlTool` defaults its scratch directory to `Path(".")`**~~ — **fixed in issue #10 / PR #21.** Scratch now lives under `tempfile.gettempdir() / "sqllens"`. The installer's `.cmd` launcher on Windows is retained for JSON-config ergonomics (single `command` + `args` shape) but is no longer load-bearing for correctness — the Windows branch can be deleted in a follow-up.
 - **`sqllens validate` requires `llm.api_key`** — secrets should be optional during structural validation. The installer works around this by temporarily injecting the key into the env during its own validation step.
-- **`sqllens --version` flag is missing** — only the subcommand form works.
 - **Config loader doesn't detect UTF-8 BOM** — emits an opaque parser error instead of a clear "your file has a BOM" message. The installer sidesteps this by always writing BOM-free, but a hand-written file still hits the trap.
-- ~~**Agent invents explanations for tool errors**~~ — mitigated by issue #14 / PR #20. The default system prompt now carries a `Tool Errors:` directive that tells the model to quote tool failures verbatim instead of paraphrasing. A protocol-level split between tool-internal and SQL-execution errors would still let the agent and UI react differently.
+- **Tool errors get flattened into a single channel** — `RunSqlTool` wraps every internal failure into a `ToolResult` with `success=False` and `error = str(e)`. The agent loop forwards `result.error` to the LLM on failure (the `Error executing query: …` prefix lives on `result_for_llm` but is dropped by the agent). The default system prompt now contains a `Tool Errors:` directive (issue #14 / PR #20) that tells the model to quote that string verbatim instead of paraphrasing, so the underlying message reaches the user; a protocol-level split between tool-internal and SQL-execution errors would still let the agent and UI react differently.

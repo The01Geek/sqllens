@@ -4,7 +4,7 @@ How `sqllens` resolves its runtime configuration, and where the current implemen
 
 ## Resolution order
 
-`Config.load()` ([src/sqllens/config.py:119](../../src/sqllens/config.py#L119)) builds a `Config` instance from three sources, in this priority (highest wins):
+`Config.load()` ([src/sqllens/config.py:125](../../src/sqllens/config.py#L125)) builds a `Config` instance from three sources, in this priority (highest wins):
 
 1. **`init_settings`** — kwargs passed programmatically (used only by tests).
 2. **`env_settings`** — environment variables with prefix `SQLLENS_`, nested fields delimited by `__`. E.g. `SQLLENS_LLM__API_KEY`, `SQLLENS_DATABASE__URL`.
@@ -32,12 +32,20 @@ Top-level keys (all required to be present in the merged config, though most hav
 
 `extra = "forbid"` is set on the top-level `Config`, so unknown keys raise a `ValidationError` rather than being silently dropped.
 
+### Sub-models are `BaseModel`, not `BaseSettings`
+
+Only the top-level `Config` inherits from `pydantic_settings.BaseSettings`. The five sub-sections (`DatabaseConfig`, `LLMConfig`, `MemoryConfig`, `AuthConfig`, `ServerConfig`) are plain `pydantic.BaseModel`.
+
+This matters: a nested `BaseSettings` spins up its own env-resolution source independent of the parent. That source has no prefix, so it silently pulls in any process-level env var matching a sub-field name — `MODE`, `HOST`, `PORT`, `TRANSPORT`, `URL`, `NAME`, etc. A stray `MODE=...` in the environment was enough to fail `Config.load` with an `AuthConfig.mode` enum error.
+
+Keeping sub-models as `BaseModel` makes the parent `Config` the only env-aware layer; nested fields are reachable solely via the `SQLLENS_<SECTION>__<FIELD>` spelling. See [tests/unit/test_config_env_isolation.py](../../tests/unit/test_config_env_isolation.py) for the regression suite and #26 for the original bug.
+
 ## CLI entry points
 
 Two commands load config:
 
-- `sqllens serve` ([src/sqllens/cli.py:48](../../src/sqllens/cli.py#L48)) — calls `Config.load(config)`. On exception, prints `Config error: <msg>` and exits 2.
-- `sqllens validate` ([src/sqllens/cli.py:66](../../src/sqllens/cli.py#L66)) — calls `Config.load(config)` and prints a one-line summary on success. On exception, prints `Invalid: <msg>` and exits 2.
+- `sqllens serve` (`serve` command in [src/sqllens/cli.py](../../src/sqllens/cli.py)) — calls `Config.load(config)`. On exception, prints `Config error: <msg>` and exits 2.
+- `sqllens validate` (`validate` command in [src/sqllens/cli.py](../../src/sqllens/cli.py)) — calls `Config.load(config)` and prints a one-line summary on success. On exception, prints `Invalid: <msg>` and exits 2.
 
 `validate` performs **structural** validation only — it doesn't open the database, doesn't ping the LLM, doesn't bind a port. It does, however, run through the full pydantic-settings pipeline, which currently means it inherits all field-required constraints (including `llm.api_key`).
 
@@ -74,9 +82,9 @@ The two approaches aren't mutually exclusive; the structural fix is cleaner but 
 
 ## Adding a new config field
 
-1. Add the field to the appropriate `*Config` class in [config.py](../../src/sqllens/config.py).
+1. Add the field to the appropriate `*Config` class in [config.py](../../src/sqllens/config.py). New sub-section models must inherit from `pydantic.BaseModel`, not `BaseSettings` — see [Sub-models are BaseModel, not BaseSettings](#sub-models-are-basemodel-not-basesettings).
 2. If it's required, set `Field(..., description=...)`. If optional, give it a default.
-3. Update the `_SAMPLE_CONFIG` template at the bottom of [cli.py](../../src/sqllens/cli.py#L85) so `sqllens init` writes a working starter that includes it.
+3. Update the `_SAMPLE_CONFIG` template at the bottom of [cli.py](../../src/sqllens/cli.py) so `sqllens init` writes a working starter that includes it.
 4. Document the corresponding env var spelling (top-level fields: `SQLLENS_FOO`; nested: `SQLLENS_SECTION__FOO`).
 5. If the field affects connector behaviour, also document it in the runbook ([claude-desktop-windows-install.md](claude-desktop-windows-install.md)) under "Point at a real database".
 6. If the field would benefit from being emitted by `sqllens claude-desktop install`, extend `generate_toml` in [src/sqllens/installers/claude_desktop.py](../../src/sqllens/installers/claude_desktop.py) and surface a corresponding CLI flag in [cli.py](../../src/sqllens/cli.py). See [claude-desktop-installer.md](claude-desktop-installer.md) for the installer's CLI surface.
