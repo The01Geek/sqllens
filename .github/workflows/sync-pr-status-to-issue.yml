@@ -89,28 +89,45 @@ jobs:
           PR_IS_DRAFT: ${{ github.event.pull_request.draft }}
         run: |
           set -euo pipefail
-          ORG="${{ github.repository_owner }}"
+          OWNER="${{ github.repository_owner }}"
           REPO_NAME="${{ github.event.repository.name }}"
           PROJECT_NUMBER="${{ needs.config.outputs.project_number }}"
           PR_NUMBER="${{ github.event.pull_request.number }}"
 
           echo "🔍 Getting PR #$PR_NUMBER status from project..."
 
-          # Get project ID
+          # Detect whether the repo owner is a User or Organization, then query
+          # projectV2 under the correct root. GraphQL has no polymorphic
+          # owner-by-login resolver, so we probe `user(login:)` first and fall
+          # back to `organization(login:)`.
+          OWNER_KIND=""
           if ! PROJECT_RESPONSE=$(gh api graphql -f query='
             query {
-              organization(login: "'$ORG'") {
+              user(login: "'$OWNER'") {
                 projectV2(number: '$PROJECT_NUMBER') {
                   id
                   title
                 }
               }
-            }'); then
-            echo "❌ Error: Failed to query project"
-            exit 1
+            }' 2>/dev/null) || [ "$(echo "$PROJECT_RESPONSE" | jq -r '.data.user')" = "null" ]; then
+            if ! PROJECT_RESPONSE=$(gh api graphql -f query='
+              query {
+                organization(login: "'$OWNER'") {
+                  projectV2(number: '$PROJECT_NUMBER') {
+                    id
+                    title
+                  }
+                }
+              }'); then
+              echo "❌ Error: Failed to query project under user or organization '$OWNER'"
+              exit 1
+            fi
+            OWNER_KIND="organization"
+            PROJECT_ID=$(echo "$PROJECT_RESPONSE" | jq -r '.data.organization.projectV2.id' 2>/dev/null)
+          else
+            OWNER_KIND="user"
+            PROJECT_ID=$(echo "$PROJECT_RESPONSE" | jq -r '.data.user.projectV2.id' 2>/dev/null)
           fi
-
-          PROJECT_ID=$(echo "$PROJECT_RESPONSE" | jq -r '.data.organization.projectV2.id' 2>/dev/null)
 
           if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ]; then
             echo "❌ Error: Project #$PROJECT_NUMBER not found"
@@ -120,7 +137,7 @@ jobs:
           # Get PR node ID
           if ! PR_RESPONSE=$(gh api graphql -f query='
             query {
-              repository(owner: "'$ORG'", name: "'$REPO_NAME'") {
+              repository(owner: "'$OWNER'", name: "'$REPO_NAME'") {
                 pullRequest(number: '$PR_NUMBER') {
                   id
                   title
