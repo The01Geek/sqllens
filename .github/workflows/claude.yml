@@ -1,5 +1,20 @@
 name: Claude Code
 
+# Light @claude-mention listener. Provisions a minimal PHP + Node toolchain
+# (phpcs/phpcbf + node) and runs the Claude Code action. The heavy
+# test-environment provisioning (MySQL + Redis + admin/client schema push +
+# composer install of resources/PHPUnit + npm install in api/src/schema/jsx)
+# lives in claude-implement.yml and only fires when /devflow:implement is
+# present in the triggering event. Mutually-exclusive `if:` conditions on the
+# two workflows guarantee exactly one fires per event — see claude-implement.yml.
+#
+# Cost rationale: full provisioning is ~3-5 min of overhead per run; for the
+# common non-implement flows (Q&A, /devflow:review, /devflow:pr-description,
+# /security-review, etc.) none of MySQL/Redis/schema/composer/jsx is used, so
+# paying for it on every @claude mention is pure waste. The light setup here
+# is ~30-60s and keeps phpcs/phpcbf on PATH so /devflow:review-and-fix can
+# still run real linters rather than falling back to `php -l`.
+
 on:
   issue_comment:
     types: [created]
@@ -18,6 +33,7 @@ jobs:
       base_branch: ${{ steps.extract.outputs.base_branch }}
       claude_model: ${{ steps.extract.outputs.claude_model }}
       allowed_bots: ${{ steps.extract.outputs.allowed_bots }}
+      effort: ${{ steps.extract.outputs.effort }}
     steps:
       - uses: actions/checkout@v6
       - id: cfg
@@ -32,17 +48,38 @@ jobs:
             echo "base_branch=$(echo "$CONFIG_JSON" | jq -r '.base_branch')"
             echo "claude_model=$(echo "$CONFIG_JSON" | jq -r '.claude_model')"
             echo "allowed_bots=$(echo "$CONFIG_JSON" | jq -r '.claude.allowed_bots')"
+            echo "effort=$(echo "$CONFIG_JSON" | jq -r '.claude.effort // "medium"')"
           } >> "$GITHUB_OUTPUT"
 
   claude:
     needs: config
+    # Fires on @claude mentions that DO NOT contain `/devflow:implement` —
+    # those are claimed by claude-implement.yml, whose conditions are the
+    # exact inverse. The `!contains(.../devflow:implement)` clause is
+    # repeated per event source because each event surfaces the body under
+    # a different path (github.event.comment.body vs github.event.review.body
+    # vs github.event.issue.body / .title).
+    #
+    # PARTITION INVARIANT (read this before adding a new event source): for
+    # events that carry the trigger string on a SINGLE field (comment.body,
+    # review.body), the light path uses `!contains(field, '/devflow:implement')`
+    # and the heavy path uses `contains(field, '/devflow:implement')` — exact
+    # complements. For events with MULTIPLE body-bearing fields (the `issues`
+    # event has both `.body` and `.title`), the light path must AND-negate
+    # `/devflow:implement` across ALL such fields — which is the De Morgan
+    # dual of the heavy path's OR-test across the same fields:
+    #   light : !contains(body, X) && !contains(title, X)
+    #   heavy :  contains(body, X) ||  contains(title, X)
+    # Missing one field on the light side will cause BOTH workflows to fire
+    # when the trigger appears on that field. If you add a new event source,
+    # enumerate every body-bearing field on both sides and apply this transform.
     if: |
       needs.config.outputs.enabled == 'true' &&
       (
-        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && !contains(github.event.comment.body, '/devflow:implement')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') && !contains(github.event.comment.body, '/devflow:implement')) ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude') && !contains(github.event.review.body, '/devflow:implement')) ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) && !contains(github.event.issue.body, '/devflow:implement') && !contains(github.event.issue.title, '/devflow:implement'))
       )
     runs-on: ubuntu-latest
     permissions:
@@ -102,6 +139,7 @@ jobs:
           base_branch: ${{ needs.config.outputs.base_branch }}
           claude_args: >-
             --model ${{ needs.config.outputs.claude_model }}
+            ${{ needs.config.outputs.effort != 'medium' && format('--effort {0}', needs.config.outputs.effort) || '' }}
             --allowed-tools
             "Read,
             Write,
@@ -227,3 +265,4 @@ jobs:
           # Optional: Add claude_args to customize behavior and configuration
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://docs.claude.com/en/docs/claude-code/sdk#command-line for available options
+

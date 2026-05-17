@@ -10,7 +10,14 @@ You are the review engine orchestrator. Run a four-phase review and present an A
 
 **Input:** Optional PR number as `$ARGUMENTS`. If omitted, review current branch vs main.
 
-**Engine sharing.** Phases 0 through 4.3 of this skill are also executed verbatim by `/devflow:review-and-fix` (which wraps them in a fix loop and replaces Phase 4.4 with a deferred post at its own Loop Exit). When modifying engine behavior here — Phase 3 agent prompts, Phase 1 batching, Phase 0.5 classification, Phase 4 verdict criteria — verify `/devflow:review-and-fix` still produces the same findings; that's where divergence has historically slipped in. `/devflow:review-and-fix`'s SKILL.md deliberately keeps no paraphrase of these phases, so changes here propagate automatically as long as the file is reachable at the path `**/devflow/skills/review/SKILL.md`.
+**Engine sharing.** Phases 0 through 4.3 of this skill are also executed verbatim by `/devflow:review-and-fix` (which wraps them in a fix loop and skips Phase 4.4 entirely — no GitHub post; its final report is emitted to chat only). When modifying engine behavior here — Phase 3 agent prompts, Phase 1 batching, Phase 0.5 classification, Phase 4 verdict criteria — verify `/devflow:review-and-fix` still produces the same findings; that's where divergence has historically slipped in. `/devflow:review-and-fix`'s SKILL.md deliberately keeps no paraphrase of these phases, so changes here propagate automatically as long as the file is reachable at the path `**/devflow/skills/review/SKILL.md`.
+
+## When NOT to use
+
+- Not for PRs you want auto-fixed — use `/devflow:review-and-fix` instead.
+- Not for general code Q&A or learning the codebase — this skill is verdict-driven, not exploratory.
+- Not for reviewing uncommitted local changes — commit to a branch first (Phase 0.1 will warn either way).
+- Not for first-time review of a multi-PR feature branch — review the most-recent PR in isolation; the engine compares against `origin/main` (or the PR base) and a long-lived branch diff will swamp Phase 1 with stale items.
 
 ---
 
@@ -25,16 +32,18 @@ git status --porcelain
 
 If there is output, warn: "You have uncommitted changes that will not be included in this review."
 
-### 0.2 Determine diff scope
+### 0.2 Determine diff scope and cache the diff
 
 **If `$ARGUMENTS` is a PR number:**
 ```bash
 gh pr diff $ARGUMENTS
-gh pr view $ARGUMENTS --json headRefName --jq '.headRefName'
+gh pr view $ARGUMENTS --json headRefName,baseRefOid,headRefOid --jq '.'
 ```
 If either command fails (non-zero exit code), stop immediately and report: "Failed to retrieve diff. Verify the PR number exists and you have required permissions."
 
-Use the PR diff output for Phase 1. Store the head branch name.
+Use the PR diff output for Phase 1. Store the head branch name, `baseRefOid` as `$PR_BASE_SHA`, and `headRefOid` as `$PR_HEAD_SHA` — Phase 1's per-file slicing needs them (see Phase 1.1).
+
+**Note on `gh pr diff` path filtering.** `gh pr diff <N>` does NOT support path arguments — `gh pr diff <N> -- <file>` errors with `accepts at most 1 arg(s)` (cli/cli#5398, unresolved). When you need per-file slicing in Phase 1.1, use `git diff "$PR_BASE_SHA...$PR_HEAD_SHA" -- <paths>` instead, or pipe the full `gh pr diff` through `filterdiff -i '<pattern>'` if `patchutils` is installed.
 
 **If no argument (review current branch):**
 ```bash
@@ -46,6 +55,24 @@ If either command fails (non-zero exit code), stop immediately and report: "Fail
 Use the diff output for Phase 1. The current branch is the review target.
 
 If the diff is empty, report: "No changes to review. Branch is identical to main." and stop.
+
+**Cache the diff to disk.** Write the diff fetched above to `.devflow/review/<slug>/diff.patch` — **fetch once, do not re-run `gh pr diff` / `git diff`**. Compute `<slug>` as:
+
+- **PR mode:** `pr-<N>` where `<N>` is the PR number from `$ARGUMENTS`.
+- **Current-branch mode:** the current branch name sanitized for filesystem use — replace `/` with `-`, lowercase, drop any character that isn't `[a-z0-9._-]`. (Matches the workpad slug convention `/devflow:review-and-fix` already uses.)
+
+Combine the initial fetch with the cache write in one shot using `tee` so the diff is captured exactly once and stdout remains available for Phase 1 consumption:
+
+```bash
+mkdir -p .devflow/review/<slug>
+gh pr diff $ARGUMENTS | tee .devflow/review/<slug>/diff.patch
+# or, in current-branch mode:
+# git diff origin/main...HEAD | tee .devflow/review/<slug>/diff.patch
+```
+
+This replaces the bare `gh pr diff` / `git diff` invocation at the top of Phase 0.2 — use the `tee` form instead. Store `<slug>` and the resolved diff path (e.g. `.devflow/review/pr-863/diff.patch`) so Phase 3 can substitute it into its agent prompts via `{DIFF_PATH}`. The directory creation is harmless if it already exists; the file is overwritten on every run.
+
+**`.devflow/` should be gitignored** (it's ephemeral working state). This skill does not add the entry itself (that's a repo-level concern); flag missing `.gitignore` coverage in the chat output if `.devflow/` is not already ignored. When `/devflow:review` is invoked standalone (not from `/devflow:review-and-fix`), this cached diff is the only file in the directory — independent of the fix-loop's `iter-<N>.json` workpad files that live in the same place.
 
 ### 0.3 Get changed file list
 
@@ -90,26 +117,31 @@ Store the issue title and truncated body as `issue_context`. If no issue was fou
 
 Before launching anything, classify the diff. The classification scales agent dispatch so that tiny / config-only PRs don't pay the full engine cost (and so type-design-analyzer is dispatched only when there are *actually* new types, not when "class" happens to appear as a word elsewhere in the diff).
 
-Compute three flags:
+Compute four flags:
 
 - `small_diff` = (total changed lines < 100) **AND** (changed-file count ≤ 3)
 - `config_only` = every changed file has an extension in `{.yml, .yaml, .json, .md, .toml, .ini, .lock, .txt}`
-- `has_new_types` = the added-lines slice of the diff (lines starting with `+` but not `+++`) contains, in a code file (file extension NOT in the `config_only` set above), a line that matches `^\+\s*(?:(?:final|abstract|readonly|export(?:\s+default)?)\s+)*(class|interface|type|enum|struct|trait)\s+\w+`. The optional leading modifiers catch PHP `final class` / `abstract class` / `readonly class` and TS `export class` / `export default class` — without them, the regex would silently miss the majority of genuinely-new-type diffs in this PHP-heavy repo.
+- `has_new_types` = the added-lines slice of the diff (lines starting with `+` but not `+++`) contains, in a code file (file extension NOT in the `config_only` set above), a line that matches `^\+\s*(?:(?:final|abstract|readonly|export(?:\s+default)?|public|pub)\s+)*(class|interface|type|enum|struct|trait)\s+\w+`. The optional leading modifiers catch language-specific qualifiers (e.g. `final class`, `abstract class`, `readonly class`, `export class`, `export default class`, `public class`) — without them, the regex would silently miss genuinely-new-type diffs in languages whose declarations begin with a visibility / modality keyword.
+- `engine_self_modifying` = any changed file's path matches `.claude/plugins/devflow/skills/**` OR `.claude/plugins/devflow/agents/**` OR `.claude/plugins/devflow/lib/**`. These are the SKILL.md / agent-definition / helper-script files that *are* the review engine — a typo here silently breaks every future review. `lib/**` is included because helper scripts and test fixtures under `.claude/plugins/devflow/lib/` are part of the engine surface.
 
 Compute counts from the diff already fetched in 0.2/0.3 — no extra `gh` calls.
 
-Apply the engine profile per the table below. Output one line announcing the chosen profile so the human reader knows the engine ran a leaner path on purpose, not by accident:
+Apply the engine profile per the table below. The first row **overrides** all others when its flag is set; otherwise the remaining rows apply per their combinations. Output one line announcing the chosen profile so the human reader knows the engine ran a leaner path on purpose, not by accident:
 
 | Combination | Engine behavior |
 |---|---|
+| `engine_self_modifying` (any combination of the other flags) | Override the other flags: run the **full engine** (no Phase 1+2 skip, no agent gating in Phase 3.1). The risk surface is "every future review breaks if this is wrong," which dwarfs the per-PR cost saving from a leaner profile. |
 | `small_diff` AND `config_only` | Skip Phase 1 + Phase 2 (checklist gen + verify) entirely. Set `checklist_skipped = "intentional"`. In Phase 3.1, skip `pr-test-analyzer` and `pr-review-toolkit:type-design-analyzer`. |
 | `config_only` (but not `small_diff`) | Run Phase 1+2 normally. In Phase 3.1, skip `pr-test-analyzer` and `pr-review-toolkit:type-design-analyzer`. |
-| `small_diff` (but not `config_only`) | Run Phase 1+2 normally. In Phase 3.1, skip `pr-test-analyzer` if no test files (`*test*`, `*spec*`, `*Test.php`, etc.) appear in the diff. |
+| `small_diff` (but not `config_only`) | Run Phase 1+2 normally. In Phase 3.1, skip `pr-test-analyzer` if no test files (`*test*`, `*spec*`, language-specific test naming conventions, etc.) appear in the diff. |
 | neither flag set | Run the full engine. In Phase 3.1, still apply the `has_new_types` gate for `type-design-analyzer`. |
+
+Concretely: when `engine_self_modifying` is true, the orchestrator does NOT set `checklist_skipped = "intentional"` regardless of `small_diff` / `config_only`, and the Phase 3.1 engine-profile gates listed below are bypassed (every Phase 3 agent in the launch list runs). The override is not an aesthetic tag on the announcement line — it is the load-bearing rule that keeps the full engine wired through Phase 1's skip predicate AND Phase 3.1's per-agent gates for engine-self-modifying diffs.
 
 `has_new_types` is the canonical predicate for the type-design-analyzer gate in Phase 3.1; the previous heuristic ("check for `class ` in the diff") fires false-positives on YAML/markdown comments and is superseded.
 
 Announce one line, e.g.:
+- `Diff classification: engine_self_modifying (overrides other flags) → running full engine — this diff modifies the review engine itself.`
 - `Diff classification: small_diff + config_only → skipping Phase 1+2 and pr-test-analyzer + type-design-analyzer.`
 - `Diff classification: config_only → skipping pr-test-analyzer + type-design-analyzer (Phase 1+2 still run).`
 - `Diff classification: full engine.`
@@ -124,13 +156,19 @@ Output: `Phase 1/4: Generating verification checklist...`
 
 ### 1.1 Determine batching
 
-Count the changed files. If 10 or fewer, launch one checklist-generator agent. If more than 10, split into batches of 10 and launch one agent per batch. **Slice the diff to only the batch's files** before passing it (use `gh pr diff $ARGUMENTS -- <file1> <file2> ...` or grep the cached diff by `^diff --git` headers) — passing the full diff to every batch is wasteful and increases dup rate. Tell each batch which other files are being handled by sibling batches so it does not generate items for them.
+Count the changed files. If 10 or fewer, launch one checklist-generator agent. If more than 10, split into batches of 10 and launch one agent per batch. **Slice the diff to only the batch's files** before passing it. To slice:
 
-Merge the resulting checklists by concatenating all items and renumbering IDs sequentially (VC-1, VC-2, ...).
+- **PR mode (PR number provided):** use `git diff "$PR_BASE_SHA...$PR_HEAD_SHA" -- <file1> <file2> ...`. Do NOT use `gh pr diff $ARGUMENTS -- <file>` — that form errors with `accepts at most 1 arg(s)` (cli/cli#5398, unresolved). Alternatively, pipe the cached full diff through `filterdiff -i '<glob>'` if `patchutils` is installed.
+- **Current-branch mode:** use `git diff origin/main...HEAD -- <file1> <file2> ...`.
+- **Fallback:** grep the cached full diff by `^diff --git` headers.
 
-**Dedup criteria** (apply both, in order):
-1. **Same-claim dedup**: drop items that make the same claim about the same `source_file`. "Same claim" = same defect/contract under scrutiny, not identical wording (e.g., "macOS config path is ~/Library/Application Support/Claude/..." appears in both batches → keep one).
-2. **Cross-cutting theme dedup**: cross-cutting checks that apply repo-wide — *SPDX headers on new .py files*, *no upstream brand names*, *.gitignore anchoring* — should appear at most once each in the merged list, not once per batch. The category for these is "api_contract" by convention.
+Passing the full diff to every batch is wasteful and increases dup rate. Tell each batch which other files are being handled by sibling batches so it does not generate items for them.
+
+Merge the resulting checklists by concatenating all items. If batching ran (>1 batch), proceed to **Phase 1.5: Dedup** before renumbering. If only one batch ran, renumber IDs sequentially (`VC-1`, `VC-2`, ...) and skip Phase 1.5.
+
+**In-batch sanity dedup** still applies before Phase 1.5 hands the array off:
+1. **Same-claim dedup**: drop items that make the same claim about the same `source_file`. "Same claim" = same defect/contract under scrutiny, not identical wording (e.g., the same path/format assertion appears in both batches → keep one). When Phase 1.5 runs, this is mostly a no-op — the deduper agent does the heavy lifting via `claim_signature`.
+2. **Cross-cutting theme dedup**: cross-cutting checks that apply repo-wide — e.g. license/SPDX header conventions, naming or branding rules, `.gitignore` anchoring — should appear at most once each in the merged list, not once per batch. The category for these is "api_contract" by convention.
 
 ### 1.1.5 Cap and prioritize
 
@@ -141,7 +179,24 @@ If the merged-and-deduped checklist has more than **100 items**, sort by priorit
 4. `api_contract` items.
 5. `data_format_assumption` items.
 
-Drop items below the cap. This is a cost cap: every checklist item triggers a verifier subagent in Phase 2. Real-world runs on medium PRs have produced 150+ items when generators are exhaustive on doc-heavy diffs, but the load-bearing signal (cross-boundary contracts, mock-vs-real divergence, issue acceptance) is usually captured well within 100. Announce the cap in chat: `Capped checklist at 100 of {N} items (priority: issue-acceptance, dependency_interaction, ...).` so the human reader knows coverage was truncated on purpose.
+Drop items below the cap. This is a cost cap: every checklist item triggers a verifier subagent in Phase 2. Real-world runs on medium PRs have produced 150+ items when generators are exhaustive on doc-heavy diffs, but the load-bearing signal (cross-boundary contracts, mock-vs-real divergence, issue acceptance) is usually captured well within 100. Announce the cap in chat: `Capped checklist at 100 of {N} items (dropped {M} items by category: dependency_interaction: K1, api_contract: K2, ...; priority kept: issue-acceptance, dependency_interaction, ...).` so the human reader knows which categories took the hit, not just that coverage was truncated. (In `/devflow:review-and-fix` mode the same data also lands in the workpad's `cap_drops` block and the report's `## Coverage` section; in standalone `/devflow:review` runs the chat announcement is the only surface.)
+
+**Record what was dropped.** When the cap fires, summarize the dropped items by category so the orchestrator can surface coverage gaps in the final report (and the fix-loop wrapper can record it in the workpad — see `cap_drops` in `/devflow:review-and-fix`'s workpad schema). Compute and return alongside the truncated checklist:
+
+```json
+{
+  "count": M,
+  "by_category": {
+    "dependency_interaction": K1,
+    "api_contract": K2,
+    "test_mock_alignment": K3,
+    "data_format_assumption": K4,
+    "...": "..."
+  }
+}
+```
+
+where `M` is the total dropped count (`N - 100`) and the per-category counts sum to `M`. If the cap did not fire, return `{"count": 0, "by_category": {}}`. The orchestrator stores this for the report's `## Coverage` section in `/devflow:review-and-fix` and for the chat announcement in standalone `/devflow:review` runs.
 
 ### 1.2 Launch checklist-generator agent(s)
 
@@ -173,15 +228,64 @@ Body (first 200 lines):
 </issue>
 ```
 
+**If the caller is `/devflow:review-and-fix` on iteration N≥2** (the fix-loop wrapper supplies `prior_checklist` from `iter-<N-1>.json`), append this to the prompt:
+
+```
+This is iteration N (N≥2) of an auto-fix loop. The previous iteration's verification checklist is supplied below. Operate in variance-recovery mode per your agent contract (Step 2b):
+
+- Generate claims NOT already present in the prior checklist (dedup against `claim_signature`).
+- Prioritize claim categories that are underrepresented in the prior iteration.
+- The goal is variance recovery — surfacing what a second-look pass would catch — NOT re-litigation of items already considered.
+
+Return an empty JSON array `[]` if a second pass surfaces nothing new.
+
+<prior_checklist iteration="N-1">
+{paste the iter-(N-1) checklist JSON — id, category, claim, source_file, claim_signature, verdict}
+</prior_checklist>
+```
+
 ### 1.3 Parse the checklist
 
 Extract the JSON array from the agent's response (look for the ```json code fence).
 
 If the agent fails or returns malformed JSON, retry once. If it fails again, log: "Verification checklist generation failed. Proceeding with existing agents only." Set a `checklist_skipped` flag and skip to Phase 3.
 
-Store the parsed checklist items for Phase 2.
+Store the parsed checklist items for Phase 1.5 (if batched) or Phase 2 (if single-batch).
 
 Output: `Generated {N} verification checklist items.`
+
+---
+
+## Phase 1.5: Dedup (only when Phase 1 ran in >1 batch)
+
+When Phase 1 ran a single generator batch, skip this phase entirely — there are no cross-batch duplicates to resolve.
+
+When Phase 1 ran in 2+ batches, dedupe via the `devflow:checklist-deduper` agent instead of manually. Manual cross-batch dedup is bias-prone (real-run telemetry: orchestrator collapsing ~70 items to ~40 by hand consistently dropped 3–6 legitimate distinct items per run).
+
+Output: `Phase 1.5/4: Deduping checklist across {B} batches...`
+
+### 1.5.1 Launch the deduper agent
+
+Use the **Agent tool** with `subagent_type: "devflow:checklist-deduper"`.
+
+Concatenate the raw checklist items from all batches into a single JSON array. Preserve each item's original `id` and tag it with its source batch so traceability survives the merge — prefix each `id` with `batch{K}:` (e.g. `batch1:VC-3`, `batch2:VC-1`) before passing to the deduper.
+
+Pass the following prompt:
+```
+Here is the concatenated raw checklist from {B} generator batches. Merge duplicates per your dedup rules and return the deduped JSON array. Preserve `merged_from` provenance on every surviving item.
+
+<raw_checklist>
+{paste the JSON array of all items from all batches, with batch-prefixed ids}
+</raw_checklist>
+```
+
+### 1.5.2 Parse the deduped checklist
+
+Extract the JSON array from the deduper's response (look for the ```json code fence). The output array uses fresh sequential IDs (`VC-1`, `VC-2`, ...) and records `merged_from` on each item.
+
+If the deduper agent fails or returns malformed JSON, retry once. If it fails again, fall back to manual cross-batch dedup using the **In-batch sanity dedup** rules from Phase 1.1 and continue — do NOT block the engine on dedup failure.
+
+Output: `Deduped to {N_after} of {N_before} items.`
 
 ---
 
@@ -189,9 +293,57 @@ Output: `Generated {N} verification checklist items.`
 
 Output: `Phase 2/4: Verifying {N} checklist items...`
 
-### 2.1 Launch verifier agents in batches
+### 2.0 Partition by verification_mode
 
-Split checklist items into batches of up to 8. For each batch, launch all agents in parallel using multiple Agent tool calls in a single message.
+Split the checklist into two groups based on each item's `verification_mode` field (set by the generator in Phase 1):
+
+- **Lite items** (`verification_mode: "lite"`) — the orchestrator runs `grep -n` / `rg` directly. No agent dispatch. See 2.1a.
+- **Agent items** (`verification_mode: "agent"`, or missing/unrecognized) — dispatch the `devflow:checklist-verifier` agent. See 2.1b.
+
+This partition supersedes the old "one verifier agent per checklist item, no batching exceptions" rule. For pure string-presence claims, an orchestrator-direct `grep -n` is 5–10x cheaper than spawning a verifier subagent and produces an identical verdict. The lite path is bounded to claims that reduce mechanically to substring presence/absence — see `checklist-generator.md` for the eligibility rules the generator applies.
+
+### 2.0.5 Narrow-reuse from iter-(N-1) (fix-loop callers only)
+
+When invoked by `/devflow:review-and-fix` on iteration N≥2, iter-(N-1)'s workpad is available and the caller has supplied (a) the iter-(N-1) checklist and (b) the set of files modified by the iter-(N-1) fix commit (`fix_files`). Before partitioning into lite/agent batches, the orchestrator MAY short-circuit verification for items whose verdicts are mechanically guaranteed to be unchanged.
+
+For each item in the **current iteration's** checklist, reuse the prior verdict (skip verification) iff ALL of the following hold:
+
+1. There exists an item in the iter-(N-1) checklist with the **same `claim_signature`**.
+2. That prior item's `verdict` is **`PASS`**.
+3. The current item's `source_file` is **NOT in `fix_files`** (the fix commit did not touch it).
+
+For each reused item, copy `verdict`, `evidence`, and `file_checked` from the prior result and tag it `reused_from_iter_<N-1>: true` in the workpad. Everything else — new items the generator emitted in variance-recovery mode, items whose prior verdict was FAIL or INCONCLUSIVE, items whose `source_file` was touched by the fix commit — verifies fresh.
+
+**Why narrow.** The framing the user established: iterations exist for two distinct reasons. *Fix-induced defects* (did the fix introduce new bugs?) are well-served by file-intersection — a PASS item whose file the fix didn't touch is genuinely unchanged. *Variance-recovered defects* (did iter-1 miss something a second look would find?) are the opposite — they're the entire purpose of running Phase 1 again, and a coarse "the fix didn't touch any prior-checklist file, so skip Phase 1+2 wholesale" gate would silently dismiss them. The narrow per-item reuse here optimizes only the first case.
+
+Output: `Reused {K} of {N} checklist verdicts from iter-(N-1) (matching claim_signature, prior verdict PASS, source_file untouched by fix commit). Verifying remaining {N-K} fresh.`
+
+### 2.1a Run lite probes directly
+
+For each `lite` item, execute the probe described in `lite_probe`:
+
+- `kind: "string_present"` — run `grep -nF -- "<string>" <file>` (or `rg -nF "<string>" <file>` if available). If a `line_range` is present, additionally check that at least one hit falls inside `[L1, L2]` (inclusive). Verdict: PASS if any in-range hit (or any hit when no range), FAIL otherwise.
+- `kind: "string_absent"` — run the same grep. Verdict: PASS if no hit; FAIL if any hit.
+
+Use fixed-string mode (`-F`) by default — `lite_probe.string` is a literal, not a regex. Escape shell-special characters by quoting.
+
+Edge cases:
+- File missing → record INCONCLUSIVE with `evidence: "file not found"`.
+- `lite_probe` field missing despite `verification_mode: "lite"` (malformed item) → promote the item to the agent path; do not silently PASS.
+- `grep` exit code 2 (real error, not just no-match) → INCONCLUSIVE with the stderr text in `evidence`.
+
+Record the result in the same JSON shape as agent verdicts:
+```json
+{"id": "VC-N", "verdict": "PASS|FAIL|INCONCLUSIVE", "evidence": "lite probe: 2 hits in lines 113, 117", "file_checked": "path/to/file.py"}
+```
+
+**Examples:**
+- *Lite-eligible:* `claim`: "License header `<expected literal>` appears in `path/to/new_source_file`". `lite_probe`: `{kind: "string_present", string: "<expected literal>", file: "path/to/new_source_file"}`. The orchestrator greps; no agent needed.
+- *Agent-required (NOT lite):* `claim`: "Mock return value of `<symbol>` in `path/to/test_file` matches the real signature in `path/to/impl_file`". Two files, semantic shape comparison — must dispatch the verifier.
+
+### 2.1b Launch verifier agents in batches
+
+Split the *agent* items into batches of up to 8. For each batch, launch all agents in parallel using multiple Agent tool calls in a single message.
 
 Use the **Agent tool** with `subagent_type: "devflow:checklist-verifier"` for each item.
 
@@ -211,16 +363,16 @@ Report your verdict as JSON in a ```json code fence: {"id": "VC-N", "verdict": "
 
 ### 2.2 Collect results
 
-For each batch, collect the agent responses. Parse the JSON verdict from each response.
+Collect verdicts from BOTH paths — lite probes (2.1a) and agent batches (2.1b). Parse the JSON verdict from each agent response.
 
 If an agent times out or fails, record that item as:
 ```json
 {"id": "VC-N", "verdict": "INCONCLUSIVE", "evidence": "Verifier agent failed or timed out.", "file_checked": "N/A"}
 ```
 
-Store all verification results.
+Store all verification results in a single combined array (lite + agent), keyed by `id`.
 
-Output: `Verified: {pass_count} passed, {fail_count} failed, {inconclusive_count} inconclusive.`
+Output: `Verified: {pass_count} passed, {fail_count} failed, {inconclusive_count} inconclusive ({lite_count} via lite probe, {agent_count} via agent).`
 
 ---
 
@@ -232,36 +384,90 @@ Output: `Phase 3/4: Running review agents...`
 
 Launch all agents in a single message using multiple Agent tool calls. For each agent, pass a prompt telling it to review the changes.
 
-**Diff command:** Use `gh pr diff $ARGUMENTS` if reviewing a PR by number, or `git diff origin/main...HEAD` if reviewing the current branch. Substitute the correct command into `{DIFF_CMD}` in the prompts below.
+**Phase 3 always re-runs on every iteration of the fix loop.** Unlike Phase 1+2 (where individual items can be narrow-reused via `claim_signature` + untouched-file checks — see Phase 2.0.5), Phase 3's review agents are the main lever for *variance recovery*: an LLM reviewer asked the same question twice in different sessions will not always surface the same findings, and that variance is the whole point of iterating. Skipping Phase 3 on a later iteration because "the fix didn't touch any flagged file" silently throws away the second-look signal — exactly the false-pass mode this engine is designed to avoid.
+
+**Prior-findings context (fix-loop callers only).** When invoked by `/devflow:review-and-fix` on iteration N≥2, prepend the following block to every Phase 3 agent's prompt (between the standard task description and the `defect_signature` paragraph). The caller supplies iter-(N-1)'s `phase3_findings` from the workpad:
+
+```
+The following findings were raised by a prior review pass on this same code and have already been considered (some fixed, some pushed back as false positives, some deferred). Treat them as PRIOR ART, not as a checklist to re-derive:
+
+- Do NOT re-raise a finding identical to one in the prior set unless you have new evidence the prior decision was wrong.
+- DO look for *new* defects the prior pass missed — your value on this iteration is variance recovery, not corroboration.
+- If you would have raised an identical finding, you may skip it; the orchestrator already has it.
+
+<prior_findings iteration="N-1">
+{paste the iter-(N-1) phase3_findings JSON — agent, severity, description, defect_signature, fix_decision}
+</prior_findings>
+```
+
+**Diff path:** Substitute the cached diff path computed in Phase 0.2 (`.devflow/review/<slug>/diff.patch`) into `{DIFF_PATH}` in the prompts below. Phase 3 agents Read this file directly via their `Read` tool — no shell command, no `gh` API call, no redundant re-fetches across the 4–5 parallel agents. The previous `{DIFF_CMD}` substitution (which had every agent re-run `gh pr diff $ARGUMENTS` or `git diff origin/main...HEAD`) is superseded.
+
+**Required `defect_signature` block.** Every Phase-3 finding from every Phase-3 review-agent — both the ones listed below AND any added by future maintainers — MUST carry a `defect_signature` object so corroboration (Phase 3.2) is mechanical, not interpretive. Append this paragraph verbatim to every Phase-3 review-agent prompt — it's the only way to instruct external pr-review-toolkit agents we cannot edit:
+
+```
+For every finding you report, include a `defect_signature` field with the following shape:
+
+  defect_signature:
+    file: "<path/to/file>"           # required; the primary file the defect lives in
+    line_range: [<start>, <end>]     # required when locatable; null only when the defect spans an unbounded region (e.g. "missing test file")
+    kind: "<one of: null_deref | unhandled_exception | leak | race | logic_error | api_misuse | type_design | comment_drift | test_gap | security | style | other>"
+
+Place this field on each finding alongside severity and description. If your normal output format is a markdown bullet list, append the signature as a fenced JSON block right under the bullet. Without `defect_signature`, the orchestrator cannot corroborate your finding against other agents and may downweight it.
+```
 
 Agents to launch:
 
 **pr-review-toolkit:code-reviewer** — prompt:
 ```
-Review the code changes in this PR. Run `{DIFF_CMD}` to see the diff. Read CLAUDE.md for project conventions. Focus on CLAUDE.md compliance, bugs, and code quality. Only report issues with confidence >= 80.
+Review the code changes in this PR. Read the cached diff at `{DIFF_PATH}`. Read CLAUDE.md for project conventions. Focus on CLAUDE.md compliance, bugs, and code quality. Only report issues with confidence >= 80.
+
+{paste the defect_signature paragraph above}
 ```
 
 **pr-review-toolkit:silent-failure-hunter** — prompt:
 ```
-Review the error handling in the code changes. Run `{DIFF_CMD}` to see the diff. Read the full changed files. Check for silent failures, inadequate error handling, and inappropriate fallback behavior.
+Review the error handling in the code changes. Read the cached diff at `{DIFF_PATH}`. Read the full changed files. Check for silent failures, inadequate error handling, and inappropriate fallback behavior.
+
+{paste the defect_signature paragraph above}
 ```
 
 **pr-review-toolkit:comment-analyzer** — prompt:
 ```
-Analyze the code comments in the changes. Run `{DIFF_CMD}` to see the diff. Check that docstrings and comments are accurate, helpful, and not misleading.
+Analyze the code comments in the changes. Read the cached diff at `{DIFF_PATH}`. Check that docstrings and comments are accurate, helpful, and not misleading.
+
+{paste the defect_signature paragraph above}
 ```
 
 **pr-review-toolkit:pr-test-analyzer** — prompt:
 ```
-Analyze test coverage for the changes. Run `{DIFF_CMD}` to see the diff. Check if tests adequately cover new functionality and edge cases.
+Analyze test coverage for the changes. Read the cached diff at `{DIFF_PATH}`. Check if tests adequately cover new functionality and edge cases.
+
+{paste the defect_signature paragraph above}
 ```
 
-**superpowers:code-reviewer** — prompt:
+**General-purpose final-pass reviewer** — dispatch a `Task` with `subagent_type: general-purpose` and instruct it to invoke the `/superpowers:requesting-code-review` skill (that skill renders its own reviewer prompt; we do not inline it). This dispatch assumes the `superpowers` plugin is installed in the executing environment; if `/superpowers:requesting-code-review` is not available, the subagent will surface that and the orchestrator should fall back to relying on the other Phase-3 reviewer agents above.
+
+Prompt:
+
 ```
-Review all changes in this PR/branch vs main. Run `{DIFF_CMD}` to see the diff. This is a final-pass code review against project standards.
+Invoke the `/superpowers:requesting-code-review` skill to perform a final-pass code review. Pass the following context into the skill:
+
+- Description: {one-line summary — "PR #<N>: <title>" or "Current branch <name> vs main"}
+- Plan / Requirements: {the PR body if available, else the originating issue body from Phase 0.4, else "No spec available — review against general project standards from CLAUDE.md"}
+- Base SHA: {PR_BASE_SHA or origin/main HEAD}
+- Head SHA: {PR_HEAD_SHA or current HEAD}
+- Diff path: `{DIFF_PATH}` (the full diff, cached to disk by Phase 0.2 — Read it directly rather than re-fetching)
+- Prior-iteration findings (already considered, look for new): {iter-(N-1) phase3_findings JSON if fix-loop iteration N≥2, else "none"}
+
+Return your findings in the standard Phase-3 output format: ### Strengths / ### Issues (grouped by Critical / Important / Suggestion) / ### Recommendations / ### Assessment. Every issue MUST carry a `defect_signature` block per the contract below.
+
+{paste the defect_signature paragraph above}
 ```
 
 **Phase 0.5 engine-profile gates (apply to this launch list):**
+
+These gates are **BYPASSED entirely** when `engine_self_modifying` is set in Phase 0.5 — every Phase 3 agent in the launch list runs regardless of `config_only` / `small_diff` / `has_new_types` for engine-self-modifying diffs (see Phase 0.5's override row). Apply the gates below only when `engine_self_modifying` is false.
+
 - Skip `pr-review-toolkit:pr-test-analyzer` when `config_only` is set, OR when `small_diff` is set AND no test files appear in the diff.
 - Skip `pr-review-toolkit:type-design-analyzer` when `has_new_types` is false. (This replaces the older "check for `class ` in the diff" predicate, which over-fired on the literal word *class* appearing in YAML / markdown / comments.)
 
@@ -269,9 +475,15 @@ In all other cases, `pr-review-toolkit:type-design-analyzer` is launched when `h
 
 ### 3.2 Collect results
 
-Collect all agent responses. Extract findings and their severity labels (Critical, Important/Major, Suggestion/Minor).
+Collect all agent responses. Extract findings, their severity labels (Critical, Important/Major, Suggestion/Minor), and their `defect_signature` blocks.
 
-For each finding, also compute a **corroboration count** — the number of Phase 3 agents that raised the same defect. Two findings agree when they describe the same defect (same root cause + same affected file/line span); identical wording is not required. The corroboration count is a stronger calibrator than the individual agent's verbalized confidence: a finding raised by 3 of 5 agents is much more likely to be a true positive than a 95%-confidence finding raised by only one. Single-source findings are not automatically wrong — they're flagged so a human reader can apply extra scrutiny.
+For each finding, compute a **corroboration count** — the number of Phase 3 agents that raised the same defect. Corroboration is now **mechanical**, not interpretive:
+
+> Two findings corroborate iff they have the **same `defect_signature.file`**, **overlapping `defect_signature.line_range`** (treat `null` as overlapping any range in the same file when `kind` matches), AND **identical `defect_signature.kind`**.
+
+A finding without a `defect_signature` block falls back to a one-line text-based agreement heuristic (same described file + same described defect kind in prose), but **flag it in the report** so the human knows the agent skipped the signature contract. Agents that systematically omit `defect_signature` should be re-prompted with the contract reminder.
+
+Corroboration count is a stronger calibrator than the individual agent's verbalized confidence: a finding raised by 3 of 5 agents is much more likely to be a true positive than a 95%-confidence finding raised by only one. Single-source findings are not automatically wrong — they're flagged so a human reader can apply extra scrutiny.
 
 If an agent fails, note: "[agent-name] did not return results." in the report. Track the count of failed agents. Failed agents do not reduce the denominator for the corroboration count of findings other agents raised.
 
@@ -288,7 +500,7 @@ Construct the report in this format:
 ```markdown
 # Review Report
 
-## Verdict: {APPROVE|REJECT} ({summary})
+## Verdict: {APPROVE | APPROVE with notes | APPROVE WITH CAVEAT | APPROVE WITH ADVISORY NOTES | REJECT} ({summary})
 
 ## Issue Compliance
 {If issue found: "Reviewed against issue #{number}: {title}. Requirement-based checklist items are included in the verification results below."}
@@ -320,8 +532,8 @@ Apply these rules in order (first match wins):
 1. Any verification checklist item with verdict FAIL → **REJECT**
 2. Any verification checklist item with verdict INCONCLUSIVE → **REJECT** (add "manual check needed" note)
 3. Any Critical finding from existing review agents → **REJECT**
-4. If Phase 1+2 were skipped **because checklist generation failed** (`checklist_skipped = "failure"`) → maximum verdict is **APPROVE WITH CAVEAT** — verification checklist not generated (never a clean APPROVE)
-4'. If Phase 1+2 were skipped **intentionally by Phase 0.5** (`checklist_skipped = "intentional"`, i.e. small_diff AND config_only) → no caveat; the verdict follows the remaining rules normally. The skip was a deliberate engine-profile choice for a low-risk diff, not a failure.
+4a. If Phase 1+2 were skipped **because checklist generation failed** (`checklist_skipped = "failure"`) → maximum verdict is **APPROVE WITH CAVEAT** — verification checklist not generated (never a clean APPROVE)
+4b. If Phase 1+2 were skipped **intentionally by Phase 0.5** (`checklist_skipped = "intentional"`, i.e. small_diff AND config_only) → no caveat; the verdict follows the remaining rules normally. The skip was a deliberate engine-profile choice for a low-risk diff, not a failure.
 5. If 2 or more Phase 3 agents failed to return results → add "partial review coverage" note to the verdict
 6. Only Important or Suggestion findings → **APPROVE with notes**
 7. No findings → **APPROVE**
@@ -343,3 +555,15 @@ Map the verdict to a `gh pr review` action:
 | **APPROVE** (clean, no findings) | `gh pr review $ARGUMENTS --approve --body "$REPORT"` |
 
 where `$REPORT` is the full report from 4.1. If `gh pr review` fails (e.g. you cannot review your own PR as the same GitHub identity, or the token lacks permission), fall back to `gh pr comment $ARGUMENTS --body "$REPORT"` and note in your chat output that the formal review could not be posted. **Never silently skip this step on a REJECT** — the whole point is that the rejection must be impossible to miss.
+
+---
+
+## Common Mistakes
+
+- Re-running Phase 1 on a config-only PR when Phase 0.5 classified it as `small_diff + config_only` — Phase 0.5 already gates this; trust the classification rather than second-guessing it.
+- Letting checklist generation failure silently degrade to a clean APPROVE — Phase 4.2 rule 4a forces APPROVE WITH CAVEAT in that case; do not skip past it because "the rest of the engine ran fine."
+- Treating an agent's verbalized confidence as load-bearing — Phase 3.2's corroboration count (mechanical, signature-based) is the stronger signal. A 95%-confident single-source finding is weaker than a 3-of-5 corroborated one.
+- Dispatching `pr-review-toolkit:type-design-analyzer` on a diff where `has_new_types` is false — the gate exists because that analyzer over-fires when the word *class* appears in YAML, markdown, or comments. Honor the gate.
+- Posting a REJECT verdict only to chat without `gh pr review --request-changes` — Phase 4.4 exists because chat-only rejections get missed and the PR ships anyway.
+- Paraphrasing Phase 0.5 in a way that loses the `engine_self_modifying` override — the first row of the table overrides all others; the full engine must run on engine-self-modifying diffs because typos in SKILL.md or agent files silently break every future review.
+- Skipping `/devflow:review-and-fix`'s Step 2.5 web-verification gate for single-source Critical findings — auto-applied fixes from confidently-stated-but-wrong external-tool claims are a known false-positive vector. (This skill itself doesn't run Step 2.5; flag it as a mistake when reviewing changes to `/devflow:review-and-fix`.)
