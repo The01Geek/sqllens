@@ -67,6 +67,8 @@ Current behaviour: the message is forwarded verbatim from `tomllib` through pyda
 
 Desired behaviour: detect the BOM bytes when `TOMLDecodeError` fires at line 1 col 1, and re-raise with a directive that names the BOM and shows a known-good rewrite incantation.
 
+Mitigation: `sqllens claude-desktop install` always writes BOM-free UTF-8 via Python's `Path.write_text(..., encoding="utf-8")`, so users who let the installer generate the file never hit this trap. The loader still needs a clearer error for hand-written configs.
+
 ### 2. Missing `llm.api_key` during `sqllens validate`
 
 `LLMConfig.api_key` is `Field(...)` (required, no default). If neither `SQLLENS_LLM__API_KEY` nor `[llm].api_key` in TOML is set, pydantic raises a `ValidationError` with `loc=('llm', 'api_key')` and `type='missing'`. The CLI surfaces it as a multi-line dump that isn't actionable in the context of "I just wanted to lint my TOML".
@@ -85,5 +87,6 @@ The two approaches aren't mutually exclusive; the structural fix is cleaner but 
 3. Update the `_SAMPLE_CONFIG` template at the bottom of [cli.py](../../src/sqllens/cli.py) so `sqllens init` writes a working starter that includes it.
 4. Document the corresponding env var spelling (top-level fields: `SQLLENS_FOO`; nested: `SQLLENS_SECTION__FOO`).
 5. If the field affects connector behaviour, also document it in the runbook ([claude-desktop-windows-install.md](claude-desktop-windows-install.md)) under "Point at a real database".
+6. If the field would benefit from being emitted by `sqllens claude-desktop install`, extend `generate_toml` in [src/sqllens/installers/claude_desktop.py](../../src/sqllens/installers/claude_desktop.py) and surface a corresponding CLI flag in [cli.py](../../src/sqllens/cli.py). See [claude-desktop-installer.md](claude-desktop-installer.md) for the installer's CLI surface.
 
 `extra = "forbid"` means old configs will hard-fail on a removed field. Bump the changelog if you remove anything.

@@ -23,6 +23,8 @@ You receive:
 
 For each changed file in the list, use the Read tool to read the FULL file (not just the diff hunks). You need surrounding context to identify all external interactions.
 
+**Line numbers must be grounded.** If you emit a `source_line` value, it must be the actual line you observed in the file via Read — not estimated from diff hunk headers, not extrapolated, not invented. If you are uncertain of the exact line, **omit the `source_line` field entirely** (verifiers will grep for the symbol). Hallucinated line numbers waste a tool call per verifier on the next phase. Either ground it or drop it.
+
 ### Step 2: Identify Verifiable Claims
 
 For each changed file, find every place the NEW or MODIFIED code:
@@ -65,11 +67,14 @@ Return a JSON array of checklist items. Each item:
 ]
 ```
 
+`source_line` is **optional** — emit it only when you can name the exact line you observed via Read. If unsure, omit the key entirely (do not guess, do not extrapolate from diff hunk headers, do not invent).
+
 ## Rules
 
-- Be EXHAUSTIVE. List every external interaction, not just suspicious ones. A PASS costs seconds. A missed item costs an entire review cycle.
+- Prioritize claims most likely to drift: cross-file/cross-boundary contracts, external library API calls, mock-vs-real divergence, data-format assumptions about externally-produced data. Skip trivial existence checks that a `grep` would resolve in one second (e.g., "the literal string 'foo' appears in file X" — that's not worth a verifier slot).
+- Be thorough on the priorities above. A missed cross-boundary item costs an entire review cycle; an over-thorough trivial item just wastes a tool call. Err toward more on priorities, fewer on trivia.
 - One claim per checklist item. Do not bundle multiple claims.
-- The `verify_hint` must be specific enough for another agent to find the source of truth. "Check the codebase" is not specific enough. "Check ChromaAgentMemory.save_tool_usage in vanna integrations" is.
+- The `verify_hint` must be specific enough for another agent to find the source of truth. "Check the codebase" is not specific enough. "Check the `save_tool_usage` method in `chroma_memory.py`" is.
 - Do NOT read the source of truth yourself. Your job is to list claims, not verify them.
-- Do NOT skip "obvious" claims. The most dangerous bugs are in assumptions that look correct.
+- Do NOT skip "obvious" claims when they cross boundaries. The most dangerous bugs are in assumptions that look correct.
 - Wrap the JSON array in a markdown code fence tagged `json` so the orchestrating skill can parse it.

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 
 import typer
@@ -99,6 +101,115 @@ def validate(
     console.print(f"  llm:      {cfg.llm.provider} / {cfg.llm.model}")
     console.print(f"  auth:     {cfg.auth.mode}")
     console.print(f"  transport: {cfg.server.transport}")
+
+
+# ---------------------------------------------------------------------------
+# `sqllens claude-desktop ...` sub-app
+# ---------------------------------------------------------------------------
+
+claude_desktop_app = typer.Typer(
+    name="claude-desktop",
+    help="Wire SQL Lens into Claude Desktop's MCP configuration.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(claude_desktop_app, name="claude-desktop")
+
+
+@claude_desktop_app.command(name="install")
+def claude_desktop_install(
+    db: str = typer.Option(
+        ...,
+        "--db",
+        "-d",
+        help="SQLAlchemy DSN. Same form accepted by [database].url.",
+    ),
+    api_key: str | None = typer.Option(
+        None,
+        "--api-key",
+        "-k",
+        help="Anthropic API key. Defaults to $SQLLENS_LLM__API_KEY if set.",
+    ),
+    name: str | None = typer.Option(
+        None,
+        "--name",
+        help="Display name and mcpServers key. Derived from the DSN by default.",
+    ),
+    model: str = typer.Option(
+        "claude-sonnet-4-5-20250929",
+        "--model",
+        help="Anthropic model id used by the agent.",
+    ),
+    memory_dir: Path | None = typer.Option(
+        None,
+        "--memory-dir",
+        help="ChromaDB persistence directory. Defaults to <working-dir>/chroma.",
+    ),
+    working_dir: Path | None = typer.Option(
+        None,
+        "--working-dir",
+        help="Where sqllens.toml (and the .cmd launcher on Windows) are written.",
+    ),
+    config_path: Path | None = typer.Option(
+        None,
+        "--config-path",
+        help="Override the detected claude_desktop_config.json location.",
+    ),
+    read_only: bool = typer.Option(
+        True,
+        "--read-only/--no-read-only",
+        help="Enforce read-only SQL (recommended).",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print the planned changes without writing anything.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite an existing sqllens.toml / launcher with different content.",
+    ),
+) -> None:
+    """Generate sqllens.toml, merge the server into Claude Desktop's MCP config."""
+    from sqllens.installers.claude_desktop import (
+        InstallError,
+        format_install_result,
+        resolve_options,
+        run_install,
+    )
+
+    try:
+        options = resolve_options(
+            db_url=db,
+            api_key=api_key,
+            name=name,
+            model=model,
+            read_only=read_only,
+            memory_dir=memory_dir,
+            working_dir=working_dir,
+            config_path=config_path,
+            platform_name=sys.platform,
+            env=os.environ,
+        )
+        result = run_install(options, dry_run=dry_run, force=force)
+    except InstallError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:
+        # Friendly framing only; re-raising would dump a Python traceback right
+        # after the framing line and contradict the "we've handled this" UX.
+        # The chained exception is preserved on the typer.Exit via __cause__
+        # for any future debug hook or test that inspects it.
+        console.print(
+            f"[red]Unexpected error:[/red] {type(exc).__name__}: {exc}\n"
+            "This is likely a bug — please file an issue at "
+            "https://github.com/The01Geek/sqllens/issues"
+        )
+        raise typer.Exit(code=2) from exc
+
+    for line in format_install_result(result):
+        console.print(line)
 
 
 _SAMPLE_CONFIG = """\

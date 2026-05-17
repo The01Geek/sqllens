@@ -94,6 +94,8 @@ Before issue #10, `factory.py` registered `RunSqlTool` without passing `file_sys
 
 The first two rows failed outright. The Windows install runbook used to require a `.cmd` wrapper that `cd`'d into a writable folder before exec'ing `sqllens.exe`; that workaround is no longer required for this specific bug (see [claude-desktop-windows-install.md](claude-desktop-windows-install.md) for any remaining launcher-quoting reasons it may still be useful).
 
+`sqllens claude-desktop install` (see [claude-desktop-installer.md](claude-desktop-installer.md)) still emits a `run-sqllens.cmd` launcher on Windows for backwards compatibility with the historical setup; with issue #10 resolved, the launcher is no longer load-bearing for scratch-file access and the installer's Windows branch can be deleted in favour of the same plain-`command` path used on macOS / Linux.
+
 The error-confabulation behavior described above — `RunSqlTool.execute()` catches the exception, returns `f"Error executing query: {str(e)}"` as `result_for_llm`, and the LLM invents plausible-sounding root causes — is a **separate rough edge** that is *not* fixed by the scratch-dir change. See [Known rough edges](#known-rough-edges) below.
 
 ## Known rough edges
