@@ -18,6 +18,7 @@ and secrets.
 from __future__ import annotations
 
 import os
+import shlex
 from pathlib import Path
 from typing import Literal
 
@@ -222,8 +223,6 @@ def _has_utf8_bom(path: Path) -> bool:
 def _bom_error_message(path: Path) -> str:
     # Quote the path for every shell flavor so paths with spaces produce a
     # copy-pasteable command. PowerShell uses single quotes; bash uses ``shlex``.
-    import shlex
-
     quoted = shlex.quote(str(path))
     ps_quoted = str(path).replace("'", "''")  # PowerShell single-quote escape
     return (

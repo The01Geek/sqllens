@@ -22,12 +22,13 @@ def _clean_config_env(monkeypatch) -> None:
     # slate.
     monkeypatch.delenv("SQLLENS_CONFIG", raising=False)
     monkeypatch.delenv("SQLLENS_LLM__API_KEY", raising=False)
-    # Every sub-config (``DatabaseConfig``, ``LLMConfig``, ``MemoryConfig``,
-    # ``AuthConfig``, ``ServerConfig``) is a ``BaseSettings`` *without* an
-    # ``env_prefix`` — so it will pick up bare names from the surrounding shell.
-    # GitHub-hosted runners happen not to set these today, but a developer's
-    # local shell easily could (``MODEL=…``, ``PORT=…``, ``URL=…``), which would
-    # silently override the test's TOML or fail ``Literal`` validation.
+    # The sub-section models (``DatabaseConfig``, ``LLMConfig``, ``MemoryConfig``,
+    # ``AuthConfig``, ``ServerConfig``) are plain ``BaseModel`` — see the
+    # architectural note in ``config.py`` and issue #26 for why they intentionally
+    # are NOT ``BaseSettings``. They therefore do NOT read bare env vars today,
+    # so this enumeration is belt-and-braces: it guards against a future refactor
+    # flipping any sub-model to ``BaseSettings``, and against the parent
+    # ``Config(BaseSettings)`` ever growing a field with one of these bare names.
     # Enumerated rather than wildcarded so a typo in a sub-config field name
     # surfaces as a missing-clear instead of a phantom pass.
     for name in (
