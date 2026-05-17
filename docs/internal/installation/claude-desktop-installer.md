@@ -1,6 +1,6 @@
 # Claude Desktop installer
 
-How `sqllens claude-desktop install` automates the manual setup runbook. Source-of-truth reference for [src/sqllens/installers/claude_desktop.py](../../src/sqllens/installers/claude_desktop.py) and the corresponding sub-app in [src/sqllens/cli.py](../../src/sqllens/cli.py).
+How `sqllens claude-desktop install` automates the manual setup runbook. Source-of-truth reference for [src/sqllens/installers/claude_desktop.py](../../../src/sqllens/installers/claude_desktop.py) and the corresponding sub-app in [src/sqllens/cli.py](../../../src/sqllens/cli.py).
 
 ## What the command does
 
@@ -11,7 +11,7 @@ sqllens claude-desktop install --db <DSN> [--api-key …] [flags]
 End-to-end, one invocation:
 
 1. Generates a BOM-free `sqllens.toml` in the working directory.
-2. On Windows, generates a `.cmd` launcher shim — Claude Desktop's `mcpServers` schema exposes a single `command` field, so the shim is the cleanest way to pin both the executable path *and* a writable working directory inside that schema. Historically it was load-bearing for [issue #10](https://github.com/The01Geek/sqllens/issues/10) (now resolved by PR #21); today it stays purely for JSON-config ergonomics — see [tool-scratch-storage.md](tool-scratch-storage.md).
+2. On Windows, generates a `.cmd` launcher shim — Claude Desktop's `mcpServers` schema exposes a single `command` field, so the shim is the cleanest way to pin both the executable path *and* a writable working directory inside that schema. Historically it was load-bearing for [issue #10](https://github.com/The01Geek/sqllens/issues/10) (now resolved by PR #21); today it stays purely for JSON-config ergonomics — see [tool-scratch-storage.md](../agent/tool-scratch-storage.md).
 3. Validates the generated TOML by round-tripping it through `Config.load()`.
 4. Merges an entry into `mcpServers` inside `claude_desktop_config.json`, preserving the existing `preferences` block and every sibling server.
 5. Writes a timestamped `.bak` of the JSON before mutating it.
@@ -20,7 +20,7 @@ The command never returns half-applied state. If TOML validation fails the TOML 
 
 ## Why it lives under `installers/`
 
-The CLI surface needed a place that wasn't `sqllens.tools` (reserved for MCP tool wrappers) and wasn't `sqllens.cli` (which should stay a thin Typer parse-and-dispatch layer per [CLAUDE.md](../../CLAUDE.md) "Code style"). A new package `sqllens.installers` was added with a single module today; future client integrations (Cursor, Windsurf, …) belong there too.
+The CLI surface needed a place that wasn't `sqllens.tools` (reserved for MCP tool wrappers) and wasn't `sqllens.cli` (which should stay a thin Typer parse-and-dispatch layer per [CLAUDE.md](../../../CLAUDE.md) "Code style"). A new package `sqllens.installers` was added with a single module today; future client integrations (Cursor, Windsurf, …) belong there too.
 
 The CLI command imports `resolve_options`, `run_install`, `format_install_result`, and `InstallError` lazily from inside the Typer callback so the import cost is not paid by `sqllens version` / `sqllens serve` startup.
 
@@ -73,13 +73,13 @@ The `.cmd` exists because Claude Desktop's `mcpServers` schema exposes a single 
 
 The macOS and Linux branches skip the launcher entirely — they invoke `sqllens` (or `python -m sqllens`) with `serve -c <toml>` as `args` straight from the JSON entry.
 
-Historically the `.cmd` was *load-bearing* for correctness: scratch CSVs used to resolve against process CWD and Windows would trip `[WinError 5]` on every query (see [tool-scratch-storage.md](tool-scratch-storage.md)). [Issue #10](https://github.com/The01Geek/sqllens/issues/10) (resolved by PR #21) moved scratch to `tempfile.gettempdir() / "sqllens"`, so the `cd /d` is no longer required for the server to work. We keep the shim purely for JSON-config ergonomics — deleting the Windows branch and routing through the same `command + args` path used on macOS / Linux is now a viable simplification.
+Historically the `.cmd` was *load-bearing* for correctness: scratch CSVs used to resolve against process CWD and Windows would trip `[WinError 5]` on every query (see [tool-scratch-storage.md](../agent/tool-scratch-storage.md)). [Issue #10](https://github.com/The01Geek/sqllens/issues/10) (resolved by PR #21) moved scratch to `tempfile.gettempdir() / "sqllens"`, so the `cd /d` is no longer required for the server to work. We keep the shim purely for JSON-config ergonomics — deleting the Windows branch and routing through the same `command + args` path used on macOS / Linux is now a viable simplification.
 
 ## Quoting and encoding gotchas the installer handles
 
 These are the three traps from the original runbook the installer eliminates:
 
-- **UTF-8 BOM in `sqllens.toml`.** `generate_toml` produces a plain Python string and `run_install` writes it with `path.write_text(text, encoding="utf-8")`, which never adds a BOM. The PowerShell `Set-Content -Encoding utf8` trap from the manual runbook is bypassed entirely. See [config-loading.md](config-loading.md) for why the loader rejects BOMs.
+- **UTF-8 BOM in `sqllens.toml`.** `generate_toml` produces a plain Python string and `run_install` writes it with `path.write_text(text, encoding="utf-8")`, which never adds a BOM. The PowerShell `Set-Content -Encoding utf8` trap from the manual runbook is bypassed entirely. See [config-loading.md](../setup/config-loading.md) for why the loader rejects BOMs.
 - **Windows backslashes in TOML.** Path fields are emitted as TOML *literal* strings (`'C:\Users\…\chroma'`, single-quoted), which TOML defines as "no escape processing". `_toml_string` falls back to a double-quoted basic string with full escapes only when the value itself contains a `'`.
 - **JSON merge destroying `preferences`.** `merge_into_mcp_servers` deep-copies the entire existing JSON object, sets `["mcpServers"][name]`, and returns. Every other top-level key (including `preferences`) and every sibling server is preserved verbatim. Idempotency is established by comparing the parsed `dict` *before* and *after* the merge — re-running with the same flags is a no-op even if the on-disk JSON was hand-formatted with different indentation, CRLF, or no trailing newline.
 
@@ -124,10 +124,10 @@ All flags resolve through `resolve_options`. Defaults marked "OS-specific" are d
 
 ## Testing
 
-[tests/unit/test_cli_claude_desktop.py](../../tests/unit/test_cli_claude_desktop.py) covers:
+[tests/unit/test_cli_claude_desktop.py](../../../tests/unit/test_cli_claude_desktop.py) covers:
 
 - Pure helpers: TOML generation (BOM-free, Windows path literals, round-trips through `Config.load`), default-path resolution per platform, name derivation, JSON merge semantics (preferences preserved, siblings preserved, idempotency on parsed-dict equality).
 - `run_install` orchestrator: dry-run produces no writes, full run produces backups, TOML validation failure reverts state, `.cmd` launcher only emitted on Windows, JSON write is skipped when the merged dict is unchanged.
 - CLI glue via Typer's `CliRunner`: required flags, exit codes on `InstallError`, env-var fallback for the API key.
 
-[tests/unit/conftest.py](../../tests/unit/conftest.py) holds an autouse `_scrub_leaky_env` fixture that deletes unprefixed env names (`MODE`, `HOST`, `PORT`, ...) before each test. Pydantic-settings sub-models in `sqllens.config` don't carry their own `env_prefix`, so a runner that exports plain `MODE=production` would otherwise be picked up as `auth.mode` and produce confusing `literal_error` failures. The fixture also scrubs `SQLLENS_CONFIG` between tests because `Config.load()` mutates it as a side effect.
+[tests/unit/conftest.py](../../../tests/unit/conftest.py) holds an autouse `_scrub_leaky_env` fixture that deletes unprefixed env names (`MODE`, `HOST`, `PORT`, ...) before each test. Pydantic-settings sub-models in `sqllens.config` don't carry their own `env_prefix`, so a runner that exports plain `MODE=production` would otherwise be picked up as `auth.mode` and produce confusing `literal_error` failures. The fixture also scrubs `SQLLENS_CONFIG` between tests because `Config.load()` mutates it as a side effect.
