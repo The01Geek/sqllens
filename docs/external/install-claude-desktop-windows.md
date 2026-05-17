@@ -122,7 +122,7 @@ The Chinook SQLite demo is roughly 1 MB and lets you confirm the wiring before p
 
 ### 3. Write the configuration file
 
-PowerShell's `Set-Content -Encoding utf8` and `Out-File -Encoding utf8` both write a byte-order mark (BOM) at the start of the file. SQL Lens's TOML parser rejects files that begin with a BOM. Use .NET's `File.WriteAllText`, which writes BOM-free UTF-8 by default:
+PowerShell's `Set-Content -Encoding utf8` and `Out-File -Encoding utf8` both write a byte-order mark (BOM) at the start of the file. SQL Lens's TOML parser rejects files that begin with a BOM. If you do hit this, `sqllens validate` and `sqllens serve` both name "UTF-8 BOM" in the error and print rewrite commands for PowerShell 7+, PowerShell 5.1, and bash. The example below uses .NET's `File.WriteAllText`, which writes BOM-free UTF-8 by default:
 
 ```powershell
 $toml = @'
@@ -161,11 +161,10 @@ Get-Content $env:USERPROFILE\sqllens\sqllens.toml -Encoding Byte -TotalCount 4
 ### 4. Validate the configuration (optional)
 
 ```powershell
-$env:SQLLENS_LLM__API_KEY = "sk-ant-..."
 sqllens validate -c $env:USERPROFILE\sqllens\sqllens.toml
 ```
 
-The `sqllens validate` command requires `llm.api_key` to be set somewhere, even if you keep the key out of TOML and supply it as an environment variable later. The export above scopes only to the current PowerShell window and does not need to be persisted.
+`sqllens validate` checks structure only and does not require `llm.api_key` to be set. When the key is absent, the summary marks it explicitly as `llm: anthropic / claude-sonnet-4-5-20250929 (api_key NOT SET)` and validation still succeeds. You supply the key to `sqllens serve` later through the Claude Desktop `env` block in step 7.
 
 The expected final line of output is `Config OK`.
 

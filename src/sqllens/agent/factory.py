@@ -27,7 +27,7 @@ from sqllens.agent.tools import (
     SaveQuestionToolArgsTool,
     SearchSavedCorrectToolUsesTool,
 )
-from sqllens.config import Config
+from sqllens.config import API_KEY_MISSING_MESSAGE, Config
 from sqllens.safety import ReadOnlyGuardRunner
 
 DEFAULT_USER_ID = "sqllens-user"
@@ -47,6 +47,14 @@ class _StaticUserResolver(UserResolver):
 
 def build_agent(cfg: Config) -> Agent:
     """Wire the agent from config. One call per process; the agent is reusable."""
+    # Every CLI-launched transport already exits 2 in ``cli.serve`` before reaching
+    # here. This guard catches the residual bypass paths — programmatic embedders
+    # and tests that call ``build_agent`` directly — so a ``None`` key surfaces as
+    # an actionable ``ValueError`` instead of slipping into ``get_secret_value()``
+    # and reaching the MCP client as a bare ``AttributeError``, which CLAUDE.md
+    # forbids.
+    if cfg.llm.api_key is None:
+        raise ValueError(API_KEY_MISSING_MESSAGE)
     llm = AnthropicLlmService(
         model=cfg.llm.model,
         api_key=cfg.llm.api_key.get_secret_value(),

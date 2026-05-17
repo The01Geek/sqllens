@@ -25,7 +25,7 @@ Top-level keys (all required to be present in the merged config, though most hav
 | Section | Required fields | Notes |
 |---|---|---|
 | `[database]` | `url` | `name` defaults to `"primary"`. `read_only` defaults to `true` (enforced by the SQL parser guard, not the SQLite driver). |
-| `[llm]` | `api_key` | Currently `provider` is locked to `"anthropic"`. `model` defaults to `claude-sonnet-4-5-20250929`. `api_key` is a `SecretStr` and is **required** at config-load time. |
+| `[llm]` | — | Currently `provider` is locked to `"anthropic"`. `model` defaults to `claude-sonnet-4-5-20250929`. `api_key` is a `SecretStr | None` and is **optional** at config-load time; `sqllens serve` checks it before building the agent, `sqllens validate` doesn't. |
 | `[memory]` | — | All defaulted. `persist_dir = Path("./chroma")` (relative to CWD). |
 | `[auth]` | — | `mode` defaults to `"none"`. `jwt` mode is scaffolded but not implemented. |
 | `[server]` | — | `transport` defaults to `"stdio"`. `host`/`port` only used for `transport = "http"`. |
@@ -47,15 +47,15 @@ Two commands load config:
 - `sqllens serve` (`serve` command in [src/sqllens/cli.py](../../src/sqllens/cli.py)) — calls `Config.load(config)`. On exception, prints `Config error: <msg>` and exits 2.
 - `sqllens validate` (`validate` command in [src/sqllens/cli.py](../../src/sqllens/cli.py)) — calls `Config.load(config)` and prints a one-line summary on success. On exception, prints `Invalid: <msg>` and exits 2.
 
-`validate` performs **structural** validation only — it doesn't open the database, doesn't ping the LLM, doesn't bind a port. It does, however, run through the full pydantic-settings pipeline, which currently means it inherits all field-required constraints (including `llm.api_key`).
+`validate` performs **structural** validation only — it doesn't open the database, doesn't ping the LLM, doesn't bind a port. Secrets are explicitly *not* required: `llm.api_key` is optional in the schema, and the only enforcement is in `sqllens serve` (see below).
 
-## Known rough edges (error messages)
-
-These are real implementation gaps. Tracking issue: see GitHub issues for "Better config error messages".
+## Handled error cases
 
 ### 1. UTF-8 BOM in `sqllens.toml`
 
-Python's `tomllib` raises `TOMLDecodeError: Invalid statement (at line 1, column 1)` if the file starts with a UTF-8 BOM (`0xEF 0xBB 0xBF`). The TOML body can be entirely valid and this error still fires.
+Python's `tomllib` raises `TOMLDecodeError: Invalid statement (at line 1, column 1)` if the file starts with a UTF-8 BOM (`0xEF 0xBB 0xBF`). The TOML body can be entirely valid and that opaque error still fires.
+
+`Config.load()` wraps the inner pydantic-settings call in a `try/except`: when an exception fires, it peeks the resolved TOML file's first three bytes and — if they match the BOM signature — re-raises as a `ValueError` with actionable rewrite commands for PowerShell 7+, PowerShell 5.1, and bash/iconv. Implementation lives in [src/sqllens/config.py](../../src/sqllens/config.py) (`_has_utf8_bom`, `_bom_error_message`).
 
 PowerShell on Windows trips this constantly:
 - `Set-Content -Encoding utf8` (PS 5.1) — adds BOM
@@ -63,22 +63,21 @@ PowerShell on Windows trips this constantly:
 - `Set-Content -Encoding utf8NoBOM` (PS 7+) — safe
 - `[System.IO.File]::WriteAllText(path, text)` — safe (BOM-less by default)
 
-Current behaviour: the message is forwarded verbatim from `tomllib` through pydantic-settings' `TomlConfigSettingsSource` to the `Invalid: ...` line. The user has no signal that encoding is the problem.
-
-Desired behaviour: detect the BOM bytes when `TOMLDecodeError` fires at line 1 col 1, and re-raise with a directive that names the BOM and shows a known-good rewrite incantation.
+Detection runs regardless of how the path was resolved (explicit `--config`, `SQLLENS_CONFIG` env, or default `./sqllens.toml`). When the file does not exist or is not readable, the BOM check is silently skipped and the original pydantic-settings error path runs unchanged. When the TOML is BOM-free but otherwise malformed, the original `tomllib.TOMLDecodeError` message is preserved.
 
 Mitigation: `sqllens claude-desktop install` always writes BOM-free UTF-8 via Python's `Path.write_text(..., encoding="utf-8")`, so users who let the installer generate the file never hit this trap. The loader still needs a clearer error for hand-written configs.
 
 ### 2. Missing `llm.api_key` during `sqllens validate`
 
-`LLMConfig.api_key` is `Field(...)` (required, no default). If neither `SQLLENS_LLM__API_KEY` nor `[llm].api_key` in TOML is set, pydantic raises a `ValidationError` with `loc=('llm', 'api_key')` and `type='missing'`. The CLI surfaces it as a multi-line dump that isn't actionable in the context of "I just wanted to lint my TOML".
+`LLMConfig.api_key` is `SecretStr | None` with a default of `None`, so a TOML containing `[llm]` with no `api_key` (or omitting the `[llm]` table entirely) loads cleanly. `sqllens validate` exits 0 and flags the missing secret in the summary line: `llm:      anthropic / claude-sonnet-4-5-20250929 (api_key NOT SET)`.
 
-Two ways to address:
+`sqllens serve` enforces the precondition in [src/sqllens/cli.py](../../src/sqllens/cli.py) immediately after `Config.load`: if `cfg.llm.api_key is None` it exits 2 with `Config error: llm.api_key is not set. Either set SQLLENS_LLM__API_KEY in your environment, or add api_key = "..." to the [llm] section of sqllens.toml.` This keeps `validate` as a real pre-flight lint command and `serve` as the runtime-readiness check.
 
-- **Targeted error message** — intercept the `loc=('llm','api_key')` + `type='missing'` case and re-raise with text that names both override paths (env var, TOML key).
-- **Structural fix** — make `LLMConfig.api_key` optional in the schema and have `serve` re-check it just before the agent is constructed. This decouples structural validation from secret presence, which is what `validate` should be about.
+The agent factory ([src/sqllens/agent/factory.py](../../src/sqllens/agent/factory.py)) still calls `cfg.llm.api_key.get_secret_value()` unchanged — that's a defensive second layer; the CLI is the authoritative gate.
 
-The two approaches aren't mutually exclusive; the structural fix is cleaner but more invasive.
+### Error rendering note
+
+CLI error printing routes the variable part through `rich.markup.escape` so messages that contain bracket-shaped substrings (`[llm]`, `[type=missing, …]` from pydantic) render verbatim. Without escaping, rich silently strips bare bracket expressions it can't interpret as a style, which would drop crucial substrings from the user's view.
 
 ## Adding a new config field
 

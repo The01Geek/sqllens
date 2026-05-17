@@ -18,6 +18,7 @@ and secrets.
 from __future__ import annotations
 
 import os
+import shlex
 from pathlib import Path
 from typing import Literal
 
@@ -51,7 +52,13 @@ class LLMConfig(BaseModel):
     """LLM provider settings. v1: Anthropic only."""
 
     provider: Literal["anthropic"] = "anthropic"
-    api_key: SecretStr = Field(..., description="Anthropic API key")
+    # Enforced at serve-time, not load-time, so ``validate`` can lint without secrets.
+    # Every CLI-launched transport (stdio and HTTP) goes through ``cli.serve``,
+    # which exits 2 with ``API_KEY_MISSING_MESSAGE`` before ``run`` is reached.
+    # ``agent.factory.build_agent`` is a second-layer guard for programmatic
+    # embedders and tests that bypass the CLI entirely; it raises ``ValueError``
+    # with the same message.
+    api_key: SecretStr | None = Field(default=None, description="Anthropic API key")
     model: str = Field(default="claude-sonnet-4-5-20250929", description="Anthropic model id")
 
 
@@ -110,7 +117,7 @@ class Config(BaseSettings):
     )
 
     database: DatabaseConfig
-    llm: LLMConfig
+    llm: LLMConfig = Field(default_factory=lambda: LLMConfig())
     memory: MemoryConfig = Field(default_factory=lambda: MemoryConfig())
     auth: AuthConfig = Field(default_factory=lambda: AuthConfig())
     server: ServerConfig = Field(default_factory=lambda: ServerConfig())
@@ -141,10 +148,36 @@ class Config(BaseSettings):
 
         If ``path`` is given it takes precedence over ``SQLLENS_CONFIG`` and the
         default ``./sqllens.toml`` location.
+
+        Raises ``ValueError`` (with the original ``tomllib.TOMLDecodeError``
+        chained via ``__cause__``) when the resolved TOML begins with a UTF-8
+        BOM — programmatic embedders that ``except TOMLDecodeError:`` need to
+        also catch ``ValueError``.
         """
+        # Stash + restore so a failed load doesn't pollute SQLLENS_CONFIG for any
+        # subsequent in-process ``Config.load()`` call (tests, programmatic embedders).
+        prior = os.environ.get("SQLLENS_CONFIG")
         if path is not None:
             os.environ["SQLLENS_CONFIG"] = str(path)
-        return cls()
+        try:
+            try:
+                return cls()
+            except Exception as exc:
+                # BOM detection drives the message swap — we check the file's first
+                # three bytes, not the exception text. Any other parse error keeps
+                # its original message. (Don't be tempted to switch on the
+                # "Invalid statement (at line 1, column 1)" string tomllib emits;
+                # it's a side effect, not the trigger.)
+                resolved = _resolved_toml_path()
+                if resolved is not None and _has_utf8_bom(resolved):
+                    raise ValueError(_bom_error_message(resolved)) from exc
+                raise
+        finally:
+            if path is not None:
+                if prior is None:
+                    os.environ.pop("SQLLENS_CONFIG", None)
+                else:
+                    os.environ["SQLLENS_CONFIG"] = prior
 
 
 def _resolved_toml_path() -> Path | None:
@@ -154,3 +187,58 @@ def _resolved_toml_path() -> Path | None:
         return p if p.exists() else None
     default = Path("./sqllens.toml")
     return default if default.exists() else None
+
+
+# Contains literal ``[llm]`` — callers that print this through ``rich`` must route
+# it through ``rich.markup.escape`` or the brackets will be eaten as markup tags.
+API_KEY_MISSING_MESSAGE = (
+    "llm.api_key is not set. Either set SQLLENS_LLM__API_KEY in your environment, "
+    'or add `api_key = "..."` to the [llm] section of sqllens.toml.'
+)
+"""Shared by ``cli.serve`` (exits 2 before agent build) and ``agent.factory.build_agent``
+(raises before dereferencing the secret). The factory guard catches the residual
+bypass paths — programmatic embedders and tests that build an ``Agent`` without
+going through the CLI — so they get the same actionable message instead of an
+opaque ``AttributeError``."""
+
+
+_UTF8_BOM = b"\xef\xbb\xbf"
+
+
+def _has_utf8_bom(path: Path) -> bool:
+    """Return True if ``path`` begins with the UTF-8 BOM byte sequence.
+
+    Returns False on any ``OSError`` from opening the file (missing, permission
+    denied, ``NotADirectoryError`` from a path like ``/etc/hosts/whatever``, …).
+    The caller re-raises the original pydantic/tomllib error from its own path,
+    so swallowing here is safe.
+    """
+    try:
+        with path.open("rb") as f:
+            return f.read(3) == _UTF8_BOM
+    except OSError:
+        return False
+
+
+def _bom_error_message(path: Path) -> str:
+    # Quote the path for every shell flavor so paths with spaces produce a
+    # copy-pasteable command. PowerShell uses single quotes; bash uses ``shlex``.
+    quoted = shlex.quote(str(path))
+    ps_quoted = str(path).replace("'", "''")  # PowerShell single-quote escape
+    return (
+        f"{path} starts with a UTF-8 BOM, which Python's TOML parser rejects.\n"
+        "Rewrite the file without a BOM, e.g.:\n"
+        f"  PowerShell 7+:   Set-Content '{ps_quoted}' -Encoding utf8NoBOM -Value $contents\n"
+        f"  PowerShell 5.1:  [System.IO.File]::WriteAllText('{ps_quoted}', $contents, "
+        "[System.Text.UTF8Encoding]::new($false))\n"
+        f"  bash (GNU sed):  iconv -f UTF-8 -t UTF-8 {quoted} | sed '1s/^\\xEF\\xBB\\xBF//' > "
+        f"{quoted}.tmp && mv {quoted}.tmp {quoted}\n"
+        # ``[3:]`` not ``lstrip(b'\\xef\\xbb\\xbf')`` — ``lstrip`` strips any
+        # combination of those bytes, which corrupts files whose post-BOM
+        # content happens to start with one of them (e.g. CJK fullwidth chars
+        # like U+FF03 = ``\\xef\\xbc\\x83``). The BOM is exactly 3 bytes when
+        # this branch fires.
+        f"  bash (BSD/macOS sed lacks \\xNN escapes — use Python instead): "
+        f"python3 -c 'import sys,pathlib; p=pathlib.Path(sys.argv[1]); "
+        f"p.write_bytes(p.read_bytes()[3:])' {quoted}"
+    )
