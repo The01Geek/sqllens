@@ -124,7 +124,24 @@ Output: `Phase 1/4: Generating verification checklist...`
 
 ### 1.1 Determine batching
 
-Count the changed files. If 10 or fewer, launch one checklist-generator agent. If more than 10, split into batches of 10 and launch one agent per batch. Merge the resulting checklists by concatenating all items and renumbering IDs sequentially (VC-1, VC-2, ...). Deduplicate items that make the same claim about the same file.
+Count the changed files. If 10 or fewer, launch one checklist-generator agent. If more than 10, split into batches of 10 and launch one agent per batch. **Slice the diff to only the batch's files** before passing it (use `gh pr diff $ARGUMENTS -- <file1> <file2> ...` or grep the cached diff by `^diff --git` headers) — passing the full diff to every batch is wasteful and increases dup rate. Tell each batch which other files are being handled by sibling batches so it does not generate items for them.
+
+Merge the resulting checklists by concatenating all items and renumbering IDs sequentially (VC-1, VC-2, ...).
+
+**Dedup criteria** (apply both, in order):
+1. **Same-claim dedup**: drop items that make the same claim about the same `source_file`. "Same claim" = same defect/contract under scrutiny, not identical wording (e.g., "macOS config path is ~/Library/Application Support/Claude/..." appears in both batches → keep one).
+2. **Cross-cutting theme dedup**: cross-cutting checks that apply repo-wide — *SPDX headers on new .py files*, *no upstream brand names*, *.gitignore anchoring* — should appear at most once each in the merged list, not once per batch. The category for these is "api_contract" by convention.
+
+### 1.1.5 Cap and prioritize
+
+If the merged-and-deduped checklist has more than **40 items**, sort by priority and keep the top 40:
+1. Items whose claim cites an issue acceptance criterion (highest yield — these failing means the PR doesn't deliver the feature).
+2. `dependency_interaction` items (cross-boundary contracts — highest drift risk).
+3. `test_mock_alignment` items (mocks-vs-real divergence is a classic PR-killer).
+4. `api_contract` items.
+5. `data_format_assumption` items.
+
+Drop items below the cap. This is a cost cap: every checklist item triggers a verifier subagent in Phase 2, and on a medium PR 60+ items burns ~10 wall-clock minutes and ~60 subagent invocations for diminishing returns. Announce the cap in chat: `Capped checklist at 40 of {N} items (priority: issue-acceptance, dependency_interaction, ...).` so the human reader knows coverage was truncated on purpose.
 
 ### 1.2 Launch checklist-generator agent(s)
 
@@ -184,6 +201,10 @@ Verify this claim against the actual source code. Read the referenced files, com
 
 Checklist item:
 {paste the JSON checklist item here}
+
+The `source_line` field (if present) is best-effort from the generator and may be approximate. Treat it as a starting hint; if the symbol/claim isn't at that line, grep the file for the relevant identifier rather than reporting INCONCLUSIVE. Report INCONCLUSIVE only when the source of truth is genuinely unreachable (file missing, claim too vague to locate, external API not consultable).
+
+When a claim's wording is technically inaccurate but the underlying code is correct (e.g., the claim oversimplifies a branch the code handles correctly), prefer **PASS** with an evidence note explaining the wording-vs-code distinction. Reserve FAIL for cases where the code itself is wrong or contradicts the claim's intent.
 
 Report your verdict as JSON in a ```json code fence: {"id": "VC-N", "verdict": "PASS|FAIL|INCONCLUSIVE", "evidence": "...", "file_checked": "..."}
 ```

@@ -126,14 +126,26 @@ Note: convergence is *not* a way around an unresolved REJECT. If iter N's verdic
 
 ## Loop Exit
 
+### Pre-mapping: Step-3-evaluated REJECT downgrade
+
+If the engine's final verdict is **REJECT** AND **every** REJECT trigger (checklist FAILs and Critical Phase 3 findings) was Step-3-skipped with one of these documented categories, **downgrade the final verdict to `APPROVE WITH CAVEAT`** and surface each trigger in the report's `## Downgraded Findings` section:
+
+1. **Claim-quality issue** — verifier evidence is correct but the underlying code is fine; the skip cites the source span proving the code is correct.
+2. **Out-of-scope** — the flagged lines are pre-existing code unmodified by this PR's diff, or belong to a separate concern; the skip cites the diff or git history.
+3. **Already tracked** — a separate issue/PR addresses it; the skip cites the issue number.
+
+"Polish," "defer," "minor," or "low priority" do **not** qualify — those are reasons to fix in-loop, not to downgrade. One unqualified trigger keeps the REJECT.
+
+### Verdict mapping
+
 The final verdict drives both the chat output and the formal GitHub review post. This mapping is the /devflow:review-and-fix equivalent of /devflow:review's Phase 4.4, adapted for the fix loop's possible end states:
 
 | Final verdict | When it applies | `gh pr review` action |
 |---|---|---|
 | **APPROVE** | Last iteration's engine verdict was APPROVE and no advisory findings were parked | `gh pr review $ARGUMENTS --approve --body "$REPORT"` |
 | **APPROVE WITH ADVISORY NOTES** | Last iteration's engine verdict was APPROVE but advisory findings survive | `gh pr review $ARGUMENTS --comment --body "$REPORT"` |
-| **APPROVE WITH CAVEAT** / **APPROVE with notes** | Last iteration's engine verdict was already in this state (e.g. checklist generation failed) | `gh pr review $ARGUMENTS --comment --body "$REPORT"` |
-| **REJECT** | Max iterations (4) reached, or convergence exit, with the iteration's verdict still REJECT | `gh pr review $ARGUMENTS --request-changes --body "$REPORT"` |
+| **APPROVE WITH CAVEAT** / **APPROVE with notes** | Last iteration's engine verdict was already in this state (e.g. checklist generation failed), OR the Step-3-evaluated REJECT downgrade above fired | `gh pr review $ARGUMENTS --comment --body "$REPORT"` |
+| **REJECT** | Max iterations (4) reached, or convergence exit, with the iteration's verdict still REJECT *and* the downgrade above did not apply | `gh pr review $ARGUMENTS --request-changes --body "$REPORT"` |
 
 `$REPORT` is the final iteration's full report, including its `## Advisory Findings` section if any.
 
