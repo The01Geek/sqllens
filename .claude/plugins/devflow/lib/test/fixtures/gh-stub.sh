@@ -9,7 +9,7 @@ ARGS="$*"
 
 case "$ARGS" in
   *"repo view"*)
-    echo "Radman-LLC/ADR"
+    echo "The01Geek/devflow-autopilot"
     ;;
   *"pr view"*)
     cat "$FX/${SET}-prview.json"

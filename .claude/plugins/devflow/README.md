@@ -55,7 +55,7 @@ The skills read repo-level config from `.github/project-config.yml`:
 
 ## Install in another repo
 
-This plugin lives in the `Radman-LLC/ADR` repo at `.claude/plugins/devflow/`, served from a local-path ("`directory`-source") marketplace whose manifest is `.claude-plugin/marketplace.json` at the repo root. Inside the ADR repo, `.claude/settings.json` declares it:
+This plugin lives in the `The01Geek/devflow-autopilot` repo at `.claude/plugins/devflow/`, served from a local-path ("`directory`-source") marketplace whose manifest is `.claude-plugin/marketplace.json` at the repo root. Inside the repo, `.claude/settings.json` declares it:
 
 ```jsonc
 {
@@ -66,7 +66,7 @@ This plugin lives in the `Radman-LLC/ADR` repo at `.claude/plugins/devflow/`, se
 }
 ```
 
-On a fresh machine, accept the trust-folder prompt when Claude Code first runs in the repo (or run `claude plugin marketplace add . --scope project` then `claude plugin install devflow@devflow-marketplace`), then `/reload-plugins`. For a remote repo to use it, the cleanest path is to register the ADR repo as a git marketplace in the consuming action/config (`plugin_marketplaces: https://github.com/Radman-LLC/ADR.git`, `plugins: devflow@devflow-marketplace`) — the repo-root `marketplace.json` is found at the clone root. The skills also work when invoked by filesystem path (`Read .claude/plugins/devflow/skills/<name>/SKILL.md`) without any marketplace machinery — that's how the WikiWizard workflow uses the `docs-sync-*` skills.
+On a fresh machine, accept the trust-folder prompt when Claude Code first runs in the repo (or run `claude plugin marketplace add . --scope project` then `claude plugin install devflow@devflow-marketplace`), then `/reload-plugins`. For a remote repo to use it, the cleanest path is to register the repo as a git marketplace in the consuming action/config (`plugin_marketplaces: https://github.com/The01Geek/devflow-autopilot.git`, `plugins: devflow@devflow-marketplace`) — the repo-root `marketplace.json` is found at the clone root. The skills also work when invoked by filesystem path (`Read .claude/plugins/devflow/skills/<name>/SKILL.md`) without any marketplace machinery — that's how the WikiWizard workflow uses the `docs-sync-*` skills.
 
 ---
 

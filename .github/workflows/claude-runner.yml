@@ -19,6 +19,15 @@ on:
         type: string
         required: false
         default: ''
+      effort:
+        description: |
+          Reasoning effort (low|medium|high|xhigh|max). Defaults to the
+          `claude_runner.effort` value from .github/project-config.yml when
+          empty. When the resolved value is "medium", the --effort flag is
+          omitted so the model's built-in default applies.
+        type: string
+        required: false
+        default: ''
       fetch_depth:
         description: 'Passed to actions/checkout. 50 covers any realistic PR commit range.'
         type: number
@@ -65,6 +74,7 @@ jobs:
           # `--model null` / `allowed_bots: null` downstream.
           CLAUDE_MODEL=$(echo "$CONFIG_JSON" | jq -r '.claude_model // empty')
           ALLOWED_BOTS=$(echo "$CONFIG_JSON" | jq -r '.claude.allowed_bots // empty')
+          EFFORT=$(echo "$CONFIG_JSON" | jq -r '.claude_runner.effort // "medium"')
           if [ -z "$CLAUDE_MODEL" ]; then
             echo "::error::claude_model is missing from .github/project-config.yml"
             exit 1
@@ -76,6 +86,7 @@ jobs:
           {
             echo "claude_model=$CLAUDE_MODEL"
             echo "allowed_bots=$ALLOWED_BOTS"
+            echo "effort=$EFFORT"
           } >> "$GITHUB_OUTPUT"
 
       - name: Resolve allowed-tools profile
@@ -108,6 +119,17 @@ jobs:
             printf '%s\n' "$TOOLS"
             printf '%s\n' "$delim"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Resolve effort
+        id: effort
+        env:
+          # Resolve input-vs-config once so the claude_args expression below
+          # mirrors the shape used by the other workflows (single output ref,
+          # no double-evaluated ternary).
+          RESOLVED: ${{ inputs.effort != '' && inputs.effort || steps.extract.outputs.effort }}
+        run: |
+          set -euo pipefail
+          echo "value=$RESOLVED" >> "$GITHUB_OUTPUT"
 
       - name: Run Claude Code
         id: claude
@@ -145,5 +167,6 @@ jobs:
           # that may need the auto-approved commands.
           claude_args: >-
             --model ${{ inputs.model != '' && inputs.model || steps.extract.outputs.claude_model }}
+            ${{ steps.effort.outputs.value != 'medium' && format('--effort {0}', steps.effort.outputs.value) || '' }}
             --permission-mode acceptEdits
             --allowed-tools "${{ steps.tools.outputs.tools }}"
