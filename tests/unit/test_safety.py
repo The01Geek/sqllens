@@ -89,6 +89,9 @@ class TestSelectIntoRejected:
             ("SELECT * INTO TEMP tmp FROM users", "postgres"),
             ("SELECT * INTO UNLOGGED u FROM users", "postgres"),
             ("SELECT * INTO new_tbl FROM users", "tsql"),
+            # MySQL `SELECT ... INTO @var` is a session-variable write; same
+            # parse shape, same guard catches it.
+            ("SELECT a INTO @var FROM users", "mysql"),
         ],
     )
     def test_select_into_rejected(self, sql: str, dialect: str) -> None:
@@ -100,5 +103,16 @@ class TestSelectIntoRejected:
         with pytest.raises(UnsafeSqlError, match=r"SELECT \.\.\. INTO"):
             assert_select_only(
                 "WITH x AS (SELECT 1 AS a) SELECT * INTO y FROM x",
+                dialect=dialect,
+            )
+
+    @pytest.mark.parametrize("dialect", ["postgres", "tsql"])
+    def test_select_into_in_set_op_rejected(self, dialect: str) -> None:
+        # ``SELECT ... INTO`` as an operand of UNION / INTERSECT / EXCEPT —
+        # walk() descends into the operands so the inner Select-with-into is
+        # reachable from the Union/Intersect/Except root.
+        with pytest.raises(UnsafeSqlError, match=r"SELECT \.\.\. INTO"):
+            assert_select_only(
+                "SELECT * INTO new_tbl FROM users UNION SELECT * FROM admins",
                 dialect=dialect,
             )
