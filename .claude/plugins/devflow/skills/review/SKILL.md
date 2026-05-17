@@ -134,14 +134,14 @@ Merge the resulting checklists by concatenating all items and renumbering IDs se
 
 ### 1.1.5 Cap and prioritize
 
-If the merged-and-deduped checklist has more than **40 items**, sort by priority and keep the top 40:
+If the merged-and-deduped checklist has more than **100 items**, sort by priority and keep the top 100:
 1. Items whose claim cites an issue acceptance criterion (highest yield — these failing means the PR doesn't deliver the feature).
 2. `dependency_interaction` items (cross-boundary contracts — highest drift risk).
 3. `test_mock_alignment` items (mocks-vs-real divergence is a classic PR-killer).
 4. `api_contract` items.
 5. `data_format_assumption` items.
 
-Drop items below the cap. This is a cost cap: every checklist item triggers a verifier subagent in Phase 2, and on a medium PR 60+ items burns ~10 wall-clock minutes and ~60 subagent invocations for diminishing returns. Announce the cap in chat: `Capped checklist at 40 of {N} items (priority: issue-acceptance, dependency_interaction, ...).` so the human reader knows coverage was truncated on purpose.
+Drop items below the cap. This is a cost cap: every checklist item triggers a verifier subagent in Phase 2. Real-world runs on medium PRs have produced 150+ items when generators are exhaustive on doc-heavy diffs, but the load-bearing signal (cross-boundary contracts, mock-vs-real divergence, issue acceptance) is usually captured well within 100. Announce the cap in chat: `Capped checklist at 100 of {N} items (priority: issue-acceptance, dependency_interaction, ...).` so the human reader knows coverage was truncated on purpose.
 
 ### 1.2 Launch checklist-generator agent(s)
 
