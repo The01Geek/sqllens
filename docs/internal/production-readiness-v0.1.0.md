@@ -80,6 +80,8 @@ localhost-bound.
 or generate a random bearer token at first container start and log it once.
 Document the chosen escape hatch in the README "Wire up an IDE" section.
 
+**Tracking:** #36
+
 #### S-3. No DB query timeout, no row cap, full materialisation to pandas
 **Files:** [`src/sqllens/agent/integrations/postgres/sql_runner.py:88`](../../src/sqllens/agent/integrations/postgres/sql_runner.py) ·
 sqlite + mysql runners · `tools/query_database.py` ·
