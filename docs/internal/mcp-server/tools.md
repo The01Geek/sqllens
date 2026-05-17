@@ -4,7 +4,7 @@ The two tools that MCP clients see. Source-of-truth reference for [src/sqllens/s
 
 ## Registration
 
-[src/sqllens/server.py:23-37](../../../src/sqllens/server.py#L23-L37) registers exactly two tools on a fresh `FastMCP("sqllens")` instance per call:
+`build_server` in [src/sqllens/server.py](../../../src/sqllens/server.py) registers exactly two tools on a fresh `FastMCP("sqllens")` instance per call:
 
 ```python
 def build_server(cfg: Config) -> FastMCP:
@@ -29,14 +29,14 @@ The docstrings are the user-facing tool descriptions that the calling AI client 
 
 [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) does the actual work:
 
-1. **Lazy singleton agent.** `_AGENT` is built on the first call via `build_agent(cfg)` (see [agent/factory.md](../agent/factory.md)) and reused for every subsequent call. The agent itself is thread-safe across requests because each request gets its own `RequestContext`.
+1. **Lazy singleton agent.** `_AGENT` is built on the first call via `build_agent(cfg)` (see [agent/factory.md](../agent/factory.md)) and reused for every subsequent call. The agent itself is safe for concurrent in-flight async requests because each request gets its own `RequestContext`.
 2. **Empty `RequestContext`.** SQL Lens has no per-request headers/cookies/metadata to forward — auth is enforced at the transport layer, and the agent is single-user (see [agent/factory.md](../agent/factory.md) "user resolver"). So the context is always `RequestContext(headers={}, cookies={}, metadata={})`.
 3. **Stream collapse.** The agent yields an async stream of `UiComponent` objects (text snippets, dataframes, status cards). MCP tools must return a single string, so we collect the stream into a list and pass it to `components_to_markdown`.
 4. **Structured error surfacing.** Exceptions from `agent.send_message` and errors flagged in the component stream are re-raised as `RuntimeError`, which FastMCP converts to a tool result with `isError: true`. CLAUDE.md forbids letting the LLM apologize inside a successful tool result — the calling agent needs structured failure signal.
 
 ## `_format.components_to_markdown` — the collapse rule
 
-[src/sqllens/tools/_format.py:21-60](../../../src/sqllens/tools/_format.py#L21-L60) is the only place that knows the shape of the agent's output stream:
+`components_to_markdown` in [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) is the only place that knows the shape of the agent's output stream:
 
 | Component type | What we do with it |
 |---|---|

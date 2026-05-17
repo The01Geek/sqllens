@@ -37,7 +37,7 @@ Cross-cutting modules can be imported from anywhere:
 |---|---|
 | [src/sqllens/__init__.py](../../../src/sqllens/__init__.py) | Exports `__version__`. |
 | [src/sqllens/__main__.py](../../../src/sqllens/__main__.py) | Enables `python -m sqllens`. |
-| [src/sqllens/cli.py](../../../src/sqllens/cli.py) | `sqllens version | init | validate | serve | claude-desktop install`. |
+| [src/sqllens/cli.py](../../../src/sqllens/cli.py) | `sqllens version \| init \| validate \| serve \| claude-desktop install`. |
 | [src/sqllens/config.py](../../../src/sqllens/config.py) | pydantic-settings: TOML + `SQLLENS_*` env. See [setup/config-loading.md](../setup/config-loading.md). |
 | [src/sqllens/server.py](../../../src/sqllens/server.py) | `build_server(cfg)` registers tools; `run(cfg)` dispatches stdio vs HTTP. |
 | [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) | Lazy singleton `Agent` + stream collapse. |
