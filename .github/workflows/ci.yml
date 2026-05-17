@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # GitHub Merge Queue dispatches a `merge_group` event for each queued PR
+  # against a synthesized post-merge tree (gh-readonly-queue/main/...). Without
+  # this trigger the required checks never fire on the queue's merge-group refs
+  # and PRs stall in the queue indefinitely.
+  merge_group:
 
 jobs:
   unit:
@@ -79,14 +84,20 @@ jobs:
       # checks usually catch this, but MySQL on first boot is slow.
       - name: Wait for databases
         run: |
+          ready=0
           for i in $(seq 1 30); do
-            python <<'PY' && break
+            if python <<'PY'
           import psycopg2, pymysql, os
           psycopg2.connect(os.environ['SQLLENS_TEST_POSTGRES_URL']).close()
           pymysql.connect(host='127.0.0.1', user='sqllens', password='sqllens', database='sqllens').close()
           print('ready')
           PY
+            then ready=1; break; fi
             sleep 2
           done
+          if [ "$ready" != 1 ]; then
+            echo "::error::Postgres/MySQL service containers never accepted connections after 30 attempts (~60s)"
+            exit 1
+          fi
 
       - run: pytest -q -m connectors -v

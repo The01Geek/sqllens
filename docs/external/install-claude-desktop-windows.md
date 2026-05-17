@@ -88,20 +88,21 @@ Record the full path. A typical value is `C:\Users\USERNAME\AppData\Local\Progra
 
 ## 6. Write a `.cmd` launcher
 
-Claude Desktop's `mcpServers` configuration honors `command`, `args`, and `env`. A `cwd` field is silently ignored. On Windows, the launched process inherits Claude Desktop's install directory as its working directory, and that directory is not writable by the user. SQL Lens writes a small CSV under the working directory for each query, so every query fails with an access-denied error when the working directory is read-only.
-
-The workaround is a tiny `.cmd` batch file that changes into a writable folder before running `sqllens.exe`:
+Claude Desktop's `mcpServers` configuration accepts a single `command` plus an `args` array. Bundling the executable path and the `-c <config>` flag into a small `.cmd` batch file keeps the JSON config short and easy to edit later:
 
 ```powershell
 $bat = @'
 @echo off
-cd /d C:\Users\USERNAME\sqllens
 "C:\Users\USERNAME\AppData\Local\Programs\Python\Python313\Scripts\sqllens.exe" serve -c C:\Users\USERNAME\sqllens\sqllens.toml
 '@
 [System.IO.File]::WriteAllText("$env:USERPROFILE\sqllens\run-sqllens.cmd", $bat)
 ```
 
-Adjust both the `cd` target and the `sqllens.exe` path to match your machine.
+Adjust the `sqllens.exe` path to match your machine.
+
+If you prefer to skip the wrapper, you can point Claude Desktop's `command` directly at `sqllens.exe` and pass the config path through `args`. See the alternative JSON shape in the note below the configuration block in step 7.
+
+Note: In earlier versions of SQL Lens, this step also worked around an access-denied error when Claude Desktop launched the server from a non-writable install directory. That underlying issue has been fixed in recent releases. Per-query scratch files are now written to your user temp directory, regardless of how the server is launched.
 
 ## 7. Configure Claude Desktop
 
@@ -134,6 +135,18 @@ Notes:
 - Backslashes in JSON must be doubled (`\\`).
 - The API key is stored in plain text and is readable by your Windows user. This is acceptable for personal machines. Redact the file before screen-sharing.
 
+Alternative without a `.cmd` wrapper: point `command` at `sqllens.exe` directly and move the config path into `args`. For example:
+
+```json
+"sqllens": {
+  "command": "C:\\Users\\USERNAME\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\sqllens.exe",
+  "args": ["serve", "-c", "C:\\Users\\USERNAME\\sqllens\\sqllens.toml"],
+  "env": {
+    "SQLLENS_LLM__API_KEY": "sk-ant-..."
+  }
+}
+```
+
 ## 8. Fully restart Claude Desktop
 
 Closing the window is not enough. Claude Desktop keeps running in the system tray.
@@ -149,7 +162,7 @@ Reopen Claude Desktop from the Start menu.
 - At the bottom right of the chat input, the MCP indicator should show `sqllens` with two tools: `query_database` and `list_data_sources`.
 - In a new chat, ask: *"Using sqllens, how many albums did AC/DC release in the chinook database?"*
 - Approve the tool call when prompted. The first query takes 30 to 60 seconds because ChromaDB downloads roughly 80 MB of embedding model weights into `C:\Users\USERNAME\sqllens\chroma\`. Subsequent queries are fast.
-- After a successful query, a `C:\Users\USERNAME\sqllens\<16-hex-chars>\` directory appears with `query_results_*.csv` files. This is the per-query scratch space. The files are safe to delete periodically.
+- After a successful query, a `sqllens` folder appears in your Windows temp directory (typically `C:\Users\USERNAME\AppData\Local\Temp\sqllens\`) with `query_results_*.csv` files inside a per-session subfolder. This is the per-query scratch space. The files are safe to delete at any time and are normally reclaimed by Disk Cleanup on its regular schedule.
 
 The expected answer is 2 albums.
 
@@ -168,7 +181,7 @@ Edit `C:\Users\USERNAME\sqllens\sqllens.toml`, replace `[database].url` with you
 | Symptom | Where to look |
 |---|---|
 | SQL Lens does not appear in Claude Desktop's MCP list | Inspect `%APPDATA%\Claude\logs\mcp.log` for a JSON typo or a missing executable. |
-| The server connects, but every query reports access errors | Inspect `%APPDATA%\Claude\logs\mcp-server-sqllens.log` for an `[WinError 5] Access is denied` line. This means the `.cmd` workaround in step 6 did not take effect. |
+| The server connects, but every query reports access errors | Inspect `%APPDATA%\Claude\logs\mcp-server-sqllens.log` for an `[WinError 5] Access is denied` line. On recent versions of SQL Lens this is rare and usually points at an access-control problem on your Windows temp directory. Confirm that `%LOCALAPPDATA%\Temp` is writable by your user account. |
 | A generic "An unexpected error occurred" message | Check the Anthropic API status at [status.anthropic.com](https://status.anthropic.com/), or look at the same per-server log for an unhandled exception. |
 | The first query hangs for a long time | ChromaDB is downloading embedding model weights on first run. Allow roughly a minute and confirm internet access to `huggingface.co`. |
 

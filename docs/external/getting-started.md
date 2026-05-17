@@ -40,7 +40,7 @@ The server starts on standard input and output and waits for an MCP client to co
 Pick the configuration snippet that matches your tool. Each example points your assistant at the SQL Lens process you just started.
 
 - **Cursor**: `~/.cursor/mcp.json` — see `examples/mcp-clients/cursor.json` in the repository.
-- **Claude Desktop**: `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS — see `examples/mcp-clients/claude_desktop.json`. For Windows, follow the dedicated [Claude Desktop Windows install guide](install-claude-desktop-windows.md).
+- **Claude Desktop** (macOS and Windows only): `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows. On macOS, stdio is recommended (simpler than HTTP, no port management): `examples/mcp-clients/claude_desktop_stdio.json`; HTTP variant: `examples/mcp-clients/claude_desktop_http.json`. On Windows, follow the dedicated [Claude Desktop Windows install guide](install-claude-desktop-windows.md) rather than copying the stdio example verbatim — it wraps `sqllens` in a `.cmd` launcher to work around a non-writable working-directory issue.
 - **Windsurf**: See `examples/mcp-clients/windsurf.json`.
 
 Restart your assistant after editing its configuration file. The SQL Lens entry should now appear in the assistant's MCP indicator with two tools: `query_database` and `list_data_sources`.
