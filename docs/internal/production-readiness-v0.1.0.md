@@ -117,6 +117,8 @@ fail fast on.
 before `run(cfg)`. Map common driver exceptions (auth failure, host unreach,
 DB missing) to clear single-line messages with exit code 2.
 
+**Tracking:** #38
+
 ### Code correctness
 
 #### C-1. `transport.http.build_asgi_app` omits the session-manager lifespan adapter
