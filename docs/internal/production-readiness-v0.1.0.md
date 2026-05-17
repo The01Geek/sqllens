@@ -63,6 +63,8 @@ whose target is not a SELECT-output variable. Add to
 [`tests/unit/test_safety.py`](../../tests/unit/test_safety.py) with explicit
 dialect=`postgres` and dialect=`tsql` cases.
 
+**Tracking:** #35
+
 #### S-2. Docker image defaults to `0.0.0.0` + `auth=none`
 **File:** [`docker/Dockerfile:65-67`](../../docker/Dockerfile) ·
 [`src/sqllens/config.py:81,93`](../../src/sqllens/config.py#L81) ·
