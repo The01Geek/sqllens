@@ -799,6 +799,29 @@ class TestResolveOptions:
                 env={},
             )
 
+    def test_rejects_unparseable_dsn_upfront(self, tmp_path: Path) -> None:
+        # A malformed --db value must fail at resolve_options, BEFORE the
+        # installer writes a TOML and a .cmd that would only fail at the
+        # later validate_toml step. Catches the "wrote files, then failed"
+        # surprise the prior derive_default_name fallback silently allowed.
+        cfg = tmp_path / "claude_desktop_config.json"
+        cfg.write_text("{}", encoding="utf-8")
+        with pytest.raises(InstallError, match="not a valid SQLAlchemy URL"):
+            resolve_options(
+                db_url="this is not a dsn",
+                api_key=FAKE_KEY,
+                name=None,
+                model="claude-sonnet-4-5-20250929",
+                read_only=True,
+                memory_dir=None,
+                working_dir=tmp_path / "workdir",
+                config_path=cfg,
+                platform_name="linux",
+                env={},
+            )
+        # Nothing was created.
+        assert not (tmp_path / "workdir").exists()
+
 
 # ---------------------------------------------------------------------------
 # CLI integration via Typer's CliRunner
@@ -1129,3 +1152,110 @@ class TestTomlStringDoubleQuotedFallback:
 
         cfg = Config.load(path)
         assert cfg.database.url == url_with_apostrophe
+
+
+class TestRevertVisibility:
+    """Revert handlers must not silently swallow secondary OSErrors.
+
+    Prior to the iteration-3 fix, ``_revert_toml`` / ``_revert_cmd_bytes``
+    used a bare ``except OSError: pass``. If the revert itself failed (the
+    documented case: antivirus has the freshly-written file locked) the
+    user got *no* signal — Typer's pretty error renderer doesn't surface
+    ``__context__``. These tests pin that a warning lands on stderr.
+    """
+
+    def test_revert_toml_warns_on_secondary_oserror(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from sqllens.installers.claude_desktop import _revert_toml
+
+        toml_path = tmp_path / "sqllens.toml"
+        toml_path.write_text("# new content", encoding="utf-8")
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise PermissionError("simulated antivirus lock")
+
+        # Patch the unlink path (original was None -> revert calls unlink).
+        original_unlink = Path.unlink
+        try:
+            Path.unlink = boom  # type: ignore[method-assign]
+            _revert_toml(toml_path, original=None)
+        finally:
+            Path.unlink = original_unlink  # type: ignore[method-assign]
+
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.err
+        assert str(toml_path) in captured.err
+        assert "inconsistent state" in captured.err
+
+    def test_revert_cmd_bytes_warns_on_secondary_oserror(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from sqllens.installers.claude_desktop import _revert_cmd_bytes
+
+        cmd_path = tmp_path / "run-sqllens.cmd"
+        cmd_path.write_bytes(b"@echo new\r\n")
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise PermissionError("simulated antivirus lock")
+
+        original_write_bytes = Path.write_bytes
+        try:
+            Path.write_bytes = boom  # type: ignore[method-assign]
+            _revert_cmd_bytes(cmd_path, original=b"@echo old\r\n")
+        finally:
+            Path.write_bytes = original_write_bytes  # type: ignore[method-assign]
+
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.err
+        assert str(cmd_path) in captured.err
+
+
+class TestCliUnexpectedError:
+    def test_unexpected_error_exits_with_code_2(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CLI's ``except Exception`` backstop must use a clean Typer Exit.
+
+        A bare ``raise`` would dump a Python traceback right after the
+        friendly "this is likely a bug" framing, contradicting the framing
+        and producing dual output. The fix swaps the bare raise for
+        ``raise typer.Exit(code=2) from exc``.
+        """
+        monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
+        monkeypatch.setenv("COLUMNS", "200")
+        cfg = tmp_path / "claude_desktop_config.json"
+        cfg.write_text("{}", encoding="utf-8")
+
+        from sqllens.installers import claude_desktop as installer_mod
+
+        def boom_run(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("simulated unexpected failure")
+
+        monkeypatch.setattr(installer_mod, "run_install", boom_run)
+        # Re-import the symbol the CLI uses to ensure the patch lands on the
+        # name the CLI's local-import resolves at call time.
+        import sqllens.cli  # noqa: F401
+
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                "claude-desktop",
+                "install",
+                "--db",
+                "sqlite:///./demo.db",
+                "--working-dir",
+                str(tmp_path / "workdir"),
+                "--config-path",
+                str(cfg),
+            ],
+        )
+        assert result.exit_code == 2, (
+            f"expected exit 2 from typer.Exit, got {result.exit_code}\n"
+            f"stdout={result.stdout}\nexception={result.exception}"
+        )
+        clean = _strip_ansi(result.stdout)
+        assert "Unexpected error" in clean
+        assert "RuntimeError" in clean
+        assert "file an issue" in clean

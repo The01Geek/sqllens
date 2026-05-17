@@ -389,6 +389,16 @@ def resolve_options(
             "An API key is required. Pass --api-key or set SQLLENS_LLM__API_KEY in your shell."
         )
 
+    # Parse the DSN upfront so a typo fails before we write a TOML and a
+    # ``.cmd`` launcher, then surface as a generic "validation failed" later.
+    from sqlalchemy.engine.url import make_url
+    from sqlalchemy.exc import ArgumentError
+
+    try:
+        make_url(db_url)
+    except (ArgumentError, ValueError) as exc:
+        raise InstallError(f"--db is not a valid SQLAlchemy URL: {exc}") from exc
+
     resolved_working = working_dir or default_working_dir(platform_name, env)
     resolved_memory = memory_dir or default_memory_dir(platform_name, env)
     resolved_name = name or derive_default_name(db_url)
@@ -662,19 +672,22 @@ def _read_bytes_or_none(path: Path) -> bytes | None:
 def _revert_toml(toml_path: Path, original: str | None) -> None:
     """Best-effort restore of *toml_path*.
 
-    If the revert itself fails (e.g. antivirus has the file locked), we don't
-    let the OSError shadow the original InstallError the caller is trying to
-    raise — propagate via __context__ instead so the user sees both signals.
+    The caller is in the middle of raising InstallError; we don't let an
+    OSError in the revert shadow that. But silently swallowing leaves the
+    user blind to a partially-failed revert (file may now be in a degraded
+    state), and Typer's pretty error rendering won't surface __context__.
+    Print a warning to stderr so the user has at least one visible signal.
     """
     try:
         if original is None:
             toml_path.unlink(missing_ok=True)
         else:
             toml_path.write_text(original, encoding="utf-8")
-    except OSError:
-        # Swallow: the caller is in the middle of raising InstallError; the
-        # revert failure remains visible through __context__.
-        pass
+    except OSError as exc:
+        sys.stderr.write(
+            f"WARNING: failed to revert {toml_path}: {exc}. "
+            "File may be in an inconsistent state.\n"
+        )
 
 
 def _revert_cmd_bytes(cmd_path: Path, original: bytes | None) -> None:
@@ -684,8 +697,11 @@ def _revert_cmd_bytes(cmd_path: Path, original: bytes | None) -> None:
             cmd_path.unlink(missing_ok=True)
         else:
             cmd_path.write_bytes(original)
-    except OSError:
-        pass
+    except OSError as exc:
+        sys.stderr.write(
+            f"WARNING: failed to revert {cmd_path}: {exc}. "
+            "File may be in an inconsistent state.\n"
+        )
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
@@ -708,7 +724,13 @@ def _atomic_write_text(path: Path, content: str) -> None:
             os.fsync(f.fileno())
         os.replace(tmp_path, path)
     except OSError:
-        tmp_path.unlink(missing_ok=True)
+        # Cleanup is best-effort: a PermissionError on the unlink itself
+        # would otherwise replace the original write failure, leaving the
+        # user with a misleading message and a leaked tempfile either way.
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         raise
 
 

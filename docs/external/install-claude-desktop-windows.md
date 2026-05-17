@@ -26,7 +26,7 @@ The `sqllens claude-desktop install` command does all of the following in one st
 
 - Creates a working folder at `C:\Users\USERNAME\sqllens\` if it does not already exist.
 - Writes a `sqllens.toml` configuration file in BOM-free UTF-8.
-- Writes a `run-sqllens.cmd` launcher that sets a writable working directory before starting the SQL Lens server. This launcher is required on Windows so the per-query scratch files can be written.
+- Writes a `run-sqllens.cmd` launcher so the single `command` field in Claude Desktop's `mcpServers` schema can bundle both the SQL Lens executable path and the path to its configuration file. The launcher also `cd`s into the writable working directory before exec'ing the server.
 - Validates the generated configuration before touching Claude Desktop's settings.
 - Merges an `mcpServers` entry into `%APPDATA%\Claude\claude_desktop_config.json`, preserving the existing `preferences` block and any other servers already configured.
 - Writes a timestamped backup of the JSON file (`claude_desktop_config.json.bak.YYYYMMDDHHMMSS`) before modifying it.
@@ -91,7 +91,7 @@ Keep the default `--read-only` unless you specifically need to allow writes.
 | The installer reports `sqllens.toml already exists with different content` | A previous install or a hand-edit diverged from what the installer would write. Review the existing file, then pass `--force` to overwrite or move the file aside. |
 | The installer prints `'sqllens' was not found on PATH; using 'python -m sqllens' fallback` | The install worked but the `Scripts` folder is not on PATH for this PowerShell session. The fallback works, and a new PowerShell window usually resolves the underlying PATH issue. |
 | SQL Lens does not appear in Claude Desktop's MCP list | Inspect `%APPDATA%\Claude\logs\mcp.log` for a JSON typo or a missing executable. |
-| The server connects, but every query reports access errors | Inspect `%APPDATA%\Claude\logs\mcp-server-sqllens.log` for an `[WinError 5] Access is denied` line. This means Claude Desktop is launching `sqllens.exe` directly instead of through the generated `run-sqllens.cmd` launcher. Check that the `command` value under `mcpServers` ends with `run-sqllens.cmd`. |
+| The server connects, but every query reports access errors | Inspect `%APPDATA%\Claude\logs\mcp-server-sqllens.log`. A `[WinError 5] Access is denied` line on older SQL Lens versions meant per-query scratch files were being written under a non-writable directory; current builds write scratch files under `%LOCALAPPDATA%\Temp\sqllens\` regardless of launcher CWD, so upgrade SQL Lens if you still see this. |
 | A generic "An unexpected error occurred" message | Check the Anthropic API status at [status.anthropic.com](https://status.anthropic.com/), or look at the same per-server log for an unhandled exception. |
 | The first query hangs for a long time | ChromaDB is downloading embedding model weights on first run. Allow roughly a minute and confirm internet access to `huggingface.co`. |
 
