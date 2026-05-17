@@ -199,8 +199,8 @@ def claude_desktop_install(
     except Exception as exc:
         # Friendly framing only; re-raising would dump a Python traceback right
         # after the framing line and contradict the "we've handled this" UX.
-        # The CHAINED exception is still available to Typer's debug renderer
-        # via __cause__ for anyone running with --tb / SQLLENS_DEBUG.
+        # The chained exception is preserved on the typer.Exit via __cause__
+        # for any future debug hook or test that inspects it.
         console.print(
             f"[red]Unexpected error:[/red] {type(exc).__name__}: {exc}\n"
             "This is likely a bug — please file an issue at "
