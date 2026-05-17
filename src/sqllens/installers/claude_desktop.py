@@ -348,7 +348,10 @@ def validate_toml(toml_path: Path, *, api_key: str) -> None:
     """Round-trip the generated TOML through :class:`sqllens.config.Config`.
 
     The API key is required at load time but is intentionally not stored in
-    the TOML, so we set it in the env for the duration of this check.
+    the TOML, so we set ``SQLLENS_LLM__API_KEY`` in the env for the duration
+    of this check. ``Config.load`` also exports ``SQLLENS_CONFIG`` as a side
+    effect, so both variables are snapshot-and-restored on exit (success or
+    failure) to keep this function side-effect-free at the process-env level.
     """
     from sqllens.config import Config
 
@@ -536,6 +539,10 @@ def run_install(
         try:
             toml_path.write_text(toml_content, encoding="utf-8")
         except OSError as exc:
+            # A failed write may leave the file truncated; restore the prior
+            # contents so the next run isn't blocked by a "different content"
+            # gate that reflects our half-finished write, not the user's intent.
+            _revert_toml(toml_path, existing_toml)
             raise InstallError(f"Could not write {toml_path}: {exc}") from exc
 
     cmd_written = False
@@ -558,19 +565,24 @@ def run_install(
             try:
                 cmd_path.write_bytes(cmd_content_bytes)
             except OSError as exc:
+                # Revert both: the .cmd may be truncated after a partial write,
+                # and the TOML write we just succeeded is meaningless without
+                # the launcher Claude Desktop will exec.
+                _revert_cmd_bytes(cmd_path, existing_cmd_bytes)
                 _revert_toml(toml_path, existing_toml)
                 raise InstallError(
-                    f"Could not write {cmd_path}: {exc}. Pass --force to overwrite."
+                    f"Could not write {cmd_path}: {exc}"
                 ) from exc
             cmd_written = True
 
     # pydantic's ValidationError and tomllib.TOMLDecodeError both subclass
-    # ValueError; OSError covers filesystem hiccups in Config.load. A broader
-    # catch would mislabel unrelated bugs (ImportError, MemoryError, ...) as
-    # "TOML validation failure".
+    # ValueError; OSError covers filesystem hiccups in Config.load.
+    # ImportError is included because Config.load can pull in optional
+    # backends (e.g. SQLAlchemy psycopg) — a missing extra is a user-fixable
+    # config issue, not an unexpected bug, and we still need to revert.
     try:
         validate_toml(toml_path, api_key=options.api_key)
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, ImportError) as exc:
         _revert_toml(toml_path, existing_toml)
         if cmd_path is not None and cmd_written:
             _revert_cmd_bytes(cmd_path, existing_cmd_bytes)
@@ -595,10 +607,16 @@ def run_install(
         try:
             _atomic_write_text(options.config_path, json_after_serialized)
         except OSError as exc:
+            # _atomic_write_text uses tempfile + os.replace; the original is
+            # untouched unless os.replace itself failed mid-rename (rare:
+            # Windows file-locking, EXDEV across mounts). Phrase the restore
+            # hint so the user only clobbers their original if it's actually
+            # missing or corrupt, not as a reflex on every write failure.
             hint = _restore_hint(platform_name, backup_path, options.config_path)
             raise InstallError(
                 f"Failed to write {options.config_path}: {exc}. "
-                f"Restore the original with: {hint}"
+                f"A backup was made at {backup_path}; the original should still "
+                f"be in place. If it is missing or corrupt, restore it with: {hint}"
             ) from exc
 
     return InstallResult(
@@ -675,8 +693,10 @@ def _revert_toml(toml_path: Path, original: str | None) -> None:
     The caller is in the middle of raising InstallError; we don't let an
     OSError in the revert shadow that. But silently swallowing leaves the
     user blind to a partially-failed revert (file may now be in a degraded
-    state), and Typer's pretty error rendering won't surface __context__.
-    Print a warning to stderr so the user has at least one visible signal.
+    state), and Typer's pretty error rendering won't surface the
+    ``__cause__`` / ``__context__`` chain. Print a warning to stderr (with
+    explicit flush so the process exit doesn't strand the line) so the user
+    has at least one visible signal.
     """
     try:
         if original is None:
@@ -684,9 +704,11 @@ def _revert_toml(toml_path: Path, original: str | None) -> None:
         else:
             toml_path.write_text(original, encoding="utf-8")
     except OSError as exc:
-        sys.stderr.write(
+        print(
             f"WARNING: failed to revert {toml_path}: {exc}. "
-            "File may be in an inconsistent state.\n"
+            "File may be in an inconsistent state.",
+            file=sys.stderr,
+            flush=True,
         )
 
 
@@ -698,9 +720,11 @@ def _revert_cmd_bytes(cmd_path: Path, original: bytes | None) -> None:
         else:
             cmd_path.write_bytes(original)
     except OSError as exc:
-        sys.stderr.write(
+        print(
             f"WARNING: failed to revert {cmd_path}: {exc}. "
-            "File may be in an inconsistent state.\n"
+            "File may be in an inconsistent state.",
+            file=sys.stderr,
+            flush=True,
         )
 
 

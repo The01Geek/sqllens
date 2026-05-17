@@ -1109,7 +1109,7 @@ class TestAtomicJsonWrite:
             raise OSError("simulated rename failure")
 
         monkeypatch.setattr(installer_mod.os, "replace", boom_replace)
-        with pytest.raises(InstallError, match="Restore the original with"):
+        with pytest.raises(InstallError, match="If it is missing or corrupt, restore it with"):
             run_install(
                 base_options,
                 dry_run=False,

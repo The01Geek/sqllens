@@ -35,6 +35,10 @@ _LEAKY_ENV_KEYS = (
     # Config.load mutates SQLLENS_CONFIG as a side effect; scrub between tests
     # so a path set by one test doesn't poison Config.load() in another.
     "SQLLENS_CONFIG",
+    # validate_toml temporarily sets SQLLENS_LLM__API_KEY; defense-in-depth
+    # for the unlikely case its finally block doesn't run (KeyboardInterrupt,
+    # SystemExit) and the key would otherwise leak into the next test.
+    "SQLLENS_LLM__API_KEY",
 )
 
 
