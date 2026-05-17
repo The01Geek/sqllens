@@ -49,3 +49,40 @@ def test_env_var_override(tmp_path: Path, monkeypatch) -> None:
     cfg = Config.load(cfg_path)
     # Env vars take precedence over TOML for nested fields.
     assert cfg.llm.api_key.get_secret_value() == "sk-ant-from-env"
+
+
+def test_agent_max_tool_iterations_env_override(tmp_path: Path, monkeypatch) -> None:
+    """Operators can raise the iteration cap via env without touching TOML."""
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [llm]
+            api_key = "sk-ant-test"
+            """
+        )
+    )
+    monkeypatch.setenv("SQLLENS_AGENT__MAX_TOOL_ITERATIONS", "35")
+    cfg = Config.load(cfg_path)
+    assert cfg.agent.max_tool_iterations == 35
+
+
+def test_agent_defaults_when_section_omitted(tmp_path: Path) -> None:
+    """An [agent] section is optional — defaults must hold."""
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [llm]
+            api_key = "sk-ant-test"
+            """
+        )
+    )
+    cfg = Config.load(cfg_path)
+    assert cfg.agent.max_tool_iterations == 20

@@ -21,6 +21,7 @@ from pydantic import SecretStr
 from sqllens.agent.factory import build_agent
 from sqllens.agent.tools import RunSqlTool
 from sqllens.config import (
+    AgentRuntimeConfig,
     AuthConfig,
     Config,
     DatabaseConfig,
@@ -29,7 +30,10 @@ from sqllens.config import (
 )
 
 
-def _build_test_config(persist_dir: Path) -> Config:
+def _build_test_config(
+    persist_dir: Path,
+    agent: AgentRuntimeConfig | None = None,
+) -> Config:
     """Build a Config from kwargs, bypassing env-var resolution.
 
     Passing every nested model explicitly avoids the default_factory
@@ -41,6 +45,7 @@ def _build_test_config(persist_dir: Path) -> Config:
         llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
         memory=MemoryConfig(persist_dir=persist_dir),
         auth=AuthConfig(mode="none"),
+        agent=agent or AgentRuntimeConfig(),
     )
 
 
@@ -66,3 +71,25 @@ def test_run_sql_scratch_anchored_to_absolute_tempdir(tmp_path: Path) -> None:
     assert working_dir == Path(tempfile.gettempdir()) / "sqllens"
     assert working_dir.is_absolute(), "scratch root must not depend on process CWD"
     assert working_dir != Path("."), "must not fall through to LocalFileSystem default"
+
+
+def test_default_max_tool_iterations_is_twenty(tmp_path: Path) -> None:
+    """The default surfaces our raised baseline, not the framework's 10.
+
+    Real schema exploration on untrained DBs routinely needs >10 tool calls;
+    a regression that drops this default would silently re-introduce the
+    "tool iteration limit reached" cutoff users hit on first-time queries.
+    """
+    cfg = _build_test_config(persist_dir=tmp_path / "chroma")
+    agent = build_agent(cfg)
+    assert agent.config.max_tool_iterations == 20
+
+
+def test_max_tool_iterations_flows_through_config(tmp_path: Path) -> None:
+    """A config override must reach the underlying agent unchanged."""
+    cfg = _build_test_config(
+        persist_dir=tmp_path / "chroma",
+        agent=AgentRuntimeConfig(max_tool_iterations=42),
+    )
+    agent = build_agent(cfg)
+    assert agent.config.max_tool_iterations == 42
