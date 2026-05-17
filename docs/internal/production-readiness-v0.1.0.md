@@ -102,6 +102,8 @@ SQLite. (c) Use server-side cursors with `itersize` and enforce row cap at
 the runner layer above the 50-row render cap. (d) Add to the `sqllens init`
 template.
 
+**Tracking:** #37
+
 #### S-4. Bad database URL crashes only at first tool call, not startup
 **File:** [`src/sqllens/tools/query_database.py:18-25`](../../src/sqllens/tools/query_database.py#L18-L25) ·
 **Category:** Reliability / DX
