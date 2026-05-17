@@ -3,16 +3,11 @@ name: Sync PR Status to Issue
 # This workflow syncs the PR's project status to linked issues.
 # When a PR event occurs, it:
 # 1. Gets the PR's current status from the project board
-# 2. If no status is set, auto-assigns based on draft state:
-#    - Draft PR → "In Progress"
-#    - Ready PR → "AI PR Drafted"
-# 3. On ready_for_review: upgrades "In Progress" → "AI PR Drafted"
-# 4. On converted_to_draft: downgrades "AI PR Drafted" → "In Progress"
-# 5. Finds all issues linked to the PR (via "Closes #123" syntax)
-# 6. Updates each linked issue's status to match the PR's status
+# 2. Finds all issues linked to the PR (via "Closes #123" syntax)
+# 3. Updates each linked issue's status to match the PR's status
 #
 # Requirements:
-# - RADMAN_AI_PRIVATE_KEY secret must be configured
+# - RADMAN_AI_APP_ID and RADMAN_AI_PRIVATE_KEY secrets must be configured
 # - Both PR and linked issues must be added to the project
 # - Linked issues must use "Closes #123" or similar syntax in PR description
 
@@ -45,28 +40,25 @@ jobs:
   config:
     runs-on: ubuntu-latest
     outputs:
-      enabled: ${{ steps.config.outputs.enabled }}
-      project_number: ${{ steps.config.outputs.project_number }}
-      status_ai_pr_drafted: ${{ steps.config.outputs.status_ai_pr_drafted }}
-      status_in_progress: ${{ steps.config.outputs.status_in_progress }}
-      bot_login: ${{ steps.config.outputs.bot_login }}
-      app_id: ${{ steps.config.outputs.app_id }}
+      enabled: ${{ steps.extract.outputs.enabled }}
+      project_number: ${{ steps.extract.outputs.project_number }}
+      status_ai_pr_drafted: ${{ steps.extract.outputs.status_ai_pr_drafted }}
+      bot_login: ${{ steps.extract.outputs.bot_login }}
     steps:
       - uses: actions/checkout@v6
-      - name: Install yq
+      - id: cfg
+        uses: ./.github/actions/read-project-config
+      - id: extract
+        env:
+          CONFIG_JSON: ${{ steps.cfg.outputs.json }}
         run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-      - name: Read config
-        id: config
-        run: |
-          CONFIG=".github/project-config.yml"
-          echo "enabled=$(yq '.workflows["sync-pr-status-to-issue"]' "$CONFIG")" >> "$GITHUB_OUTPUT"
-          echo "project_number=$(yq '.project_number' "$CONFIG")" >> "$GITHUB_OUTPUT"
-          echo "status_ai_pr_drafted=$(yq '.statuses.ai_pr_drafted' "$CONFIG")" >> "$GITHUB_OUTPUT"
-          echo "status_in_progress=$(yq '.statuses.in_progress' "$CONFIG")" >> "$GITHUB_OUTPUT"
-          echo "bot_login=$(yq '.bot_login' "$CONFIG")" >> "$GITHUB_OUTPUT"
-          echo "app_id=$(yq '.app_id' "$CONFIG")" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          {
+            echo "enabled=$(echo "$CONFIG_JSON" | jq -r '.workflows["sync-pr-status-to-issue"] // false')"
+            echo "project_number=$(echo "$CONFIG_JSON" | jq -r '.project_number')"
+            echo "status_ai_pr_drafted=$(echo "$CONFIG_JSON" | jq -r '.statuses.ai_pr_drafted')"
+            echo "bot_login=$(echo "$CONFIG_JSON" | jq -r '.bot_login')"
+          } >> "$GITHUB_OUTPUT"
 
   sync-status:
     needs: config
@@ -75,69 +67,67 @@ jobs:
     # Avoid duplicate runs: pull_request for human actors, pull_request_target for bots
     runs-on: ubuntu-latest
     steps:
-      - name: Check actor type
-        id: actor-check
-        run: |
-          ACTOR="${{ github.actor }}"
-          if [[ "$ACTOR" == *"[bot]" ]]; then
-            echo "is_bot=true" >> "$GITHUB_OUTPUT"
-            if [ "${{ github.event_name }}" = "pull_request_target" ]; then
-              echo "should_run=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "should_run=false" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            echo "is_bot=false" >> "$GITHUB_OUTPUT"
-            if [ "${{ github.event_name }}" = "pull_request" ]; then
-              echo "should_run=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "should_run=false" >> "$GITHUB_OUTPUT"
-            fi
-          fi
+      # Required so path-based composite action references resolve.
+      - uses: actions/checkout@v6
+
+      - id: actor-check
+        uses: ./.github/actions/dedupe-pr-events
+
+      - name: Generate app token
+        id: app-token
+        if: steps.actor-check.outputs.should_run == 'true'
+        uses: ./.github/actions/get-app-token
+        with:
+          app-id: ${{ secrets.RADMAN_AI_APP_ID }}
+          private-key: ${{ secrets.RADMAN_AI_PRIVATE_KEY }}
 
       - name: Get PR status from project
         id: get_pr_status
         if: steps.actor-check.outputs.should_run == 'true'
         env:
-          GH_TOKEN: ${{ secrets.PROJECT_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_IS_DRAFT: ${{ github.event.pull_request.draft }}
         run: |
           set -euo pipefail
-          ORG="${{ github.repository_owner }}"
+          OWNER="${{ github.repository_owner }}"
           REPO_NAME="${{ github.event.repository.name }}"
           PROJECT_NUMBER="${{ needs.config.outputs.project_number }}"
           PR_NUMBER="${{ github.event.pull_request.number }}"
 
           echo "🔍 Getting PR #$PR_NUMBER status from project..."
 
-          # Detect if owner is an organization or user
-          OWNER_TYPE=$(gh api graphql -f query='
-            query {
-              repositoryOwner(login: "'$ORG'") {
-                __typename
-              }
-            }' --jq '.data.repositoryOwner.__typename')
-
-          if [ "$OWNER_TYPE" = "Organization" ]; then
-            OWNER_FIELD="organization"
-          else
-            OWNER_FIELD="user"
-          fi
-
-          # Get project ID
+          # Detect whether the repo owner is a User or Organization, then query
+          # projectV2 under the correct root. GraphQL has no polymorphic
+          # owner-by-login resolver, so we probe `user(login:)` first and fall
+          # back to `organization(login:)`.
+          OWNER_KIND=""
           if ! PROJECT_RESPONSE=$(gh api graphql -f query='
             query {
-              '$OWNER_FIELD'(login: "'$ORG'") {
+              user(login: "'$OWNER'") {
                 projectV2(number: '$PROJECT_NUMBER') {
                   id
                   title
                 }
               }
-            }'); then
-            echo "❌ Error: Failed to query project"
-            exit 1
+            }' 2>/dev/null) || [ "$(echo "$PROJECT_RESPONSE" | jq -r '.data.user')" = "null" ]; then
+            if ! PROJECT_RESPONSE=$(gh api graphql -f query='
+              query {
+                organization(login: "'$OWNER'") {
+                  projectV2(number: '$PROJECT_NUMBER') {
+                    id
+                    title
+                  }
+                }
+              }'); then
+              echo "❌ Error: Failed to query project under user or organization '$OWNER'"
+              exit 1
+            fi
+            OWNER_KIND="organization"
+            PROJECT_ID=$(echo "$PROJECT_RESPONSE" | jq -r '.data.organization.projectV2.id' 2>/dev/null)
+          else
+            OWNER_KIND="user"
+            PROJECT_ID=$(echo "$PROJECT_RESPONSE" | jq -r '.data.user.projectV2.id' 2>/dev/null)
           fi
-
-          PROJECT_ID=$(echo "$PROJECT_RESPONSE" | jq -r '.data.'$OWNER_FIELD'.projectV2.id' 2>/dev/null)
 
           if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ]; then
             echo "❌ Error: Project #$PROJECT_NUMBER not found"
@@ -147,7 +137,7 @@ jobs:
           # Get PR node ID
           if ! PR_RESPONSE=$(gh api graphql -f query='
             query {
-              repository(owner: "'$ORG'", name: "'$REPO_NAME'") {
+              repository(owner: "'$OWNER'", name: "'$REPO_NAME'") {
                 pullRequest(number: '$PR_NUMBER') {
                   id
                   title
@@ -279,17 +269,14 @@ jobs:
           fi
 
           if [ -z "$PR_STATUS" ] || [ "$PR_STATUS" = "null" ]; then
-            echo "⚠️  PR #$PR_NUMBER has no status set in the project"
-
-            # Choose status based on whether the PR is a draft
-            IS_DRAFT="${{ github.event.pull_request.draft }}"
-            if [ "$IS_DRAFT" = "true" ]; then
-              TARGET_STATUS="${{ needs.config.outputs.status_in_progress }}"
-            else
-              TARGET_STATUS="${{ needs.config.outputs.status_ai_pr_drafted }}"
+            if [ "$PR_IS_DRAFT" = "true" ]; then
+              echo "⏭️  PR #$PR_NUMBER is in Draft mode - skipping auto-set to '${{ needs.config.outputs.status_ai_pr_drafted }}'"
+              echo "   Status will be set when the PR is marked ready for review."
+              exit 0
             fi
 
-            echo "🔄 Auto-setting status to '$TARGET_STATUS' (draft=$IS_DRAFT)..."
+            echo "⚠️  PR #$PR_NUMBER has no status set in the project"
+            echo "🔄 Auto-setting status to '${{ needs.config.outputs.status_ai_pr_drafted }}'..."
 
             # Get status field ID
             if ! FIELDS_RESPONSE=$(gh api graphql -f query='
@@ -318,7 +305,7 @@ jobs:
               exit 1
             fi
 
-            # Get status option ID for the target status
+            # Get status option ID for the configured AI PR Drafted status
             if ! OPTIONS_RESPONSE=$(gh api graphql -f query='
               query {
                 node(id: "'$FIELD_ID'") {
@@ -334,10 +321,10 @@ jobs:
               exit 1
             fi
 
-            OPTION_ID=$(echo "$OPTIONS_RESPONSE" | jq -r --arg status "$TARGET_STATUS" '.data.node.options[] | select(.name == $status) | .id' 2>/dev/null)
+            OPTION_ID=$(echo "$OPTIONS_RESPONSE" | jq -r --arg status "${{ needs.config.outputs.status_ai_pr_drafted }}" '.data.node.options[] | select(.name == $status) | .id' 2>/dev/null)
 
             if [ -z "$OPTION_ID" ] || [ "$OPTION_ID" = "null" ]; then
-              echo "❌ Error: '$TARGET_STATUS' status option not found in project"
+              echo "❌ Error: '${{ needs.config.outputs.status_ai_pr_drafted }}' status option not found in project"
               exit 1
             fi
 
@@ -366,121 +353,10 @@ jobs:
               exit 1
             fi
 
-            PR_STATUS="$TARGET_STATUS"
+            PR_STATUS="${{ needs.config.outputs.status_ai_pr_drafted }}"
             echo "✅ PR #$PR_NUMBER status auto-set to: $PR_STATUS"
           else
-            # PR already has a status — check if we need to upgrade it
-            IS_DRAFT="${{ github.event.pull_request.draft }}"
-            EVENT_ACTION="${{ github.event.action }}"
-            IN_PROGRESS_STATUS="${{ needs.config.outputs.status_in_progress }}"
-            AI_PR_DRAFTED_STATUS="${{ needs.config.outputs.status_ai_pr_drafted }}"
-
-            if [ "$EVENT_ACTION" = "ready_for_review" ] && [ "$PR_STATUS" = "$IN_PROGRESS_STATUS" ]; then
-              # PR was marked ready — upgrade from In Progress to AI PR Drafted
-              echo "🔄 PR marked ready for review — upgrading status from '$IN_PROGRESS_STATUS' to '$AI_PR_DRAFTED_STATUS'..."
-
-              # Get status field and option IDs
-              FIELD_ID=$(gh api graphql -f query='
-                query {
-                  node(id: "'$PROJECT_ID'") {
-                    ... on ProjectV2 {
-                      fields(first: 20) {
-                        nodes {
-                          ... on ProjectV2SingleSelectField {
-                            id
-                            name
-                          }
-                        }
-                      }
-                    }
-                  }
-                }' --jq '.data.node.fields.nodes[] | select(.name == "Status") | .id' 2>/dev/null)
-
-              OPTION_ID=$(gh api graphql -f query='
-                query {
-                  node(id: "'$FIELD_ID'") {
-                    ... on ProjectV2SingleSelectField {
-                      options {
-                        id
-                        name
-                      }
-                    }
-                  }
-                }' --jq ".data.node.options[] | select(.name == \"$AI_PR_DRAFTED_STATUS\") | .id" 2>/dev/null)
-
-              if [ -n "$OPTION_ID" ] && [ "$OPTION_ID" != "null" ]; then
-                gh api graphql -f query='
-                  mutation {
-                    updateProjectV2ItemFieldValue(input: {
-                      projectId: "'$PROJECT_ID'",
-                      itemId: "'$PR_PROJECT_ITEM_ID'",
-                      fieldId: "'$FIELD_ID'",
-                      value: { singleSelectOptionId: "'$OPTION_ID'" }
-                    }) {
-                      projectV2Item {
-                        id
-                      }
-                    }
-                  }' > /dev/null
-                PR_STATUS="$AI_PR_DRAFTED_STATUS"
-                echo "✅ PR #$PR_NUMBER status upgraded to: $PR_STATUS"
-              else
-                echo "⚠️  Could not find '$AI_PR_DRAFTED_STATUS' status option"
-              fi
-            elif [ "$EVENT_ACTION" = "converted_to_draft" ] && [ "$PR_STATUS" = "$AI_PR_DRAFTED_STATUS" ]; then
-              # PR was converted back to draft — downgrade from AI PR Drafted to In Progress
-              echo "🔄 PR converted to draft — downgrading status from '$AI_PR_DRAFTED_STATUS' to '$IN_PROGRESS_STATUS'..."
-
-              FIELD_ID=$(gh api graphql -f query='
-                query {
-                  node(id: "'$PROJECT_ID'") {
-                    ... on ProjectV2 {
-                      fields(first: 20) {
-                        nodes {
-                          ... on ProjectV2SingleSelectField {
-                            id
-                            name
-                          }
-                        }
-                      }
-                    }
-                  }
-                }' --jq '.data.node.fields.nodes[] | select(.name == "Status") | .id' 2>/dev/null)
-
-              OPTION_ID=$(gh api graphql -f query='
-                query {
-                  node(id: "'$FIELD_ID'") {
-                    ... on ProjectV2SingleSelectField {
-                      options {
-                        id
-                        name
-                      }
-                    }
-                  }
-                }' --jq ".data.node.options[] | select(.name == \"$IN_PROGRESS_STATUS\") | .id" 2>/dev/null)
-
-              if [ -n "$OPTION_ID" ] && [ "$OPTION_ID" != "null" ]; then
-                gh api graphql -f query='
-                  mutation {
-                    updateProjectV2ItemFieldValue(input: {
-                      projectId: "'$PROJECT_ID'",
-                      itemId: "'$PR_PROJECT_ITEM_ID'",
-                      fieldId: "'$FIELD_ID'",
-                      value: { singleSelectOptionId: "'$OPTION_ID'" }
-                    }) {
-                      projectV2Item {
-                        id
-                      }
-                    }
-                  }' > /dev/null
-                PR_STATUS="$IN_PROGRESS_STATUS"
-                echo "✅ PR #$PR_NUMBER status downgraded to: $PR_STATUS"
-              else
-                echo "⚠️  Could not find '$IN_PROGRESS_STATUS' status option"
-              fi
-            else
-              echo "✅ PR #$PR_NUMBER status: $PR_STATUS"
-            fi
+            echo "✅ PR #$PR_NUMBER status: $PR_STATUS"
           fi
 
           echo "status=$PR_STATUS" >> "$GITHUB_OUTPUT"
@@ -489,7 +365,7 @@ jobs:
       - name: Sync status to linked issues
         if: steps.actor-check.outputs.should_run == 'true' && steps.get_pr_status.outputs.status != ''
         env:
-          GH_TOKEN: ${{ secrets.PROJECT_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           ORG="${{ github.repository_owner }}"

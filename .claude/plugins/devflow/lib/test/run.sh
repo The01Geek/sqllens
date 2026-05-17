@@ -166,7 +166,7 @@ SCAN_TMP="$(mktemp -d)"
 cat > "$SCAN_TMP/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
-  *"repo view"*) echo "Radman-LLC/ADR" ;;
+  *"repo view"*) echo "The01Geek/devflow-autopilot" ;;
   *"pr list"*"author:claude"*)
     echo '[{"number":1,"headRefName":"claude/issue-1-a","author":{"login":"claude"},"mergedAt":"2026-05-01T00:00:00Z"},
            {"number":3,"headRefName":"claude/issue-3-c","author":{"login":"claude"},"mergedAt":"2026-05-03T00:00:00Z"},
@@ -189,7 +189,7 @@ assert_eq "scan excludes devflow/learnings branch" "false" "$(echo "$SCAN_OUT" |
 cat > "$SCAN_TMP/gh2" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
-  *"repo view"*) echo "Radman-LLC/ADR" ;;
+  *"repo view"*) echo "The01Geek/devflow-autopilot" ;;
   *"pr view 1 --repo"*) echo '{"number":1,"headRefName":"claude/issue-1-a","mergedAt":"2026-05-01T00:00:00Z","state":"MERGED"}' ;;
   *"pr view 2 --repo"*) echo '{"number":2,"headRefName":"feature/hand-written","mergedAt":"2026-05-02T00:00:00Z","state":"MERGED"}' ;;
   *"pr view 3 --repo"*) echo '{"number":3,"headRefName":"claude/issue-3-c","mergedAt":"2026-05-03T00:00:00Z","state":"OPEN"}' ;;
@@ -407,7 +407,7 @@ rm -rf "$M_TMP"
 echo "check-excluded-path.sh"
 # ────────────────────────────────────────────────────────────────────────────
 ex() { bash "$LIB/check-excluded-path.sh" "$@" >/dev/null 2>&1; echo $?; }
-assert_eq "skill file allowed"            "1" "$(ex ".claude/skills/guidoo-qa/SKILL.md")"
+assert_eq "skill file allowed"            "1" "$(ex ".claude/skills/example/SKILL.md")"
 assert_eq "CLAUDE.md allowed"             "1" "$(ex "CLAUDE.md")"
 assert_eq "docs allowed"                  "1" "$(ex "docs/internal/foo.md")"
 assert_eq "plugin path excluded"          "0" "$(ex ".claude/plugins/devflow/skills/retrospective/SKILL.md")"
@@ -431,29 +431,29 @@ cat > "$MI_TMP/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
   *"issue list"*) echo '' ;;                                # no existing issue
-  *"issue create"*) echo 'https://github.com/Radman-LLC/ADR/issues/4242' ;;
+  *"issue create"*) echo 'https://github.com/The01Geek/devflow-autopilot/issues/4242' ;;
   *"issue comment"*) echo 'commented' ;;
   *) echo '' ;;
 esac
 STUB
 chmod +x "$MI_TMP/gh"
 URL="$(DEVFLOW_GH="$MI_TMP/gh" bash "$LIB/meta-issue.sh" --tag review-reject-bypassed --slug review-reject-bypassed --title "audit(devflow): x" --body-file "$MI_TMP/body.md" --overrides "$MI_TMP/ov.json" 2>/dev/null)"
-assert_eq "meta-issue returns the new URL" "https://github.com/Radman-LLC/ADR/issues/4242" "$URL"
-assert_eq "override recorded with url"     "https://github.com/Radman-LLC/ADR/issues/4242" "$(jq -r '.dismissed["review-reject-bypassed"].meta_issue' "$MI_TMP/ov.json")"
+assert_eq "meta-issue returns the new URL" "https://github.com/The01Geek/devflow-autopilot/issues/4242" "$URL"
+assert_eq "override recorded with url"     "https://github.com/The01Geek/devflow-autopilot/issues/4242" "$(jq -r '.dismissed["review-reject-bypassed"].meta_issue' "$MI_TMP/ov.json")"
 assert_eq "override reason"                "meta-plugin-issue" "$(jq -r '.dismissed["review-reject-bypassed"].reason' "$MI_TMP/ov.json")"
 assert_eq "override dismissed_by"          "devflow-weekly"    "$(jq -r '.dismissed["review-reject-bypassed"].dismissed_by' "$MI_TMP/ov.json")"
 # existing-issue path
 cat > "$MI_TMP/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
-  *"issue list"*) echo '{"number":99,"url":"https://github.com/Radman-LLC/ADR/issues/99"}' ;;
+  *"issue list"*) echo '{"number":99,"url":"https://github.com/The01Geek/devflow-autopilot/issues/99"}' ;;
   *"issue comment"*) echo 'commented' ;;
   *) echo '' ;;
 esac
 STUB
 chmod +x "$MI_TMP/gh"
 URL2="$(DEVFLOW_GH="$MI_TMP/gh" bash "$LIB/meta-issue.sh" --tag t-existing --slug t-existing --title "x" --body-file "$MI_TMP/body.md" --overrides "$MI_TMP/ov.json" 2>/dev/null)"
-assert_eq "meta-issue reuses existing URL" "https://github.com/Radman-LLC/ADR/issues/99" "$URL2"
+assert_eq "meta-issue reuses existing URL" "https://github.com/The01Geek/devflow-autopilot/issues/99" "$URL2"
 rm -rf "$MI_TMP"
 
 # ────────────────────────────────────────────────────────────────────────────

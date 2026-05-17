@@ -24,30 +24,41 @@ statuses:
   released: "Released"
   closed: "Closed"
 
-# Documentation paths (relative to repo root).
-# This repo currently has only docs/internal/. The external/ path is reserved
-# for /devflow:docs-bootstrap-external — run that skill once after install if
-# you want WikiWizard's external-docs pass to write anywhere.
+# Documentation paths (relative to repo root)
 docs:
   internal: "docs/internal/"
   external: "docs/external/"
 
-# GitHub App ID for project automation (Radman AI default: 3102164).
+# GitHub App ID for project automation (Radman AI default: 3102164)
+# Override this if using your own GitHub App
 app_id: "3102164"
 
-# Bot account login (for distinguishing AI-authored PRs from human ones).
+# Bot account login (for distinguishing AI-authored PRs from human ones)
+# Leave empty if not using a bot account
 bot_login: "radman-ai"
 
 # Claude action settings
 claude:
-  # Bot logins allowed to trigger the Claude action (comma-separated).
+  # Bot logins allowed to trigger the Claude action (comma-separated)
   # `claude` is Anthropic's GitHub App identity; `radman-ai` is the
-  # Radman AI default App's bot identity.
+  # legacy/owner-installed app. Both currently author /implement PRs.
   allowed_bots: "claude,radman-ai"
   # Marker line used to identify the persistent /implement workpad comment on issues.
   # The /implement skill finds and edits exactly one comment per issue whose body
   # starts with this marker, instead of creating a new comment per run.
   workpad_marker: "<!-- devflow:workpad -->"
+  # Reasoning effort for Claude-action workflows below. Valid: low, medium,
+  # high, xhigh, max. "medium" causes the workflow to omit --effort entirely
+  # so the model's built-in default applies (xhigh on Opus 4.7, high on Opus
+  # 4.6 / Sonnet 4.6). Pin explicitly when the model default would silently
+  # change depth on a model upgrade.
+  effort: "medium"
+
+claude_implement:
+  effort: "high"
+
+claude_runner:
+  effort: "high"
 
 # WikiWizard settings
 wikiwizard:
@@ -55,6 +66,13 @@ wikiwizard:
   documented_label: "Documented"
   release_notes_file: "docs/external/release-notes.md"
   allowed_bots: "claude,radman-ai"
+  effort: "low"
+
+security_audit:
+  # medium is sufficient for the configured weekly cadence; bump to xhigh
+  # if the audit needs deeper reasoning (max is per-session-only and
+  # bypasses cost guardrails, so avoid it here).
+  effort: "medium"
 
 # DevFlow retrospective settings
 # Consumed by the /devflow-weekly skill (locally-run orchestrator, not a GitHub Actions workflow).
@@ -71,7 +89,8 @@ devflow_retrospective:
   cooldown_days: 3
   # Soft cap on PRs processed per scheduled retrospective run. Saturation
   # above this opens a notice issue but doesn't abort — the oldest N are
-  # processed, the rest roll into next week.
+  # processed, the rest roll into next week. 500 gives substantial headroom
+  # over any realistic weekly bot-merge volume.
   max_prs_per_run: 500
   # Optional override; defaults to claude.allowed_bots if unset.
   # watched_authors: ["radman-ai"]
@@ -84,7 +103,7 @@ workflows:
   comment-on-draft-issues: true
   move-to-in-progress: true
   sync-pr-status-to-issue: true
-  request-review-on-ready: false
-  security_audit: false
+  request-review-on-ready: true
+  security_audit: true
   screenshots: false
   tests: false

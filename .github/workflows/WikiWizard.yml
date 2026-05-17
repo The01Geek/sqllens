@@ -22,6 +22,7 @@ jobs:
       release_notes_file: ${{ steps.extract.outputs.release_notes_file }}
       bot_login: ${{ steps.extract.outputs.bot_login }}
       allowed_bots: ${{ steps.extract.outputs.allowed_bots }}
+      effort: ${{ steps.extract.outputs.effort }}
     steps:
       - uses: actions/checkout@v6
       - id: cfg
@@ -42,6 +43,7 @@ jobs:
             echo "release_notes_file=$(echo "$CONFIG_JSON" | jq -r '.wikiwizard.release_notes_file')"
             echo "bot_login=$(echo "$CONFIG_JSON" | jq -r '.bot_login')"
             echo "allowed_bots=$(echo "$CONFIG_JSON" | jq -r '.wikiwizard.allowed_bots')"
+            echo "effort=$(echo "$CONFIG_JSON" | jq -r '.wikiwizard.effort // "medium"')"
           } >> "$GITHUB_OUTPUT"
 
   documentation:
@@ -89,6 +91,7 @@ jobs:
           # --allowed-tools.
           claude_args: >-
             --model ${{ needs.config.outputs.wikiwizard_claude_model }}
+            ${{ needs.config.outputs.effort != 'medium' && format('--effort {0}', needs.config.outputs.effort) || '' }}
             --permission-mode acceptEdits
             --allowed-tools
             "Read,
@@ -132,6 +135,7 @@ jobs:
           # --permission-mode acceptEdits is needed.
           claude_args: >-
             --model ${{ needs.config.outputs.wikiwizard_claude_model }}
+            ${{ needs.config.outputs.effort != 'medium' && format('--effort {0}', needs.config.outputs.effort) || '' }}
             --permission-mode acceptEdits
             --allowed-tools
             "Read,
@@ -177,6 +181,7 @@ jobs:
           # --permission-mode acceptEdits is needed.
           claude_args: >-
             --model ${{ needs.config.outputs.wikiwizard_claude_model }}
+            ${{ needs.config.outputs.effort != 'medium' && format('--effort {0}', needs.config.outputs.effort) || '' }}
             --permission-mode acceptEdits
             --allowed-tools
             "Read,

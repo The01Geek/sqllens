@@ -22,6 +22,7 @@ jobs:
       enabled: ${{ steps.extract.outputs.enabled }}
       base_branch: ${{ steps.extract.outputs.base_branch }}
       claude_model: ${{ steps.extract.outputs.claude_model }}
+      effort: ${{ steps.extract.outputs.effort }}
     steps:
       - uses: actions/checkout@v6
       - id: cfg
@@ -35,6 +36,7 @@ jobs:
             echo "enabled=$(echo "$CONFIG_JSON" | jq -r '.workflows.security_audit // true')"
             echo "base_branch=$(echo "$CONFIG_JSON" | jq -r '.base_branch')"
             echo "claude_model=$(echo "$CONFIG_JSON" | jq -r '.claude_model')"
+            echo "effort=$(echo "$CONFIG_JSON" | jq -r '.security_audit.effort // "medium"')"
           } >> "$GITHUB_OUTPUT"
 
   security-review:
@@ -97,20 +99,20 @@ jobs:
             equivalent audit covering at minimum:
               - OWASP Top 10 (SQL injection, XSS, CSRF, SSRF, IDOR, auth/session
                 flaws, deserialization, broken access control, etc.)
-              - Command injection in PHP `exec`, `shell_exec`, `system`, `passthru`
+              - Command/shell injection in any language-specific subprocess or
+                eval surface used by this repo
               - Path traversal in file operations
               - Hardcoded secrets, credentials, or API keys
               - Insecure cryptography or weak hashing
-              - Unsafe direct database queries that bypass EntityService/Database
-                parameterization (per `CLAUDE.md`)
-              - Missing input validation/sanitization on AJAX endpoints
-                (`/ajax/`) and API endpoints (`/api/`)
+              - Unsafe direct database queries that bypass the project's
+                parameterization / ORM layer (per `CLAUDE.md`)
+              - Missing input validation/sanitization on HTTP/RPC endpoints
+                exposed by this repo
               - Authorization gaps in admin/backend routes
-              - Dependency vulnerabilities (npm in `/jsx/`, `/api/src/`)
+              - Dependency vulnerabilities in any package manifests present
 
-            Apply the Zangerine architectural rules from `CLAUDE.md` — flag any
-            code in `/lib/Zangerine/` that calls into `/class/` or
-            `/frontend-main/classes/`.
+            Apply the architectural/layering rules from `CLAUDE.md` — flag any
+            cross-layer call that violates the boundaries declared there.
 
             **Output**: create a single GitHub issue that is an **actionable
             work ticket**, not an informational report. Title it
@@ -132,14 +134,14 @@ jobs:
               - Lead with a top-level `## Action Items` checklist of GitHub
                 task-list items (`- [ ] ...`), one per fix. Each item is a
                 specific, scoped change — e.g. "Parameterize the SQL query in
-                `ajax/orders.php:142` (currently concatenates the request
+                `path/to/handler.ext:LINE` (currently concatenates the request
                 parameter)". Avoid vague items like "review auth code".
               - Group action items by severity in this order: Critical, High,
                 Medium, Low. Skip a severity entirely if it has no items (do
                 not include "no issues found" filler).
               - For each action item, immediately under it include a short
                 indented block with:
-                  - **File**: `path/to/file.php:LINE`
+                  - **File**: `path/to/file.ext:LINE`
                   - **Risk**: one sentence on the concrete attack/impact
                   - **Fix**: the specific change to make (function to call,
                     pattern to apply, code to remove)
@@ -166,6 +168,7 @@ jobs:
           # the codebase without hitting silent denials.
           claude_args: >-
             --model ${{ needs.config.outputs.claude_model }}
+            ${{ needs.config.outputs.effort != 'medium' && format('--effort {0}', needs.config.outputs.effort) || '' }}
             --allowed-tools
             "Read,
             Glob,
