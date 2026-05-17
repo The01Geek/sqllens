@@ -121,19 +121,6 @@ DB missing) to clear single-line messages with exit code 2.
 
 ### Code correctness
 
-#### C-1. `transport.http.build_asgi_app` omits the session-manager lifespan adapter
-**File:** [`src/sqllens/transport/http.py:48-62`](../../src/sqllens/transport/http.py#L48-L62) ·
-**Category:** Bug
-
-`build_asgi_app` is documented as the "testable seam"; `run()` at line 84
-assembles its own identical stack and wraps it in `_SessionManagerLifespan`.
-A deployment that mounts the ASGI app under an existing server (rather than
-calling `run()`) gets an app whose session manager is never started. The
-public function name invites production misuse.
-
-**Fix:** Either rename to `_build_asgi_app_no_lifespan`, or add a
-`with_lifespan: bool = True` parameter and have `run()` delegate to it.
-
 #### C-2. Private `mcp._session_manager` access kills the server on SDK refactor
 **File:** [`src/sqllens/transport/http.py:91`](../../src/sqllens/transport/http.py#L91) ·
 [`tests/integration/conftest.py:105`](../../tests/integration/conftest.py#L105) ·
@@ -296,6 +283,7 @@ file on POSIX.
 
 | # | File:line | Issue | Direction |
 |---|---|---|---|
+| C-1 | [`transport/http.py:48-62`](../../src/sqllens/transport/http.py#L48-L62) | `build_asgi_app` returns an app without the `_SessionManagerLifespan` wrapper that `run()` applies inline at line 91 — a production-shaped public name with test-shaped behaviour. Latent: no callers today, but the "testable seam" docstring invites future mount-style misuse that 500s post-deploy. **Tracking:** #39 |  Split into `build_asgi_app` (wrapped, mount-ready) + `build_asgi_app_bare` (manual lifespan); have `run()` and the integration fixture both delegate; drop the broken `session_manager_for` stub. Land together with C-2. |
 | C-3 | [`tools/query_database.py:18-25`](../../src/sqllens/tools/query_database.py#L18) | `_AGENT` global singleton: non-atomic check-then-set races under HTTP load; also silently binds first-caller `cfg`. | `asyncio.Lock` around init; compare config identity / hash and reject mismatched calls. |
 | C-4 | [`auth/__init__.py:36-41`](../../src/sqllens/auth/__init__.py) | `mode="jwt"` passes `None` fields to `JwtAuthenticator` with no validation. | `model_validator` on `AuthConfig` rejecting `mode="jwt"` until implemented (see P-2). |
 | C-5 | [`config.py:165-172`](../../src/sqllens/config.py#L165) | BOM check re-opens the TOML after a failed parse — TOCTOU window can drop the BOM-specific error. | Cache `_resolved_toml_path()` before the inner `try`. |
@@ -399,7 +387,7 @@ file on POSIX.
 ## Suggested release plan
 
 ### v0.1.0-rc.1 — safety & ops baseline (target: 2–3 weeks)
-**Must land:** S-1, S-2, S-3, S-4, C-1, C-2, C-3, C-4, T-1, T-2, T-3, P-1, P-2, P-3, P-4, P-5, P-6, O-1, O-4, O-5, O-7, O-8, O-12, O-13, O-14, O-16.
+**Must land:** S-1, S-2, S-3, S-4, C-2, C-3, C-4, T-1, T-2, T-3, P-1, P-2, P-3, P-4, P-5, P-6, O-1, O-4, O-5, O-7, O-8, O-12, O-13, O-14, O-16.
 
 Rationale: every P0 + the highest-trust-impact P1s (the bypass-corpus tests
 in T-4, the timeout/row-cap in S-3, the Docker default in S-2). Without
@@ -408,8 +396,8 @@ default") is demonstrably false and whose default Docker deployment is
 unauthenticated.
 
 ### v0.1.0 — release (target: +1 week after rc.1)
-**Add:** S-5, S-6, S-7, S-8, S-9, S-10, S-11, S-12, S-13, O-2, O-3, O-9,
-O-10, O-15, T-4, T-5, T-6, T-7, T-8.
+**Add:** S-5, S-6, S-7, S-8, S-9, S-10, S-11, S-12, S-13, C-1, O-2, O-3,
+O-9, O-10, O-15, T-4, T-5, T-6, T-7, T-8.
 
 Rationale: closes the rest of the safety surface, adds the observability
 needed for self-hosters, and pins the regression-test corpus so 0.1.x
