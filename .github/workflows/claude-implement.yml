@@ -1,17 +1,29 @@
-name: Claude Code
+name: Claude Code (implement)
 
-# Light @claude-mention listener for non-implementing flows (Q&A,
-# /devflow:review, /devflow:pr-description, /security-review, …). The
-# heavy /devflow:implement path lives in claude-implement.yml — both
-# files share the same toolchain today, but the split lets
-# /devflow:implement run under a higher `claude_implement.effort` setting
-# (configured in .github/project-config.yml) without inflating every
-# @claude mention's cost, and leaves room for future implement-only
-# provisioning (e.g. Postgres + MySQL services for connector-level runs)
-# without touching the light path.
+# Heavy @claude-mention listener — fires only when the triggering event
+# contains both `@claude` and `/devflow:implement`. Today the runtime
+# provisioning is identical to claude.yml (Python + pip install of the
+# project with dev + all DB drivers), so the split is structural rather
+# than environmental: this workflow reads `claude_implement.effort`
+# (currently "high" in .github/project-config.yml) so /devflow:implement's
+# planning + write-the-tests phases get more reasoning budget than the
+# light flows, without inflating every @claude mention's cost. If future
+# implement work needs heavy provisioning the light path doesn't (e.g.
+# Postgres + MySQL service containers for connector-level /implement
+# runs), add it here, not in claude.yml.
 #
-# Mutually-exclusive `if:` conditions on the two workflows guarantee
-# exactly one fires per event — see claude-implement.yml.
+# Mutually-exclusive `if:` conditions on this workflow and claude.yml
+# guarantee exactly one fires per event: claude.yml requires `@claude`
+# AND NOT `/devflow:implement`; this workflow requires `@claude` AND
+# `/devflow:implement`. If you add a new heavy slash command, extend
+# BOTH `if:` blocks symmetrically — never make them overlap.
+#
+# Most of this file is structurally identical to claude.yml so the
+# plugin/marketplace surface area is the same. Keep the
+# plugin_marketplaces, plugins, and claude_args sections in sync between
+# the two files (and with claude-runner.yml's review profile where
+# applicable); the existing claude-runner.yml comment establishes that
+# convention.
 
 on:
   issue_comment:
@@ -24,6 +36,10 @@ on:
     types: [submitted]
 
 jobs:
+  # Duplicates the config job in claude.yml verbatim except for the
+  # `effort` source (`claude_implement.effort` vs `claude.effort`). A
+  # workflow_call indirection would buy nothing here — the config is
+  # ~15 lines and the call would be more.
   config:
     runs-on: ubuntu-latest
     outputs:
@@ -46,38 +62,23 @@ jobs:
             echo "base_branch=$(echo "$CONFIG_JSON" | jq -r '.base_branch')"
             echo "claude_model=$(echo "$CONFIG_JSON" | jq -r '.claude_model')"
             echo "allowed_bots=$(echo "$CONFIG_JSON" | jq -r '.claude.allowed_bots')"
-            echo "effort=$(echo "$CONFIG_JSON" | jq -r '.claude.effort // "medium"')"
+            echo "effort=$(echo "$CONFIG_JSON" | jq -r '.claude_implement.effort // "medium"')"
           } >> "$GITHUB_OUTPUT"
 
   claude:
     needs: config
-    # Fires on @claude mentions that DO NOT contain `/devflow:implement` —
-    # those are claimed by claude-implement.yml, whose conditions are the
-    # exact inverse. The `!contains(.../devflow:implement)` clause is
-    # repeated per event source because each event surfaces the body under
-    # a different path (github.event.comment.body vs github.event.review.body
-    # vs github.event.issue.body / .title).
-    #
-    # PARTITION INVARIANT (read this before adding a new event source): for
-    # events that carry the trigger string on a SINGLE field (comment.body,
-    # review.body), the light path uses `!contains(field, '/devflow:implement')`
-    # and the heavy path uses `contains(field, '/devflow:implement')` — exact
-    # complements. For events with MULTIPLE body-bearing fields (the `issues`
-    # event has both `.body` and `.title`), the light path must AND-negate
-    # `/devflow:implement` across ALL such fields — which is the De Morgan
-    # dual of the heavy path's OR-test across the same fields:
-    #   light : !contains(body, X) && !contains(title, X)
-    #   heavy :  contains(body, X) ||  contains(title, X)
-    # Missing one field on the light side will cause BOTH workflows to fire
-    # when the trigger appears on that field. If you add a new event source,
-    # enumerate every body-bearing field on both sides and apply this transform.
+    # Inverse of claude.yml's `if:` — every clause that excludes
+    # `/devflow:implement` there REQUIRES it here. The two sets of
+    # clauses partition the event space exactly: for any single event,
+    # `contains(..., '/devflow:implement')` is either true or false, so
+    # exactly one workflow's `if:` evaluates true.
     if: |
       needs.config.outputs.enabled == 'true' &&
       (
-        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && !contains(github.event.comment.body, '/devflow:implement')) ||
-        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') && !contains(github.event.comment.body, '/devflow:implement')) ||
-        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude') && !contains(github.event.review.body, '/devflow:implement')) ||
-        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) && !contains(github.event.issue.body, '/devflow:implement') && !contains(github.event.issue.title, '/devflow:implement'))
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && contains(github.event.comment.body, '/devflow:implement')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') && contains(github.event.comment.body, '/devflow:implement')) ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude') && contains(github.event.review.body, '/devflow:implement')) ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) && (contains(github.event.issue.body, '/devflow:implement') || contains(github.event.issue.title, '/devflow:implement')))
       )
     runs-on: ubuntu-latest
     permissions:
@@ -90,20 +91,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          # /devflow:review and /devflow:pr-description read the diff via
+          # Matches claude.yml. /devflow:implement reads the diff via
           # three-dot notation against `origin/main` (`git diff
-          # origin/main...HEAD`), which internally computes a merge-base —
-          # an ancestor walk on both sides. Depth 50 covers the realistic
-          # case (PRs typically ≤ a few dozen commits behind main); long-
-          # lived branches that drift past that will error out visibly on
-          # the missing merge-base rather than silently produce wrong
-          # output. Bump to `fetch-depth: 0` if that becomes a recurring
-          # problem.
+          # origin/main...HEAD`), which internally computes a merge-base.
+          # Depth 50 covers the realistic case (PRs typically ≤ a few
+          # dozen commits behind main); long-lived branches that drift
+          # past that will error out visibly on the missing merge-base.
           fetch-depth: 50
 
-      # Provisioning mirrors claude-implement.yml so both partitions of
-      # the @claude event space resolve against the same toolchain. If
-      # you change either side, change the other.
+      # Provisioning mirrors claude.yml so both partitions of the
+      # @claude event space resolve against the same toolchain. If you
+      # change either side, change the other.
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -126,18 +124,14 @@ jobs:
           additional_permissions: |
             actions: read
 
-          # Register the official plugin marketplace plus this repo's own
-          # local marketplace. `./` resolves to the workflow's checkout root
-          # (where .claude-plugin/marketplace.json lives), so PR-branch changes
-          # to the marketplace or .claude/plugins/devflow/** are exercised by
-          # claude.yml on the PR that introduces them — a git-URL entry would
-          # always resolve to main. Local-path marketplaces are supported by
-          # claude-code-action since v1.0.28 (we pin @v1, the floating major).
+          # Keep plugin_marketplaces, plugins, and claude_args in sync
+          # with claude.yml — both listeners must expose the same skill
+          # surface so that whether a flow hits the light or heavy path
+          # is invisible to users invoking /devflow:* commands.
           plugin_marketplaces: |
             https://github.com/anthropics/claude-plugins-official.git
             ./
 
-          # Install plugins so skills like /pr-review-toolkit and /devflow:* are available
           plugins: |
             pr-review-toolkit@claude-plugins-official
             code-review@claude-plugins-official
@@ -266,13 +260,3 @@ jobs:
             Bash(mv:*),
             Bash(cp:*),
             Bash(tee:*)"
-          # assignee_trigger: "claude"
-          # label_trigger: "claude"
-
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
-
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://docs.claude.com/en/docs/claude-code/sdk#command-line for available options
-
