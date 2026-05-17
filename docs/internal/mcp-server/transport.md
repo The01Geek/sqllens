@@ -68,7 +68,7 @@ CLAUDE.md "Gotchas" again: `--network=host` on Docker Desktop puts the container
 
 ## `_AuthMiddleware` — auth runs per-request
 
-Even though FastMCP multiplexes sessions, the auth check runs per HTTP request, not per MCP session. The `Authenticator` is built once in `build_asgi_app` ([transport/http.py:58](../../../src/sqllens/transport/http.py#L58)); each request's headers are passed to `authenticator.authenticate(headers)`.
+Even though FastMCP multiplexes sessions, the auth check runs per HTTP request, not per MCP session. The `Authenticator` is built once in `build_asgi_app` in [transport/http.py](../../../src/sqllens/transport/http.py); each request's headers are passed to `authenticator.authenticate(headers)`.
 
 On success, the resulting `AuthContext` is stashed on `scope["state"]["auth"]` so downstream handlers can read it. Today nothing reads it — the tools are single-user closures over `cfg` — but the seam exists for future per-principal logic.
 

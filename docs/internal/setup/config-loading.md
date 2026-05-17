@@ -4,7 +4,7 @@ How `sqllens` resolves its runtime configuration, and where the current implemen
 
 ## Resolution order
 
-`Config.load()` ([src/sqllens/config.py:125](../../../src/sqllens/config.py#L125)) builds a `Config` instance from three sources, in this priority (highest wins):
+`Config.load()` ([src/sqllens/config.py](../../../src/sqllens/config.py)) builds a `Config` instance from three sources, in this priority (highest wins):
 
 1. **`init_settings`** — kwargs passed programmatically (used only by tests).
 2. **`env_settings`** — environment variables with prefix `SQLLENS_`, nested fields delimited by `__`. E.g. `SQLLENS_LLM__API_KEY`, `SQLLENS_DATABASE__URL`.
@@ -29,12 +29,13 @@ Top-level keys (all required to be present in the merged config, though most hav
 | `[memory]` | — | All defaulted. `persist_dir = Path("./chroma")` (relative to CWD). |
 | `[auth]` | — | `mode` defaults to `"none"`. `jwt` mode is scaffolded but not implemented. |
 | `[server]` | — | `transport` defaults to `"stdio"`. `host`/`port` only used for `transport = "http"`. |
+| `[agent]` | — | `max_tool_iterations` defaults to `20`. Raised from the framework's built-in `10` — real-world schema exploration requires more iterations. Env var: `SQLLENS_AGENT__MAX_TOOL_ITERATIONS`. |
 
 `extra = "forbid"` is set on the top-level `Config`, so unknown keys raise a `ValidationError` rather than being silently dropped.
 
 ### Sub-models are `BaseModel`, not `BaseSettings`
 
-Only the top-level `Config` inherits from `pydantic_settings.BaseSettings`. The five sub-sections (`DatabaseConfig`, `LLMConfig`, `MemoryConfig`, `AuthConfig`, `ServerConfig`) are plain `pydantic.BaseModel`.
+Only the top-level `Config` inherits from `pydantic_settings.BaseSettings`. The six sub-sections (`DatabaseConfig`, `LLMConfig`, `MemoryConfig`, `AuthConfig`, `ServerConfig`, `AgentRuntimeConfig`) are plain `pydantic.BaseModel`.
 
 This matters: a nested `BaseSettings` spins up its own env-resolution source independent of the parent. That source has no prefix, so it silently pulls in any process-level env var matching a sub-field name — `MODE`, `HOST`, `PORT`, `TRANSPORT`, `URL`, `NAME`, etc. A stray `MODE=...` in the environment was enough to fail `Config.load` with an `AuthConfig.mode` enum error.
 

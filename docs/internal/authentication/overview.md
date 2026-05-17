@@ -65,8 +65,8 @@ If you want this now, the design notes are in the module docstring; the implemen
 
 `build_authenticator(cfg.auth)` is called once per process:
 
-- `transport/http.py:58` (`build_asgi_app`) — used by integration tests.
-- `transport/http.py:86` (`run`) — used by `sqllens serve` in HTTP mode.
+- `build_asgi_app` in `transport/http.py` — used by integration tests.
+- `run` in `transport/http.py` — used by `sqllens serve` in HTTP mode.
 
 The authenticator is then held by `_AuthMiddleware` for the lifetime of the server. There is **no hot-reload** — changing `auth.mode` or `auth.bearer_token` requires a process restart.
 
