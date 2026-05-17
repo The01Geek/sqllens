@@ -1,22 +1,30 @@
 ---
 name: review-and-fix
-description: Use when you need a comprehensive code review that also automatically fixes findings. Takes an optional PR number as argument.
+description: Use when you need findings on a PR or current branch to be auto-applied, not just reported.
 argument-hint: pr-number
 ---
 
-# /review-and-fix — Review, Fix, and Verify Loop
+# /devflow:review-and-fix — Review, Fix, and Verify Loop
 
-You are the review-and-fix orchestrator. Run the four-phase review engine, fix findings, and re-run until the review passes.
+You are the review-and-fix orchestrator. Run /devflow:review's review engine, fix the findings it surfaces, and re-run until the engine returns a clean verdict.
 
-**Input:** Optional PR number as `$ARGUMENTS`. If omitted, review and fix current branch.
+**Input:** Optional PR number as `$ARGUMENTS`. If omitted, review and fix the current branch.
 
-**Key principle:** You perform fixes DIRECTLY in this session. Do NOT delegate fixes to a subagent. You need full conversation context to apply receiving-code-review principles (technical evaluation, pushback, verification).
+**Key principle:** You perform fixes DIRECTLY in this session. Do NOT delegate fixes to a subagent. You need full conversation context to apply `superpowers:receiving-code-review` principles (technical evaluation, pushback, verification).
+
+## Engine source of truth
+
+This skill wraps /devflow:review's four-phase engine in a fix loop. Phases 0 through 4.3 — setup, diff classification, checklist generation (including >10-file batching), checklist verification, review agents (including the exact per-agent prompts), and aggregation — live in `/devflow:review`'s SKILL.md and are authoritative. Read them on every Step 1; never improvise the engine or paraphrase the Phase 3 prompts. Drift between the two skills is the single biggest cause of /devflow:review-and-fix missing findings /devflow:review caught.
+
+This skill replaces only Phase 4.4 (formal GitHub review posting), which it defers to **Loop Exit** so the post reflects the final state after fixes converge.
+
+**Maintainer rule.** Engine changes belong in /devflow:review's SKILL.md; this file should only touch the loop wrapper, the Step 2.5 verification gate, the fix step, the convergence check, or Loop Exit's verdict mapping. **Violating the letter of these phases is violating the spirit** — even when a paraphrase looks faithful, the downstream agents are calibrated to /devflow:review's exact wording.
 
 ---
 
 ## Main Loop
 
-Execute this loop with a maximum of 4 iterations:
+Execute this loop with a maximum of 4 iterations.
 
 ### Iteration Start
 
@@ -24,43 +32,26 @@ Output: `Review iteration {N}/4...`
 
 ### Step 1: Run the Review Engine
 
-Execute the same four-phase review engine as the `/review` skill:
+**Mandatory and authoritative.** Use `Glob` with pattern `**/devflow/skills/review/SKILL.md` to locate /devflow:review's SKILL.md, then `Read` it in full. Execute its **Phases 0 through 4.3 verbatim** — do not improvise the Phase 3 agent prompts, do not skip the Phase 1 >10-file batching, do not substitute your own verdict criteria. This skill deliberately does *not* contain a paraphrase of those phases; if you cannot read /devflow:review's SKILL.md, error out (see Error Handling).
 
-**Phase 0: Setup**
-- Check for uncommitted changes (warn if present)
-- Determine diff: if `$ARGUMENTS` is a PR number, use `gh pr diff $ARGUMENTS`; otherwise use `git diff origin/main...HEAD`
-- If diff commands fail (non-zero exit code), stop immediately and report the error
-- Get changed file list from the diff
-- If diff is empty, report "No changes to review" and stop
-- Discover related GitHub issue: check PR body for `Resolves/Fixes/Closes #N`, then branch name for `issue-{N}` pattern (if reviewing a PR, use the PR's head branch name, not the local branch). If found, fetch issue via `gh issue view` and store the title + first 200 lines of the body as `issue_context`. If not found, note "No related issue found — skipping issue compliance check."
-- Run **Phase 0.5 (diff classification)** per `/review`'s SKILL.md to set `small_diff`, `config_only`, `has_new_types`, and `checklist_skipped`. Subsequent phases below honor those flags exactly as the `/review` engine specifies (skip Phase 1+2 when `checklist_skipped = "intentional"`; skip `pr-test-analyzer` and `type-design-analyzer` per the table). The auto-fix loop's iteration cap is unchanged (still max 4) — Phase 0.5 only scales agent dispatch, not the loop.
+Skip /devflow:review's Phase 4.4 (formal GitHub review posting). The fix loop posts at **Loop Exit** instead, so the post reflects the final state after fixes converge.
 
-**Phase 1: Verification Checklist Generation**
-- Launch `devflow:checklist-generator` agent with the diff and file list
-- If `issue_context` is available, include it in the prompt and instruct the generator to also produce checklist items verifying the PR implements the key requirements from the issue's summary and desired behavior sections (focus on functional requirements, not stylistic suggestions)
-- Parse JSON checklist from the response
-- If generation fails, retry once; if still fails, set `checklist_skipped` flag and skip to Phase 3
+**Red flags — STOP and run Glob+Read if you're about to:**
+- Skip the Read because "I already know what /devflow:review does"
+- Paraphrase the Phase 3 agent prompts instead of using them verbatim
+- Treat the engine recap below as a substitute for the canonical phases
+- Guess the path instead of running Glob
 
-**Phase 2: Checklist Verification**
-- Launch `devflow:checklist-verifier` agents in batches of 8 (one per checklist item)
-- Collect PASS/FAIL/INCONCLUSIVE verdicts
-- Record timed-out agents as INCONCLUSIVE
+Every drift incident this skill has had traces to one of those rationalizations. Violating the letter of /devflow:review's phases is violating the spirit, even when the paraphrase reads correct.
 
-**Phase 3: Existing Review Agents**
-- Launch in parallel: `pr-review-toolkit:code-reviewer`, `pr-review-toolkit:silent-failure-hunter`, `pr-review-toolkit:comment-analyzer`, `pr-review-toolkit:pr-test-analyzer`, `superpowers:code-reviewer`
-- Use `gh pr diff $ARGUMENTS` if reviewing a PR by number, or `git diff origin/main...HEAD` if reviewing the current branch — pass the correct diff command to each agent
-- Conditionally launch `pr-review-toolkit:type-design-analyzer` if new types are in the diff
-- Collect findings with severity labels. Track the count of failed agents.
-
-**Phase 4: Aggregation and Verdict**
-- Build the report (same format as `/review`, including the Issue Compliance section noting which issue was checked)
-- Determine verdict using the same rules (including: checklist_skipped → max APPROVE WITH CAVEAT; 2+ failed agents → partial review coverage note)
+The engine produces, for this iteration: a verdict in {APPROVE, APPROVE WITH CAVEAT / APPROVE with notes, REJECT} plus a markdown report. Phase 0.5 flags (`small_diff`, `config_only`, `has_new_types`, `checklist_skipped`) apply unchanged. **The fix loop's iteration cap is still max 4** — Phase 0.5 only scales agent dispatch, not the loop.
 
 ### Step 2: Check Verdict
 
-If verdict is **APPROVE** → break out of the loop. Output the report and: "Review passed. All checks approved."
-
-If verdict is **REJECT** → continue to Step 2.5.
+- Engine verdict **APPROVE** AND no advisory findings carry forward from any prior Step 2.5 → break out of the loop. Go to **Loop Exit** with final verdict `APPROVE`.
+- Engine verdict **APPROVE** but advisory findings have been parked → break out of the loop. Go to **Loop Exit** with final verdict `APPROVE WITH ADVISORY NOTES`.
+- Engine verdict **APPROVE WITH CAVEAT** / **APPROVE with notes** → break out of the loop. Go to **Loop Exit** with final verdict `APPROVE WITH CAVEAT`.
+- Engine verdict **REJECT** → continue to Step 2.5.
 
 ### Step 2.5: Pre-fix verification gate
 
@@ -77,12 +68,13 @@ For each Critical/Important finding raised by exactly one Phase 3 agent:
    - WebFetch the most-authoritative-looking source. Preference order: official documentation → tool's GitHub repo / release notes → blog or third-party tracker. Use WebSearch to find the URL first only when no canonical doc URL is obvious.
    - Classify the result:
      - **Confirmed** (the docs explicitly support the agent's claim) → keep finding; auto-fix in Step 3.
-     - **Refuted** (the docs explicitly contradict the agent's claim) → drop the finding. Append a line to the workpad's `Devflow Reflection` section: `verified false positive — {claim text} — refuted by {url}`. (The workpad is the durable surface a future re-run/review can read; this builds an evidence trail of which claim-shapes keep getting falsified.)
+     - **Refuted** (the docs explicitly contradict the agent's claim) → **demote to *advisory* with a `refuted by {url}` tag**. Do NOT auto-fix. Also append a line to the workpad's `Devflow Reflection` section: `verified false positive — {claim text} — refuted by {url}` to build the evidence trail. The finding still surfaces in this iteration's `## Advisory Findings` section so the human reviewer can override if the docs were wrong about the codebase. (Earlier versions of this skill *dropped* refuted findings entirely; that hid user-visible evidence and was a primary drift mechanism vs. /devflow:review.)
      - **Inconclusive** (the docs don't directly address the claim, or the fetched page is ambiguous) → demote to *advisory* — do NOT auto-fix.
 
-3. **Add an `## Advisory Findings` section to the iteration's report** listing every advisory finding verbatim (the original agent's claim plus a one-line reason: "inconclusive after web verification" or "over verification budget"). Advisory findings:
+3. **Add an `## Advisory Findings` section to the iteration's report** listing every advisory finding verbatim (the original agent's claim plus a one-line reason: `refuted by {url}`, `inconclusive after web verification`, or `over verification budget`). Advisory findings:
    - Are surfaced for human attention but are **not** auto-fixed.
-   - Do **not** contribute to the REJECT/APPROVE verdict on the next iteration — they're parked, not failing.
+   - Do **not** contribute to the per-iteration REJECT/APPROVE verdict — they're parked, not failing, so the loop can converge.
+   - **Do** contribute to the final reported verdict at Loop Exit: if any advisory findings survive when the engine would otherwise return a clean APPROVE, the final verdict becomes **APPROVE WITH ADVISORY NOTES**, and the full advisory list is included in the GitHub post. This prevents the loop from silently dismissing concerns it couldn't fix.
    - Carry forward across iterations unchanged; do not re-verify the same advisory finding on a later iteration in the same run.
 
 **Agreement heuristic.** Two findings agree when they describe the same defect (same root cause + same affected file/line span); identical wording is not required. Use your own judgment; do not invoke a subagent for this.
@@ -91,7 +83,7 @@ For each Critical/Important finding raised by exactly one Phase 3 agent:
 
 ### Step 3: Fix Findings
 
-Apply the `superpowers:receiving-code-review` principles. After Step 2.5, the findings reaching Step 3 are: Phase 2 checklist FAILs, corroborated Phase 3 findings, confirmed-by-web findings, and codebase-claim findings. Refuted findings have already been dropped; advisory findings stay parked.
+Apply the `superpowers:receiving-code-review` principles. After Step 2.5, the findings reaching Step 3 are: Phase 2 checklist FAILs, corroborated Phase 3 findings, confirmed-by-web findings, and codebase-claim findings. Refuted and inconclusive findings have been demoted to advisory and are not in this list; they stay parked.
 
 1. **Read all findings** without reacting. Understand the full picture before fixing anything.
 
@@ -134,20 +126,27 @@ Note: convergence is *not* a way around an unresolved REJECT. If iter N's verdic
 
 ## Loop Exit
 
-### On APPROVE:
-Output the final report and: "Review passed after {N} iteration(s). All checks approved."
+The final verdict drives both the chat output and the formal GitHub review post. This mapping is the /devflow:review-and-fix equivalent of /devflow:review's Phase 4.4, adapted for the fix loop's possible end states:
 
-### On max iterations (4) reached with REJECT:
-Output the final report and: "Review still has findings after 4 iterations. Remaining issues require manual review:"
-List all unresolved findings.
+| Final verdict | When it applies | `gh pr review` action |
+|---|---|---|
+| **APPROVE** | Last iteration's engine verdict was APPROVE and no advisory findings were parked | `gh pr review $ARGUMENTS --approve --body "$REPORT"` |
+| **APPROVE WITH ADVISORY NOTES** | Last iteration's engine verdict was APPROVE but advisory findings survive | `gh pr review $ARGUMENTS --comment --body "$REPORT"` |
+| **APPROVE WITH CAVEAT** / **APPROVE with notes** | Last iteration's engine verdict was already in this state (e.g. checklist generation failed) | `gh pr review $ARGUMENTS --comment --body "$REPORT"` |
+| **REJECT** | Max iterations (4) reached, or convergence exit, with the iteration's verdict still REJECT | `gh pr review $ARGUMENTS --request-changes --body "$REPORT"` |
 
-**Then record the unresolved REJECT as a formal GitHub review (PR mode only).** If `$ARGUMENTS` is a PR number — i.e. you were reviewing an actual PR rather than the current branch — you MUST also submit a `--request-changes` review so the outstanding rejection becomes a visible merge signal instead of a chat-only message that gets missed:
+`$REPORT` is the final iteration's full report, including its `## Advisory Findings` section if any.
 
-```bash
-gh pr review $ARGUMENTS --request-changes --body "$REPORT"
-```
+**Current-branch mode (no PR number argument):** skip the GitHub post — there is nothing to post to. Output the report to chat only.
 
-where `$REPORT` is the full final report. If `gh pr review` fails (e.g. the token cannot request changes on its own PR, or lacks permission), fall back to `gh pr comment $ARGUMENTS --body "$REPORT"` and note in your chat output that the formal review could not be posted. **Never silently skip this on an unresolved REJECT** — the auto-fix loop giving up is exactly the case where a human merge gate matters most. This mirrors the `/review` skill's "record the verdict as a formal GitHub review" step; in current-branch mode (no PR number) there is nothing to post to, so skip it.
+**On `gh pr review` failure** (e.g. own-PR limitation, missing permissions, token can't request changes): fall back to `gh pr comment $ARGUMENTS --body "$REPORT"` and note in chat that the formal review could not be posted. **Never silently skip the post on a REJECT** — the auto-fix loop giving up is exactly when a human merge gate matters most.
+
+### Chat output
+
+- **APPROVE**: `Review passed after {N} iteration(s). All checks approved.`
+- **APPROVE WITH ADVISORY NOTES**: `Review passed after {N} iteration(s) with {M} advisory finding(s) parked for human review. See report.`
+- **APPROVE WITH CAVEAT**: `Review passed after {N} iteration(s) with caveats. See report.`
+- **REJECT**: `Review still has findings after {N} iteration(s). Remaining issues require manual review:` followed by the list of unresolved findings.
 
 ---
 
@@ -156,3 +155,4 @@ where `$REPORT` is the full final report. If `gh pr review` fails (e.g. the toke
 - **Agent failures**: Treat as INCONCLUSIVE or note in report. Never abort the entire review.
 - **Test failures after fixes**: Fix the test failures before re-running the review loop.
 - **Commit failures**: If a commit fails (e.g., pre-commit hook), fix the issue and retry the commit.
+- **Cannot locate /devflow:review's SKILL.md**: This is fatal — /devflow:review-and-fix depends on the engine. Error out with a clear message; do not improvise by paraphrasing the phases. (See "Engine source of truth" at the top.)

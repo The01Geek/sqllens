@@ -1,14 +1,16 @@
 ---
 name: review
-description: Use when you need a comprehensive code review of a PR or the current branch with a structured APPROVE/REJECT verdict. Does not fix issues. Takes an optional PR number as argument.
+description: Use when you need a code-review verdict on a PR or current branch, without auto-applying any fixes.
 argument-hint: pr-number
 ---
 
-# /review — Comprehensive PR Review
+# /devflow:review — Comprehensive PR Review
 
 You are the review engine orchestrator. Run a four-phase review and present an APPROVE/REJECT verdict.
 
 **Input:** Optional PR number as `$ARGUMENTS`. If omitted, review current branch vs main.
+
+**Engine sharing.** Phases 0 through 4.3 of this skill are also executed verbatim by `/devflow:review-and-fix` (which wraps them in a fix loop and replaces Phase 4.4 with a deferred post at its own Loop Exit). When modifying engine behavior here — Phase 3 agent prompts, Phase 1 batching, Phase 0.5 classification, Phase 4 verdict criteria — verify `/devflow:review-and-fix` still produces the same findings; that's where divergence has historically slipped in. `/devflow:review-and-fix`'s SKILL.md deliberately keeps no paraphrase of these phases, so changes here propagate automatically as long as the file is reachable at the path `**/devflow/skills/review/SKILL.md`.
 
 ---
 
