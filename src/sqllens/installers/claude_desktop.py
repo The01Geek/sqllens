@@ -4,7 +4,7 @@
 """One-command installer that wires SQL Lens into Claude Desktop's MCP config.
 
 Automates the runbook documented in
-``docs/internal/claude-desktop-windows-install.md``: writes a BOM-free
+``docs/internal/installation/claude-desktop-windows-install.md``: writes a BOM-free
 ``sqllens.toml``, on Windows writes a ``.cmd`` launcher that bundles the
 ``command`` + ``args`` pair into the single-``command`` field Claude Desktop's
 ``mcpServers`` schema exposes, and merges a ``mcpServers`` entry into

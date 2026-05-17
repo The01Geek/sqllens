@@ -14,13 +14,13 @@ Either alone is insufficient: a misconfigured role + a code path that bypasses t
 
 ## What the guard does
 
-[src/sqllens/safety/readonly.py:34-68](../../../src/sqllens/safety/readonly.py#L34-L68) — `assert_select_only(sql, *, dialect=None)`:
+`assert_select_only(sql, *, dialect=None)` in [src/sqllens/safety/readonly.py](../../../src/sqllens/safety/readonly.py):
 
 1. **Reject empty / whitespace-only SQL.**
 2. **Parse with `sqlglot`** (dialect-aware). Parse failure → `UnsafeSqlError`. Rationale in the module docstring: *"we'd rather block a query we can't understand than execute it."* This is opinionated and intentional.
 3. **Reject multiple statements.** `sqlglot.parse` returns a list; anything but length 1 is rejected. Stops `SELECT 1; DROP TABLE x` style payloads.
 4. **Whitelist root expression types:** `Select`, `Union`, `Intersect`, `Except`, `With` (CTE chains). Anything else — `Insert`, `Update`, `Delete`, `Drop`, `Create`, `Alter`, `Pragma`, `Truncate`, etc. — is rejected by the negative-type-check at the root.
-5. **Walk the entire parse tree** and reject if any DML/DDL node is nested *anywhere* — e.g. `WITH x AS (DELETE FROM ... RETURNING *) SELECT * FROM x`. Without the walk, a CTE could smuggle a mutation past the root check.
+5. **Walk the entire parse tree** and reject if any DML/DDL node is nested *anywhere* — e.g. `WITH x AS (DELETE FROM ... RETURNING *) SELECT * FROM x` (Postgres syntax). Without the walk, a CTE could smuggle a mutation past the root check.
 
 The walk also normalizes between sqlglot versions: older versions yield `(node, parent, key)` tuples; newer ones yield bare nodes. The code handles both.
 
@@ -34,7 +34,7 @@ If a query the guard would accept causes side effects in your database, the **da
 
 ## How it gets wired in
 
-[src/sqllens/safety/__init__.py:21-39](../../../src/sqllens/safety/__init__.py#L21-L39) defines `ReadOnlyGuardRunner` — a decorator that wraps any `SqlRunner` and runs `assert_select_only` before delegating:
+[src/sqllens/safety/__init__.py](../../../src/sqllens/safety/__init__.py) defines `ReadOnlyGuardRunner` — a decorator that wraps any `SqlRunner` and runs `assert_select_only` before delegating:
 
 ```python
 class ReadOnlyGuardRunner(SqlRunner):
@@ -50,7 +50,7 @@ class ReadOnlyGuardRunner(SqlRunner):
         return await self._inner.run_sql(args, context)
 ```
 
-`build_agent` ([src/sqllens/agent/factory.py:62-64](../../../src/sqllens/agent/factory.py#L62-L64)) wraps the runner when `cfg.database.read_only` is true (the default):
+`build_agent` in [src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py) wraps the runner when `cfg.database.read_only` is true (the default):
 
 ```python
 sql_runner = build_sql_runner(cfg.database.url)
@@ -62,7 +62,7 @@ The composition pattern is deliberate: the guard never touches the lifted agent 
 
 ## Dialect handling
 
-`_sqlglot_dialect(url)` in [src/sqllens/agent/factory.py:125-134](../../../src/sqllens/agent/factory.py#L125-L134) maps URL schemes to sqlglot dialect names:
+`_sqlglot_dialect(url)` in [src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py) maps URL schemes to sqlglot dialect names:
 
 | URL prefix | Dialect |
 |---|---|

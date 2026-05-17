@@ -4,7 +4,7 @@ How requests reach `build_server` from the outside world, and the two footguns t
 
 ## Dispatch
 
-[src/sqllens/server.py:40-51](../../../src/sqllens/server.py#L40-L51) picks the transport based on `cfg.server.transport`:
+`run` in [src/sqllens/server.py](../../../src/sqllens/server.py) picks the transport based on `cfg.server.transport`:
 
 ```python
 def run(cfg: Config) -> None:
@@ -27,7 +27,7 @@ The FastMCP library handles everything — framing, request/response cycle, life
 
 ## HTTP mode — the three middleware layers
 
-[src/sqllens/transport/http.py:80-95](../../../src/sqllens/transport/http.py#L80-L95) builds a stack around FastMCP's Streamable HTTP app:
+The `run` function in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py) builds a stack around FastMCP's Streamable HTTP app:
 
 ```
 uvicorn
@@ -47,7 +47,7 @@ mcp.streamable_http_app()  — FastMCP's Streamable HTTP handler
 
 FastMCP registers its endpoint at the **bare** path `/mcp`. Every MCP client we care about (Cursor, Claude Desktop, MCP Inspector) configures URLs ending in `/mcp/` (with trailing slash). Without intervention, `POST /mcp/` would 404.
 
-`_PathNormalizer` ([src/sqllens/transport/http.py:101-133](../../../src/sqllens/transport/http.py#L101-L133)) bridges the gap:
+`_PathNormalizer` (in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py)) bridges the gap:
 
 | Incoming path | Action |
 |---|---|

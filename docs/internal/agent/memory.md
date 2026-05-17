@@ -15,7 +15,7 @@ This is what `cfg.memory.similarity_threshold` controls: results with a similari
 
 ## Wiring
 
-`build_agent` ([src/sqllens/agent/factory.py:65-68](../../../src/sqllens/agent/factory.py#L65-L68)) constructs a `ChromaAgentMemory` per process:
+`build_agent` ([src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py)) constructs a `ChromaAgentMemory` per process:
 
 ```python
 memory = ChromaAgentMemory(
@@ -24,7 +24,7 @@ memory = ChromaAgentMemory(
 )
 ```
 
-The two memory tools are then registered alongside `RunSqlTool` ([factory.py:82-83](../../../src/sqllens/agent/factory.py#L82-L83)):
+The two memory tools are then registered alongside `RunSqlTool` inside `build_agent` ([factory.py](../../../src/sqllens/agent/factory.py)):
 
 ```python
 tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
@@ -73,7 +73,7 @@ If you're profiling and see Chroma operations blocking, check that the executor 
 
 The upstream framework also defined memory backends other than Chroma; those were dropped during the lift. `ChromaAgentMemory` is the only concrete `AgentMemory` implementation in SQL Lens. The abstract `AgentMemory` interface lives at [src/sqllens/agent/capabilities/agent_memory/base.py](../../../src/sqllens/agent/capabilities/agent_memory/base.py) — if a second backend is ever needed, that's the contract to implement.
 
-The third upstream memory tool — `SaveTextMemoryTool` ([agent/tools/agent_memory.py:269](../../../src/sqllens/agent/tools/agent_memory.py#L269)) — is defined in the lifted code but **not registered** in `factory.py`. It would let the agent save free-text notes (not just tool-arg recordings). If/when we want that, register it alongside the existing two tools.
+The third upstream memory tool — `SaveTextMemoryTool` (in [agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py)) — is defined in the lifted code but **not registered** in `factory.py`. It would let the agent save free-text notes (not just tool-arg recordings). If/when we want that, register it alongside the existing two tools.
 
 ## Debugging memory hits
 
