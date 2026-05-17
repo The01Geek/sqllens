@@ -16,10 +16,8 @@ Runbook for connecting SQL Lens to Claude Desktop on a fresh Windows machine. Wa
 
 ```powershell
 pip install "sqllens[all]"
-sqllens version
+sqllens --version
 ```
-
-> The CLI uses `sqllens version` (subcommand), not `sqllens --version` (flag). The flag form will error.
 
 If `sqllens` is "not recognized" after install, close and reopen PowerShell so the new `Scripts\` directory takes effect.
 
@@ -184,6 +182,5 @@ These are real bugs we worked around in this runbook. Fixing them in the codebas
 
 - ~~**`RunSqlTool` defaults its scratch directory to `Path(".")`**~~ — **fixed in issue #10 / PR #21.** Scratch now lives under `tempfile.gettempdir() / "sqllens"`. The `.cmd` wrapper in step 6 is retained for JSON-config ergonomics, not correctness.
 - **`sqllens validate` requires `llm.api_key`** — secrets should be optional during structural validation.
-- **`sqllens --version` flag is missing** — only the subcommand form works.
 - **Config loader doesn't detect UTF-8 BOM** — emits an opaque parser error instead of a clear "your file has a BOM" message.
 - **Tool errors get flattened into a single channel** — `RunSqlTool` wraps every internal failure into a `ToolResult` with `success=False` and `error = str(e)`. The agent loop forwards `result.error` to the LLM on failure (the `Error executing query: …` prefix lives on `result_for_llm` but is dropped by the agent). The default system prompt now contains a `Tool Errors:` directive (issue #14) that tells the model to quote that string verbatim instead of paraphrasing, so the underlying message reaches the user; a protocol-level split between tool-internal and SQL-execution errors would still let the agent and UI react differently.

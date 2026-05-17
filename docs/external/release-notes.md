@@ -8,6 +8,7 @@ This page lists user-visible changes in each released version of SQL Lens. For t
 
 ## Unreleased
 
+- **[Feature] `--version` flag on the sqllens CLI** — Running `sqllens --version` now prints the installed version and exits, matching common CLI conventions. The existing `sqllens version` subcommand is preserved. (#19)
 - **[Improvement] Ship stdio Claude Desktop example and add Windows config path to README** — A new `examples/mcp-clients/claude_desktop_stdio.json` snippet steers Claude Desktop users onto the recommended stdio launch pattern (simpler than HTTP — no port management), and the existing HTTP example is renamed to `claude_desktop_http.json` to make the two variants explicit. The README and getting-started guide now list the Windows config path `%APPDATA%\Claude\claude_desktop_config.json` alongside the macOS path, and point Windows users at the dedicated install guide that documents the `.cmd` launcher workaround for the non-writable working-directory issue. (#22)
 - **Fix: Access-denied errors on every query under Claude Desktop on Windows** — SQL Lens previously wrote per-query scratch CSVs into its current working directory, which under Claude Desktop on Windows is the launcher's install folder and is not writable by the user. Every query failed with `[WinError 5] Access is denied`. Scratch files are now written into your user temp directory regardless of how the server is launched, so Claude Desktop on Windows works out of the box without the `.cmd` wrapper workaround. (#21)
 

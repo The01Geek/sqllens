@@ -44,8 +44,8 @@ Keeping sub-models as `BaseModel` makes the parent `Config` the only env-aware l
 
 Two commands load config:
 
-- `sqllens serve` ([src/sqllens/cli.py:48](../../src/sqllens/cli.py#L48)) — calls `Config.load(config)`. On exception, prints `Config error: <msg>` and exits 2.
-- `sqllens validate` ([src/sqllens/cli.py:66](../../src/sqllens/cli.py#L66)) — calls `Config.load(config)` and prints a one-line summary on success. On exception, prints `Invalid: <msg>` and exits 2.
+- `sqllens serve` (`serve` command in [src/sqllens/cli.py](../../src/sqllens/cli.py)) — calls `Config.load(config)`. On exception, prints `Config error: <msg>` and exits 2.
+- `sqllens validate` (`validate` command in [src/sqllens/cli.py](../../src/sqllens/cli.py)) — calls `Config.load(config)` and prints a one-line summary on success. On exception, prints `Invalid: <msg>` and exits 2.
 
 `validate` performs **structural** validation only — it doesn't open the database, doesn't ping the LLM, doesn't bind a port. It does, however, run through the full pydantic-settings pipeline, which currently means it inherits all field-required constraints (including `llm.api_key`).
 
@@ -82,7 +82,7 @@ The two approaches aren't mutually exclusive; the structural fix is cleaner but 
 
 1. Add the field to the appropriate `*Config` class in [config.py](../../src/sqllens/config.py). New sub-section models must inherit from `pydantic.BaseModel`, not `BaseSettings` — see [Sub-models are BaseModel, not BaseSettings](#sub-models-are-basemodel-not-basesettings).
 2. If it's required, set `Field(..., description=...)`. If optional, give it a default.
-3. Update the `_SAMPLE_CONFIG` template at the bottom of [cli.py](../../src/sqllens/cli.py#L85) so `sqllens init` writes a working starter that includes it.
+3. Update the `_SAMPLE_CONFIG` template at the bottom of [cli.py](../../src/sqllens/cli.py) so `sqllens init` writes a working starter that includes it.
 4. Document the corresponding env var spelling (top-level fields: `SQLLENS_FOO`; nested: `SQLLENS_SECTION__FOO`).
 5. If the field affects connector behaviour, also document it in the runbook ([claude-desktop-windows-install.md](claude-desktop-windows-install.md)) under "Point at a real database".
 
