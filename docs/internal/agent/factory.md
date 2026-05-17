@@ -42,7 +42,7 @@ See [agent/tool-scratch-storage.md](tool-scratch-storage.md) for the full story,
 
 ## Why `max_tool_iterations` is a config knob
 
-The upstream `AgentConfig` defaults `max_tool_iterations=10`. That's enough for a trained DB but too low for untrained schemas where the agent needs separate iterations for catalog lookups, memory searches, and the final query. Surfacing the knob via [config.py:104-104](../../../src/sqllens/config.py#L104) (and `SQLLENS_AGENT__MAX_TOOL_ITERATIONS`) lets operators raise it without patching the lifted code.
+The upstream `AgentConfig` defaults `max_tool_iterations=10`. That's enough for a trained DB but too low for untrained schemas where the agent needs separate iterations for catalog lookups, memory searches, and the final query. Surfacing the knob via `AgentRuntimeConfig.max_tool_iterations` in [config.py](../../../src/sqllens/config.py) (and `SQLLENS_AGENT__MAX_TOOL_ITERATIONS`) lets operators raise it without patching the lifted code.
 
 ## `build_sql_runner` — URL → SqlRunner
 

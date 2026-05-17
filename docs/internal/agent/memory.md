@@ -43,7 +43,7 @@ All three live under `[memory]` in `sqllens.toml` (or `SQLLENS_MEMORY__*` env va
 | `collection` | `sqllens` | `SQLLENS_MEMORY__COLLECTION` | Logical collection name inside the persisted store. Letting two processes share a `persist_dir` with different collections is supported but rarely useful. |
 | `similarity_threshold` | `0.7` | `SQLLENS_MEMORY__SIMILARITY_THRESHOLD` | Cosine similarity floor in `[0.0, 1.0]`. Hits below this are dropped. |
 
-Schema definition: [src/sqllens/config.py:65-73](../../../src/sqllens/config.py#L65-L73) (`MemoryConfig`).
+Schema definition: `MemoryConfig` in [src/sqllens/config.py](../../../src/sqllens/config.py).
 
 The Claude Desktop installer ([src/sqllens/installers/claude_desktop.py](../../../src/sqllens/installers/claude_desktop.py)) writes `persist_dir` as a TOML *literal* string so Windows backslashes aren't escape-interpreted. See [installation/claude-desktop-installer.md](../installation/claude-desktop-installer.md).
 

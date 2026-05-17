@@ -60,7 +60,7 @@ If we ever want richer introspection (table list, row counts), it should be a *s
 
 ## Why both tools take `cfg` from the closure, not a parameter
 
-`build_server(cfg)` is called once per process from [src/sqllens/server.py:42](../../../src/sqllens/server.py#L42) (stdio) or [src/sqllens/transport/http.py:56](../../../src/sqllens/transport/http.py#L56) (HTTP). The tools are closures over that `cfg`. MCP's `@mcp.tool()` decorator wants a function whose parameters become the tool schema — passing `cfg` as an argument would either pollute the schema or require a workaround. The closure pattern is the path of least resistance.
+`build_server(cfg)` is called once per process from `run()` in [src/sqllens/server.py](../../../src/sqllens/server.py) (stdio) or `build_asgi_app`/`run` in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py) (HTTP). The tools are closures over that `cfg`. MCP's `@mcp.tool()` decorator wants a function whose parameters become the tool schema — passing `cfg` as an argument would either pollute the schema or require a workaround. The closure pattern is the path of least resistance.
 
 This means **config changes require a process restart**. There is no hot-reload, and the agent singleton in `query_database.py` reinforces this — even if we re-ran `build_server`, the cached `_AGENT` would still use the old config. If runtime reconfiguration ever matters, both this closure and the agent singleton need to change.
 
