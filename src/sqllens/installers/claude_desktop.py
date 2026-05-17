@@ -5,10 +5,11 @@
 
 Automates the runbook documented in
 ``docs/internal/claude-desktop-windows-install.md``: writes a BOM-free
-``sqllens.toml``, on Windows writes a ``.cmd`` launcher that sets a writable
-CWD before invoking the server (workaround for issue #10), and merges a
-``mcpServers`` entry into ``claude_desktop_config.json`` while preserving any
-existing ``preferences`` and sibling servers.
+``sqllens.toml``, on Windows writes a ``.cmd`` launcher that bundles the
+``command`` + ``args`` pair into the single-``command`` field Claude Desktop's
+``mcpServers`` schema exposes, and merges a ``mcpServers`` entry into
+``claude_desktop_config.json`` while preserving any existing ``preferences``
+and sibling servers.
 
 The module is intentionally a CLI-side concern, not under ``sqllens.tools``
 which is reserved for MCP tool wrappers.
@@ -22,10 +23,12 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 PLATFORM_WIN = "win32"
@@ -62,18 +65,18 @@ class InstallResult:
     options: InstallOptions
     platform_name: str
     server_command: str
-    server_args: list[str]
+    server_args: tuple[str, ...]
     toml_content: str
     cmd_path: Path | None
     cmd_content: str | None
-    json_after: dict[str, Any]
+    json_after: Mapping[str, Any]
     json_diff: str
     backup_path: Path | None
     toml_written: bool
     cmd_written: bool
     dry_run: bool
     preserved_sibling_servers: int
-    args_prefix: list[str] = field(default_factory=list)
+    args_prefix: tuple[str, ...] = ()
 
     @property
     def used_python_module_fallback(self) -> bool:
@@ -95,7 +98,7 @@ class _Invocation:
     """How the MCP client should spawn the SQL Lens server."""
 
     command: str
-    args_prefix: list[str] = field(default_factory=list)
+    args_prefix: tuple[str, ...] = ()
 
     @property
     def used_python_module_fallback(self) -> bool:
@@ -183,7 +186,7 @@ def resolve_invocation(
         return _Invocation(command=found)
     return _Invocation(
         command=sys_executable,
-        args_prefix=["-m", "sqllens"],
+        args_prefix=("-m", "sqllens"),
     )
 
 
@@ -253,18 +256,18 @@ def generate_cmd_launcher(
     *,
     working_dir: Path,
     server_command: str,
-    server_args: list[str],
+    server_args: list[str] | tuple[str, ...],
 ) -> str:
     r"""Render the Windows ``.cmd`` launcher body.
 
-    The launcher exists because Claude Desktop's ``mcpServers`` schema has no
-    ``cwd`` field — the child process inherits Claude.exe's install
-    directory, which isn't user-writable. The agent's scratch CSV path resolves
-    against CWD, so without this workaround every query fails with WinError 5.
-
-    Once the scratch-storage rework in issue #10 lands and the agent stops
-    relying on CWD, this helper and the Windows branch in ``run_install`` can
-    be deleted in one change.
+    Claude Desktop's ``mcpServers`` schema exposes a single ``command`` field
+    (plus ``args``), and on Windows the most ergonomic way to pin both the
+    binary and the working directory while staying within that schema is to
+    point ``command`` at a tiny ``.cmd`` shim that ``cd``-s into the writable
+    working directory and execs the server. The ``cd /d`` is belt-and-suspenders
+    — it keeps the launcher useful for any future tooling that resolves paths
+    against CWD, even though core agent scratch storage now lives under
+    ``tempfile.gettempdir()``.
     """
     quoted_args = " ".join(_cmd_quote(arg) for arg in server_args)
     return (
@@ -424,9 +427,12 @@ def run_install(
 ) -> InstallResult:
     """Perform (or simulate) the install end-to-end.
 
-    The function never returns half-applied state: TOML failures revert the
-    TOML write and leave the JSON untouched; JSON failures surface before
-    any backup is moved.
+    On dry-run, the function never touches disk and reports the plan. On a
+    real run, TOML and ``.cmd`` failures revert their respective writes and
+    leave Claude Desktop's JSON untouched; the JSON itself is updated
+    atomically (tempfile + rename) so a kill mid-write cannot truncate the
+    user's config. The working-directory ``mkdir`` is intentionally *not*
+    reverted — it is idempotent and harmless on its own.
     """
     now_fn = now or (lambda: datetime.now(tz=UTC))
 
@@ -442,7 +448,12 @@ def run_install(
     )
 
     if is_windows(platform_name):
-        embedded_args = [*invocation.args_prefix, "serve", "-c", str(toml_path)]
+        embedded_args: tuple[str, ...] = (
+            *invocation.args_prefix,
+            "serve",
+            "-c",
+            str(toml_path),
+        )
         cmd_path: Path | None = options.working_dir / "run-sqllens.cmd"
         cmd_content: str | None = generate_cmd_launcher(
             working_dir=options.working_dir,
@@ -450,25 +461,34 @@ def run_install(
             server_args=embedded_args,
         )
         json_command = str(cmd_path)
-        json_args: list[str] = []
+        json_args: tuple[str, ...] = ()
     else:
         cmd_path = None
         cmd_content = None
         json_command = invocation.command
-        json_args = [*invocation.args_prefix, "serve", "-c", str(toml_path)]
+        json_args = (*invocation.args_prefix, "serve", "-c", str(toml_path))
 
     entry = build_mcp_entry(
         server_command=json_command,
-        server_args=json_args,
+        server_args=list(json_args),
         api_key=options.api_key,
     )
 
-    json_before = _read_existing_config(options.config_path)
+    # During a dry-run, a brand-new machine without Claude Desktop installed
+    # should still be able to preview the planned changes. Treat a missing
+    # file as an empty config; on a real run, _read_existing_config still
+    # raises so the user gets the "install Claude Desktop" hint before any
+    # writes happen.
+    if dry_run and not options.config_path.exists():
+        json_before: dict[str, Any] = {}
+    else:
+        json_before = _read_existing_config(options.config_path)
     json_after, preserved_siblings = merge_into_mcp_servers(
         json_before, name=options.name, entry=entry
     )
     json_after_serialized = json.dumps(json_after, indent=2) + "\n"
     json_diff = _unified_json_diff(json_before, json_after, str(options.config_path))
+    json_after_frozen: Mapping[str, Any] = MappingProxyType(json_after)
 
     if dry_run:
         return InstallResult(
@@ -479,14 +499,14 @@ def run_install(
             toml_content=toml_content,
             cmd_path=cmd_path,
             cmd_content=cmd_content,
-            json_after=json_after,
+            json_after=json_after_frozen,
             json_diff=json_diff,
             backup_path=None,
             toml_written=False,
             cmd_written=False,
             dry_run=True,
             preserved_sibling_servers=preserved_siblings,
-            args_prefix=list(invocation.args_prefix),
+            args_prefix=tuple(invocation.args_prefix),
         )
 
     try:
@@ -509,18 +529,24 @@ def run_install(
             raise InstallError(f"Could not write {toml_path}: {exc}") from exc
 
     cmd_written = False
-    existing_cmd: str | None = None
+    existing_cmd_bytes: bytes | None = None
+    cmd_content_bytes: bytes | None = None
     if cmd_path is not None and cmd_content is not None:
-        existing_cmd = _read_text_or_none(cmd_path)
-        cmd_changed = existing_cmd != cmd_content
-        if cmd_changed and existing_cmd is not None and not force:
+        # Compare as bytes — ``Path.read_text`` collapses ``\r\n`` to ``\n``
+        # under universal newlines, but ``generate_cmd_launcher`` deliberately
+        # emits CRLF. A text-mode round-trip would re-trip the equality check
+        # on every run and demand ``--force`` on each re-invocation.
+        existing_cmd_bytes = _read_bytes_or_none(cmd_path)
+        cmd_content_bytes = cmd_content.encode("utf-8")
+        cmd_changed = existing_cmd_bytes != cmd_content_bytes
+        if cmd_changed and existing_cmd_bytes is not None and not force:
             _revert_toml(toml_path, existing_toml)
             raise InstallError(
                 f"{cmd_path} already exists with different content. Pass --force to overwrite."
             )
         if cmd_changed:
             try:
-                cmd_path.write_text(cmd_content, encoding="utf-8")
+                cmd_path.write_bytes(cmd_content_bytes)
             except OSError as exc:
                 _revert_toml(toml_path, existing_toml)
                 raise InstallError(
@@ -537,7 +563,7 @@ def run_install(
     except (ValueError, OSError) as exc:
         _revert_toml(toml_path, existing_toml)
         if cmd_path is not None and cmd_written:
-            _revert_cmd(cmd_path, existing_cmd)
+            _revert_cmd_bytes(cmd_path, existing_cmd_bytes)
         raise InstallError(
             f"Generated sqllens.toml failed validation; aborting before touching "
             f"{options.config_path}.\n  Cause: {type(exc).__name__}: {exc}"
@@ -557,11 +583,12 @@ def run_install(
                 f"Failed to back up {options.config_path}: {exc}"
             ) from exc
         try:
-            options.config_path.write_text(json_after_serialized, encoding="utf-8")
+            _atomic_write_text(options.config_path, json_after_serialized)
         except OSError as exc:
+            hint = _restore_hint(platform_name, backup_path, options.config_path)
             raise InstallError(
                 f"Failed to write {options.config_path}: {exc}. "
-                f"Restore the original with: cp {backup_path} {options.config_path}"
+                f"Restore the original with: {hint}"
             ) from exc
 
     return InstallResult(
@@ -572,14 +599,14 @@ def run_install(
         toml_content=toml_content,
         cmd_path=cmd_path,
         cmd_content=cmd_content,
-        json_after=json_after,
+        json_after=json_after_frozen,
         json_diff=json_diff,
         backup_path=backup_path,
         toml_written=toml_changed,
         cmd_written=cmd_written,
         dry_run=False,
         preserved_sibling_servers=preserved_siblings,
-        args_prefix=list(invocation.args_prefix),
+        args_prefix=tuple(invocation.args_prefix),
     )
 
 
@@ -588,7 +615,9 @@ def _read_existing_config(path: Path) -> dict[str, Any]:
 
     A `FileNotFoundError` is translated into an actionable `InstallError` so
     the user gets "install Claude Desktop or pass --config-path" instead of
-    a raw traceback.
+    a raw traceback. Other `OSError` (permission denied, I/O errors) is also
+    surfaced through `InstallError` so the CLI's user-friendly channel handles
+    it rather than the generic "file an issue" backstop.
     """
     try:
         raw = path.read_text(encoding="utf-8")
@@ -597,6 +626,8 @@ def _read_existing_config(path: Path) -> dict[str, Any]:
             f"Claude Desktop config not found at {path}; "
             "install Claude Desktop or pass --config-path."
         ) from exc
+    except OSError as exc:
+        raise InstallError(f"Could not read {path}: {exc}") from exc
     if not raw.strip():
         return {}
     try:
@@ -619,18 +650,73 @@ def _read_text_or_none(path: Path) -> str | None:
         raise InstallError(f"Could not read {path}: {exc}") from exc
 
 
+def _read_bytes_or_none(path: Path) -> bytes | None:
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise InstallError(f"Could not read {path}: {exc}") from exc
+
+
 def _revert_toml(toml_path: Path, original: str | None) -> None:
-    if original is None:
-        toml_path.unlink(missing_ok=True)
-    else:
-        toml_path.write_text(original, encoding="utf-8")
+    """Best-effort restore of *toml_path*.
+
+    If the revert itself fails (e.g. antivirus has the file locked), we don't
+    let the OSError shadow the original InstallError the caller is trying to
+    raise — propagate via __context__ instead so the user sees both signals.
+    """
+    try:
+        if original is None:
+            toml_path.unlink(missing_ok=True)
+        else:
+            toml_path.write_text(original, encoding="utf-8")
+    except OSError:
+        # Swallow: the caller is in the middle of raising InstallError; the
+        # revert failure remains visible through __context__.
+        pass
 
 
-def _revert_cmd(cmd_path: Path, original: str | None) -> None:
-    if original is None:
-        cmd_path.unlink(missing_ok=True)
-    else:
-        cmd_path.write_text(original, encoding="utf-8")
+def _revert_cmd_bytes(cmd_path: Path, original: bytes | None) -> None:
+    """Bytes-mode counterpart of :func:`_revert_toml` for the Windows ``.cmd``."""
+    try:
+        if original is None:
+            cmd_path.unlink(missing_ok=True)
+        else:
+            cmd_path.write_bytes(original)
+    except OSError:
+        pass
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Write *content* to *path* atomically (tempfile + os.replace).
+
+    ``os.replace`` is atomic on POSIX and on Windows ≥ Vista, so a kill mid-
+    write cannot leave the user's ``claude_desktop_config.json`` truncated.
+    """
+    encoded = content.encode("utf-8")
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=path.name + ".",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(encoded)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except OSError:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def _restore_hint(platform_name: str, backup_path: Path, config_path: Path) -> str:
+    """Build a platform-appropriate copy command for restoring the backup."""
+    if is_windows(platform_name):
+        return f'copy "{backup_path}" "{config_path}"'
+    return f"cp {backup_path} {config_path}"
 
 
 def _unified_json_diff(before: dict[str, Any], after: dict[str, Any], label: str) -> str:
@@ -680,7 +766,7 @@ def format_install_result(result: InstallResult) -> list[str]:
         lines.append(f"  - sqllens.toml unchanged at {toml_path}")
     if result.cmd_path is not None:
         if result.cmd_written:
-            lines.append(f"  - wrote {result.cmd_path} (CWD launcher workaround for issue #10)")
+            lines.append(f"  - wrote {result.cmd_path} (Windows launcher shim)")
         else:
             lines.append(f"  - {result.cmd_path} unchanged")
     if result.used_python_module_fallback:

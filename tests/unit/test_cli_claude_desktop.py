@@ -197,7 +197,7 @@ class TestResolveInvocation:
             which=lambda exe: "/usr/local/bin/sqllens" if exe == "sqllens" else None,
         )
         assert result.command == "/usr/local/bin/sqllens"
-        assert result.args_prefix == []
+        assert result.args_prefix == ()
         assert result.used_python_module_fallback is False
 
     def test_falls_back_to_python_m_when_not_on_path(self) -> None:
@@ -207,7 +207,7 @@ class TestResolveInvocation:
             sys_executable="/usr/bin/python3",
         )
         assert result.command == "/usr/bin/python3"
-        assert result.args_prefix == ["-m", "sqllens"]
+        assert result.args_prefix == ("-m", "sqllens")
         assert result.used_python_module_fallback is True
 
     def test_windows_prefers_exe_suffix(self) -> None:
@@ -953,3 +953,179 @@ class TestBackupPath:
         cfg.write_text("{}", encoding="utf-8")
         result = make_backup_path(cfg, _fixed_now())
         assert result.name == "claude_desktop_config.json.bak.20260505174211"
+
+
+# ---------------------------------------------------------------------------
+# Regression: Windows idempotency under CRLF round-trip (PR #25 follow-up)
+# ---------------------------------------------------------------------------
+
+
+class TestWindowsIdempotency:
+    def test_idempotent_double_run_windows(
+        self, base_options: InstallOptions, fake_config_json: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # generate_cmd_launcher emits CRLF; Path.read_text would collapse to LF
+        # under universal newlines, so the second run would otherwise demand
+        # --force. Comparing bytes pins the no-op.
+        monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
+        first = run_install(
+            base_options,
+            dry_run=False,
+            force=False,
+            platform_name="win32",
+            which=lambda exe: r"C:\Python\Scripts\sqllens.exe" if "sqllens" in exe else None,
+            now=_fixed_now,
+        )
+        assert first.cmd_written is True
+        second = run_install(
+            base_options,
+            dry_run=False,
+            force=False,
+            platform_name="win32",
+            which=lambda exe: r"C:\Python\Scripts\sqllens.exe" if "sqllens" in exe else None,
+            now=lambda: datetime(2026, 5, 5, 18, 0, 0, tzinfo=UTC),
+        )
+        # No --force needed, no rewrite, no second backup.
+        assert second.cmd_written is False
+        assert second.toml_written is False
+        assert second.backup_path is None
+        # And the on-disk bytes still carry CRLF.
+        assert first.cmd_path is not None
+        raw = first.cmd_path.read_bytes()
+        assert b"\r\n" in raw
+
+    def test_dry_run_works_without_existing_claude_config(
+        self, base_options: InstallOptions, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Fresh machine: Claude Desktop config doesn't exist yet; --dry-run
+        # should still preview the plan instead of erroring.
+        monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
+        missing = tmp_path / "no-such" / "claude_desktop_config.json"
+        opts = dataclasses.replace(base_options, config_path=missing)
+        result = run_install(
+            opts,
+            dry_run=True,
+            force=False,
+            platform_name="linux",
+            which=lambda _: "/usr/local/bin/sqllens",
+            now=_fixed_now,
+        )
+        assert result.dry_run is True
+        assert "demo" in result.json_after["mcpServers"]
+        assert not missing.exists()
+
+
+class TestRestoreHint:
+    def test_uses_copy_on_windows(self, tmp_path: Path) -> None:
+        from sqllens.installers.claude_desktop import _restore_hint
+
+        hint = _restore_hint("win32", tmp_path / "x.bak", tmp_path / "x.json")
+        assert hint.startswith("copy ")
+        assert hint.count('"') == 4  # both paths quoted
+
+    def test_uses_cp_on_unix(self, tmp_path: Path) -> None:
+        from sqllens.installers.claude_desktop import _restore_hint
+
+        hint = _restore_hint("linux", tmp_path / "x.bak", tmp_path / "x.json")
+        assert hint.startswith("cp ")
+
+
+class TestReadExistingConfig:
+    def test_oserror_translates_to_install_error(
+        self, base_options: InstallOptions, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Non-FileNotFoundError OSError (e.g. permission denied) must hit the
+        # InstallError channel rather than the CLI's "file an issue" backstop.
+        monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
+        from sqllens.installers import claude_desktop as installer_mod
+
+        def boom_read(*_: object, **__: object) -> str:
+            raise PermissionError("simulated EACCES")
+
+        monkeypatch.setattr(Path, "read_text", boom_read)
+        with pytest.raises(InstallError, match="Could not read"):
+            run_install(
+                base_options,
+                dry_run=False,
+                force=False,
+                platform_name="linux",
+                which=lambda _: "/usr/local/bin/sqllens",
+                now=_fixed_now,
+            )
+        # silence unused import warning
+        _ = installer_mod
+
+
+class TestAtomicJsonWrite:
+    def test_no_tmp_file_left_on_success(
+        self, base_options: InstallOptions, fake_config_json: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
+        run_install(
+            base_options,
+            dry_run=False,
+            force=False,
+            platform_name="linux",
+            which=lambda _: "/usr/local/bin/sqllens",
+            now=_fixed_now,
+        )
+        # Atomic write uses a tempfile in the config dir; on success it must
+        # be renamed away, not left behind.
+        tmps = list(fake_config_json.parent.glob("claude_desktop_config.json.*.tmp"))
+        assert tmps == []
+
+    def test_failed_write_cleans_up_tmp_and_keeps_backup(
+        self, base_options: InstallOptions, fake_config_json: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
+        from sqllens.installers import claude_desktop as installer_mod
+
+        original_replace = installer_mod.os.replace
+
+        def boom_replace(*args: object, **kwargs: object) -> None:
+            raise OSError("simulated rename failure")
+
+        monkeypatch.setattr(installer_mod.os, "replace", boom_replace)
+        with pytest.raises(InstallError, match="Restore the original with"):
+            run_install(
+                base_options,
+                dry_run=False,
+                force=False,
+                platform_name="linux",
+                which=lambda _: "/usr/local/bin/sqllens",
+                now=_fixed_now,
+            )
+        # No tmp left behind.
+        tmps = list(fake_config_json.parent.glob("claude_desktop_config.json.*.tmp"))
+        assert tmps == []
+        # Backup still present.
+        baks = list(fake_config_json.parent.glob("claude_desktop_config.json.bak.*"))
+        assert len(baks) == 1
+        # silence
+        _ = original_replace
+
+
+class TestTomlStringDoubleQuotedFallback:
+    def test_password_with_apostrophe_round_trips(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A DSN containing a single quote forces _toml_string into its
+        # double-quoted basic-string fallback. The generated TOML must still
+        # parse cleanly back through Config.load.
+        url_with_apostrophe = "sqlite:///./demo's.db"
+        toml = generate_toml(
+            db_url=url_with_apostrophe,
+            db_name="demo",
+            read_only=True,
+            model="claude-sonnet-4-5-20250929",
+            memory_dir=str(tmp_path / "chroma"),
+        )
+        # Must have picked the double-quoted form for this field.
+        assert 'url = "sqlite:///./demo\'s.db"' in toml
+        path = tmp_path / "sqllens.toml"
+        path.write_text(toml, encoding="utf-8")
+        monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
+        from sqllens.config import Config
+
+        cfg = Config.load(path)
+        assert cfg.database.url == url_with_apostrophe

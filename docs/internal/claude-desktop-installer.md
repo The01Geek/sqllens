@@ -11,7 +11,7 @@ sqllens claude-desktop install --db <DSN> [--api-key …] [flags]
 End-to-end, one invocation:
 
 1. Generates a BOM-free `sqllens.toml` in the working directory.
-2. On Windows, generates a `.cmd` launcher that `cd`s to a writable folder before exec'ing the server (workaround for [issue #10](https://github.com/The01Geek/sqllens/issues/10) — see [tool-scratch-storage.md](tool-scratch-storage.md)).
+2. On Windows, generates a `.cmd` launcher shim — Claude Desktop's `mcpServers` schema exposes a single `command` field, so the shim is the cleanest way to pin both the executable path *and* a writable working directory inside that schema. Historically it was load-bearing for [issue #10](https://github.com/The01Geek/sqllens/issues/10) (now resolved by PR #21); today it stays purely for JSON-config ergonomics — see [tool-scratch-storage.md](tool-scratch-storage.md).
 3. Validates the generated TOML by round-tripping it through `Config.load()`.
 4. Merges an entry into `mcpServers` inside `claude_desktop_config.json`, preserving the existing `preferences` block and every sibling server.
 5. Writes a timestamped `.bak` of the JSON before mutating it.
@@ -69,11 +69,11 @@ cd /d "C:\Users\…\sqllens"
 "C:\…\Scripts\sqllens.exe" serve -c "C:\Users\…\sqllens\sqllens.toml"
 ```
 
-The `.cmd` exists because Claude Desktop's `mcpServers` schema has no `cwd` field, and the server's scratch directory currently resolves relative to launcher CWD — see [tool-scratch-storage.md](tool-scratch-storage.md) for the underlying bug. The `mcpServers[<name>].command` field then points at the `.cmd` rather than at `sqllens.exe` directly.
+The `.cmd` exists because Claude Desktop's `mcpServers` schema exposes a single `command` field (plus `args`) — no `cwd` slot. The shim lets us bundle "set the working directory, then exec the server" inside that single field. The `mcpServers[<name>].command` value then points at the `.cmd` rather than at `sqllens.exe` directly.
 
 The macOS and Linux branches skip the launcher entirely — they invoke `sqllens` (or `python -m sqllens`) with `serve -c <toml>` as `args` straight from the JSON entry.
 
-Once [issue #10](https://github.com/The01Geek/sqllens/issues/10) lands and the scratch directory has a sensible absolute default, the launcher branch can be deleted and Windows can fall through to the same code path as macOS / Linux.
+Historically the `.cmd` was *load-bearing* for correctness: scratch CSVs used to resolve against process CWD and Windows would trip `[WinError 5]` on every query (see [tool-scratch-storage.md](tool-scratch-storage.md)). [Issue #10](https://github.com/The01Geek/sqllens/issues/10) (resolved by PR #21) moved scratch to `tempfile.gettempdir() / "sqllens"`, so the `cd /d` is no longer required for the server to work. We keep the shim purely for JSON-config ergonomics — deleting the Windows branch and routing through the same `command + args` path used on macOS / Linux is now a viable simplification.
 
 ## Quoting and encoding gotchas the installer handles
 
@@ -91,7 +91,7 @@ The installer treats "the file exists with different content" as a hard stop:
 - Same rule for the `.cmd` launcher on Windows.
 - The JSON file is never gated by `--force`: the merge is a structural overlay that always preserves the user's other keys. A `.bak.<UTC timestamp>` is written next to the JSON before any mutation, on every run that actually changes the file.
 
-The validate-then-mutate order also means: if a user has already written a working `sqllens.toml` by hand and re-runs the installer with the same flags, the TOML write is skipped, the launcher write is skipped, and the JSON merge proceeds — `--force` is not needed for a true no-op.
+The validate-then-mutate order also means: if a user has already written a **byte-identical** `sqllens.toml` by hand and re-runs the installer with the same flags, the TOML write is skipped, the launcher write is skipped, and the JSON merge proceeds — `--force` is not needed for a true no-op. (Any byte-level difference, including a hand-added comment or different whitespace, trips the `--force` gate. The launcher comparison is bytes-for-bytes so CRLF line endings round-trip cleanly.)
 
 ## `--dry-run`
 
