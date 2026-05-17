@@ -1,19 +1,9 @@
 name: Claude Code
 
-# Light @claude-mention listener. Provisions a minimal PHP + Node toolchain
-# (phpcs/phpcbf + node) and runs the Claude Code action. The heavy
-# test-environment provisioning (MySQL + Redis + admin/client schema push +
-# composer install of resources/PHPUnit + npm install in api/src/schema/jsx)
-# lives in claude-implement.yml and only fires when /devflow:implement is
-# present in the triggering event. Mutually-exclusive `if:` conditions on the
-# two workflows guarantee exactly one fires per event — see claude-implement.yml.
-#
-# Cost rationale: full provisioning is ~3-5 min of overhead per run; for the
-# common non-implement flows (Q&A, /devflow:review, /devflow:pr-description,
-# /security-review, etc.) none of MySQL/Redis/schema/composer/jsx is used, so
-# paying for it on every @claude mention is pure waste. The light setup here
-# is ~30-60s and keeps phpcs/phpcbf on PATH so /devflow:review-and-fix can
-# still run real linters rather than falling back to `php -l`.
+# @claude-mention listener. Runs the Claude Code action against
+# issues/PRs that mention @claude, for Q&A, /devflow:review,
+# /devflow:pr-description, /security-review, and similar non-implementing
+# flows.
 
 on:
   issue_comment:
