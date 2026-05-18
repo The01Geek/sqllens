@@ -8,6 +8,8 @@ Only on the HTTP transport. The stdio transport assumes the parent process is tr
 
 For HTTP, `_AuthMiddleware` runs **per request, before** the FastMCP handler. See [mcp-server/transport.md](../mcp-server/transport.md).
 
+**Exception: `GET /healthz`.** The liveness probe is intentionally unauthenticated. `_PathNormalizer` short-circuits `/healthz` with a 200 JSON response *above* `_AuthMiddleware` in the stack, so the auth check never runs for that path even under `auth.mode = "bearer"`. It exposes no data (only `{"status":"ok"}`) and no DB/LLM signal, so requiring a token would only break orchestrator health probes for no security gain. Details in [mcp-server/transport.md](../mcp-server/transport.md) "Liveness probe".
+
 ## The `Authenticator` protocol
 
 [src/sqllens/auth/base.py](../../../src/sqllens/auth/base.py):

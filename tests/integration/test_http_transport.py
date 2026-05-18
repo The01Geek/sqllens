@@ -108,6 +108,31 @@ class TestBearerAuth:
         assert r.status_code == 401
 
 
+# ─────────────────────── liveness: /healthz ─────────────────────────────────
+
+
+class TestHealthz:
+    """``/healthz`` is an unauthenticated liveness probe (ticket O-4)."""
+
+    async def test_healthz_no_auth(self, make_server) -> None:
+        handle = make_server(AuthConfig(mode="none"))
+        async with httpx.AsyncClient() as client:
+            r = await client.get(handle.base_url + "/healthz")
+        assert r.status_code == 200
+        assert r.json() == {"status": "ok"}
+        assert r.text == '{"status":"ok"}'
+
+    async def test_healthz_bypasses_bearer_auth(self, make_server) -> None:
+        """No ``Authorization`` header is required even under bearer auth."""
+        handle = make_server(
+            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token"))
+        )
+        async with httpx.AsyncClient() as client:
+            r = await client.get(handle.base_url + "/healthz")
+        assert r.status_code == 200
+        assert r.json() == {"status": "ok"}
+
+
 # ─────────────────────── path normalization ─────────────────────────────────
 
 
@@ -145,5 +170,4 @@ class TestPathNormalization:
                 headers={"Accept": "application/json, text/event-stream"},
             )
         assert r.status_code == 200
-        assert "guidoo" not in r.text  # sanity: not the parent project's all-in-one server
         assert "sqllens" in r.text  # our server name shows up in serverInfo

@@ -82,6 +82,19 @@ Start the server with `sqllens serve` and point your client at `http://127.0.0.1
 
 **Warning:** If you change `host` to anything other than a loopback address (for example, when running in a container that binds `0.0.0.0`), SQL Lens refuses to start with `auth.mode = "none"`. Switch to bearer auth by setting `SQLLENS_AUTH__MODE=bearer` and `SQLLENS_AUTH__BEARER_TOKEN=$(openssl rand -hex 32)`, or set `SQLLENS_AUTH__INSECURE=1` for closed-network deployments. See [Configuration: Non-loopback safety guard](configuration.md#non-loopback-safety-guard).
 
+### Health Check Endpoint
+
+When running over HTTP, SQL Lens exposes an unauthenticated liveness endpoint at `GET /healthz`. It returns HTTP 200 with the body `{"status":"ok"}` while the server process is up and serving requests. No `Authorization` header is required, even when bearer authentication is enabled, so orchestrator health probes work without a token.
+
+```bash
+curl http://127.0.0.1:8765/healthz
+# {"status":"ok"}
+```
+
+Use this endpoint for container and orchestrator health checks (Docker, Kubernetes liveness probes, load balancers). The published Docker image already uses `/healthz` for its built-in `HEALTHCHECK`, so a container that stops serving is correctly reported as unhealthy.
+
+**Note:** `/healthz` is a liveness check only. It confirms the server is running, not that the database, vector memory store, or language model are reachable. A successful response does not guarantee that a query will succeed.
+
 ## See also
 
 - **[Configuration reference](configuration.md)** for every available field.
