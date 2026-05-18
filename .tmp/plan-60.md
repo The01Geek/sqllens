@@ -1,8 +1,0 @@
-- [ ] Audit `_handle_lifespan` for re-entry / unknown-message hygiene gaps beyond c9b7e1b
-- [ ] Add `_shutdown_done` flag; clear `_cm = None` after shutdown (success or failure) to prevent double `__aexit__`
-- [ ] Reject post-shutdown `lifespan.startup` with an accurate "single-shot instance already shut down" message (not "duplicate startup")
-- [ ] Make post-shutdown `lifespan.shutdown` idempotent (send `shutdown.complete` without re-entering `__aexit__`)
-- [ ] Update `_SessionManagerLifespan` docstring to document single-shot instance semantics
-- [ ] Add regression test: post-shutdown startup → `lifespan.startup.failed` with "shut down" in message
-- [ ] Add regression test: post-shutdown shutdown is idempotent and does not call `__aexit__` twice
-- [ ] Run `ruff check .` and `pytest -q` — both green

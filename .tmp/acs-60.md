@@ -1,3 +1,0 @@
-- [ ] Review whether the current `_handle_lifespan` re-entry and unknown-message paths need additional defenses (e.g., resetting `_cm` after successful shutdown, explicit single-shot vs. reusable instance semantics).
-- [ ] If yes, land the additional hardening with regression tests.
-- [ ] If no, close this issue as "addressed by PR #43 commit c9b7e1b" with a comment summarizing the audit.
