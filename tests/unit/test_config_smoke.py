@@ -295,9 +295,12 @@ def test_cli_validate_rejects_bearer_token_without_bearer_mode(tmp_path: Path) -
     )
     runner = CliRunner()
     result = runner.invoke(cli.app, ["validate", "-c", str(cfg_path)])
-    assert result.exit_code == 2, result.stdout
-    assert "bearer_token" in result.stdout
-    assert "SQLLENS_AUTH__BEARER_TOKEN" in result.stdout
+    assert result.exit_code == 2, result.stderr
+    # validate's Config.load rejection routes to err_console (stderr) so it
+    # cannot collide with the stdio MCP JSON-RPC channel on stdout.
+    assert "bearer_token" in result.stderr
+    assert "SQLLENS_AUTH__BEARER_TOKEN" in result.stderr
+    assert "bearer_token" not in result.stdout
 
 
 def test_cli_validate_rejects_env_bearer_token_without_bearer_mode(
@@ -321,9 +324,12 @@ def test_cli_validate_rejects_env_bearer_token_without_bearer_mode(
     monkeypatch.setenv("SQLLENS_AUTH__BEARER_TOKEN", "hunter2")
     runner = CliRunner()
     result = runner.invoke(cli.app, ["validate", "-c", str(cfg_path)])
-    assert result.exit_code == 2, result.stdout
-    assert "bearer_token" in result.stdout
-    assert "SQLLENS_AUTH__BEARER_TOKEN" in result.stdout
+    assert result.exit_code == 2, result.stderr
+    # validate's Config.load rejection routes to err_console (stderr) so it
+    # cannot collide with the stdio MCP JSON-RPC channel on stdout.
+    assert "bearer_token" in result.stderr
+    assert "SQLLENS_AUTH__BEARER_TOKEN" in result.stderr
+    assert "bearer_token" not in result.stdout
 
 
 def _bearer_no_token_toml() -> str:
