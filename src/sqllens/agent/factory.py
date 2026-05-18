@@ -25,6 +25,7 @@ from sqllens.agent.integrations.mysql import MySQLRunner
 from sqllens.agent.tools import (
     RunSqlTool,
     SaveQuestionToolArgsTool,
+    SaveTextMemoryTool,
     SearchSavedCorrectToolUsesTool,
 )
 from sqllens.config import API_KEY_MISSING_MESSAGE, Config
@@ -85,7 +86,16 @@ def build_agent(cfg: Config) -> Agent:
         access_groups=access,
     )
     tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
-    tools.register_local_tool(SearchSavedCorrectToolUsesTool(), access_groups=access)
+    tools.register_local_tool(
+        SearchSavedCorrectToolUsesTool(
+            default_similarity_threshold=cfg.memory.similarity_threshold,
+        ),
+        access_groups=access,
+    )
+    # save_text_memory persists free-form domain knowledge (vocabulary, semantic
+    # notes) so subsequent questions can land on the right tables/columns. The
+    # default system prompt switches on its presence via has_text_memory.
+    tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
 
     return Agent(
         llm_service=llm,

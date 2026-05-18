@@ -1,5 +1,6 @@
 """PostgreSQL implementation of SqlRunner interface."""
 
+import logging
 import uuid
 from typing import Optional
 import pandas as pd
@@ -11,6 +12,8 @@ from sqllens.safety.readonly import is_read_shaped
 
 
 _DEFAULT_MAX_ROWS = 10_000
+
+logger = logging.getLogger(__name__)
 
 
 class PostgresRunner(SqlRunner):
@@ -122,7 +125,17 @@ class PostgresRunner(SqlRunner):
                     cursor.execute(args.sql)
                     rows = cursor.fetchmany(self._max_rows + 1)
                 finally:
-                    cursor.close()
+                    # Log-and-swallow secondary exceptions on the SELECT cleanup
+                    # path so the primary query error (e.g. statement_timeout /
+                    # "current transaction is aborted") reaches the LLM intact
+                    # rather than being masked by a secondary error from closing
+                    # a server-side cursor in an indeterminate state.
+                    try:
+                        cursor.close()
+                    except Exception:
+                        logger.warning(
+                            "cursor.close() failed during cleanup", exc_info=True
+                        )
                 return rows_to_capped_df(rows, self._max_rows)
 
             cursor = conn.cursor()
@@ -131,8 +144,20 @@ class PostgresRunner(SqlRunner):
                 conn.commit()
                 rows_affected = cursor.rowcount
             finally:
-                cursor.close()
+                try:
+                    cursor.close()
+                except Exception:
+                    logger.warning("cursor.close() failed during cleanup", exc_info=True)
             return pd.DataFrame({"rows_affected": [rows_affected]})
 
         finally:
-            conn.close()
+            # Log-and-swallow secondary exceptions during connection teardown so
+            # the primary query error reaches the LLM intact rather than being
+            # masked by a secondary error from closing a connection in an
+            # indeterminate state. Cleanup failures are still worth a breadcrumb
+            # for diagnosing chronic teardown problems (e.g. a misconfigured
+            # pool or a broken pgbouncer).
+            try:
+                conn.close()
+            except Exception:
+                logger.warning("conn.close() failed during cleanup", exc_info=True)

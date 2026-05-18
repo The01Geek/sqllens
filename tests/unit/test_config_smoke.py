@@ -23,6 +23,10 @@ def _clean_config_env(monkeypatch) -> None:
     # slate.
     monkeypatch.delenv("SQLLENS_CONFIG", raising=False)
     monkeypatch.delenv("SQLLENS_LLM__API_KEY", raising=False)
+    # Cleared so AuthConfig._token_only_with_bearer_mode doesn't reject configs
+    # in unrelated tests because a CI runner or developer shell happens to have
+    # the bearer token set globally.
+    monkeypatch.delenv("SQLLENS_AUTH__BEARER_TOKEN", raising=False)
     # The sub-section models (``DatabaseConfig``, ``LLMConfig``, ``MemoryConfig``,
     # ``AuthConfig``, ``ServerConfig``) are plain ``BaseModel`` — see the
     # architectural note in ``config.py`` and issue #26 for why they intentionally
@@ -271,6 +275,55 @@ def test_cli_validate_fails_on_plain_malformed_toml(tmp_path: Path) -> None:
     assert result.exit_code == 2
     assert "Invalid" in result.stderr
     assert "Invalid" not in result.stdout
+
+
+def test_cli_validate_rejects_bearer_token_without_bearer_mode(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [llm]
+            api_key = "sk-ant-test"
+
+            [auth]
+            bearer_token = "hunter2"
+            """
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 2, result.stdout
+    assert "bearer_token" in result.stdout
+    assert "SQLLENS_AUTH__BEARER_TOKEN" in result.stdout
+
+
+def test_cli_validate_rejects_env_bearer_token_without_bearer_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The misconfig that motivated this validator is env-var-driven (operator
+    # sets SQLLENS_AUTH__BEARER_TOKEN expecting it to enable bearer auth).
+    # Mirror the TOML test through the env-var path to lock that surface.
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [llm]
+            api_key = "sk-ant-test"
+            """
+        )
+    )
+    monkeypatch.setenv("SQLLENS_AUTH__BEARER_TOKEN", "hunter2")
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 2, result.stdout
+    assert "bearer_token" in result.stdout
+    assert "SQLLENS_AUTH__BEARER_TOKEN" in result.stdout
 
 
 def _bearer_no_token_toml() -> str:

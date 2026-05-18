@@ -130,6 +130,7 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         f"{truncation_note}"
                     )
 
+
                     description = (
                         f"SQL query returned {row_count} rows with {len(columns)} columns"
                     )

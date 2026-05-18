@@ -80,7 +80,7 @@ What was kept:
 - `agent/core/` — `Agent`, `RequestContext`, `ToolRegistry`, `UiComponent`, etc.
 - `agent/capabilities/` — `SqlRunner`, `FileSystem`, `AgentMemory` abstractions.
 - `agent/integrations/` — `anthropic`, `chromadb`, `local`, `sqlite`, `postgres`, `mysql`.
-- `agent/tools/` — only `RunSqlTool` + the two `agent_memory` tools.
+- `agent/tools/` — only `RunSqlTool` + the three `agent_memory` tools (`SaveQuestionToolArgsTool`, `SearchSavedCorrectToolUsesTool`, `SaveTextMemoryTool`).
 - `agent/components/` — Rich-component rendering (we only ever use the markdown conversion).
 
 What was dropped, and why we might regret it:
