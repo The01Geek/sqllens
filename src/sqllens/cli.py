@@ -5,9 +5,11 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
@@ -16,6 +18,9 @@ from rich.markup import escape
 from sqllens import __version__
 from sqllens.config import API_KEY_MISSING_MESSAGE
 
+if TYPE_CHECKING:
+    from sqllens.config import Config
+
 app = typer.Typer(
     name="sqllens",
     help="Natural-language SQL analytics over MCP.",
@@ -23,6 +28,53 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+
+def _is_loopback_host(host: str) -> bool:
+    # Recognizes the entire 127.0.0.0/8 IPv4 loopback range and ::1 (plus
+    # IPv4-mapped IPv6 loopback like ::ffff:127.0.0.1), not just the canonical
+    # spellings. No DNS resolution — wildcards ("0.0.0.0", "::") and arbitrary
+    # external hostnames fail closed and must use bearer auth or the
+    # SQLLENS_AUTH__INSECURE opt-out. Hostname comparison is case-insensitive
+    # per RFC 1035, so "Localhost" / "LOCALHOST" are recognized too.
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+_INSECURE_NON_LOOPBACK_MESSAGE = (
+    "Refusing to start an unauthenticated HTTP server on a non-loopback interface "
+    "(server.host={host!r}, auth.mode=none). Set SQLLENS_AUTH__MODE=bearer with a "
+    "SQLLENS_AUTH__BEARER_TOKEN, or SQLLENS_AUTH__INSECURE=1 to override for "
+    "closed-network deployments."
+)
+
+# The same message swapped to past-tense framing for `validate`, which lints
+# config without ever calling ``run``. Keeps the actionable remediation (env
+# vars to set) identical so CI logs from `validate` and `serve` are
+# directly comparable.
+_INSECURE_NON_LOOPBACK_VALIDATE_MESSAGE = (
+    "Config would refuse to start an unauthenticated HTTP server on a non-loopback "
+    "interface (server.host={host!r}, auth.mode=none). Set SQLLENS_AUTH__MODE=bearer "
+    "with a SQLLENS_AUTH__BEARER_TOKEN, or SQLLENS_AUTH__INSECURE=1 to override for "
+    "closed-network deployments."
+)
+
+
+def _loopback_policy_violated(cfg: Config) -> bool:
+    """True when the unauthenticated-non-loopback policy is violated.
+
+    Shared between ``serve`` (hard-fails before binding the socket) and
+    ``validate`` (hard-fails so CI/pre-deploy linting catches the same
+    misconfiguration before deploy).
+    """
+    return (
+        cfg.server.transport == "http"
+        and cfg.auth.mode == "none"
+        and not _is_loopback_host(cfg.server.host)
+    )
 
 
 def _version_callback(value: bool) -> None:
@@ -86,6 +138,18 @@ def serve(
     if cfg.llm.api_key is None:
         console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
         raise typer.Exit(code=2)
+    if _loopback_policy_violated(cfg):
+        if not cfg.auth.insecure:
+            console.print(
+                f"[red]Refusing to start:[/red] "
+                f"{escape(_INSECURE_NON_LOOPBACK_MESSAGE.format(host=cfg.server.host))}"
+            )
+            raise typer.Exit(code=2)
+        console.print(
+            f"[yellow]Warning:[/yellow] SQLLENS_AUTH__INSECURE=1 — starting "
+            f"unauthenticated HTTP server on {escape(cfg.server.host)}. "
+            "Closed-network deployments only."
+        )
     run(cfg)
 
 
@@ -101,11 +165,29 @@ def validate(
     except Exception as e:
         console.print(f"[red]Invalid:[/red] {escape(str(e))}")
         raise typer.Exit(code=2) from e
+    # Mirror serve's loopback-policy guard so CI / pre-deploy linting built on
+    # `validate` catches the misconfiguration before `serve` would refuse it.
+    # Non-acknowledged violation = hard exit (matches serve). Acknowledged
+    # violation (SQLLENS_AUTH__INSECURE=1) = visible warning printed alongside
+    # the `auth:` line so the breadcrumb is preserved in CI logs.
+    violated = _loopback_policy_violated(cfg)
+    if violated and not cfg.auth.insecure:
+        console.print(
+            f"[red]Invalid:[/red] "
+            f"{escape(_INSECURE_NON_LOOPBACK_VALIDATE_MESSAGE.format(host=cfg.server.host))}"
+        )
+        raise typer.Exit(code=2)
     console.print("[green]Config OK[/green]")
     console.print(f"  database: {cfg.database.name} ({cfg.database.url.split('://')[0]})")
     llm_suffix = "" if cfg.llm.api_key is not None else " (api_key NOT SET)"
     console.print(f"  llm:      {cfg.llm.provider} / {cfg.llm.model}{llm_suffix}")
-    console.print(f"  auth:     {cfg.auth.mode}")
+    auth_line = f"  auth:     {cfg.auth.mode}"
+    if violated:
+        auth_line += (
+            f" [yellow](SQLLENS_AUTH__INSECURE=1 — non-loopback host "
+            f"{escape(cfg.server.host)} with auth.mode=none)[/yellow]"
+        )
+    console.print(auth_line)
     console.print(f"  transport: {cfg.server.transport}")
 
 
