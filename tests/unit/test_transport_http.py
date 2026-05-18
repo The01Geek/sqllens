@@ -233,6 +233,30 @@ def test_lifespan_shutdown_after_failed_startup_is_clean_noop() -> None:
     assert sent2 == [{"type": "lifespan.shutdown.complete"}]
 
 
+def test_lifespan_unknown_message_type_terminates_loop() -> None:
+    """An unknown lifespan message type must not park the handler in an
+    infinite warn-and-continue loop — log once and return so a misbehaving
+    host can't hold the lifespan task open indefinitely.
+    """
+    sm = _FakeSessionManager()
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io([{"type": "lifespan.bogus"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+    assert sent == []
+
+
+def test_lifespan_missing_message_type_terminates_loop() -> None:
+    """A malformed lifespan message with no ``type`` key must not KeyError
+    out of ``_handle_lifespan`` (bypassing the failed-reply path); falls
+    through to the unknown-message handler instead.
+    """
+    sm = _FakeSessionManager()
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io([{"foo": "bar"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+    assert sent == []
+
+
 def test_lifespan_duplicate_startup_is_rejected() -> None:
     """A second lifespan.startup must not silently replace ``self._cm``."""
     sm = _FakeSessionManager()
