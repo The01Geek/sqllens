@@ -190,6 +190,87 @@ def test_lifespan_shutdown_failure_sends_failed_not_complete() -> None:
     assert "boom" in sent[-1]["message"]
 
 
+def test_lifespan_startup_failure_sends_failed_not_complete() -> None:
+    """Symmetric twin of the shutdown-failure test: ``__aenter__`` raising
+    must surface as ``lifespan.startup.failed`` (not ``.complete``) and the
+    exception message must reach the host.
+    """
+    sm = _FakeSessionManager(startup_exc=RuntimeError("startup-boom"))
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io([{"type": "lifespan.startup"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    types = [m["type"] for m in sent]
+    assert "lifespan.startup.complete" not in types
+    assert sent[-1]["type"] == "lifespan.startup.failed"
+    assert "startup-boom" in sent[-1]["message"]
+    # Post-state: _cm dropped, _started never flipped — so a subsequent
+    # lifespan.shutdown can't call __aexit__ on a never-entered CM, and
+    # the duplicate-startup guard does not trip on retry.
+    assert adapter._cm is None
+    assert adapter._started is False
+
+
+def test_lifespan_shutdown_after_failed_startup_is_clean_noop() -> None:
+    """End-to-end pin of the behavioral claim made by the ``self._cm = None``
+    reset in ``_handle_lifespan``'s startup-failure branch: if a host driver
+    opens a fresh lifespan scope and sends ``shutdown`` on an adapter whose
+    earlier startup failed, the handler must emit ``shutdown.complete``
+    (a clean no-op) and must NOT call ``__aexit__`` on the never-entered
+    context manager — which would raise ``RuntimeError("generator didn't
+    yield")`` and surface as a spurious ``shutdown.failed``, masking the
+    original startup failure.
+    """
+    sm = _FakeSessionManager(startup_exc=RuntimeError("startup-boom"))
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+
+    receive1, send1, sent1 = _make_io([{"type": "lifespan.startup"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive1, send1))
+    assert sent1[-1]["type"] == "lifespan.startup.failed"
+
+    receive2, send2, sent2 = _make_io([{"type": "lifespan.shutdown"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive2, send2))
+    assert sent2 == [{"type": "lifespan.shutdown.complete"}]
+
+
+def test_lifespan_unknown_message_type_is_logged_and_loop_continues() -> None:
+    """An unknown lifespan message type must be logged and skipped, with the
+    loop continuing to wait for a recognized message rather than exiting (which
+    would leave a subsequent valid startup/shutdown unhandled).
+    """
+    sm = _FakeSessionManager()
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io(
+        [
+            {"type": "lifespan.bogus"},
+            {"type": "lifespan.startup"},
+            {"type": "lifespan.shutdown"},
+        ]
+    )
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+    types = [m["type"] for m in sent]
+    assert types == ["lifespan.startup.complete", "lifespan.shutdown.complete"]
+
+
+def test_lifespan_missing_message_type_is_logged_and_loop_continues() -> None:
+    """A malformed lifespan message with no ``type`` key must not KeyError out
+    of ``_handle_lifespan``; it falls through to the unknown-message handler
+    (logged) and the loop continues to process the next valid message.
+    """
+    sm = _FakeSessionManager()
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io(
+        [
+            {"foo": "bar"},
+            {"type": "lifespan.startup"},
+            {"type": "lifespan.shutdown"},
+        ]
+    )
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+    types = [m["type"] for m in sent]
+    assert types == ["lifespan.startup.complete", "lifespan.shutdown.complete"]
+
+
 def test_lifespan_duplicate_startup_is_rejected() -> None:
     """A second lifespan.startup must not silently replace ``self._cm``."""
     sm = _FakeSessionManager()
