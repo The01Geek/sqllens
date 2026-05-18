@@ -9,7 +9,8 @@ Two responsibilities:
    ``PORT=``, ...) — pydantic-settings sub-models in ``sqllens.config`` lack
    their own ``env_prefix`` and would otherwise pick up those names from the
    process environment, masking real failures with ``literal_error`` validation
-   errors. We also scrub ``ANTHROPIC_API_KEY`` (the Anthropic SDK's canonical
+   errors on fields like ``auth.mode``. We also scrub ``ANTHROPIC_API_KEY``
+   (the Anthropic SDK's canonical
    env var, fallback for ``AnthropicLlmService``) and ``SQLLENS_AUTH__BEARER_TOKEN``
    so a developer with those exported cannot bypass the project-specific scrub.
 
@@ -136,14 +137,16 @@ def stub_agent_send_message() -> Callable[..., StubSendMessage]:
       message via ``error_message=``). Mirrors how the real agent surfaces
       failures to ``components_to_markdown``.
     - ``"status"`` — yields a ``STATUS_CARD`` with a non-error status (override
-      via ``status_title=`` / ``status=`` / ``description=``).
+      via ``status_title=`` / ``status=`` / ``description=``). Note:
+      ``components_to_markdown`` ignores non-error status cards, so this
+      scenario renders as ``"(no answer)"`` unless combined with ``"custom"``.
     - ``"empty"`` — yields nothing. ``components_to_markdown`` should render
       ``"(no answer)"`` for this case.
     - ``"custom"`` — yields the explicit ``components=`` iterable verbatim.
 
     The returned callable has the same signature as ``Agent.send_message``
-    (``request_context``, ``message``, ``conversation_id=None``) and ignores
-    its arguments — pass whatever the call site requires.
+    (``request_context``, ``message``, ``conversation_id=None``); the arguments
+    are accepted (so a drifted call site fails loudly) but not otherwise used.
 
     Issue #72 consumes this directly when exercising ``query_database``.
     """
@@ -201,8 +204,16 @@ def stub_agent_send_message() -> Callable[..., StubSendMessage]:
         )
 
         async def _send_message(
-            *args: Any, **kwargs: Any
+            request_context: Any = None,
+            message: str = "",
+            *,
+            conversation_id: str | None = None,
         ) -> AsyncGenerator[UiComponent, None]:
+            # Explicit parameters (not ``*args, **kwargs``) so a call site that
+            # drifts from the real ``Agent.send_message`` signature raises
+            # ``TypeError`` here instead of silently passing — the stub proves
+            # the documented contract, it doesn't just claim it.
+            del request_context, message, conversation_id
             for comp in prepared:
                 yield comp
 

@@ -71,6 +71,54 @@ async def test_stub_default_accepts_custom_text_and_rows(
     assert "Zed" in answer
 
 
+async def test_stub_text_only_yields_single_text_component(
+    stub_agent_send_message,
+) -> None:
+    send_message = stub_agent_send_message(scenario="text_only", text="Just prose.")
+
+    components = [c async for c in send_message(None, "any question")]
+
+    assert len(components) == 1
+    assert isinstance(components[0].rich_component, RichTextComponent)
+    answer, is_error = components_to_markdown(components)
+    assert not is_error
+    assert answer == "Just prose."
+
+
+async def test_stub_dataframe_only_yields_single_dataframe_component(
+    stub_agent_send_message,
+) -> None:
+    send_message = stub_agent_send_message(
+        scenario="dataframe_only", rows=[{"id": 7, "name": "Gus"}]
+    )
+
+    components = [c async for c in send_message(None, "any question")]
+
+    assert len(components) == 1
+    assert isinstance(components[0].rich_component, DataFrameComponent)
+    answer, is_error = components_to_markdown(components)
+    assert not is_error
+    assert "Gus" in answer
+
+
+async def test_stub_accepts_documented_keyword_signature(
+    stub_agent_send_message,
+) -> None:
+    """The stub's signature mirrors ``Agent.send_message`` — calling with the
+    documented keyword names must work (and would raise ``TypeError`` if the
+    stub drifted to a different parameter shape)."""
+    send_message = stub_agent_send_message()
+
+    components = [
+        c
+        async for c in send_message(
+            request_context=None, message="q", conversation_id="abc"
+        )
+    ]
+
+    assert len(components) == 2
+
+
 async def test_stub_error_scenario_surfaces_as_error(
     stub_agent_send_message,
 ) -> None:
@@ -112,6 +160,13 @@ async def test_stub_status_scenario_non_error_is_not_error(
 
     components = [c async for c in send_message(None, "anything")]
 
+    # Assert the stub itself, not just the renderer: a regression where the
+    # "status" branch yielded nothing would also render "(no answer)".
+    assert len(components) == 1
+    card = components[0].rich_component
+    assert isinstance(card, StatusCardComponent)
+    assert card.status == "running"
+    assert card.title == "Generating SQL"
     answer, is_error = components_to_markdown(components)
     assert not is_error  # only status="error" trips the error path
     # Non-error status cards aren't rendered to markdown; renderer returns
