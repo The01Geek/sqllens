@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 18, 2026
+
+- **[Feature] Query timeouts and row caps in every SQL runner** — SQL Lens now enforces a per-query statement timeout (default 30 seconds) and a hard ceiling on rows returned (default 10000) on Postgres, MySQL, and SQLite. When a result is trimmed, the assistant is told the answer was truncated so it can re-issue a narrower query. Tune the new `database.statement_timeout_ms` and `database.max_rows` fields in `sqllens.toml`, or override per deployment with `SQLLENS_DATABASE__STATEMENT_TIMEOUT_MS` and `SQLLENS_DATABASE__MAX_ROWS`. (#45)
+
 ## May 17, 2026
 
 - **[Fix] Read-only guard now rejects `SELECT ... INTO` on Postgres and T-SQL** — The read-only SQL guard previously accepted statements like `SELECT * INTO new_table FROM users`, which create a new table on Postgres and T-SQL (including `INTO TEMP` and `INTO UNLOGGED` variants) and write a session variable on MySQL (`SELECT ... INTO @var`). These statements are now rejected at parse time, including when nested inside common table expressions or used as an operand of `UNION`, `INTERSECT`, or `EXCEPT`. This restores the documented "read-only by default" guarantee for the default configuration. (#41)
