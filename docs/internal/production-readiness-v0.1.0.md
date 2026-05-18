@@ -201,18 +201,29 @@ and the error-surfacing path. Add an autouse fixture in
 
 **Tracking:** #72
 
-#### T-3. No mock-LLM fixture; integration conftest doesn't scrub `SQLLENS_LLM__API_KEY`
-**Files:** [`tests/integration/conftest.py`](../../tests/integration/conftest.py) ·
-[`tests/unit/conftest.py:41`](../../tests/unit/conftest.py#L41) ·
+#### T-3. No mock-LLM fixture; integration conftest doesn't scrub `SQLLENS_LLM__API_KEY` — *resolved*
+**Files:** [`tests/conftest.py`](../../tests/conftest.py) ·
+[`tests/integration/conftest.py`](../../tests/integration/conftest.py) ·
+[`pyproject.toml`](../../pyproject.toml)
 **Category:** Test infrastructure / Safety
 
-Unit conftest scrubs the env var, integration conftest does not. If a future
-test calls `Config.load()` from integration with the developer's real key in
-env, a forgotten mock could hit the real Anthropic API.
+Unit conftest scrubbed the env var, integration conftest did not. If a future
+test called `Config.load()` from integration with the developer's real key in
+env, a forgotten mock could hit the real Anthropic API. Additionally, the
+Anthropic SDK's canonical `ANTHROPIC_API_KEY` fallback was never scrubbed at
+all, so the project-specific scrub could be bypassed entirely.
 
-**Fix:** Mirror the env-scrub fixture in the integration conftest. Add a
-session-scoped fixture that monkeypatches `sqllens.agent.factory.build_agent`
-(or the Anthropic client constructor) to a stub.
+**Resolution (#74):** The autouse `_scrub_leaky_env` fixture was promoted to a
+new top-level [`tests/conftest.py`](../../tests/conftest.py) so both the unit
+and integration suites inherit it; the duplicated `tests/unit/conftest.py` was
+deleted. The scrub tuple gained `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`,
+`ANTHROPIC_MODEL`, and `SQLLENS_AUTH__BEARER_TOKEN`. A shared
+`stub_agent_send_message` factory fixture (async-generator of `UiComponent`,
+signature-compatible with `Agent.send_message`) ships in the same conftest for
+#72 to consume. Belt-and-suspenders sentinels are injected via `pytest-env` in
+`pyproject.toml` (`D:` defaults) so any test that slips past the scrub fails
+loudly with an obviously-bad key; a meta-test asserts the scrub removes those
+sentinels, proving the fixture is not a no-op.
 
 **Tracking:** #74
 

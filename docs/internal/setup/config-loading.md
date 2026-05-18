@@ -45,8 +45,12 @@ Keeping sub-models as `BaseModel` makes the parent `Config` the only env-aware l
 
 Two commands load config:
 
-- `sqllens serve` (`serve` command in [src/sqllens/cli.py](../../../src/sqllens/cli.py)) — calls `Config.load(config)`. On exception, prints `Config error: <msg>` and exits 2. After config loads cleanly, runs eager preflight probes against the four infrastructure dependencies (database, LLM, Chroma persist dir, authenticator); on failure prints `Preflight failed: <subsystem>: <detail>` and exits 2. Skip with `--no-preflight` / `SQLLENS_NO_PREFLIGHT=1` — the skip is announced in yellow so the safety net isn't lost silently. See [preflight.md](preflight.md).
-- `sqllens validate` (`validate` command in [src/sqllens/cli.py](../../../src/sqllens/cli.py)) — calls `Config.load(config)` and prints a one-line summary on success. On exception, prints `Invalid: <msg>` and exits 2. Accepts `--check-db`, `--check-llm`, `--check-memory`, `--check-auth` to opt into the same preflight probes `serve` runs.
+- `sqllens serve` (`serve` command in [src/sqllens/cli.py](../../../src/sqllens/cli.py)) — calls `Config.load(config)`. On exception, prints `Config error: <msg>` **to stderr** and exits 2. After config loads cleanly, runs eager preflight probes against the four infrastructure dependencies (database, LLM, Chroma persist dir, authenticator); on failure prints `Preflight failed: <subsystem>: <detail>` **to stderr** and exits 2. Skip with `--no-preflight` / `SQLLENS_NO_PREFLIGHT=1` — the skip is announced in yellow on stderr so the safety net isn't lost silently. See [preflight.md](preflight.md).
+- `sqllens validate` (`validate` command in [src/sqllens/cli.py](../../../src/sqllens/cli.py)) — calls `Config.load(config)` and prints a one-line summary on success **(stdout)**. On exception, prints `Invalid: <msg>` **to stderr** and exits 2. Accepts `--check-db`, `--check-llm`, `--check-memory`, `--check-auth` to opt into the same preflight probes `serve` runs.
+
+Operator-facing errors emitted before `run(cfg)` are routed through a dedicated `err_console = Console(stderr=True)` defined at module scope in `cli.py`. This is a stdio-transport-safety invariant: when `cfg.server.transport == "stdio"` (the default), the MCP host reads JSON-RPC frames on the server's stdout. Any non-framed byte on stdout — including a Rich-rendered "Config error" line — can corrupt the protocol channel and surface to the operator as cryptic client-side parse failures. Routing the pre-`run(cfg)` error paths (config-load failures, the `llm.api_key` gate, the non-loopback/insecure refusal, the `SQLLENS_AUTH__INSECURE=1` and `--no-preflight` warnings, and `Preflight failed:`) through stderr keeps stdout clean even when the server never gets as far as starting FastMCP. See [transport.md](../mcp-server/transport.md#stdio-mode) for the full rationale.
+
+Success output (`Wrote <path>`, `Config OK` + summary lines, `sqllens version`) is left on stdout, because by the time those print FastMCP has not yet taken over stdout (commands other than `serve`) or the CLI is exiting with a clean status without ever calling `run(cfg)`.
 
 By default `validate` performs **structural** validation only — it doesn't open the database, doesn't ping the LLM, doesn't bind a port. Secrets are explicitly *not* required: `llm.api_key` is optional in the schema, and the only enforcement is in `sqllens serve` (see below). Pass `--check-*` flags to extend validation into runtime-readiness territory without starting the server.
 
@@ -97,6 +101,8 @@ This catches the most common bearer-auth footgun: an operator exports `SQLLENS_A
 ### Error rendering note
 
 CLI error printing routes the variable part through `rich.markup.escape` so messages that contain bracket-shaped substrings (`[llm]`, `[type=missing, …]` from pydantic) render verbatim. Without escaping, rich silently strips bare bracket expressions it can't interpret as a style, which would drop crucial substrings from the user's view.
+
+The two `Console` instances in `cli.py` (`console` for success/data output, `err_console = Console(stderr=True)` for operator errors) are both Rich consoles and apply markup the same way; the only difference is the stream. Tests assert both halves of the routing invariant — the expected substring appears on `result.stderr` and stdout is empty for failing `serve`/`validate`/`init` invocations (`tests/unit/test_cli.py::test_config_load_failure_goes_to_stderr`, `test_init_already_exists_error_goes_to_stderr`).
 
 ## Adding a new config field
 

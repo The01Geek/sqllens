@@ -29,6 +29,9 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+# `sqllens serve` shares stdout with the stdio MCP JSON-RPC stream; routing
+# errors to stderr keeps that channel clean. Other commands follow suit.
+err_console = Console(stderr=True)
 
 def _is_loopback_host(host: str) -> bool:
     # Recognizes the entire 127.0.0.0/8 IPv4 loopback range and ::1, plus
@@ -114,7 +117,7 @@ def init(
 ) -> None:
     """Write a sample sqllens.toml to the current directory."""
     if path.exists() and not force:
-        console.print(f"[red]{path} already exists. Use --force to overwrite.[/red]")
+        err_console.print(f"[red]{path} already exists. Use --force to overwrite.[/red]")
         raise typer.Exit(code=1)
     path.write_text(_SAMPLE_CONFIG)
     console.print(f"[green]Wrote {path}[/green]")
@@ -145,30 +148,30 @@ def serve(
     try:
         cfg = Config.load(config)
     except Exception as e:
-        console.print(f"[red]Config error:[/red] {escape(str(e))}")
+        err_console.print(f"[red]Config error:[/red] {escape(str(e))}")
         raise typer.Exit(code=2) from e
     if cfg.llm.api_key is None:
-        console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
+        err_console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
         raise typer.Exit(code=2)
     if _loopback_policy_violated(cfg):
         if not cfg.auth.insecure:
-            console.print(
+            err_console.print(
                 f"[red]Refusing to start:[/red] "
                 f"{escape(_INSECURE_NON_LOOPBACK_MESSAGE.format(host=cfg.server.host))}"
             )
             raise typer.Exit(code=2)
-        console.print(
+        err_console.print(
             f"[yellow]Warning:[/yellow] SQLLENS_AUTH__INSECURE=1 — starting "
             f"unauthenticated HTTP server on {escape(cfg.server.host)}. "
             "Closed-network deployments only."
         )
     if no_preflight:
-        console.print("[yellow]Preflight skipped (--no-preflight).[/yellow]")
+        err_console.print("[yellow]Preflight skipped (--no-preflight).[/yellow]")
     else:
         try:
             run_preflight(cfg)
         except PreflightError as e:
-            console.print(f"[red]Preflight failed:[/red] {escape(str(e))}")
+            err_console.print(f"[red]Preflight failed:[/red] {escape(str(e))}")
             raise typer.Exit(code=2) from e
     run(cfg)
 
@@ -200,13 +203,13 @@ def validate(
     try:
         cfg = Config.load(config)
     except Exception as e:
-        console.print(f"[red]Invalid:[/red] {escape(str(e))}")
+        err_console.print(f"[red]Invalid:[/red] {escape(str(e))}")
         raise typer.Exit(code=2) from e
     # Mirror serve's guard so CI / pre-deploy linting catches the
     # misconfiguration before `serve` would refuse to start.
     violated = _loopback_policy_violated(cfg)
     if violated and not cfg.auth.insecure:
-        console.print(
+        err_console.print(
             f"[red]Invalid:[/red] "
             f"{escape(_INSECURE_NON_LOOPBACK_MESSAGE.format(host=cfg.server.host))}"
         )
@@ -238,7 +241,7 @@ def validate(
         try:
             probe(cfg)
         except PreflightError as e:
-            console.print(f"[red]Preflight failed:[/red] {escape(str(e))}")
+            err_console.print(f"[red]Preflight failed:[/red] {escape(str(e))}")
             raise typer.Exit(code=2) from e
         console.print(f"  [green]{label} OK[/green]")
 
@@ -334,14 +337,14 @@ def claude_desktop_install(
         )
         result = run_install(options, dry_run=dry_run, force=force)
     except InstallError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
+        err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
     except Exception as exc:
         # Friendly framing only; re-raising would dump a Python traceback right
         # after the framing line and contradict the "we've handled this" UX.
         # The chained exception is preserved on the typer.Exit via __cause__
         # for any future debug hook or test that inspects it.
-        console.print(
+        err_console.print(
             f"[red]Unexpected error:[/red] {type(exc).__name__}: {exc}\n"
             "This is likely a bug — please file an issue at "
             "https://github.com/The01Geek/sqllens/issues"

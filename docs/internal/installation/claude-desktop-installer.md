@@ -44,7 +44,7 @@ The installer file is structured as **pure helpers → orchestrator → formatte
 | `run_install` | The orchestrator — dry-run aware, idempotent. |
 | `format_install_result` | Returns a list of Rich-markup lines for `cli.py` to print. |
 
-Keeping the formatter colocated with the dataclass internals means changes to `InstallResult` and its rendered output stay together; the CLI layer just iterates and calls `console.print`.
+Keeping the formatter colocated with the dataclass internals means changes to `InstallResult` and its rendered output stay together; the CLI layer just iterates and calls `console.print` — the success path lands on stdout. Error framing in the `claude-desktop install` command (both the `InstallError` branch and the unexpected-exception "file an issue" branch) goes through `err_console = Console(stderr=True)` instead, so the protocol stream remains clean when the installer is invoked from inside a stdio-MCP-aware harness. See [mcp-server/transport.md](../mcp-server/transport.md#stdio-mode) for the broader rationale.
 
 ## OS-specific defaults
 
