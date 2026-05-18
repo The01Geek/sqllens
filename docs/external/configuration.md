@@ -68,7 +68,7 @@ Configures authentication for the HTTP transport. The stdio transport does not n
 | Field | Type | Description |
 |---|---|---|
 | `mode` | String | One of `none`, `bearer`, or `jwt`. See the [authentication modes](#authentication-modes) below. |
-| `bearer_token` | String | The shared token required by `bearer` mode. Prefer setting this with `SQLLENS_AUTH__BEARER_TOKEN`. |
+| `bearer_token` | String | The shared token required by `bearer` mode. Prefer setting this with `SQLLENS_AUTH__BEARER_TOKEN`. Setting this without also setting `mode = "bearer"` is rejected at config load — pair them, or unset both. |
 
 ### Authentication modes
 

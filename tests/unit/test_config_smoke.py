@@ -291,7 +291,7 @@ def test_cli_validate_rejects_bearer_token_without_bearer_mode(tmp_path: Path) -
 
 
 def test_cli_validate_rejects_env_bearer_token_without_bearer_mode(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The misconfig that motivated this validator is env-var-driven (operator
     # sets SQLLENS_AUTH__BEARER_TOKEN expecting it to enable bearer auth).
