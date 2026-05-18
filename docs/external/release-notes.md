@@ -5,6 +5,7 @@ This page lists user-visible changes in each released version of SQL Lens. For t
 ## May 18, 2026
 
 - **[Feature] Query timeouts and row caps in every SQL runner** — SQL Lens now enforces a per-query statement timeout (default 30 seconds) and a hard ceiling on rows returned (default 10000) on Postgres, MySQL, and SQLite. When a result is trimmed, the assistant is told the answer was truncated so it can re-issue a narrower query. Tune the new `database.statement_timeout_ms` and `database.max_rows` fields in `sqllens.toml`, or override per deployment with `SQLLENS_DATABASE__STATEMENT_TIMEOUT_MS` and `SQLLENS_DATABASE__MAX_ROWS`. (#45)
+- **[Fix] Memory feature: text-memory tool now wired up and `similarity_threshold` setting now honored** — SQL Lens can now save free-form text notes (for example, "in this schema, `cust_seg` means customer segment") so the assistant can lean on domain vocabulary across future questions. Previously the tool that saves these notes existed in the code but was never registered, so the assistant never used it. In addition, the `[memory].similarity_threshold` setting (and `SQLLENS_MEMORY__SIMILARITY_THRESHOLD`) now actually controls the default similarity floor used when SQL Lens searches its memory; before this fix the configured value was ignored at runtime and a hardcoded `0.7` was used instead. (#77)
 
 ## May 17, 2026
 

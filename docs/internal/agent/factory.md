@@ -17,8 +17,10 @@ cfg.memory      →  ChromaAgentMemory                 →  persists under cfg.m
                    LocalFileSystem                   →  scratch root = tempfile.gettempdir() / "sqllens"
 ToolRegistry    →  RunSqlTool                          (executes generated SQL, writes a scratch CSV,
                                                         appends truncation hint when df.attrs['truncated'])
-                   SaveQuestionToolArgsTool            (memory write)
-                   SearchSavedCorrectToolUsesTool      (memory read)
+                   SaveQuestionToolArgsTool            (memory write — tool-arg recordings)
+                   SearchSavedCorrectToolUsesTool      (memory read; default_similarity_threshold
+                                                        bound to cfg.memory.similarity_threshold)
+                   SaveTextMemoryTool                  (memory write — free-form text notes)
                                                           ↓
                                                         Agent(llm, tool_registry, user_resolver,
                                                               agent_memory, AgentConfig(max_tool_iterations))
