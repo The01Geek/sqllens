@@ -104,6 +104,8 @@ class MemoryConfig(BaseModel):
 class AuthConfig(BaseModel):
     """Authentication mode."""
 
+    # "jwt" stays in the Literal for schema stability and the JwtAuthenticator
+    # scaffold, but _reject_unimplemented_jwt rejects it at load — use none|bearer.
     mode: Literal["none", "bearer", "jwt"] = "none"
     bearer_token: SecretStr | None = Field(default=None, description="Required when mode=bearer")
     # Opt-out for the cli.serve loopback guard: closed-network deployments

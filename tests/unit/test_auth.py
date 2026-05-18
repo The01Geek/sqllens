@@ -111,9 +111,12 @@ class TestAuthConfigValidation:
 
     def test_token_with_mode_jwt_raises(self) -> None:
         # jwt is rejected at validation regardless of bearer_token; the jwt
-        # validator runs first so its actionable message wins.
-        with pytest.raises(ValidationError, match="not implemented"):
+        # validator runs first so its actionable message wins. Assert the
+        # misleading "bearer_token set with non-bearer mode" message does NOT
+        # also surface — a validator-reorder regression would leak it.
+        with pytest.raises(ValidationError, match="not implemented") as exc:
             AuthConfig(mode="jwt", bearer_token=SecretStr("x"))
+        assert "bearer_token is set but" not in str(exc.value)
 
     def test_token_with_mode_bearer_accepted(self) -> None:
         cfg = AuthConfig(mode="bearer", bearer_token=SecretStr("bearer-token-0123456789"))
@@ -189,6 +192,15 @@ class TestBearerTokenMinLength:
     def test_exactly_16_chars_accepted(self) -> None:
         auth = BearerTokenAuthenticator("0123456789abcdef")
         assert auth is not None
+
+    def test_authconfig_15_chars_rejected_16_accepted(self) -> None:
+        # The AuthConfig validator and BearerTokenAuthenticator are independent
+        # code paths sharing one constant; pin the boundary on the config path
+        # too so an off-by-one (< vs <=) in only one path can't slip through.
+        with pytest.raises(ValidationError, match="at least 16 characters"):
+            AuthConfig(mode="bearer", bearer_token=SecretStr("123456789012345"))
+        cfg = AuthConfig(mode="bearer", bearer_token=SecretStr("0123456789abcdef"))
+        assert cfg.bearer_token is not None
 
     def test_short_token_rejected_via_authconfig(self) -> None:
         with pytest.raises(ValidationError, match="at least 16 characters"):

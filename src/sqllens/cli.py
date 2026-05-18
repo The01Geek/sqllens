@@ -34,13 +34,19 @@ console = Console()
 # errors to stderr keeps that channel clean. Other commands follow suit.
 err_console = Console(stderr=True)
 
+
 def _format_config_error(exc: Exception) -> str:
     """Render a config-load exception for stderr without leaking secrets.
 
-    A pydantic ``ValidationError``'s ``str()`` embeds the offending input
-    (bearer token, API key, DSN password). Emit only ``loc``/``msg``/``type``,
-    dropping ``input``/``ctx``. Other config-load errors (file-not-found, BOM,
-    TOML syntax) carry no secret input, so pass them through.
+    A pydantic ``ValidationError``'s ``str()`` can embed the offending input
+    (bearer token, API key, DSN password) for schema-validation failures —
+    including plain-``str`` fields like ``database.url`` whose value is not a
+    self-masking ``SecretStr``. Emit only ``loc``/``msg``/``type``, dropping
+    ``input``/``ctx``. Non-``ValidationError`` config-load errors (file-not-found,
+    BOM, TOML syntax) are passed through: their messages are the actionable
+    remediation and do not embed schema input. A ``tomllib`` *syntax* error on a
+    secret-bearing line can still echo that line verbatim — config files are
+    expected to be operator-readable, so that residual is accepted, not scrubbed.
     """
     if not isinstance(exc, ValidationError):
         return str(exc)

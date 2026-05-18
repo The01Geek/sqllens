@@ -959,3 +959,31 @@ def test_validate_check_llm_runs_before_exit_one(
     result = runner.invoke(app, ["validate", "-c", str(cfg_path), "--check-llm"])
     assert result.exit_code == 2, result.stdout
     assert "Preflight failed" in result.stderr
+
+
+def test_format_config_error_redacts_plain_str_input() -> None:
+    # S-11 invariant pinned independently of SecretStr self-masking: a
+    # ValidationError whose failing input is a plain str (the shape of a DSN
+    # password in database.url, which is `str`, not SecretStr) must not leak
+    # that input. _format_config_error emits only loc/msg/type.
+    from pydantic import BaseModel, ValidationError, model_validator
+
+    from sqllens.cli import _format_config_error
+
+    secret = "p@ssw0rd-DSN-CANARY"
+
+    class _M(BaseModel):
+        dsn: str
+
+        @model_validator(mode="after")
+        def _reject(self) -> _M:
+            raise ValueError("dsn is malformed")
+
+    try:
+        _M(dsn=f"postgresql://u:{secret}@h/db")
+    except ValidationError as e:
+        rendered = _format_config_error(e)
+        assert secret not in rendered
+        assert "dsn is malformed" in rendered
+    else:  # pragma: no cover - validator always raises
+        raise AssertionError("expected ValidationError")
