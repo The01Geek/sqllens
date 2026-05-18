@@ -211,6 +211,28 @@ def test_lifespan_startup_failure_sends_failed_not_complete() -> None:
     assert adapter._started is False
 
 
+def test_lifespan_shutdown_after_failed_startup_is_clean_noop() -> None:
+    """End-to-end pin of the behavioral claim made by the ``self._cm = None``
+    reset in ``_handle_lifespan``'s startup-failure branch: if a host driver
+    opens a fresh lifespan scope and sends ``shutdown`` on an adapter whose
+    earlier startup failed, the handler must emit ``shutdown.complete``
+    (a clean no-op) and must NOT call ``__aexit__`` on the never-entered
+    context manager — which would raise ``RuntimeError("generator didn't
+    yield")`` and surface as a spurious ``shutdown.failed``, masking the
+    original startup failure.
+    """
+    sm = _FakeSessionManager(startup_exc=RuntimeError("startup-boom"))
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+
+    receive1, send1, sent1 = _make_io([{"type": "lifespan.startup"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive1, send1))
+    assert sent1[-1]["type"] == "lifespan.startup.failed"
+
+    receive2, send2, sent2 = _make_io([{"type": "lifespan.shutdown"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive2, send2))
+    assert sent2 == [{"type": "lifespan.shutdown.complete"}]
+
+
 def test_lifespan_duplicate_startup_is_rejected() -> None:
     """A second lifespan.startup must not silently replace ``self._cm``."""
     sm = _FakeSessionManager()
