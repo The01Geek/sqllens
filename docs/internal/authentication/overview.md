@@ -50,7 +50,12 @@ Static bearer token configured at startup. Clients send `Authorization: Bearer <
 - **Case-insensitive header lookup** — accepts `Authorization` and `authorization`. Anything else (`AUTHORIZATION`, etc.) is missed; if a proxy uppercases the header that's a problem, but no real client does that.
 - **Subject is the literal string `"bearer"`** — there's no principal information in a static token to derive a stable id from, and `None` would conflict with the "successful authentication implies non-null subject" convention some downstream code might one day want.
 
-Config: `auth.mode = "bearer"`, `auth.bearer_token = "..."` (or env `SQLLENS_AUTH__BEARER_TOKEN`). Missing token at startup raises `ValueError` in `build_authenticator`.
+Config: `auth.mode = "bearer"`, `auth.bearer_token = "..."` (or env `SQLLENS_AUTH__BEARER_TOKEN`). The `mode`/`bearer_token` pair is validated at two distinct points:
+
+- **Config-load time** — `AuthConfig._token_only_with_bearer_mode` (a pydantic `model_validator(mode="after")` in [src/sqllens/config.py](../../../src/sqllens/config.py)) rejects a `bearer_token` set when `mode` is anything other than `"bearer"`. This catches the dangerous misconfiguration where an operator sets `SQLLENS_AUTH__BEARER_TOKEN` and assumes that alone enables bearer auth — under `mode = "none"` the active authenticator would otherwise be `NoOpAuthenticator` and the server would run completely open. `mode = "jwt"` with a stale token is rejected for the same reason (the stale credential implies the wrong thing about what authorizes a request). The error message names the offending field, the actual mode, and both remediations (set `mode = "bearer"` or remove the token / unset the env var).
+- **`build_authenticator` time** — the inverse check: `mode = "bearer"` with `bearer_token is None` raises `ValueError("auth.mode='bearer' requires auth.bearer_token to be set")` in [src/sqllens/auth/\_\_init\_\_.py](../../../src/sqllens/auth/__init__.py).
+
+Together, the two checks make every `(mode, bearer_token)` combination either valid or fail loudly — there is no silent-ignore path.
 
 ### `jwt` — [src/sqllens/auth/jwt.py](../../../src/sqllens/auth/jwt.py)
 

@@ -98,6 +98,8 @@ sqllens validate -c path/to/sqllens.toml
 
 The command exits with a clear error message if any required field is missing or has the wrong type. `llm.api_key` is **not** required for validation: when the key is absent, the summary line marks it explicitly as `llm: anthropic / <model> (api_key NOT SET)` and validation still exits successfully. The key is enforced when you run `sqllens serve`.
 
+Validation also rejects an `auth.bearer_token` that is set while `auth.mode` is anything other than `"bearer"`. This is the most common bearer-auth misconfiguration: setting `SQLLENS_AUTH__BEARER_TOKEN` and assuming the token alone enables bearer auth. Either set `auth.mode = "bearer"` to use the token, or remove `bearer_token` and unset `SQLLENS_AUTH__BEARER_TOKEN`.
+
 If `sqllens.toml` starts with a UTF-8 byte-order mark (BOM), validation reports it by name and prints rewrite commands for PowerShell 7+, PowerShell 5.1, and bash. PowerShell 5.1's `Set-Content -Encoding utf8` and `Out-File -Encoding utf8` both add a BOM; use `Set-Content -Encoding utf8NoBOM` (PowerShell 7+) or `[System.IO.File]::WriteAllText(...)` to write a BOM-free file.
 
 ## See also
