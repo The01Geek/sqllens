@@ -120,20 +120,32 @@ template.
 
 **Tracking:** #37
 
-#### S-4. Bad database URL crashes only at first tool call, not startup
+#### S-4. Bad database URL crashes only at first tool call, not startup — **resolved by #38**
 **File:** [`src/sqllens/tools/query_database.py:18-25`](../../src/sqllens/tools/query_database.py#L18-L25) ·
 **Category:** Reliability / DX
 
-`build_agent` is lazy. A typo, wrong port, or missing password produces a
-process that starts cleanly, prints nothing, and returns an opaque
-`RuntimeError` to the first MCP call. Operators have no startup signal to
+`build_agent` was lazy. A typo, wrong port, or missing password produced a
+process that started cleanly, printed nothing, and returned an opaque
+`RuntimeError` to the first MCP call. Operators had no startup signal to
 fail fast on.
 
-**Fix:** Call `build_agent(cfg)` eagerly in `cli.serve` after loading config,
-before `run(cfg)`. Map common driver exceptions (auth failure, host unreach,
-DB missing) to clear single-line messages with exit code 2.
+**Resolution (PR #38, merged for v0.1.0):**
+[`src/sqllens/preflight.py`](../../src/sqllens/preflight.py) adds
+`probe_database`, `probe_llm`, `probe_memory`, `probe_auth`, and a
+`run_preflight` orchestrator that `sqllens serve` calls before binding the
+transport. Failures exit 2 with `Preflight failed: <subsystem>: <detail>`.
+`--no-preflight` / `SQLLENS_NO_PREFLIGHT=1` provides the escape hatch for
+container orchestrators where dependencies come up after the server; the
+skip is announced in yellow so the safety net isn't lost silently.
+`sqllens validate` exposes the same probes via `--check-db`, `--check-llm`,
+`--check-memory`, `--check-auth`. Full reference:
+[docs/internal/setup/preflight.md](setup/preflight.md).
 
-**Tracking:** #38
+Out of scope (separate issue): replacing the agent's blanket exception
+handler at `agent.py:166-213`, which still collapses post-startup tool
+errors into a generic message.
+
+**Tracking:** #38 (resolved)
 
 ### Code correctness
 

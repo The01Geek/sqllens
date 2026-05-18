@@ -128,6 +128,25 @@ The command exits with a clear error message if any required field is missing or
 
 If `sqllens.toml` starts with a UTF-8 byte-order mark (BOM), validation reports it by name and prints rewrite commands for PowerShell 7+, PowerShell 5.1, and bash. PowerShell 5.1's `Set-Content -Encoding utf8` and `Out-File -Encoding utf8` both add a BOM; use `Set-Content -Encoding utf8NoBOM` (PowerShell 7+) or `[System.IO.File]::WriteAllText(...)` to write a BOM-free file.
 
+### Optional runtime checks
+
+By default `validate` checks only that the file parses and the fields are well-typed. To also verify that each runtime dependency is reachable without starting the server, pass one or more of:
+
+| Flag | What it checks |
+|---|---|
+| `--check-db` | Opens and immediately closes a connection to `database.url`. |
+| `--check-llm` | Constructs the Anthropic client. Does not call the API. |
+| `--check-memory` | Confirms the Chroma `persist_dir` exists and is writable. |
+| `--check-auth` | Builds the configured authenticator, catching mistakes such as `bearer` mode with no token. |
+
+Each selected check prints `<name> OK` in green on success. On failure, the command prints `Preflight failed: <subsystem>: <detail>` and exits with code 2. This is useful in CI pipelines where you want a single command to confirm a deployment is ready before the server is started.
+
+## Startup preflight on `sqllens serve`
+
+When you run `sqllens serve`, the same four checks above run automatically after the configuration file is parsed and before the transport binds. Any failure exits with code 2 and a `Preflight failed: <subsystem>: <detail>` message, so an unreachable database, a typo in the API key, an unwritable Chroma directory, or a missing bearer token surfaces at startup rather than on the first question your assistant asks.
+
+To skip the preflight checks, for example in a container orchestrator where dependencies come up after the server, pass `--no-preflight` or set `SQLLENS_NO_PREFLIGHT=1`. When the checks are skipped, SQL Lens prints a yellow notice so the safety net is never disabled silently.
+
 ## See also
 
 - **[Getting started](getting-started.md)** for the minimal configuration needed to run the demo.
