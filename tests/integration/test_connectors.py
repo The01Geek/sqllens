@@ -183,10 +183,12 @@ class TestMysqlRunner:
 
         assert len(df) == max_rows
         assert df.attrs[TRUNCATED_ATTR] is True
-        # Bound is generous (1.5s) for slow CI runners. A full drain would be
-        # orders of magnitude over this; tightening further would just produce
-        # flakes without sharpening the signal.
-        assert elapsed < 1.5, (
+        # Bound is generous (5s) for slow CI runners. A full drain of 10**8
+        # rows over the wire is orders of magnitude over this (many seconds
+        # at minimum), so a wide bound still catches a real drain regression;
+        # tightening further only produces flakes without sharpening the
+        # signal (observed 1.68s on a healthy run with the cap working).
+        assert elapsed < 5.0, (
             f"cap returned in {elapsed:.2f}s — far too slow; cursor likely "
             "drained the full result set (SSDictCursor.close() was probably added)"
         )
