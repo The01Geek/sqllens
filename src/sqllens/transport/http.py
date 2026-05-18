@@ -14,9 +14,16 @@ that registers its endpoint at the path ``/mcp``. We wrap it with:
 2. **Authentication middleware.** Every request hits the configured
    ``Authenticator`` before the MCP handler sees it. Failures return ``401``
    with a short reason; auth-mode ``none`` is a passthrough.
+3. **Session-manager lifespan.** FastMCP's session manager must be started
+   inside an async context for requests to succeed; we wrap the stack in an
+   ASGI lifespan adapter so any host (uvicorn, FastAPI mount, custom server)
+   that drives lifespan events will start/stop it correctly.
 
-The ``run`` function is a thin uvicorn launcher; ``build_asgi_app`` is the
-testable seam used by the integration tests.
+Public surface:
+
+- ``build_asgi_app(cfg)`` returns the fully wrapped, mount-ready app. Use this
+  to mount SQL Lens under an external ASGI app (FastAPI, Starlette, etc.).
+- ``run(cfg)`` is the thin uvicorn launcher used by ``sqllens serve``.
 """
 
 from __future__ import annotations
@@ -25,6 +32,7 @@ import json
 import logging
 from collections.abc import Callable
 
+from mcp.server.fastmcp import FastMCP
 from starlette.responses import RedirectResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -46,53 +54,54 @@ _INTERNAL_PATH = "/mcp"
 
 
 def build_asgi_app(cfg: Config) -> ASGIApp:
-    """Build the Streamable HTTP ASGI app for ``cfg``.
+    """Build the fully wrapped, mount-ready Streamable HTTP ASGI app for ``cfg``.
 
-    Returned app is a bare ASGI callable wrapped in our own auth + path-fix
-    middleware. No Starlette ``Mount`` involved — that's deliberate: ``Mount``
+    The returned app includes path normalization, authentication, AND the
+    session-manager lifespan adapter — it is safe to mount under any ASGI
+    host (uvicorn, FastAPI, Starlette) that drives lifespan events.
+
+    No Starlette ``Mount`` is used internally — that's deliberate: ``Mount``
     has surprising trailing-slash semantics, and a single-server transport
     doesn't need path-based dispatch.
+    """
+    bare, mcp = _build_asgi_app_bare(cfg)
+    # Centralized private-attribute reach: FastMCP exposes the session manager
+    # as ``_session_manager``. We guard for AttributeError so an SDK upgrade
+    # that renames or removes it fails loudly at build time (one clear
+    # RuntimeError) rather than silently — the previous bug pattern was a
+    # 500 on first request, far from startup.
+    try:
+        session_manager = mcp._session_manager  # type: ignore[attr-defined]
+    except AttributeError as exc:
+        raise RuntimeError(
+            "FastMCP no longer exposes _session_manager; the mcp SDK likely "
+            "changed its private API. Pin a compatible mcp version or update "
+            "sqllens.transport.http.build_asgi_app."
+        ) from exc
+    return _SessionManagerLifespan(bare, session_manager)
+
+
+def _build_asgi_app_bare(cfg: Config) -> tuple[ASGIApp, FastMCP]:
+    """Build the path-normalized, authenticated ASGI app WITHOUT lifespan.
+
+    Returns the bare app and the underlying ``FastMCP`` instance so callers
+    that want to manage the session-manager lifespan themselves (typically
+    tests) can do so. Production callers should use ``build_asgi_app``.
     """
     mcp = build_server(cfg)
     inner = mcp.streamable_http_app()
     authenticator = build_authenticator(cfg.auth)
-
-    auth_app = _AuthMiddleware(inner, authenticator)
-    fixed_app = _PathNormalizer(auth_app)
-    return fixed_app
-
-
-def session_manager_for(cfg: Config):
-    """Return the FastMCP session manager so callers can manage its lifespan.
-
-    FastMCP's ``streamable_http_app`` initialises a session manager on first
-    call; the caller must run it inside a ``manager.run()`` async context for
-    the HTTP server to function. We return both the app and the manager handle
-    via ``build_asgi_app`` consumers — this helper exposes the manager only.
-    """
-    # build_server creates a fresh FastMCP, but we need the same instance whose
-    # streamable_http_app was returned. Re-derive deterministically.
-    raise NotImplementedError(
-        "session_manager_for is reserved for the run() launcher; do not call directly"
-    )
+    return _PathNormalizer(_AuthMiddleware(inner, authenticator)), mcp
 
 
 def run(cfg: Config) -> None:
     """Launch uvicorn with the Streamable HTTP app."""
     import uvicorn
 
-    mcp = build_server(cfg)
-    inner = mcp.streamable_http_app()
-    authenticator = build_authenticator(cfg.auth)
-    app = _PathNormalizer(_AuthMiddleware(inner, authenticator))
-
-    # FastMCP's session manager must be running for the inner app to handle
-    # requests. Wrap uvicorn's lifespan so the manager starts/stops with it.
-    lifespan_app = _SessionManagerLifespan(app, mcp._session_manager)  # type: ignore[attr-defined]
-
+    app = build_asgi_app(cfg)
     logger.info("starting Streamable HTTP server on %s:%d (path %s)",
                 cfg.server.host, cfg.server.port, MCP_PATH)
-    uvicorn.run(lifespan_app, host=cfg.server.host, port=cfg.server.port, log_level="info")
+    uvicorn.run(app, host=cfg.server.host, port=cfg.server.port, log_level="info")
 
 
 # ─────────────────────────── ASGI middleware ────────────────────────────────
