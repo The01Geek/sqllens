@@ -88,7 +88,7 @@ def test_save_text_memory_tool_is_registered(tmp_path: Path) -> None:
     Without this wiring the LLM never sees the tool, so free-form domain
     knowledge can never be persisted — see issue #76.
     """
-    cfg = _build_test_config(persist_dir=tmp_path / "chroma")
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
     agent = build_agent(cfg)
 
     assert "save_text_memory" in agent.tool_registry._tools
