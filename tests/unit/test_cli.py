@@ -72,6 +72,36 @@ def test_no_args_prints_help() -> None:
     assert "version" in result.stdout
 
 
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("serve", "Config error"),
+        ("validate", "Invalid"),
+    ],
+)
+def test_config_load_failure_goes_to_stderr(tmp_path, command: str, expected: str) -> None:
+    # Stdio MCP clients read JSON-RPC on stdout; operator errors must land on
+    # stderr to avoid corrupting that stream. Assert stdout is completely
+    # empty — the contract is "no non-JSON-RPC bytes on stdout", not just
+    # "no specific error substring on stdout".
+    missing = tmp_path / "does-not-exist.toml"
+    result = runner.invoke(app, [command, "--config", str(missing)])
+    assert result.exit_code == 2
+    assert expected in result.stderr
+    assert result.stdout == ""
+
+
+def test_init_already_exists_error_goes_to_stderr(tmp_path) -> None:
+    # Same stdio-safety contract: the `init` "already exists" error must
+    # land on stderr, never on stdout.
+    existing = tmp_path / "sqllens.toml"
+    existing.write_text("# placeholder\n")
+    result = runner.invoke(app, ["init", "--path", str(existing)])
+    assert result.exit_code == 1
+    assert "already exists" in result.stderr
+    assert "already exists" not in result.stdout
+
+
 # ---------------------------------------------------------------------------
 # Preflight integration with `serve` and `validate`
 # ---------------------------------------------------------------------------
@@ -91,7 +121,8 @@ def test_serve_preflight_blocks_on_unwritable_persist_dir(tmp_path: Path) -> Non
         result = runner.invoke(app, ["serve", "--config", str(cfg_path)])
 
     assert result.exit_code == 2
-    assert "Preflight failed: memory:" in result.stdout
+    # Operator errors route to stderr to keep the stdio JSON-RPC channel clean.
+    assert "Preflight failed: memory:" in result.stderr
     mock_run.assert_not_called()
 
 
@@ -112,8 +143,8 @@ def test_serve_preflight_blocks_on_bearer_without_token(tmp_path: Path) -> None:
     # not a preflight failure. `probe_auth` remains the defense-in-depth net
     # for callers that bypass validation (see test_preflight.py).
     assert result.exit_code == 2
-    assert "Config error:" in result.stdout
-    assert "auth.bearer_token" in result.stdout
+    assert "Config error:" in result.stderr
+    assert "auth.bearer_token" in result.stderr
     mock_run.assert_not_called()
 
 
@@ -129,7 +160,7 @@ def test_serve_preflight_blocks_on_bad_database(tmp_path: Path) -> None:
         result = runner.invoke(app, ["serve", "--config", str(cfg_path)])
 
     assert result.exit_code == 2
-    assert "Preflight failed: database:" in result.stdout
+    assert "Preflight failed: database:" in result.stderr
     mock_run.assert_not_called()
 
 
@@ -216,7 +247,7 @@ def test_validate_check_db_reports_failure(tmp_path: Path) -> None:
     result = runner.invoke(app, ["validate", "--config", str(cfg_path), "--check-db"])
 
     assert result.exit_code == 2
-    assert "Preflight failed: database:" in result.stdout
+    assert "Preflight failed: database:" in result.stderr
 
 
 def test_serve_no_preflight_announces_the_skip(tmp_path: Path) -> None:
@@ -230,7 +261,7 @@ def test_serve_no_preflight_announces_the_skip(tmp_path: Path) -> None:
         result = runner.invoke(app, ["serve", "--config", str(cfg_path), "--no-preflight"])
 
     assert result.exit_code == 0, result.stdout
-    assert "Preflight skipped" in result.stdout
+    assert "Preflight skipped" in result.stderr
     mock_run.assert_called_once()
 
 
@@ -267,11 +298,13 @@ def test_serve_refuses_non_loopback_when_auth_none(
     cfg_path = _write_serve_config(tmp_path, host=host)
 
     result = runner.invoke(app, ["serve", "-c", str(cfg_path)])
-    assert result.exit_code == 2, result.stdout
-    assert "Refusing to start" in result.stdout
-    assert host in result.stdout
-    assert "SQLLENS_AUTH__MODE=bearer" in result.stdout
-    assert "SQLLENS_AUTH__INSECURE=1" in result.stdout
+    assert result.exit_code == 2, result.stderr
+    # The refusal is an operator error — it must land on stderr so it cannot
+    # corrupt the stdio MCP JSON-RPC stream on stdout.
+    assert "Refusing to start" in result.stderr
+    assert host in result.stderr
+    assert "SQLLENS_AUTH__MODE=bearer" in result.stderr
+    assert "SQLLENS_AUTH__INSECURE=1" in result.stderr
 
 
 def test_serve_insecure_env_var_opt_out_bypasses_guard(
@@ -296,8 +329,11 @@ def test_serve_insecure_env_var_opt_out_bypasses_guard(
     assert result.exit_code == 0, result.stdout
     assert called == [True], "expected sqllens.server.run to be invoked past the guard"
     assert "Refusing to start" not in result.stdout
-    assert "SQLLENS_AUTH__INSECURE=1" in result.stdout
-    assert "Warning" in result.stdout
+    assert "Refusing to start" not in result.stderr
+    # The opt-out breadcrumb is an operator warning — routed to stderr so it
+    # never collides with the stdio MCP JSON-RPC stream on stdout.
+    assert "SQLLENS_AUTH__INSECURE=1" in result.stderr
+    assert "Warning" in result.stderr
 
 
 def test_serve_insecure_opt_out_via_toml(
@@ -334,12 +370,13 @@ def test_serve_insecure_opt_out_via_toml(
     assert result.exit_code == 0, result.stdout
     assert called == [True]
     assert "Refusing to start" not in result.stdout
+    assert "Refusing to start" not in result.stderr
     # The breadcrumb must show up regardless of which surface (env vs TOML)
     # set `insecure`. A regression that tied the warning emission to
     # os.environ.get("SQLLENS_AUTH__INSECURE") rather than cfg.auth.insecure
     # would silently bypass the guard with no log evidence for ops.
-    assert "SQLLENS_AUTH__INSECURE=1" in result.stdout
-    assert "Warning" in result.stdout
+    assert "SQLLENS_AUTH__INSECURE=1" in result.stderr
+    assert "Warning" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -464,11 +501,12 @@ def test_validate_refuses_non_loopback_when_auth_none(
     cfg_path = _write_serve_config(tmp_path, host=host)
 
     result = runner.invoke(app, ["validate", "-c", str(cfg_path)])
-    assert result.exit_code == 2, result.stdout
-    assert "Invalid" in result.stdout
-    assert host in result.stdout
-    assert "SQLLENS_AUTH__MODE=bearer" in result.stdout
-    assert "SQLLENS_AUTH__INSECURE=1" in result.stdout
+    assert result.exit_code == 2, result.stderr
+    # The refusal is an operator error and routes to stderr.
+    assert "Invalid" in result.stderr
+    assert host in result.stderr
+    assert "SQLLENS_AUTH__MODE=bearer" in result.stderr
+    assert "SQLLENS_AUTH__INSECURE=1" in result.stderr
     # Must NOT print the cheerful Config OK line ahead of the refusal.
     assert "Config OK" not in result.stdout
 

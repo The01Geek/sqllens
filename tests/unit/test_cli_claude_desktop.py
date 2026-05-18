@@ -912,7 +912,9 @@ class TestCli:
             ],
         )
         assert result.exit_code != 0
-        assert "Claude Desktop config not found" in _strip_ansi(result.stdout)
+        assert "Claude Desktop config not found" in _strip_ansi(result.stderr)
+        # Stdio-safety: this error must not leak onto stdout either.
+        assert "Claude Desktop config not found" not in _strip_ansi(result.stdout)
 
     def test_post_install_output_contains_required_lines(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1253,9 +1255,11 @@ class TestCliUnexpectedError:
         )
         assert result.exit_code == 2, (
             f"expected exit 2 from typer.Exit, got {result.exit_code}\n"
-            f"stdout={result.stdout}\nexception={result.exception}"
+            f"stdout={result.stdout}\nstderr={result.stderr}\nexception={result.exception}"
         )
-        clean = _strip_ansi(result.stdout)
+        clean = _strip_ansi(result.stderr)
         assert "Unexpected error" in clean
         assert "RuntimeError" in clean
         assert "file an issue" in clean
+        # Stdio-safety: error framing must not leak onto stdout either.
+        assert "Unexpected error" not in _strip_ansi(result.stdout)
