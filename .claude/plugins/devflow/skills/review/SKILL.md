@@ -493,6 +493,44 @@ If an agent fails, note: "[agent-name] did not return results." in the report. T
 
 Output: `Phase 4/4: Aggregating findings...`
 
+### 4.0 Match deferrals from PR body (PR mode only)
+
+**Skip this step entirely in current-branch mode** (no PR → no body to read). On standalone branch reviews, there is no Scope-Acknowledged Findings block; jump straight to 4.1.
+
+When `$ARGUMENTS` is a PR number, the engine consults the **Scope-Acknowledged Findings** block in the PR body (delimited by `<!-- DEVFLOW_DEFERRED_FINDINGS_START -->` / `<!-- DEVFLOW_DEFERRED_FINDINGS_END -->`) and demotes any current finding that matches a validated deferral entry to **Informational**. This is the consumer side of the contract /implement Phase 4.0.5 produces; without it, /devflow:review re-raises findings that /implement already filed follow-up issues for, creating the policy mismatch the contract is meant to prevent. (See `.claude/plugins/devflow/scripts/match-deferrals.py` for the matcher's exact guard order and matching rule.)
+
+Serialize the Phase 3 findings collected in 3.2 to a temporary JSON array with one object per finding:
+
+```json
+[
+  {"file": "...", "line_range": [N, M], "kind": "...", "description": "...",
+   "severity": "Critical|Important|Suggestion", "agent": "..."}
+]
+```
+
+The order matters — index N in this array becomes the matcher's `finding_index` reference. Write to `.devflow/review/<slug>/findings.json` (same directory the cached diff already lives in).
+
+Then invoke the matcher:
+
+```bash
+.claude/plugins/devflow/scripts/match-deferrals.py \
+    --pr $ARGUMENTS \
+    --diff ".devflow/review/<slug>/diff.patch" \
+    --findings ".devflow/review/<slug>/findings.json" \
+    > ".devflow/review/<slug>/deferrals-match.json"
+```
+
+The matcher always exits 0 when it ran (any result, including no block found). Read the output JSON:
+
+- `block_present: false` → PR has no Scope-Acknowledged Findings block; proceed to 4.1 with all findings intact.
+- `pr_author_trusted: false` → PR author is not in `claude.allowed_bots`; **every** deferral is rejected with reason `untrusted-filer`. All findings flow through unchanged. Include the rejection list in 4.1's `## Deferrals` section so the human reader sees the contract was claimed but not honorable.
+- For each entry in `honored[]`: the finding at `findings[finding_index]` is **demoted to Informational** for the rest of Phase 4. Record the `deferral_id` + `follow_up_issue` so the 4.1 line annotation can cite them.
+- For each entry in `rejected_deferrals[]`: the deferral did not apply (issue closed, missing cross-link, widens-surface re-check failed, or no matching current finding). The corresponding current finding (if any) is **not** demoted — flag it explicitly in 4.1's `## Deferrals` section with the reason.
+
+If the matcher itself errors out (exit code 2), log the failure (`Deferral matcher failed: {stderr}; proceeding without demotions.`) and continue to 4.1 with all findings intact. Never block the review on a matcher failure — the safe default is to surface findings, not hide them.
+
+**Caching note.** The matcher hits the GitHub API once for the PR body + author and once per `follow_up.issue` for the cross-link guard. For a PR with N deferrals, this is N+1 API calls. Tolerable; if it ever becomes a bottleneck, batch the issue reads via `gh api graphql`.
+
 ### 4.1 Build the report
 
 Construct the report in this format:
@@ -514,12 +552,21 @@ PASS items are summarized in the count line above; do not list them individually
 
 ## Code Review Findings
 {for each finding: "- [agent-name] severity: description (raised by N/{total Phase 3 agents that returned results} agents)"}
-{group Critical findings first, then Important/Major, then Suggestion/Minor. Within each severity, list corroborated findings (N≥2) before single-source ones (N=1) so the highest-confidence items lead.}
+{for findings whose index appears in the matcher's honored[] list, append " [Deferred → #{follow_up_issue}]" to the line and render the finding under a separate sub-heading "### Informational — Deferred" rather than under its original severity bucket.}
+{group Critical findings first, then Important/Major, then Suggestion/Minor, then Informational — Deferred. Within each severity, list corroborated findings (N≥2) before single-source ones (N=1) so the highest-confidence items lead.}
+
+## Deferrals
+{Omit this section entirely when 4.0 was skipped (current-branch mode) or block_present was false. Otherwise render:}
+- Honored: {stats.honored}
+{for each honored entry: "  - {deferral_id} → #{follow_up_issue} ({category})"}
+- Rejected: {len(rejected_deferrals)}
+{for each rejected entry: "  - {deferral_id} — rejected: {reason}"}
+{If pr_author_trusted is false, prepend a single line: "**Block claimed but not honored — PR author is not in `claude.allowed_bots`. All deferrals rejected.**"}
 
 ## Verdict Criteria
 - Any FAIL in verification checklist → REJECT
 - Any INCONCLUSIVE in verification checklist → REJECT (manual check needed)
-- Any Critical finding from review agents → REJECT
+- Any Critical finding from review agents → REJECT (excluding findings demoted to Informational via Phase 4.0's deferral match)
 - Checklist generation failed → max APPROVE WITH CAVEAT
 - 2+ review agents failed → partial review coverage
 - Only Important/Suggestion findings → APPROVE with notes
@@ -528,15 +575,16 @@ PASS items are summarized in the count line above; do not list them individually
 
 ### 4.2 Determine verdict
 
-Apply these rules in order (first match wins):
+Apply these rules in order (first match wins). For every rule that counts findings by severity, **exclude findings demoted to Informational by Phase 4.0's deferral match** — they appear in the report under the "Informational — Deferred" sub-heading but do not contribute to verdict computation. (Rejected-deferral entries do *not* demote their corresponding finding; those flow through at their original severity.)
+
 1. Any verification checklist item with verdict FAIL → **REJECT**
 2. Any verification checklist item with verdict INCONCLUSIVE → **REJECT** (add "manual check needed" note)
-3. Any Critical finding from existing review agents → **REJECT**
+3. Any Critical finding from existing review agents (excluding deferral-demoted ones) → **REJECT**
 4a. If Phase 1+2 were skipped **because checklist generation failed** (`checklist_skipped = "failure"`) → maximum verdict is **APPROVE WITH CAVEAT** — verification checklist not generated (never a clean APPROVE)
 4b. If Phase 1+2 were skipped **intentionally by Phase 0.5** (`checklist_skipped = "intentional"`, i.e. small_diff AND config_only) → no caveat; the verdict follows the remaining rules normally. The skip was a deliberate engine-profile choice for a low-risk diff, not a failure.
 5. If 2 or more Phase 3 agents failed to return results → add "partial review coverage" note to the verdict
-6. Only Important or Suggestion findings → **APPROVE with notes**
-7. No findings → **APPROVE**
+6. Only Important or Suggestion findings (excluding deferral-demoted ones) → **APPROVE with notes**
+7. No findings (excluding deferral-demoted ones) → **APPROVE**
 
 ### 4.3 Present the report
 

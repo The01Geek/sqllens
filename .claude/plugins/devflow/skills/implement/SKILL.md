@@ -475,7 +475,39 @@ EOF
 )"
 ```
 
-Record the new issue numbers in the workpad: `workpad.py update $ISSUE_NUMBER --note "Filed follow-up issues for deferred work: #N (phase 2), #N+1 (phase 3), …"` before continuing to 4.1.
+Record the new issue numbers in the workpad: `workpad.py update $ISSUE_NUMBER --note "Filed follow-up issues for deferred work: #N (phase 2), #N+1 (phase 3), …"` before continuing to 4.0.5.
+
+### 4.0.5 File Follow-Up Issues for Deferred Review Findings
+
+If Phase 3.3's /devflow:review-and-fix run emitted a deferrals manifest (`.devflow/review/<slug>/deferrals.json` — see that skill's "Pre-mapping: Widens-surface guard + deferrals manifest" section for what's in it), file follow-up GitHub issues for those findings now and update the manifest in place with the assigned issue numbers + deterministic deferral IDs. Phase 4.2's /pr-description run will then surface them in the PR body as a Scope-Acknowledged Findings block that /devflow:review's verdict matcher honors.
+
+Skip this step if the manifest does not exist or is empty.
+
+```bash
+PR_NUMBER=$(gh pr view --json number --jq '.number')
+DEFERRALS_FILE=".devflow/review/pr-${PR_NUMBER}/deferrals.json"
+if [ -s "$DEFERRALS_FILE" ]; then
+    FILED_NUMBERS=$(.claude/plugins/devflow/scripts/file-deferrals.py \
+        --source-issue $ARGUMENTS \
+        --pr "$PR_NUMBER" \
+        --manifest "$DEFERRALS_FILE")
+fi
+```
+
+The helper groups manifest entries by `file` (one issue per source file), files each issue with a repo-agnostic title/body template (`<area>: deferred review findings in <file> (carried from #<source_issue>)` and a body containing the verbatim findings plus the `PR #<pr_number>` substring that the verdict matcher's mutual-cross-link guard validates against), then rewrites the manifest in place with `id: dfr-<6-hex>` (deterministic hash of `file + symbol + kind + summary`) and `follow_up: {issue, url, filed_at, filed_by}` populated per entry. Filed issue numbers are printed to stdout, one per line.
+
+Failure mode: if `gh issue create` fails for a particular file-group, that group's entries are dropped from the manifest entirely — no fake deferral can downgrade a future review. The helper exits 0 as long as at least one group succeeded. Capture stderr in your `Devflow Reflection` notes if anything was dropped.
+
+Record the filed issue numbers in the workpad:
+
+```bash
+if [ -n "${FILED_NUMBERS:-}" ]; then
+    NUMBERS_CSV=$(echo "$FILED_NUMBERS" | tr '\n' ',' | sed 's/,$//' | sed 's/,/, #/g')
+    workpad.py update $ISSUE_NUMBER --note "Filed follow-up issues for deferred review findings: #${NUMBERS_CSV}"
+fi
+```
+
+If the helper exits non-zero (every group failed), surface the failure to the workpad's Devflow Reflection (`--reflection "file-deferrals.py failed; no follow-up issues filed; PR body will not contain the Scope-Acknowledged Findings block — /devflow:review will treat any deferred findings as new"`) and continue to 4.1. The PR can still ship; it will just not enjoy the deferral demotion on next review.
 
 ### 4.1 Update Documentation
 
@@ -544,7 +576,7 @@ Before reporting completion, verify ALL phases executed:
 - Phase 1: Issue fetched, branch exists, workpad initialized with Acceptance Criteria mirrored
 - Phase 2: For `bug`-labelled issues, reproduction signal recorded; if the issue spans multiple PRs, the 2.2.5 scope-adjustment rule was applied and the workpad's Acceptance Criteria section now contains only in-scope items; code committed and pushed
 - Phase 3: Draft PR created, `/simplify` ran (fixes committed if any), `/review-and-fix` ran, acceptance criteria gate passed (PR still draft)
-- Phase 4: If any criteria were deferred in 2.2.5, follow-up issue(s) filed in 4.0; docs updated and "Documented" label applied; PR description generated via `/pr-description`; PR marked ready; workpad finalized with `Status: Complete`
+- Phase 4: If any criteria were deferred in 2.2.5, follow-up issue(s) filed in 4.0; if /devflow:review-and-fix emitted a deferrals manifest, follow-up issue(s) filed in 4.0.5 and the manifest hydrated; docs updated and "Documented" label applied; PR description generated via `/pr-description`; PR marked ready; workpad finalized with `Status: Complete`
 
 Verify each `Status` PATCH actually landed at the time it was issued (see the Update protocol's "Always verify a PATCH that changes `Status` actually landed" rule). If a phase was skipped or a `Status` PATCH didn't land, go back and complete it now. In particular:
 

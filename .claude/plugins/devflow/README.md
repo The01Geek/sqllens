@@ -11,14 +11,16 @@ It bundles four things:
 
 …plus a self-improving loop (`/devflow-weekly`, with the `retrospective` and `audit-implementations` subagent briefs) that reads the evidence trail of merged Claude-authored PRs, finds recurring failure patterns, and opens human-reviewed PRs proposing the smallest change that would prevent the next occurrence. See [The retrospective loop](#the-retrospective-loop) below.
 
+The reviewer and orchestrator also coordinate via a structured **Scope-Acknowledged Findings contract**: when `/review-and-fix` chooses to defer a Critical finding as out-of-scope, `/implement` files a follow-up issue and surfaces it in the PR body, and a later `/review` run honors the acknowledgement instead of re-raising the same finding. See [Scope-Acknowledged Findings](#scope-acknowledged-findings) below.
+
 ## Skills and agents
 
 | Skill | What it does | Invoked |
 |---|---|---|
-| `/devflow:implement <issue#>` | Full lifecycle: fetch issue → branch + workpad → discover/plan → implement → test → draft PR → `/simplify` → `/devflow:review-and-fix` → acceptance gate → docs → ready PR | interactively, or via `@claude /devflow:implement <n>` |
-| `/devflow:review [PR#]` | Comprehensive review of a PR/branch: verification checklist (generated + verified against source), then `pr-review-toolkit` + `superpowers` reviewers; returns APPROVE/REJECT | interactively, or via `@claude run /devflow:review` |
-| `/devflow:review-and-fix [PR#]` | `/devflow:review` + an automatic fix loop (max 4 iterations) | interactively; called by `/devflow:implement` Phase 3 |
-| `/devflow:pr-description [issue#]` | Generate/update the PR description from the branch diff | interactively; called by `/devflow:implement` Phase 4 |
+| `/devflow:implement <issue#>` | Full lifecycle: fetch issue → branch + workpad → discover/plan → implement → test → draft PR → `/simplify` → `/devflow:review-and-fix` → acceptance gate → file follow-up issues for any deferred review findings (Phase 4.0.5) → docs → ready PR | interactively, or via `@claude /devflow:implement <n>` |
+| `/devflow:review [PR#]` | Comprehensive review of a PR/branch: verification checklist (generated + verified against source), then `pr-review-toolkit` + `superpowers` reviewers; in PR mode it also matches the PR body's Scope-Acknowledged Findings block (Phase 4.0) and demotes acknowledged findings to Informational; returns APPROVE/REJECT | interactively, or via `@claude run /devflow:review` |
+| `/devflow:review-and-fix [PR#]` | `/devflow:review` + an automatic fix loop (max 4 iterations); at Loop Exit it runs the widens-surface guard on Yes-downgrade skips and writes a deferrals manifest for the downstream contract | interactively; called by `/devflow:implement` Phase 3 |
+| `/devflow:pr-description [issue#]` | Generate/update the PR description from the branch diff; if a hydrated deferrals manifest exists, renders the Scope-Acknowledged Findings block in the PR body | interactively; called by `/devflow:implement` Phase 4 |
 | `/devflow:docs` | Orchestrates the three doc steps below in one session | interactively; called by `/devflow:implement` Phase 4 |
 | `/devflow:docs-sync-internal` | Update internal docs to match code changes on the branch | interactively; called by `/devflow:docs`; also by WikiWizard CI |
 | `/devflow:docs-sync-external` | Align external customer docs with the updated internal docs | interactively; called by `/devflow:docs`; also by WikiWizard CI |
@@ -50,6 +52,7 @@ The skills read repo-level config from `.github/project-config.yml`:
 
 - `docs.internal`, `docs.external` — documentation paths (read by the `/docs` family and `/implement`).
 - `claude.workpad_marker` — the marker line `/implement` uses to find/update its single per-issue workpad comment.
+- `claude.allowed_bots` — bot login allowlist; also doubles as the **trusted-filer allowlist** for the Scope-Acknowledged Findings contract (`/devflow:review`'s Phase 4.0 only honors deferrals filed by a PR author in this list).
 - `wikiwizard.documented_label` — the label `/implement` applies in Phase 4 so the WikiWizard workflow skips its own docs pass.
 - `devflow_retrospective.*` — settings for `/devflow-weekly` (see [Configuration](#configuration-1)).
 
@@ -67,6 +70,29 @@ This plugin lives in the `The01Geek/devflow-autopilot` repo at `.claude/plugins/
 ```
 
 On a fresh machine, accept the trust-folder prompt when Claude Code first runs in the repo (or run `claude plugin marketplace add . --scope project` then `claude plugin install devflow@devflow-marketplace`), then `/reload-plugins`. For a remote repo to use it, the cleanest path is to register the repo as a git marketplace in the consuming action/config (`plugin_marketplaces: https://github.com/The01Geek/devflow-autopilot.git`, `plugins: devflow@devflow-marketplace`) — the repo-root `marketplace.json` is found at the clone root. The skills also work when invoked by filesystem path (`Read .claude/plugins/devflow/skills/<name>/SKILL.md`) without any marketplace machinery — that's how the WikiWizard workflow uses the `docs-sync-*` skills.
+
+---
+
+# Scope-Acknowledged Findings
+
+A structured handoff between `/review-and-fix`, `/implement`, `/pr-description`, and `/review` so that a Critical finding deliberately deferred during the fix loop is not re-raised as a fresh REJECT by the next review run.
+
+**The mismatch this closes.** The `/review-and-fix` fix loop already has a `skip_category` enum with three Yes-downgrade categories (`out-of-scope`, `already-tracked`, `claim-quality`); when every REJECT trigger falls into one of those, the Loop Exit gate downgrades `REJECT → APPROVE WITH CAVEAT`. But a later standalone `/review` (e.g. as a merge signal) had no equivalent gate and would re-raise the same findings as REJECT, undoing the downgrade decision.
+
+**The handoff, in order.**
+
+1. **`/review-and-fix` Loop Exit** runs a **widens-surface guard** on every Yes-downgrade skip — if the PR diff overlaps the deferred finding's file within ±10 lines, the skip is disqualified (catches "refactor around the bug, then defer the bug"). Survivors are emitted as `.devflow/review/<slug>/deferrals.json`.
+2. **`/implement` Phase 4.0.5** reads that manifest, runs `scripts/file-deferrals.py` to file **one follow-up issue per source file** (the body contains the verbatim findings plus a `PR #<N>` cross-link), and rewrites the manifest in place with deterministic `id: dfr-<6-hex>` and `follow_up: {issue, url, filed_at, filed_by}` fields per entry.
+3. **`/pr-description`** does a best-effort lookup of the hydrated manifest and renders a Scope-Acknowledged Findings YAML block between `<!-- DEVFLOW_DEFERRED_FINDINGS_START -->` / `END` markers in the PR body (inside the existing `PR_BODY_START` markers).
+4. **`/devflow:review` Phase 4.0** (PR mode only) runs `scripts/match-deferrals.py`, which validates each deferral against three guards and demotes matched current findings to **Informational** before verdict computation.
+
+**The three guards** (any failure rejects the deferral; the matching finding flows through unchanged):
+
+- **Trusted filer** — the PR author is in `claude.allowed_bots`.
+- **Mutual cross-link** — the follow-up issue still exists, is open, and its body contains the literal substring `PR #<current_pr_number>`.
+- **Widens surface (re-check)** — the PR's current diff still does not overlap the deferral's file within ±10 lines (re-evaluated at review time, not trusted from manifest creation).
+
+The deferral category names exactly match the `skip_category` enum — no translation layer, no new config keys. The contract is repo-agnostic; trusted-filer comes from `claude.allowed_bots`, base branch from `base_branch`, all in `.github/project-config.yml`.
 
 ---
 
@@ -253,6 +279,13 @@ devflow_retrospective:
 │   ├── checklist-generator.md
 │   ├── checklist-verifier.md
 │   └── github-issue-creator.md
+├── scripts/
+│   ├── branch-for-issue.py        # /implement Phase 1 — branch + workpad helper
+│   ├── config-get.sh              # reads keys from .github/project-config.yml
+│   ├── file-deferrals.py          # Scope-Acknowledged Findings — producer (/implement Phase 4.0.5)
+│   ├── match-deferrals.py         # Scope-Acknowledged Findings — consumer (/devflow:review Phase 4.0)
+│   ├── parse-acs.py               # /implement Phase 2 — Acceptance Criteria parser
+│   └── workpad.py                 # /implement workpad CRUD helper
 └── lib/
     ├── conf.sh
     ├── scan.sh
