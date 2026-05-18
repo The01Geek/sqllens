@@ -417,11 +417,47 @@ Note: convergence is *not* a way around an unresolved REJECT. If iter N's verdic
 
 ## Loop Exit
 
+### Pre-mapping: Widens-surface guard + deferrals manifest
+
+Run this step BEFORE the REJECT downgrade gate below. It does two things: enforces a widens-surface guard on Yes-downgrade skips, and emits a structured manifest that downstream callers (currently /implement Phase 4.0.5) can consume to file follow-up issues and inject the Scope-Acknowledged Findings block into the PR body.
+
+**Widens-surface guard.** Walk every `fix_decisions` entry in the final iter's workpad whose `skip_category` reads **Yes** in the enum table (Step 3, item 5 — currently `claim-quality`, `out-of-scope`, `already-tracked`). For each candidate, join to its Phase 3 finding via `finding_id` to obtain `defect_signature.file` and `defect_signature.line_range`, then read the cached diff (`.devflow/review/<slug>/diff.patch`) and check whether any non-comment hunk in the diff overlaps that file within ±10 lines of the line range. If overlap is detected, the skip is **disqualified for the downgrade gate** — append a bullet to the workpad's `Devflow Reflection` (`widens-surface guard rejected skip for finding {finding_id}: PR diff overlaps {file}:{lines}`) and treat the finding as a non-skipped REJECT trigger for the gate that runs next. This catches the "refactor around a pre-existing bug, then defer the bug" pattern: the bug's lines weren't touched in isolation, but the surrounding code changed in a way that widens reliance on the broken behavior.
+
+**Deferrals manifest.** After the guard runs, emit `.devflow/review/<slug>/deferrals.json` containing every **surviving** Yes-downgrade skip (i.e. `claim-quality` / `out-of-scope` / `already-tracked` entries that the widens-surface guard did not disqualify). The manifest is written regardless of whether the downgrade gate ultimately fires; `claim-quality` and `already-tracked` skips on non-REJECT runs are still legitimate deferrals worth tracking for the verdict matcher. If zero entries survive, omit the file entirely.
+
+Schema:
+
+```json
+{
+  "schema_version": 1,
+  "pr_branch": "<current branch>",
+  "base_branch": "<from .github/project-config.yml's base_branch key>",
+  "generated_at": "<ISO 8601 UTC>",
+  "deferrals": [
+    {
+      "agent": "<from phase3_findings.agent>",
+      "severity": "<Critical | Important | Suggestion>",
+      "file": "<from defect_signature.file>",
+      "line_range": [<start>, <end>],
+      "symbol": "<best-effort, see below>",
+      "kind": "<from defect_signature.kind>",
+      "summary": "<verbatim from phase3_findings.description>",
+      "category": "<one of: out-of-scope, already-tracked, claim-quality>",
+      "explanation": "<verbatim from fix_decisions.evidence>"
+    }
+  ]
+}
+```
+
+`symbol` is best-effort: scan the finding's `description` for the first backtick-quoted identifier; if none, leave empty string. Downstream matchers (the /devflow:review verdict engine) fall back to `line_range` + summary similarity when `symbol` is absent.
+
+This step writes the artifact and applies the guard. It does **NOT** file follow-up issues, mutate the PR body, or touch GitHub — those are /implement Phase 4.0.5's responsibility. /devflow:review-and-fix is silent on GitHub by design and stays so. When the caller is standalone /devflow:review-and-fix (no orchestrator wrapping it), the manifest is still written but no consumer reads it — that's fine; it's informational state on disk and useful for debugging.
+
 ### Pre-mapping: Step-3-evaluated REJECT downgrade
 
-If the engine's final verdict is **REJECT** AND **every** REJECT trigger (checklist FAILs and Critical Phase 3 findings) was Step-3-skipped with a `skip_category` whose "qualifies for REJECT downgrade?" column in the `skip_category` enum (authoritative) table (Step 3, item 5) reads **Yes**, **downgrade the final verdict to `APPROVE WITH CAVEAT`** and surface each trigger in the report's `## Downgraded Findings` section with its category label and evidence.
+If the engine's final verdict is **REJECT** AND **every** REJECT trigger (checklist FAILs and Critical Phase 3 findings) was Step-3-skipped with a `skip_category` whose "qualifies for REJECT downgrade?" column in the `skip_category` enum (authoritative) table (Step 3, item 5) reads **Yes** AND survived the widens-surface guard above, **downgrade the final verdict to `APPROVE WITH CAVEAT`** and surface each trigger in the report's `## Downgraded Findings` section with its category label and evidence.
 
-The gate consults that table directly — it does not maintain its own list. If a future edit adds a sixth `skip_category`, mark its downgrade-eligibility in the table row and the gate picks it up automatically. **One trigger whose category reads "No" (or "N/A", or whose category isn't in the table at all) keeps the REJECT.** Similarly, any REJECT trigger that was NOT skipped at all (i.e. the orchestrator addressed it in Step 3 but the post-fix engine re-run still rejects) keeps the REJECT; the downgrade gate is for false-positive REJECTs, not for unfinished work.
+The gate consults that table directly — it does not maintain its own list. If a future edit adds a sixth `skip_category`, mark its downgrade-eligibility in the table row and the gate picks it up automatically. **One trigger whose category reads "No" (or "N/A", or whose category isn't in the table at all) keeps the REJECT.** Similarly, any REJECT trigger that was NOT skipped at all (i.e. the orchestrator addressed it in Step 3 but the post-fix engine re-run still rejects) keeps the REJECT; the downgrade gate is for false-positive REJECTs, not for unfinished work. A trigger whose skip was disqualified by the widens-surface guard above keeps the REJECT for the same reason — the guard found that this PR widens reliance on the deferred bug, so the bug is no longer "pre-existing and unrelated" for review purposes.
 
 ### Verdict → chat output
 
