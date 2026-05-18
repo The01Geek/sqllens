@@ -52,6 +52,14 @@ either form."""
 
 _INTERNAL_PATH = "/mcp"
 
+HEALTHZ_PATH = "/healthz"
+"""Unauthenticated liveness probe path.
+
+Asserts only that the ASGI process is up and the event loop is serving
+requests — it does **not** check DB, ChromaDB, or LLM reachability. Handled
+in ``_PathNormalizer``, ahead of ``_AuthMiddleware``, so orchestrator probes
+never need (and are never gated by) an ``Authorization`` header."""
+
 
 def build_asgi_app(cfg: Config) -> ASGIApp:
     """Build the fully wrapped, mount-ready Streamable HTTP ASGI app for ``cfg``.
@@ -136,6 +144,9 @@ class _PathNormalizer:
             return
 
         path = scope.get("path", "")
+        if path == HEALTHZ_PATH:
+            await _send_health(send)
+            return
         if path == "/":
             response = RedirectResponse(url=MCP_PATH, status_code=307)
             await response(scope, receive, send)
@@ -361,6 +372,21 @@ class _SessionManagerLifespan:
 
 def _decode_headers(raw: list[tuple[bytes, bytes]]) -> dict[str, str]:
     return {k.decode("latin-1"): v.decode("latin-1") for k, v in raw}
+
+
+async def _send_health(send: Send) -> None:
+    body = json.dumps({"status": "ok"}, separators=(",", ":")).encode()
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
 
 
 async def _send_401(send: Send, reason: str) -> None:
