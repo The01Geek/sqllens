@@ -44,7 +44,11 @@ class SearchSavedCorrectToolUsesParams(BaseModel):
         default=10, description="Maximum number of results to return"
     )
     similarity_threshold: Optional[float] = Field(
-        default=0.7, description="Minimum similarity score for results (0.0-1.0)"
+        default=None,
+        description=(
+            "Minimum similarity score for results (0.0-1.0). When omitted, the "
+            "server-configured default (memory.similarity_threshold) is used."
+        ),
     )
     tool_name_filter: Optional[str] = Field(
         default=None, description="Filter results to specific tool name"
@@ -120,6 +124,9 @@ class SaveQuestionToolArgsTool(Tool[SaveQuestionToolArgsParams]):
 class SearchSavedCorrectToolUsesTool(Tool[SearchSavedCorrectToolUsesParams]):
     """Tool for searching saved tool usage patterns."""
 
+    def __init__(self, *, default_similarity_threshold: float = 0.7) -> None:
+        self._default_similarity_threshold = default_similarity_threshold
+
     @property
     def name(self) -> str:
         return "search_saved_correct_tool_uses"
@@ -136,11 +143,16 @@ class SearchSavedCorrectToolUsesTool(Tool[SearchSavedCorrectToolUsesParams]):
     ) -> ToolResult:
         """Search for similar tool usage patterns."""
         try:
+            threshold = (
+                args.similarity_threshold
+                if args.similarity_threshold is not None
+                else self._default_similarity_threshold
+            )
             results = await context.agent_memory.search_similar_usage(
                 question=args.question,
                 context=context,
                 limit=args.limit or 10,
-                similarity_threshold=args.similarity_threshold or 0.7,
+                similarity_threshold=threshold,
                 tool_name_filter=args.tool_name_filter,
             )
 
