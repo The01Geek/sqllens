@@ -46,10 +46,11 @@ def test_no_args_prints_help() -> None:
     assert "version" in result.stdout
 
 
-def _write_serve_config(tmp_path: Path, *, host: str) -> Path:
+def _write_serve_config(tmp_path: Path, *, host: str, transport: str = "http") -> Path:
     # Minimum viable TOML — api_key supplied via env so the api_key gate (which
     # fires *before* the loopback guard) passes and the test exercises the
-    # actual guard. transport=http triggers the guard; auth.mode defaults to "none".
+    # actual guard. transport defaults to "http" (triggers the guard); auth.mode
+    # defaults to "none".
     cfg_path = tmp_path / "sqllens.toml"
     cfg_path.write_text(
         textwrap.dedent(
@@ -58,7 +59,7 @@ def _write_serve_config(tmp_path: Path, *, host: str) -> Path:
             url = "sqlite:///./demo.db"
 
             [server]
-            transport = "http"
+            transport = "{transport}"
             host = "{host}"
             """
         )
@@ -155,19 +156,7 @@ def test_serve_stdio_transport_skips_loopback_guard(
     monkeypatch.setenv("SQLLENS_LLM__API_KEY", "sk-ant-test")
     monkeypatch.delenv("SQLLENS_AUTH__INSECURE", raising=False)
     monkeypatch.delenv("SQLLENS_AUTH__MODE", raising=False)
-    cfg_path = tmp_path / "sqllens.toml"
-    cfg_path.write_text(
-        textwrap.dedent(
-            """\
-            [database]
-            url = "sqlite:///./demo.db"
-
-            [server]
-            transport = "stdio"
-            host = "0.0.0.0"
-            """
-        )
-    )
+    cfg_path = _write_serve_config(tmp_path, host="0.0.0.0", transport="stdio")
 
     called: list[bool] = []
     import sqllens.server
