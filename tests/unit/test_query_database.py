@@ -13,11 +13,13 @@ so no LLM key or ChromaDB download is required.
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 import pytest
 
 from sqllens.config import Config
+from sqllens.safety import UnsafeSqlError
 from sqllens.tools import query_database as query_database_module
 from sqllens.tools.query_database import query_database_impl
 
@@ -70,16 +72,19 @@ async def test_second_call_reuses_singleton(
 
 
 @pytest.mark.asyncio
-async def test_singleton_ignores_changed_cfg(
+async def test_changed_cfg_warns_and_does_not_rebuild(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Documents current behavior: a second call with a fresh ``Config`` is ignored.
+    """C-3: a second call with a different ``Config`` warns explicitly.
 
-    This is a known limitation tracked alongside the singleton race (see
-    #72's out-of-scope section). The test pins the current behavior so that
-    any future fix has a clear regression target.
+    The agent is still built exactly once (no wasted ~80 MB download), but
+    the mismatch is no longer *silent* — the wrong-config caller gets an
+    explicit ``logger.warning`` instead of being served by the original
+    agent with no signal. This replaces the old behavior-pinning test that
+    documented the silent drop as a known bug.
     """
     cfg_a = build_test_config(persist_dir=tmp_path / "chroma")
     cfg_b = build_test_config(persist_dir=tmp_path / "alt")
@@ -92,9 +97,36 @@ async def test_singleton_ignores_changed_cfg(
     monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
 
     await query_database_impl(cfg_a, "q")
-    await query_database_impl(cfg_b, "q")
+    with caplog.at_level(logging.WARNING, logger="sqllens.tools.query_database"):
+        await query_database_impl(cfg_b, "q")
 
-    assert seen == [cfg_a]  # cfg_b was silently dropped
+    assert seen == [cfg_a]  # built once; cfg_b did not trigger a rebuild
+    assert any(
+        "different Config" in r.message and r.levelno == logging.WARNING
+        for r in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_same_cfg_does_not_warn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The mismatch warning fires only on an actual config mismatch."""
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    monkeypatch.setattr(
+        query_database_module,
+        "build_agent",
+        lambda _c: agent_stub_factory([make_text_component("ok")]),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="sqllens.tools.query_database"):
+        await query_database_impl(cfg, "q1")
+        await query_database_impl(cfg, "q2")
+
+    assert not any("different Config" in r.message for r in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -125,21 +157,80 @@ async def test_build_agent_raises_leaves_singleton_none(
 
 
 @pytest.mark.asyncio
-async def test_send_message_raises_surfaces_as_runtime_error(
+async def test_send_message_raises_surfaces_sanitized_runtime_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
 ) -> None:
-    """Errors from ``send_message`` are wrapped in ``RuntimeError`` with chained cause."""
+    """S-10: ``send_message`` failures surface a stable, sanitized message.
+
+    The original exception is chained (``__cause__``) for server-side logs
+    but its string is *not* interpolated into the client-facing message.
+    """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     original = ValueError("LLM exploded")
     stub = agent_stub_factory(raise_exc=original)
     monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
 
-    with pytest.raises(RuntimeError, match="query_database failed: LLM exploded") as excinfo:
+    with pytest.raises(RuntimeError) as excinfo:
         await query_database_impl(cfg, "q")
 
+    assert str(excinfo.value) == "internal error; see server logs"
+    assert "LLM exploded" not in str(excinfo.value)
     assert excinfo.value.__cause__ is original
+
+
+@pytest.mark.asyncio
+async def test_driver_exception_message_is_sanitized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """S-10: a driver exception's host/port/role never reaches the client.
+
+    The client-facing message must *equal* the stable internal-error string
+    and contain none of the connection-detail substrings.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    leaky = OSError(
+        "could not connect to host=db.internal port=5432 user=admin_role"
+    )
+    stub = agent_stub_factory(raise_exc=leaky)
+    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await query_database_impl(cfg, "q")
+
+    message = str(excinfo.value)
+    assert message == "internal error; see server logs"
+    for secret in ("db.internal", "5432", "admin_role"):
+        assert secret not in message
+
+
+@pytest.mark.asyncio
+async def test_unsafe_sql_error_surfaces_verbatim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """S-10/#14: ``UnsafeSqlError`` is actionable feedback, not a leak.
+
+    Its original message must reach the client verbatim and stay
+    distinguishable from the generic internal-error category.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    safety_msg = (
+        "refusing to execute non-SELECT SQL: "
+        "only SELECT statements are allowed (got DELETE)"
+    )
+    stub = agent_stub_factory(raise_exc=UnsafeSqlError(safety_msg))
+    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await query_database_impl(cfg, "delete everything")
+
+    assert str(excinfo.value) == safety_msg
+    assert str(excinfo.value) != "internal error; see server logs"
 
 
 @pytest.mark.asyncio
@@ -188,14 +279,14 @@ async def test_concurrent_first_calls_build_once(
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
 ) -> None:
-    """Singleton invariant holds under ``asyncio.gather`` of two cold-start calls.
+    """C-3: ``_agent_for``'s double-checked lock builds exactly one agent.
 
-    The current ``_agent_for`` is synchronous (no ``await`` between the
-    ``if _AGENT is None`` check and the assignment), so two awaits started
-    via ``asyncio.gather`` cannot interleave inside that critical section
-    on a single event loop. If a future refactor inserts an ``await``
-    between the check and the set without protecting it with a lock, this
-    assertion is the regression signal.
+    ``_agent_for`` is now ``async`` and awaits ``_AGENT_LOCK`` around the
+    cold start. To prove the lock (not merely single-threaded luck) holds,
+    each ``build_agent`` yields control via ``asyncio.sleep(0)`` so a second
+    gathered call gets a chance to run inside the critical section. Without
+    the lock both calls would observe ``_AGENT is None`` and build twice;
+    the assertion that ``build_agent`` ran once is the regression signal.
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     builds: list[Config] = []
@@ -206,9 +297,21 @@ async def test_concurrent_first_calls_build_once(
 
     monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
 
+    # Force the event loop to switch tasks at the start of every call so the
+    # second gathered call reaches ``_agent_for`` while the first may still be
+    # mid-cold-start — the scenario the lock exists to serialize.
+    real_agent_for = query_database_module._agent_for
+
+    async def slow_agent_for(c: Config):
+        await asyncio.sleep(0)
+        return await real_agent_for(c)
+
+    monkeypatch.setattr(query_database_module, "_agent_for", slow_agent_for)
+
     await asyncio.gather(
         query_database_impl(cfg, "q1"),
         query_database_impl(cfg, "q2"),
+        query_database_impl(cfg, "q3"),
     )
 
     assert len(builds) == 1

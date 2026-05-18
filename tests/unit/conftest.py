@@ -25,15 +25,20 @@ from ._agent_stubs import StubAgent
 
 @pytest.fixture(autouse=True)
 def _reset_query_database_singleton():
-    """Guarantee ``_AGENT`` is None entering each test.
+    """Guarantee the agent singleton state is reset entering each test.
 
     The module-level singleton in ``sqllens.tools.query_database`` is process-
     wide. Without this fixture, a test that builds the agent leaks state
     into the next, masking isolation bugs and making ordering matter.
+    ``_AGENT_CFG`` (the config that built the agent, tracked for the
+    cfg-mismatch warning) is reset alongside ``_AGENT`` so the two never
+    drift apart between tests.
     """
     query_database_module._AGENT = None
+    query_database_module._AGENT_CFG = None
     yield
     query_database_module._AGENT = None
+    query_database_module._AGENT_CFG = None
 
 
 @pytest.fixture
