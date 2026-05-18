@@ -93,3 +93,40 @@ def test_max_tool_iterations_flows_through_config(tmp_path: Path) -> None:
     )
     agent = build_agent(cfg)
     assert agent.config.max_tool_iterations == 42
+
+
+def test_database_timeout_and_cap_flow_through_to_runner(tmp_path: Path) -> None:
+    """A regression that drops statement_timeout_ms or max_rows from the runner
+    constructor (e.g. a future refactor of build_sql_runner) would silently
+    disable the safety primitives — this test pins the wiring shape.
+
+    Decorator stack order is also pinned: ReadOnlyGuardRunner must be outermost
+    (parse-time reject), then RowCapRunner (post-execution cap), then the
+    engine-specific runner.
+    """
+    from sqllens.agent.integrations.sqlite import SqliteRunner
+    from sqllens.safety import ReadOnlyGuardRunner, RowCapRunner
+
+    cfg = Config(
+        database=DatabaseConfig(
+            url="sqlite:///:memory:",
+            statement_timeout_ms=1234,
+            max_rows=77,
+        ),
+        llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
+        memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
+        auth=AuthConfig(mode="none"),
+        agent=AgentRuntimeConfig(),
+    )
+    agent = build_agent(cfg)
+    run_sql_tool = _unwrap(agent.tool_registry._tools["run_sql"])
+
+    outer = run_sql_tool.sql_runner
+    assert isinstance(outer, ReadOnlyGuardRunner)
+    cap = outer._inner
+    assert isinstance(cap, RowCapRunner)
+    assert cap._max_rows == 77
+    inner = cap._inner
+    assert isinstance(inner, SqliteRunner)
+    assert inner._statement_timeout_ms == 1234
+    assert inner._max_rows == 77

@@ -8,15 +8,11 @@ missing bearer token) is deferred until the first ``query_database`` call and
 gets collapsed into the agent's blanket exception handler — operators see only
 "Please try again" in their MCP client while the real error sits in stderr.
 
-The probes are side-effect-light by design — except ``probe_memory``, which
-necessarily writes to disk: it creates the persist dir (and any missing
-parents) and touches then removes a sentinel file to confirm writability,
-since ``os.access`` alone gives wrong answers under EUID/ACL setups. Even
-``probe_memory`` avoids opening a Chroma collection so the ~80 MB embedding
-download stays lazy. The remaining probes are non-mutating: open and
-immediately close a connection (no query), construct the LLM client (no
-API round-trip), and build the authenticator (catches bearer-mode configs
-missing a token).
+Each probe is intentionally minimal: open and immediately close a connection
+(no query), construct the LLM client (no API round-trip), create the persist
+dir and touch a sentinel file to confirm writability (no Chroma collection
+open, so the 80 MB embedding download stays lazy), and build the
+authenticator (catches bearer-mode configs missing a token).
 """
 
 from __future__ import annotations
@@ -78,7 +74,7 @@ def probe_database(cfg: Config) -> None:
                 sqlite3.connect(path or ":memory:", timeout=_DB_CONNECT_TIMEOUT_SECONDS)
             ):
                 pass
-        except Exception as exc:
+        except sqlite3.Error as exc:
             raise PreflightError("database", f"{type(exc).__name__}: {exc}") from exc
         return
 
@@ -99,7 +95,7 @@ def probe_database(cfg: Config) -> None:
                 psycopg2.connect(normalized, connect_timeout=_DB_CONNECT_TIMEOUT_SECONDS)
             ):
                 pass
-        except Exception as exc:
+        except psycopg2.Error as exc:
             raise PreflightError("database", f"{type(exc).__name__}: {exc}") from exc
         return
 
@@ -129,7 +125,7 @@ def probe_database(cfg: Config) -> None:
                 )
             ):
                 pass
-        except Exception as exc:
+        except pymysql.MySQLError as exc:
             raise PreflightError("database", f"{type(exc).__name__}: {exc}") from exc
         return
 
@@ -151,14 +147,16 @@ def probe_llm(cfg: Config) -> None:
     if cfg.llm.api_key is None:
         raise PreflightError("llm", API_KEY_MISSING_MESSAGE)
 
-    try:
-        from sqllens.agent.integrations import AnthropicLlmService
+    import anthropic
 
+    from sqllens.agent.integrations import AnthropicLlmService
+
+    try:
         AnthropicLlmService(
             model=cfg.llm.model,
             api_key=cfg.llm.api_key.get_secret_value(),
         )
-    except Exception as exc:
+    except anthropic.AnthropicError as exc:
         raise PreflightError("llm", f"{type(exc).__name__}: {exc}") from exc
 
 

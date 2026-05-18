@@ -6,18 +6,25 @@
 
 ```
 cfg.llm         →  AnthropicLlmService
-cfg.database    →  build_sql_runner       →  Sqlite/Postgres/MySQLRunner
-                                              ↓ (if cfg.database.read_only)
-                                            ReadOnlyGuardRunner (sqlglot dialect-aware)
-cfg.memory      →  ChromaAgentMemory      →  persists under cfg.memory.persist_dir
-                   LocalFileSystem          →  scratch root = tempfile.gettempdir() / "sqllens"
-ToolRegistry    →  RunSqlTool              (executes generated SQL, writes a scratch CSV)
-                   SaveQuestionToolArgsTool          (memory write)
-                   SearchSavedCorrectToolUsesTool    (memory read)
-                                              ↓
-                                            Agent(llm, tool_registry, user_resolver,
-                                                  agent_memory, AgentConfig(max_tool_iterations))
+cfg.database    →  build_sql_runner(url,
+                                    statement_timeout_ms,
+                                    max_rows)        →  Sqlite/Postgres/MySQLRunner
+                                                          ↓
+                                                        RowCapRunner (max_rows belt-and-suspenders)
+                                                          ↓ (if cfg.database.read_only)
+                                                        ReadOnlyGuardRunner (sqlglot dialect-aware)
+cfg.memory      →  ChromaAgentMemory                 →  persists under cfg.memory.persist_dir
+                   LocalFileSystem                   →  scratch root = tempfile.gettempdir() / "sqllens"
+ToolRegistry    →  RunSqlTool                          (executes generated SQL, writes a scratch CSV,
+                                                        appends truncation hint when df.attrs['truncated'])
+                   SaveQuestionToolArgsTool            (memory write)
+                   SearchSavedCorrectToolUsesTool      (memory read)
+                                                          ↓
+                                                        Agent(llm, tool_registry, user_resolver,
+                                                              agent_memory, AgentConfig(max_tool_iterations))
 ```
+
+Call order on every query is the reverse of construction: **ReadOnlyGuardRunner → RowCapRunner → engine runner**. The parser rejects before any connection opens; the engine runner streams with `fetchmany(max_rows + 1)` and sets its native statement-timeout primitive; the decorator clamps the result a second time on the way back. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full timeout/cap story.
 
 ## API-key check is here, not in config
 
@@ -55,6 +62,8 @@ Dialect picked from the URL scheme prefix:
 | `mysql://` | `MySQLRunner` | Parsed with `urlparse`; requires user, host, and database name. |
 
 Unsupported schemes raise `ValueError` — the calling CLI layer turns that into a "Config error: …" exit 2.
+
+`statement_timeout_ms` and `max_rows` are threaded as keyword arguments into every runner so each engine can apply its native primitives (Postgres `SET statement_timeout`, MySQL `SET SESSION MAX_EXECUTION_TIME`, SQLite progress-handler deadline) and stream with `fetchmany(max_rows + 1)`. Callers outside `build_agent` (programmatic embedders, tests) can pass either keyword; defaults match `DatabaseConfig` (`30_000` ms timeout, `10_000` rows).
 
 `_sqlglot_dialect(url)` maps the same scheme to a sqlglot dialect name (`"sqlite"`, `"postgres"`, `"mysql"`) for the read-only guard. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md).
 

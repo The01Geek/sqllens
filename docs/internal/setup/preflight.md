@@ -25,6 +25,18 @@ from sqllens.preflight import (
 
 Each `probe_*` accepts a fully-loaded `Config` and returns `None` on success, raising `PreflightError` otherwise. The originating driver exception is chained via `__cause__` so callers that re-raise (or `pytest -s` runs) still see the full traceback.
 
+### Exception-narrowing contract
+
+Probes catch **only the driver / SDK exception base** for the subsystem they validate and re-label it as a `PreflightError`. Anything else — `TypeError`, `AttributeError`, an `ImportError` from a missing transitive dep, or any other programmer error — propagates as itself. The point is to avoid masking bugs by re-labelling them as "database failure" or "llm failure"; a `TypeError` from preflight should surface as a `TypeError`, not as `database: TypeError: ...`.
+
+| Probe | Caught (re-labelled as `PreflightError`) | Propagated as-is |
+|---|---|---|
+| `probe_database` (sqlite) | `sqlite3.Error` | everything else |
+| `probe_database` (postgres) | `psycopg2.Error` | everything else (the explicit `ImportError` branch above this catch handles the "driver not installed" case) |
+| `probe_database` (mysql) | `pymysql.MySQLError` | everything else (same: the explicit `ImportError` branch handles a missing driver) |
+| `probe_llm` | `anthropic.AnthropicError` | everything else, including `ImportError` from `import anthropic` or `from sqllens.agent.integrations import AnthropicLlmService` — these imports are deliberately kept **outside** the `try` block so a packaging breakage doesn't masquerade as an "llm" subsystem failure |
+| `probe_auth` | `ValueError` (and a residual `Exception` catch for parity with `build_authenticator`'s historic surface) | n/a |
+
 `run_preflight(cfg)` runs the four probes in a fixed order — `database → llm → memory → auth` — and short-circuits at the first failure. Ordering is most-likely-to-fail first: DSN typos and missing API keys are the common operator mistakes; the Chroma persist dir and auth mode rarely change.
 
 ## What each probe does (and doesn't do)
@@ -127,7 +139,7 @@ Driver exception strings can leak DSN-derived hints (host, port, database name) 
 
 ## Adding a new probe
 
-1. Write a `probe_<thing>(cfg: Config) -> None` function in `preflight.py` following the existing pattern: do the bounded check, raise `PreflightError("<thing>", detail)` on failure with `from exc`.
+1. Write a `probe_<thing>(cfg: Config) -> None` function in `preflight.py` following the existing pattern: do the bounded check, raise `PreflightError("<thing>", detail)` on failure with `from exc`. **Catch only the driver/SDK exception base** for the subsystem (see the exception-narrowing contract above) — let `TypeError`/`AttributeError`/`ImportError` propagate so programmer errors don't get re-labelled as subsystem failures. If the subsystem's driver is an optional dependency, do the `import` in its own `try`/`except ImportError` block *before* the connectivity-check `try` block, so a missing-driver case surfaces with an actionable "install hint" message rather than as a generic propagated `ImportError`.
 2. Add the new subsystem name to the `Subsystem` `Literal`.
 3. Append the probe to the `_PROBES` tuple in the order it should run (cheapest / most-likely-to-fail first).
 4. Add a `--check-<thing>` flag on `validate` in [cli.py](../../../src/sqllens/cli.py).

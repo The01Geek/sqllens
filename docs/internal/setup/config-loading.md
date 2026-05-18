@@ -24,10 +24,10 @@ Top-level keys (all required to be present in the merged config, though most hav
 
 | Section | Required fields | Notes |
 |---|---|---|
-| `[database]` | `url` | `name` defaults to `"primary"`. `read_only` defaults to `true` (enforced by the SQL parser guard, not the SQLite driver). |
+| `[database]` | `url` | `name` defaults to `"primary"`. `read_only` defaults to `true` (enforced by the SQL parser guard, not the SQLite driver). `statement_timeout_ms` defaults to `30_000` (30s; `0` disables on Postgres/MySQL). `max_rows` defaults to `10_000`, bounded `1..1_000_000`. Both are applied per-runner via the engine's native primitive and surface a truncation hint to the LLM — see [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md). |
 | `[llm]` | — | Currently `provider` is locked to `"anthropic"`. `model` defaults to `claude-sonnet-4-5-20250929`. `api_key` is a `SecretStr | None` and is **optional** at config-load time; `sqllens serve` checks it before building the agent, `sqllens validate` doesn't. |
 | `[memory]` | — | All defaulted. `persist_dir = Path("./chroma")` (relative to CWD). |
-| `[auth]` | — | `mode` defaults to `"none"`. `jwt` mode is scaffolded but not implemented. |
+| `[auth]` | — | `mode` defaults to `"none"`. `jwt` mode is scaffolded but not implemented. `insecure` (default `false`, env `SQLLENS_AUTH__INSECURE`) opts out of the `serve` boot-time guard that refuses `mode=none` + non-loopback HTTP host — see [authentication/overview.md](../authentication/overview.md#none--srcsqllensauthnonepy). |
 | `[server]` | — | `transport` defaults to `"stdio"`. `host`/`port` only used for `transport = "http"`. |
 | `[agent]` | — | `max_tool_iterations` defaults to `20`. Raised from the framework's built-in `10` — real-world schema exploration requires more iterations. Env var: `SQLLENS_AGENT__MAX_TOOL_ITERATIONS`. |
 
@@ -79,6 +79,14 @@ The agent factory ([src/sqllens/agent/factory.py](../../../src/sqllens/agent/fac
 ### 3. Infrastructure preflight failures during `sqllens serve`
 
 After `Config.load()` succeeds and the `llm.api_key` gate passes, `sqllens serve` calls `run_preflight(cfg)` to exercise the database, LLM client, Chroma persist directory, and authenticator. A `PreflightError` from any probe surfaces as `Preflight failed: <subsystem>: <detail>` and exits 2 — same exit code as a config-load failure, since both block startup. The full reference for what each probe does (and doesn't do) is in [preflight.md](preflight.md). `sqllens validate` exposes the same probes via `--check-db / --check-llm / --check-memory / --check-auth`, so a CI lint step can fail fast on a broken DSN without spinning up the transport.
+
+### 4. `auth.mode = "bearer"` without a usable `bearer_token`
+
+`AuthConfig._bearer_requires_token` (a pydantic `@model_validator(mode="after")` in [src/sqllens/config.py](../../../src/sqllens/config.py)) rejects `mode = "bearer"` when `bearer_token` is `None`, empty, or whitespace-only. The check fires inside `Config.load()`, so both `sqllens serve` and `sqllens validate` exit 2 through the generic `except Exception` block — no special-case CLI branch is needed (contrast with `llm.api_key`, where `validate` deliberately stays permissive).
+
+The `ValidationError` message is `BEARER_TOKEN_MISSING_MESSAGE` from [src/sqllens/config.py](../../../src/sqllens/config.py); it names `SQLLENS_AUTH__BEARER_TOKEN`, the `[auth]` TOML stanza, and the alternate `mode` values (`none|jwt`). Because the literal `[auth]` is a bracket-shaped substring, the constant is rendered through `rich.markup.escape` the same way `API_KEY_MISSING_MESSAGE` is — see the [Error rendering note](#error-rendering-note) below.
+
+Defense-in-depth: `build_authenticator` in [src/sqllens/auth/__init__.py](../../../src/sqllens/auth/__init__.py) repeats the same check (and emits the same constant) for callers that bypass validation via `AuthConfig.model_construct(...)`. `BearerTokenAuthenticator.__init__` also strips whitespace and rejects empty/whitespace-only tokens — mirroring `_extract_bearer`'s inbound `.strip()` so a config like `bearer_token = "  secret  "` never silently fails to match a client sending `Authorization: Bearer secret`. See [authentication/overview.md](../authentication/overview.md#bearer--srcsqllensauthbearerpy).
 
 ### Error rendering note
 

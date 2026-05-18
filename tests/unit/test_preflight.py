@@ -110,6 +110,31 @@ def test_probe_database_mysql_missing_driver_raises_clean_preflight_error(
     assert isinstance(exc_info.value.__cause__, ImportError)
 
 
+@pytest.mark.parametrize(
+    ("driver_module", "db_url"),
+    [
+        ("sqlite3", "sqlite:///:memory:"),
+        ("psycopg2", "postgresql://user:pw@localhost:5432/db"),
+        ("pymysql", "mysql://user:pw@localhost:3306/db"),
+    ],
+)
+def test_probe_database_does_not_swallow_programmer_errors(
+    monkeypatch: pytest.MonkeyPatch, driver_module: str, db_url: str
+) -> None:
+    # A TypeError from the driver's connect() represents a bug in our caller,
+    # not a database reachability failure — it must propagate rather than be
+    # relabeled as a PreflightError("database", ...) which would mislead
+    # operators into chasing a config issue that doesn't exist.
+    driver = pytest.importorskip(driver_module)
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise TypeError("not a real connect error")
+
+    monkeypatch.setattr(driver, "connect", boom)
+    with pytest.raises(TypeError, match="not a real connect error"):
+        probe_database(_cfg(db_url=db_url))
+
+
 # ---------------------------------------------------------------------------
 # probe_llm
 # ---------------------------------------------------------------------------
@@ -133,6 +158,18 @@ def test_probe_llm_constructs_anthropic_service_without_round_trip() -> None:
     kwargs = mock_service.call_args.kwargs
     assert kwargs["api_key"] == "sk-ant-real-test"
     assert "model" in kwargs
+
+
+def test_probe_llm_does_not_swallow_programmer_errors() -> None:
+    # A TypeError from constructing the LLM service represents a bug, not an
+    # API-level failure — it must propagate rather than be relabeled as a
+    # PreflightError("llm", ...).
+    with patch(
+        "sqllens.agent.integrations.AnthropicLlmService",
+        side_effect=TypeError("not a real anthropic error"),
+    ):
+        with pytest.raises(TypeError, match="not a real anthropic error"):
+            probe_llm(_cfg(api_key="sk-ant-real-test"))
 
 
 # ---------------------------------------------------------------------------
@@ -162,8 +199,19 @@ def test_probe_memory_unwritable_parent_raises(tmp_path: Path) -> None:
 
 
 def test_probe_auth_bearer_without_token_message_is_clean() -> None:
+    # bearer+no-token is rejected at Config.load() by the AuthConfig model
+    # validator (#51), so it can no longer reach probe_auth through normal
+    # config loading. probe_auth remains the defense-in-depth net for callers
+    # that bypass validation via model_construct (the same bypass path
+    # build_authenticator's own check guards). Construct that way here so the
+    # ValueError -> PreflightError translation stays under test.
+    cfg = _cfg()
+    # Config (a BaseSettings) re-validates nested submodels passed to its
+    # constructor, so the bad auth must be injected post-construction —
+    # mirroring a model_construct bypass in the wild.
+    cfg.auth = AuthConfig.model_construct(mode="bearer", bearer_token=None)
     with pytest.raises(PreflightError) as exc_info:
-        probe_auth(_cfg(auth=AuthConfig(mode="bearer")))
+        probe_auth(cfg)
     assert exc_info.value.subsystem == "auth"
     # The "ValueError:" prefix from the underlying exception should NOT leak.
     assert not exc_info.value.detail.startswith("ValueError")
