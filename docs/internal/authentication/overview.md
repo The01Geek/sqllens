@@ -82,11 +82,11 @@ bypass, and the non-loopback-with-bearer happy path.
 Static bearer token configured at startup. Clients send `Authorization: Bearer <token>`. Implementation notes:
 
 - **Constant-time comparison** via `hmac.compare_digest`. Comparing as strings would leak token length and prefix through timing.
-- **Empty token rejected** at construction. An empty configured token would let any non-empty request through.
+- **Empty / whitespace-only token rejected** at construction. An empty configured token would let any non-empty request through; a whitespace-only one would silently fail every match after `_extract_bearer` strips inbound tokens.
 - **Case-insensitive header lookup** — accepts `Authorization` and `authorization`. Anything else (`AUTHORIZATION`, etc.) is missed; if a proxy uppercases the header that's a problem, but no real client does that.
 - **Subject is the literal string `"bearer"`** — there's no principal information in a static token to derive a stable id from, and `None` would conflict with the "successful authentication implies non-null subject" convention some downstream code might one day want.
 
-Config: `auth.mode = "bearer"`, `auth.bearer_token = "..."` (or env `SQLLENS_AUTH__BEARER_TOKEN`). Missing token at startup raises `ValueError` in `build_authenticator`.
+Config: `auth.mode = "bearer"`, `auth.bearer_token = "..."` (or env `SQLLENS_AUTH__BEARER_TOKEN`). Missing, empty, or whitespace-only tokens are rejected at config load by `AuthConfig._bearer_requires_token`, surfaced through `cli.serve` / `cli.validate` as a `ValidationError` with an actionable message naming the env var, the `[auth]` TOML stanza, and the alternate `mode` values. `build_authenticator` retains the same check as defense-in-depth for callers that bypass validation via `model_construct`.
 
 `bearer` (and `jwt`, once implemented) bypass the `serve` loopback guard — they are the intended way to run HTTP on a non-loopback host. See the `none` section above for the guard's behaviour and the `SQLLENS_AUTH__INSECURE` opt-out.
 

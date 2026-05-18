@@ -62,6 +62,13 @@ class TestBearerTokenAuthenticator:
         with pytest.raises(ValueError):
             BearerTokenAuthenticator("   ")
 
+    async def test_strips_surrounding_whitespace_to_match_extracted_header(self) -> None:
+        # Mirrors _extract_bearer's strip on the inbound side — otherwise a config
+        # like bearer_token = "  secret  " would silently never match.
+        auth = BearerTokenAuthenticator("  secret-123  ")
+        ctx = await auth.authenticate({"Authorization": "Bearer secret-123"})
+        assert ctx.subject == "bearer"
+
 
 class TestJwtAuthenticator:
     """JWT is scaffolded only — a placeholder verifier that refuses requests."""
@@ -116,6 +123,14 @@ class TestAuthConfigValidator:
         # ``model_construct`` skips validators. ``build_authenticator`` must still
         # surface the actionable message, not an opaque ``AttributeError``.
         cfg = AuthConfig.model_construct(mode="bearer", bearer_token=None)
+        with pytest.raises(ValueError, match="SQLLENS_AUTH__BEARER_TOKEN"):
+            build_authenticator(cfg)
+
+    def test_build_authenticator_rejects_whitespace_when_validator_bypassed(self) -> None:
+        # Whitespace-only token via the same bypass path: build_authenticator's
+        # defense-in-depth check should still emit the actionable message rather
+        # than fall through to BearerTokenAuthenticator's terser error.
+        cfg = AuthConfig.model_construct(mode="bearer", bearer_token=SecretStr("   "))
         with pytest.raises(ValueError, match="SQLLENS_AUTH__BEARER_TOKEN"):
             build_authenticator(cfg)
 

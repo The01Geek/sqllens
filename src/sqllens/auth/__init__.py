@@ -31,11 +31,10 @@ def build_authenticator(cfg: AuthConfig) -> Authenticator:
         return NoOpAuthenticator()
     if cfg.mode == "bearer":
         # Defense-in-depth: AuthConfig's model validator normally enforces this, but
-        # callers that bypass validation via ``model_construct`` (as a few test fixtures
-        # do) reach this path with bearer_token unset. Raising here keeps the actionable
-        # message intact under ``python -O`` (which strips ``assert``) and matches the
-        # pattern in ``agent.factory.build_agent``.
-        if cfg.bearer_token is None:
+        # callers that bypass validation via ``model_construct`` reach this path with
+        # an unset or unusable token. Mirror the validator's whitespace-aware check
+        # so embedders get the actionable message rather than a terser downstream one.
+        if cfg.bearer_token is None or not cfg.bearer_token.get_secret_value().strip():
             raise ValueError(BEARER_TOKEN_MISSING_MESSAGE)
         return BearerTokenAuthenticator(cfg.bearer_token.get_secret_value())
     if cfg.mode == "jwt":

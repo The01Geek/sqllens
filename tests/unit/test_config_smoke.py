@@ -340,6 +340,33 @@ def test_env_bearer_mode_without_token_rejected_at_load(
     assert "SQLLENS_AUTH__BEARER_TOKEN" in str(exc.value)
 
 
+@pytest.mark.parametrize("token_value", ["", "   "])
+def test_env_bearer_mode_with_blank_token_rejected_at_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token_value: str
+) -> None:
+    # The validator docstring names ``SQLLENS_AUTH__BEARER_TOKEN=`` as the motivating
+    # footgun. Pydantic-settings can treat empty env values differently from missing
+    # ones depending on coercion; pin both shapes end-to-end so a future upgrade
+    # can't regress silently.
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [llm]
+            api_key = "sk-ant-test"
+            """
+        )
+    )
+    monkeypatch.setenv("SQLLENS_AUTH__MODE", "bearer")
+    monkeypatch.setenv("SQLLENS_AUTH__BEARER_TOKEN", token_value)
+    with pytest.raises(ValidationError) as exc:
+        Config.load(cfg_path)
+    assert "SQLLENS_AUTH__BEARER_TOKEN" in str(exc.value)
+
+
 def test_build_agent_raises_when_api_key_missing(tmp_path: Path) -> None:
     # Defense-in-depth contract: ``cli.serve`` gates ``None`` already, but
     # programmatic embedders / tests that build an Agent directly must get a
