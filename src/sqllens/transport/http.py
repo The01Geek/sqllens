@@ -202,8 +202,10 @@ class _SessionManagerLifespan:
     ``lifespan.startup`` — once any one of these happens:
 
     - ``lifespan.shutdown`` completed (the CM was exited via ``__aexit__``), or
-    - ``lifespan.shutdown`` failed in ``__aexit__`` (the CM raised on exit;
-      reusing it is unsafe), or
+    - ``lifespan.shutdown`` raised in ``__aexit__`` (the CM raised on exit —
+      whether an ``Exception`` or a ``BaseException`` such as
+      ``asyncio.CancelledError`` interrupting the close; reusing it is
+      unsafe — a ``BaseException`` is re-raised after finalizing), or
     - ``lifespan.startup`` failed in ``__aenter__`` (the partially-acquired
       context manager reference is dropped *without* ``__aexit__`` —
       calling ``__aexit__`` on a CM whose ``__aenter__`` never completed
@@ -335,6 +337,22 @@ class _SessionManagerLifespan:
                             }
                         )
                         return
+                    except BaseException:
+                        # A BaseException (asyncio.CancelledError,
+                        # KeyboardInterrupt, SystemExit, GeneratorExit) is not
+                        # caught by `except Exception` above. It interrupted
+                        # __aexit__ before the session manager finished
+                        # closing. Finalize the instance — same as the
+                        # Exception branch — so a host driving a follow-up
+                        # lifespan scope gets the single-shot rejection /
+                        # idempotent ack instead of re-entering __aexit__ on a
+                        # half-closed CM. Then re-raise: a BaseException (most
+                        # importantly CancelledError) must propagate
+                        # cooperatively and must never be swallowed into a
+                        # spurious shutdown.complete.
+                        self._shutdown_done = True
+                        logger.exception("session manager shutdown interrupted")
+                        raise
                 elif not self._started:
                     # Genuine shutdown-without-startup: lifespan.shutdown
                     # arrived with no prior lifespan.startup. The legitimate
