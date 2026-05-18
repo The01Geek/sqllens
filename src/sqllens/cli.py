@@ -26,18 +26,24 @@ app = typer.Typer(
 console = Console()
 
 def _is_loopback_host(host: str) -> bool:
-    # Recognizes the entire 127.0.0.0/8 IPv4 loopback range and ::1 (plus
-    # IPv4-mapped IPv6 loopback like ::ffff:127.0.0.1), not just the canonical
-    # spellings. No DNS resolution — wildcards ("0.0.0.0", "::") and arbitrary
-    # external hostnames fail closed and must use bearer auth or the
-    # SQLLENS_AUTH__INSECURE opt-out. Hostname comparison is case-insensitive
-    # per RFC 1035, so "Localhost" / "LOCALHOST" are recognized too.
+    # Recognizes the entire 127.0.0.0/8 IPv4 loopback range and ::1, plus
+    # IPv4-mapped IPv6 loopback (e.g. ::ffff:127.0.0.1) — the IPv4-mapped form
+    # is unwrapped explicitly because CPython's IPv6Address.is_loopback returns
+    # False for these on Python 3.11.x and 3.12.0-3.12.3 (gh-117566, fixed in
+    # 3.12.4 / 3.13). No DNS resolution — wildcards ("0.0.0.0", "::") and
+    # arbitrary external hostnames fail closed and must use bearer auth or
+    # the SQLLENS_AUTH__INSECURE opt-out. Hostname comparison is
+    # case-insensitive per RFC 1035, so "Localhost" / "LOCALHOST" are
+    # recognized too.
     if host.lower() == "localhost":
         return True
     try:
-        return ipaddress.ip_address(host).is_loopback
+        addr = ipaddress.ip_address(host)
     except ValueError:
         return False
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        return addr.ipv4_mapped.is_loopback
+    return addr.is_loopback
 
 
 _INSECURE_NON_LOOPBACK_MESSAGE = (

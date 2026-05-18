@@ -48,8 +48,11 @@ a loopback address. The guard lives in `serve` in
 config load (after the `llm.api_key` check). Behaviour:
 
 - Loopback detection uses `ipaddress.ip_address(host).is_loopback`, so the
-  entire `127.0.0.0/8` IPv4 range, `::1`, and IPv4-mapped IPv6 loopback
-  (`::ffff:127.0.0.1`) all count. The literal hostname `localhost` is
+  entire `127.0.0.0/8` IPv4 range and `::1` count. IPv4-mapped IPv6 loopback
+  (e.g. `::ffff:127.0.0.1`) is also recognised: the guard unwraps the
+  mapped IPv4 via `IPv6Address.ipv4_mapped` because CPython's
+  `is_loopback` returns `False` for these on Python 3.11.x and 3.12.0–3.12.3
+  (gh-117566, fixed in 3.12.4 / 3.13). The literal hostname `localhost` is
   recognised case-insensitively (`localhost`, `Localhost`, `LOCALHOST`). No
   DNS resolution happens — wildcard binds (`0.0.0.0`, `::`) and arbitrary
   external hostnames fail closed.
