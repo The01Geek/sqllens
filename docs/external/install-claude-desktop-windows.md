@@ -164,9 +164,9 @@ Get-Content $env:USERPROFILE\sqllens\sqllens.toml -Encoding Byte -TotalCount 4
 sqllens validate -c $env:USERPROFILE\sqllens\sqllens.toml
 ```
 
-`sqllens validate` checks structure only and does not require `llm.api_key` to be set. When the key is absent, the summary marks it explicitly as `llm: anthropic / claude-sonnet-4-5-20250929 (api_key NOT SET)` and validation still succeeds. You supply the key to `sqllens serve` later through the Claude Desktop `env` block in step 7.
+`sqllens validate` checks structure only and does not require `llm.api_key` to be set for the file to parse. When the key is absent, the command prints the `Config OK` summary (marking the key explicitly as `llm: anthropic / claude-sonnet-4-5-20250929 (api_key NOT SET)`), then prints a `Would fail to start:` notice and exits with code `1` — the configuration is structurally fine but the server would not start until you supply the key. That is expected at this step: you supply the key to `sqllens serve` later through the Claude Desktop `env` block in step 7.
 
-The expected final line of output is `Config OK`.
+The expected output includes a `Config OK` line. Once the API key is set, `sqllens validate` exits with code `0`.
 
 ### 5. Find the absolute path to `sqllens.exe`
 
