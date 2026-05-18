@@ -253,6 +253,13 @@ class _SessionManagerLifespan:
                     self._cm = self.session_manager.run()
                     await self._cm.__aenter__()
                 except Exception as exc:
+                    # Broad by design: every startup failure must surface as
+                    # lifespan.startup.failed so the ASGI host doesn't hang
+                    # waiting for an ack. BaseException subclasses
+                    # (asyncio.CancelledError, KeyboardInterrupt, SystemExit,
+                    # MemoryError) are deliberately *not* caught — they signal
+                    # cancellation or interpreter teardown and must propagate
+                    # to unwind the host cleanly.
                     # Drop the partially-acquired CM and finalize the
                     # instance: calling __aexit__ on a CM whose __aenter__
                     # never completed is undefined per PEP 343, and a host
@@ -296,6 +303,14 @@ class _SessionManagerLifespan:
                     try:
                         await cm.__aexit__(None, None, None)
                     except Exception as exc:
+                        # Broad by design: any __aexit__ failure must surface
+                        # as lifespan.shutdown.failed so the ASGI host doesn't
+                        # hang waiting for an ack. BaseException subclasses
+                        # (asyncio.CancelledError, KeyboardInterrupt,
+                        # SystemExit, MemoryError) are deliberately *not*
+                        # caught — they signal cancellation or interpreter
+                        # teardown and must propagate to unwind the host
+                        # cleanly.
                         self._shutdown_done = True
                         logger.exception("session manager shutdown failed")
                         await send(
@@ -305,6 +320,25 @@ class _SessionManagerLifespan:
                             }
                         )
                         return
+                elif not self._started:
+                    # Genuine shutdown-without-startup: lifespan.shutdown
+                    # arrived with no prior lifespan.startup. The legitimate
+                    # failed-startup-then-shutdown case returns early above via
+                    # the _shutdown_done idempotent branch, so reaching here
+                    # with cm is None and not _started means startup was never
+                    # attempted. A host that does this is misbehaving; surface
+                    # it rather than masking the bug with a clean ack.
+                    self._shutdown_done = True
+                    logger.warning(
+                        "lifespan.shutdown received without prior lifespan.startup"
+                    )
+                    await send(
+                        {
+                            "type": "lifespan.shutdown.failed",
+                            "message": "shutdown without prior startup",
+                        }
+                    )
+                    return
                 self._shutdown_done = True
                 await send({"type": "lifespan.shutdown.complete"})
                 return

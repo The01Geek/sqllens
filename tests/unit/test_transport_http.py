@@ -233,6 +233,32 @@ def test_lifespan_shutdown_after_failed_startup_is_clean_noop() -> None:
     assert sent2 == [{"type": "lifespan.shutdown.complete"}]
 
 
+def test_lifespan_shutdown_without_startup_surfaces_failed() -> None:
+    """Regression: ``lifespan.shutdown`` with no prior ``lifespan.startup``
+    must surface as ``lifespan.shutdown.failed`` (not silently ``.complete``).
+
+    A host that drives shutdown without startup is misbehaving; answering
+    "complete" would mask the host bug. Distinct from the legitimate
+    failed-startup-then-shutdown no-op above: there ``_shutdown_done`` is
+    already set so the idempotent branch fires, whereas here startup was
+    never attempted (``_cm is None and not _started``). ``__aexit__`` must
+    not be invoked on a never-entered context manager.
+    """
+    sm = _FakeSessionManager()
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io([{"type": "lifespan.shutdown"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    types = [m["type"] for m in sent]
+    assert "lifespan.shutdown.complete" not in types
+    assert sent[-1]["type"] == "lifespan.shutdown.failed"
+    assert "startup" in sent[-1]["message"].lower()
+    # Never-entered CM: run()/__aenter__/__aexit__ all untouched.
+    assert sm.run_calls == 0
+    assert sm.aenter_calls == 0
+    assert sm.aexit_calls == 0
+
+
 def test_lifespan_unknown_message_type_is_logged_and_loop_continues() -> None:
     """An unknown lifespan message type must be logged and skipped, with the
     loop continuing to wait for a recognized message rather than exiting (which
