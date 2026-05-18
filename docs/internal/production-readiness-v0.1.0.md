@@ -72,22 +72,31 @@ rule 6.
 
 **Tracking:** #35 (closed by #41)
 
-#### S-2. Docker image defaults to `0.0.0.0` + `auth=none`
+#### S-2. Docker image defaults to `0.0.0.0` + `auth=none` — **resolved by #48**
 **File:** [`docker/Dockerfile:65-67`](../../docker/Dockerfile) ·
-[`src/sqllens/config.py:81,93`](../../src/sqllens/config.py#L81) ·
+[`src/sqllens/config.py`](../../src/sqllens/config.py) ·
+[`src/sqllens/cli.py`](../../src/sqllens/cli.py) ·
 **CWE:** 1188 · **Category:** Deployment / Auth
 
 A `docker run -p 8765:8765 ghcr.io/the01geek/sqllens:latest` with no further
 config exposes the database to anything that can reach the port, with no
-auth. `docs/internal/authentication/overview.md:39-43` says `none` is "the
-right choice for localhost-bound HTTP" — but the shipped image isn't
+auth. `docs/internal/authentication/overview.md` says `none` is "the right
+choice for localhost-bound HTTP" — but the shipped image isn't
 localhost-bound.
 
-**Fix:** Either refuse to start when `mode=="none"` and `host` isn't loopback,
-or generate a random bearer token at first container start and log it once.
-Document the chosen escape hatch in the README "Wire up an IDE" section.
+**Resolution (PR #48, merged for v0.1.0):** Chose the "refuse to start"
+branch. `sqllens serve` now exits 2 with a remediation message when
+`server.transport == "http"`, `auth.mode == "none"`, and `server.host` is
+not loopback. `SQLLENS_AUTH__INSECURE=1` (or TOML `auth.insecure = true`) is
+the documented opt-out for closed-network deployments; when the opt-out
+fires the CLI logs a yellow `Warning:` breadcrumb. Loopback detection uses
+`ipaddress.ip_address(host).is_loopback`, covering all of `127.0.0.0/8`,
+`::1`, and `localhost` (case-insensitive). The README Docker quick-start
+now seeds `SQLLENS_AUTH__MODE=bearer` plus
+`SQLLENS_AUTH__BEARER_TOKEN=$(openssl rand -hex 32)`. See
+[authentication/overview.md](authentication/overview.md#none--srcsqllensauthnonepy).
 
-**Tracking:** #36
+**Tracking:** #36 (closed by #48)
 
 #### S-3. No DB query timeout, no row cap, full materialisation to pandas
 **Files:** [`src/sqllens/agent/integrations/postgres/sql_runner.py:88`](../../src/sqllens/agent/integrations/postgres/sql_runner.py) ·

@@ -80,6 +80,8 @@ port = 8765
 
 Start the server with `sqllens serve` and point your client at `http://127.0.0.1:8765/mcp/`. Both `/mcp` and `/mcp/` are accepted; the root path redirects to the canonical form.
 
+**Warning:** If you change `host` to anything other than a loopback address (for example, when running in a container that binds `0.0.0.0`), SQL Lens refuses to start with `auth.mode = "none"`. Switch to bearer auth by setting `SQLLENS_AUTH__MODE=bearer` and `SQLLENS_AUTH__BEARER_TOKEN=$(openssl rand -hex 32)`, or set `SQLLENS_AUTH__INSECURE=1` for closed-network deployments. See [Configuration: Non-loopback safety guard](configuration.md#non-loopback-safety-guard).
+
 ## See also
 
 - **[Configuration reference](configuration.md)** for every available field.

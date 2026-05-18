@@ -73,14 +73,36 @@ Configures authentication for the HTTP transport. The stdio transport does not n
 |---|---|---|
 | `mode` | String | One of `none`, `bearer`, or `jwt`. See the [authentication modes](#authentication-modes) below. |
 | `bearer_token` | String | The shared token required by `bearer` mode. Prefer setting this with `SQLLENS_AUTH__BEARER_TOKEN`. |
+| `insecure` | Boolean | Defaults to `false`. Set to `true` (or `SQLLENS_AUTH__INSECURE=1`) to acknowledge that `mode = "none"` on a non-loopback host is intentional for a closed-network deployment. See [Non-loopback safety guard](#non-loopback-safety-guard) below. |
 
 ### Authentication modes
 
 | Mode | When to use |
 |---|---|
-| `none` | Loopback only. Use this when the only client is an assistant on the same machine. |
-| `bearer` | A single shared token is required on every request. |
+| `none` | Loopback only. `sqllens serve` refuses to start when this mode is paired with `transport = "http"` and a non-loopback host. See [Non-loopback safety guard](#non-loopback-safety-guard) below. |
+| `bearer` | A single shared token is required on every request. The recommended mode for any deployment that listens on a public or shared interface. |
 | `jwt` | Scaffolded but not yet implemented. Do not use in production. |
+
+### Non-loopback safety guard
+
+`sqllens serve` refuses to start when all of the following are true:
+
+- `server.transport` is `http`
+- `auth.mode` is `none`
+- `server.host` is not a loopback address (anything outside `127.0.0.0/8`, `::1`, or `localhost`)
+
+The check is there to prevent an unauthenticated SQL endpoint from being exposed by accident — most commonly when a container binds to `0.0.0.0` so the port can be published. When the guard trips, SQL Lens exits with a remediation message that offers two paths:
+
+- **Recommended**: switch to bearer auth.
+
+  ```bash
+  export SQLLENS_AUTH__MODE=bearer
+  export SQLLENS_AUTH__BEARER_TOKEN=$(openssl rand -hex 32)
+  ```
+
+- **Closed-network override**: set `SQLLENS_AUTH__INSECURE=1` (or `auth.insecure = true` in `sqllens.toml`). Use this only when the listener is reachable solely from a trusted network — for example, a private VPC, a Kubernetes ClusterIP service, or a host-only Docker network. When the override is active, SQL Lens still prints a yellow warning at startup so the choice is visible in the logs.
+
+The guard does not affect `transport = "stdio"`, and it does not affect `bearer` or `jwt` modes.
 
 ## Section: `[server]`
 
