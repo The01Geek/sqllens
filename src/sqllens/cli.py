@@ -22,10 +22,9 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
-# Operator status and errors go to stderr so they never collide with the
-# JSON-RPC stream on stdout under the stdio MCP transport. Stdout is reserved
-# for command output that callers may pipe (e.g. `sqllens version`).
 console = Console()
+# Errors land on stderr so they cannot collide with the JSON-RPC stream
+# stdio MCP clients read on stdout.
 err_console = Console(stderr=True)
 
 

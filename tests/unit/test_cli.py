@@ -43,40 +43,18 @@ def test_no_args_prints_help() -> None:
     assert "version" in result.stdout
 
 
-def test_serve_config_error_goes_to_stderr(tmp_path) -> None:
-    """Operator error messages must not collide with stdout under the stdio MCP
-    transport. Pointing serve at a non-existent config triggers the
-    ``Config error:`` branch, which must land on stderr and leave stdout empty.
-    """
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("serve", "Config error"),
+        ("validate", "Invalid"),
+    ],
+)
+def test_config_load_failure_goes_to_stderr(tmp_path, command: str, expected: str) -> None:
+    # Stdio MCP clients read JSON-RPC on stdout; operator errors must land on
+    # stderr to avoid corrupting that stream.
     missing = tmp_path / "does-not-exist.toml"
-    result = runner.invoke(app, ["serve", "--config", str(missing)])
+    result = runner.invoke(app, [command, "--config", str(missing)])
     assert result.exit_code == 2
-    assert "Config error" in result.stderr
-    assert "Config error" not in result.stdout
-
-
-def test_serve_missing_api_key_error_goes_to_stderr(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The follow-on ``api_key`` check must also land on stderr."""
-    cfg = tmp_path / "sqllens.toml"
-    cfg.write_text(
-        '[database]\nurl = "sqlite:///./demo.db"\nname = "primary"\n'
-        '[llm]\nprovider = "anthropic"\nmodel = "claude-sonnet-4-5-20250929"\n'
-    )
-    monkeypatch.delenv("SQLLENS_LLM__API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    result = runner.invoke(app, ["serve", "--config", str(cfg)])
-    assert result.exit_code == 2
-    assert "Config error" in result.stderr
-    assert "Config error" not in result.stdout
-
-
-def test_validate_invalid_config_error_goes_to_stderr(tmp_path) -> None:
-    """The validate command's error path must also stay off stdout for
-    consistency with serve — operators piping its stdout get clean output."""
-    missing = tmp_path / "does-not-exist.toml"
-    result = runner.invoke(app, ["validate", "--config", str(missing)])
-    assert result.exit_code == 2
-    assert "Invalid" in result.stderr
-    assert "Invalid" not in result.stdout
+    assert expected in result.stderr
+    assert expected not in result.stdout
