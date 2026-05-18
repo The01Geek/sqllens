@@ -52,6 +52,14 @@ either form."""
 
 _INTERNAL_PATH = "/mcp"
 
+HEALTHZ_PATH = "/healthz"
+"""Unauthenticated liveness probe path.
+
+Asserts only that the ASGI process is up and the event loop is serving
+requests — it does **not** check DB, ChromaDB, or LLM reachability. Handled
+in ``_PathNormalizer``, ahead of ``_AuthMiddleware``, so orchestrator probes
+never need (and are never gated by) an ``Authorization`` header."""
+
 
 def build_asgi_app(cfg: Config) -> ASGIApp:
     """Build the fully wrapped, mount-ready Streamable HTTP ASGI app for ``cfg``.
@@ -123,6 +131,7 @@ class _PathNormalizer:
     - ``/mcp/``  → rewrite scope.path to ``/mcp`` so FastMCP's Route matches.
                    No redirect, so POST clients that don't follow 307 work.
     - ``/mcp``   → pass through unchanged (matches FastMCP directly).
+    - ``/healthz`` → 200 liveness JSON, short-circuited here (pre-auth).
 
     Everything else passes through.
     """
@@ -136,6 +145,9 @@ class _PathNormalizer:
             return
 
         path = scope.get("path", "")
+        if path == HEALTHZ_PATH:
+            await _send_health(send)
+            return
         if path == "/":
             response = RedirectResponse(url=MCP_PATH, status_code=307)
             await response(scope, receive, send)
@@ -363,20 +375,38 @@ def _decode_headers(raw: list[tuple[bytes, bytes]]) -> dict[str, str]:
     return {k.decode("latin-1"): v.decode("latin-1") for k, v in raw}
 
 
-async def _send_401(send: Send, reason: str) -> None:
-    body = json.dumps({"error": "unauthorized", "reason": reason}).encode()
+async def _send_json(
+    send: Send,
+    status: int,
+    body: bytes,
+    *,
+    extra_headers: tuple[tuple[bytes, bytes], ...] = (),
+) -> None:
     await send(
         {
             "type": "http.response.start",
-            "status": 401,
+            "status": status,
             "headers": [
                 (b"content-type", b"application/json"),
                 (b"content-length", str(len(body)).encode()),
-                (b"www-authenticate", b'Bearer realm="sqllens"'),
+                *extra_headers,
             ],
         }
     )
     await send({"type": "http.response.body", "body": body})
+
+
+async def _send_health(send: Send) -> None:
+    # Compact separators so the body is exactly {"status":"ok"} — orchestrator
+    # probes and the integration test match on the literal bytes.
+    await _send_json(send, 200, json.dumps({"status": "ok"}, separators=(",", ":")).encode())
+
+
+async def _send_401(send: Send, reason: str) -> None:
+    body = json.dumps({"error": "unauthorized", "reason": reason}).encode()
+    await _send_json(
+        send, 401, body, extra_headers=((b"www-authenticate", b'Bearer realm="sqllens"'),)
+    )
 
 
 # Type alias kept for callers that want to type middleware factories.

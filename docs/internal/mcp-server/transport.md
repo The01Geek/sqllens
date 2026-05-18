@@ -49,7 +49,7 @@ ASGI host (uvicorn, FastAPI mount, Starlette, …)
   ↓
 _SessionManagerLifespan   — starts/stops FastMCP's session manager via ASGI lifespan
   ↓
-_PathNormalizer            — fixes "/" and "/mcp/" path mismatches
+_PathNormalizer            — fixes "/" and "/mcp/" path mismatches; serves /healthz
   ↓
 _AuthMiddleware            — runs the configured Authenticator
   ↓
@@ -76,9 +76,25 @@ FastMCP registers its endpoint at the **bare** path `/mcp`. Every MCP client we 
 | `/` | 307 redirect to `/mcp/` — browser-friendly so opening the URL in a tab doesn't 404. |
 | `/mcp/` | **Rewrite** `scope["path"]` to `/mcp` and pass through. No redirect, because POST clients that don't follow 307 redirects would lose their request body otherwise. |
 | `/mcp` | Pass through unchanged. |
+| `/healthz` | **Short-circuit**: emit a 200 liveness JSON and return, *before* `_AuthMiddleware`. See "Liveness probe" below. |
 | Anything else | Pass through (FastMCP will 404 if it doesn't recognize it). |
 
 The reason this isn't done with a Starlette `Mount` is recorded in the docstring at the top of `transport/http.py`: `Mount` has surprising trailing-slash semantics, and the single-server SQL Lens transport doesn't need path-based dispatch.
+
+## Liveness probe: `GET /healthz`
+
+`HEALTHZ_PATH = "/healthz"` (module constant in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py)) is an **unauthenticated** liveness endpoint. `_PathNormalizer.__call__` checks `path == HEALTHZ_PATH` before any other branch and calls `_send_health(send)`, which writes HTTP 200 with the body **exactly** `{"status":"ok"}` (15 bytes — `json.dumps(..., separators=(",", ":"))`, no spaces) and `content-type: application/json`.
+
+Two properties are deliberate and pinned by tests:
+
+- **Pre-auth.** The short-circuit lives in `_PathNormalizer`, which sits *above* `_AuthMiddleware` in the stack. A probe to `/healthz` therefore needs no `Authorization` header even when `auth.mode = "bearer"`. Covered by `tests/integration/test_http_transport.py::TestHealthz::test_healthz_no_auth` and `::test_healthz_bypasses_bearer_auth`.
+- **Liveness only, not readiness.** It asserts solely that the ASGI process is up and the event loop is serving requests. It does **not** check database, ChromaDB, or LLM reachability — a server that answers `/healthz` 200 may still fail a `query_database` call. There is no readiness endpoint; add one explicitly if orchestration needs dependency-aware gating.
+
+`_send_health` shares the response writer with `_send_401` via the `_send_json(send, status, body, *, extra_headers=())` helper; only `_send_401` passes the `WWW-Authenticate` header through `extra_headers`.
+
+### Docker `HEALTHCHECK` consumes it
+
+[docker/Dockerfile](../../../docker/Dockerfile)'s `HEALTHCHECK` probes `GET http://127.0.0.1:8765/healthz` (previously it `urlopen`'d the POST-only `/mcp/` endpoint). The old command swallowed all failures with a trailing `2>/dev/null || exit 0`, so a dead or broken container always reported *healthy*; that escape hatch was removed. The probe now exits non-zero — and the container reports **unhealthy** to the orchestrator — whenever the server is not serving. The body bytes are not asserted by the Dockerfile (it only checks `urllib.request.urlopen` does not raise), but the integration test pins the literal `{"status":"ok"}` so external probes can byte-match if they choose.
 
 ## Footgun 2: FastMCP's Host-header check
 
@@ -96,7 +112,7 @@ On success, the resulting `AuthContext` is stashed on `scope["state"]["auth"]` s
 
 On failure, `AuthError` becomes HTTP 401 with a JSON body `{"error": "unauthorized", "reason": <short>}` and a `WWW-Authenticate: Bearer realm="sqllens"` header. The reason is `e.reason` from the `AuthError`; the underlying credential is never echoed back. See [authentication/overview.md](../authentication/overview.md).
 
-Lifespan and websocket scopes bypass both `_AuthMiddleware` and `_PathNormalizer` — they only act on `scope["type"] == "http"`.
+Lifespan and websocket scopes bypass both `_AuthMiddleware` and `_PathNormalizer` — they only act on `scope["type"] == "http"`. `GET /healthz` is also never seen by `_AuthMiddleware`: `_PathNormalizer` short-circuits it one layer earlier (see "Liveness probe" above), so the auth check never runs for that path.
 
 ## `_SessionManagerLifespan` — why this exists
 
