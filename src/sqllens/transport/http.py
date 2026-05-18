@@ -131,6 +131,7 @@ class _PathNormalizer:
     - ``/mcp/``  → rewrite scope.path to ``/mcp`` so FastMCP's Route matches.
                    No redirect, so POST clients that don't follow 307 work.
     - ``/mcp``   → pass through unchanged (matches FastMCP directly).
+    - ``/healthz`` → 200 liveness JSON, short-circuited here (pre-auth).
 
     Everything else passes through.
     """
@@ -374,35 +375,38 @@ def _decode_headers(raw: list[tuple[bytes, bytes]]) -> dict[str, str]:
     return {k.decode("latin-1"): v.decode("latin-1") for k, v in raw}
 
 
-async def _send_health(send: Send) -> None:
-    body = json.dumps({"status": "ok"}, separators=(",", ":")).encode()
+async def _send_json(
+    send: Send,
+    status: int,
+    body: bytes,
+    *,
+    extra_headers: tuple[tuple[bytes, bytes], ...] = (),
+) -> None:
     await send(
         {
             "type": "http.response.start",
-            "status": 200,
+            "status": status,
             "headers": [
                 (b"content-type", b"application/json"),
                 (b"content-length", str(len(body)).encode()),
+                *extra_headers,
             ],
         }
     )
     await send({"type": "http.response.body", "body": body})
+
+
+async def _send_health(send: Send) -> None:
+    # Compact separators so the body is exactly {"status":"ok"} — orchestrator
+    # probes and the integration test match on the literal bytes.
+    await _send_json(send, 200, json.dumps({"status": "ok"}, separators=(",", ":")).encode())
 
 
 async def _send_401(send: Send, reason: str) -> None:
     body = json.dumps({"error": "unauthorized", "reason": reason}).encode()
-    await send(
-        {
-            "type": "http.response.start",
-            "status": 401,
-            "headers": [
-                (b"content-type", b"application/json"),
-                (b"content-length", str(len(body)).encode()),
-                (b"www-authenticate", b'Bearer realm="sqllens"'),
-            ],
-        }
+    await _send_json(
+        send, 401, body, extra_headers=((b"www-authenticate", b'Bearer realm="sqllens"'),)
     )
-    await send({"type": "http.response.body", "body": body})
 
 
 # Type alias kept for callers that want to type middleware factories.
