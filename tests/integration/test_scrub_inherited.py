@@ -25,7 +25,6 @@ import pytest
         "ANTHROPIC_API_KEY",
         "SQLLENS_LLM__API_KEY",
         "SQLLENS_AUTH__BEARER_TOKEN",
-        "SQLLENS_CONFIG",
         "ANTHROPIC_BASE_URL",
     ],
 )

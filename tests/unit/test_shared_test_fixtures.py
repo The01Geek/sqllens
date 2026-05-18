@@ -28,9 +28,8 @@ from sqllens.tools._format import components_to_markdown
         "ANTHROPIC_API_KEY",
         "SQLLENS_LLM__API_KEY",
         "SQLLENS_AUTH__BEARER_TOKEN",
-        # Non-credential keys: prove the scrub covers more than the API-key
-        # tuple, so a future trim of _LEAKY_ENV_KEYS can't silently regress.
-        "SQLLENS_CONFIG",
+        # A non-credential key: proves the scrub covers more than the API-key
+        # tuple, so a future trim of _LEAKY_ENV_KEYS can't silently regress it.
         "ANTHROPIC_BASE_URL",
     ],
 )
@@ -205,10 +204,12 @@ async def test_stub_default_rows_are_isolated_across_calls(
     send_message = stub_agent_send_message()
     components = [c async for c in send_message(None, "q")]
     df = components[0].rich_component
-    # Mutate whatever row state the component exposes, then re-drive a fresh
-    # default stub and confirm it still renders the pristine default rows.
-    if hasattr(df, "rows") and isinstance(df.rows, list):
-        df.rows.clear()
+    # Assert the storage shape rather than guarding on it — a `hasattr` skip
+    # would let this test pass vacuously if DataFrameComponent's internals
+    # changed. Clearing the list then re-driving a fresh stub proves the
+    # factory-boundary ``list(_DEFAULT_ROWS)`` copy isolates the module global.
+    assert isinstance(df.rows, list)
+    df.rows.clear()
 
     send_message2 = stub_agent_send_message()
     answer, _ = components_to_markdown([c async for c in send_message2(None, "q")])
