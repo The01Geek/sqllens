@@ -140,6 +140,27 @@ def test_dataframe_empty_columns_and_rows_renders_nothing() -> None:
     assert components_to_markdown(stream) == ("(no answer)", False)
 
 
+def test_explicit_columns_override_row_keys_and_drop_extras() -> None:
+    # Pins that an explicit `columns` list controls header order AND projection:
+    # _render_dataframe uses row.get(c, "") so unlisted row keys are silently
+    # dropped, and column order follows the caller, not rows[0].keys().
+    rendered = _render_dataframe(_df(columns=["b", "a"], rows=[{"a": 1, "b": 2, "c": 3}]))
+    header = rendered.splitlines()[0]
+    assert header == "| b | a |"
+    body_line = rendered.splitlines()[-1]
+    assert body_line == "| 2 | 1 |"
+    assert "3" not in rendered
+
+
+def test_heterogeneous_rows_missing_keys_render_as_empty_cell() -> None:
+    # Pins row.get(c, "") behavior: declared columns missing from a given row
+    # render as empty cells, not KeyError. Common shape when an agent merges
+    # partial results.
+    rendered = _render_dataframe(_df(columns=["a", "b"], rows=[{"a": 1}, {"b": 2}]))
+    body_lines = rendered.splitlines()[2:]
+    assert body_lines == ["| 1 |  |", "|  | 2 |"]
+
+
 def test_cell_value_coercion_none_and_decimal_and_datetime() -> None:
     # Pinning test: documents the current naive ``str(value)`` coercion in
     # _render_dataframe. Any change to cell formatting (e.g. nicer NULL
