@@ -1,0 +1,260 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
+"""Unit coverage for ``sqllens.tools.query_database``.
+
+These tests pin the tool wrapper's behavior around the lazy-built ``_AGENT``
+singleton: when it builds, when it reuses, when it surfaces errors, and how
+it cleans up the underlying ``send_message`` async generator. The agent
+itself is stubbed via ``agent_stub_factory`` (see ``tests/unit/conftest.py``)
+so no LLM key or ChromaDB download is required.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import pytest
+from pydantic import SecretStr
+
+from sqllens.config import (
+    AgentRuntimeConfig,
+    AuthConfig,
+    Config,
+    DatabaseConfig,
+    LLMConfig,
+    MemoryConfig,
+)
+from sqllens.tools import query_database as query_database_module
+from sqllens.tools.query_database import query_database_impl
+
+from ._agent_stubs import make_dataframe, make_status_card, make_text_component
+
+
+def _build_cfg(tmp_path: Path) -> Config:
+    return Config(
+        database=DatabaseConfig(url="sqlite:///:memory:"),
+        llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
+        memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
+        auth=AuthConfig(mode="none"),
+        agent=AgentRuntimeConfig(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_first_call_builds_agent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """First call goes through ``build_agent``."""
+    cfg = _build_cfg(tmp_path)
+    stub = agent_stub_factory([make_text_component("hello")])
+    calls: list[Config] = []
+
+    def fake_build_agent(c: Config):
+        calls.append(c)
+        return stub
+
+    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+
+    await query_database_impl(cfg, "question?")
+
+    assert len(calls) == 1
+    assert calls[0] is cfg
+
+
+@pytest.mark.asyncio
+async def test_second_call_reuses_singleton(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """Subsequent calls reuse the cached agent."""
+    cfg = _build_cfg(tmp_path)
+    call_count = {"n": 0}
+
+    def fake_build_agent(_c: Config):
+        call_count["n"] += 1
+        return agent_stub_factory([make_text_component("answer")])
+
+    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+
+    await query_database_impl(cfg, "q1")
+    await query_database_impl(cfg, "q2")
+
+    assert call_count["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_singleton_ignores_changed_cfg(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """Documents current behavior: a second call with a fresh ``Config`` is ignored.
+
+    This is a known limitation tracked alongside the singleton race (see the
+    issue body — out-of-scope for this PR). The test pins the current
+    behavior so that any future fix has a clear regression target.
+    """
+    cfg_a = _build_cfg(tmp_path)
+    cfg_b = _build_cfg(tmp_path / "alt")
+    seen: list[Config] = []
+
+    def fake_build_agent(c: Config):
+        seen.append(c)
+        return agent_stub_factory([make_text_component("ok")])
+
+    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+
+    await query_database_impl(cfg_a, "q")
+    await query_database_impl(cfg_b, "q")
+
+    assert seen == [cfg_a]  # cfg_b was silently dropped
+
+
+@pytest.mark.asyncio
+async def test_build_agent_raises_leaves_singleton_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """If ``build_agent`` raises, ``_AGENT`` stays None so a retry can succeed."""
+    cfg = _build_cfg(tmp_path)
+    attempts = {"n": 0}
+
+    def flaky_build_agent(_c: Config):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise RuntimeError("boom on first build")
+        return agent_stub_factory([make_text_component("recovered")])
+
+    monkeypatch.setattr(query_database_module, "build_agent", flaky_build_agent)
+
+    with pytest.raises(RuntimeError, match="boom on first build"):
+        await query_database_impl(cfg, "q1")
+
+    assert query_database_module._AGENT is None
+    result = await query_database_impl(cfg, "q2")
+    assert "recovered" in result
+    assert attempts["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_send_message_raises_surfaces_as_runtime_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """Errors from ``send_message`` are wrapped in ``RuntimeError`` with chained cause."""
+    cfg = _build_cfg(tmp_path)
+    original = ValueError("LLM exploded")
+    stub = agent_stub_factory(raise_exc=original)
+    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+
+    with pytest.raises(RuntimeError, match="query_database failed: LLM exploded") as excinfo:
+        await query_database_impl(cfg, "q")
+
+    assert excinfo.value.__cause__ is original
+
+
+@pytest.mark.asyncio
+async def test_is_error_status_card_raises_runtime_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """A STATUS_CARD with status='error' surfaces as a RuntimeError to the MCP client."""
+    cfg = _build_cfg(tmp_path)
+    stub = agent_stub_factory(
+        [make_status_card(description="schema introspection failed")]
+    )
+    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+
+    with pytest.raises(RuntimeError, match="schema introspection failed"):
+        await query_database_impl(cfg, "q")
+
+
+@pytest.mark.asyncio
+async def test_happy_path_returns_markdown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """A normal TEXT + DATAFRAME stream collapses to a Markdown string."""
+    cfg = _build_cfg(tmp_path)
+    stub = agent_stub_factory(
+        [
+            make_text_component("Here are the results:"),
+            make_dataframe([{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]),
+        ]
+    )
+    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+
+    result = await query_database_impl(cfg, "list users")
+
+    assert "Here are the results:" in result
+    assert "Alice" in result
+    assert "| name | age |" in result
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_calls_build_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """Singleton invariant holds under ``asyncio.gather`` of two cold-start calls.
+
+    The current ``_agent_for`` is synchronous (no ``await`` between the
+    ``if _AGENT is None`` check and the assignment), so two awaits started
+    via ``asyncio.gather`` cannot interleave inside that critical section
+    on a single event loop. If a future refactor inserts an ``await``
+    between the check and the set without protecting it with a lock, this
+    assertion is the regression signal.
+    """
+    cfg = _build_cfg(tmp_path)
+    call_count = {"n": 0}
+
+    def fake_build_agent(_c: Config):
+        call_count["n"] += 1
+        return agent_stub_factory([make_text_component("ok")])
+
+    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+
+    await asyncio.gather(
+        query_database_impl(cfg, "q1"),
+        query_database_impl(cfg, "q2"),
+    )
+
+    assert call_count["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_send_message_generator_is_closed_on_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """The ``async for`` loop closes the generator when the wrapper raises.
+
+    Python's ``async for`` invokes ``aclose`` on the underlying async
+    generator when its body propagates an exception. We pin this so a
+    future refactor that switches to ``while True: __anext__()`` without
+    a ``finally: aclose()`` (a common shape) cannot silently regress
+    cleanup behavior.
+    """
+    cfg = _build_cfg(tmp_path)
+    aclose_seen = [False]
+    stub = agent_stub_factory(
+        raise_exc=ValueError("midstream failure"),
+        on_aclose=aclose_seen,
+    )
+    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+
+    with pytest.raises(RuntimeError):
+        await query_database_impl(cfg, "q")
+
+    assert aclose_seen[0] is True
