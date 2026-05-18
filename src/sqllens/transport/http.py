@@ -19,11 +19,8 @@ that registers its endpoint at the path ``/mcp``. We wrap it with:
    ASGI lifespan adapter so any host (uvicorn, FastAPI mount, custom server)
    that drives lifespan events will start/stop it correctly.
 
-Public surface:
-
-- ``build_asgi_app(cfg)`` returns the fully wrapped, mount-ready app. Use this
-  to mount SQL Lens under an external ASGI app (FastAPI, Starlette, etc.).
-- ``run(cfg)`` is the thin uvicorn launcher used by ``sqllens serve``.
+Public surface: ``build_asgi_app(cfg)`` returns the mount-ready app;
+``run(cfg)`` is the uvicorn launcher used by ``sqllens serve``.
 """
 
 from __future__ import annotations
@@ -65,11 +62,8 @@ def build_asgi_app(cfg: Config) -> ASGIApp:
     doesn't need path-based dispatch.
     """
     bare, mcp = _build_asgi_app_bare(cfg)
-    # Centralized private-attribute reach: FastMCP exposes the session manager
-    # as ``_session_manager``. We guard for AttributeError so an SDK upgrade
-    # that renames or removes it fails loudly at build time (one clear
-    # RuntimeError) rather than silently — the previous bug pattern was a
-    # 500 on first request, far from startup.
+    # Private SDK attribute: guard so an mcp upgrade that renames or removes
+    # ``_session_manager`` fails loudly at build time instead of silently.
     try:
         session_manager = mcp._session_manager  # type: ignore[attr-defined]
     except AttributeError as exc:
@@ -84,9 +78,10 @@ def build_asgi_app(cfg: Config) -> ASGIApp:
 def _build_asgi_app_bare(cfg: Config) -> tuple[ASGIApp, FastMCP]:
     """Build the path-normalized, authenticated ASGI app WITHOUT lifespan.
 
-    Returns the bare app and the underlying ``FastMCP`` instance so callers
-    that want to manage the session-manager lifespan themselves (typically
-    tests) can do so. Production callers should use ``build_asgi_app``.
+    Returns the bare app and the underlying ``FastMCP`` instance so the
+    caller can wire up the session-manager lifespan itself. The only
+    in-tree consumer is ``build_asgi_app``; the split exists to make the
+    private-attribute reach a single, guarded site.
     """
     mcp = build_server(cfg)
     inner = mcp.streamable_http_app()
