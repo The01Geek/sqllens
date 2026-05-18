@@ -135,20 +135,31 @@ async def test_build_agent_raises_leaves_singleton_none(
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
 ) -> None:
-    """If ``build_agent`` raises, ``_AGENT`` stays None so a retry can succeed."""
+    """If ``build_agent`` raises, ``_AGENT`` stays None so a retry can succeed.
+
+    The cold-start failure is now sanitized too (S-10): the client sees the
+    stable internal message, not the raw build exception, while the original
+    is chained for server-side logs. The #72/#81 guarantee this test pins —
+    the singleton resets on a failed build and a retry rebuilds cleanly —
+    is unchanged.
+    """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     builds: list[Config] = []
+    original = RuntimeError("boom on first build host=secret.db")
 
     def flaky_build_agent(c: Config):
         builds.append(c)
         if len(builds) == 1:
-            raise RuntimeError("boom on first build")
+            raise original
         return agent_stub_factory([make_text_component("recovered")])
 
     monkeypatch.setattr(query_database_module, "build_agent", flaky_build_agent)
 
-    with pytest.raises(RuntimeError, match="boom on first build"):
+    with pytest.raises(RuntimeError) as excinfo:
         await query_database_impl(cfg, "q1")
+    assert str(excinfo.value) == "internal error; see server logs"
+    assert "secret.db" not in str(excinfo.value)
+    assert excinfo.value.__cause__ is original
 
     assert query_database_module._AGENT is None
     result = await query_database_impl(cfg, "q2")
@@ -185,6 +196,7 @@ async def test_driver_exception_message_is_sanitized(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """S-10: a driver exception's host/port/role never reaches the client.
 
@@ -198,13 +210,20 @@ async def test_driver_exception_message_is_sanitized(
     stub = agent_stub_factory(raise_exc=leaky)
     monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
 
-    with pytest.raises(RuntimeError) as excinfo:
-        await query_database_impl(cfg, "q")
+    with caplog.at_level(logging.ERROR, logger="sqllens.tools.query_database"):
+        with pytest.raises(RuntimeError) as excinfo:
+            await query_database_impl(cfg, "q")
 
     message = str(excinfo.value)
     assert message == "internal error; see server logs"
     for secret in ("db.internal", "5432", "admin_role"):
         assert secret not in message
+    # Other half of the S-10 contract: the secret IS preserved server-side
+    # (logger.exception records the chained traceback) for operator debugging.
+    logged = "\n".join(r.getMessage() for r in caplog.records) + "\n" + "\n".join(
+        str(r.exc_info[1]) for r in caplog.records if r.exc_info
+    )
+    assert "db.internal" in logged
 
 
 @pytest.mark.asyncio
@@ -215,8 +234,13 @@ async def test_unsafe_sql_error_surfaces_verbatim(
 ) -> None:
     """S-10/#14: ``UnsafeSqlError`` is actionable feedback, not a leak.
 
-    Its original message must reach the client verbatim and stay
-    distinguishable from the generic internal-error category.
+    Pins the ``except UnsafeSqlError`` branch's contract in isolation: when
+    it *does* propagate out of ``send_message`` (stubbed here via
+    ``raise_exc``), its original message reaches the client verbatim and
+    stays distinguishable from the generic internal-error category. The
+    current vendored agent converts guard violations into tool-result
+    components instead of propagating them, so this branch is defensive —
+    see the comment on it in ``query_database.py``.
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     safety_msg = (
@@ -239,15 +263,24 @@ async def test_is_error_status_card_raises_runtime_error(
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
 ) -> None:
-    """A STATUS_CARD with status='error' surfaces as a RuntimeError to the MCP client."""
+    """#14: an agent-reported failure surfaces as the SQL-execution category.
+
+    Positively pins the ``SQL execution error: `` prefix (the observable
+    category signal), not just that the description appears — ``pytest.raises``
+    ``match`` is a regex *search* and would pass even if the prefix regressed.
+    """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     stub = agent_stub_factory(
         [make_status_card(description="schema introspection failed")]
     )
     monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
 
-    with pytest.raises(RuntimeError, match="schema introspection failed"):
+    with pytest.raises(RuntimeError) as excinfo:
         await query_database_impl(cfg, "q")
+
+    assert str(excinfo.value).startswith("SQL execution error: ")
+    assert "schema introspection failed" in str(excinfo.value)
+    assert str(excinfo.value) != "internal error; see server logs"
 
 
 @pytest.mark.asyncio

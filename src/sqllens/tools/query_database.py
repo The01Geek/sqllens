@@ -1,7 +1,17 @@
 # SPDX-FileCopyrightText: 2026 Daniel Radman
 # SPDX-License-Identifier: Apache-2.0
 
-"""``query_database`` MCP tool implementation."""
+"""``query_database`` MCP tool implementation.
+
+The FastMCP tool wrapper (``mcp.server.fastmcp`` — the official MCP SDK, not
+the separately-distributed standalone ``fastmcp`` package) in ``server.py``
+re-raises any exception from this module and maps it to an ``isError: true``
+result, currently formatting the client text as
+``Error executing tool query_database: <message>``. Our contract is therefore
+the *raised message* (the categorized text below), which the client receives
+as the suffix after that wrapper prefix — the category split stays observable
+because the forms here remain mutually distinguishable under it.
+"""
 
 from __future__ import annotations
 
@@ -24,7 +34,10 @@ logger = logging.getLogger("sqllens.tools.query_database")
 #    (driver exceptions carry host/port/db/role; the full traceback is logged
 #    server-side instead of echoed to the MCP client),
 #  - SQL-execution failures the agent reported get a recognizable prefix,
-#  - ``UnsafeSqlError`` is surfaced verbatim (actionable safety feedback).
+#  - ``UnsafeSqlError`` is surfaced verbatim — issue #91 mandates the original
+#    safety message reach the client unaltered, so this form is deliberately
+#    *not* prefixed; it stays distinguishable by its own recognizable text
+#    ("refusing to execute non-SELECT SQL: ..."), not by a constant prefix.
 _INTERNAL_ERROR_MESSAGE = "internal error; see server logs"
 _SQL_EXECUTION_ERROR_PREFIX = "SQL execution error: "
 
@@ -44,10 +57,17 @@ async def _agent_for(cfg: Config) -> Agent:
     Double-checked locking: the outer ``_AGENT is None`` test is a fast-path
     optimization that skips the lock once the agent exists; correctness comes
     from the *inner* re-check after awaiting ``_AGENT_LOCK`` (the only
-    suspension point), so two concurrent first calls cannot both run
-    ``build_agent``. A later call whose ``cfg`` differs (by identity) from
-    the one that built the agent is still served by the original agent, but
-    logs a warning rather than silently honoring a config it is not using.
+    suspension point *in this function*), so two concurrent first calls cannot
+    both run ``build_agent``. A later call whose ``cfg`` differs is still
+    served by the original agent but logs a warning rather than silently
+    honoring a config it is not using.
+
+    The mismatch test is by object identity, not value: ``server.py`` builds
+    the FastMCP tool once and closes over a single ``Config`` instance that is
+    passed to every call, so identity is stable for a correctly-run server and
+    a *different* object genuinely means a second config was introduced. Do
+    not "fix" this to ``!=`` — value-equality would false-warn on a benign
+    config reload that produced an equal-but-distinct object.
     """
     global _AGENT, _AGENT_CFG
     if _AGENT is None:
@@ -55,7 +75,7 @@ async def _agent_for(cfg: Config) -> Agent:
             if _AGENT is None:
                 _AGENT = build_agent(cfg)
                 _AGENT_CFG = cfg
-    if cfg is not _AGENT_CFG:
+    if _AGENT_CFG is not None and cfg is not _AGENT_CFG:
         logger.warning(
             "query_database called with a different Config than the one that "
             "built the agent; reusing the original agent and ignoring the new "
@@ -66,7 +86,15 @@ async def _agent_for(cfg: Config) -> Agent:
 
 async def query_database_impl(cfg: Config, question: str) -> str:
     """Translate ``question`` to SQL, execute, and return a Markdown answer."""
-    agent = await _agent_for(cfg)
+    try:
+        agent = await _agent_for(cfg)
+    except Exception as e:
+        # Cold-start failures (DB driver connect, ChromaDB, embedding-model
+        # download, bad API key) carry the same host/port/role strings S-10
+        # targets. Sanitize them identically: full traceback server-side,
+        # stable internal message to the client.
+        logger.exception("agent construction failed")
+        raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
     request_context = RequestContext(headers={}, cookies={}, metadata={})
 
     components = []
@@ -74,9 +102,16 @@ async def query_database_impl(cfg: Config, question: str) -> str:
         async for comp in agent.send_message(request_context, question):
             components.append(comp)
     except UnsafeSqlError as e:
-        # Actionable safety feedback, not an infra leak — surface verbatim so
-        # the calling agent can correct its SQL. This is the SQL-execution
-        # error category, distinct from the internal-error category below.
+        # Defensive path: the current vendored agent catches a read-only-guard
+        # violation inside its SQL tool (RunSqlTool.execute's broad
+        # ``except Exception`` at agent/tools/run_sql.py:182) and feeds it back
+        # as a tool result rather than propagating UnsafeSqlError out of
+        # send_message, so this branch is not exercised by that pipeline today
+        # (a real guard violation surfaces via the is_error path below). It is
+        # kept because UnsafeSqlError *is* actionable safety feedback (not an
+        # infra leak): if it ever propagates (a direct guard call, a future
+        # code path), it must reach the client verbatim, distinct from the
+        # sanitized internal-error category below.
         logger.warning("query rejected by read-only guard: %s", e)
         raise RuntimeError(str(e)) from e
     except Exception as e:
