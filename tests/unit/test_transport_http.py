@@ -204,6 +204,11 @@ def test_lifespan_startup_failure_sends_failed_not_complete() -> None:
     assert "lifespan.startup.complete" not in types
     assert sent[-1]["type"] == "lifespan.startup.failed"
     assert "startup-boom" in sent[-1]["message"]
+    # Post-state: _cm dropped, _started never flipped — so a subsequent
+    # lifespan.shutdown can't call __aexit__ on a never-entered CM, and
+    # the duplicate-startup guard does not trip on retry.
+    assert adapter._cm is None
+    assert adapter._started is False
 
 
 def test_lifespan_duplicate_startup_is_rejected() -> None:
