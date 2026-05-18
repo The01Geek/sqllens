@@ -47,10 +47,12 @@ def test_no_args_prints_help() -> None:
 
 
 def _write_serve_config(tmp_path: Path, *, host: str, transport: str = "http") -> Path:
-    # Minimum viable TOML — api_key supplied via env so the api_key gate (which
-    # fires *before* the loopback guard) passes and the test exercises the
-    # actual guard. transport defaults to "http" (triggers the guard); auth.mode
-    # defaults to "none".
+    # Minimum viable TOML. Serve tests pair this with SQLLENS_LLM__API_KEY set
+    # so the api_key gate (which fires *before* the loopback guard in `serve`)
+    # passes and the test exercises the actual guard. Validate tests reuse the
+    # same helper without setting api_key — `validate` has no api_key gate, so
+    # the loopback guard is reached directly. transport defaults to "http"
+    # (triggers the guard); auth.mode defaults to "none".
     cfg_path = tmp_path / "sqllens.toml"
     cfg_path.write_text(
         textwrap.dedent(
@@ -144,6 +146,12 @@ def test_serve_insecure_opt_out_via_toml(
     assert result.exit_code == 0, result.stdout
     assert called == [True]
     assert "Refusing to start" not in result.stdout
+    # The breadcrumb must show up regardless of which surface (env vs TOML)
+    # set `insecure`. A regression that tied the warning emission to
+    # os.environ.get("SQLLENS_AUTH__INSECURE") rather than cfg.auth.insecure
+    # would silently bypass the guard with no log evidence for ops.
+    assert "SQLLENS_AUTH__INSECURE=1" in result.stdout
+    assert "Warning" in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -448,3 +456,77 @@ def test_is_loopback_host_rejects_non_loopback_forms(host: str) -> None:
     from sqllens.cli import _is_loopback_host
 
     assert _is_loopback_host(host) is False
+
+
+@pytest.mark.parametrize("host", [None, 127, 0.0, [], {}])
+def test_is_loopback_host_fails_closed_on_non_string(host: object) -> None:
+    # Pydantic's `host: str` field should prevent this in practice, but the
+    # predicate documents fail-closed semantics — a future refactor that
+    # passed e.g. `IPv4Address(...)` directly must not raise out of the
+    # guard. A traceback in place of a refusal is exactly the obscure
+    # failure mode the guard is supposed to prevent.
+    from sqllens.cli import _is_loopback_host
+
+    assert _is_loopback_host(host) is False  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Direct unit tests for `_loopback_policy_violated`
+# ---------------------------------------------------------------------------
+#
+# Pinning the helper's contract directly (rather than only through the CLI
+# invoke path) prevents a future refactor from folding `cfg.auth.insecure`
+# into the predicate. Doing so would silently change the contract: callers
+# rely on the helper returning True even when the operator has acknowledged
+# the policy with insecure=1, so they can phrase a "you waived this" warning
+# distinct from the "you violated this" error.
+
+
+def _build_cfg(transport: str, mode: str, host: str, *, insecure: bool = False):
+    from sqllens.config import AuthConfig, Config, DatabaseConfig, ServerConfig
+
+    return Config.model_construct(
+        database=DatabaseConfig(url="sqlite:///./demo.db"),
+        server=ServerConfig.model_construct(transport=transport, host=host),
+        auth=AuthConfig.model_construct(mode=mode, insecure=insecure),
+    )
+
+
+def test_loopback_policy_violated_returns_true_on_unauth_non_loopback() -> None:
+    from sqllens.cli import _loopback_policy_violated
+
+    cfg = _build_cfg(transport="http", mode="none", host="0.0.0.0")
+    assert _loopback_policy_violated(cfg) is True
+
+
+def test_loopback_policy_violated_returns_true_even_when_insecure_set() -> None:
+    # Critical contract: the helper does NOT consult cfg.auth.insecure. Callers
+    # must combine `violated` with `cfg.auth.insecure` themselves. A regression
+    # that ANDed `not cfg.auth.insecure` into the helper would silently break
+    # the validate breadcrumb path (which needs `violated=True` even when
+    # insecure=True to emit the auth-line annotation).
+    from sqllens.cli import _loopback_policy_violated
+
+    cfg = _build_cfg(transport="http", mode="none", host="0.0.0.0", insecure=True)
+    assert _loopback_policy_violated(cfg) is True
+
+
+def test_loopback_policy_violated_false_on_loopback_host() -> None:
+    from sqllens.cli import _loopback_policy_violated
+
+    cfg = _build_cfg(transport="http", mode="none", host="127.0.0.1")
+    assert _loopback_policy_violated(cfg) is False
+
+
+def test_loopback_policy_violated_false_on_stdio_transport() -> None:
+    from sqllens.cli import _loopback_policy_violated
+
+    cfg = _build_cfg(transport="stdio", mode="none", host="0.0.0.0")
+    assert _loopback_policy_violated(cfg) is False
+
+
+def test_loopback_policy_violated_false_on_bearer_mode() -> None:
+    from sqllens.cli import _loopback_policy_violated
+
+    cfg = _build_cfg(transport="http", mode="bearer", host="0.0.0.0")
+    assert _loopback_policy_violated(cfg) is False

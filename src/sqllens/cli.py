@@ -34,13 +34,17 @@ def _is_loopback_host(host: str) -> bool:
     # IPv4-mapped IPv6 loopback like ::ffff:127.0.0.1), not just the canonical
     # spellings. No DNS resolution — wildcards ("0.0.0.0", "::") and arbitrary
     # external hostnames fail closed and must use bearer auth or the
-    # SQLLENS_AUTH__INSECURE opt-out. Hostname comparison is case-insensitive
-    # per RFC 1035, so "Localhost" / "LOCALHOST" are recognized too.
-    if host.lower() == "localhost":
-        return True
+    # SQLLENS_AUTH__INSECURE opt-out. The single literal hostname "localhost"
+    # is matched case-insensitively (RFC 1035); no other hostnames are
+    # recognized. Non-string input (None, ints, etc. from a future refactor)
+    # also fails closed rather than raising — this is a security guard and a
+    # traceback in place of a refusal would be misread as "the guard didn't
+    # apply".
     try:
+        if host.lower() == "localhost":
+            return True
         return ipaddress.ip_address(host).is_loopback
-    except ValueError:
+    except (ValueError, AttributeError, TypeError):
         return False
 
 
