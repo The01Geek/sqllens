@@ -51,17 +51,6 @@ _INSECURE_NON_LOOPBACK_MESSAGE = (
     "closed-network deployments."
 )
 
-# The same message swapped to past-tense framing for `validate`, which lints
-# config without ever calling ``run``. Keeps the actionable remediation (env
-# vars to set) identical so CI logs from `validate` and `serve` are
-# directly comparable.
-_INSECURE_NON_LOOPBACK_VALIDATE_MESSAGE = (
-    "Config would refuse to start an unauthenticated HTTP server on a non-loopback "
-    "interface (server.host={host!r}, auth.mode=none). Set SQLLENS_AUTH__MODE=bearer "
-    "with a SQLLENS_AUTH__BEARER_TOKEN, or SQLLENS_AUTH__INSECURE=1 to override for "
-    "closed-network deployments."
-)
-
 
 def _loopback_policy_violated(cfg: Config) -> bool:
     """True when the unauthenticated-non-loopback policy is violated.
@@ -165,16 +154,13 @@ def validate(
     except Exception as e:
         console.print(f"[red]Invalid:[/red] {escape(str(e))}")
         raise typer.Exit(code=2) from e
-    # Mirror serve's loopback-policy guard so CI / pre-deploy linting built on
-    # `validate` catches the misconfiguration before `serve` would refuse it.
-    # Non-acknowledged violation = hard exit (matches serve). Acknowledged
-    # violation (SQLLENS_AUTH__INSECURE=1) = visible warning printed alongside
-    # the `auth:` line so the breadcrumb is preserved in CI logs.
+    # Mirror serve's guard so CI / pre-deploy linting catches the
+    # misconfiguration before `serve` would refuse to start.
     violated = _loopback_policy_violated(cfg)
     if violated and not cfg.auth.insecure:
         console.print(
             f"[red]Invalid:[/red] "
-            f"{escape(_INSECURE_NON_LOOPBACK_VALIDATE_MESSAGE.format(host=cfg.server.host))}"
+            f"{escape(_INSECURE_NON_LOOPBACK_MESSAGE.format(host=cfg.server.host))}"
         )
         raise typer.Exit(code=2)
     console.print("[green]Config OK[/green]")
