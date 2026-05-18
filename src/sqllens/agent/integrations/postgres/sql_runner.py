@@ -1,10 +1,15 @@
 """PostgreSQL implementation of SqlRunner interface."""
 
+import uuid
 from typing import Optional
 import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
+from sqllens.safety.limits import mark_truncation
+
+
+_DEFAULT_MAX_ROWS = 10_000
 
 
 class PostgresRunner(SqlRunner):
@@ -18,6 +23,8 @@ class PostgresRunner(SqlRunner):
         database: Optional[str] = None,
         user: Optional[str] = None,
         password: Optional[str] = None,
+        statement_timeout_ms: int = 0,
+        max_rows: int = _DEFAULT_MAX_ROWS,
         **kwargs,
     ):
         """Initialize with PostgreSQL connection parameters.
@@ -32,6 +39,8 @@ class PostgresRunner(SqlRunner):
             database: Database name
             user: Database user
             password: Database password
+            statement_timeout_ms: Per-query timeout in milliseconds (0 disables)
+            max_rows: Hard ceiling on rows returned per SELECT
             **kwargs: Additional psycopg2 connection parameters (sslmode, connect_timeout, etc.)
         """
         try:
@@ -62,6 +71,9 @@ class PostgresRunner(SqlRunner):
                 "Either provide connection_string OR (host, database, and user) parameters"
             )
 
+        self._statement_timeout_ms = statement_timeout_ms
+        self._max_rows = max_rows
+
     async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
         """Execute SQL query against PostgreSQL database and return results as DataFrame.
 
@@ -70,43 +82,68 @@ class PostgresRunner(SqlRunner):
             context: Tool execution context
 
         Returns:
-            DataFrame with query results
+            DataFrame with query results. For SELECTs, ``df.attrs['truncated']`` is True
+            when the result was capped at ``max_rows`` and the agent should re-issue
+            with a narrower WHERE / LIMIT.
 
         Raises:
-            psycopg2.Error: If query execution fails
+            psycopg2.Error: If query execution fails (including statement_timeout firing).
         """
-        # Connect to the database using either connection string or parameters
         if self.connection_string:
             conn = self.psycopg2.connect(self.connection_string)
         else:
             conn = self.psycopg2.connect(**self.connection_params)
 
-        cursor = conn.cursor(cursor_factory=self.psycopg2.extras.RealDictCursor)
-
         try:
-            # Execute the query
-            cursor.execute(args.sql)
+            if self._statement_timeout_ms > 0:
+                # Cast to int prevents driver mis-typing of subclassed ints.
+                setup = conn.cursor()
+                try:
+                    setup.execute(
+                        "SET statement_timeout = %s", (int(self._statement_timeout_ms),)
+                    )
+                finally:
+                    setup.close()
 
-            # Determine if this is a SELECT query or modification query
             query_type = args.sql.strip().upper().split()[0]
 
             if query_type == "SELECT":
-                # Fetch results for SELECT queries
-                rows = cursor.fetchall()
-                if not rows:
-                    # Return empty DataFrame
-                    return pd.DataFrame()
+                # Named (server-side) cursor streams rows; the +1 sentinel lets us
+                # detect truncation without a separate COUNT.
+                cursor_name = f"sqllens_{uuid.uuid4().hex}"
+                cursor = conn.cursor(
+                    name=cursor_name,
+                    cursor_factory=self.psycopg2.extras.RealDictCursor,
+                )
+                try:
+                    cursor.execute(args.sql)
+                    rows = cursor.fetchmany(self._max_rows + 1)
+                finally:
+                    cursor.close()
 
-                # Convert rows to list of dictionaries
-                results_data = [dict(row) for row in rows]
-                return pd.DataFrame(results_data)
+                truncated = len(rows) > self._max_rows
+                if truncated:
+                    rows = rows[: self._max_rows]
+
+                if not rows:
+                    df = pd.DataFrame()
+                else:
+                    df = pd.DataFrame([dict(row) for row in rows])
+
+                mark_truncation(df, truncated=truncated, max_rows=self._max_rows)
+                return df
             else:
-                # For non-SELECT queries (INSERT, UPDATE, DELETE, etc.)
-                conn.commit()
-                rows_affected = cursor.rowcount
-                # Return a DataFrame indicating rows affected
+                # Non-SELECT path is defensive — ReadOnlyGuardRunner should block this
+                # upstream in production. Kept so smoke tests against a writable DB still
+                # exercise the same return shape.
+                cursor = conn.cursor()
+                try:
+                    cursor.execute(args.sql)
+                    conn.commit()
+                    rows_affected = cursor.rowcount
+                finally:
+                    cursor.close()
                 return pd.DataFrame({"rows_affected": [rows_affected]})
 
         finally:
-            cursor.close()
             conn.close()

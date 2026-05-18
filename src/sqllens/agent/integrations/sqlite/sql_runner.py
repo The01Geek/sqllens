@@ -1,22 +1,41 @@
 """SQLite implementation of SqlRunner interface."""
 
 import sqlite3
+import time
 import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
+from sqllens.safety.limits import mark_truncation
+
+
+_DEFAULT_MAX_ROWS = 10_000
+
+# Frequency (in VM instructions) at which SQLite invokes the progress handler.
+# Smaller = tighter deadline check; larger = less per-op overhead. 1000 keeps
+# the overhead negligible while still giving sub-millisecond cancellation.
+_PROGRESS_HANDLER_INSTRUCTIONS = 1000
 
 
 class SqliteRunner(SqlRunner):
     """SQLite implementation of the SqlRunner interface."""
 
-    def __init__(self, database_path: str):
+    def __init__(
+        self,
+        database_path: str,
+        statement_timeout_ms: int = 0,
+        max_rows: int = _DEFAULT_MAX_ROWS,
+    ):
         """Initialize with a SQLite database path.
 
         Args:
             database_path: Path to the SQLite database file
+            statement_timeout_ms: Per-query timeout in milliseconds (0 disables)
+            max_rows: Hard ceiling on rows returned per SELECT
         """
         self.database_path = database_path
+        self._statement_timeout_ms = statement_timeout_ms
+        self._max_rows = max_rows
 
     async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
         """Execute SQL query against SQLite database and return results as DataFrame.
@@ -26,40 +45,65 @@ class SqliteRunner(SqlRunner):
             context: Tool execution context
 
         Returns:
-            DataFrame with query results
+            DataFrame with query results. For SELECTs, ``df.attrs['truncated']`` is True
+            when the result was capped at ``max_rows`` and the agent should re-issue
+            with a narrower WHERE / LIMIT.
 
         Raises:
-            sqlite3.Error: If query execution fails
+            sqlite3.Error: If query execution fails (the progress-handler deadline
+                raises ``sqlite3.OperationalError('interrupted')``).
         """
-        # Connect to the database
         conn = sqlite3.connect(self.database_path)
-        conn.row_factory = sqlite3.Row  # Enable column access by name
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
+        if self._statement_timeout_ms > 0:
+            deadline = time.monotonic() + (self._statement_timeout_ms / 1000.0)
+            conn.set_progress_handler(
+                _make_deadline_handler(deadline), _PROGRESS_HANDLER_INSTRUCTIONS
+            )
+
         try:
-            # Execute the query
             cursor.execute(args.sql)
 
-            # Determine if this is a SELECT query or modification query
             query_type = args.sql.strip().upper().split()[0]
 
             if query_type == "SELECT":
-                # Fetch results for SELECT queries
-                rows = cursor.fetchall()
-                if not rows:
-                    # Return empty DataFrame
-                    return pd.DataFrame()
+                rows = cursor.fetchmany(self._max_rows + 1)
+                truncated = len(rows) > self._max_rows
+                if truncated:
+                    rows = rows[: self._max_rows]
 
-                # Convert rows to list of dictionaries
-                results_data = [dict(row) for row in rows]
-                return pd.DataFrame(results_data)
-            else:
-                # For non-SELECT queries (INSERT, UPDATE, DELETE, etc.)
-                conn.commit()
-                rows_affected = cursor.rowcount
-                # Return a DataFrame indicating rows affected
-                return pd.DataFrame({"rows_affected": [rows_affected]})
+                if not rows:
+                    df = pd.DataFrame()
+                else:
+                    df = pd.DataFrame([dict(row) for row in rows])
+
+                mark_truncation(df, truncated=truncated, max_rows=self._max_rows)
+                return df
+
+            conn.commit()
+            rows_affected = cursor.rowcount
+            return pd.DataFrame({"rows_affected": [rows_affected]})
 
         finally:
+            # Clearing the handler before close is paranoia — the handler holds a
+            # closure over ``deadline`` only, no DB or fd references.
+            if self._statement_timeout_ms > 0:
+                conn.set_progress_handler(None, 0)
             cursor.close()
             conn.close()
+
+
+def _make_deadline_handler(deadline: float):
+    """Return a progress handler that interrupts SQLite once ``deadline`` passes.
+
+    ``set_progress_handler`` calls this every N VM instructions; returning a
+    truthy value raises ``sqlite3.OperationalError('interrupted')`` from the
+    currently-executing statement.
+    """
+
+    def handler() -> int:
+        return 1 if time.monotonic() >= deadline else 0
+
+    return handler

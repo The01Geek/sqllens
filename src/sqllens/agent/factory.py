@@ -28,7 +28,7 @@ from sqllens.agent.tools import (
     SearchSavedCorrectToolUsesTool,
 )
 from sqllens.config import API_KEY_MISSING_MESSAGE, Config
-from sqllens.safety import ReadOnlyGuardRunner
+from sqllens.safety import ReadOnlyGuardRunner, RowCapRunner
 
 DEFAULT_USER_ID = "sqllens-user"
 DEFAULT_USER_GROUP = "default"
@@ -59,7 +59,14 @@ def build_agent(cfg: Config) -> Agent:
         model=cfg.llm.model,
         api_key=cfg.llm.api_key.get_secret_value(),
     )
-    sql_runner = build_sql_runner(cfg.database.url)
+    sql_runner = build_sql_runner(
+        cfg.database.url,
+        statement_timeout_ms=cfg.database.statement_timeout_ms,
+        max_rows=cfg.database.max_rows,
+    )
+    # Decorator order matters: ReadOnly runs first (parse-time reject), then
+    # RowCap is the post-execution belt-and-suspenders on the per-runner cap.
+    sql_runner = RowCapRunner(sql_runner, max_rows=cfg.database.max_rows)
     if cfg.database.read_only:
         sql_runner = ReadOnlyGuardRunner(sql_runner, dialect=_sqlglot_dialect(cfg.database.url))
     memory = ChromaAgentMemory(
@@ -94,20 +101,40 @@ def build_agent(cfg: Config) -> Agent:
     )
 
 
-def build_sql_runner(url: str) -> SqlRunner:
-    """Pick the right SQL runner from the database URL prefix."""
+def build_sql_runner(
+    url: str,
+    *,
+    statement_timeout_ms: int = 0,
+    max_rows: int = 10_000,
+) -> SqlRunner:
+    """Pick the right SQL runner from the database URL prefix.
+
+    ``statement_timeout_ms`` and ``max_rows`` are passed through to the runner so
+    the per-engine safety primitives (SET statement_timeout / MAX_EXECUTION_TIME /
+    progress handler, plus fetchmany(max_rows + 1)) run inside the runner itself.
+    Defaults keep the integration-test call sites (``build_sql_runner(url)``)
+    working without modification.
+    """
     scheme = url.split("://", 1)[0].lower()
     if scheme.startswith("sqlite"):
         # sqlite:///abs/path.db → /abs/path.db ; sqlite://:memory: stays as-is
         path = url.split("://", 1)[1]
         if path.startswith("/"):
             path = path[1:] if not path.startswith("//") else path
-        return SqliteRunner(database_path=path or ":memory:")
+        return SqliteRunner(
+            database_path=path or ":memory:",
+            statement_timeout_ms=statement_timeout_ms,
+            max_rows=max_rows,
+        )
     if scheme.startswith("postgres"):
         # SQLAlchemy-style scheme like "postgresql+psycopg2" needs to be normalized
         # for psycopg2 connection strings, which only accept "postgresql://".
         normalized = "postgresql://" + url.split("://", 1)[1]
-        return PostgresRunner(connection_string=normalized)
+        return PostgresRunner(
+            connection_string=normalized,
+            statement_timeout_ms=statement_timeout_ms,
+            max_rows=max_rows,
+        )
     if scheme.startswith("mysql"):
         parsed = urlparse(url)
         if not parsed.hostname or not parsed.username:
@@ -118,6 +145,8 @@ def build_sql_runner(url: str) -> SqlRunner:
             database=(parsed.path or "").lstrip("/"),
             user=parsed.username,
             password=parsed.password or "",
+            statement_timeout_ms=statement_timeout_ms,
+            max_rows=max_rows,
         )
     raise ValueError(f"unsupported database scheme: {scheme!r} (expected sqlite/postgres/mysql)")
 
