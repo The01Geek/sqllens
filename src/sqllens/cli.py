@@ -53,11 +53,14 @@ _INSECURE_NON_LOOPBACK_MESSAGE = (
 
 
 def _loopback_policy_violated(cfg: Config) -> bool:
-    """True when the unauthenticated-non-loopback policy is violated.
+    """True when the unauthenticated-non-loopback policy condition holds.
 
-    Shared between ``serve`` (hard-fails before binding the socket) and
-    ``validate`` (hard-fails so CI/pre-deploy linting catches the same
-    misconfiguration before deploy).
+    Callers (``serve``, ``validate``) combine this with ``cfg.auth.insecure``:
+    when the policy condition holds and the operator has *not* set
+    ``SQLLENS_AUTH__INSECURE=1`` they hard-fail; with the opt-out set they
+    proceed and emit a visible breadcrumb. This helper does not consult
+    ``cfg.auth.insecure`` itself so callers can phrase the warning/error
+    message in surface-appropriate terms.
     """
     return (
         cfg.server.transport == "http"

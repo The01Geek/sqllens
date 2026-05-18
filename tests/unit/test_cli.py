@@ -281,9 +281,68 @@ def test_validate_insecure_env_var_opt_out_emits_warning(
     assert "Config OK" in result.stdout
     assert "Invalid" not in result.stdout
     # The warning text appears on the auth: line so it's visually attached to
-    # the field that motivates it.
-    assert "SQLLENS_AUTH__INSECURE=1" in result.stdout
-    assert "0.0.0.0" in result.stdout
+    # the field that motivates it. Asserting the substrings are co-located on
+    # the auth line (not just present somewhere in stdout) pins this UX intent;
+    # a future refactor that moved the breadcrumb to a standalone banner above
+    # `Config OK` would still satisfy a plain "substring in stdout" check.
+    auth_lines = [line for line in result.stdout.splitlines() if "auth:" in line]
+    assert auth_lines, f"expected an `auth:` line in stdout, got:\n{result.stdout}"
+    assert any(
+        "SQLLENS_AUTH__INSECURE=1" in line and "0.0.0.0" in line for line in auth_lines
+    ), f"expected the insecure breadcrumb on the auth: line, got:\n{result.stdout}"
+
+
+def test_validate_insecure_opt_out_via_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Mirror of the env-var test but via TOML — pins that validate honors
+    # `cfg.auth.insecure` from the config file too, not only from the env. Same
+    # symmetry guarantee `test_serve_insecure_opt_out_via_toml` gives serve.
+    monkeypatch.delenv("SQLLENS_LLM__API_KEY", raising=False)
+    monkeypatch.delenv("SQLLENS_AUTH__INSECURE", raising=False)
+    monkeypatch.delenv("SQLLENS_AUTH__MODE", raising=False)
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [auth]
+            insecure = true
+
+            [server]
+            transport = "http"
+            host = "0.0.0.0"
+            """
+        )
+    )
+
+    result = runner.invoke(app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 0, result.stdout
+    assert "Config OK" in result.stdout
+    assert "Invalid" not in result.stdout
+    auth_lines = [line for line in result.stdout.splitlines() if "auth:" in line]
+    assert auth_lines and any(
+        "SQLLENS_AUTH__INSECURE=1" in line and "0.0.0.0" in line for line in auth_lines
+    ), f"expected the insecure breadcrumb on the auth: line, got:\n{result.stdout}"
+
+
+def test_validate_insecure_with_loopback_emits_no_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `insecure=1` with a loopback host should NOT warn — the policy condition
+    # is not met, so the opt-out is a no-op. Guards against a regression that
+    # printed the breadcrumb anytime `insecure=true` regardless of host.
+    monkeypatch.delenv("SQLLENS_LLM__API_KEY", raising=False)
+    monkeypatch.setenv("SQLLENS_AUTH__INSECURE", "1")
+    cfg_path = _write_serve_config(tmp_path, host="127.0.0.1")
+
+    result = runner.invoke(app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 0, result.stdout
+    assert "Config OK" in result.stdout
+    assert "SQLLENS_AUTH__INSECURE" not in result.stdout
+    assert "non-loopback" not in result.stdout
 
 
 def test_validate_loopback_passes_cleanly(
@@ -337,3 +396,55 @@ def test_validate_allows_non_loopback_with_bearer_auth(
     assert "Config OK" in result.stdout
     assert "Invalid" not in result.stdout
     assert "SQLLENS_AUTH__INSECURE" not in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Direct unit tests for the `_is_loopback_host` predicate
+# ---------------------------------------------------------------------------
+#
+# The CLI-integration tests above exercise the predicate transitively. Pinning
+# it directly here documents the contract (entire 127.0.0.0/8, ::1, IPv4-mapped
+# IPv6 loopback, case-insensitive "localhost", no DNS resolution / fail-closed
+# on everything else) so a string-match regression that broke e.g. the IPv4-
+# mapped IPv6 form would be caught by a single fast test rather than slipping
+# through the slower invoke-based suite.
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "127.0.0.1",
+        "127.0.0.2",
+        "127.255.255.254",
+        "::1",
+        "::ffff:127.0.0.1",
+        "localhost",
+        "Localhost",
+        "LOCALHOST",
+    ],
+)
+def test_is_loopback_host_accepts_loopback_forms(host: str) -> None:
+    from sqllens.cli import _is_loopback_host
+
+    assert _is_loopback_host(host) is True
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "0.0.0.0",
+        "::",
+        "10.0.0.5",
+        "192.168.1.1",
+        "example.com",
+        "localhost.localdomain",
+        "",
+        " 127.0.0.1",  # leading whitespace — fail-closed
+        "[::1]",  # bracketed IPv6 — fail-closed (ipaddress raises ValueError)
+        "127.0.0.1:8080",  # port-embedded — fail-closed
+    ],
+)
+def test_is_loopback_host_rejects_non_loopback_forms(host: str) -> None:
+    from sqllens.cli import _is_loopback_host
+
+    assert _is_loopback_host(host) is False
