@@ -28,7 +28,7 @@ agent/*           →  Vendored NL-to-SQL framework (see "Lifted code" below)
 Cross-cutting modules can be imported from anywhere:
 
 - [src/sqllens/auth/](../../../src/sqllens/auth/) — `Authenticator` protocol + `none`/`bearer`/`jwt` strategies.
-- [src/sqllens/safety/](../../../src/sqllens/safety/) — `assert_select_only` sqlglot parser + `ReadOnlyGuardRunner` decorator.
+- [src/sqllens/safety/](../../../src/sqllens/safety/) — `assert_select_only` sqlglot parser + `ReadOnlyGuardRunner` decorator (parse-time gate); `RowCapRunner` + `rows_to_capped_df` helpers (row-cap belt-and-suspenders alongside the per-runner `fetchmany` stream + native statement-timeout primitives). See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md).
 - [src/sqllens/transport/](../../../src/sqllens/transport/) — ASGI wrapper around FastMCP's HTTP app (auth middleware + path normalizer).
 
 ## Key source files

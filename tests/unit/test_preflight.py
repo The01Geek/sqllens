@@ -199,8 +199,19 @@ def test_probe_memory_unwritable_parent_raises(tmp_path: Path) -> None:
 
 
 def test_probe_auth_bearer_without_token_message_is_clean() -> None:
+    # bearer+no-token is rejected at Config.load() by the AuthConfig model
+    # validator (#51), so it can no longer reach probe_auth through normal
+    # config loading. probe_auth remains the defense-in-depth net for callers
+    # that bypass validation via model_construct (the same bypass path
+    # build_authenticator's own check guards). Construct that way here so the
+    # ValueError -> PreflightError translation stays under test.
+    cfg = _cfg()
+    # Config (a BaseSettings) re-validates nested submodels passed to its
+    # constructor, so the bad auth must be injected post-construction —
+    # mirroring a model_construct bypass in the wild.
+    cfg.auth = AuthConfig.model_construct(mode="bearer", bearer_token=None)
     with pytest.raises(PreflightError) as exc_info:
-        probe_auth(_cfg(auth=AuthConfig(mode="bearer")))
+        probe_auth(cfg)
     assert exc_info.value.subsystem == "auth"
     # The "ValueError:" prefix from the underlying exception should NOT leak.
     assert not exc_info.value.detail.startswith("ValueError")
