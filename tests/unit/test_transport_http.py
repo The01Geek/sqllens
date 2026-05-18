@@ -238,9 +238,11 @@ def test_lifespan_post_shutdown_shutdown_is_idempotent() -> None:
 
     Latent reuse bug: before issue #60's hardening, ``_cm`` still referenced
     the already-exited context manager after shutdown, so a second shutdown
-    would call ``__aexit__`` again. Most CMs raise on double-exit; tracking
-    ``aexit_calls`` pins that the adapter exits exactly once across two
-    shutdown scopes and still acknowledges the second one cleanly.
+    would call ``__aexit__`` again. Double-exit is per-CM-specific and
+    FastMCP's session manager expects an exactly-once enter/exit pair;
+    tracking ``aexit_calls`` pins that the adapter exits exactly once
+    across two shutdown scopes and still acknowledges the second one
+    cleanly.
     """
     sm = _FakeSessionManager()
     adapter = _SessionManagerLifespan(_noop_inner, sm)
@@ -263,8 +265,11 @@ def test_lifespan_shutdown_failure_still_finalizes_instance() -> None:
 
     A CM that raised in ``__aexit__`` is in an undefined state; reusing it
     is unsafe. The adapter must finalize itself even on shutdown failure so
-    that a host that subsequently sends startup on a new scope gets the
-    single-shot rejection (not a fresh ``run()`` against a broken manager).
+    that (a) a host that subsequently sends startup on a new scope gets the
+    single-shot rejection rather than a fresh ``run()`` against a broken
+    manager, AND (b) a subsequent shutdown is idempotent — no second
+    ``__aexit__`` call on the already-failed CM. Pins both symmetric paths
+    out of the failure branch.
     """
     sm = _FakeSessionManager(shutdown_exc=RuntimeError("boom"))
     adapter = _SessionManagerLifespan(_noop_inner, sm)
@@ -274,8 +279,51 @@ def test_lifespan_shutdown_failure_still_finalizes_instance() -> None:
     )
     asyncio.run(adapter({"type": "lifespan"}, receive, send))
     assert sent[-1]["type"] == "lifespan.shutdown.failed"
+    assert sm.aexit_calls == 1
 
     receive2, send2, sent2 = _make_io([{"type": "lifespan.startup"}])
     asyncio.run(adapter({"type": "lifespan"}, receive2, send2))
     assert sent2[0]["type"] == "lifespan.startup.failed"
     assert "shut down" in sent2[0]["message"].lower()
+
+    receive3, send3, sent3 = _make_io([{"type": "lifespan.shutdown"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive3, send3))
+    assert sent3 == [{"type": "lifespan.shutdown.complete"}]
+    assert sm.aexit_calls == 1
+
+
+def test_lifespan_startup_failure_finalizes_instance() -> None:
+    """A failed ``__aenter__`` must finalize the instance and not leak the CM.
+
+    Pre-issue-#60 latent: if ``session_manager.run()`` succeeded but
+    ``__aenter__`` raised, ``self._cm`` retained the partially-acquired
+    context manager. A subsequent ``lifespan.shutdown`` would then call
+    ``__aexit__`` on a CM whose ``__aenter__`` never completed — undefined
+    per PEP 343. Issue #60's audit closes the gap: the startup-failure
+    branch clears ``_cm`` and finalizes the instance so a follow-up
+    shutdown is idempotent (no ``__aexit__`` attempt) and a follow-up
+    startup gets the single-shot rejection.
+
+    Also pins that the failure message carries the exception *type* in
+    addition to the value, so hosts logging it can distinguish e.g.
+    ``RuntimeError: boom`` from ``ValueError: boom``.
+    """
+    sm = _FakeSessionManager(startup_exc=RuntimeError("boom"))
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+
+    receive, send, sent = _make_io([{"type": "lifespan.startup"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+    assert sent[0]["type"] == "lifespan.startup.failed"
+    assert "RuntimeError" in sent[0]["message"]
+    assert "boom" in sent[0]["message"]
+    assert sm.aexit_calls == 0
+
+    receive2, send2, sent2 = _make_io([{"type": "lifespan.shutdown"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive2, send2))
+    assert sent2 == [{"type": "lifespan.shutdown.complete"}]
+    assert sm.aexit_calls == 0
+
+    receive3, send3, sent3 = _make_io([{"type": "lifespan.startup"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive3, send3))
+    assert sent3[0]["type"] == "lifespan.startup.failed"
+    assert "shut down" in sent3[0]["message"].lower()

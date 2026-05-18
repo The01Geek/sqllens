@@ -186,12 +186,20 @@ class _SessionManagerLifespan:
     intercept those events to start/stop the manager.
 
     **Single-shot instance.** One adapter instance handles exactly one
-    startup/shutdown cycle. After ``lifespan.shutdown`` (success *or*
-    failure), the underlying session-manager context manager is released and
-    the instance refuses any further ``lifespan.startup``. A second
-    ``lifespan.shutdown`` is idempotent — ``shutdown.complete`` is sent
-    again without re-entering ``__aexit__``. Mount a fresh adapter (via
-    ``build_asgi_app``) for each new lifespan scope you need to serve.
+    lifecycle. The instance is finalized — refuses any further
+    ``lifespan.startup`` — once any one of these happens:
+
+    - ``lifespan.shutdown`` completed (success), or
+    - ``lifespan.shutdown`` failed in ``__aexit__``, or
+    - ``lifespan.startup`` failed in ``__aenter__`` (the partially-acquired
+      context manager is released; calling ``__aexit__`` on a CM whose
+      ``__aenter__`` never completed is undefined per PEP 343).
+
+    After finalization, the underlying session-manager context manager is
+    released and a second ``lifespan.shutdown`` is idempotent —
+    ``shutdown.complete`` is sent again without re-entering ``__aexit__``.
+    Mount a fresh adapter (via ``build_asgi_app``) for each new lifespan
+    scope you need to serve.
     """
 
     def __init__(self, inner: ASGIApp, session_manager) -> None:  # type: ignore[no-untyped-def]
@@ -240,26 +248,43 @@ class _SessionManagerLifespan:
                 try:
                     self._cm = self.session_manager.run()
                     await self._cm.__aenter__()
-                except Exception as exc:  # pragma: no cover — startup failures
+                except Exception as exc:
+                    # Drop the partially-acquired CM and finalize the
+                    # instance: calling __aexit__ on a CM whose __aenter__
+                    # never completed is undefined per PEP 343, and a host
+                    # that retries on a finalized adapter gets the
+                    # single-shot rejection rather than a fresh run()
+                    # against a session manager in an unknown state.
+                    self._cm = None
+                    self._shutdown_done = True
                     logger.exception("session manager startup failed")
-                    await send({"type": "lifespan.startup.failed", "message": str(exc)})
+                    await send(
+                        {
+                            "type": "lifespan.startup.failed",
+                            "message": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
                     return
                 self._started = True
                 await send({"type": "lifespan.startup.complete"})
             elif msg_type == "lifespan.shutdown":
                 if self._shutdown_done:
-                    # Already shut down on a prior scope. Treat repeated
-                    # shutdown as idempotent — never call __aexit__ twice on
-                    # the same context manager (most CMs treat that as an
-                    # error). Acknowledge cleanly so the host doesn't hang.
+                    # Already finalized on a prior scope. Acknowledge cleanly
+                    # so the host doesn't hang; never call __aexit__ a second
+                    # time on the same CM — double-exit is per-CM-specific
+                    # and FastMCP's session manager in particular expects an
+                    # exactly-once enter/exit pair.
                     logger.debug(
                         "lifespan.shutdown after shutdown; treating as idempotent"
                     )
                     await send({"type": "lifespan.shutdown.complete"})
                     return
-                # Capture-and-clear self._cm before awaiting __aexit__: any
-                # subsequent shutdown scope must see a cleared reference and
-                # skip __aexit__ rather than re-exit the same CM.
+                # Capture-and-clear self._cm before awaiting __aexit__. The
+                # _shutdown_done flag set below is the primary single-shot
+                # guard; clearing self._cm here is belt-and-braces — it
+                # releases the reference for GC and removes the only path a
+                # future refactor could use to re-exit the same CM if the
+                # _shutdown_done check were ever reordered.
                 cm = self._cm
                 self._cm = None
                 if cm is not None:
@@ -269,14 +294,21 @@ class _SessionManagerLifespan:
                         self._shutdown_done = True
                         logger.exception("session manager shutdown failed")
                         await send(
-                            {"type": "lifespan.shutdown.failed", "message": str(exc)}
+                            {
+                                "type": "lifespan.shutdown.failed",
+                                "message": f"{type(exc).__name__}: {exc}",
+                            }
                         )
                         return
                 self._shutdown_done = True
                 await send({"type": "lifespan.shutdown.complete"})
                 return
             else:
-                # Unknown lifespan message — surface it instead of looping silently.
+                # Unknown lifespan message — log and continue. The
+                # ignore-and-continue choice is deliberate forward-compat for
+                # future ASGI lifespan extensions; the warning makes it
+                # observable without locking the loop out of valid messages
+                # that may follow.
                 logger.warning("unknown lifespan message type: %s", msg_type)
 
 
