@@ -396,26 +396,14 @@ def test_lifespan_shutdown_failure_still_finalizes_instance() -> None:
 def test_lifespan_startup_base_exception_finalizes_and_propagates(
     base_exc: BaseException,
 ) -> None:
-    """A BaseException interrupting __aenter__ must finalize the instance and re-raise.
+    """Regression for #98: a BaseException in __aenter__ finalizes and re-raises.
 
-    Regression for issue #98 (carried from #88): the ``except Exception``
-    startup guard does not catch a ``BaseException``
-    (``asyncio.CancelledError``, ``KeyboardInterrupt``, ``SystemExit``,
-    ``GeneratorExit``). The prior code let it propagate WITHOUT dropping
-    ``_cm`` or setting ``_shutdown_done``, leaving the instance
-    non-finalized with ``_cm`` pointing at a never-entered CM — so a host
-    driving a follow-up lifespan scope would either re-run ``run()``
-    against a session manager in an unknown state or call ``__aexit__`` on
-    a CM whose ``__aenter__`` never completed (undefined per PEP 343). The
-    adapter must (a) re-raise the BaseException (cancellation must
-    propagate cooperatively, never be swallowed into a spurious
-    ``startup.complete``), and (b) finalize the instance so a follow-up
-    startup gets the single-shot rejection and a follow-up shutdown is an
-    idempotent no-op (no ``__aexit__`` on the never-entered CM) — symmetric
-    with the ``except Exception`` finalization path. Parametrized over the
-    ``BaseException`` subtypes the inline comment claims behave identically
-    (``GeneratorExit`` is omitted — it cannot be driven through
-    ``asyncio.run`` here).
+    Invariant under test, per ``BaseException`` subtype: the interrupted
+    scope sends no protocol message and re-raises, ``_cm`` is dropped and
+    ``_shutdown_done`` set (so a follow-up startup gets the single-shot
+    rejection and a follow-up shutdown is an idempotent no-op, never
+    ``__aexit__`` on the never-entered CM). ``GeneratorExit`` is omitted —
+    it cannot be driven through ``asyncio.run`` here.
     """
     sm = _FakeSessionManager(startup_exc=base_exc)
     adapter = _SessionManagerLifespan(_noop_inner, sm)

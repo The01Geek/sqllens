@@ -274,10 +274,11 @@ class _SessionManagerLifespan:
                     )
                     return
                 except BaseException as exc:
-                    # The direct BaseException subclasses `except Exception`
-                    # does not catch — most relevantly asyncio.CancelledError
-                    # (task cancellation interrupting startup), plus
-                    # KeyboardInterrupt / SystemExit. __aenter__ was
+                    # Catches the direct BaseException subclasses that
+                    # `except Exception` does not — most relevantly
+                    # asyncio.CancelledError (task cancellation interrupting
+                    # startup), plus KeyboardInterrupt / SystemExit.
+                    # __aenter__ was
                     # interrupted before the session manager finished
                     # acquiring. Drop the partially-acquired CM (calling
                     # __aexit__ on a CM whose __aenter__ never completed is
