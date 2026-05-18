@@ -15,7 +15,7 @@ One database per running instance. Read-only by default, enforced by a `sqlglot`
 
 **Repo:** https://github.com/The01Geek/sqllens (public, owner `The01Geek`).
 
-This repo was extracted from a larger product (Guidoo) at `/home/natprog/guidoo/`. The extraction is intentional — SQL Lens is meant to stand on its own. Do **not** add Guidoo-specific concerns (multi-tenancy, OAuth login UI, tenant settings JSONB, AILog persistence, RAG, chat skill routing) without an explicit decision recorded in an issue or design doc.
+This repo was extracted from a larger parent product (the maintainer knows the path). The extraction is intentional — SQL Lens is meant to stand on its own. Do **not** add parent-product-specific concerns (multi-tenancy, OAuth login UI, tenant settings JSONB, AILog persistence, RAG, chat skill routing) without an explicit decision recorded in an issue or design doc.
 
 ## Architecture
 
@@ -53,7 +53,7 @@ When extracting `sqllens.agent` we made a deliberate **aggressive-pruning** choi
 
 **Upstream brand cleanliness — strict rule:**
 
-The agent code originated as a fork of an MIT-licensed upstream project. The legal copyright line lives in `LICENSES/THIRD-PARTY.txt` and **must not be removed**. Outside that one file, **no reference to the upstream's name may appear anywhere in the repository** — not in docs, not in code, not in module docstrings, not in user-facing strings (CLI help, MCP tool descriptions, log messages, system prompts, error messages). When lifting more code from upstream, sed-rewrite `vanna.*` → `sqllens.agent.*` and scrub any "Vanna" string occurrences in the same change.
+The agent code originated as a fork of an MIT-licensed upstream project. The legal copyright line lives in `LICENSES/THIRD-PARTY.txt` and **must not be removed**. Outside that one file, **no reference to the upstream's name may appear anywhere in the repository** — not in docs, not in code, not in module docstrings, not in user-facing strings (CLI help, MCP tool descriptions, log messages, system prompts, error messages). When lifting more code from upstream, sed-rewrite the upstream package namespace (the maintainer knows it) → `sqllens.agent.*` and scrub any upstream brand-name string occurrences in the same change.
 
 ## Commands
 
