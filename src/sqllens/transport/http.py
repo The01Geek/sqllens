@@ -184,6 +184,14 @@ class _SessionManagerLifespan:
     served (it owns the per-session state). The ASGI host (uvicorn, FastAPI
     mount, custom Starlette app) drives lifespan startup and shutdown; we
     intercept those events to start/stop the manager.
+
+    **Single-shot instance.** One adapter instance handles exactly one
+    startup/shutdown cycle. After ``lifespan.shutdown`` (success *or*
+    failure), the underlying session-manager context manager is released and
+    the instance refuses any further ``lifespan.startup``. A second
+    ``lifespan.shutdown`` is idempotent — ``shutdown.complete`` is sent
+    again without re-entering ``__aexit__``. Mount a fresh adapter (via
+    ``build_asgi_app``) for each new lifespan scope you need to serve.
     """
 
     def __init__(self, inner: ASGIApp, session_manager) -> None:  # type: ignore[no-untyped-def]
@@ -191,6 +199,7 @@ class _SessionManagerLifespan:
         self.session_manager = session_manager
         self._cm = None
         self._started = False
+        self._shutdown_done = False
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "lifespan":
@@ -203,6 +212,20 @@ class _SessionManagerLifespan:
             message = await receive()
             msg_type = message["type"]
             if msg_type == "lifespan.startup":
+                if self._shutdown_done:
+                    # Single-shot: this instance has already shut down; the
+                    # underlying context manager is gone and cannot be
+                    # re-entered. The host should mount a fresh adapter.
+                    logger.error(
+                        "lifespan.startup after shutdown; this instance is single-shot"
+                    )
+                    await send(
+                        {
+                            "type": "lifespan.startup.failed",
+                            "message": "single-shot instance already shut down",
+                        }
+                    )
+                    return
                 if self._started:
                     # ASGI hosts must not send startup twice; if they do, refuse
                     # rather than leaking the original session-manager context.
@@ -224,15 +247,35 @@ class _SessionManagerLifespan:
                 self._started = True
                 await send({"type": "lifespan.startup.complete"})
             elif msg_type == "lifespan.shutdown":
-                if self._cm is not None:
+                if self._shutdown_done:
+                    # Already shut down on a prior scope. Treat repeated
+                    # shutdown as idempotent — never call __aexit__ twice on
+                    # the same context manager (most CMs treat that as an
+                    # error). Acknowledge cleanly so the host doesn't hang.
+                    logger.debug(
+                        "lifespan.shutdown after shutdown; treating as idempotent"
+                    )
+                    await send({"type": "lifespan.shutdown.complete"})
+                    return
+                # Clear self._cm before awaiting __aexit__ so that even if the
+                # adapter is re-driven on a separate scope before this coroutine
+                # returns, the cleared reference prevents a second __aexit__ on
+                # the same CM. _shutdown_done = True is set unconditionally
+                # after the attempt — success or failure both finalize the
+                # instance (a CM that failed to exit cleanly is not reusable).
+                cm = self._cm
+                self._cm = None
+                if cm is not None:
                     try:
-                        await self._cm.__aexit__(None, None, None)
+                        await cm.__aexit__(None, None, None)
                     except Exception as exc:
+                        self._shutdown_done = True
                         logger.exception("session manager shutdown failed")
                         await send(
                             {"type": "lifespan.shutdown.failed", "message": str(exc)}
                         )
                         return
+                self._shutdown_done = True
                 await send({"type": "lifespan.shutdown.complete"})
                 return
             else:

@@ -116,6 +116,8 @@ class _FakeSessionManager:
 
     ``run()`` returns an async context manager whose ``__aexit__`` raises
     ``shutdown_exc`` if set. ``__aenter__`` raises ``startup_exc`` if set.
+    ``aexit_calls`` counts how many times ``__aexit__`` ran, which lets
+    regression tests assert the adapter never double-exits.
     """
 
     def __init__(
@@ -125,6 +127,7 @@ class _FakeSessionManager:
     ) -> None:
         self._startup_exc = startup_exc
         self._shutdown_exc = shutdown_exc
+        self.aexit_calls = 0
 
     def run(self) -> _FakeSessionManager:
         return self
@@ -135,6 +138,7 @@ class _FakeSessionManager:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+        self.aexit_calls += 1
         if self._shutdown_exc is not None:
             raise self._shutdown_exc
 
@@ -194,3 +198,84 @@ def test_lifespan_duplicate_startup_is_rejected() -> None:
     assert types[0] == "lifespan.startup.complete"
     assert types[-1] == "lifespan.startup.failed"
     assert "duplicate" in sent[-1]["message"].lower()
+
+
+def test_lifespan_post_shutdown_startup_is_rejected() -> None:
+    """A startup on a fresh scope after shutdown must fail with single-shot message.
+
+    Latent reuse bug: before issue #60's hardening, ``_started`` stayed True
+    after shutdown, so a second startup got rejected with the misleading
+    "duplicate" message. With single-shot semantics, the rejection message
+    should accurately say the instance has already shut down — and the
+    underlying ``__aexit__`` must not be re-invoked when the host then sends
+    shutdown on this second scope.
+    """
+    sm = _FakeSessionManager()
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+
+    # First scope: clean startup → shutdown.
+    receive, send, sent = _make_io(
+        [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
+    )
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+    assert [m["type"] for m in sent] == [
+        "lifespan.startup.complete",
+        "lifespan.shutdown.complete",
+    ]
+    assert sm.aexit_calls == 1
+
+    # Second scope: startup must be rejected as single-shot, not "duplicate".
+    receive2, send2, sent2 = _make_io([{"type": "lifespan.startup"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive2, send2))
+    assert len(sent2) == 1
+    assert sent2[0]["type"] == "lifespan.startup.failed"
+    assert "shut down" in sent2[0]["message"].lower()
+    assert "duplicate" not in sent2[0]["message"].lower()
+
+
+def test_lifespan_post_shutdown_shutdown_is_idempotent() -> None:
+    """A second shutdown on a new scope must not call __aexit__ twice.
+
+    Latent reuse bug: before issue #60's hardening, ``_cm`` still referenced
+    the already-exited context manager after shutdown, so a second shutdown
+    would call ``__aexit__`` again. Most CMs raise on double-exit; tracking
+    ``aexit_calls`` pins that the adapter exits exactly once across two
+    shutdown scopes and still acknowledges the second one cleanly.
+    """
+    sm = _FakeSessionManager()
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+
+    receive, send, _sent = _make_io(
+        [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
+    )
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+    assert sm.aexit_calls == 1
+
+    # Second scope: shutdown again — idempotent, no second __aexit__.
+    receive2, send2, sent2 = _make_io([{"type": "lifespan.shutdown"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive2, send2))
+    assert sent2 == [{"type": "lifespan.shutdown.complete"}]
+    assert sm.aexit_calls == 1
+
+
+def test_lifespan_shutdown_failure_still_finalizes_instance() -> None:
+    """After a failed shutdown, the instance refuses further startups and is idempotent.
+
+    A CM that raised in ``__aexit__`` is in an undefined state; reusing it
+    is unsafe. The adapter must finalize itself even on shutdown failure so
+    that a host that subsequently sends startup on a new scope gets the
+    single-shot rejection (not a fresh ``run()`` against a broken manager).
+    """
+    sm = _FakeSessionManager(shutdown_exc=RuntimeError("boom"))
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+
+    receive, send, sent = _make_io(
+        [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
+    )
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+    assert sent[-1]["type"] == "lifespan.shutdown.failed"
+
+    receive2, send2, sent2 = _make_io([{"type": "lifespan.startup"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive2, send2))
+    assert sent2[0]["type"] == "lifespan.startup.failed"
+    assert "shut down" in sent2[0]["message"].lower()
