@@ -41,12 +41,16 @@ def make_status_card(
 def make_dataframe(
     rows: list[dict[str, Any]], columns: list[str] | None = None
 ) -> UiComponent:
-    """Build a UiComponent wrapping a DataFrameComponent."""
-    return UiComponent(
-        rich_component=DataFrameComponent(
-            rows=rows, columns=columns or list(rows[0].keys())
-        )
-    )
+    """Build a UiComponent wrapping a DataFrameComponent.
+
+    ``columns`` must be supplied explicitly when ``rows`` is empty, since the
+    fallback (``list(rows[0].keys())``) would otherwise ``IndexError``.
+    """
+    if columns is None:
+        if not rows:
+            raise ValueError("make_dataframe requires `columns` when `rows` is empty")
+        columns = list(rows[0].keys())
+    return UiComponent(rich_component=DataFrameComponent(rows=rows, columns=columns))
 
 
 class StubAgent:
@@ -55,6 +59,16 @@ class StubAgent:
     The implementation under test only touches ``agent.send_message(...)`` and
     iterates the resulting async generator, so this stub mirrors that surface
     without depending on any agent internals.
+
+    ``cleanup_ran`` flips True whenever the generator's frame unwinds — via
+    natural exhaustion, an exception raised inside the body, or an explicit
+    ``aclose()`` call from the consumer. This matches what the wrapper
+    actually relies on: when ``send_message`` raises mid-stream, Python's
+    own exception machinery runs the generator's ``finally`` block to free
+    its resources; the wrapper does not need to explicitly invoke
+    ``aclose()``. A future refactor that switches to manual ``__anext__``
+    iteration without a ``finally``-guarded cleanup would leave this flag
+    False and trip the regression test.
     """
 
     def __init__(
@@ -65,11 +79,21 @@ class StubAgent:
     ) -> None:
         self._components = list(components or [])
         self._raise_exc = raise_exc
-        self.send_message_calls: list[tuple[Any, str]] = []
-        self.aclose_called: bool = False
+        self.send_message_calls: list[tuple[Any, str, str | None]] = []
+        self.cleanup_ran: bool = False
 
-    def send_message(self, request_context: Any, message: str) -> AsyncIterator[UiComponent]:
-        self.send_message_calls.append((request_context, message))
+    # NOTE: regular `def`, not `async def`. Mirrors the real
+    # ``Agent.send_message`` shape — an async-generator function callable
+    # without ``await``, consumed via ``async for``. Changing this to
+    # ``async def`` would force callers to ``await`` before iterating.
+    def send_message(
+        self,
+        request_context: Any,
+        message: str,
+        *,
+        conversation_id: str | None = None,
+    ) -> AsyncIterator[UiComponent]:
+        self.send_message_calls.append((request_context, message, conversation_id))
         return self._stream()
 
     async def _stream(self) -> AsyncIterator[UiComponent]:
@@ -79,4 +103,4 @@ class StubAgent:
             for comp in self._components:
                 yield comp
         finally:
-            self.aclose_called = True
+            self.cleanup_ran = True

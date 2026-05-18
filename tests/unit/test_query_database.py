@@ -77,9 +77,9 @@ async def test_singleton_ignores_changed_cfg(
 ) -> None:
     """Documents current behavior: a second call with a fresh ``Config`` is ignored.
 
-    This is a known limitation tracked alongside the singleton race (see the
-    issue body — out-of-scope for this PR). The test pins the current
-    behavior so that any future fix has a clear regression target.
+    This is a known limitation tracked alongside the singleton race (see
+    #72's out-of-scope section). The test pins the current behavior so that
+    any future fix has a clear regression target.
     """
     cfg_a = build_test_config(persist_dir=tmp_path / "chroma")
     cfg_b = build_test_config(persist_dir=tmp_path / "alt")
@@ -220,13 +220,16 @@ async def test_send_message_generator_is_closed_on_exception(
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
 ) -> None:
-    """The ``async for`` loop closes the generator when the wrapper raises.
+    """The agent's generator's cleanup block runs when ``send_message`` raises.
 
-    Python's ``async for`` invokes ``aclose`` on the underlying async
-    generator when its body propagates an exception. We pin this so a
-    future refactor that switches to ``while True: __anext__()`` without
-    a ``finally: aclose()`` (a common shape) cannot silently regress
-    cleanup behavior.
+    When the async generator raises during ``__anext__``, Python's own
+    exception-propagation machinery unwinds the generator frame and runs
+    its ``finally`` (or ``aclose``-equivalent) block before the exception
+    reaches the wrapper's ``except``. The wrapper relies on this — it does
+    not invoke ``aclose()`` explicitly. A future refactor that defers
+    iteration (e.g. ``while True: __anext__()`` without a surrounding
+    cleanup) would leak the agent's resources on the error path; this
+    test pins the current cleanup-on-raise guarantee.
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     stub = agent_stub_factory(raise_exc=ValueError("midstream failure"))
@@ -235,4 +238,4 @@ async def test_send_message_generator_is_closed_on_exception(
     with pytest.raises(RuntimeError):
         await query_database_impl(cfg, "q")
 
-    assert stub.aclose_called is True
+    assert stub.cleanup_ran is True
