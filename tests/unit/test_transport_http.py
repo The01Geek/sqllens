@@ -470,7 +470,14 @@ def test_lifespan_shutdown_failure_still_finalizes_instance() -> None:
     assert sm.aenter_calls == 1
 
 
-def test_lifespan_shutdown_base_exception_finalizes_and_propagates() -> None:
+@pytest.mark.parametrize(
+    "base_exc",
+    [asyncio.CancelledError(), KeyboardInterrupt(), SystemExit()],
+    ids=["CancelledError", "KeyboardInterrupt", "SystemExit"],
+)
+def test_lifespan_shutdown_base_exception_finalizes_and_propagates(
+    base_exc: BaseException,
+) -> None:
     """A BaseException interrupting __aexit__ must finalize the instance and re-raise.
 
     Regression for the deferred finding carried from #75 (issue #88): the
@@ -484,20 +491,25 @@ def test_lifespan_shutdown_base_exception_finalizes_and_propagates() -> None:
     spurious ``shutdown.complete``), and (b) finalize the instance so a
     follow-up startup gets the single-shot rejection and a follow-up shutdown
     is an idempotent no-op (no second ``__aexit__``) — symmetric with the
-    ``except Exception`` finalization path.
+    ``except Exception`` finalization path. Parametrized over the
+    ``BaseException`` subtypes the inline comment claims behave identically
+    (``GeneratorExit`` is omitted — it cannot be driven through
+    ``asyncio.run`` here).
     """
-    sm = _FakeSessionManager(shutdown_exc=asyncio.CancelledError())
+    sm = _FakeSessionManager(shutdown_exc=base_exc)
     adapter = _SessionManagerLifespan(_noop_inner, sm)
 
     receive, send, sent = _make_io(
         [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
     )
-    with pytest.raises(asyncio.CancelledError):
+    with pytest.raises(type(base_exc)):
         asyncio.run(adapter({"type": "lifespan"}, receive, send))
 
-    # Startup acked; the interrupted scope sent no shutdown.complete and
-    # the instance is finalized despite the BaseException propagating.
+    # Startup acked; the interrupted scope sent no shutdown.complete AND no
+    # shutdown.failed (the BaseException path emits no protocol message — it
+    # re-raises so cancellation propagates), and the instance is finalized.
     assert [m["type"] for m in sent] == ["lifespan.startup.complete"]
+    assert "lifespan.shutdown.failed" not in [m["type"] for m in sent]
     assert sm.aexit_calls == 1
     assert adapter._shutdown_done is True
 
