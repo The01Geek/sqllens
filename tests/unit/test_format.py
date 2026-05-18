@@ -70,6 +70,47 @@ def test_empty_stream_returns_no_answer() -> None:
     assert components_to_markdown([]) == ("(no answer)", False)
 
 
+def test_error_status_card_with_empty_description_uses_fallback_message() -> None:
+    # Pins the user-visible message when an upstream agent emits an error
+    # status_card without a description. _format.py line 53 falls back to
+    # "Agent reported an error" — a typo there would ship silently otherwise.
+    stream = [
+        _ui(StatusCardComponent(title="Query failed", status="error", description=None)),
+    ]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is True
+    assert msg == "Agent reported an error"
+
+
+def test_whitespace_only_text_does_not_clobber_real_answer() -> None:
+    # Pins the .strip() guard in _format.py line 44-46: trailing empty/whitespace
+    # TEXT components must not overwrite an earlier non-empty answer. Dropping
+    # the strip+truthiness check here would silently surface whitespace as the
+    # user-visible MCP response.
+    stream = [
+        _ui(RichTextComponent(content="real answer")),
+        _ui(RichTextComponent(content="   \n  ")),
+    ]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is False
+    assert msg == "real answer"
+
+
+def test_dataframe_then_text_renders_table_before_summary() -> None:
+    # Pins the happy-path shape of an MCP response that mixes a table with a
+    # natural-language summary: tables come first, then the answer, separated
+    # by a blank line (_format.py line 58-63 joins parts with "\n\n").
+    stream = [
+        _ui(DataFrameComponent(rows=[{"id": 1, "name": "alpha"}])),
+        _ui(RichTextComponent(content="one row returned")),
+    ]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is False
+    assert msg.startswith("| id | name |")
+    assert msg.endswith("one row returned")
+    assert "\n\none row returned" in msg
+
+
 def test_dataframe_columns_fallback_from_first_row() -> None:
     rendered = _render_dataframe(_df(columns=[], rows=[{"id": 1, "name": "alpha"}]))
     header = rendered.splitlines()[0]
