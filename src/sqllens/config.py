@@ -296,7 +296,7 @@ BEARER_TOKEN_MISSING_MESSAGE = (
     "auth.mode='bearer' requires auth.bearer_token to be set. "
     "Either set SQLLENS_AUTH__BEARER_TOKEN in your environment, "
     'add `bearer_token = "..."` to the [auth] section of sqllens.toml, '
-    "or set auth.mode to a different value (none|jwt)."
+    "or set auth.mode to a different value (none)."
 )
 
 
