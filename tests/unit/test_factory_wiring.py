@@ -19,7 +19,11 @@ from pathlib import Path
 from pydantic import SecretStr
 
 from sqllens.agent.factory import build_agent
-from sqllens.agent.tools import RunSqlTool
+from sqllens.agent.tools import (
+    RunSqlTool,
+    SaveTextMemoryTool,
+    SearchSavedCorrectToolUsesTool,
+)
 from sqllens.config import (
     AgentRuntimeConfig,
     AuthConfig,
@@ -93,6 +97,39 @@ def test_max_tool_iterations_flows_through_config(tmp_path: Path) -> None:
     )
     agent = build_agent(cfg)
     assert agent.config.max_tool_iterations == 42
+
+
+def test_save_text_memory_tool_is_registered(tmp_path: Path) -> None:
+    """The default system prompt's text-memory instructions only fire when
+    ``save_text_memory`` is registered (``has_text_memory`` in default.py).
+    Without this wiring the LLM never sees the tool, so free-form domain
+    knowledge can never be persisted — see issue #76.
+    """
+    cfg = _build_test_config(persist_dir=tmp_path / "chroma")
+    agent = build_agent(cfg)
+
+    assert "save_text_memory" in agent.tool_registry._tools
+    save_text_memory_tool = _unwrap(agent.tool_registry._tools["save_text_memory"])
+    assert isinstance(save_text_memory_tool, SaveTextMemoryTool)
+
+
+def test_memory_similarity_threshold_flows_into_search_tool(tmp_path: Path) -> None:
+    """``cfg.memory.similarity_threshold`` must become the effective default
+    used by ``search_saved_correct_tool_uses`` when the LLM omits the per-call
+    argument — otherwise the operator-facing config knob is dead (issue #76).
+    """
+    cfg = Config(
+        database=DatabaseConfig(url="sqlite:///:memory:"),
+        llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
+        memory=MemoryConfig(persist_dir=tmp_path / "chroma", similarity_threshold=0.42),
+        auth=AuthConfig(mode="none"),
+        agent=AgentRuntimeConfig(),
+    )
+    agent = build_agent(cfg)
+
+    search_tool = _unwrap(agent.tool_registry._tools["search_saved_correct_tool_uses"])
+    assert isinstance(search_tool, SearchSavedCorrectToolUsesTool)
+    assert search_tool._default_similarity_threshold == 0.42
 
 
 def test_database_timeout_and_cap_flow_through_to_runner(tmp_path: Path) -> None:

@@ -30,6 +30,11 @@ class SqliteRunner(SqlRunner):
             statement_timeout_ms: Per-query timeout in milliseconds (0 disables)
             max_rows: Hard ceiling on rows returned per SELECT
         """
+        if statement_timeout_ms < 0:
+            raise ValueError(
+                f"statement_timeout_ms must be >= 0 (got {statement_timeout_ms}); "
+                "use 0 to disable"
+            )
         self.database_path = database_path
         self._statement_timeout_ms = statement_timeout_ms
         self._max_rows = max_rows
@@ -54,13 +59,16 @@ class SqliteRunner(SqlRunner):
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        if self._statement_timeout_ms > 0:
-            deadline = time.monotonic() + (self._statement_timeout_ms / 1000.0)
-            conn.set_progress_handler(
-                _make_deadline_handler(deadline), _PROGRESS_HANDLER_INSTRUCTIONS
-            )
-
         try:
+            # Register inside the try so the ``finally`` block always runs the
+            # ``set_progress_handler(None, 0)`` cleanup even if registration
+            # itself raises.
+            if self._statement_timeout_ms > 0:
+                deadline = time.monotonic() + (self._statement_timeout_ms / 1000.0)
+                conn.set_progress_handler(
+                    _make_deadline_handler(deadline), _PROGRESS_HANDLER_INSTRUCTIONS
+                )
+
             cursor.execute(args.sql)
 
             if is_read_shaped(args.sql):
