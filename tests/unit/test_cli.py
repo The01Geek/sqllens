@@ -156,15 +156,27 @@ def test_serve_insecure_opt_out_via_toml(
 
 @pytest.mark.parametrize(
     "host",
-    ["127.0.0.1", "127.0.0.2", "::1", "localhost", "Localhost", "LOCALHOST"],
+    [
+        "127.0.0.1",
+        "127.0.0.2",
+        "::1",
+        "localhost",
+        "Localhost",
+        "LOCALHOST",
+        "::ffff:127.0.0.1",
+    ],
 )
 def test_serve_allows_loopback_with_auth_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: str
 ) -> None:
     # Loopback bind with auth=none is the documented dev default — guard must
     # let it through even without the INSECURE opt-out. Covers the canonical
-    # forms (127.0.0.1, ::1, localhost) and a 127.0.0.0/8 alias (127.0.0.2)
-    # that string-match implementations would have wrongly rejected.
+    # forms (127.0.0.1, ::1, localhost), a 127.0.0.0/8 alias (127.0.0.2) that
+    # string-match implementations would have wrongly rejected, and the
+    # IPv4-mapped IPv6 form (::ffff:127.0.0.1) which CPython's stdlib treats
+    # as non-loopback on Python 3.11.x and 3.12.0-3.12.3 (gh-117566) - the
+    # guard unwraps `ipv4_mapped` to handle this uniformly across supported
+    # Python versions.
     monkeypatch.setenv("SQLLENS_LLM__API_KEY", "sk-ant-test")
     monkeypatch.delenv("SQLLENS_AUTH__INSECURE", raising=False)
     monkeypatch.delenv("SQLLENS_AUTH__MODE", raising=False)
