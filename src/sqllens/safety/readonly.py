@@ -66,3 +66,10 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
         if isinstance(sub, (exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.Create, exp.Alter)):
             kind = type(sub).__name__.upper()
             raise UnsafeSqlError(f"only SELECT statements are allowed (found nested {kind})")
+        # ``SELECT ... INTO new_tbl`` is a write on both Postgres and T-SQL —
+        # sqlglot parses it as ``exp.Select`` with ``args["into"]`` set rather
+        # than as ``exp.Create``, so the DML/DDL deny-walk above misses it.
+        # Covers root-level and CTE-nested occurrences; ``INTO TEMP`` /
+        # ``INTO UNLOGGED`` variants are the same node shape.
+        if isinstance(sub, exp.Select) and sub.args.get("into"):
+            raise UnsafeSqlError("SELECT ... INTO is not allowed (creates a table)")

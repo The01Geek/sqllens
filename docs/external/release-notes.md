@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 17, 2026
+
+- **[Fix] Read-only guard now rejects `SELECT ... INTO` on Postgres and T-SQL** — The read-only SQL guard previously accepted statements like `SELECT * INTO new_table FROM users`, which create a new table on Postgres and T-SQL (including `INTO TEMP` and `INTO UNLOGGED` variants) and write a session variable on MySQL (`SELECT ... INTO @var`). These statements are now rejected at parse time, including when nested inside common table expressions or used as an operand of `UNION`, `INTERSECT`, or `EXCEPT`. This restores the documented "read-only by default" guarantee for the default configuration. (#41)
+
 ## May 16, 2026
 
 - **[Feature] One-command Claude Desktop setup** — Connecting SQL Lens to Claude Desktop is now a single command: `sqllens claude-desktop install --db <url>`. The installer writes a configuration file, merges an entry into Claude Desktop's settings while preserving any existing preferences and other MCP servers, and saves a timestamped backup of the settings file before changing it. On Windows, the installer also generates the launcher script that was previously assembled by hand. Run with `--dry-run` to preview the changes before they are written. Works on Windows, macOS, and Linux. (#25)
