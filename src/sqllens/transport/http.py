@@ -192,10 +192,14 @@ class _SessionManagerLifespan:
     - ``lifespan.shutdown`` completed (the CM was exited via ``__aexit__``), or
     - ``lifespan.shutdown`` failed in ``__aexit__`` (the CM raised on exit;
       reusing it is unsafe), or
-    - ``lifespan.startup`` failed in ``__aenter__`` (the partially-acquired
+    - ``lifespan.startup`` raised in ``__aenter__`` (the partially-acquired
       context manager reference is dropped *without* ``__aexit__`` —
       calling ``__aexit__`` on a CM whose ``__aenter__`` never completed
-      is undefined per PEP 343).
+      is undefined per PEP 343 — an ``Exception`` is reported to the host
+      as ``lifespan.startup.failed``, while a ``BaseException`` such as
+      ``asyncio.CancelledError`` interrupting startup is re-raised after
+      finalizing with *no* protocol message sent, so cancellation
+      propagates cooperatively instead of being acked complete).
 
     After finalization, the CM reference is gone and a subsequent
     ``lifespan.shutdown`` is acknowledged with ``shutdown.complete``
@@ -269,6 +273,31 @@ class _SessionManagerLifespan:
                         }
                     )
                     return
+                except BaseException as exc:
+                    # The direct BaseException subclasses `except Exception`
+                    # does not catch — most relevantly asyncio.CancelledError
+                    # (task cancellation interrupting startup), plus
+                    # KeyboardInterrupt / SystemExit. __aenter__ was
+                    # interrupted before the session manager finished
+                    # acquiring. Drop the partially-acquired CM (calling
+                    # __aexit__ on a CM whose __aenter__ never completed is
+                    # undefined per PEP 343) and finalize the instance —
+                    # same as the Exception branch — so a host driving a
+                    # follow-up lifespan scope gets the single-shot
+                    # rejection / idempotent ack instead of re-running run()
+                    # against a session manager in an unknown state. Then
+                    # re-raise: a BaseException (most importantly
+                    # CancelledError) must propagate cooperatively and must
+                    # never be swallowed into a spurious startup.complete.
+                    self._cm = None
+                    self._shutdown_done = True
+                    logger.exception(
+                        "session manager startup interrupted by %s; "
+                        "the session manager may not have released its "
+                        "resources",
+                        type(exc).__name__,
+                    )
+                    raise
                 self._started = True
                 await send({"type": "lifespan.startup.complete"})
             elif msg_type == "lifespan.shutdown":
