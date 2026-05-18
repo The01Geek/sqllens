@@ -27,10 +27,10 @@ The FastMCP library handles everything — framing, request/response cycle, life
 
 ## HTTP mode — the three middleware layers
 
-The `run` function in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py) builds a stack around FastMCP's Streamable HTTP app:
+`build_asgi_app(cfg)` in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py) builds the full stack around FastMCP's Streamable HTTP app and returns the **mount-ready** ASGI app:
 
 ```
-uvicorn
+ASGI host (uvicorn, FastAPI mount, Starlette, …)
   ↓
 _SessionManagerLifespan   — starts/stops FastMCP's session manager via ASGI lifespan
   ↓
@@ -41,7 +41,14 @@ _AuthMiddleware            — runs the configured Authenticator
 mcp.streamable_http_app()  — FastMCP's Streamable HTTP handler
 ```
 
-`build_asgi_app(cfg)` returns the same stack *minus* the lifespan adapter. It's the seam used by integration tests that drive the app with `httpx.ASGITransport` and don't need uvicorn to run the lifespan loop.
+`run(cfg)` is a thin uvicorn launcher that delegates to `build_asgi_app(cfg)` — there is no longer a duplicated middleware-stack assembly in `run`.
+
+### `build_asgi_app` vs `_build_asgi_app_bare`
+
+- `build_asgi_app(cfg) -> ASGIApp` is the **only** supported public entry point. The returned app includes the lifespan adapter, so callers mounting it under FastAPI/Starlette/uvicorn get a working session manager without having to wire lifespan themselves.
+- `_build_asgi_app_bare(cfg) -> tuple[ASGIApp, FastMCP]` is a private helper that returns the path-normalized + authenticated app **without** the lifespan adapter, plus the underlying `FastMCP` instance. It exists for two reasons: (1) so `build_asgi_app` itself can wrap the bare app with the lifespan adapter at a single, guarded SDK-access site, and (2) so the unit suite can assert the inner stack composition without bringing up a session manager. Out-of-tree code should not depend on it.
+
+The integration test fixture (`tests/integration/conftest.py`) calls `build_asgi_app(cfg)` directly and hands the result to a real `uvicorn.Server` with `lifespan="on"` — there is no longer a hand-rolled `_AuthMiddleware` + `_PathNormalizer` + `_SessionManagerLifespan` stack in the fixture.
 
 ## Footgun 1: trailing slash
 
@@ -78,9 +85,13 @@ Lifespan and websocket scopes bypass both `_AuthMiddleware` and `_PathNormalizer
 
 ## `_SessionManagerLifespan` — why this exists
 
-FastMCP exposes a session manager that must be active while requests are served — it owns per-session state. uvicorn drives lifespan startup/shutdown events; `_SessionManagerLifespan` intercepts them to call `session_manager.run().__aenter__()` on startup and `__aexit__` on shutdown.
+FastMCP exposes a session manager that must be active while requests are served — it owns per-session state. The ASGI host (uvicorn, FastAPI mount, custom Starlette app) drives lifespan startup/shutdown events; `_SessionManagerLifespan` intercepts them to call `session_manager.run().__aenter__()` on startup and `__aexit__` on shutdown.
 
-If the lifespan adapter is wired wrong, you'll see requests succeed at the routing layer but then 500 inside FastMCP when it tries to look up the session. The integration tests' `build_asgi_app` path uses `httpx.ASGITransport` with `lifespan="off"` plus a manual `async with manager.run()` wrapper to dodge this — see the test fixtures for the pattern.
+If the lifespan adapter is missing, requests reach the routing layer but then fail inside FastMCP with an opaque SDK assertion (`"Task group is not initialized. Make sure to use run()."`) on the first call. Issue #39 was exactly this: `build_asgi_app` used to return a bare app without the lifespan wrapper, so any external mount silently skipped session-manager startup. The fix in PR #43 moved the wrapper inside `build_asgi_app`, and `tests/unit/test_transport_http.py::test_build_asgi_app_returns_lifespan_wrapped` pins the contract at construction time.
+
+### SDK-attribute access — `mcp.session_manager`
+
+`_SessionManagerLifespan` needs a handle to FastMCP's session manager. We read the documented public `session_manager` property on `FastMCP` (not the private `_session_manager` attribute) so that a future `mcp` SDK rename/removal is a build-time failure, not a request-time `AttributeError`. The access is guarded with `try/except AttributeError` inside `build_asgi_app`; on miss it raises `RuntimeError("FastMCP no longer exposes a session_manager attribute; the mcp SDK likely renamed or removed it. …")` naming this file as the place to update. The guard is exercised by `tests/unit/test_transport_http.py::test_build_asgi_app_raises_runtimeerror_when_session_manager_missing`.
 
 ## What does **not** sit on the HTTP transport
 

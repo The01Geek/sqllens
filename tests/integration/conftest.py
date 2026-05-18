@@ -33,8 +33,7 @@ from sqllens.config import (
     MemoryConfig,
     ServerConfig,
 )
-from sqllens.server import build_server
-from sqllens.transport.http import _SessionManagerLifespan
+from sqllens.transport.http import build_asgi_app
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHINOOK_DB = REPO_ROOT / "examples" / "sqlite-demo" / "chinook.db"
@@ -89,23 +88,20 @@ class _ServerHandle:
 
 @pytest.fixture
 def make_server(tmp_path: Path):
-    """Factory fixture: build_server(auth=...) → handle. One server per test."""
+    """Factory: call returned callable with an AuthConfig to get a running server handle.
+
+    One server per test.
+    """
     handles: list[_ServerHandle] = []
     threads: list[threading.Thread] = []
 
     def _build(auth: AuthConfig) -> _ServerHandle:
         port = _free_port()
         cfg = _make_config(auth=auth, port=port, tmp_path=tmp_path)
-        mcp = build_server(cfg)
-        from sqllens.auth import build_authenticator
-        from sqllens.transport.http import _AuthMiddleware, _PathNormalizer
-
-        inner = mcp.streamable_http_app()
-        app = _PathNormalizer(_AuthMiddleware(inner, build_authenticator(cfg.auth)))
-        lifespan_app = _SessionManagerLifespan(app, mcp._session_manager)  # type: ignore[attr-defined]
+        app = build_asgi_app(cfg)
 
         config = uvicorn.Config(
-            lifespan_app,
+            app,
             host="127.0.0.1",
             port=port,
             log_level="warning",
