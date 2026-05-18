@@ -187,6 +187,8 @@ config-binding behavior (explicit warning if a different `cfg` is passed)
 and the error-surfacing path. Add an autouse fixture in
 `tests/integration/conftest.py` that resets `_AGENT = None` between tests.
 
+**Tracking:** #72
+
 #### T-3. No mock-LLM fixture; integration conftest doesn't scrub `SQLLENS_LLM__API_KEY`
 **Files:** [`tests/integration/conftest.py`](../../tests/integration/conftest.py) ·
 [`tests/unit/conftest.py:41`](../../tests/unit/conftest.py#L41) ·
