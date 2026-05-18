@@ -129,6 +129,8 @@ From the MCP client's perspective:
 
 There's no prompt-injection issue here: the rejection message is plaintext SQL parse output, not user-controlled. The CLAUDE.md module note explicitly calls out the prompt-injection benefit: *"Rejecting at parse time means the LLM never sees an 'executed mutation' code path, which makes prompt-injection attacks harder."*
 
+For the symmetric concern on the *execute* side — making sure a primary execute-time error (timeout, lost connection, aborted transaction) reaches the LLM instead of being masked by a secondary `cursor.close()` / `conn.close()` exception — see [database-connectors/cleanup-error-handling.md](cleanup-error-handling.md).
+
 ## Testing the guard
 
 Unit tests live under [tests/unit/](../../../tests/unit/). When extending the rules, add tests for:

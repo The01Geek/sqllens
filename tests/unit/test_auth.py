@@ -93,6 +93,30 @@ class TestBuildAuthenticator:
         assert isinstance(build_authenticator(cfg), JwtAuthenticator)
 
 
+class TestAuthConfigValidation:
+    def test_token_with_mode_none_raises(self) -> None:
+        with pytest.raises(ValidationError) as exc:
+            AuthConfig(mode="none", bearer_token=SecretStr("x"))
+        msg = str(exc.value)
+        assert "bearer_token" in msg
+        assert "'none'" in msg
+        assert "mode='bearer'" in msg
+        assert "SQLLENS_AUTH__BEARER_TOKEN" in msg
+
+    def test_token_with_mode_jwt_raises(self) -> None:
+        with pytest.raises(ValidationError, match="bearer_token"):
+            AuthConfig(mode="jwt", bearer_token=SecretStr("x"))
+
+    def test_token_with_mode_bearer_accepted(self) -> None:
+        cfg = AuthConfig(mode="bearer", bearer_token=SecretStr("x"))
+        assert cfg.bearer_token is not None
+        assert cfg.bearer_token.get_secret_value() == "x"
+
+    def test_no_token_with_mode_none_accepted(self) -> None:
+        cfg = AuthConfig(mode="none")
+        assert cfg.bearer_token is None
+
+
 class TestAuthConfigValidator:
     """Misconfiguration is caught at AuthConfig construction, before the server starts."""
 

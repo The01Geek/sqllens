@@ -23,6 +23,10 @@ def _clean_config_env(monkeypatch) -> None:
     # slate.
     monkeypatch.delenv("SQLLENS_CONFIG", raising=False)
     monkeypatch.delenv("SQLLENS_LLM__API_KEY", raising=False)
+    # Cleared so AuthConfig._token_only_with_bearer_mode doesn't reject configs
+    # in unrelated tests because a CI runner or developer shell happens to have
+    # the bearer token set globally.
+    monkeypatch.delenv("SQLLENS_AUTH__BEARER_TOKEN", raising=False)
     # The sub-section models (``DatabaseConfig``, ``LLMConfig``, ``MemoryConfig``,
     # ``AuthConfig``, ``ServerConfig``) are plain ``BaseModel`` — see the
     # architectural note in ``config.py`` and issue #26 for why they intentionally
@@ -199,9 +203,13 @@ def test_cli_serve_fails_without_api_key(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(cli.app, ["serve", "-c", str(cfg_path)])
     assert result.exit_code == 2
-    assert "llm.api_key" in result.stdout
-    assert "SQLLENS_LLM__API_KEY" in result.stdout
-    assert "[llm]" in result.stdout
+    # Config errors during serve land on stderr so they cannot collide with the
+    # JSON-RPC channel on stdout under the stdio MCP transport. Enforce both
+    # halves of the invariant — the message is on stderr AND stdout is clean.
+    assert "llm.api_key" in result.stderr
+    assert "SQLLENS_LLM__API_KEY" in result.stderr
+    assert "[llm]" in result.stderr
+    assert "llm.api_key" not in result.stdout
 
 
 def test_env_api_key_satisfies_missing_toml_key(tmp_path: Path, monkeypatch) -> None:
@@ -265,7 +273,63 @@ def test_cli_validate_fails_on_plain_malformed_toml(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(cli.app, ["validate", "-c", str(cfg_path)])
     assert result.exit_code == 2
-    assert "Invalid" in result.stdout
+    assert "Invalid" in result.stderr
+    assert "Invalid" not in result.stdout
+
+
+def test_cli_validate_rejects_bearer_token_without_bearer_mode(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [llm]
+            api_key = "sk-ant-test"
+
+            [auth]
+            bearer_token = "hunter2"
+            """
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 2, result.stderr
+    # validate's Config.load rejection routes to err_console (stderr) so it
+    # cannot collide with the stdio MCP JSON-RPC channel on stdout.
+    assert "bearer_token" in result.stderr
+    assert "SQLLENS_AUTH__BEARER_TOKEN" in result.stderr
+    assert "bearer_token" not in result.stdout
+
+
+def test_cli_validate_rejects_env_bearer_token_without_bearer_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The misconfig that motivated this validator is env-var-driven (operator
+    # sets SQLLENS_AUTH__BEARER_TOKEN expecting it to enable bearer auth).
+    # Mirror the TOML test through the env-var path to lock that surface.
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [llm]
+            api_key = "sk-ant-test"
+            """
+        )
+    )
+    monkeypatch.setenv("SQLLENS_AUTH__BEARER_TOKEN", "hunter2")
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 2, result.stderr
+    # validate's Config.load rejection routes to err_console (stderr) so it
+    # cannot collide with the stdio MCP JSON-RPC channel on stdout.
+    assert "bearer_token" in result.stderr
+    assert "SQLLENS_AUTH__BEARER_TOKEN" in result.stderr
+    assert "bearer_token" not in result.stdout
 
 
 def _bearer_no_token_toml() -> str:
@@ -283,12 +347,14 @@ def _bearer_no_token_toml() -> str:
     )
 
 
-def _assert_bearer_message_substrings(stdout: str) -> None:
+def _assert_bearer_message_substrings(stderr: str) -> None:
     # Three load-bearing substrings: the offending field, the env-var fix, and the
     # TOML section header (the last one also catches rich-markup-escape regressions).
-    assert "bearer_token" in stdout
-    assert "SQLLENS_AUTH__BEARER_TOKEN" in stdout
-    assert "[auth]" in stdout
+    # Config-load errors on serve/validate route to stderr so they cannot collide
+    # with the stdio MCP JSON-RPC channel on stdout.
+    assert "bearer_token" in stderr
+    assert "SQLLENS_AUTH__BEARER_TOKEN" in stderr
+    assert "[auth]" in stderr
 
 
 def test_cli_serve_fails_when_bearer_mode_has_no_token(tmp_path: Path) -> None:
@@ -300,7 +366,7 @@ def test_cli_serve_fails_when_bearer_mode_has_no_token(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(cli.app, ["serve", "-c", str(cfg_path)])
     assert result.exit_code == 2
-    _assert_bearer_message_substrings(result.stdout)
+    _assert_bearer_message_substrings(result.stderr)
 
 
 def test_cli_validate_fails_when_bearer_mode_has_no_token(tmp_path: Path) -> None:
@@ -311,7 +377,7 @@ def test_cli_validate_fails_when_bearer_mode_has_no_token(tmp_path: Path) -> Non
     runner = CliRunner()
     result = runner.invoke(cli.app, ["validate", "-c", str(cfg_path)])
     assert result.exit_code == 2
-    _assert_bearer_message_substrings(result.stdout)
+    _assert_bearer_message_substrings(result.stderr)
 
 
 def test_env_bearer_mode_without_token_rejected_at_load(

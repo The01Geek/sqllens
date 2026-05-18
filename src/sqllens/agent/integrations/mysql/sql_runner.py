@@ -1,5 +1,6 @@
 """MySQL implementation of SqlRunner interface."""
 
+import logging
 from typing import Optional
 import pandas as pd
 
@@ -10,6 +11,8 @@ from sqllens.safety.readonly import is_read_shaped
 
 
 _DEFAULT_MAX_ROWS = 10_000
+
+logger = logging.getLogger(__name__)
 
 
 class MySQLRunner(SqlRunner):
@@ -85,6 +88,7 @@ class MySQLRunner(SqlRunner):
             **self.kwargs,
         )
 
+        cursor = None
         try:
             conn.ping(reconnect=True)
 
@@ -119,8 +123,27 @@ class MySQLRunner(SqlRunner):
                 conn.commit()
                 rows_affected = cursor.rowcount
             finally:
-                cursor.close()
+                # Log-and-swallow secondary exceptions on the write cleanup path
+                # so the primary query error reaches the LLM intact rather than
+                # being masked by a secondary error from closing a cursor in an
+                # indeterminate state.
+                try:
+                    cursor.close()
+                except Exception:
+                    logger.warning("cursor.close() failed during cleanup", exc_info=True)
             return pd.DataFrame({"rows_affected": [rows_affected]})
 
         finally:
-            conn.close()
+            # Log-and-swallow secondary exceptions during connection teardown so
+            # the primary query error (e.g. max_statement_time / lost-connection)
+            # reaches the LLM intact rather than being masked by a secondary
+            # error (InterfaceError, BrokenPipeError) from closing a connection
+            # in an indeterminate state. This is also the SELECT cleanup path:
+            # the streaming SSDictCursor is deliberately left open (closing it
+            # would drain the wire and defeat the row cap), so ``conn.close()``
+            # is what tears the socket down. Cleanup failures are still worth a
+            # breadcrumb for diagnosing chronic teardown problems.
+            try:
+                conn.close()
+            except Exception:
+                logger.warning("conn.close() failed during cleanup", exc_info=True)

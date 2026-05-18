@@ -134,6 +134,24 @@ class AuthConfig(BaseModel):
             raise ValueError(BEARER_TOKEN_MISSING_MESSAGE)
         return self
 
+    @model_validator(mode="after")
+    def _token_only_with_bearer_mode(self) -> AuthConfig:
+        # Inverse of _bearer_requires_token: reject a stored bearer_token when the
+        # mode isn't "bearer". The token sits unused under any other mode; the most
+        # dangerous case is mode='none', where the active authenticator is
+        # NoOpAuthenticator and the server runs completely unauthenticated despite
+        # the operator believing bearer auth is enabled. mode='jwt' is a milder but
+        # still confusing variant — JWT is active while the stale bearer token
+        # implies the wrong credential will authorize. Loud config-load failure
+        # beats silent misconfiguration in either case.
+        if self.mode != "bearer" and self.bearer_token is not None:
+            raise ValueError(
+                "auth.bearer_token is set but auth.mode is "
+                f"{self.mode!r}. Either set auth.mode='bearer' to use it, "
+                "or remove bearer_token / unset SQLLENS_AUTH__BEARER_TOKEN."
+            )
+        return self
+
 
 class ServerConfig(BaseModel):
     """Transport + bind settings."""
