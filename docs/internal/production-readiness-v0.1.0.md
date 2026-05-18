@@ -47,23 +47,30 @@ section at the end flags closed issues that are incomplete in practice.
 
 ### Safety / security
 
-#### S-1. Read-only guard bypass: `SELECT … INTO new_table`
-**File:** [`src/sqllens/safety/readonly.py:25-68`](../../src/sqllens/safety/readonly.py#L25-L68) ·
-**CWE:** 89/284 · **Category:** Bug / Bypass
+#### S-1. Read-only guard bypass: `SELECT … INTO new_table` — **RESOLVED**
+**File:** [`src/sqllens/safety/readonly.py`](../../src/sqllens/safety/readonly.py) ·
+**CWE:** 89/284 · **Category:** Bug / Bypass · **Status:** Fixed in #41
 
 In Postgres, `SELECT * INTO new_tbl FROM users` is semantically a DDL/DML
 write — equivalent to `CREATE TABLE new_tbl AS SELECT …`. sqlglot parses the
-`INTO` as a child node of `exp.Select`, so the statement passes the root-type
+`INTO` as a child node of `exp.Select`, so the statement passed the root-type
 whitelist *and* the nested `Insert/Update/Delete/Drop/Create/Alter` deny-walk.
-The guard's stated promise ("only SELECT statements are allowed") is broken
+The guard's stated promise ("only SELECT statements are allowed") was broken
 at the most natural Postgres write-via-SELECT path.
 
-**Fix:** Walk for `Select.args.get("into")` being set, or for any `exp.Into`
-whose target is not a SELECT-output variable. Add to
-[`tests/unit/test_safety.py`](../../tests/unit/test_safety.py) with explicit
-dialect=`postgres` and dialect=`tsql` cases.
+**Resolution:** `assert_select_only` now additionally rejects any
+`exp.Select` whose `args["into"]` is set, inside the existing tree-walk loop.
+The check fires for root-level statements, CTE-nested forms, set-operation
+operands (`SELECT ... INTO ... UNION ...`), `INTO TEMP` / `INTO UNLOGGED`
+variants (same node shape), and MySQL `SELECT ... INTO @var` (session-variable
+write). Regression corpus added to
+[`tests/unit/test_safety.py`](../../tests/unit/test_safety.py) as
+`TestSelectIntoRejected`, parametrised over Postgres + T-SQL × {base, TEMP,
+UNLOGGED} plus the CTE-nested, UNION-operand, and MySQL `@var` cases. See
+[`docs/internal/database-connectors/read-only-safety.md`](database-connectors/read-only-safety.md)
+rule 6.
 
-**Tracking:** #35
+**Tracking:** #35 (closed by #41)
 
 #### S-2. Docker image defaults to `0.0.0.0` + `auth=none`
 **File:** [`docker/Dockerfile:65-67`](../../docker/Dockerfile) ·
@@ -316,7 +323,7 @@ file on POSIX.
 
 | # | File | Gap | Direction |
 |---|---|---|---|
-| T-4 | [`tests/unit/test_safety.py`](../../tests/unit/test_safety.py) | No `SELECT … INTO` bypass test (pairs with S-1). No `pg_sleep`/`dblink_exec`/`load_extension` rejection tests. No `WITH x AS (UPDATE/DELETE ...) ...` CTE coverage. | Add bypass-corpus parametrised tests; assert each is rejected post-S-1 fix. |
+| T-4 | [`tests/unit/test_safety.py`](../../tests/unit/test_safety.py) | ~~No `SELECT … INTO` bypass test (pairs with S-1).~~ Closed by #41 (`TestSelectIntoRejected`). Still no `pg_sleep`/`dblink_exec`/`load_extension` rejection tests; still no `WITH x AS (UPDATE/DELETE ...) ...` CTE coverage. | Add the remaining bypass-corpus parametrised tests. |
 | T-5 | [`tests/unit/test_safety.py`](../../tests/unit/test_safety.py) | `ReadOnlyGuardRunner.run_sql` has no unit test — only the connector-marked integration tests exercise it. | Unit test with a stub `SqlRunner`: assert `assert_select_only` called with correct dialect, `UnsafeSqlError` raised before inner runner, passing SELECT reaches inner unchanged. |
 | T-6 | [`tests/unit/test_auth.py`](../../tests/unit/test_auth.py) | `_AuthMiddleware` has no direct unit test; only HTTP integration happy/401 paths. Missing: lifespan/websocket scope passthrough, `scope['state']['auth']` contract, `WWW-Authenticate` header on 401, whitespace-only bearer payload. | Unit-test the middleware in isolation with mock authenticators. |
 | T-7 | [`tests/integration/test_http_transport.py`](../../tests/integration/test_http_transport.py) | No regression test for FastMCP Host-header rejection (CLAUDE.md gotcha #4) — silent regressions possible on `mcp` SDK bumps. No agent-failure → `isError: true` end-to-end test. No `POST /mcp/` companion to the `POST /mcp` test. No OPTIONS-preflight behavior pinned. | Add each as a parametrised integration test. |
