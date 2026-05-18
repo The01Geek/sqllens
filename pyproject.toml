@@ -46,6 +46,7 @@ all = ["sqllens[postgres,mysql]"]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
+    "pytest-env>=1.1",
     "ruff>=0.5",
     "mypy>=1.10",
     "httpx>=0.27",
@@ -85,4 +86,12 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "connectors: integration tests against real Postgres/MySQL service containers (CI-only)",
+]
+# Sentinel keys via pytest-env. Belt-and-suspenders for the autouse env scrub
+# in tests/conftest.py: if any test slips past the scrub and reaches the real
+# Anthropic SDK, it fails loudly with an obviously-bad key rather than
+# silently authenticating against the developer's real credentials.
+env = [
+    "D:ANTHROPIC_API_KEY=test-sentinel-do-not-use",
+    "D:SQLLENS_LLM__API_KEY=test-sentinel-do-not-use",
 ]
