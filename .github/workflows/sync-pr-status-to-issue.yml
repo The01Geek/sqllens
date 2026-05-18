@@ -48,7 +48,14 @@ jobs:
       status_ai_pr_drafted: ${{ steps.extract.outputs.status_ai_pr_drafted }}
       bot_login: ${{ steps.extract.outputs.bot_login }}
     steps:
+      # Pin to the base branch name, not the default github.sha. For
+      # pull_request_target github.sha is the base tip at dispatch time,
+      # which can vanish under rapid merges and makes checkout fail with
+      # a misleading "could not read Username" error. We only need the
+      # repo so the path-based composite actions below resolve.
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
       - id: cfg
         uses: ./.github/actions/read-project-config
       - id: extract
@@ -71,7 +78,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Required so path-based composite action references resolve.
+      # Pin to the base branch name (see config job for rationale).
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
 
       - id: actor-check
         uses: ./.github/actions/dedupe-pr-events
