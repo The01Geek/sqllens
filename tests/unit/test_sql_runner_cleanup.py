@@ -33,24 +33,22 @@ class _SecondaryCloseError(Exception):
     """Stand-in for ``InterfaceError`` / ``BrokenPipeError`` raised on close."""
 
 
-def _install_fake_module(monkeypatch: pytest.MonkeyPatch, name: str, mod: Any) -> None:
-    """Register *mod* (and any submodules already attached) under sys.modules."""
-    monkeypatch.setitem(sys.modules, name, mod)
-
-
 # ---------------------------------------------------------------------------
 # MySQL
 # ---------------------------------------------------------------------------
 
 
-def _fake_pymysql(connect_factory: Any) -> types.ModuleType:
+def _install_fake_pymysql(
+    monkeypatch: pytest.MonkeyPatch, connect_factory: Any
+) -> None:
     pymysql = types.ModuleType("pymysql")
     cursors_mod = types.ModuleType("pymysql.cursors")
     cursors_mod.DictCursor = type("DictCursor", (), {})
     pymysql.cursors = cursors_mod
     pymysql.connect = connect_factory
     pymysql.Error = Exception
-    return pymysql
+    monkeypatch.setitem(sys.modules, "pymysql", pymysql)
+    monkeypatch.setitem(sys.modules, "pymysql.cursors", cursors_mod)
 
 
 async def test_mysql_runner_preserves_primary_when_close_raises(
@@ -59,14 +57,13 @@ async def test_mysql_runner_preserves_primary_when_close_raises(
     """A close()-raised secondary error must not mask the primary execute() error."""
     cursor = MagicMock()
     cursor.execute.side_effect = _PrimaryError("max_statement_time exceeded")
+    cursor.close.side_effect = _SecondaryCloseError("cursor close failed")
 
     conn = MagicMock()
     conn.cursor.return_value = cursor
     conn.close.side_effect = _SecondaryCloseError("broken pipe on close")
 
-    pymysql = _fake_pymysql(lambda **_kwargs: conn)
-    _install_fake_module(monkeypatch, "pymysql", pymysql)
-    _install_fake_module(monkeypatch, "pymysql.cursors", pymysql.cursors)
+    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
 
     from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 
@@ -75,25 +72,25 @@ async def test_mysql_runner_preserves_primary_when_close_raises(
     with pytest.raises(_PrimaryError, match="max_statement_time"):
         await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
 
+    cursor.close.assert_called_once()
     conn.close.assert_called_once()
 
 
 async def test_mysql_runner_close_failure_alone_does_not_raise(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """If the query succeeds but close() fails, the caller still gets results."""
+    """If the query succeeds but cleanup fails, the caller still gets results."""
     cursor = MagicMock()
     cursor.execute.return_value = None
     cursor.fetchall.return_value = [{"x": 1}]
     cursor.description = [("x",)]
+    cursor.close.side_effect = _SecondaryCloseError("cursor close failed")
 
     conn = MagicMock()
     conn.cursor.return_value = cursor
     conn.close.side_effect = _SecondaryCloseError("broken pipe on close")
 
-    pymysql = _fake_pymysql(lambda **_kwargs: conn)
-    _install_fake_module(monkeypatch, "pymysql", pymysql)
-    _install_fake_module(monkeypatch, "pymysql.cursors", pymysql.cursors)
+    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
 
     from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 
@@ -101,6 +98,7 @@ async def test_mysql_runner_close_failure_alone_does_not_raise(
     df = await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
 
     assert df.to_dict(orient="records") == [{"x": 1}]
+    cursor.close.assert_called_once()
     conn.close.assert_called_once()
 
 
@@ -109,14 +107,17 @@ async def test_mysql_runner_close_failure_alone_does_not_raise(
 # ---------------------------------------------------------------------------
 
 
-def _fake_psycopg2(connect_factory: Any) -> types.ModuleType:
+def _install_fake_psycopg2(
+    monkeypatch: pytest.MonkeyPatch, connect_factory: Any
+) -> None:
     psycopg2 = types.ModuleType("psycopg2")
     extras_mod = types.ModuleType("psycopg2.extras")
     extras_mod.RealDictCursor = type("RealDictCursor", (), {})
     psycopg2.extras = extras_mod
     psycopg2.connect = connect_factory
     psycopg2.Error = Exception
-    return psycopg2
+    monkeypatch.setitem(sys.modules, "psycopg2", psycopg2)
+    monkeypatch.setitem(sys.modules, "psycopg2.extras", extras_mod)
 
 
 async def test_postgres_runner_preserves_primary_when_close_raises(
@@ -133,9 +134,7 @@ async def test_postgres_runner_preserves_primary_when_close_raises(
         "InternalError: current transaction is aborted"
     )
 
-    psycopg2 = _fake_psycopg2(lambda *_a, **_k: conn)
-    _install_fake_module(monkeypatch, "psycopg2", psycopg2)
-    _install_fake_module(monkeypatch, "psycopg2.extras", psycopg2.extras)
+    _install_fake_psycopg2(monkeypatch, lambda *_a, **_k: conn)
 
     from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
 
@@ -163,9 +162,7 @@ async def test_postgres_runner_close_failure_alone_does_not_raise(
         "InternalError: current transaction is aborted"
     )
 
-    psycopg2 = _fake_psycopg2(lambda *_a, **_k: conn)
-    _install_fake_module(monkeypatch, "psycopg2", psycopg2)
-    _install_fake_module(monkeypatch, "psycopg2.extras", psycopg2.extras)
+    _install_fake_psycopg2(monkeypatch, lambda *_a, **_k: conn)
 
     from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
 

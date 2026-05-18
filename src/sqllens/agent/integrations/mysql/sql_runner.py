@@ -70,6 +70,7 @@ class MySQLRunner(SqlRunner):
             **self.kwargs,
         )
 
+        cursor = None
         try:
             # Ping to ensure connection is alive
             conn.ping(reconnect=True)
@@ -79,20 +80,21 @@ class MySQLRunner(SqlRunner):
             results = cursor.fetchall()
 
             # Create a pandas dataframe from the results
-            df = pd.DataFrame(
+            return pd.DataFrame(
                 results,
                 columns=[desc[0] for desc in cursor.description]
                 if cursor.description
                 else [],
             )
 
-            cursor.close()
-            return df
-
         finally:
             # Suppress secondary exceptions during cleanup so the primary
             # query error (e.g. max_statement_time / lost-connection) reaches
             # the LLM intact rather than being masked by InterfaceError /
-            # BrokenPipeError from closing an indeterminate-state connection.
+            # BrokenPipeError from closing a cursor or connection in an
+            # indeterminate state.
+            if cursor is not None:
+                with contextlib.suppress(Exception):
+                    cursor.close()
             with contextlib.suppress(Exception):
                 conn.close()
