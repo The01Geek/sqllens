@@ -1,11 +1,17 @@
 """PostgreSQL implementation of SqlRunner interface."""
 
 import logging
+import uuid
 from typing import Optional
 import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
+from sqllens.safety.limits import rows_to_capped_df
+from sqllens.safety.readonly import is_read_shaped
+
+
+_DEFAULT_MAX_ROWS = 10_000
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +27,8 @@ class PostgresRunner(SqlRunner):
         database: Optional[str] = None,
         user: Optional[str] = None,
         password: Optional[str] = None,
+        statement_timeout_ms: int = 0,
+        max_rows: int = _DEFAULT_MAX_ROWS,
         **kwargs,
     ):
         """Initialize with PostgreSQL connection parameters.
@@ -35,6 +43,8 @@ class PostgresRunner(SqlRunner):
             database: Database name
             user: Database user
             password: Database password
+            statement_timeout_ms: Per-query timeout in milliseconds (0 disables)
+            max_rows: Hard ceiling on rows returned per SELECT
             **kwargs: Additional psycopg2 connection parameters (sslmode, connect_timeout, etc.)
         """
         try:
@@ -65,6 +75,14 @@ class PostgresRunner(SqlRunner):
                 "Either provide connection_string OR (host, database, and user) parameters"
             )
 
+        if statement_timeout_ms < 0:
+            raise ValueError(
+                f"statement_timeout_ms must be >= 0 (got {statement_timeout_ms}); "
+                "use 0 to disable"
+            )
+        self._statement_timeout_ms = statement_timeout_ms
+        self._max_rows = max_rows
+
     async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
         """Execute SQL query against PostgreSQL database and return results as DataFrame.
 
@@ -73,57 +91,72 @@ class PostgresRunner(SqlRunner):
             context: Tool execution context
 
         Returns:
-            DataFrame with query results
+            DataFrame with query results. For SELECTs, ``df.attrs['truncated']`` is True
+            when the result was capped at ``max_rows`` and the agent should re-issue
+            with a narrower WHERE / LIMIT.
 
         Raises:
-            psycopg2.Error: If query execution fails
+            psycopg2.Error: If query execution fails (including statement_timeout firing).
         """
-        # Connect to the database using either connection string or parameters
         if self.connection_string:
             conn = self.psycopg2.connect(self.connection_string)
         else:
             conn = self.psycopg2.connect(**self.connection_params)
 
-        cursor = None
         try:
-            cursor = conn.cursor(cursor_factory=self.psycopg2.extras.RealDictCursor)
+            if self._statement_timeout_ms > 0:
+                setup = conn.cursor()
+                try:
+                    setup.execute(
+                        "SET statement_timeout = %s", (int(self._statement_timeout_ms),)
+                    )
+                finally:
+                    setup.close()
 
-            # Execute the query
-            cursor.execute(args.sql)
+            if is_read_shaped(args.sql):
+                # Named cursors are server-side and stream from a portal; they
+                # require an open transaction (psycopg2's default autocommit=False).
+                cursor_name = f"sqllens_{uuid.uuid4().hex}"
+                cursor = conn.cursor(
+                    name=cursor_name,
+                    cursor_factory=self.psycopg2.extras.RealDictCursor,
+                )
+                try:
+                    cursor.execute(args.sql)
+                    rows = cursor.fetchmany(self._max_rows + 1)
+                finally:
+                    # Log-and-swallow secondary exceptions on the SELECT cleanup
+                    # path so the primary query error (e.g. statement_timeout /
+                    # "current transaction is aborted") reaches the LLM intact
+                    # rather than being masked by a secondary error from closing
+                    # a server-side cursor in an indeterminate state.
+                    try:
+                        cursor.close()
+                    except Exception:
+                        logger.warning(
+                            "cursor.close() failed during cleanup", exc_info=True
+                        )
+                return rows_to_capped_df(rows, self._max_rows)
 
-            # Determine if this is a SELECT query or modification query
-            query_type = args.sql.strip().upper().split()[0]
-
-            if query_type == "SELECT":
-                # Fetch results for SELECT queries
-                rows = cursor.fetchall()
-                if not rows:
-                    # Return empty DataFrame
-                    return pd.DataFrame()
-
-                # Convert rows to list of dictionaries
-                results_data = [dict(row) for row in rows]
-                return pd.DataFrame(results_data)
-            else:
-                # For non-SELECT queries (INSERT, UPDATE, DELETE, etc.)
+            cursor = conn.cursor()
+            try:
+                cursor.execute(args.sql)
                 conn.commit()
                 rows_affected = cursor.rowcount
-                # Return a DataFrame indicating rows affected
-                return pd.DataFrame({"rows_affected": [rows_affected]})
-
-        finally:
-            # Log-and-swallow secondary exceptions during cleanup so the primary
-            # query error (e.g. statement_timeout / "current transaction is
-            # aborted") reaches the LLM intact rather than being masked by
-            # secondary errors from closing a cursor or connection in an
-            # indeterminate state. Cleanup failures are still worth a breadcrumb
-            # for diagnosing chronic teardown problems (e.g. a misconfigured
-            # pool or a broken pgbouncer).
-            if cursor is not None:
+            finally:
                 try:
                     cursor.close()
                 except Exception:
                     logger.warning("cursor.close() failed during cleanup", exc_info=True)
+            return pd.DataFrame({"rows_affected": [rows_affected]})
+
+        finally:
+            # Log-and-swallow secondary exceptions during connection teardown so
+            # the primary query error reaches the LLM intact rather than being
+            # masked by a secondary error from closing a connection in an
+            # indeterminate state. Cleanup failures are still worth a breadcrumb
+            # for diagnosing chronic teardown problems (e.g. a misconfigured
+            # pool or a broken pgbouncer).
             try:
                 conn.close()
             except Exception:

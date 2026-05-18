@@ -41,16 +41,13 @@ Allows every request, returns an empty `AuthContext()`. The right choice for:
 - localhost-bound HTTP (`server.host = "127.0.0.1"`)
 - HTTP behind a trusted reverse proxy that handles auth itself
 
-### `bearer` — [src/sqllens/auth/bearer.py](../../../src/sqllens/auth/bearer.py)
-
-Static bearer token configured at startup. Clients send `Authorization: Bearer <token>`. Implementation notes:
-
-- **Constant-time comparison** via `hmac.compare_digest`. Comparing as strings would leak token length and prefix through timing.
-- **Empty token rejected** at construction. An empty configured token would let any non-empty request through.
+- **Empty / whitespace-only token rejected** at construction. An empty configured token would let any non-empty request through; a whitespace-only one would silently fail every match after `_extract_bearer` strips inbound tokens. Non-empty tokens are `.strip()`-normalized before storage so a config like `bearer_token = "  secret  "` matches a client sending `Authorization: Bearer secret`.
 - **Case-insensitive header lookup** — accepts `Authorization` and `authorization`. Anything else (`AUTHORIZATION`, etc.) is missed; if a proxy uppercases the header that's a problem, but no real client does that.
 - **Subject is the literal string `"bearer"`** — there's no principal information in a static token to derive a stable id from, and `None` would conflict with the "successful authentication implies non-null subject" convention some downstream code might one day want.
 
-Config: `auth.mode = "bearer"`, `auth.bearer_token = "..."` (or env `SQLLENS_AUTH__BEARER_TOKEN`). Missing token at startup raises `ValueError` in `build_authenticator`.
+Config: `auth.mode = "bearer"`, `auth.bearer_token = "..."` (or env `SQLLENS_AUTH__BEARER_TOKEN`). Missing, empty, or whitespace-only tokens are rejected at config load by `AuthConfig._bearer_requires_token`, surfaced through `cli.serve` / `cli.validate` as a `ValidationError` with an actionable message naming the env var, the `[auth]` TOML stanza, and the alternate `mode` values. `build_authenticator` retains the same check as defense-in-depth for callers that bypass validation via `model_construct`.
+
+`bearer` (and `jwt`, once implemented) bypass the `serve` loopback guard — they are the intended way to run HTTP on a non-loopback host. See the `none` section above for the guard's behaviour and the `SQLLENS_AUTH__INSECURE` opt-out.
 
 ### `jwt` — [src/sqllens/auth/jwt.py](../../../src/sqllens/auth/jwt.py)
 
@@ -65,8 +62,8 @@ If you want this now, the design notes are in the module docstring; the implemen
 
 `build_authenticator(cfg.auth)` is called once per process:
 
-- `build_asgi_app` in `transport/http.py` — used by integration tests.
-- `run` in `transport/http.py` — used by `sqllens serve` in HTTP mode.
+- `build_asgi_app` in `transport/http.py` — the canonical app-construction entry point; called by `run` and by the integration test fixture, and safe to mount under any external ASGI host.
+- `run` in `transport/http.py` — used by `sqllens serve` in HTTP mode; thin uvicorn launcher that delegates to `build_asgi_app`.
 
 The authenticator is then held by `_AuthMiddleware` for the lifetime of the server. There is **no hot-reload** — changing `auth.mode` or `auth.bearer_token` requires a process restart.
 

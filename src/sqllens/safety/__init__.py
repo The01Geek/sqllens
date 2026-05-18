@@ -1,7 +1,19 @@
 # SPDX-FileCopyrightText: 2026 Daniel Radman
 # SPDX-License-Identifier: Apache-2.0
 
-"""SQL safety guards (read-only enforcement, row caps, query timeouts)."""
+"""SQL safety guards.
+
+Three orthogonal protections, composed at the factory:
+
+* ``assert_select_only`` / ``ReadOnlyGuardRunner`` — sqlglot parse rejects
+  anything that isn't a single ``SELECT``/``WITH``.
+* Per-runner statement timeouts (``SET statement_timeout`` on Postgres,
+  ``SET SESSION MAX_EXECUTION_TIME`` on MySQL, ``set_progress_handler``
+  deadline on SQLite) — server- or driver-side time bound.
+* ``RowCapRunner`` — per-runner streaming via ``fetchmany`` stops at
+  ``max_rows``; this decorator is the secondary belt-and-suspenders check
+  on the returned DataFrame.
+"""
 
 from __future__ import annotations
 
@@ -10,12 +22,27 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
-from sqllens.safety.readonly import UnsafeSqlError, assert_select_only
+from sqllens.safety.limits import (
+    MAX_ROWS_ATTR,
+    TRUNCATED_ATTR,
+    RowCapRunner,
+    mark_truncation,
+)
+from sqllens.safety.readonly import UnsafeSqlError, assert_select_only, is_read_shaped
 
 if TYPE_CHECKING:
     from sqllens.agent.core.tool import ToolContext
 
-__all__ = ["ReadOnlyGuardRunner", "UnsafeSqlError", "assert_select_only"]
+__all__ = [
+    "MAX_ROWS_ATTR",
+    "TRUNCATED_ATTR",
+    "ReadOnlyGuardRunner",
+    "RowCapRunner",
+    "UnsafeSqlError",
+    "assert_select_only",
+    "is_read_shaped",
+    "mark_truncation",
+]
 
 
 class ReadOnlyGuardRunner(SqlRunner):

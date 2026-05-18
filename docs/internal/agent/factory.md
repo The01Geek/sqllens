@@ -6,18 +6,25 @@
 
 ```
 cfg.llm         →  AnthropicLlmService
-cfg.database    →  build_sql_runner       →  Sqlite/Postgres/MySQLRunner
-                                              ↓ (if cfg.database.read_only)
-                                            ReadOnlyGuardRunner (sqlglot dialect-aware)
-cfg.memory      →  ChromaAgentMemory      →  persists under cfg.memory.persist_dir
-                   LocalFileSystem          →  scratch root = tempfile.gettempdir() / "sqllens"
-ToolRegistry    →  RunSqlTool              (executes generated SQL, writes a scratch CSV)
-                   SaveQuestionToolArgsTool          (memory write)
-                   SearchSavedCorrectToolUsesTool    (memory read)
-                                              ↓
-                                            Agent(llm, tool_registry, user_resolver,
-                                                  agent_memory, AgentConfig(max_tool_iterations))
+cfg.database    →  build_sql_runner(url,
+                                    statement_timeout_ms,
+                                    max_rows)        →  Sqlite/Postgres/MySQLRunner
+                                                          ↓
+                                                        RowCapRunner (max_rows belt-and-suspenders)
+                                                          ↓ (if cfg.database.read_only)
+                                                        ReadOnlyGuardRunner (sqlglot dialect-aware)
+cfg.memory      →  ChromaAgentMemory                 →  persists under cfg.memory.persist_dir
+                   LocalFileSystem                   →  scratch root = tempfile.gettempdir() / "sqllens"
+ToolRegistry    →  RunSqlTool                          (executes generated SQL, writes a scratch CSV,
+                                                        appends truncation hint when df.attrs['truncated'])
+                   SaveQuestionToolArgsTool            (memory write)
+                   SearchSavedCorrectToolUsesTool      (memory read)
+                                                          ↓
+                                                        Agent(llm, tool_registry, user_resolver,
+                                                              agent_memory, AgentConfig(max_tool_iterations))
 ```
+
+Call order on every query is the reverse of construction: **ReadOnlyGuardRunner → RowCapRunner → engine runner**. The parser rejects before any connection opens; the engine runner streams with `fetchmany(max_rows + 1)` and sets its native statement-timeout primitive; the decorator clamps the result a second time on the way back. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full timeout/cap story.
 
 ## API-key check is here, not in config
 
@@ -28,7 +35,7 @@ if cfg.llm.api_key is None:
     raise ValueError(API_KEY_MISSING_MESSAGE)
 ```
 
-`sqllens serve` ([src/sqllens/cli.py](../../../src/sqllens/cli.py)) does the same check earlier and exits 2 with a friendly error. The factory's check is a backstop for programmatic embedders and tests that call `build_agent` directly — without it, a `None` key surfaces as a bare `AttributeError` at the first `get_secret_value()` call. That violates the CLAUDE.md rule that MCP tool errors must be clear, structured messages.
+`sqllens serve` ([src/sqllens/cli.py](../../../src/sqllens/cli.py)) does the same check earlier and exits 2 with a friendly error. The CLI gate runs unconditionally; the [preflight](../setup/preflight.md) layer that follows it (`probe_llm`) then constructs `AnthropicLlmService` to surface other LLM-config problems before the transport starts. The factory's check is the third layer: a backstop for programmatic embedders and tests that call `build_agent` directly, where preflight may have been bypassed. Without it, a `None` key surfaces as a bare `AttributeError` at the first `get_secret_value()` call, which violates the CLAUDE.md rule that MCP tool errors must be clear, structured messages.
 
 ## Why the scratch FS is anchored to `tempfile.gettempdir()`
 
@@ -55,6 +62,8 @@ Dialect picked from the URL scheme prefix:
 | `mysql://` | `MySQLRunner` | Parsed with `urlparse`; requires user, host, and database name. |
 
 Unsupported schemes raise `ValueError` — the calling CLI layer turns that into a "Config error: …" exit 2.
+
+`statement_timeout_ms` and `max_rows` are threaded as keyword arguments into every runner so each engine can apply its native primitives (Postgres `SET statement_timeout`, MySQL `SET SESSION MAX_EXECUTION_TIME`, SQLite progress-handler deadline) and stream with `fetchmany(max_rows + 1)`. Callers outside `build_agent` (programmatic embedders, tests) can pass either keyword; defaults match `DatabaseConfig` (`30_000` ms timeout, `10_000` rows).
 
 `_sqlglot_dialect(url)` maps the same scheme to a sqlglot dialect name (`"sqlite"`, `"postgres"`, `"mysql"`) for the read-only guard. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md).
 

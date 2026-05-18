@@ -45,6 +45,9 @@ def _install_fake_pymysql(
     pymysql = types.ModuleType("pymysql")
     cursors_mod = types.ModuleType("pymysql.cursors")
     cursors_mod.DictCursor = type("DictCursor", (), {})
+    # The SELECT path streams via a server-side cursor (PR #58 / #80); the fake
+    # must expose the same attribute the runner now references.
+    cursors_mod.SSDictCursor = type("SSDictCursor", (), {})
     pymysql.cursors = cursors_mod
     pymysql.connect = connect_factory
     pymysql.Error = Exception
@@ -55,7 +58,14 @@ def _install_fake_pymysql(
 async def test_mysql_runner_preserves_primary_when_close_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A close()-raised secondary error must not mask the primary execute() error."""
+    """A close()-raised secondary error must not mask the primary execute() error.
+
+    On the SELECT path the runner streams via ``SSDictCursor`` and deliberately
+    does *not* call ``cursor.close()`` (closing an SSCursor drains the wire and
+    defeats the row cap — PR #58 / #80). Connection teardown is ``conn.close()``,
+    which here raises a secondary error; PR #61's contract is that the primary
+    ``execute()`` error must still reach the caller.
+    """
     cursor = MagicMock()
     cursor.execute.side_effect = _PrimaryError("max_statement_time exceeded")
     cursor.close.side_effect = _SecondaryCloseError("cursor close failed")
@@ -73,19 +83,18 @@ async def test_mysql_runner_preserves_primary_when_close_raises(
     with pytest.raises(_PrimaryError, match="max_statement_time"):
         await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
 
-    cursor.close.assert_called_once()
     conn.close.assert_called_once()
 
 
 async def test_mysql_runner_close_failure_alone_does_not_raise(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """If the query succeeds but cleanup fails, the caller still gets results."""
+    """If the query succeeds but connection teardown fails, the caller still
+    gets results. The SELECT path streams via ``fetchmany`` on an SSCursor that
+    is intentionally left open; only ``conn.close()`` raises here."""
     cursor = MagicMock()
     cursor.execute.return_value = None
-    cursor.fetchall.return_value = [{"x": 1}]
-    cursor.description = [("x",)]
-    cursor.close.side_effect = _SecondaryCloseError("cursor close failed")
+    cursor.fetchmany.return_value = [{"x": 1}]
 
     conn = MagicMock()
     conn.cursor.return_value = cursor
@@ -99,7 +108,6 @@ async def test_mysql_runner_close_failure_alone_does_not_raise(
     df = await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
 
     assert df.to_dict(orient="records") == [{"x": 1}]
-    cursor.close.assert_called_once()
     conn.close.assert_called_once()
 
 
@@ -151,10 +159,15 @@ async def test_postgres_runner_preserves_primary_when_close_raises(
 async def test_postgres_runner_close_failure_alone_does_not_raise(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """If the SELECT succeeds but cleanup fails, the caller still gets results."""
+    """If the SELECT succeeds but cleanup fails, the caller still gets results.
+
+    The Postgres SELECT path uses a server-side named cursor and streams via
+    ``fetchmany``; both the per-cursor close and the connection teardown raise
+    secondary errors here and must both be swallowed.
+    """
     cursor = MagicMock()
     cursor.execute.return_value = None
-    cursor.fetchall.return_value = [{"x": 1}]
+    cursor.fetchmany.return_value = [{"x": 1}]
     cursor.close.side_effect = _SecondaryCloseError("cursor close failed")
 
     conn = MagicMock()
