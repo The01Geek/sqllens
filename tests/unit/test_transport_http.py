@@ -126,7 +126,7 @@ class _FakeSessionManager:
     def __init__(
         self,
         startup_exc: BaseException | None = None,
-        shutdown_exc: Exception | None = None,
+        shutdown_exc: BaseException | None = None,
     ) -> None:
         self._startup_exc = startup_exc
         self._shutdown_exc = shutdown_exc
@@ -231,6 +231,88 @@ def test_lifespan_shutdown_after_failed_startup_is_clean_noop() -> None:
     receive2, send2, sent2 = _make_io([{"type": "lifespan.shutdown"}])
     asyncio.run(adapter({"type": "lifespan"}, receive2, send2))
     assert sent2 == [{"type": "lifespan.shutdown.complete"}]
+
+
+def test_lifespan_shutdown_without_startup_surfaces_failed() -> None:
+    """Regression: ``lifespan.shutdown`` with no prior ``lifespan.startup``
+    must surface as ``lifespan.shutdown.failed`` (not silently ``.complete``).
+
+    A host that drives shutdown without startup is misbehaving; answering
+    "complete" would mask the host bug. Distinct from the legitimate
+    failed-startup-then-shutdown no-op above: there ``_shutdown_done`` is
+    already set so the idempotent branch fires, whereas here startup was
+    never attempted (``_cm is None and not _started``). ``__aexit__`` must
+    not be invoked on a never-entered context manager.
+    """
+    sm = _FakeSessionManager()
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io([{"type": "lifespan.shutdown"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    types = [m["type"] for m in sent]
+    assert "lifespan.shutdown.complete" not in types
+    assert sent[-1]["type"] == "lifespan.shutdown.failed"
+    # Pin the distinguishing phrase, not just any "startup" substring, so
+    # this can't be conflated with the duplicate / single-shot messages.
+    assert "without prior startup" in sent[-1]["message"].lower()
+    # Never-entered CM: run()/__aenter__/__aexit__ all untouched.
+    assert sm.run_calls == 0
+    assert sm.aenter_calls == 0
+    assert sm.aexit_calls == 0
+
+    # The branch finalizes the instance (_shutdown_done = True), matching
+    # every other failure path in this file: a follow-up scope's startup
+    # must get the single-shot rejection, not a fresh run().
+    receive2, send2, sent2 = _make_io([{"type": "lifespan.startup"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive2, send2))
+    assert sent2[-1]["type"] == "lifespan.startup.failed"
+    assert "single-shot" in sent2[-1]["message"].lower()
+    assert sm.run_calls == 0
+
+
+def test_lifespan_startup_baseexception_propagates_not_caught() -> None:
+    """Concern 1 contract: a BaseException-only subclass raised from
+    ``__aenter__`` must propagate out of ``_handle_lifespan`` rather than be
+    converted into a ``lifespan.startup.failed`` reply.
+
+    Pins the documented breadth of the startup ``except Exception`` (it must
+    stay ``Exception``, never widen to ``BaseException``/bare ``except``): if
+    a future refactor caught ``BaseException``, structured-concurrency
+    cancellation of the lifespan task would be silently swallowed.
+    """
+    sm = _FakeSessionManager(startup_exc=KeyboardInterrupt("interrupt"))
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io([{"type": "lifespan.startup"}])
+
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    # The signal escaped; no startup.failed ack was fabricated for it.
+    assert sent == []
+    # The raise traversed the awaited CM method (not run()), so this pins
+    # the `except Exception` site specifically, not an upstream escape.
+    assert sm.aenter_calls == 1
+
+
+def test_lifespan_shutdown_baseexception_propagates_not_caught() -> None:
+    """Symmetric twin: a BaseException-only subclass raised from ``__aexit__``
+    must propagate, not be converted into ``lifespan.shutdown.failed``.
+    """
+    sm = _FakeSessionManager(shutdown_exc=KeyboardInterrupt("interrupt"))
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io(
+        [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    types = [m["type"] for m in sent]
+    assert types == ["lifespan.startup.complete"]
+    assert "lifespan.shutdown.failed" not in types
+    # The raise traversed __aexit__ (not run()/__aenter__), pinning the
+    # shutdown `except Exception` site specifically.
+    assert sm.aexit_calls == 1
 
 
 def test_lifespan_unknown_message_type_is_logged_and_loop_continues() -> None:
@@ -439,6 +521,63 @@ def test_lifespan_startup_base_exception_finalizes_and_propagates(
     assert sm.run_calls == 1
     assert sm.aenter_calls == 1
 
+@pytest.mark.parametrize(
+    "base_exc",
+    [asyncio.CancelledError(), KeyboardInterrupt(), SystemExit()],
+    ids=["CancelledError", "KeyboardInterrupt", "SystemExit"],
+)
+def test_lifespan_shutdown_base_exception_finalizes_and_propagates(
+    base_exc: BaseException,
+) -> None:
+    """A BaseException interrupting __aexit__ must finalize the instance and re-raise.
+
+    Regression for the deferred finding carried from #75 (issue #88): the
+    ``except Exception`` shutdown guard does not catch a ``BaseException``
+    (``asyncio.CancelledError``, ``KeyboardInterrupt``, ``SystemExit``,
+    ``GeneratorExit``). The prior code let it propagate WITHOUT setting
+    ``_shutdown_done``, leaving the instance non-finalized — so a host driving
+    a follow-up lifespan scope would re-run against a session manager that
+    never finished closing. The adapter must (a) re-raise the BaseException
+    (cancellation must propagate cooperatively, never be swallowed into a
+    spurious ``shutdown.complete``), and (b) finalize the instance so a
+    follow-up startup gets the single-shot rejection and a follow-up shutdown
+    is an idempotent no-op (no second ``__aexit__``) — symmetric with the
+    ``except Exception`` finalization path. Parametrized over the
+    ``BaseException`` subtypes the inline comment claims behave identically
+    (``GeneratorExit`` is omitted — it cannot be driven through
+    ``asyncio.run`` here).
+    """
+    sm = _FakeSessionManager(shutdown_exc=base_exc)
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+
+    receive, send, sent = _make_io(
+        [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
+    )
+    with pytest.raises(type(base_exc)):
+        asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    # Startup acked; the interrupted scope sent no shutdown.complete AND no
+    # shutdown.failed (the BaseException path emits no protocol message — it
+    # re-raises so cancellation propagates), and the instance is finalized.
+    assert [m["type"] for m in sent] == ["lifespan.startup.complete"]
+    assert "lifespan.shutdown.failed" not in [m["type"] for m in sent]
+    assert sm.aexit_calls == 1
+    assert adapter._shutdown_done is True
+
+    # Follow-up startup on a fresh scope → single-shot rejection; no fresh
+    # run()/__aenter__ against the half-closed manager.
+    receive2, send2, sent2 = _make_io([{"type": "lifespan.startup"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive2, send2))
+    assert sent2[0]["type"] == "lifespan.startup.failed"
+    assert "shut down" in sent2[0]["message"].lower()
+    assert sm.run_calls == 1
+    assert sm.aenter_calls == 1
+
+    # Follow-up shutdown on a fresh scope → idempotent, no second __aexit__.
+    receive3, send3, sent3 = _make_io([{"type": "lifespan.shutdown"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive3, send3))
+    assert sent3 == [{"type": "lifespan.shutdown.complete"}]
+    assert sm.aexit_calls == 1
 
 def test_lifespan_startup_failure_finalizes_instance() -> None:
     """A failed ``__aenter__`` must finalize the instance and not leak the CM.

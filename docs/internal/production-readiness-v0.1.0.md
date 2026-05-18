@@ -398,11 +398,11 @@ file on POSIX.
 | O-10 | `.github/workflows/docker.yml:99` | `cosign` downloaded from GitHub at runtime with no checksum verification. | Replace with `sigstore/cosign-installer` action (pinned by version, verifies checksums). |
 | O-11 | CLAUDE.md / repo conventions | No documented emergency hotfix path for the protected `main` branch. | Document the temporary-bypass-actor procedure in CLAUDE.md or a `RUNBOOK.md`. |
 | O-12 | [`README.md:75`](../../README.md#L75) | Links to `docs/internal/claude-desktop-windows-install.md` which moved to `docs/internal/installation/...` — broken on GitHub. | Fix the link; add a CI check for broken internal links. |
-| O-13 | [`README.md:136`](../../README.md#L136) | "Phase 4 — integration with Guidoo" violates CLAUDE.md's brand-cleanliness rule. | Rewrite Phase 4 as "JWT verifier (JWKS + shared-secret) and permission scopes" with no upstream-product reference. |
+| O-13 | [`README.md:136`](../../README.md#L136) | ~~Phase 4 line names the extracted-from parent product, violating CLAUDE.md's brand-cleanliness rule.~~ Fixed by #93 (issue #89): Phase 4 rewritten with no parent-product reference; remaining brand-name occurrences scrubbed from CLAUDE.md, this doc, and a test. | Rewrite Phase 4 as "JWT verifier (JWKS + shared-secret) and permission scopes" with no parent-product reference. |
 | O-14 | `config.py` | No `config_version` field; no migration story for 0.0.x → 0.1.0. `extra="forbid"` means any new required field silently breaks existing TOMLs. | Add `config_version: int = 1` (ignored for now); document in CHANGELOG that 0.1.0 is the first stable config schema. |
 | O-15 | `pyproject.toml` | No `dependabot.yml`, no Renovate config. Wide ranges + no update bot = breaking changes ship undetected. | Add `.github/dependabot.yml` with weekly pip + Actions groups. |
-| O-16 | [`src/sqllens/agent/factory.py:1`](../../src/sqllens/agent/factory.py) | Missing SPDX header. Every other first-party file has it; this one is the public seam, not lifted code. | Add the two-line SPDX block. |
-| O-17 | `mcpb/build.sh:59` | Vendors `.[postgres,mysql]` not `.[all]` — future connectors added to `[all]` would silently miss MCPB. | Change to `".[all]"`. |
+| O-16 | [`src/sqllens/agent/factory.py:1`](../../src/sqllens/agent/factory.py) | ~~Missing SPDX header. Every other first-party file has it; this one is the public seam, not lifted code.~~ Fixed by #93 (issue #89): two-line SPDX block added. | Add the two-line SPDX block. |
+| O-17 | `mcpb/build.sh:59` | ~~Vendors `.[postgres,mysql]` not `.[all]` — future connectors added to `[all]` would silently miss MCPB.~~ Fixed by #93 (issue #89): now vendors `.[all]`. | Change to `".[all]"`. |
 
 ### Test coverage
 
@@ -414,7 +414,7 @@ file on POSIX.
 | T-7 | [`tests/integration/test_http_transport.py`](../../tests/integration/test_http_transport.py) | No regression test for FastMCP Host-header rejection (CLAUDE.md gotcha #4) — silent regressions possible on `mcp` SDK bumps. No agent-failure → `isError: true` end-to-end test. No `POST /mcp/` companion to the `POST /mcp` test. No OPTIONS-preflight behavior pinned. | Add each as a parametrised integration test. |
 | T-8 | [`tests/unit/test_cli.py`](../../tests/unit/test_cli.py) | `sqllens init` has zero coverage — writes file, `--path`, `--force`, round-trip-through-`Config.load`. `sqllens serve` happy path has no test either. | Cover both. |
 | T-9 | [`tests/unit/test_factory_wiring.py`](../../tests/unit/test_factory_wiring.py) | No test asserting `ReadOnlyGuardRunner` wraps the runner iff `database.read_only=True`. A refactor flipping the default silently disables the guard. | Two parametrised cases: `read_only=True` → wrapped; `read_only=False` → bare. |
-| T-10 | [`pyproject.toml`](../../pyproject.toml) | `pytest -q` runs the `connectors`-marked tests by default; skip logic lives inside each test, not in `addopts`. | Add `addopts = "-m 'not connectors'"`. |
+| T-10 | [`pyproject.toml`](../../pyproject.toml) | ~~`pytest -q` runs the `connectors`-marked tests by default; skip logic lives inside each test, not in `addopts`.~~ Fixed by #93 (issue #89): `addopts = "-m 'not connectors'"` set; connector tests now default-skip and run only via `pytest -q -m connectors`. | Add `addopts = "-m 'not connectors'"`. |
 
 ### Product / UX
 

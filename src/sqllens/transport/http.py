@@ -52,6 +52,14 @@ either form."""
 
 _INTERNAL_PATH = "/mcp"
 
+HEALTHZ_PATH = "/healthz"
+"""Unauthenticated liveness probe path.
+
+Asserts only that the ASGI process is up and the event loop is serving
+requests — it does **not** check DB, ChromaDB, or LLM reachability. Handled
+in ``_PathNormalizer``, ahead of ``_AuthMiddleware``, so orchestrator probes
+never need (and are never gated by) an ``Authorization`` header."""
+
 
 def build_asgi_app(cfg: Config) -> ASGIApp:
     """Build the fully wrapped, mount-ready Streamable HTTP ASGI app for ``cfg``.
@@ -123,6 +131,7 @@ class _PathNormalizer:
     - ``/mcp/``  → rewrite scope.path to ``/mcp`` so FastMCP's Route matches.
                    No redirect, so POST clients that don't follow 307 work.
     - ``/mcp``   → pass through unchanged (matches FastMCP directly).
+    - ``/healthz`` → 200 liveness JSON, short-circuited here (pre-auth).
 
     Everything else passes through.
     """
@@ -136,6 +145,9 @@ class _PathNormalizer:
             return
 
         path = scope.get("path", "")
+        if path == HEALTHZ_PATH:
+            await _send_health(send)
+            return
         if path == "/":
             response = RedirectResponse(url=MCP_PATH, status_code=307)
             await response(scope, receive, send)
@@ -190,8 +202,12 @@ class _SessionManagerLifespan:
     ``lifespan.startup`` — once any one of these happens:
 
     - ``lifespan.shutdown`` completed (the CM was exited via ``__aexit__``), or
-    - ``lifespan.shutdown`` failed in ``__aexit__`` (the CM raised on exit;
-      reusing it is unsafe), or
+    - ``lifespan.shutdown`` raised in ``__aexit__`` (the CM raised on exit;
+      reusing it is unsafe — an ``Exception`` is reported to the host as
+      ``lifespan.shutdown.failed``, while a ``BaseException`` such as
+      ``asyncio.CancelledError`` interrupting the close is re-raised after
+      finalizing with *no* protocol message sent, so cancellation
+      propagates cooperatively instead of being acked complete), or
     - ``lifespan.startup`` raised in ``__aenter__`` (the partially-acquired
       context manager reference is dropped *without* ``__aexit__`` —
       calling ``__aexit__`` on a CM whose ``__aenter__`` never completed
@@ -199,13 +215,17 @@ class _SessionManagerLifespan:
       as ``lifespan.startup.failed``, while a ``BaseException`` such as
       ``asyncio.CancelledError`` interrupting startup is re-raised after
       finalizing with *no* protocol message sent, so cancellation
-      propagates cooperatively instead of being acked complete).
+      propagates cooperatively instead of being acked complete), or
+    - ``lifespan.shutdown`` arrived with no prior ``lifespan.startup`` (a
+      misbehaving host) — the instance is finalized and the shutdown is
+      answered ``shutdown.failed``, not ``shutdown.complete``.
 
     After finalization, the CM reference is gone and a subsequent
     ``lifespan.shutdown`` is acknowledged with ``shutdown.complete``
-    without re-entering ``__aexit__``. ``__aexit__`` is invoked at most
-    once over an instance's lifetime, and never on a CM whose
-    ``__aenter__`` failed. If a host drives more than one lifespan scope
+    without re-entering ``__aexit__`` (except the shutdown-without-startup
+    path above, whose own ``shutdown`` is answered ``shutdown.failed``).
+    ``__aexit__`` is invoked at most once over an instance's lifetime, and
+    never on a CM whose ``__aenter__`` failed. If a host drives more than one lifespan scope
     against the same app (uncommon outside test harnesses), mount a fresh
     adapter via ``build_asgi_app`` for each.
     """
@@ -257,6 +277,13 @@ class _SessionManagerLifespan:
                     self._cm = self.session_manager.run()
                     await self._cm.__aenter__()
                 except Exception as exc:
+                    # Broad by design: every startup failure must surface as
+                    # lifespan.startup.failed so the ASGI host doesn't hang
+                    # waiting for an ack. BaseException-only subclasses
+                    # (asyncio.CancelledError, KeyboardInterrupt, SystemExit)
+                    # are deliberately *not* caught — they signal cancellation
+                    # or interpreter teardown and must propagate to unwind the
+                    # host cleanly.
                     # Drop the partially-acquired CM and finalize the
                     # instance: calling __aexit__ on a CM whose __aenter__
                     # never completed is undefined per PEP 343, and a host
@@ -328,6 +355,13 @@ class _SessionManagerLifespan:
                     try:
                         await cm.__aexit__(None, None, None)
                     except Exception as exc:
+                        # Broad by design: any __aexit__ failure must surface
+                        # as lifespan.shutdown.failed so the ASGI host doesn't
+                        # hang waiting for an ack. BaseException-only
+                        # subclasses (asyncio.CancelledError, KeyboardInterrupt,
+                        # SystemExit) are deliberately *not* caught — they
+                        # signal cancellation or interpreter teardown and must
+                        # propagate to unwind the host cleanly.
                         self._shutdown_done = True
                         logger.exception("session manager shutdown failed")
                         await send(
@@ -337,6 +371,47 @@ class _SessionManagerLifespan:
                             }
                         )
                         return
+                    except BaseException as exc:
+                        # The direct BaseException subclasses `except
+                        # Exception` does not catch — most relevantly
+                        # asyncio.CancelledError (task cancellation during the
+                        # close), plus KeyboardInterrupt / SystemExit. Whatever
+                        # the type, __aexit__ was interrupted before the
+                        # session manager finished closing. Finalize the
+                        # instance — same as the Exception branch — so a host
+                        # driving a follow-up lifespan scope gets the
+                        # single-shot rejection / idempotent ack instead of
+                        # re-entering __aexit__ on a half-closed CM. Then
+                        # re-raise: a BaseException (most importantly
+                        # CancelledError) must propagate cooperatively and must
+                        # never be swallowed into a spurious shutdown.complete.
+                        self._shutdown_done = True
+                        logger.exception(
+                            "session manager shutdown interrupted by %s; "
+                            "the session manager may not have released its "
+                            "resources",
+                            type(exc).__name__,
+                        )
+                        raise
+                elif not self._started:
+                    # Genuine shutdown-without-startup: lifespan.shutdown
+                    # arrived with no prior lifespan.startup. The legitimate
+                    # failed-startup-then-shutdown case returns early above via
+                    # the _shutdown_done idempotent branch, so reaching here
+                    # with cm is None and not _started means startup was never
+                    # attempted. A host that does this is misbehaving; surface
+                    # it rather than masking the bug with a clean ack.
+                    self._shutdown_done = True
+                    logger.warning(
+                        "lifespan.shutdown received without prior lifespan.startup"
+                    )
+                    await send(
+                        {
+                            "type": "lifespan.shutdown.failed",
+                            "message": "shutdown without prior startup",
+                        }
+                    )
+                    return
                 self._shutdown_done = True
                 await send({"type": "lifespan.shutdown.complete"})
                 return
@@ -358,20 +433,38 @@ def _decode_headers(raw: list[tuple[bytes, bytes]]) -> dict[str, str]:
     return {k.decode("latin-1"): v.decode("latin-1") for k, v in raw}
 
 
-async def _send_401(send: Send, reason: str) -> None:
-    body = json.dumps({"error": "unauthorized", "reason": reason}).encode()
+async def _send_json(
+    send: Send,
+    status: int,
+    body: bytes,
+    *,
+    extra_headers: tuple[tuple[bytes, bytes], ...] = (),
+) -> None:
     await send(
         {
             "type": "http.response.start",
-            "status": 401,
+            "status": status,
             "headers": [
                 (b"content-type", b"application/json"),
                 (b"content-length", str(len(body)).encode()),
-                (b"www-authenticate", b'Bearer realm="sqllens"'),
+                *extra_headers,
             ],
         }
     )
     await send({"type": "http.response.body", "body": body})
+
+
+async def _send_health(send: Send) -> None:
+    # Compact separators so the body is exactly {"status":"ok"} — orchestrator
+    # probes and the integration test match on the literal bytes.
+    await _send_json(send, 200, json.dumps({"status": "ok"}, separators=(",", ":")).encode())
+
+
+async def _send_401(send: Send, reason: str) -> None:
+    body = json.dumps({"error": "unauthorized", "reason": reason}).encode()
+    await _send_json(
+        send, 401, body, extra_headers=((b"www-authenticate", b'Bearer realm="sqllens"'),)
+    )
 
 
 # Type alias kept for callers that want to type middleware factories.

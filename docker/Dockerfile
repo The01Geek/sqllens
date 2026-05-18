@@ -69,9 +69,7 @@ ENV SQLLENS_SERVER__TRANSPORT=http \
 EXPOSE 8765
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request,sys; \
-urllib.request.urlopen('http://127.0.0.1:8765/mcp/', timeout=2); \
-sys.exit(0)" 2>/dev/null || exit 0
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=2)"
 
 # tini handles PID 1 signal forwarding so SIGTERM from `docker stop` cleanly
 # shuts down uvicorn.
