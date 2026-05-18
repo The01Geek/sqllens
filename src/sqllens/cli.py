@@ -101,9 +101,7 @@ def serve(
         try:
             run_preflight(cfg)
         except PreflightError as e:
-            console.print(
-                f"[red]Preflight failed:[/red] {escape(e.subsystem)}: {escape(e.detail)}"
-            )
+            console.print(f"[red]Preflight failed:[/red] {escape(str(e))}")
             raise typer.Exit(code=2) from e
     run(cfg)
 
@@ -158,9 +156,7 @@ def validate(
         try:
             probe(cfg)
         except PreflightError as e:
-            console.print(
-                f"[red]Preflight failed:[/red] {escape(e.subsystem)}: {escape(e.detail)}"
-            )
+            console.print(f"[red]Preflight failed:[/red] {escape(str(e))}")
             raise typer.Exit(code=2) from e
         console.print(f"  [green]{label} OK[/green]")
 

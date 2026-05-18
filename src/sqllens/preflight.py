@@ -17,13 +17,13 @@ configs missing a token).
 
 from __future__ import annotations
 
-import os
+import contextlib
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
 from sqllens.auth import build_authenticator
-from sqllens.config import Config
+from sqllens.config import API_KEY_MISSING_MESSAGE, Config
 
 Subsystem = Literal["database", "llm", "memory", "auth"]
 
@@ -51,49 +51,67 @@ def probe_database(cfg: Config) -> None:
         the detail. The original driver exception is chained via ``__cause__``.
     """
     url = cfg.database.url
-    scheme = url.split("://", 1)[0].lower()
+    if "://" not in url:
+        raise PreflightError(
+            "database", f"database.url {url!r} is missing the '://' separator"
+        )
+    scheme, rest = url.split("://", 1)
+    scheme = scheme.lower()
 
-    try:
-        if scheme.startswith("sqlite"):
-            import sqlite3
+    if scheme.startswith("sqlite"):
+        import sqlite3
 
-            path = url.split("://", 1)[1]
-            if path.startswith("/") and not path.startswith("//"):
-                path = path[1:]
-            conn = sqlite3.connect(path or ":memory:", timeout=_DB_CONNECT_TIMEOUT_SECONDS)
-            conn.close()
-            return
-        if scheme.startswith("postgres"):
-            import psycopg2
+        path = rest
+        if path.startswith("/") and not path.startswith("//"):
+            path = path[1:]
+        # ``timeout`` is sqlite3's lock-wait, not a connect timeout — the file
+        # open itself is the only network-ish step (over NFS etc.) and isn't
+        # bounded by this kwarg. For local files this is effectively instant.
+        try:
+            with contextlib.closing(
+                sqlite3.connect(path or ":memory:", timeout=_DB_CONNECT_TIMEOUT_SECONDS)
+            ):
+                pass
+        except Exception as exc:
+            raise PreflightError("database", f"{type(exc).__name__}: {exc}") from exc
+        return
 
-            normalized = "postgresql://" + url.split("://", 1)[1]
-            conn = psycopg2.connect(
-                normalized, connect_timeout=_DB_CONNECT_TIMEOUT_SECONDS
+    if scheme.startswith("postgres"):
+        import psycopg2
+
+        normalized = "postgresql://" + rest
+        try:
+            with contextlib.closing(
+                psycopg2.connect(normalized, connect_timeout=_DB_CONNECT_TIMEOUT_SECONDS)
+            ):
+                pass
+        except Exception as exc:
+            raise PreflightError("database", f"{type(exc).__name__}: {exc}") from exc
+        return
+
+    if scheme.startswith("mysql"):
+        import pymysql
+
+        parsed = urlparse(url)
+        if not parsed.hostname or not parsed.username:
+            raise PreflightError(
+                "database", "mysql url must include user, host, and database name"
             )
-            conn.close()
-            return
-        if scheme.startswith("mysql"):
-            import pymysql
-
-            parsed = urlparse(url)
-            if not parsed.hostname or not parsed.username:
-                raise PreflightError(
-                    "database", "mysql url must include user, host, and database name"
+        try:
+            with contextlib.closing(
+                pymysql.connect(
+                    host=parsed.hostname,
+                    port=parsed.port or 3306,
+                    user=parsed.username,
+                    password=parsed.password or "",
+                    database=(parsed.path or "").lstrip("/"),
+                    connect_timeout=_DB_CONNECT_TIMEOUT_SECONDS,
                 )
-            conn = pymysql.connect(
-                host=parsed.hostname,
-                port=parsed.port or 3306,
-                user=parsed.username,
-                password=parsed.password or "",
-                database=(parsed.path or "").lstrip("/"),
-                connect_timeout=_DB_CONNECT_TIMEOUT_SECONDS,
-            )
-            conn.close()
-            return
-    except PreflightError:
-        raise
-    except Exception as exc:
-        raise PreflightError("database", f"{type(exc).__name__}: {exc}") from exc
+            ):
+                pass
+        except Exception as exc:
+            raise PreflightError("database", f"{type(exc).__name__}: {exc}") from exc
+        return
 
     raise PreflightError(
         "database",
@@ -102,19 +120,24 @@ def probe_database(cfg: Config) -> None:
 
 
 def probe_llm(cfg: Config) -> None:
-    """Construct the Anthropic client to validate config shape.
+    """Construct the Anthropic client via ``AnthropicLlmService`` to validate config.
 
-    No network round-trip: a real auth check would cost a token-billed
-    ``messages.create`` and slow restarts. Catching missing/empty keys here
-    still beats letting them surface inside ``send_message`` later.
+    Goes through ``AnthropicLlmService`` rather than ``anthropic.Anthropic``
+    directly so ``ANTHROPIC_BASE_URL`` / ``ANTHROPIC_API_KEY`` env fallback
+    and the friendly ``ImportError`` framing match what ``build_agent`` will
+    produce later. No network round-trip — that would cost a token-billed
+    ``messages.create`` and slow restarts.
     """
     if cfg.llm.api_key is None:
-        raise PreflightError("llm", "llm.api_key is not set")
+        raise PreflightError("llm", API_KEY_MISSING_MESSAGE)
 
     try:
-        import anthropic
+        from sqllens.agent.integrations import AnthropicLlmService
 
-        anthropic.Anthropic(api_key=cfg.llm.api_key.get_secret_value())
+        AnthropicLlmService(
+            model=cfg.llm.model,
+            api_key=cfg.llm.api_key.get_secret_value(),
+        )
     except Exception as exc:
         raise PreflightError("llm", f"{type(exc).__name__}: {exc}") from exc
 
@@ -122,9 +145,11 @@ def probe_llm(cfg: Config) -> None:
 def probe_memory(cfg: Config) -> None:
     """Ensure the ChromaDB persist directory exists and is writable.
 
-    Creates the directory (and any missing parents) but does **not** open a
-    Chroma collection — that would trigger the ~80 MB embedding model
-    download which is a UX problem, not a config error, and stays lazy.
+    Creates the directory (and any missing parents) and confirms writability
+    with a sentinel file — ``os.access`` alone gives wrong answers under
+    EUID/ACL setups and races with the actual write. Does **not** open a
+    Chroma collection (that would trigger the ~80 MB embedding model
+    download, which stays lazy by design).
     """
     persist_dir = Path(cfg.memory.persist_dir)
 
@@ -135,10 +160,15 @@ def probe_memory(cfg: Config) -> None:
             "memory", f"cannot create persist_dir {persist_dir}: {exc}"
         ) from exc
 
-    if not os.access(persist_dir, os.W_OK):
+    sentinel = persist_dir / ".sqllens-preflight"
+    try:
+        sentinel.touch()
+    except OSError as exc:
         raise PreflightError(
-            "memory", f"persist_dir {persist_dir} is not writable"
-        )
+            "memory", f"persist_dir {persist_dir} is not writable: {exc}"
+        ) from exc
+    finally:
+        sentinel.unlink(missing_ok=True)
 
 
 def probe_auth(cfg: Config) -> None:
