@@ -123,6 +123,17 @@ _DEFAULT_TEXT = "Here are the results."
 
 
 @pytest.fixture
+def default_stub_rows() -> list[dict[str, Any]]:
+    """The live module-global ``_DEFAULT_ROWS`` object (not a copy).
+
+    Exposed so meta-tests can assert the default-scenario stub never mutates
+    the shared global — a silent cross-test-contamination regression guard
+    that has to inspect the real object, not a fixture-local copy.
+    """
+    return _DEFAULT_ROWS
+
+
+@pytest.fixture
 def stub_agent_send_message() -> Callable[..., StubSendMessage]:
     """Factory yielding async-generator stubs that mimic ``Agent.send_message``.
 
@@ -209,11 +220,12 @@ def stub_agent_send_message() -> Callable[..., StubSendMessage]:
             *,
             conversation_id: str | None = None,
         ) -> AsyncGenerator[UiComponent, None]:
-            # Explicit, *required* parameters (not ``*args, **kwargs`` and no
-            # defaults) so the shape matches the real ``Agent.send_message``
-            # exactly: a call site that drops ``request_context``/``message``
-            # raises ``TypeError`` here just as it would against the real
-            # agent — the stub proves the documented contract, not a looser one.
+            # ``request_context``/``message`` are explicit and *required*
+            # (not ``*args, **kwargs``); ``conversation_id`` keeps its default
+            # exactly as the real ``Agent.send_message`` does. A call site that
+            # drops ``request_context``/``message`` raises ``TypeError`` here
+            # just as it would against the real agent — the stub proves the
+            # documented contract, not a looser one.
             del request_context, message, conversation_id
             for comp in prepared:
                 yield comp

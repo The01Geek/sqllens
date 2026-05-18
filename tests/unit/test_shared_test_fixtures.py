@@ -8,6 +8,7 @@ plumbing that every other test relies on.
 
 from __future__ import annotations
 
+import copy
 import os
 
 import pytest
@@ -195,26 +196,55 @@ async def test_stub_custom_scenario_yields_explicit_components(
     assert answer == "second"
 
 
-async def test_stub_default_rows_are_isolated_across_calls(
+async def test_default_stub_call_does_not_mutate_module_global_rows(
     stub_agent_send_message,
+    default_stub_rows,
 ) -> None:
-    """The factory's ``list(_DEFAULT_ROWS)`` copy must isolate the module-level
-    default rows: mutating the rows seen by one stub must not poison the next
-    default-scenario stub (a silent cross-test-contamination failure mode)."""
+    """A default-scenario stub call must leave the module-global
+    ``_DEFAULT_ROWS`` untouched (a silent cross-test-contamination guard).
+
+    Note: ``DataFrameComponent`` (Pydantic v2) re-validates ``rows`` into a
+    fresh list on construction, so ``df.rows`` is never the global and
+    mutating it proves nothing. The real, non-vacuous contract is "driving
+    the default stub — including consuming the component — does not write
+    back into the shared global." We snapshot the global, exercise the full
+    path (build + render), then assert the global is byte-for-byte unchanged;
+    this fails if a future refactor passes ``_DEFAULT_ROWS`` by reference to
+    a component that mutates in place."""
+    snapshot = copy.deepcopy(default_stub_rows)
+
     send_message = stub_agent_send_message()
     components = [c async for c in send_message(None, "q")]
     df = components[0].rich_component
-    # Assert the storage shape rather than guarding on it — a `hasattr` skip
-    # would let this test pass vacuously if DataFrameComponent's internals
-    # changed. Clearing the list then re-driving a fresh stub proves the
-    # factory-boundary ``list(_DEFAULT_ROWS)`` copy isolates the module global.
-    assert isinstance(df.rows, list)
-    df.rows.clear()
+    df.rows.clear()  # mutate the component's (copied) list — must not reach the global
+    components_to_markdown(components)
 
+    assert default_stub_rows == snapshot
+
+    # And a fresh default stub still yields the pristine default rows.
     send_message2 = stub_agent_send_message()
     answer, _ = components_to_markdown([c async for c in send_message2(None, "q")])
     assert "Alice" in answer
     assert "Bob" in answer
+
+
+async def test_stub_rejects_call_missing_required_args(
+    stub_agent_send_message,
+) -> None:
+    """The PR's central change tightens the stub from ``*args, **kwargs`` to
+    explicit required params so a drifted call site fails like the real
+    ``Agent.send_message``. This negative test pins that: a call missing the
+    required positionals must raise ``TypeError`` (it would NOT if the stub
+    regressed to ``*args, **kwargs``). For async-generator functions the
+    argument binding — and thus the ``TypeError`` — happens at call time,
+    before any iteration."""
+    send_message = stub_agent_send_message()
+
+    with pytest.raises(TypeError):
+        send_message()  # missing request_context, message
+
+    with pytest.raises(TypeError):
+        send_message(None)  # missing message
 
 
 def test_stub_unknown_scenario_raises(stub_agent_send_message) -> None:
