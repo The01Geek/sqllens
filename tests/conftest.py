@@ -9,7 +9,8 @@ Two responsibilities:
    ``PORT=``, ...) — pydantic-settings sub-models in ``sqllens.config`` lack
    their own ``env_prefix`` and would otherwise pick up those names from the
    process environment, masking real failures with ``literal_error`` validation
-   errors. We also scrub ``ANTHROPIC_API_KEY`` (the Anthropic SDK's canonical
+   errors on fields like ``auth.mode``. We also scrub ``ANTHROPIC_API_KEY``
+   (the Anthropic SDK's canonical
    env var, fallback for ``AnthropicLlmService``) and ``SQLLENS_AUTH__BEARER_TOKEN``
    so a developer with those exported cannot bypass the project-specific scrub.
 
@@ -122,6 +123,17 @@ _DEFAULT_TEXT = "Here are the results."
 
 
 @pytest.fixture
+def default_stub_rows() -> list[dict[str, Any]]:
+    """The live module-global ``_DEFAULT_ROWS`` object (not a copy).
+
+    Exposed so meta-tests can assert the default-scenario stub never mutates
+    the shared global — a silent cross-test-contamination regression guard
+    that has to inspect the real object, not a fixture-local copy.
+    """
+    return _DEFAULT_ROWS
+
+
+@pytest.fixture
 def stub_agent_send_message() -> Callable[..., StubSendMessage]:
     """Factory yielding async-generator stubs that mimic ``Agent.send_message``.
 
@@ -136,14 +148,16 @@ def stub_agent_send_message() -> Callable[..., StubSendMessage]:
       message via ``error_message=``). Mirrors how the real agent surfaces
       failures to ``components_to_markdown``.
     - ``"status"`` — yields a ``STATUS_CARD`` with a non-error status (override
-      via ``status_title=`` / ``status=`` / ``description=``).
+      via ``status_title=`` / ``status=`` / ``description=``). Note:
+      ``components_to_markdown`` ignores non-error status cards, so this
+      scenario renders as ``"(no answer)"`` unless combined with ``"custom"``.
     - ``"empty"`` — yields nothing. ``components_to_markdown`` should render
       ``"(no answer)"`` for this case.
     - ``"custom"`` — yields the explicit ``components=`` iterable verbatim.
 
     The returned callable has the same signature as ``Agent.send_message``
-    (``request_context``, ``message``, ``conversation_id=None``) and ignores
-    its arguments — pass whatever the call site requires.
+    (``request_context``, ``message``, ``conversation_id=None``); the arguments
+    are accepted (so a drifted call site fails loudly) but not otherwise used.
 
     Issue #72 consumes this directly when exercising ``query_database``.
     """
@@ -201,8 +215,18 @@ def stub_agent_send_message() -> Callable[..., StubSendMessage]:
         )
 
         async def _send_message(
-            *args: Any, **kwargs: Any
+            request_context: Any,
+            message: str,
+            *,
+            conversation_id: str | None = None,
         ) -> AsyncGenerator[UiComponent, None]:
+            # ``request_context``/``message`` are explicit and *required*
+            # (not ``*args, **kwargs``); ``conversation_id`` keeps its default
+            # exactly as the real ``Agent.send_message`` does. A call site that
+            # drops ``request_context``/``message`` raises ``TypeError`` here
+            # just as it would against the real agent — the stub proves the
+            # documented contract, not a looser one.
+            del request_context, message, conversation_id
             for comp in prepared:
                 yield comp
 

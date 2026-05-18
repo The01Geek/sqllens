@@ -8,6 +8,7 @@ plumbing that every other test relies on.
 
 from __future__ import annotations
 
+import copy
 import os
 
 import pytest
@@ -28,6 +29,9 @@ from sqllens.tools._format import components_to_markdown
         "ANTHROPIC_API_KEY",
         "SQLLENS_LLM__API_KEY",
         "SQLLENS_AUTH__BEARER_TOKEN",
+        # A non-credential key: proves the scrub covers more than the API-key
+        # tuple, so a future trim of _LEAKY_ENV_KEYS can't silently regress it.
+        "ANTHROPIC_BASE_URL",
     ],
 )
 def test_autouse_scrub_removes_pytest_env_sentinels(leaky_key: str) -> None:
@@ -71,6 +75,54 @@ async def test_stub_default_accepts_custom_text_and_rows(
     assert "Zed" in answer
 
 
+async def test_stub_text_only_yields_single_text_component(
+    stub_agent_send_message,
+) -> None:
+    send_message = stub_agent_send_message(scenario="text_only", text="Just prose.")
+
+    components = [c async for c in send_message(None, "any question")]
+
+    assert len(components) == 1
+    assert isinstance(components[0].rich_component, RichTextComponent)
+    answer, is_error = components_to_markdown(components)
+    assert not is_error
+    assert answer == "Just prose."
+
+
+async def test_stub_dataframe_only_yields_single_dataframe_component(
+    stub_agent_send_message,
+) -> None:
+    send_message = stub_agent_send_message(
+        scenario="dataframe_only", rows=[{"id": 7, "name": "Gus"}]
+    )
+
+    components = [c async for c in send_message(None, "any question")]
+
+    assert len(components) == 1
+    assert isinstance(components[0].rich_component, DataFrameComponent)
+    answer, is_error = components_to_markdown(components)
+    assert not is_error
+    assert "Gus" in answer
+
+
+async def test_stub_accepts_documented_keyword_signature(
+    stub_agent_send_message,
+) -> None:
+    """The stub's signature mirrors ``Agent.send_message`` — calling with the
+    documented keyword names must work (and would raise ``TypeError`` if the
+    stub drifted to a different parameter shape)."""
+    send_message = stub_agent_send_message()
+
+    components = [
+        c
+        async for c in send_message(
+            request_context=None, message="q", conversation_id="abc"
+        )
+    ]
+
+    assert len(components) == 2
+
+
 async def test_stub_error_scenario_surfaces_as_error(
     stub_agent_send_message,
 ) -> None:
@@ -112,6 +164,13 @@ async def test_stub_status_scenario_non_error_is_not_error(
 
     components = [c async for c in send_message(None, "anything")]
 
+    # Assert the stub itself, not just the renderer: a regression where the
+    # "status" branch yielded nothing would also render "(no answer)".
+    assert len(components) == 1
+    card = components[0].rich_component
+    assert isinstance(card, StatusCardComponent)
+    assert card.status == "running"
+    assert card.title == "Generating SQL"
     answer, is_error = components_to_markdown(components)
     assert not is_error  # only status="error" trips the error path
     # Non-error status cards aren't rendered to markdown; renderer returns
@@ -135,6 +194,57 @@ async def test_stub_custom_scenario_yields_explicit_components(
     assert not is_error
     # components_to_markdown takes the *last* TEXT component as the answer.
     assert answer == "second"
+
+
+async def test_default_stub_call_does_not_mutate_module_global_rows(
+    stub_agent_send_message,
+    default_stub_rows,
+) -> None:
+    """A default-scenario stub call must leave the module-global
+    ``_DEFAULT_ROWS`` untouched (a silent cross-test-contamination guard).
+
+    Note: ``DataFrameComponent`` (Pydantic v2) re-validates ``rows`` into a
+    fresh list on construction, so ``df.rows`` is never the global and
+    mutating it proves nothing. The real, non-vacuous contract is "driving
+    the default stub — including consuming the component — does not write
+    back into the shared global." We snapshot the global, exercise the full
+    path (build + render), then assert the global is byte-for-byte unchanged;
+    this fails if a future refactor passes ``_DEFAULT_ROWS`` by reference to
+    a component that mutates in place."""
+    snapshot = copy.deepcopy(default_stub_rows)
+
+    send_message = stub_agent_send_message()
+    components = [c async for c in send_message(None, "q")]
+    df = components[0].rich_component
+    df.rows.clear()  # mutate the component's (copied) list — must not reach the global
+    components_to_markdown(components)
+
+    assert default_stub_rows == snapshot
+
+    # And a fresh default stub still yields the pristine default rows.
+    send_message2 = stub_agent_send_message()
+    answer, _ = components_to_markdown([c async for c in send_message2(None, "q")])
+    assert "Alice" in answer
+    assert "Bob" in answer
+
+
+async def test_stub_rejects_call_missing_required_args(
+    stub_agent_send_message,
+) -> None:
+    """The PR's central change tightens the stub from ``*args, **kwargs`` to
+    explicit required params so a drifted call site fails like the real
+    ``Agent.send_message``. This negative test pins that: a call missing the
+    required positionals must raise ``TypeError`` (it would NOT if the stub
+    regressed to ``*args, **kwargs``). For async-generator functions the
+    argument binding — and thus the ``TypeError`` — happens at call time,
+    before any iteration."""
+    send_message = stub_agent_send_message()
+
+    with pytest.raises(TypeError):
+        send_message()  # missing request_context, message
+
+    with pytest.raises(TypeError):
+        send_message(None)  # missing message
 
 
 def test_stub_unknown_scenario_raises(stub_agent_send_message) -> None:
