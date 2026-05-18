@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
+import anthropic
+
 from sqllens.auth import build_authenticator
 from sqllens.config import API_KEY_MISSING_MESSAGE, Config
 
@@ -74,7 +76,7 @@ def probe_database(cfg: Config) -> None:
                 sqlite3.connect(path or ":memory:", timeout=_DB_CONNECT_TIMEOUT_SECONDS)
             ):
                 pass
-        except Exception as exc:
+        except sqlite3.Error as exc:
             raise PreflightError("database", f"{type(exc).__name__}: {exc}") from exc
         return
 
@@ -95,7 +97,7 @@ def probe_database(cfg: Config) -> None:
                 psycopg2.connect(normalized, connect_timeout=_DB_CONNECT_TIMEOUT_SECONDS)
             ):
                 pass
-        except Exception as exc:
+        except psycopg2.Error as exc:
             raise PreflightError("database", f"{type(exc).__name__}: {exc}") from exc
         return
 
@@ -125,7 +127,7 @@ def probe_database(cfg: Config) -> None:
                 )
             ):
                 pass
-        except Exception as exc:
+        except pymysql.MySQLError as exc:
             raise PreflightError("database", f"{type(exc).__name__}: {exc}") from exc
         return
 
@@ -147,14 +149,14 @@ def probe_llm(cfg: Config) -> None:
     if cfg.llm.api_key is None:
         raise PreflightError("llm", API_KEY_MISSING_MESSAGE)
 
-    try:
-        from sqllens.agent.integrations import AnthropicLlmService
+    from sqllens.agent.integrations import AnthropicLlmService
 
+    try:
         AnthropicLlmService(
             model=cfg.llm.model,
             api_key=cfg.llm.api_key.get_secret_value(),
         )
-    except Exception as exc:
+    except anthropic.AnthropicError as exc:
         raise PreflightError("llm", f"{type(exc).__name__}: {exc}") from exc
 
 
