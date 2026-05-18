@@ -41,42 +41,6 @@ Allows every request, returns an empty `AuthContext()`. The right choice for:
 - localhost-bound HTTP (`server.host = "127.0.0.1"`)
 - HTTP behind a trusted reverse proxy that handles auth itself
 
-**Boot-time guard.** `sqllens serve` refuses to start when all three hold:
-`server.transport == "http"`, `auth.mode == "none"`, and `server.host` is not
-a loopback address. The guard lives in `serve` in
-[src/sqllens/cli.py](../../../src/sqllens/cli.py) and runs immediately after
-config load (after the `llm.api_key` check). Behaviour:
-
-- Loopback detection uses `ipaddress.ip_address(host).is_loopback`, so the
-  entire `127.0.0.0/8` IPv4 range and `::1` count. IPv4-mapped IPv6 loopback
-  (e.g. `::ffff:127.0.0.1`) is also recognised: the guard unwraps the
-  mapped IPv4 via `IPv6Address.ipv4_mapped` because CPython's
-  `is_loopback` returns `False` for these on Python 3.11.x and 3.12.0–3.12.3
-  (gh-117566, fixed in 3.12.4 / 3.13). The literal hostname `localhost` is
-  recognised case-insensitively (`localhost`, `Localhost`, `LOCALHOST`). No
-  DNS resolution happens — wildcard binds (`0.0.0.0`, `::`) and arbitrary
-  external hostnames fail closed.
-- On a non-loopback bind with `mode=none`, the CLI exits 2 and prints a
-  remediation message naming both `SQLLENS_AUTH__MODE=bearer` (with
-  `SQLLENS_AUTH__BEARER_TOKEN`) and `SQLLENS_AUTH__INSECURE=1`.
-- `SQLLENS_AUTH__INSECURE=1` (or `auth.insecure = true` in TOML) is the
-  documented opt-out for closed-network deployments (private VPC, k8s
-  ClusterIP, host-only Docker network). When the opt-out is active and the
-  guard would otherwise have tripped, the CLI prints a yellow `Warning:`
-  breadcrumb so the override leaves a log trace.
-- `transport = "stdio"` and `auth.mode in {"bearer", "jwt"}` bypass the guard
-  unconditionally.
-
-The guard is a CLI policy only — `build_authenticator` and `_AuthMiddleware`
-are unchanged. Programmatic callers of `build_asgi_app(cfg)` are not gated,
-because integration tests and embedded users intentionally compose the stack
-on non-loopback hosts without auth.
-
-Regression suite: [tests/unit/test_cli.py](../../../tests/unit/test_cli.py)
-covers refuse-to-boot across IPv4/IPv6/wildcard hosts, both env and TOML
-opt-outs, the loopback recognition matrix, the JWT-mode bypass, the stdio
-bypass, and the non-loopback-with-bearer happy path.
-
 ### `bearer` — [src/sqllens/auth/bearer.py](../../../src/sqllens/auth/bearer.py)
 
 Static bearer token configured at startup. Clients send `Authorization: Bearer <token>`. Implementation notes:
@@ -86,7 +50,12 @@ Static bearer token configured at startup. Clients send `Authorization: Bearer <
 - **Case-insensitive header lookup** — accepts `Authorization` and `authorization`. Anything else (`AUTHORIZATION`, etc.) is missed; if a proxy uppercases the header that's a problem, but no real client does that.
 - **Subject is the literal string `"bearer"`** — there's no principal information in a static token to derive a stable id from, and `None` would conflict with the "successful authentication implies non-null subject" convention some downstream code might one day want.
 
-Config: `auth.mode = "bearer"`, `auth.bearer_token = "..."` (or env `SQLLENS_AUTH__BEARER_TOKEN`). Missing, empty, or whitespace-only tokens are rejected at config load by `AuthConfig._bearer_requires_token`, surfaced through `cli.serve` / `cli.validate` as a `ValidationError` with an actionable message naming the env var, the `[auth]` TOML stanza, and the alternate `mode` values. `build_authenticator` retains the same check as defense-in-depth for callers that bypass validation via `model_construct`.
+Config: `auth.mode = "bearer"`, `auth.bearer_token = "..."` (or env `SQLLENS_AUTH__BEARER_TOKEN`). The `mode`/`bearer_token` pair is validated by two complementary, inverse pydantic `model_validator(mode="after")` checks in [src/sqllens/config.py](../../../src/sqllens/config.py):
+
+- **`AuthConfig._bearer_requires_token`** rejects `mode = "bearer"` with a missing, empty, or whitespace-only `bearer_token`. Without this guard the server would start cleanly and then reject every request at auth time with no startup signal. Surfaced through `cli.serve` / `cli.validate` as a `ValidationError` with an actionable message naming the env var, the `[auth]` TOML stanza, and the alternate `mode` values. `build_authenticator` retains the same check as defense-in-depth for callers that bypass validation via `model_construct`.
+- **`AuthConfig._token_only_with_bearer_mode`** is the inverse: it rejects a `bearer_token` set when `mode` is anything other than `"bearer"`. This catches the dangerous misconfiguration where an operator sets `SQLLENS_AUTH__BEARER_TOKEN` and assumes that alone enables bearer auth — under `mode = "none"` the active authenticator would otherwise be `NoOpAuthenticator` and the server would run completely open. `mode = "jwt"` with a stale token is rejected for the same reason. The error message names the offending field, the actual mode, and both remediations (set `mode = "bearer"` or remove the token / unset the env var).
+
+Together, the two checks make every `(mode, bearer_token)` combination either valid or fail loudly — there is no silent-ignore path.
 
 `bearer` (and `jwt`, once implemented) bypass the `serve` loopback guard — they are the intended way to run HTTP on a non-loopback host. See the `none` section above for the guard's behaviour and the `SQLLENS_AUTH__INSECURE` opt-out.
 

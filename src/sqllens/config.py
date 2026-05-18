@@ -49,10 +49,17 @@ class DatabaseConfig(BaseModel):
     statement_timeout_ms: int = Field(
         default=30_000,
         ge=0,
+        # 24h ceiling rejects values so large they almost certainly reflect a
+        # unit-confusion typo (microseconds passed as ms, an epoch timestamp
+        # pasted in, etc.). Sub-second typos in the other direction
+        # (seconds-meant-as-ms producing too-short timeouts) are not catchable
+        # mechanically and stay the operator's responsibility.
+        le=24 * 60 * 60 * 1000,
         description=(
             "Server-side statement timeout in milliseconds. Applied via "
             "SET statement_timeout (Postgres), SET SESSION MAX_EXECUTION_TIME (MySQL), "
-            "or a progress-handler deadline (SQLite). 0 disables (Postgres/MySQL only)."
+            "or a progress-handler deadline (SQLite). 0 disables (Postgres/MySQL only). "
+            "Upper bound is 24h (86_400_000) to catch unit-confusion typos."
         ),
     )
     max_rows: int = Field(
@@ -125,6 +132,24 @@ class AuthConfig(BaseModel):
             self.bearer_token is None or not self.bearer_token.get_secret_value().strip()
         ):
             raise ValueError(BEARER_TOKEN_MISSING_MESSAGE)
+        return self
+
+    @model_validator(mode="after")
+    def _token_only_with_bearer_mode(self) -> AuthConfig:
+        # Inverse of _bearer_requires_token: reject a stored bearer_token when the
+        # mode isn't "bearer". The token sits unused under any other mode; the most
+        # dangerous case is mode='none', where the active authenticator is
+        # NoOpAuthenticator and the server runs completely unauthenticated despite
+        # the operator believing bearer auth is enabled. mode='jwt' is a milder but
+        # still confusing variant — JWT is active while the stale bearer token
+        # implies the wrong credential will authorize. Loud config-load failure
+        # beats silent misconfiguration in either case.
+        if self.mode != "bearer" and self.bearer_token is not None:
+            raise ValueError(
+                "auth.bearer_token is set but auth.mode is "
+                f"{self.mode!r}. Either set auth.mode='bearer' to use it, "
+                "or remove bearer_token / unset SQLLENS_AUTH__BEARER_TOKEN."
+            )
         return self
 
 
