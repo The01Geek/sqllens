@@ -56,22 +56,35 @@ def _now_iso():
 def _gh_login():
     """Whoever is actually filing — for the manifest's follow_up.filed_by.
 
-    Tries gh api user first (works for personal access tokens). On failure
-    (e.g., GITHUB_TOKEN in Actions lacks the user:read scope and returns
-    HTTP 403 "Resource not accessible by integration"), falls back to the
-    GITHUB_ACTOR env var, then returns "(unknown)". filed_by is
-    informational only — never gate logic — so we degrade rather than
-    fail the run.
+    Tries gh api user first (works for personal access tokens). Falls back
+    to GITHUB_ACTOR, then "(unknown)", on ANY gh failure mode — not just the
+    canonical 403 "Resource not accessible by integration" you get when
+    GITHUB_TOKEN in Actions lacks user:read. That includes expired tokens,
+    5xx, DNS errors, rate-limiting, and gh-not-on-PATH (FileNotFoundError).
+    filed_by is informational only — never gate logic — so we degrade
+    rather than fail the run, but we leave a stderr breadcrumb so operators
+    can see when the primary lookup didn't work.
     """
+    rc_info = "no-binary"
+    stderr_info = ""
     try:
         r = _run(["gh", "api", "user", "--jq", ".login"], check=False)
         if r.returncode == 0 and r.stdout.strip():
             return r.stdout.strip()
+        rc_info = str(r.returncode)
+        stderr_info = (r.stderr or "").strip().splitlines()[0][:120] if r.stderr else ""
     except FileNotFoundError:
         pass
+    sys.stderr.write(
+        f"file-deferrals.py: gh api user unavailable "
+        f"(rc={rc_info}, stderr={stderr_info!r}), falling back to GITHUB_ACTOR\n"
+    )
     actor = os.environ.get("GITHUB_ACTOR", "").strip()
     if actor:
         return actor
+    sys.stderr.write(
+        "file-deferrals.py: GITHUB_ACTOR unset, filed_by will be '(unknown)'\n"
+    )
     return "(unknown)"
 
 
