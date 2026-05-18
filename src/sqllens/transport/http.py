@@ -257,12 +257,9 @@ class _SessionManagerLifespan:
                     )
                     await send({"type": "lifespan.shutdown.complete"})
                     return
-                # Clear self._cm before awaiting __aexit__ so that even if the
-                # adapter is re-driven on a separate scope before this coroutine
-                # returns, the cleared reference prevents a second __aexit__ on
-                # the same CM. _shutdown_done = True is set unconditionally
-                # after the attempt — success or failure both finalize the
-                # instance (a CM that failed to exit cleanly is not reusable).
+                # Capture-and-clear self._cm before awaiting __aexit__: any
+                # subsequent shutdown scope must see a cleared reference and
+                # skip __aexit__ rather than re-exit the same CM.
                 cm = self._cm
                 self._cm = None
                 if cm is not None:
