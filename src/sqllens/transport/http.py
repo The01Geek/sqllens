@@ -28,14 +28,17 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
-from mcp.server.fastmcp import FastMCP
 from starlette.responses import RedirectResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from sqllens.auth import Authenticator, AuthError, build_authenticator
 from sqllens.config import Config
 from sqllens.server import build_server
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 
 logger = logging.getLogger("sqllens.transport.http")
 
@@ -62,26 +65,30 @@ def build_asgi_app(cfg: Config) -> ASGIApp:
     doesn't need path-based dispatch.
     """
     bare, mcp = _build_asgi_app_bare(cfg)
-    # Private SDK attribute: guard so an mcp upgrade that renames or removes
-    # ``_session_manager`` fails loudly at build time instead of silently.
+    # Use the public `session_manager` property: it raises RuntimeError with a
+    # clear message if the manager is uninitialized (None), where the private
+    # ``_session_manager`` attribute would silently be None and explode later
+    # at first-request time. The AttributeError guard handles the SDK-removal
+    # case so an mcp upgrade fails at build time, not at request time.
     try:
-        session_manager = mcp._session_manager  # type: ignore[attr-defined]
+        session_manager = mcp.session_manager
     except AttributeError as exc:
         raise RuntimeError(
-            "FastMCP no longer exposes _session_manager; the mcp SDK likely "
-            "changed its private API. Pin a compatible mcp version or update "
-            "sqllens.transport.http.build_asgi_app."
+            "FastMCP no longer exposes a session_manager attribute; the mcp "
+            "SDK likely renamed or removed it. Pin a compatible mcp version "
+            "or update sqllens.transport.http.build_asgi_app."
         ) from exc
     return _SessionManagerLifespan(bare, session_manager)
 
 
 def _build_asgi_app_bare(cfg: Config) -> tuple[ASGIApp, FastMCP]:
-    """Build the path-normalized, authenticated ASGI app WITHOUT lifespan.
+    """Build the path-normalized, authenticated ASGI app WITHOUT the lifespan adapter.
 
-    Returns the bare app and the underlying ``FastMCP`` instance so the
-    caller can wire up the session-manager lifespan itself. The only
-    in-tree consumer is ``build_asgi_app``; the split exists to make the
-    private-attribute reach a single, guarded site.
+    "Bare" means lifespan-bare only: path normalization and authentication
+    middleware are still applied. Returns the app and the underlying
+    ``FastMCP`` instance so the caller can wire up the session-manager
+    lifespan itself. The only in-tree consumer is ``build_asgi_app``; the
+    split exists to keep the SDK-attribute reach at a single guarded site.
     """
     mcp = build_server(cfg)
     inner = mcp.streamable_http_app()
@@ -171,8 +178,9 @@ class _SessionManagerLifespan:
     """Adapter that runs FastMCP's session manager inside ASGI lifespan events.
 
     FastMCP exposes a session manager that must be active while requests are
-    served (it owns the per-session state). uvicorn drives lifespan startup
-    and shutdown; we intercept those events to start/stop the manager.
+    served (it owns the per-session state). The ASGI host (uvicorn, FastAPI
+    mount, custom Starlette app) drives lifespan startup and shutdown; we
+    intercept those events to start/stop the manager.
     """
 
     def __init__(self, inner: ASGIApp, session_manager) -> None:  # type: ignore[no-untyped-def]

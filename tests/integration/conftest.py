@@ -88,7 +88,10 @@ class _ServerHandle:
 
 @pytest.fixture
 def make_server(tmp_path: Path):
-    """Factory fixture: build_server(auth=...) → handle. One server per test."""
+    """Factory: call returned callable with an AuthConfig to get a running server handle.
+
+    One server per test.
+    """
     handles: list[_ServerHandle] = []
     threads: list[threading.Thread] = []
 
