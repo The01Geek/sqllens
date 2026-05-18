@@ -22,11 +22,16 @@ class BearerTokenAuthenticator(Authenticator):
     """Compare the request's bearer token against a configured value."""
 
     def __init__(self, expected_token: str) -> None:
-        if not expected_token:
+        # ``.strip()`` matches both AuthConfig._bearer_requires_token's whitespace-aware
+        # check AND _extract_bearer's strip on the incoming header — so a config like
+        # ``bearer_token = "  secret  "`` would otherwise be stored verbatim but
+        # never match a client sending ``Authorization: Bearer secret``.
+        normalized = expected_token.strip() if expected_token else ""
+        if not normalized:
             raise ValueError("bearer token must not be empty")
         # Hold the comparison value as bytes so hmac.compare_digest gets a
         # consistent type and we don't allocate on every request.
-        self._expected = expected_token.encode("utf-8")
+        self._expected = normalized.encode("utf-8")
 
     async def authenticate(self, headers: Mapping[str, str]) -> AuthContext:
         token = _extract_bearer(headers)

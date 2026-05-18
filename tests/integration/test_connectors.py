@@ -14,6 +14,7 @@ docker-compose, GH Actions service containers, or a developer's local DBs.
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from typing import Any
 
@@ -31,6 +32,7 @@ from sqllens.config import (
     ServerConfig,
 )
 from sqllens.safety import ReadOnlyGuardRunner, UnsafeSqlError
+from sqllens.safety.limits import MAX_ROWS_ATTR, TRUNCATED_ATTR
 
 pytestmark = [pytest.mark.connectors, pytest.mark.asyncio]
 
@@ -82,6 +84,27 @@ class TestPostgresRunner:
                 _ctx(),
             )
 
+    async def test_max_rows_cap_truncates(self, postgres_url: str) -> None:
+        """generate_series of max_rows + 1 must return exactly max_rows with a truncation marker."""
+        max_rows = 50
+        runner = build_sql_runner(postgres_url, max_rows=max_rows)
+        df = await runner.run_sql(
+            RunSqlToolArgs(sql=f"SELECT generate_series(1, {max_rows + 1}) AS n"),
+            _ctx(),
+        )
+        assert len(df) == max_rows
+        assert df.attrs[TRUNCATED_ATTR] is True
+        assert df.attrs[MAX_ROWS_ATTR] == max_rows
+
+    async def test_statement_timeout_raises_within_a_second(self, postgres_url: str) -> None:
+        """pg_sleep(2) with a 500ms timeout must error in under 1s."""
+        runner = build_sql_runner(postgres_url, statement_timeout_ms=500)
+        start = time.monotonic()
+        with pytest.raises(Exception):  # noqa: B017 — psycopg2.errors.QueryCanceled
+            await runner.run_sql(RunSqlToolArgs(sql="SELECT pg_sleep(2)"), _ctx())
+        elapsed = time.monotonic() - start
+        assert elapsed < 1.5, f"timeout fired too slowly ({elapsed:.2f}s)"
+
 
 # ──────────────────────────────── mysql ─────────────────────────────────────
 
@@ -100,6 +123,38 @@ class TestMysqlRunner:
                 RunSqlToolArgs(sql=f"CREATE TABLE t_{uuid.uuid4().hex} (a INT)"),
                 _ctx(),
             )
+
+    async def test_max_rows_cap_truncates(self, mysql_url: str) -> None:
+        """A UNION-built row generator of max_rows + 1 must return exactly max_rows."""
+        max_rows = 5
+        # MySQL has no generate_series; build a small union to overshoot the cap.
+        sql = " UNION ALL ".join(f"SELECT {i} AS n" for i in range(1, max_rows + 2))
+        runner = build_sql_runner(mysql_url, max_rows=max_rows)
+        df = await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+        assert len(df) == max_rows
+        assert df.attrs[TRUNCATED_ATTR] is True
+        assert df.attrs[MAX_ROWS_ATTR] == max_rows
+
+    async def test_statement_timeout_raises_within_a_second(self, mysql_url: str) -> None:
+        """A long-running SELECT with a 500ms timeout must error in under ~2s.
+
+        ``MAX_EXECUTION_TIME`` in MySQL 8.0 only interrupts read-only SELECTs
+        that the executor checks between row reads; ``SELECT SLEEP(2)`` is *not*
+        reliably interrupted because it has no storage-engine read phase. A
+        cross-join of ``information_schema.columns`` against itself produces
+        a long-running join the executor actually loops over.
+        """
+        runner = build_sql_runner(mysql_url, statement_timeout_ms=500)
+        sql = (
+            "SELECT COUNT(*) FROM information_schema.columns a "
+            "CROSS JOIN information_schema.columns b "
+            "CROSS JOIN information_schema.columns c"
+        )
+        start = time.monotonic()
+        with pytest.raises(Exception):  # noqa: B017 — pymysql.err.OperationalError
+            await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+        elapsed = time.monotonic() - start
+        assert elapsed < 2.0, f"timeout fired too slowly ({elapsed:.2f}s)"
 
 
 # ──────────────────────────────── factory ───────────────────────────────────
