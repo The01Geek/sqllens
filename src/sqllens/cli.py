@@ -8,6 +8,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -126,9 +127,20 @@ def serve(
     config: Path | None = typer.Option(
         None, "--config", "-c", help="Path to sqllens.toml. Falls back to env / ./sqllens.toml."
     ),
+    no_preflight: bool = typer.Option(
+        False,
+        "--no-preflight",
+        envvar="SQLLENS_NO_PREFLIGHT",
+        help=(
+            "Skip eager DB/LLM/Chroma/auth probes. Useful in container "
+            "orchestrators where dependencies come up after the server, or in "
+            "tests. Otherwise leave on — the probes are your fail-fast guard."
+        ),
+    ),
 ) -> None:
     """Start the MCP server."""
     from sqllens.config import Config
+    from sqllens.preflight import PreflightError, run_preflight
     from sqllens.server import run
 
     try:
@@ -151,15 +163,40 @@ def serve(
             f"unauthenticated HTTP server on {escape(cfg.server.host)}. "
             "Closed-network deployments only."
         )
+    if no_preflight:
+        console.print("[yellow]Preflight skipped (--no-preflight).[/yellow]")
+    else:
+        try:
+            run_preflight(cfg)
+        except PreflightError as e:
+            console.print(f"[red]Preflight failed:[/red] {escape(str(e))}")
+            raise typer.Exit(code=2) from e
     run(cfg)
 
 
 @app.command(name="validate")
 def validate(
     config: Path | None = typer.Option(None, "--config", "-c"),
+    check_db: bool = typer.Option(False, "--check-db", help="Probe the database connection."),
+    check_llm: bool = typer.Option(False, "--check-llm", help="Probe the LLM client."),
+    check_memory: bool = typer.Option(
+        False, "--check-memory", help="Probe the Chroma persist directory."
+    ),
+    check_auth: bool = typer.Option(False, "--check-auth", help="Probe the authenticator."),
 ) -> None:
-    """Validate config without starting the server."""
+    """Validate config without starting the server.
+
+    Schema is always validated. Pass any combination of ``--check-*`` flags to
+    also run the corresponding preflight probe — same checks ``serve`` runs.
+    """
     from sqllens.config import Config
+    from sqllens.preflight import (
+        PreflightError,
+        probe_auth,
+        probe_database,
+        probe_llm,
+        probe_memory,
+    )
 
     try:
         cfg = Config.load(config)
@@ -187,6 +224,24 @@ def validate(
         )
     console.print(auth_line)
     console.print(f"  transport: {cfg.server.transport}")
+
+    selected: list[tuple[str, Callable[..., None]]] = []
+    if check_db:
+        selected.append(("database", probe_database))
+    if check_llm:
+        selected.append(("llm", probe_llm))
+    if check_memory:
+        selected.append(("memory", probe_memory))
+    if check_auth:
+        selected.append(("auth", probe_auth))
+
+    for label, probe in selected:
+        try:
+            probe(cfg)
+        except PreflightError as e:
+            console.print(f"[red]Preflight failed:[/red] {escape(str(e))}")
+            raise typer.Exit(code=2) from e
+        console.print(f"  [green]{label} OK[/green]")
 
 
 # ---------------------------------------------------------------------------

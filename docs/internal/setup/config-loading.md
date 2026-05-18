@@ -45,10 +45,10 @@ Keeping sub-models as `BaseModel` makes the parent `Config` the only env-aware l
 
 Two commands load config:
 
-- `sqllens serve` (`serve` command in [src/sqllens/cli.py](../../../src/sqllens/cli.py)) — calls `Config.load(config)`. On exception, prints `Config error: <msg>` and exits 2.
-- `sqllens validate` (`validate` command in [src/sqllens/cli.py](../../../src/sqllens/cli.py)) — calls `Config.load(config)` and prints a one-line summary on success. On exception, prints `Invalid: <msg>` and exits 2.
+- `sqllens serve` (`serve` command in [src/sqllens/cli.py](../../../src/sqllens/cli.py)) — calls `Config.load(config)`. On exception, prints `Config error: <msg>` and exits 2. After config loads cleanly, runs eager preflight probes against the four infrastructure dependencies (database, LLM, Chroma persist dir, authenticator); on failure prints `Preflight failed: <subsystem>: <detail>` and exits 2. Skip with `--no-preflight` / `SQLLENS_NO_PREFLIGHT=1` — the skip is announced in yellow so the safety net isn't lost silently. See [preflight.md](preflight.md).
+- `sqllens validate` (`validate` command in [src/sqllens/cli.py](../../../src/sqllens/cli.py)) — calls `Config.load(config)` and prints a one-line summary on success. On exception, prints `Invalid: <msg>` and exits 2. Accepts `--check-db`, `--check-llm`, `--check-memory`, `--check-auth` to opt into the same preflight probes `serve` runs.
 
-`validate` performs **structural** validation only — it doesn't open the database, doesn't ping the LLM, doesn't bind a port. Secrets are explicitly *not* required: `llm.api_key` is optional in the schema, and the only enforcement is in `sqllens serve` (see below).
+By default `validate` performs **structural** validation only — it doesn't open the database, doesn't ping the LLM, doesn't bind a port. Secrets are explicitly *not* required: `llm.api_key` is optional in the schema, and the only enforcement is in `sqllens serve` (see below). Pass `--check-*` flags to extend validation into runtime-readiness territory without starting the server.
 
 ## Handled error cases
 
@@ -76,7 +76,11 @@ Mitigation: `sqllens claude-desktop install` always writes BOM-free UTF-8 via Py
 
 The agent factory ([src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py)) still calls `cfg.llm.api_key.get_secret_value()` unchanged — that's a defensive second layer; the CLI is the authoritative gate.
 
-### 3. `auth.mode = "bearer"` without a usable `bearer_token`
+### 3. Infrastructure preflight failures during `sqllens serve`
+
+After `Config.load()` succeeds and the `llm.api_key` gate passes, `sqllens serve` calls `run_preflight(cfg)` to exercise the database, LLM client, Chroma persist directory, and authenticator. A `PreflightError` from any probe surfaces as `Preflight failed: <subsystem>: <detail>` and exits 2 — same exit code as a config-load failure, since both block startup. The full reference for what each probe does (and doesn't do) is in [preflight.md](preflight.md). `sqllens validate` exposes the same probes via `--check-db / --check-llm / --check-memory / --check-auth`, so a CI lint step can fail fast on a broken DSN without spinning up the transport.
+
+### 4. `auth.mode = "bearer"` without a usable `bearer_token`
 
 `AuthConfig._bearer_requires_token` (a pydantic `@model_validator(mode="after")` in [src/sqllens/config.py](../../../src/sqllens/config.py)) rejects `mode = "bearer"` when `bearer_token` is `None`, empty, or whitespace-only. The check fires inside `Config.load()`, so both `sqllens serve` and `sqllens validate` exit 2 through the generic `except Exception` block — no special-case CLI branch is needed (contrast with `llm.api_key`, where `validate` deliberately stays permissive).
 
