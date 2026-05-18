@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
+from pydantic import ValidationError
 from rich.console import Console
 from rich.markup import escape
 
@@ -36,16 +37,11 @@ err_console = Console(stderr=True)
 def _format_config_error(exc: Exception) -> str:
     """Render a config-load exception for stderr without leaking secrets.
 
-    A pydantic ``ValidationError``'s ``str()`` embeds the offending *input*
-    values — bearer token, LLM API key, DSN password. Rendering only
-    ``loc``/``msg``/``type`` from ``errors(include_url=False)`` keeps the
-    actionable message (our validators' text lives in ``msg``) while dropping
-    the ``input``/``ctx`` fields that carry the secret. Non-``ValidationError``
-    exceptions are config-load errors (file-not-found, BOM, TOML syntax) that
-    do not carry secret input, so their ``str()`` is safe as-is.
+    A pydantic ``ValidationError``'s ``str()`` embeds the offending input
+    (bearer token, API key, DSN password). Emit only ``loc``/``msg``/``type``,
+    dropping ``input``/``ctx``. Other config-load errors (file-not-found, BOM,
+    TOML syntax) carry no secret input, so pass them through.
     """
-    from pydantic import ValidationError
-
     if not isinstance(exc, ValidationError):
         return str(exc)
     lines: list[str] = []
@@ -270,12 +266,9 @@ def validate(
             raise typer.Exit(code=2) from e
         console.print(f"  [green]{label} OK[/green]")
 
-    # O-8 exit-code contract: 0 = genuinely OK, 1 = parses but the server would
-    # fail to start (api_key unset — serve exits 2 on this), 2 = parse/schema
-    # error (handled above). Deploy/CI scripts need to distinguish a
-    # would-fail-to-start config from a clean one; a bare exit 0 hid that.
-    # Run selected probes first (above) so --check-llm output is not suppressed,
-    # then signal would-fail-to-start.
+    # Exit-code contract: 0 = OK, 1 = parses but would fail to start (api_key
+    # unset), 2 = parse/schema error (raised above). Probes run before this so
+    # --check-llm output is not suppressed by the early exit.
     if cfg.llm.api_key is None:
         err_console.print(
             f"[red]Would fail to start:[/red] {escape(API_KEY_MISSING_MESSAGE)}"

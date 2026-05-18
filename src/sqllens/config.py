@@ -122,37 +122,36 @@ class AuthConfig(BaseModel):
     jwt_issuer: str | None = None
     jwt_audience: str | None = None
 
+    # Pydantic runs mode="after" validators in definition order; jwt rejection
+    # is defined first so a jwt config gets JWT_NOT_IMPLEMENTED_MESSAGE rather
+    # than the misleading "bearer_token set with non-bearer mode" message from
+    # _token_only_with_bearer_mode.
     @model_validator(mode="after")
     def _reject_unimplemented_jwt(self) -> AuthConfig:
-        # JWT is scaffolded (auth/jwt.py) but unimplemented — it raises only at
-        # request time. Without this guard, mode='jwt' loads cleanly, ``validate``
-        # prints ``Config OK``, the server starts, and every request 401s: a green
-        # check against a dead server. Reject at config-validation so BOTH
-        # ``serve`` and ``validate`` (which share ``Config.load``) fail fast with
-        # an actionable message instead of a terse enum error. Runs first so the
-        # jwt message wins over the bearer-token validators for a jwt config.
+        # mode='jwt' parses against the Literal but JWT only raises at request
+        # time, so without this guard `validate` prints Config OK against a
+        # server that 401s every request.
         if self.mode == "jwt":
             raise ValueError(JWT_NOT_IMPLEMENTED_MESSAGE)
         return self
 
     @model_validator(mode="after")
     def _bearer_requires_token(self) -> AuthConfig:
-        # Without this guard, mode='bearer' without a usable token (None, empty, or
-        # whitespace-only — a real footgun from shell env vars like
-        # ``SQLLENS_AUTH__BEARER_TOKEN=``) loads cleanly and the server starts. Every
-        # request is then rejected at auth time with no startup signal.
-        if self.mode == "bearer" and (
-            self.bearer_token is None or not self.bearer_token.get_secret_value().strip()
-        ):
+        # mode='bearer' with an unusable token (None, empty, or whitespace-only
+        # — a footgun from shell env vars like ``SQLLENS_AUTH__BEARER_TOKEN=``)
+        # would otherwise load cleanly and fail every request at auth time with
+        # no startup signal. Length is measured post-strip to match what
+        # BearerTokenAuthenticator stores and _extract_bearer compares against.
+        if self.mode != "bearer":
+            return self
+        token = (
+            "" if self.bearer_token is None
+            else self.bearer_token.get_secret_value().strip()
+        )
+        if not token:
             raise ValueError(BEARER_TOKEN_MISSING_MESSAGE)
-        # A too-short token is trivially brute-forceable. Length is measured on
-        # the stripped value so it matches what BearerTokenAuthenticator stores
-        # and what _extract_bearer compares against. The None/empty/whitespace
-        # cases are already handled above, so bearer_token is usable here.
-        if self.mode == "bearer":
-            token = self.bearer_token.get_secret_value().strip()  # type: ignore[union-attr]
-            if len(token) < MIN_BEARER_TOKEN_LENGTH:
-                raise ValueError(BEARER_TOKEN_TOO_SHORT_MESSAGE)
+        if len(token) < MIN_BEARER_TOKEN_LENGTH:
+            raise ValueError(BEARER_TOKEN_TOO_SHORT_MESSAGE)
         return self
 
     @model_validator(mode="after")

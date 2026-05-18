@@ -16,7 +16,7 @@ import hmac
 from collections.abc import Mapping
 
 from sqllens.auth.base import AuthContext, Authenticator, AuthError
-from sqllens.config import MIN_BEARER_TOKEN_LENGTH
+from sqllens.config import BEARER_TOKEN_TOO_SHORT_MESSAGE, MIN_BEARER_TOKEN_LENGTH
 
 
 class BearerTokenAuthenticator(Authenticator):
@@ -32,11 +32,8 @@ class BearerTokenAuthenticator(Authenticator):
             raise ValueError("bearer token must not be empty")
         # Defense-in-depth: AuthConfig's validator normally enforces this at
         # config-load, but model_construct / direct construction bypass it.
-        # A short token is trivially brute-forceable.
         if len(normalized) < MIN_BEARER_TOKEN_LENGTH:
-            raise ValueError(
-                f"bearer token must be at least {MIN_BEARER_TOKEN_LENGTH} characters"
-            )
+            raise ValueError(BEARER_TOKEN_TOO_SHORT_MESSAGE)
         # Hold the comparison value as bytes so hmac.compare_digest gets a
         # consistent type and we don't allocate on every request.
         self._expected = normalized.encode("utf-8")
