@@ -16,10 +16,17 @@ from sqllens.tools._format import components_to_markdown
 
 logger = logging.getLogger("sqllens.tools.query_database")
 
-# Stable client-facing message for tool-internal / infrastructure failures.
-# Driver exceptions carry host/port/db/role; the full traceback is logged
-# server-side instead of echoed to the MCP client.
+# Client-facing error taxonomy. The MCP wrapper collapses every failure into
+# one ``isError: true`` result, so the *message* is the only category signal
+# the caller gets — keep both forms named here so the split stays observable
+# in one place:
+#  - tool-internal / infrastructure failures get the stable sanitized message
+#    (driver exceptions carry host/port/db/role; the full traceback is logged
+#    server-side instead of echoed to the MCP client),
+#  - SQL-execution failures the agent reported get a recognizable prefix,
+#  - ``UnsafeSqlError`` is surfaced verbatim (actionable safety feedback).
 _INTERNAL_ERROR_MESSAGE = "internal error; see server logs"
+_SQL_EXECUTION_ERROR_PREFIX = "SQL execution error: "
 
 # Lazy-built singleton — first call wires the agent, subsequent calls reuse it.
 # ``_AGENT_CFG`` records the ``Config`` that built it so a later call with a
@@ -34,12 +41,13 @@ _AGENT_LOCK = asyncio.Lock()
 async def _agent_for(cfg: Config) -> Agent:
     """Return the process-wide agent, building it exactly once.
 
-    Double-checked locking: the fast path returns the already-built agent
-    without acquiring ``_AGENT_LOCK``; only the cold start serializes on it,
-    so two concurrent first calls cannot both run ``build_agent``. A later
-    call whose ``cfg`` differs (by identity) from the one that built the
-    agent is still served by the original agent, but logs a warning rather
-    than silently honoring a config it is not actually using.
+    Double-checked locking: the outer ``_AGENT is None`` test is a fast-path
+    optimization that skips the lock once the agent exists; correctness comes
+    from the *inner* re-check after awaiting ``_AGENT_LOCK`` (the only
+    suspension point), so two concurrent first calls cannot both run
+    ``build_agent``. A later call whose ``cfg`` differs (by identity) from
+    the one that built the agent is still served by the original agent, but
+    logs a warning rather than silently honoring a config it is not using.
     """
     global _AGENT, _AGENT_CFG
     if _AGENT is None:
@@ -81,5 +89,5 @@ async def query_database_impl(cfg: Config, question: str) -> str:
     answer, is_error = components_to_markdown(components)
     if is_error:
         # Agent-reported query failure — SQL-execution error category.
-        raise RuntimeError(f"SQL execution error: {answer}")
+        raise RuntimeError(f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}")
     return answer
