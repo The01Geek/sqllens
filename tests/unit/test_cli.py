@@ -52,9 +52,22 @@ def test_no_args_prints_help() -> None:
 )
 def test_config_load_failure_goes_to_stderr(tmp_path, command: str, expected: str) -> None:
     # Stdio MCP clients read JSON-RPC on stdout; operator errors must land on
-    # stderr to avoid corrupting that stream.
+    # stderr to avoid corrupting that stream. Assert stdout is completely
+    # empty — the contract is "no non-JSON-RPC bytes on stdout", not just
+    # "no specific error substring on stdout".
     missing = tmp_path / "does-not-exist.toml"
     result = runner.invoke(app, [command, "--config", str(missing)])
     assert result.exit_code == 2
     assert expected in result.stderr
-    assert expected not in result.stdout
+    assert result.stdout == ""
+
+
+def test_init_already_exists_error_goes_to_stderr(tmp_path) -> None:
+    # Same stdio-safety contract: the `init` "already exists" error must
+    # land on stderr, never on stdout.
+    existing = tmp_path / "sqllens.toml"
+    existing.write_text("# placeholder\n")
+    result = runner.invoke(app, ["init", "--path", str(existing)])
+    assert result.exit_code == 1
+    assert "already exists" in result.stderr
+    assert "already exists" not in result.stdout

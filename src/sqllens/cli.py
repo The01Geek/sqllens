@@ -23,8 +23,8 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
-# Errors land on stderr so they cannot collide with the JSON-RPC stream
-# stdio MCP clients read on stdout.
+# `sqllens serve` shares stdout with the stdio MCP JSON-RPC stream; routing
+# errors to stderr keeps that channel clean. Other commands follow suit.
 err_console = Console(stderr=True)
 
 

@@ -199,10 +199,12 @@ def test_cli_serve_fails_without_api_key(tmp_path: Path) -> None:
     result = runner.invoke(cli.app, ["serve", "-c", str(cfg_path)])
     assert result.exit_code == 2
     # Config errors during serve land on stderr so they cannot collide with the
-    # JSON-RPC channel on stdout under the stdio MCP transport.
+    # JSON-RPC channel on stdout under the stdio MCP transport. Enforce both
+    # halves of the invariant — the message is on stderr AND stdout is clean.
     assert "llm.api_key" in result.stderr
     assert "SQLLENS_LLM__API_KEY" in result.stderr
     assert "[llm]" in result.stderr
+    assert "llm.api_key" not in result.stdout
 
 
 def test_env_api_key_satisfies_missing_toml_key(tmp_path: Path, monkeypatch) -> None:
@@ -267,6 +269,7 @@ def test_cli_validate_fails_on_plain_malformed_toml(tmp_path: Path) -> None:
     result = runner.invoke(cli.app, ["validate", "-c", str(cfg_path)])
     assert result.exit_code == 2
     assert "Invalid" in result.stderr
+    assert "Invalid" not in result.stdout
 
 
 def test_build_agent_raises_when_api_key_missing(tmp_path: Path) -> None:
