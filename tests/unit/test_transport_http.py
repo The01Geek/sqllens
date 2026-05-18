@@ -21,6 +21,7 @@ otherwise only covers indirectly.
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 import pytest
@@ -310,6 +311,74 @@ def test_lifespan_shutdown_baseexception_propagates_not_caught() -> None:
     types = [m["type"] for m in sent]
     assert types == ["lifespan.startup.complete"]
     assert "lifespan.shutdown.failed" not in types
+# Exact named-type coverage for issue #101's deferred review findings.
+# The pre-existing BaseException-propagation tests above use
+# ``KeyboardInterrupt``; the findings on PR #100 specifically name
+# ``asyncio.CancelledError`` and ``SystemExit``. These parametrized tests
+# pin those exact types so the disproofs are airtight:
+#
+#  - Finding 1 (logger.exception logs CancelledError/SystemExit at ERROR):
+#    the startup/shutdown ``except Exception`` arms cannot catch a
+#    BaseException-only subclass, so ``logger.exception`` is never reached
+#    and no ERROR record is emitted — asserted explicitly via ``caplog``.
+#  - Finding 3 (partially-entered CM dropped without __aexit__ when
+#    interrupted mid-entry): a CancelledError raised *from* ``__aenter__``
+#    means entry was suspended and did not complete; ``__aexit__`` must NOT
+#    run on it (PEP 343), pinned via ``aexit_calls == 0``.
+_BASE_EXC_NAMED_TYPES = [asyncio.CancelledError, SystemExit]
+
+
+@pytest.mark.parametrize("exc_type", _BASE_EXC_NAMED_TYPES)
+def test_lifespan_startup_named_baseexception_propagates_uncaught(
+    exc_type: type[BaseException], caplog: pytest.LogCaptureFixture
+) -> None:
+    """A BaseException-only subclass raised from ``__aenter__`` propagates
+    out of ``_handle_lifespan`` unchanged: no fabricated ``startup.failed``,
+    no ERROR log, and ``__aexit__`` is never called on the CM whose
+    ``__aenter__`` was interrupted mid-entry.
+    """
+    sm = _FakeSessionManager(startup_exc=exc_type())
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io([{"type": "lifespan.startup"}])
+
+    with caplog.at_level(logging.ERROR, logger="sqllens.transport.http"):
+        with pytest.raises(exc_type):
+            asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    # No ack fabricated for the signal (the `except Exception` arm — which
+    # holds the only logger.exception call — was never entered).
+    assert sent == []
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+    # The raise traversed the awaited CM entry, pinning the startup
+    # `except Exception` site specifically (not an upstream escape).
+    assert sm.aenter_calls == 1
+    # Interrupted mid-entry: the partially-acquired CM must NOT be exited
+    # (calling __aexit__ on a CM whose __aenter__ never completed is
+    # undefined per PEP 343).
+    assert sm.aexit_calls == 0
+
+
+@pytest.mark.parametrize("exc_type", _BASE_EXC_NAMED_TYPES)
+def test_lifespan_shutdown_named_baseexception_propagates_uncaught(
+    exc_type: type[BaseException], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Symmetric twin: a BaseException-only subclass raised from ``__aexit__``
+    propagates unchanged — no fabricated ``shutdown.failed``, no ERROR log.
+    """
+    sm = _FakeSessionManager(shutdown_exc=exc_type())
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io(
+        [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
+    )
+
+    with caplog.at_level(logging.ERROR, logger="sqllens.transport.http"):
+        with pytest.raises(exc_type):
+            asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    types = [m["type"] for m in sent]
+    assert types == ["lifespan.startup.complete"]
+    assert "lifespan.shutdown.failed" not in types
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
     # The raise traversed __aexit__ (not run()/__aenter__), pinning the
     # shutdown `except Exception` site specifically.
     assert sm.aexit_calls == 1
