@@ -120,20 +120,32 @@ template.
 
 **Tracking:** #37
 
-#### S-4. Bad database URL crashes only at first tool call, not startup
+#### S-4. Bad database URL crashes only at first tool call, not startup — **resolved by #38**
 **File:** [`src/sqllens/tools/query_database.py:18-25`](../../src/sqllens/tools/query_database.py#L18-L25) ·
 **Category:** Reliability / DX
 
-`build_agent` is lazy. A typo, wrong port, or missing password produces a
-process that starts cleanly, prints nothing, and returns an opaque
-`RuntimeError` to the first MCP call. Operators have no startup signal to
+`build_agent` was lazy. A typo, wrong port, or missing password produced a
+process that started cleanly, printed nothing, and returned an opaque
+`RuntimeError` to the first MCP call. Operators had no startup signal to
 fail fast on.
 
-**Fix:** Call `build_agent(cfg)` eagerly in `cli.serve` after loading config,
-before `run(cfg)`. Map common driver exceptions (auth failure, host unreach,
-DB missing) to clear single-line messages with exit code 2.
+**Resolution (PR #38, merged for v0.1.0):**
+[`src/sqllens/preflight.py`](../../src/sqllens/preflight.py) adds
+`probe_database`, `probe_llm`, `probe_memory`, `probe_auth`, and a
+`run_preflight` orchestrator that `sqllens serve` calls before binding the
+transport. Failures exit 2 with `Preflight failed: <subsystem>: <detail>`.
+`--no-preflight` / `SQLLENS_NO_PREFLIGHT=1` provides the escape hatch for
+container orchestrators where dependencies come up after the server; the
+skip is announced in yellow so the safety net isn't lost silently.
+`sqllens validate` exposes the same probes via `--check-db`, `--check-llm`,
+`--check-memory`, `--check-auth`. Full reference:
+[docs/internal/setup/preflight.md](setup/preflight.md).
 
-**Tracking:** #38
+Out of scope (separate issue): replacing the agent's blanket exception
+handler at `agent.py:166-213`, which still collapses post-startup tool
+errors into a generic message.
+
+**Tracking:** #38 (resolved)
 
 ### Code correctness
 
@@ -169,6 +181,8 @@ empty-component case returns `"(no answer)"`. None of this is tested.
 survives, truncation note format, empty columns fallback at line 70, cell
 formatting for None/Decimal/datetime/NaN (see also P0 Product gaps below).
 
+**Tracking:** #71
+
 #### T-2. Zero coverage of `tools/query_database.py` (+ exposes a singleton bug)
 **File:** [`src/sqllens/tools/query_database.py`](../../src/sqllens/tools/query_database.py) ·
 **Category:** No-test area / Bug
@@ -185,6 +199,8 @@ config-binding behavior (explicit warning if a different `cfg` is passed)
 and the error-surfacing path. Add an autouse fixture in
 `tests/integration/conftest.py` that resets `_AGENT = None` between tests.
 
+**Tracking:** #72
+
 #### T-3. No mock-LLM fixture; integration conftest doesn't scrub `SQLLENS_LLM__API_KEY`
 **Files:** [`tests/integration/conftest.py`](../../tests/integration/conftest.py) ·
 [`tests/unit/conftest.py:41`](../../tests/unit/conftest.py#L41) ·
@@ -197,6 +213,8 @@ env, a forgotten mock could hit the real Anthropic API.
 **Fix:** Mirror the env-scrub fixture in the integration conftest. Add a
 session-scoped fixture that monkeypatches `sqllens.agent.factory.build_agent`
 (or the Anthropic client constructor) to a stub.
+
+**Tracking:** #74
 
 ### Product / UX
 
@@ -407,7 +425,7 @@ file on POSIX.
 ## Suggested release plan
 
 ### v0.1.0-rc.1 — safety & ops baseline (target: 2–3 weeks)
-**Must land:** S-1, S-2, S-3, S-4, C-2, C-3, C-4, T-1, T-2, T-3, P-1, P-2, P-3, P-4, P-5, P-6, O-1, O-4, O-5, O-7, O-8, O-12, O-13, O-14, O-16.
+**Must land:** S-1, S-2, S-3, S-4, C-3, C-4, T-1, T-2, T-3, P-1, P-2, P-3, P-4, P-5, P-6, O-1, O-4, O-5, O-7, O-8, O-12, O-13, O-14, O-16. (~~C-1~~ and ~~C-2~~ landed early via PR #43.)
 
 Rationale: every P0 + the highest-trust-impact P1s (the bypass-corpus tests
 in T-4, the timeout/row-cap in S-3, the Docker default in S-2). Without

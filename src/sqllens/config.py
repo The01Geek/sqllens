@@ -49,10 +49,17 @@ class DatabaseConfig(BaseModel):
     statement_timeout_ms: int = Field(
         default=30_000,
         ge=0,
+        # 24h ceiling rejects values so large they almost certainly reflect a
+        # unit-confusion typo (microseconds passed as ms, an epoch timestamp
+        # pasted in, etc.). Sub-second typos in the other direction
+        # (seconds-meant-as-ms producing too-short timeouts) are not catchable
+        # mechanically and stay the operator's responsibility.
+        le=24 * 60 * 60 * 1000,
         description=(
             "Server-side statement timeout in milliseconds. Applied via "
             "SET statement_timeout (Postgres), SET SESSION MAX_EXECUTION_TIME (MySQL), "
-            "or a progress-handler deadline (SQLite). 0 disables (Postgres/MySQL only)."
+            "or a progress-handler deadline (SQLite). 0 disables (Postgres/MySQL only). "
+            "Upper bound is 24h (86_400_000) to catch unit-confusion typos."
         ),
     )
     max_rows: int = Field(

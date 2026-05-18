@@ -37,7 +37,7 @@ if cfg.llm.api_key is None:
     raise ValueError(API_KEY_MISSING_MESSAGE)
 ```
 
-`sqllens serve` ([src/sqllens/cli.py](../../../src/sqllens/cli.py)) does the same check earlier and exits 2 with a friendly error. The factory's check is a backstop for programmatic embedders and tests that call `build_agent` directly — without it, a `None` key surfaces as a bare `AttributeError` at the first `get_secret_value()` call. That violates the CLAUDE.md rule that MCP tool errors must be clear, structured messages.
+`sqllens serve` ([src/sqllens/cli.py](../../../src/sqllens/cli.py)) does the same check earlier and exits 2 with a friendly error. The CLI gate runs unconditionally; the [preflight](../setup/preflight.md) layer that follows it (`probe_llm`) then constructs `AnthropicLlmService` to surface other LLM-config problems before the transport starts. The factory's check is the third layer: a backstop for programmatic embedders and tests that call `build_agent` directly, where preflight may have been bypassed. Without it, a `None` key surfaces as a bare `AttributeError` at the first `get_secret_value()` call, which violates the CLAUDE.md rule that MCP tool errors must be clear, structured messages.
 
 ## Why the scratch FS is anchored to `tempfile.gettempdir()`
 
