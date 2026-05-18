@@ -87,28 +87,21 @@ def test_build_asgi_app_bare_returns_app_without_lifespan(tmp_path: Path) -> Non
 def test_build_asgi_app_raises_runtimeerror_when_session_manager_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The AttributeError guard fires when the SDK no longer exposes session_manager.
+    """The AttributeError guard fires when the SDK removes ``session_manager``.
 
-    Simulates a hypothetical future mcp SDK upgrade that removes the
-    attribute. Without the guard, ``_SessionManagerLifespan`` would be
-    constructed with whatever stand-in we passed and the failure would
-    surface deep inside the lifespan startup path — far from the SDK
-    change that caused it.
+    Simulates a hypothetical future mcp SDK upgrade by patching the
+    ``session_manager`` property on ``FastMCP`` itself to raise
+    ``AttributeError``. Without the guard, this would surface as an opaque
+    ``AttributeError`` at the property-access line with no hint that an mcp
+    SDK upgrade is the cause; the guard converts it to a ``RuntimeError``
+    whose message names the file to update.
     """
-    import sqllens.transport.http as http_mod
+    from mcp.server.fastmcp import FastMCP
 
-    real_bare = _build_asgi_app_bare
+    def raise_attribute_error(self: FastMCP) -> None:
+        raise AttributeError("session_manager")
 
-    def fake_bare(cfg: Config):
-        bare, _mcp = real_bare(cfg)
-
-        class _StubMCP:
-            # No session_manager attribute → AttributeError on access.
-            pass
-
-        return bare, _StubMCP()
-
-    monkeypatch.setattr(http_mod, "_build_asgi_app_bare", fake_bare)
+    monkeypatch.setattr(FastMCP, "session_manager", property(raise_attribute_error))
 
     with pytest.raises(RuntimeError, match="FastMCP no longer exposes"):
         build_asgi_app(_cfg(tmp_path))

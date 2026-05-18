@@ -65,11 +65,11 @@ def build_asgi_app(cfg: Config) -> ASGIApp:
     doesn't need path-based dispatch.
     """
     bare, mcp = _build_asgi_app_bare(cfg)
-    # Use the public `session_manager` property: it raises RuntimeError with a
-    # clear message if the manager is uninitialized (None), where the private
-    # ``_session_manager`` attribute would silently be None and explode later
-    # at first-request time. The AttributeError guard handles the SDK-removal
-    # case so an mcp upgrade fails at build time, not at request time.
+    # Read via the documented public ``session_manager`` property rather than
+    # ``_session_manager``: depending on documented surface is the only thing
+    # that gives us a stable SDK contract. The AttributeError guard converts
+    # a future SDK rename/removal into a build-time RuntimeError instead of
+    # an opaque attribute error far from the cause.
     try:
         session_manager = mcp.session_manager
     except AttributeError as exc:
