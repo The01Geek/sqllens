@@ -42,25 +42,26 @@ _INTERNAL_ERROR_MESSAGE = "internal error; see server logs"
 _SQL_EXECUTION_ERROR_PREFIX = "SQL execution error: "
 
 # Lazy-built singleton — first call wires the agent, subsequent calls reuse it.
-# ``_AGENT_CFG`` records the ``Config`` that built it so a later call with a
-# different config gets an explicit signal instead of silent wrong-agent reuse.
-# ``_AGENT_LOCK`` serializes the cold start so ``build_agent`` (an ~80 MB
-# embedding-model download) runs exactly once under concurrent HTTP load.
-_AGENT: Agent | None = None
-_AGENT_CFG: Config | None = None
+# The agent and the ``Config`` that built it are stored as one tuple assigned
+# atomically: the cfg-mismatch warning's correctness depends on the two never
+# disagreeing, so they cannot be separate globals that a future edit (or a
+# half-completed assignment) could let drift apart. ``_AGENT_LOCK`` serializes
+# the cold start so ``build_agent`` (an ~80 MB embedding-model download) runs
+# exactly once under concurrent HTTP load.
+_AGENT_STATE: tuple[Agent, Config] | None = None
 _AGENT_LOCK = asyncio.Lock()
 
 
 async def _agent_for(cfg: Config) -> Agent:
     """Return the process-wide agent, building it exactly once.
 
-    Double-checked locking: the outer ``_AGENT is None`` test is a fast-path
-    optimization that skips the lock once the agent exists; correctness comes
-    from the *inner* re-check after awaiting ``_AGENT_LOCK`` (the only
-    suspension point *in this function*), so two concurrent first calls cannot
-    both run ``build_agent``. A later call whose ``cfg`` differs is still
-    served by the original agent but logs a warning rather than silently
-    honoring a config it is not using.
+    Double-checked locking: the outer ``_AGENT_STATE is None`` test is a
+    fast-path optimization that skips the lock once the agent exists;
+    correctness comes from the *inner* re-check after awaiting ``_AGENT_LOCK``
+    (the only suspension point *in this function*), so two concurrent first
+    calls cannot both run ``build_agent``. A later call whose ``cfg`` differs
+    is still served by the original agent but logs a warning rather than
+    silently honoring a config it is not using.
 
     The mismatch test is by object identity, not value: ``server.py`` builds
     the FastMCP tool once and closes over a single ``Config`` instance that is
@@ -69,19 +70,19 @@ async def _agent_for(cfg: Config) -> Agent:
     not "fix" this to ``!=`` — value-equality would false-warn on a benign
     config reload that produced an equal-but-distinct object.
     """
-    global _AGENT, _AGENT_CFG
-    if _AGENT is None:
+    global _AGENT_STATE
+    if _AGENT_STATE is None:
         async with _AGENT_LOCK:
-            if _AGENT is None:
-                _AGENT = build_agent(cfg)
-                _AGENT_CFG = cfg
-    if _AGENT_CFG is not None and cfg is not _AGENT_CFG:
+            if _AGENT_STATE is None:
+                _AGENT_STATE = (build_agent(cfg), cfg)
+    agent, built_cfg = _AGENT_STATE
+    if cfg is not built_cfg:
         logger.warning(
             "query_database called with a different Config than the one that "
             "built the agent; reusing the original agent and ignoring the new "
             "config. Run a separate server instance per database."
         )
-    return _AGENT
+    return agent
 
 
 async def query_database_impl(cfg: Config, question: str) -> str:
@@ -123,6 +124,14 @@ async def query_database_impl(cfg: Config, question: str) -> str:
 
     answer, is_error = components_to_markdown(components)
     if is_error:
-        # Agent-reported query failure — SQL-execution error category.
+        # Agent-reported query failure — SQL-execution error category. ``answer``
+        # is the agent's own error text; #14 requires it reach the caller as
+        # actionable, categorized detail, so it is intentionally *not* collapsed
+        # into the sanitized internal message. It is still logged server-side so
+        # this branch keeps the same operator-debugging trail as every sibling
+        # branch. Fully stripping any infra detail the *vendored* agent may have
+        # folded into that text is out of scope for issue #91 (the root cause is
+        # in src/sqllens/agent/, which this file-disjoint issue must not touch).
+        logger.warning("agent reported query failure: %s", answer)
         raise RuntimeError(f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}")
     return answer

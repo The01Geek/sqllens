@@ -3,7 +3,7 @@
 
 """Unit coverage for ``sqllens.tools.query_database``.
 
-These tests pin the tool wrapper's behavior around the lazy-built ``_AGENT``
+These tests pin the tool wrapper's behavior around the lazy-built ``_AGENT_STATE``
 singleton: when it builds, when it reuses, when it surfaces errors, and how
 it cleans up the underlying ``send_message`` async generator. The agent
 itself is stubbed via ``agent_stub_factory`` (see ``tests/unit/conftest.py``)
@@ -135,7 +135,7 @@ async def test_build_agent_raises_leaves_singleton_none(
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
 ) -> None:
-    """If ``build_agent`` raises, ``_AGENT`` stays None so a retry can succeed.
+    """If ``build_agent`` raises, ``_AGENT_STATE`` stays None so a retry can succeed.
 
     The cold-start failure is now sanitized too (S-10): the client sees the
     stable internal message, not the raw build exception, while the original
@@ -161,7 +161,7 @@ async def test_build_agent_raises_leaves_singleton_none(
     assert "secret.db" not in str(excinfo.value)
     assert excinfo.value.__cause__ is original
 
-    assert query_database_module._AGENT is None
+    assert query_database_module._AGENT_STATE is None
     result = await query_database_impl(cfg, "q2")
     assert "recovered" in result
     assert len(builds) == 2
@@ -312,34 +312,32 @@ async def test_concurrent_first_calls_build_once(
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
 ) -> None:
-    """C-3: ``_agent_for``'s double-checked lock builds exactly one agent.
+    """C-3: ``_agent_for`` builds exactly once and does so under the lock.
 
-    ``_agent_for`` is now ``async`` and awaits ``_AGENT_LOCK`` around the
-    cold start. To prove the lock (not merely single-threaded luck) holds,
-    each ``build_agent`` yields control via ``asyncio.sleep(0)`` so a second
-    gathered call gets a chance to run inside the critical section. Without
-    the lock both calls would observe ``_AGENT is None`` and build twice;
-    the assertion that ``build_agent`` ran once is the regression signal.
+    Two concrete regression signals, both of which fail if the C-3 fix is
+    reverted:
+
+    1. ``build_agent`` runs exactly once across three gathered cold-start
+       calls (the inner double-checked re-check; without it the warm calls
+       would not see the populated state).
+    2. ``_AGENT_LOCK`` is *held* while ``build_agent`` runs — asserted from
+       inside the patched ``build_agent``. Deleting the ``async with
+       _AGENT_LOCK`` wrapper makes this assertion fail, so the test is a
+       true regression signal for the lock's presence rather than passing
+       on single-threaded-event-loop luck (a synchronous ``build_agent``
+       never suspends, so a build-count check alone would pass even with
+       the lock removed).
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     builds: list[Config] = []
+    lock_held_during_build: list[bool] = []
 
     def fake_build_agent(c: Config):
         builds.append(c)
+        lock_held_during_build.append(query_database_module._AGENT_LOCK.locked())
         return agent_stub_factory([make_text_component("ok")])
 
     monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
-
-    # Force the event loop to switch tasks at the start of every call so the
-    # second gathered call reaches ``_agent_for`` while the first may still be
-    # mid-cold-start — the scenario the lock exists to serialize.
-    real_agent_for = query_database_module._agent_for
-
-    async def slow_agent_for(c: Config):
-        await asyncio.sleep(0)
-        return await real_agent_for(c)
-
-    monkeypatch.setattr(query_database_module, "_agent_for", slow_agent_for)
 
     await asyncio.gather(
         query_database_impl(cfg, "q1"),
@@ -348,6 +346,7 @@ async def test_concurrent_first_calls_build_once(
     )
 
     assert len(builds) == 1
+    assert lock_held_during_build == [True]
 
 
 @pytest.mark.asyncio

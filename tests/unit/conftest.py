@@ -30,15 +30,12 @@ def _reset_query_database_singleton():
     The module-level singleton in ``sqllens.tools.query_database`` is process-
     wide. Without this fixture, a test that builds the agent leaks state
     into the next, masking isolation bugs and making ordering matter.
-    ``_AGENT_CFG`` (the config that built the agent, tracked for the
-    cfg-mismatch warning) is reset alongside ``_AGENT`` so the two never
-    drift apart between tests.
+    ``_AGENT_STATE`` is a single ``(agent, cfg)`` tuple, so one reset clears
+    both the agent and the config that built it — they cannot drift apart.
     """
-    query_database_module._AGENT = None
-    query_database_module._AGENT_CFG = None
+    query_database_module._AGENT_STATE = None
     yield
-    query_database_module._AGENT = None
-    query_database_module._AGENT_CFG = None
+    query_database_module._AGENT_STATE = None
 
 
 @pytest.fixture
