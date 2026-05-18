@@ -22,41 +22,22 @@ from sqllens.tools._format import components_to_markdown
 @pytest.mark.parametrize(
     "leaky_key",
     [
+        # pytest-env sets each of these to a sentinel at session start (see the
+        # ``env`` block in pyproject.toml). The autouse scrub must remove them
+        # before any test body observes them.
         "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_MODEL",
-        "SQLLENS_AUTH__BEARER_TOKEN",
         "SQLLENS_LLM__API_KEY",
-        "MODE",
-        "HOST",
-        "PORT",
+        "SQLLENS_AUTH__BEARER_TOKEN",
     ],
 )
-def test_autouse_scrub_removes_leaky_env(
-    leaky_key: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The autouse fixture removes env vars that could otherwise leak into
-    pydantic-settings or the Anthropic SDK fallback.
+def test_autouse_scrub_removes_pytest_env_sentinels(leaky_key: str) -> None:
+    """The autouse scrub must wipe sentinel values that pytest-env injects.
 
-    monkeypatch.setenv applies after the autouse fixture's delenv during
-    fixture setup, so we set the var inside the test body and expect that
-    if the autouse fixture had failed to run, this would be a tautology;
-    if it ran, the value we just set is what the test should observe.
-    The real guard is that subsequent tests don't see the value — covered
-    by parametrizing this same case repeatedly.
+    This is the real coverage for the scrub: if the autouse fixture in
+    ``tests/conftest.py`` were a no-op, ``os.environ[leaky_key]`` would
+    contain ``"test-sentinel-do-not-use"`` and this assertion would fail.
     """
-    monkeypatch.setenv(leaky_key, "should-not-leak")
-    assert os.environ[leaky_key] == "should-not-leak"
-
-
-def test_autouse_scrub_runs_before_test_body() -> None:
-    """Without the autouse scrub, ``ANTHROPIC_API_KEY`` set by ``pytest-env``
-    (sentinel ``test-sentinel-do-not-use``) would leak into the test body.
-    Confirm it is absent by the time the test runs.
-    """
-    assert "ANTHROPIC_API_KEY" not in os.environ
-    assert "SQLLENS_LLM__API_KEY" not in os.environ
-    assert "SQLLENS_AUTH__BEARER_TOKEN" not in os.environ
+    assert leaky_key not in os.environ
 
 
 async def test_stub_default_yields_dataframe_and_text(
