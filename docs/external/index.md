@@ -34,7 +34,7 @@ The server supports two transports:
 SQL Lens supports two authentication modes:
 
 - **None**: Suitable for loopback-only deployments where the only client is the assistant running on the same machine. SQL Lens refuses to start in this mode if the HTTP server is bound to a non-loopback host, to prevent accidentally exposing an unauthenticated SQL endpoint.
-- **Bearer token**: A single shared token is required on every request. This is the recommended mode whenever the server listens on a shared or public interface. Configure the token in `sqllens.toml` or set the `SQLLENS_AUTH__BEARER_TOKEN` environment variable.
+- **Bearer token**: A single shared token is required on every request. This is the recommended mode whenever the server listens on a shared or public interface. Configure the token in `sqllens.toml` or set the `SQLLENS_AUTH__BEARER_TOKEN` environment variable. SQL Lens refuses to start in bearer mode if the token is missing, empty, or only whitespace.
 
 A third mode for JSON Web Tokens (JWT) is scaffolded but not yet implemented. Do not enable it in production.
 
