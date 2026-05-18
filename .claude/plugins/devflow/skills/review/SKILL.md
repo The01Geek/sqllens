@@ -499,7 +499,7 @@ Output: `Phase 4/4: Aggregating findings...`
 
 When `$ARGUMENTS` is a PR number, the engine consults the **Scope-Acknowledged Findings** block in the PR body (delimited by `<!-- DEVFLOW_DEFERRED_FINDINGS_START -->` / `<!-- DEVFLOW_DEFERRED_FINDINGS_END -->`) and demotes any current finding that matches a validated deferral entry to **Informational**. This is the consumer side of the contract /implement Phase 4.0.5 produces; without it, /devflow:review re-raises findings that /implement already filed follow-up issues for, creating the policy mismatch the contract is meant to prevent. (See `.claude/plugins/devflow/scripts/match-deferrals.py` for the matcher's exact guard order and matching rule.)
 
-Serialize the Phase 3 findings collected in 3.2 to a temporary JSON array with one object per finding:
+Serialize the Phase 3 findings collected in 3.2 to a JSON array with one object per finding:
 
 ```json
 [
@@ -508,17 +508,18 @@ Serialize the Phase 3 findings collected in 3.2 to a temporary JSON array with o
 ]
 ```
 
-The order matters — index N in this array becomes the matcher's `finding_index` reference. Write to `.devflow/review/<slug>/findings.json` (same directory the cached diff already lives in).
+The order matters — index N in this array becomes the matcher's `finding_index` reference.
 
-Then invoke the matcher:
+Pipe the JSON to the matcher via stdin (the `review` allowed-tools profile in `claude-runner.yml` is read-only and does not grant the Write tool, so the orchestrator cannot write a `findings.json` file; stdin is the load-bearing alternative):
 
 ```bash
-.claude/plugins/devflow/scripts/match-deferrals.py \
+printf '%s' "$FINDINGS_JSON" | .claude/plugins/devflow/scripts/match-deferrals.py \
     --pr $ARGUMENTS \
     --diff ".devflow/review/<slug>/diff.patch" \
-    --findings ".devflow/review/<slug>/findings.json" \
-    > ".devflow/review/<slug>/deferrals-match.json"
+    --findings -
 ```
+
+Capture the matcher's stdout (the JSON report described below). When invoked from /implement Phase 3.3 via /devflow:review-and-fix (which DOES have the Write tool), the file form `--findings .devflow/review/<slug>/findings.json` is equally supported — pick whichever the surrounding profile permits.
 
 The matcher always exits 0 when it ran (any result, including no block found). Read the output JSON:
 

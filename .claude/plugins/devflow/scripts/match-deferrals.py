@@ -24,7 +24,12 @@ enough to prevent false positives, and a more permissive rule would risk
 demoting genuinely new findings that share vague terminology.
 
 Usage:
-    match-deferrals.py --pr N --diff PATH --findings PATH [--config PATH]
+    match-deferrals.py --pr N --diff PATH --findings (PATH | -) [--config PATH]
+
+Pass `--findings -` to read the findings JSON from stdin. The stdin form is
+required when the caller cannot write a temp file (e.g., /devflow:review
+under the claude-runner.yml `review` profile, which is intentionally
+read-only and does not have the Write tool).
 
 Output (JSON to stdout, always exit 0 when the helper itself ran):
     {
@@ -216,21 +221,28 @@ def main(argv=None):
     p.add_argument("--diff", required=True,
                    help="Path to the cached diff (for widens-surface check).")
     p.add_argument("--findings", required=True,
-                   help="Path to JSON file with current Phase 3 findings.")
+                   help="Path to JSON file with current Phase 3 findings, "
+                        "or `-` to read from stdin.")
     p.add_argument("--config", default=DEFAULT_CONFIG,
                    help="Path to project-config.yml (default: %(default)s).")
     args = p.parse_args(argv)
 
     diff_path = Path(args.diff)
-    findings_path = Path(args.findings)
-    if not findings_path.is_file():
-        _fail(f"findings file not found: {findings_path}")
+    if args.findings == "-":
+        raw_findings = sys.stdin.read()
+        if not raw_findings.strip():
+            _fail("--findings - was passed but stdin was empty")
+    else:
+        findings_path = Path(args.findings)
+        if not findings_path.is_file():
+            _fail(f"findings file not found: {findings_path}")
+        raw_findings = findings_path.read_text(encoding="utf-8")
     try:
-        findings = json.loads(findings_path.read_text(encoding="utf-8"))
+        findings = json.loads(raw_findings)
     except json.JSONDecodeError as e:
-        _fail(f"findings file is not valid JSON: {e}")
+        _fail(f"findings input is not valid JSON: {e}")
     if not isinstance(findings, list):
-        _fail("findings file must be a JSON array")
+        _fail("findings input must be a JSON array")
 
     pr_body, pr_author = _get_pr_body_and_author(args.pr)
     block = _extract_block(pr_body)
