@@ -1,10 +1,12 @@
 # SQL Lens — Production-Readiness Audit for v0.1.0
 
-> **Status:** Draft. Generated 2026-05-17 from a cross-functional review of the
-> codebase, internal docs (`docs/internal/`), GitHub issues, and CI workflows.
-> Authored as a PM + senior R&D punch list for getting SQL Lens out of pre-alpha.
-> Each item carries a priority (P0 release blocker, P1 should land in 0.1.0,
-> P2 roadmap), a category, and a concrete file/line anchor where possible.
+> **Status:** Re-verified 2026-05-18 against the live codebase on `main`
+> (post-#86). Originally generated 2026-05-17. Each item carries a priority
+> (P0 release blocker, P1 should land in 0.1.0, P2 roadmap), a category, and a
+> concrete file/line anchor. **The per-item RESOLVED markers below the line
+> have been audited; several were stale or aspirational. The authoritative
+> current state is the "Verified status (2026-05-18)" section immediately
+> below — read that first.**
 
 ---
 
@@ -40,6 +42,261 @@ What is **not** ready:
 
 Below: ~70 findings, organised by priority. The "Already on the radar"
 section at the end flags closed issues that are incomplete in practice.
+
+---
+
+## Verified status (2026-05-18) — what actually shipped vs. what's left
+
+A line-by-line re-audit against the working tree on `main` (after PRs
+#41–#86). **The headline: the P0 safety set is genuinely closed, but almost
+nothing else is.** The large run of recent PRs (#57–#86) was overwhelmingly
+devflow/CI plumbing and test-infra scaffolding — not the substantive P1
+safety, ops, or product work the original release plan front-loaded. The
+audit doc's prose drifted ahead of the code; treat this section as the
+source of truth.
+
+### Done — verified in code
+
+| Item | Evidence |
+|---|---|
+| **S-1** `SELECT … INTO` rejected | `safety/readonly.py:105-106`; `tests/unit/test_safety.py::TestSelectIntoRejected` (#41) |
+| **S-2** Docker auth=none on non-loopback refuses to boot | `cli.py:68-82,156-167`; loopback detect `cli.py:36-57` (#48) |
+| **S-3** statement timeout + row cap, all 3 runners | `config.py:49,65`; pg/sqlite/mysql runners (#45) |
+| **S-4** eager preflight before transport bind | `preflight.py`; `cli.py:145,168-176` (#44) |
+| **C-1 / C-2** lifespan-wrapped `build_asgi_app`, public `mcp.session_manager` | `transport/http.py`; `tests/unit/test_transport_http.py` (#43) |
+| **T-1** `_format.py` covered | `tests/unit/test_format.py` (#73) |
+| **T-3** top-level conftest env scrub + mock-LLM fixture | `tests/conftest.py`; meta-tests (#82/#85) |
+| **O-12** README claude-desktop install link | `README.md:75` → existing file |
+| extras | bearer-token presence guards #50/#54 (`config.py:104-153`), validate surfaces loopback policy #52, secondary-runner edge cases #57/#58, preflight hardening #62/#63, stdio operator-message routing #64, lifespan re-entry/shutdown audits #59/#60/#66/#70, memory wiring #76 (`SaveTextMemoryTool` registered + `similarity_threshold` now live) |
+
+### Severity escalations (re-prioritised by this pass)
+
+Two items were under-rated in the original doc and are now **de-facto P0
+release blockers**:
+
+- **S-5 → P0.** `SELECT load_extension('evil.so')` on SQLite is arbitrary
+  code execution and passes the read-only guard untouched (no function
+  denylist exists anywhere in `safety/readonly.py`). `dblink_exec` is a
+  Postgres write-via-function with the same bypass. The S-3 timeout does
+  **not** mitigate either (both are instant). This directly falsifies the
+  project's central "read-only by default" claim for the *default* SQLite
+  deployment — strictly worse than S-1, which we treated as P0.
+- **P-2 → P0.** `auth.mode = "jwt"` still parses clean, `sqllens validate`
+  still passes, and every request then 401s (`config.py:107`,
+  `auth/__init__.py:40-45`, `auth/jwt.py:38`). A self-hoster who follows the
+  README ships a dead server with a green validate. One `model_validator`
+  line fixes it. Shipping 0.1.0 with this is a guaranteed support fire.
+
+### Still open — corrections to stale per-item markers
+
+- **C-3 (NOT fixed).** #72/#81 added tests *around* the `_AGENT` singleton
+  but did not add the `asyncio.Lock` or config-identity check. The
+  non-atomic check-then-set race and first-caller-`cfg`-wins bug are live at
+  `tools/query_database.py:18-25`. The doc's T-2 phrasing implies remediation
+  landed; only test coverage did.
+- **C-4, C-5, C-6, C-7** — all OPEN, none addressed (verified
+  `config.py:107`, `config.py:238`, `http.py:325-326`, duplicated dialect
+  parse in `cli.py:218` + `list_data_sources.py:13`).
+- **S-6..S-13** — all OPEN or PARTIAL. No function denylist (S-5), no
+  sqlglot upper bound / shim still live (S-6, `pyproject.toml:32`,
+  `readonly.py:96`), no runner-level read-only (S-7), no
+  `TrustedHostMiddleware` (S-8), no bearer-over-plain-HTTP warning (S-9),
+  driver-exception string leak live (S-10, `query_database.py:37-40`),
+  `validate`/`serve` echo pydantic input values incl. secrets (S-11,
+  `cli.py:151,206`), no dependency upper bounds (S-12), no bearer min-length
+  (S-13, `auth/bearer.py:29-31`).
+- **O-1..O-17** — only **O-12** done. Highest-risk open ops items: **O-4**
+  (Docker `HEALTHCHECK` still `|| exit 0` → always reports healthy; every
+  orchestrator routes to a dead server), **O-13** (README still links
+  "Guidoo" at `README.md:136` — direct CLAUDE.md brand-rule violation in a
+  public file), **O-16** (no SPDX header on `agent/factory.py`, the one
+  public-seam file), **O-8** (`validate` exits 0 when API key unset — breaks
+  pre-deploy CI gating).
+- **P-1..P-14** — 0 resolved. P-3 (no schema in `list_data_sources` → burns
+  `max_tool_iterations`, the gotcha CLAUDE.md itself flags) and P-6
+  (installer writes API key plaintext by default, on the marketed
+  one-command path) are the highest-leverage open product items after P-2.
+- **GH #75 (in-process, OPEN).** Of its 3 lifespan-hardening concerns,
+  concern 2 (`str(exc)` → `f"{type(exc).__name__}: {exc}"`) is already fixed
+  independently (`http.py:268,304`). Concern 1 (undocumented broad
+  `except Exception` / deliberate `BaseException` propagation) and concern 3
+  (genuine shutdown-without-startup silently emits `complete`) remain. This
+  is the last item the team is actively working; it is a defensive-hardening
+  polish, **not** a release blocker.
+- **#10 / #14 / #26** — still PARTIAL exactly as the doc describes
+  (scratch-CSV dead write at `agent/tools/run_sql.py:113-121` not repurposed;
+  tool-error protocol split still prompt-only; #26 fix only test-asserted,
+  no startup-time scrub).
+
+### Revised release plan (supersedes the one at the bottom of this doc)
+
+The original two-week rc.1 plan is no longer realistic — most of its
+must-land set never started. Re-scoped:
+
+**v0.1.0-rc.1 — close the safety hole + the two trust footguns (≈1 week).**
+True blockers only: **S-5** (function denylist + SQLite `load_extension`
+refusal — escalated P0), **S-7** (open SQLite `mode=ro`; `SET TRANSACTION
+READ ONLY` on pg/mysql — defense-in-depth pair for S-5), **C-3**
+(`asyncio.Lock` + config-identity on `_AGENT`), **C-4 / P-2** (reject
+`mode="jwt"` at config-validation — one validator covers both), **S-10**
+(stop leaking driver exception strings), **S-11** (location-only pydantic
+errors), **O-4** (`/healthz` + fix Dockerfile probe), **O-13** (strike
+"Guidoo" from README), **O-16** (SPDX header). These are all small, mostly
+single-file, and each is either a security hole or a guaranteed-support-fire.
+
+**v0.1.0 — operability + the rest of the safety surface (≈1–2 weeks after
+rc.1).** S-6, S-8, S-9, S-12, S-13, C-5, C-6, C-7, O-1, O-2, O-3, O-5, O-8,
+O-9, O-10, O-14, O-15, P-3, P-5, P-10, T-4, T-5, T-6, T-7, T-9, T-10, plus
+finishing GH #75. P-3/P-10 are in here (not deferred) because they're the
+cheapest first-query-latency and trust wins in the codebase.
+
+**v0.1.x — onboarding + product polish.** P-1 (`sqllens demo`), P-4 (export
++ TRUNCATED signal), P-6 (don't embed API key), P-7, P-8, P-9, P-11, P-12,
+P-13, P-14, O-6, O-7, O-11, O-17, and the #10/#14/#26 follow-ups. *(P-6 is
+v0.1.x only if P-1's demo path doesn't itself ship the installer; if it
+does, pull P-6 forward — a plaintext-key default on the marketed
+one-command path is not acceptable in 0.1.0.)*
+
+Rationale: rc.1 is now a tight, achievable list whose omission would make
+"read-only by default" demonstrably false (S-5/S-7) or strand self-hosters
+with a green-validate dead server (C-4/P-2). Everything that is merely
+*missing* rather than *actively misleading or unsafe* moves right.
+
+---
+
+## Implementation roadmap (dependency-ordered, 2026-05-18)
+
+Tickets are grouped into **workstreams** — each workstream is a set of items
+that touch the same code seam and should ship as one PR (or a tight PR
+series on one branch) to avoid merge churn and re-loading the same context.
+Workstreams are ordered into **waves** by hard dependency and risk. Within a
+wave, workstreams marked *parallel* have no shared files and can be branched
+independently.
+
+### Wave 0 — zero-dependency hygiene (hours, do immediately, can be one PR)
+
+| Item | Why now |
+|---|---|
+| **O-13** strip "Guidoo" from `README.md:136` | Public-file brand-rule violation; no deps; embarrassing to ship. |
+| **O-16** SPDX header on `agent/factory.py` | Two-line legal-hygiene fix; no deps. |
+| **O-17** `mcpb/build.sh` → `.[all]` | One-word latent-correctness fix; no deps. |
+| **T-10** `addopts = "-m 'not connectors'"` in `pyproject.toml` | Changes default test scope — must land *before* the unit-level guard tests (T-5) are meaningful. Unblocks Wave 1 Track A. |
+
+### Wave 1 — rc.1 blockers (≈1 week). Four parallel tracks.
+
+**Track A — Read-only guard hardening** *(seam: `safety/readonly.py`, the
+connector runners, `pyproject.toml`, `tests/unit/test_safety.py`)*. Sequence
+internally; do **not** split across branches (they all rewrite the guard):
+1. **S-5** per-dialect side-effect-function denylist (+ explicit SQLite
+   `load_extension` refusal) — the escalated-P0 RCE hole.
+2. **S-7** open SQLite `file:…?mode=ro`; `SET TRANSACTION READ ONLY` on
+   pg/mysql — defense-in-depth pair for S-5 (same threat, runner layer).
+3. **T-4 + T-5 + T-9** lock it down: bypass corpus (`pg_sleep`,
+   `load_extension`, `dblink_exec`, UPDATE/DELETE-in-CTE), `ReadOnlyGuardRunner`
+   unit test, factory-wiring `read_only=False`→bare case. *Depends on
+   Wave-0 T-10* so these run by default.
+4. **S-6 + S-12** pin `sqlglot>=25,<26`, remove the version shim
+   (`readonly.py:96`), add upper bounds + a CI assertion the corpus stays
+   rejected on bumps. **Must come last in the track** — the T-4 corpus is
+   the safety net that makes removing the shim safe.
+
+**Track B — Config & validate trust footguns** *(seam: `config.py`,
+`auth/`, `cli.py`)* — parallel to A:
+- **C-4 / P-2** one `model_validator` rejecting `mode="jwt"` (closes both).
+- **S-13** bearer-token ≥16-char minimum (same `AuthConfig` validator file).
+- **S-11** `validate`/`serve` format pydantic errors location-only (stop
+  leaking secret values) — `cli.py:151,206`.
+- **O-8** `validate` exit code 1 on "would fail to start" (API key unset).
+  Bundle with S-11 — same `cli.py` validate path.
+
+**Track C — Query path: races + error leakage** *(seam:
+`tools/query_database.py`)* — parallel:
+- **C-3** `asyncio.Lock` + config-identity check on `_AGENT` (the
+  still-live race; #72/#81 only added tests around it).
+- **S-10 + #14** stop leaking driver exception strings; split
+  tool-internal vs SQL-execution errors at the return boundary. Same
+  except-block as C-3 — do in the same PR after C-3's lock lands.
+
+**Track D — Container health** *(seam: `transport/http.py` + `Dockerfile`)*
+— parallel:
+- **O-4** add `GET /healthz` route; repoint Dockerfile `HEALTHCHECK`;
+  delete the `|| exit 0` always-healthy escape hatch.
+
+> Wave-1 ordering note: Track D's `/healthz` route establishes the
+> route-adding pattern in `http.py` that Wave 2's transport workstream
+> (O-5 `/readyz`, S-8, S-9, C-6, #75) builds on — keep D's PR small and
+> merge it first so Wave 2 rebases cleanly.
+
+### Wave 2 — v0.1.0 (≈1–2 weeks after rc.1)
+
+**W2-1 Transport surface** *(seam: `transport/http.py` — serialise, hot
+file, no parallel branches)*: **C-6** UTF-8/latin-1 header decode →
+**S-8** `TrustedHostMiddleware` → **S-9** bearer-over-plain-HTTP warning →
+**O-5** eager `build_agent` in lifespan + `GET /readyz` *(depends on Wave-1
+C-3 — eager init must be race-safe first)* → **GH #75** lifespan
+broad-`except` doc + shutdown-without-startup warning → **T-6 + T-7**
+auth-middleware unit + Host-header/`isError` integration regressions
+(written last, against the finished surface).
+
+**W2-2 Observability** *(seam: `agent/factory.py`, `query_database.py`)* —
+parallel: **O-3** wire `LoggingAuditLogger` + expose `AuditConfig` →
+**O-2** latency/`duration_ms` instrumentation (sits on the same call
+bracket; do after O-3) → **O-1** `ServerConfig.log_level` threaded into
+uvicorn + `basicConfig`.
+
+**W2-3 Config forward-safety** *(seam: `config.py`)* — parallel:
+**C-5** cache resolved TOML path before BOM re-check (TOCTOU); **O-14**
+`config_version: int = 1` + CHANGELOG note.
+
+**W2-4 Rendering & first-query cost** *(seam: `tools/_format.py`,
+`list_data_sources.py`)* — parallel: **C-7** `DatabaseConfig.dialect`
+property *(do first — P-3 rewrites the call site)* → **P-3** schema/
+`describe_schema` in `list_data_sources` (highest functional leverage:
+kills the `max_tool_iterations` burn) → **P-5** `_render_cell` helper →
+**P-10** `agent.show_sql` SQL-prefix (cheapest trust win). T-8 (`init`/
+`serve` CLI coverage) rides along here.
+
+**W2-5 Supply chain / release** *(seam: `.github/workflows/`,
+`pyproject.toml`)* — parallel: **O-9** post-publish smoke job;
+**O-10** `sigstore/cosign-installer`; **O-15** `dependabot.yml`;
+**S-12 lockfile** ship `requirements.txt` with the wheel (the pin half
+landed in Wave-1 Track A; this is the lockfile half).
+
+### Wave 3 — v0.1.x (onboarding + product polish)
+
+- **W3-1 Onboarding** *(seam: `cli.py`, `installers/`)*: **P-1**
+  `sqllens demo` → then **P-6** installer stops embedding API key by
+  default *(pull P-6 into Wave 1 if the demo path ships the installer —
+  a plaintext-key default on the marketed one-command path is not
+  0.1.0-acceptable)*.
+- **W3-2 Result export** *(seam: `tools/_format.py`,
+  `agent/tools/run_sql.py`)*: **P-4 + #10** — repurpose the dead scratch
+  CSV write as the `export_query_results` seam (one change, two tickets).
+- **W3-3 Memory product** *(seam: `cli.py`, `agent/.../agent_memory.py`)*:
+  **P-7** `sqllens memory` CLI **+ P-11** `confirm_last_answer` tool —
+  ship together; a correction loop is useless without inspect/prune.
+- **W3-4 Pluggable LLM**: **P-8** `openai_compatible` provider
+  (`config.py` + `factory.py`) — larger, standalone.
+- **W3-5 Ops**: **O-6** psycopg2 pool; **O-7** `[agent]` block in
+  `_SAMPLE_CONFIG`; **O-11** hotfix `RUNBOOK.md`.
+- **W3-6 Docs sprint** *(no engine change, fully parallel, one
+  contributor)*: **P-9** data-flow/privacy, **P-12** connectors matrix,
+  **P-13** multi-database (the `--name` seam already exists), **P-14**
+  IDE-compatibility matrix, **#26** startup env-var scrub note.
+
+### Dependency edges that drive the ordering
+
+- `T-10` → `T-5` (unit guard test only runs by default after the
+  connector-skip default).
+- `S-5` → `T-4` → `S-6` (corpus must exist before the shim is removed).
+- `C-3` → `O-5` (eager agent init must be race-safe first).
+- `C-3` → `O-2` (instrument a stable lifecycle, not a racing one).
+- `O-4` → `W2-1` (route-adding pattern; merge O-4 first to keep the hot
+  `http.py` file rebasing cleanly).
+- `C-7` → `P-3` (clean the dialect seam before rewriting the call site).
+- `#10` ↔ `P-4` (same code: the CSV write *is* the export seam).
+- `P-7` ↔ `P-11` (inspect/prune is a prerequisite for a correction loop
+  to be usable).
 
 ---
 
@@ -286,7 +543,7 @@ to a generated config under `~/.sqllens/demo/`, (b) requires only
 paste. Bundle `chinook.db` as package data or fetch-on-first-run with
 checksum verification.
 
-#### P-2. JWT mode is reachable in config but always 401s
+#### P-2. JWT mode is reachable in config but always 401s — ⛔ **escalated to P0 (2026-05-18)**
 **Files:** [`src/sqllens/config.py:81`](../../src/sqllens/config.py#L81) ·
 [`src/sqllens/auth/jwt.py:37-41`](../../src/sqllens/auth/jwt.py#L37) ·
 **Category:** Trust signal / Confusing UX
@@ -361,7 +618,7 @@ file on POSIX.
 
 | # | File:line | Issue | Direction |
 |---|---|---|---|
-| S-5 | [`safety/readonly.py`](../../src/sqllens/safety/readonly.py) | Side-effect / DoS functions pass unchecked: `pg_sleep`, `pg_terminate_backend`, `pg_read_file`, `dblink_exec`, `load_extension` (SQLite — RCE!), `SLEEP()`, `generate_series(1, 1e9)`. | Add per-dialect function-name denylist; for SQLite, document/refuse `load_extension` explicitly. |
+| S-5 ⛔**P0** | [`safety/readonly.py`](../../src/sqllens/safety/readonly.py) | **Escalated to release blocker (2026-05-18).** Side-effect / DoS functions pass unchecked: `pg_sleep`, `pg_terminate_backend`, `pg_read_file`, `dblink_exec`, `load_extension` (SQLite — **RCE on the default deployment**!), `SLEEP()`, `generate_series(1, 1e9)`. Verified OPEN — no denylist exists. | Add per-dialect function-name denylist; for SQLite, refuse `load_extension` explicitly. |
 | S-6 | [`safety/readonly.py:64-65`](../../src/sqllens/safety/readonly.py#L64) | sqlglot tuple/non-tuple version shim is fragile — one branch is dead in any given version. | Pin `sqlglot>=25.0,<26` in `pyproject.toml`, remove the shim, add CI assertion that the bypass corpus stays rejected on bumps. |
 | S-7 | [`safety/__init__.py`](../../src/sqllens/safety/__init__.py) + connector runners | When `database.read_only=False` is set, runner write paths (`conn.commit()`) cheerfully execute mutations. SQLite has no DB role to fall back on. | Open SQLite read-only when `cfg.database.read_only` (`file:{path}?mode=ro`). Set `SET TRANSACTION READ ONLY` on Postgres/MySQL regardless of role. |
 | S-8 | [`transport/http.py:48-95`](../../src/sqllens/transport/http.py#L48) | No `TrustedHostMiddleware`; DNS-rebinding risk against `127.0.0.1` dev servers if the bundled MCP SDK's Host check isn't wired. | Add `TrustedHostMiddleware(allowed_hosts=[...])` in `build_asgi_app`. |
@@ -477,6 +734,12 @@ file on POSIX.
 ---
 
 ## Suggested release plan
+
+> ⚠️ **Superseded.** This plan was written 2026-05-17 and assumed its
+> must-land set would land. The 2026-05-18 re-audit found most of it never
+> started. Use the **"Revised release plan"** in the *Verified status*
+> section near the top of this document. The text below is kept for
+> historical context only.
 
 ### v0.1.0-rc.1 — safety & ops baseline (target: 2–3 weeks)
 **Must land:** S-1, S-2, S-3, S-4, C-3, C-4, T-1, T-2, T-3, P-1, P-2, P-3, P-4, P-5, P-6, O-1, O-4, O-5, O-7, O-8, O-12, O-13, O-14, O-16. (~~C-1~~ and ~~C-2~~ landed early via PR #43.)
