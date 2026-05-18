@@ -21,6 +21,7 @@ Either alone is insufficient: a misconfigured role + a code path that bypasses t
 3. **Reject multiple statements.** `sqlglot.parse` returns a list; anything but length 1 is rejected. Stops `SELECT 1; DROP TABLE x` style payloads.
 4. **Whitelist root expression types:** `Select`, `Union`, `Intersect`, `Except`, `With` (CTE chains). Anything else — `Insert`, `Update`, `Delete`, `Drop`, `Create`, `Alter`, `Pragma`, `Truncate`, etc. — is rejected by the negative-type-check at the root.
 5. **Walk the entire parse tree** and reject if any DML/DDL node is nested *anywhere* — e.g. `WITH x AS (DELETE FROM ... RETURNING *) SELECT * FROM x` (Postgres syntax). Without the walk, a CTE could smuggle a mutation past the root check.
+6. **Reject `SELECT ... INTO`.** On Postgres and T-SQL, `SELECT * INTO new_tbl FROM users` is semantically a write (it creates `new_tbl`), and MySQL's `SELECT ... INTO @var` writes a session variable. sqlglot parses all of these as `exp.Select` with `args["into"]` set — *not* as `exp.Create` — so the DML/DDL deny-walk in rule 5 would miss them. The same `walk()` loop therefore also rejects any `exp.Select` whose `into` arg is non-`None`, covering root-level statements, CTE-nested forms, set-operation operands (`SELECT ... INTO ... UNION ...`), and the `INTO TEMP` / `INTO UNLOGGED` variants (same node shape).
 
 The walk also normalizes between sqlglot versions: older versions yield `(node, parent, key)` tuples; newer ones yield bare nodes. The code handles both.
 
@@ -95,3 +96,6 @@ Unit tests live under [tests/unit/](../../../tests/unit/). When extending the ru
 - The new accepted case (positive).
 - A close-but-rejected case (negative — to lock in the boundary).
 - A nested smuggle attempt (CTE / subquery — to prove the walk still catches it).
+- A set-operation-operand smuggle attempt (`SELECT ... UNION SELECT ...`) — `walk()` descends into operands, so the rule should still fire from the `Union` / `Intersect` / `Except` root.
+
+The `SELECT ... INTO` rule (rule 6) is regression-tested by `TestSelectIntoRejected` in [tests/unit/test_safety.py](../../../tests/unit/test_safety.py), parametrised over Postgres + T-SQL × {base, `INTO TEMP`, `INTO UNLOGGED`}, the CTE-nested form, the UNION-operand form, and MySQL `SELECT ... INTO @var`.
