@@ -219,11 +219,15 @@ the action to skip the OIDC exchange) still applies and is already handled insid
 `claude-runner.yml` — no change.
 
 Concurrency: extend the existing group to cover the check_run path so a Re-run
-during an in-flight review cancels the stale one:
+during an in-flight review cancels the stale one. The group key is scoped by
+event source (`github.event_name`) so that the `pull_request` and
+`pull_request_target` dedupe pair (which both fire for a single
+`ready_for_review` and carry the same PR number) run in separate lanes —
+preventing `cancel-in-progress` from killing the canonical variant mid-review:
 
 ```yaml
 concurrency:
-  group: request-review-on-ready-${{ github.event.pull_request.number || github.event.check_run.pull_requests[0].number || github.run_id }}
+  group: request-review-on-ready-${{ github.event.pull_request.number || github.event.check_run.pull_requests[0].number || github.run_id }}-${{ github.event_name }}
   cancel-in-progress: true
 ```
 
