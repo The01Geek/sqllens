@@ -110,45 +110,29 @@ def test_probe_database_mysql_missing_driver_raises_clean_preflight_error(
     assert isinstance(exc_info.value.__cause__, ImportError)
 
 
-def test_probe_database_sqlite_does_not_swallow_programmer_errors(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("driver_module", "db_url"),
+    [
+        ("sqlite3", "sqlite:///:memory:"),
+        ("psycopg2", "postgresql://user:pw@localhost:5432/db"),
+        ("pymysql", "mysql://user:pw@localhost:3306/db"),
+    ],
+)
+def test_probe_database_does_not_swallow_programmer_errors(
+    monkeypatch: pytest.MonkeyPatch, driver_module: str, db_url: str
 ) -> None:
-    # A TypeError from sqlite3.connect represents a bug in our caller, not a
-    # database reachability failure — it must propagate rather than be
+    # A TypeError from the driver's connect() represents a bug in our caller,
+    # not a database reachability failure — it must propagate rather than be
     # relabeled as a PreflightError("database", ...) which would mislead
     # operators into chasing a config issue that doesn't exist.
-    def boom(*_args: object, **_kwargs: object) -> None:
-        raise TypeError("not a real connect error")
-
-    monkeypatch.setattr("sqlite3.connect", boom)
-    with pytest.raises(TypeError, match="not a real connect error"):
-        probe_database(_cfg(db_url="sqlite:///:memory:"))
-
-
-def test_probe_database_postgres_does_not_swallow_programmer_errors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    psycopg2 = pytest.importorskip("psycopg2")
+    driver = pytest.importorskip(driver_module)
 
     def boom(*_args: object, **_kwargs: object) -> None:
         raise TypeError("not a real connect error")
 
-    monkeypatch.setattr(psycopg2, "connect", boom)
+    monkeypatch.setattr(driver, "connect", boom)
     with pytest.raises(TypeError, match="not a real connect error"):
-        probe_database(_cfg(db_url="postgresql://user:pw@localhost:5432/db"))
-
-
-def test_probe_database_mysql_does_not_swallow_programmer_errors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    pymysql = pytest.importorskip("pymysql")
-
-    def boom(*_args: object, **_kwargs: object) -> None:
-        raise TypeError("not a real connect error")
-
-    monkeypatch.setattr(pymysql, "connect", boom)
-    with pytest.raises(TypeError, match="not a real connect error"):
-        probe_database(_cfg(db_url="mysql://user:pw@localhost:3306/db"))
+        probe_database(_cfg(db_url=db_url))
 
 
 # ---------------------------------------------------------------------------

@@ -22,8 +22,6 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
-import anthropic
-
 from sqllens.auth import build_authenticator
 from sqllens.config import API_KEY_MISSING_MESSAGE, Config
 
@@ -148,6 +146,8 @@ def probe_llm(cfg: Config) -> None:
     """
     if cfg.llm.api_key is None:
         raise PreflightError("llm", API_KEY_MISSING_MESSAGE)
+
+    import anthropic
 
     from sqllens.agent.integrations import AnthropicLlmService
 
