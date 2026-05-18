@@ -204,6 +204,7 @@ and the error-surfacing path. Add an autouse fixture in
 #### T-3. No mock-LLM fixture; integration conftest doesn't scrub `SQLLENS_LLM__API_KEY` — *resolved*
 **Files:** [`tests/conftest.py`](../../tests/conftest.py) ·
 [`tests/integration/conftest.py`](../../tests/integration/conftest.py) ·
+[`tests/integration/test_scrub_inherited.py`](../../tests/integration/test_scrub_inherited.py) ·
 [`pyproject.toml`](../../pyproject.toml)
 **Category:** Test infrastructure / Safety
 
@@ -219,11 +220,16 @@ and integration suites inherit it; the duplicated `tests/unit/conftest.py` was
 deleted. The scrub tuple gained `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`,
 `ANTHROPIC_MODEL`, and `SQLLENS_AUTH__BEARER_TOKEN`. A shared
 `stub_agent_send_message` factory fixture (async-generator of `UiComponent`,
-signature-compatible with `Agent.send_message`) ships in the same conftest for
-#72 to consume. Belt-and-suspenders sentinels are injected via `pytest-env` in
-`pyproject.toml` (`D:` defaults) so any test that slips past the scrub fails
-loudly with an obviously-bad key; a meta-test asserts the scrub removes those
-sentinels, proving the fixture is not a no-op.
+signature-compatible with `Agent.send_message` — explicit `request_context`,
+`message`, `conversation_id=None` parameters, not `*args/**kwargs`, so a
+drifted call site raises `TypeError` instead of silently passing) ships in the
+same conftest for #72 to consume. Belt-and-suspenders sentinels are injected
+via `pytest-env` in `pyproject.toml` (`D:` defaults) so any test that slips
+past the scrub fails loudly with an obviously-bad key; a meta-test in both the
+unit suite (`tests/unit/test_shared_test_fixtures.py`) and the integration
+suite (`tests/integration/test_scrub_inherited.py`) asserts the scrub removes
+those sentinels for all four keys, proving the fixture is not a no-op and that
+the fix reaches the integration directory.
 
 **Tracking:** #74
 
