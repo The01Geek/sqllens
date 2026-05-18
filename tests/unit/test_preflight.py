@@ -110,6 +110,31 @@ def test_probe_database_mysql_missing_driver_raises_clean_preflight_error(
     assert isinstance(exc_info.value.__cause__, ImportError)
 
 
+@pytest.mark.parametrize(
+    ("driver_module", "db_url"),
+    [
+        ("sqlite3", "sqlite:///:memory:"),
+        ("psycopg2", "postgresql://user:pw@localhost:5432/db"),
+        ("pymysql", "mysql://user:pw@localhost:3306/db"),
+    ],
+)
+def test_probe_database_does_not_swallow_programmer_errors(
+    monkeypatch: pytest.MonkeyPatch, driver_module: str, db_url: str
+) -> None:
+    # A TypeError from the driver's connect() represents a bug in our caller,
+    # not a database reachability failure — it must propagate rather than be
+    # relabeled as a PreflightError("database", ...) which would mislead
+    # operators into chasing a config issue that doesn't exist.
+    driver = pytest.importorskip(driver_module)
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise TypeError("not a real connect error")
+
+    monkeypatch.setattr(driver, "connect", boom)
+    with pytest.raises(TypeError, match="not a real connect error"):
+        probe_database(_cfg(db_url=db_url))
+
+
 # ---------------------------------------------------------------------------
 # probe_llm
 # ---------------------------------------------------------------------------
@@ -133,6 +158,18 @@ def test_probe_llm_constructs_anthropic_service_without_round_trip() -> None:
     kwargs = mock_service.call_args.kwargs
     assert kwargs["api_key"] == "sk-ant-real-test"
     assert "model" in kwargs
+
+
+def test_probe_llm_does_not_swallow_programmer_errors() -> None:
+    # A TypeError from constructing the LLM service represents a bug, not an
+    # API-level failure — it must propagate rather than be relabeled as a
+    # PreflightError("llm", ...).
+    with patch(
+        "sqllens.agent.integrations.AnthropicLlmService",
+        side_effect=TypeError("not a real anthropic error"),
+    ):
+        with pytest.raises(TypeError, match="not a real anthropic error"):
+            probe_llm(_cfg(api_key="sk-ant-real-test"))
 
 
 # ---------------------------------------------------------------------------
