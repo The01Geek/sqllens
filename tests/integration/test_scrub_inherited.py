@@ -25,6 +25,8 @@ import pytest
         "ANTHROPIC_API_KEY",
         "SQLLENS_LLM__API_KEY",
         "SQLLENS_AUTH__BEARER_TOKEN",
+        "SQLLENS_CONFIG",
+        "ANTHROPIC_BASE_URL",
     ],
 )
 def test_scrub_applies_in_integration_suite(leaky_key: str) -> None:

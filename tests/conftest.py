@@ -204,15 +204,16 @@ def stub_agent_send_message() -> Callable[..., StubSendMessage]:
         )
 
         async def _send_message(
-            request_context: Any = None,
-            message: str = "",
+            request_context: Any,
+            message: str,
             *,
             conversation_id: str | None = None,
         ) -> AsyncGenerator[UiComponent, None]:
-            # Explicit parameters (not ``*args, **kwargs``) so a call site that
-            # drifts from the real ``Agent.send_message`` signature raises
-            # ``TypeError`` here instead of silently passing — the stub proves
-            # the documented contract, it doesn't just claim it.
+            # Explicit, *required* parameters (not ``*args, **kwargs`` and no
+            # defaults) so the shape matches the real ``Agent.send_message``
+            # exactly: a call site that drops ``request_context``/``message``
+            # raises ``TypeError`` here just as it would against the real
+            # agent — the stub proves the documented contract, not a looser one.
             del request_context, message, conversation_id
             for comp in prepared:
                 yield comp

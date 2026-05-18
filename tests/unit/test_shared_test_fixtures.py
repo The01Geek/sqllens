@@ -28,6 +28,10 @@ from sqllens.tools._format import components_to_markdown
         "ANTHROPIC_API_KEY",
         "SQLLENS_LLM__API_KEY",
         "SQLLENS_AUTH__BEARER_TOKEN",
+        # Non-credential keys: prove the scrub covers more than the API-key
+        # tuple, so a future trim of _LEAKY_ENV_KEYS can't silently regress.
+        "SQLLENS_CONFIG",
+        "ANTHROPIC_BASE_URL",
     ],
 )
 def test_autouse_scrub_removes_pytest_env_sentinels(leaky_key: str) -> None:
@@ -190,6 +194,26 @@ async def test_stub_custom_scenario_yields_explicit_components(
     assert not is_error
     # components_to_markdown takes the *last* TEXT component as the answer.
     assert answer == "second"
+
+
+async def test_stub_default_rows_are_isolated_across_calls(
+    stub_agent_send_message,
+) -> None:
+    """The factory's ``list(_DEFAULT_ROWS)`` copy must isolate the module-level
+    default rows: mutating the rows seen by one stub must not poison the next
+    default-scenario stub (a silent cross-test-contamination failure mode)."""
+    send_message = stub_agent_send_message()
+    components = [c async for c in send_message(None, "q")]
+    df = components[0].rich_component
+    # Mutate whatever row state the component exposes, then re-drive a fresh
+    # default stub and confirm it still renders the pristine default rows.
+    if hasattr(df, "rows") and isinstance(df.rows, list):
+        df.rows.clear()
+
+    send_message2 = stub_agent_send_message()
+    answer, _ = components_to_markdown([c async for c in send_message2(None, "q")])
+    assert "Alice" in answer
+    assert "Bob" in answer
 
 
 def test_stub_unknown_scenario_raises(stub_agent_send_message) -> None:
