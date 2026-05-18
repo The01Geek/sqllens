@@ -268,9 +268,6 @@ def test_cli_validate_fails_on_plain_malformed_toml(tmp_path: Path) -> None:
 
 
 def test_cli_validate_rejects_bearer_token_without_bearer_mode(tmp_path: Path) -> None:
-    # An operator who sets ``bearer_token`` but forgets ``mode = "bearer"`` would
-    # otherwise get a server running under ``NoOpAuthenticator`` with the token
-    # silently ignored. ``sqllens validate`` must fail loudly at config load.
     cfg_path = tmp_path / "sqllens.toml"
     cfg_path.write_text(
         textwrap.dedent(
