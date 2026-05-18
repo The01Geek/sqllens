@@ -91,9 +91,25 @@ markers = [
 # in tests/conftest.py: if any test slips past the scrub and reaches the real
 # Anthropic SDK, it fails loudly with an obviously-bad key rather than
 # silently authenticating against the developer's real credentials.
-# ``D:`` = default — only set when not already present in the environment.
+#
+# These are set UNCONDITIONALLY (no ``D:`` skip-if-set prefix). pytest-env's
+# ``D:`` gates on key *presence*, not truthiness — GitHub-hosted runners
+# pre-export ``ANTHROPIC_API_KEY=`` / ``ANTHROPIC_BASE_URL=`` (empty), so a
+# ``D:`` sentinel is SKIPPED there and the scrub meta-tests would assert
+# against an absent/empty var instead of the injected sentinel (vacuous on
+# CI). A test session has no legitimate reason to honour an inherited
+# real/empty value for any of these keys, so set them outright; the autouse
+# scrub still deletes them before each test body.
+#
+# ``SQLLENS_CONFIG`` is deliberately NOT seeded: pytest-env injects at session
+# start while the autouse scrub is function-scoped, so a path-typed sentinel
+# would be live for any future session/module fixture or collection-time
+# ``Config.load()`` and point it at a nonexistent path. A bogus base URL has
+# no such blast radius (the SDK is never called) yet still exercises the
+# broader-than-credentials scrub contract.
 env = [
-    "D:ANTHROPIC_API_KEY=test-sentinel-do-not-use",
-    "D:SQLLENS_LLM__API_KEY=test-sentinel-do-not-use",
-    "D:SQLLENS_AUTH__BEARER_TOKEN=test-sentinel-do-not-use",
+    "ANTHROPIC_API_KEY=test-sentinel-do-not-use",
+    "SQLLENS_LLM__API_KEY=test-sentinel-do-not-use",
+    "SQLLENS_AUTH__BEARER_TOKEN=test-sentinel-do-not-use",
+    "ANTHROPIC_BASE_URL=test-sentinel-do-not-use",
 ]
