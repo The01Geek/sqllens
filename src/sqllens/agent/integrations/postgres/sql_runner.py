@@ -1,11 +1,13 @@
 """PostgreSQL implementation of SqlRunner interface."""
 
-import contextlib
+import logging
 from typing import Optional
 import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
+
+logger = logging.getLogger(__name__)
 
 
 class PostgresRunner(SqlRunner):
@@ -82,9 +84,10 @@ class PostgresRunner(SqlRunner):
         else:
             conn = self.psycopg2.connect(**self.connection_params)
 
-        cursor = conn.cursor(cursor_factory=self.psycopg2.extras.RealDictCursor)
-
+        cursor = None
         try:
+            cursor = conn.cursor(cursor_factory=self.psycopg2.extras.RealDictCursor)
+
             # Execute the query
             cursor.execute(args.sql)
 
@@ -109,12 +112,19 @@ class PostgresRunner(SqlRunner):
                 return pd.DataFrame({"rows_affected": [rows_affected]})
 
         finally:
-            # Suppress secondary exceptions during cleanup so the primary
+            # Log-and-swallow secondary exceptions during cleanup so the primary
             # query error (e.g. statement_timeout / "current transaction is
             # aborted") reaches the LLM intact rather than being masked by
-            # InternalError / InterfaceError from closing a cursor or
-            # connection in an indeterminate state.
-            with contextlib.suppress(Exception):
-                cursor.close()
-            with contextlib.suppress(Exception):
+            # secondary errors from closing a cursor or connection in an
+            # indeterminate state. Cleanup failures are still worth a breadcrumb
+            # for diagnosing chronic teardown problems (e.g. a misconfigured
+            # pool or a broken pgbouncer).
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    logger.warning("cursor.close() failed during cleanup", exc_info=True)
+            try:
                 conn.close()
+            except Exception:
+                logger.warning("conn.close() failed during cleanup", exc_info=True)

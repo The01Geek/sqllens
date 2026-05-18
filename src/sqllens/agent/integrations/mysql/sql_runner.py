@@ -1,11 +1,13 @@
 """MySQL implementation of SqlRunner interface."""
 
-import contextlib
+import logging
 from typing import Optional
 import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
+
+logger = logging.getLogger(__name__)
 
 
 class MySQLRunner(SqlRunner):
@@ -88,13 +90,18 @@ class MySQLRunner(SqlRunner):
             )
 
         finally:
-            # Suppress secondary exceptions during cleanup so the primary
+            # Log-and-swallow secondary exceptions during cleanup so the primary
             # query error (e.g. max_statement_time / lost-connection) reaches
-            # the LLM intact rather than being masked by InterfaceError /
-            # BrokenPipeError from closing a cursor or connection in an
-            # indeterminate state.
+            # the LLM intact rather than being masked by secondary errors
+            # (InterfaceError, BrokenPipeError) from closing a cursor or
+            # connection in an indeterminate state. Cleanup failures are still
+            # worth a breadcrumb for diagnosing chronic teardown problems.
             if cursor is not None:
-                with contextlib.suppress(Exception):
+                try:
                     cursor.close()
-            with contextlib.suppress(Exception):
+                except Exception:
+                    logger.warning("cursor.close() failed during cleanup", exc_info=True)
+            try:
                 conn.close()
+            except Exception:
+                logger.warning("conn.close() failed during cleanup", exc_info=True)

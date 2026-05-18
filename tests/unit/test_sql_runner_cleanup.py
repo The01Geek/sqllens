@@ -15,6 +15,7 @@ exception, not the secondary one raised during cleanup.
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import types
 from typing import Any
@@ -171,4 +172,75 @@ async def test_postgres_runner_close_failure_alone_does_not_raise(
 
     assert df.to_dict(orient="records") == [{"x": 1}]
     cursor.close.assert_called_once()
+    conn.close.assert_called_once()
+
+
+async def test_postgres_runner_closes_conn_when_cursor_allocation_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If conn.cursor() itself raises, conn.close() must still run (no leak)."""
+    conn = MagicMock()
+    conn.cursor.side_effect = _PrimaryError("connection died before cursor allocation")
+
+    _install_fake_psycopg2(monkeypatch, lambda *_a, **_k: conn)
+
+    from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
+
+    runner = PostgresRunner(connection_string="postgresql://u:p@h/d")
+
+    with pytest.raises(_PrimaryError, match="connection died"):
+        await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
+
+    conn.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# BaseException propagation
+#
+# contextlib.suppress / `except Exception` deliberately do NOT catch
+# BaseException. KeyboardInterrupt, SystemExit, and asyncio.CancelledError must
+# still unwind through the cleanup path — otherwise Ctrl+C during a query and
+# cancelled MCP requests would be silently swallowed.
+# ---------------------------------------------------------------------------
+
+
+async def test_mysql_runner_propagates_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cursor = MagicMock()
+    cursor.execute.side_effect = asyncio.CancelledError()
+
+    conn = MagicMock()
+    conn.cursor.return_value = cursor
+
+    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
+
+    from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
+
+    runner = MySQLRunner(host="h", database="d", user="u", password="p")
+
+    with pytest.raises(asyncio.CancelledError):
+        await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
+
+    conn.close.assert_called_once()
+
+
+async def test_postgres_runner_propagates_keyboard_interrupt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cursor = MagicMock()
+    cursor.execute.side_effect = KeyboardInterrupt()
+
+    conn = MagicMock()
+    conn.cursor.return_value = cursor
+
+    _install_fake_psycopg2(monkeypatch, lambda *_a, **_k: conn)
+
+    from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
+
+    runner = PostgresRunner(connection_string="postgresql://u:p@h/d")
+
+    with pytest.raises(KeyboardInterrupt):
+        await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
+
     conn.close.assert_called_once()
