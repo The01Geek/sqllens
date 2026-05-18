@@ -216,7 +216,27 @@ config-binding behavior (explicit warning if a different `cfg` is passed)
 and the error-surfacing path. Add an autouse fixture in
 `tests/integration/conftest.py` that resets `_AGENT = None` between tests.
 
-**Tracking:** #72
+**Status:** Test coverage landed in PR #81 (issue #72) —
+[`tests/unit/test_query_database.py`](../../tests/unit/test_query_database.py)
+adds 9 cases: singleton lifecycle (first call builds, second reuses,
+changed-`cfg` ignored, build failure leaves singleton `None`), error
+surfacing (`send_message` raises → `RuntimeError` with chained cause,
+`is_error` status card → `RuntimeError`), happy path (TEXT + DATAFRAME
+markdown), concurrent cold-start race, and async-generator `aclose()` on
+exception. Shared agent stubs live in
+[`tests/unit/_agent_stubs.py`](../../tests/unit/_agent_stubs.py); the
+shared `Config` builder moved to
+[`tests/unit/_config_builders.py`](../../tests/unit/_config_builders.py)
+(imported by `test_factory_wiring.py`). The autouse `_AGENT = None` reset
+fixture landed in
+[`tests/unit/conftest.py`](../../tests/unit/conftest.py) (unit, not
+integration — the new tests are unit-level). The tests *characterize*
+current behavior; they assert the changed-`cfg` value is silently ignored
+rather than warned-on. The production singleton fix (`asyncio.Lock`,
+config-identity check) is still **not done** — `query_database.py` retains
+the unguarded module-global `_AGENT`. That part remains tracked by C-3.
+
+**Tracking:** #72 (test coverage — done via #81); production fix tracked by C-3
 
 #### T-3. No mock-LLM fixture; integration conftest doesn't scrub `SQLLENS_LLM__API_KEY` — *resolved*
 **Files:** [`tests/conftest.py`](../../tests/conftest.py) ·

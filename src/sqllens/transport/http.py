@@ -222,7 +222,7 @@ class _SessionManagerLifespan:
     async def _handle_lifespan(self, scope: Scope, receive: Receive, send: Send) -> None:
         while True:
             message = await receive()
-            msg_type = message["type"]
+            msg_type = message.get("type")
             if msg_type == "lifespan.startup":
                 if self._shutdown_done:
                     # Single-shot: this instance has already shut down; the

@@ -134,6 +134,19 @@ If `__call__` receives a `lifespan` message whose `type` is neither `lifespan.st
 
 `_SessionManagerLifespan` needs a handle to FastMCP's session manager. We read the documented public `session_manager` property on `FastMCP` (not the private `_session_manager` attribute) so that a future `mcp` SDK rename/removal is a build-time failure, not a request-time `AttributeError`. The access is guarded with `try/except AttributeError` inside `build_asgi_app`; on miss it raises `RuntimeError("FastMCP no longer exposes a session_manager attribute; the mcp SDK likely renamed or removed it. …")` naming this file as the place to update. The guard is exercised by `tests/unit/test_transport_http.py::test_build_asgi_app_raises_runtimeerror_when_session_manager_missing`.
 
+### Lifespan failure-path contract
+
+The adapter pins a symmetric contract for both lifespan failure paths — startup and shutdown — and the unit suite locks both ends in:
+
+- **Startup failure**: if `session_manager.run().__aenter__()` raises, the adapter logs the traceback via `logger.exception(...)`, drops its `_cm` reference to `None`, sends `{"type": "lifespan.startup.failed", "message": str(exc)}`, and returns. Pinning the `failed` message (not `complete`) is what stops a broken startup from being misreported as a healthy one. Covered by `tests/unit/test_transport_http.py::test_lifespan_startup_failure_sends_failed_not_complete`.
+- **Shutdown failure**: if `__aexit__` raises, the adapter logs the traceback via `logger.exception(...)`, sends `{"type": "lifespan.shutdown.failed", "message": str(exc)}`, and returns — never `lifespan.shutdown.complete`. Covered by `tests/unit/test_transport_http.py::test_lifespan_shutdown_failure_sends_failed_not_complete`.
+
+Three incidental defensive properties round out the contract:
+
+- **Drop the CM on failed startup.** After a failed `__aenter__`, `_cm` is reset to `None`. A subsequent `lifespan.shutdown` therefore takes the no-op path (the `if self._cm is not None` guard short-circuits) and replies `lifespan.shutdown.complete` directly. Without this, a generator-based `@asynccontextmanager` would raise `RuntimeError("generator didn't yield")` from `__aexit__` and we would surface the original startup failure as a shutdown failure — hiding the real cause. Covered end-to-end by `tests/unit/test_transport_http.py::test_lifespan_shutdown_after_failed_startup_is_clean_noop`.
+- **Unknown / missing message types are logged and skipped.** An unrecognized lifespan `type` is logged (`unknown lifespan message type: %s`) and the receive loop continues to wait for a recognized message rather than exiting (which would leave a subsequent valid startup/shutdown unhandled) or raising (which would crash the host) — see the *Unknown lifespan messages* section above. A malformed message with no `"type"` key falls through to the same branch instead of raising `KeyError`. Covered by `tests/unit/test_transport_http.py::test_lifespan_unknown_message_type_is_logged_and_loop_continues` and `::test_lifespan_missing_message_type_is_logged_and_loop_continues`.
+- **Duplicate `lifespan.startup` is rejected.** If a host sends `lifespan.startup` twice, the adapter logs an error and replies `lifespan.startup.failed` with message `"duplicate lifespan.startup"` rather than leaking the original session-manager context by re-entering it. Covered by `tests/unit/test_transport_http.py::test_lifespan_duplicate_startup_is_rejected`.
+
 ## What does **not** sit on the HTTP transport
 
 - **Logging middleware.** Logging is configured globally; the per-request log line comes from FastMCP, not our wrapper.
