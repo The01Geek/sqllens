@@ -143,11 +143,12 @@ class TestMysqlRunner:
     async def test_huge_select_does_not_drain_after_cap(self, mysql_url: str) -> None:
         """Regression: ``SSDictCursor.close()`` MUST NOT be added to the streaming path.
 
-        PyMySQL's ``SSCursor.close()`` drains every remaining row off the wire to
-        keep the connection in sync. Adding ``cursor.close()`` to ``run_sql`` would
-        pass every other current test (they all use tiny result sets) while
-        defeating the row cap on huge result sets — the runner would still return
-        ``max_rows`` rows, but only after pulling millions of rows over the wire.
+        PyMySQL's ``SSCursor.close()`` (inherited by ``SSDictCursor``) drains
+        every remaining row off the wire to keep the connection in sync.
+        Adding ``cursor.close()`` to ``run_sql`` would pass every other current
+        test (they all use tiny result sets) while defeating the row cap on
+        huge result sets — the runner would still return ``max_rows`` rows,
+        but only after pulling millions of rows over the wire.
 
         Cross-join ``information_schema.columns`` against itself — even on a
         fresh MySQL this produces millions of rows. With ``max_rows=5`` the

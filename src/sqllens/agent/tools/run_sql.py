@@ -64,10 +64,13 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
             query_type = args.sql.strip().upper().split()[0]
 
             if query_type == "SELECT":
-                # Read truncation signal once so empty and non-empty branches
-                # agree. A runner contract that returns an empty DataFrame with
-                # ``df.attrs[TRUNCATED_ATTR] is True`` must still surface the
-                # "re-issue narrower" hint to the LLM, not "no rows".
+                # Read the truncation signal before branching so the empty
+                # branch also surfaces the "re-issue narrower" hint instead of
+                # silently reporting "no rows". The constants index the
+                # producer-side ``df.attrs`` contract; the metadata dict below
+                # uses the literal wire-format keys ``"truncated"`` and
+                # ``"max_rows"`` so a future rename of those constants does not
+                # accidentally rename the public JSON-RPC schema.
                 row_cap_hit = bool(df.attrs.get(TRUNCATED_ATTR, False))
                 cap_size = int(df.attrs.get(MAX_ROWS_ATTR, 0))
                 truncation_note = ""

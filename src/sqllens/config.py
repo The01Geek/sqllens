@@ -49,8 +49,11 @@ class DatabaseConfig(BaseModel):
     statement_timeout_ms: int = Field(
         default=30_000,
         ge=0,
-        # 24h ceiling catches unit-confusion typos (e.g. someone writing
-        # 3_000_000_000 thinking they're in seconds — that's 35 days in ms).
+        # 24h ceiling rejects values so large they almost certainly reflect a
+        # unit-confusion typo (microseconds passed as ms, an epoch timestamp
+        # pasted in, etc.). Sub-second typos in the other direction
+        # (seconds-meant-as-ms producing too-short timeouts) are not catchable
+        # mechanically and stay the operator's responsibility.
         le=24 * 60 * 60 * 1000,
         description=(
             "Server-side statement timeout in milliseconds. Applied via "
