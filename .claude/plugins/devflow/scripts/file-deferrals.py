@@ -26,6 +26,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from collections import OrderedDict
@@ -53,11 +54,25 @@ def _now_iso():
 
 
 def _gh_login():
-    """Whoever is actually filing — for the manifest's follow_up.filed_by."""
-    r = _run(["gh", "api", "user", "--jq", ".login"], check=False)
-    if r.returncode != 0:
-        _fail(f"could not read GitHub login: {r.stderr.strip()}")
-    return r.stdout.strip()
+    """Whoever is actually filing — for the manifest's follow_up.filed_by.
+
+    Tries gh api user first (works for personal access tokens). On failure
+    (e.g., GITHUB_TOKEN in Actions lacks the user:read scope and returns
+    HTTP 403 "Resource not accessible by integration"), falls back to the
+    GITHUB_ACTOR env var, then returns "(unknown)". filed_by is
+    informational only — never gate logic — so we degrade rather than
+    fail the run.
+    """
+    try:
+        r = _run(["gh", "api", "user", "--jq", ".login"], check=False)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except FileNotFoundError:
+        pass
+    actor = os.environ.get("GITHUB_ACTOR", "").strip()
+    if actor:
+        return actor
+    return "(unknown)"
 
 
 def _derive_area(file_path: str) -> str:
