@@ -46,16 +46,18 @@ Allows every request, returns an empty `AuthContext()`. The right choice for:
 Static bearer token configured at startup. Clients send `Authorization: Bearer <token>`. Implementation notes:
 
 - **Constant-time comparison** via `hmac.compare_digest`. Comparing as strings would leak token length and prefix through timing.
-- **Empty token rejected** at construction. An empty configured token would let any non-empty request through.
+- **Empty / whitespace-only token rejected** at construction. An empty configured token would let any non-empty request through; a whitespace-only one would silently fail every match after `_extract_bearer` strips inbound tokens. Non-empty tokens are `.strip()`-normalized before storage so a config like `bearer_token = "  secret  "` matches a client sending `Authorization: Bearer secret`.
 - **Case-insensitive header lookup** — accepts `Authorization` and `authorization`. Anything else (`AUTHORIZATION`, etc.) is missed; if a proxy uppercases the header that's a problem, but no real client does that.
 - **Subject is the literal string `"bearer"`** — there's no principal information in a static token to derive a stable id from, and `None` would conflict with the "successful authentication implies non-null subject" convention some downstream code might one day want.
 
-Config: `auth.mode = "bearer"`, `auth.bearer_token = "..."` (or env `SQLLENS_AUTH__BEARER_TOKEN`). The `mode`/`bearer_token` pair is validated at two distinct points:
+Config: `auth.mode = "bearer"`, `auth.bearer_token = "..."` (or env `SQLLENS_AUTH__BEARER_TOKEN`). The `mode`/`bearer_token` pair is validated by two complementary, inverse pydantic `model_validator(mode="after")` checks in [src/sqllens/config.py](../../../src/sqllens/config.py):
 
-- **Config-load time** — `AuthConfig._token_only_with_bearer_mode` (a pydantic `model_validator(mode="after")` in [src/sqllens/config.py](../../../src/sqllens/config.py)) rejects a `bearer_token` set when `mode` is anything other than `"bearer"`. This catches the dangerous misconfiguration where an operator sets `SQLLENS_AUTH__BEARER_TOKEN` and assumes that alone enables bearer auth — under `mode = "none"` the active authenticator would otherwise be `NoOpAuthenticator` and the server would run completely open. `mode = "jwt"` with a stale token is rejected for the same reason (the stale credential implies the wrong thing about what authorizes a request). The error message names the offending field, the actual mode, and both remediations (set `mode = "bearer"` or remove the token / unset the env var).
-- **`build_authenticator` time** — the inverse check: `mode = "bearer"` with `bearer_token is None` raises `ValueError("auth.mode='bearer' requires auth.bearer_token to be set")` in [src/sqllens/auth/\_\_init\_\_.py](../../../src/sqllens/auth/__init__.py).
+- **`AuthConfig._bearer_requires_token`** rejects `mode = "bearer"` with a missing, empty, or whitespace-only `bearer_token`. Without this guard the server would start cleanly and then reject every request at auth time with no startup signal. Surfaced through `cli.serve` / `cli.validate` as a `ValidationError` with an actionable message naming the env var, the `[auth]` TOML stanza, and the alternate `mode` values. `build_authenticator` retains the same check as defense-in-depth for callers that bypass validation via `model_construct`.
+- **`AuthConfig._token_only_with_bearer_mode`** is the inverse: it rejects a `bearer_token` set when `mode` is anything other than `"bearer"`. This catches the dangerous misconfiguration where an operator sets `SQLLENS_AUTH__BEARER_TOKEN` and assumes that alone enables bearer auth — under `mode = "none"` the active authenticator would otherwise be `NoOpAuthenticator` and the server would run completely open. `mode = "jwt"` with a stale token is rejected for the same reason. The error message names the offending field, the actual mode, and both remediations (set `mode = "bearer"` or remove the token / unset the env var).
 
 Together, the two checks make every `(mode, bearer_token)` combination either valid or fail loudly — there is no silent-ignore path.
+
+`bearer` (and `jwt`, once implemented) bypass the `serve` loopback guard — they are the intended way to run HTTP on a non-loopback host. See the `none` section above for the guard's behaviour and the `SQLLENS_AUTH__INSECURE` opt-out.
 
 ### `jwt` — [src/sqllens/auth/jwt.py](../../../src/sqllens/auth/jwt.py)
 
@@ -70,8 +72,8 @@ If you want this now, the design notes are in the module docstring; the implemen
 
 `build_authenticator(cfg.auth)` is called once per process:
 
-- `build_asgi_app` in `transport/http.py` — used by integration tests.
-- `run` in `transport/http.py` — used by `sqllens serve` in HTTP mode.
+- `build_asgi_app` in `transport/http.py` — the canonical app-construction entry point; called by `run` and by the integration test fixture, and safe to mount under any external ASGI host.
+- `run` in `transport/http.py` — used by `sqllens serve` in HTTP mode; thin uvicorn launcher that delegates to `build_asgi_app`.
 
 The authenticator is then held by `_AuthMiddleware` for the lifetime of the server. There is **no hot-reload** — changing `auth.mode` or `auth.bearer_token` requires a process restart.
 

@@ -14,9 +14,13 @@ that registers its endpoint at the path ``/mcp``. We wrap it with:
 2. **Authentication middleware.** Every request hits the configured
    ``Authenticator`` before the MCP handler sees it. Failures return ``401``
    with a short reason; auth-mode ``none`` is a passthrough.
+3. **Session-manager lifespan.** FastMCP's session manager must be started
+   inside an async context for requests to succeed; we wrap the stack in an
+   ASGI lifespan adapter so any host (uvicorn, FastAPI mount, custom server)
+   that drives lifespan events will start/stop it correctly.
 
-The ``run`` function is a thin uvicorn launcher; ``build_asgi_app`` is the
-testable seam used by the integration tests.
+Public surface: ``build_asgi_app(cfg)`` returns the mount-ready app;
+``run(cfg)`` is the uvicorn launcher used by ``sqllens serve``.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from starlette.responses import RedirectResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -31,6 +36,9 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from sqllens.auth import Authenticator, AuthError, build_authenticator
 from sqllens.config import Config
 from sqllens.server import build_server
+
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import FastMCP
 
 logger = logging.getLogger("sqllens.transport.http")
 
@@ -46,53 +54,59 @@ _INTERNAL_PATH = "/mcp"
 
 
 def build_asgi_app(cfg: Config) -> ASGIApp:
-    """Build the Streamable HTTP ASGI app for ``cfg``.
+    """Build the fully wrapped, mount-ready Streamable HTTP ASGI app for ``cfg``.
 
-    Returned app is a bare ASGI callable wrapped in our own auth + path-fix
-    middleware. No Starlette ``Mount`` involved — that's deliberate: ``Mount``
+    The returned app includes path normalization, authentication, AND the
+    session-manager lifespan adapter — it is safe to mount under any ASGI
+    host (uvicorn, FastAPI, Starlette) that drives lifespan events.
+
+    No Starlette ``Mount`` is used internally — that's deliberate: ``Mount``
     has surprising trailing-slash semantics, and a single-server transport
     doesn't need path-based dispatch.
+    """
+    bare, mcp = _build_asgi_app_bare(cfg)
+    # Read via the documented public ``session_manager`` property rather than
+    # ``_session_manager``: depending on documented surface is the only thing
+    # that gives us a stable SDK contract. The AttributeError guard converts
+    # a future SDK rename/removal into a build-time RuntimeError whose
+    # message names this file and the mcp SDK as the likely cause, instead
+    # of an opaque AttributeError with no actionable hint.
+    try:
+        session_manager = mcp.session_manager
+    except AttributeError as exc:
+        raise RuntimeError(
+            "FastMCP no longer exposes a session_manager attribute; the mcp "
+            "SDK likely renamed or removed it. Pin a compatible mcp version "
+            "or update sqllens.transport.http.build_asgi_app."
+        ) from exc
+    return _SessionManagerLifespan(bare, session_manager)
+
+
+def _build_asgi_app_bare(cfg: Config) -> tuple[ASGIApp, FastMCP]:
+    """Build the path-normalized, authenticated ASGI app WITHOUT the lifespan adapter.
+
+    "Bare" means lifespan-bare only: path normalization and authentication
+    middleware are still applied. Returns the app and the underlying
+    ``FastMCP`` instance so the caller can wire up the session-manager
+    lifespan itself. Production callers reach this only via
+    ``build_asgi_app``; the unit suite also calls it directly to assert
+    the inner stack composition. The split exists to keep the
+    SDK-attribute reach at a single guarded site.
     """
     mcp = build_server(cfg)
     inner = mcp.streamable_http_app()
     authenticator = build_authenticator(cfg.auth)
-
-    auth_app = _AuthMiddleware(inner, authenticator)
-    fixed_app = _PathNormalizer(auth_app)
-    return fixed_app
-
-
-def session_manager_for(cfg: Config):
-    """Return the FastMCP session manager so callers can manage its lifespan.
-
-    FastMCP's ``streamable_http_app`` initialises a session manager on first
-    call; the caller must run it inside a ``manager.run()`` async context for
-    the HTTP server to function. We return both the app and the manager handle
-    via ``build_asgi_app`` consumers — this helper exposes the manager only.
-    """
-    # build_server creates a fresh FastMCP, but we need the same instance whose
-    # streamable_http_app was returned. Re-derive deterministically.
-    raise NotImplementedError(
-        "session_manager_for is reserved for the run() launcher; do not call directly"
-    )
+    return _PathNormalizer(_AuthMiddleware(inner, authenticator)), mcp
 
 
 def run(cfg: Config) -> None:
     """Launch uvicorn with the Streamable HTTP app."""
     import uvicorn
 
-    mcp = build_server(cfg)
-    inner = mcp.streamable_http_app()
-    authenticator = build_authenticator(cfg.auth)
-    app = _PathNormalizer(_AuthMiddleware(inner, authenticator))
-
-    # FastMCP's session manager must be running for the inner app to handle
-    # requests. Wrap uvicorn's lifespan so the manager starts/stops with it.
-    lifespan_app = _SessionManagerLifespan(app, mcp._session_manager)  # type: ignore[attr-defined]
-
+    app = build_asgi_app(cfg)
     logger.info("starting Streamable HTTP server on %s:%d (path %s)",
                 cfg.server.host, cfg.server.port, MCP_PATH)
-    uvicorn.run(lifespan_app, host=cfg.server.host, port=cfg.server.port, log_level="info")
+    uvicorn.run(app, host=cfg.server.host, port=cfg.server.port, log_level="info")
 
 
 # ─────────────────────────── ASGI middleware ────────────────────────────────
@@ -167,14 +181,16 @@ class _SessionManagerLifespan:
     """Adapter that runs FastMCP's session manager inside ASGI lifespan events.
 
     FastMCP exposes a session manager that must be active while requests are
-    served (it owns the per-session state). uvicorn drives lifespan startup
-    and shutdown; we intercept those events to start/stop the manager.
+    served (it owns the per-session state). The ASGI host (uvicorn, FastAPI
+    mount, custom Starlette app) drives lifespan startup and shutdown; we
+    intercept those events to start/stop the manager.
     """
 
     def __init__(self, inner: ASGIApp, session_manager) -> None:  # type: ignore[no-untyped-def]
         self.inner = inner
         self.session_manager = session_manager
         self._cm = None
+        self._started = False
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "lifespan":
@@ -185,22 +201,43 @@ class _SessionManagerLifespan:
     async def _handle_lifespan(self, scope: Scope, receive: Receive, send: Send) -> None:
         while True:
             message = await receive()
-            if message["type"] == "lifespan.startup":
+            msg_type = message["type"]
+            if msg_type == "lifespan.startup":
+                if self._started:
+                    # ASGI hosts must not send startup twice; if they do, refuse
+                    # rather than leaking the original session-manager context.
+                    logger.error("duplicate lifespan.startup received; ignoring")
+                    await send(
+                        {
+                            "type": "lifespan.startup.failed",
+                            "message": "duplicate lifespan.startup",
+                        }
+                    )
+                    return
                 try:
                     self._cm = self.session_manager.run()
                     await self._cm.__aenter__()
                 except Exception as exc:  # pragma: no cover — startup failures
+                    logger.exception("session manager startup failed")
                     await send({"type": "lifespan.startup.failed", "message": str(exc)})
                     return
+                self._started = True
                 await send({"type": "lifespan.startup.complete"})
-            elif message["type"] == "lifespan.shutdown":
+            elif msg_type == "lifespan.shutdown":
                 if self._cm is not None:
                     try:
                         await self._cm.__aexit__(None, None, None)
-                    except Exception:
+                    except Exception as exc:
                         logger.exception("session manager shutdown failed")
+                        await send(
+                            {"type": "lifespan.shutdown.failed", "message": str(exc)}
+                        )
+                        return
                 await send({"type": "lifespan.shutdown.complete"})
                 return
+            else:
+                # Unknown lifespan message — surface it instead of looping silently.
+                logger.warning("unknown lifespan message type: %s", msg_type)
 
 
 # ───────────────────────────── helpers ──────────────────────────────────────

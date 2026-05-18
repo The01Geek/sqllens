@@ -63,7 +63,7 @@ Env vars beat TOML — the convention containerized deploys expect.
 
 | Mode | When to use |
 |---|---|
-| `none` | Loopback only. The default for `sqllens init`. |
+| `none` | Loopback only. `sqllens serve` refuses to start with `auth.mode=none` and `server.transport=http` bound to a non-loopback host unless `SQLLENS_AUTH__INSECURE=1` is set (closed-network override). The default for `sqllens init`. |
 | `bearer` | Single shared token. Set `auth.bearer_token` in TOML or `SQLLENS_AUTH__BEARER_TOKEN` in env. |
 | `jwt` | **Scaffolded — not implemented yet.** The verifier interface is locked; the implementation lands in a follow-up. Don't deploy with this mode. |
 
@@ -125,7 +125,7 @@ Three install paths, all produced by the same release pipeline:
 | Path | Command | Use when |
 |---|---|---|
 | **PyPI** | `pip install sqllens[all]` then `sqllens serve` | You're a Python user or running on a server. |
-| **Docker** | `docker run -p 8765:8765 -e SQLLENS_LLM__API_KEY=… -e SQLLENS_DATABASE__URL=… ghcr.io/the01geek/sqllens:latest` | You don't want a Python install on the host. Multi-arch (amd64 + arm64), signed with cosign, SBOM attached. |
+| **Docker** | `docker run -p 8765:8765 -e SQLLENS_LLM__API_KEY=… -e SQLLENS_DATABASE__URL=… -e SQLLENS_AUTH__MODE=bearer -e SQLLENS_AUTH__BEARER_TOKEN=$(openssl rand -hex 32) ghcr.io/the01geek/sqllens:latest` | You don't want a Python install on the host. Multi-arch (amd64 + arm64), signed with cosign, SBOM attached. ⚠ The image binds `0.0.0.0` inside the container — anything that can reach the published host port can reach the MCP endpoint. Use bearer auth (above) or set `SQLLENS_AUTH__INSECURE=1` to opt out of the loopback safety check for closed-network deployments. |
 | **MCPB** | Drag the `.mcpb` for your platform onto Claude Desktop. | You only use Claude Desktop and want a one-click install. See [`mcpb/README.md`](mcpb/README.md). |
 
 ## Roadmap

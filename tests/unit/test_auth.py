@@ -56,6 +56,19 @@ class TestBearerTokenAuthenticator:
         with pytest.raises(ValueError):
             BearerTokenAuthenticator("")
 
+    def test_rejects_whitespace_expected_token(self) -> None:
+        # Innermost-layer guard against a whitespace-only token slipping through
+        # an AuthConfig that bypassed validation (see build_authenticator path).
+        with pytest.raises(ValueError):
+            BearerTokenAuthenticator("   ")
+
+    async def test_strips_surrounding_whitespace_to_match_extracted_header(self) -> None:
+        # Mirrors _extract_bearer's strip on the inbound side — otherwise a config
+        # like bearer_token = "  secret  " would silently never match.
+        auth = BearerTokenAuthenticator("  secret-123  ")
+        ctx = await auth.authenticate({"Authorization": "Bearer secret-123"})
+        assert ctx.subject == "bearer"
+
 
 class TestJwtAuthenticator:
     """JWT is scaffolded only — a placeholder verifier that refuses requests."""
@@ -74,11 +87,6 @@ class TestBuildAuthenticator:
     def test_bearer_mode_with_token(self) -> None:
         cfg = AuthConfig(mode="bearer", bearer_token=SecretStr("token-1"))
         assert isinstance(build_authenticator(cfg), BearerTokenAuthenticator)
-
-    def test_bearer_mode_without_token_raises(self) -> None:
-        cfg = AuthConfig(mode="bearer", bearer_token=None)
-        with pytest.raises(ValueError, match="bearer_token"):
-            build_authenticator(cfg)
 
     def test_jwt_mode_returns_scaffold(self) -> None:
         cfg = AuthConfig(mode="jwt", jwt_jwks_url="https://example.com/jwks.json")
@@ -106,4 +114,52 @@ class TestAuthConfigValidation:
 
     def test_no_token_with_mode_none_accepted(self) -> None:
         cfg = AuthConfig(mode="none")
+        assert cfg.bearer_token is None
+
+
+class TestAuthConfigValidator:
+    """Misconfiguration is caught at AuthConfig construction, before the server starts."""
+
+    def test_bearer_without_token_rejected(self) -> None:
+        with pytest.raises(ValidationError) as exc:
+            AuthConfig(mode="bearer", bearer_token=None)
+        msg = str(exc.value)
+        assert "bearer_token" in msg
+        assert "SQLLENS_AUTH__BEARER_TOKEN" in msg
+        assert "auth.mode" in msg
+
+    def test_bearer_with_empty_token_rejected(self) -> None:
+        # Same actionable-message check as the None case — a misset shell env var
+        # like ``SQLLENS_AUTH__BEARER_TOKEN=`` deserves the same guidance.
+        with pytest.raises(ValidationError) as exc:
+            AuthConfig(mode="bearer", bearer_token=SecretStr(""))
+        msg = str(exc.value)
+        assert "SQLLENS_AUTH__BEARER_TOKEN" in msg
+        assert "auth.mode" in msg
+
+    def test_bearer_with_whitespace_token_rejected(self) -> None:
+        # Whitespace-only tokens (env var with trailing newline, templated config with
+        # a stray space) would otherwise pass the truthiness check and break silently.
+        with pytest.raises(ValidationError, match="SQLLENS_AUTH__BEARER_TOKEN"):
+            AuthConfig(mode="bearer", bearer_token=SecretStr("   "))
+
+    def test_build_authenticator_raises_when_validator_bypassed(self) -> None:
+        # ``model_construct`` skips validators. ``build_authenticator`` must still
+        # surface the actionable message, not an opaque ``AttributeError``.
+        cfg = AuthConfig.model_construct(mode="bearer", bearer_token=None)
+        with pytest.raises(ValueError, match="SQLLENS_AUTH__BEARER_TOKEN"):
+            build_authenticator(cfg)
+
+    def test_build_authenticator_rejects_whitespace_when_validator_bypassed(self) -> None:
+        # Whitespace-only token via the same bypass path: build_authenticator's
+        # defense-in-depth check should still emit the actionable message rather
+        # than fall through to BearerTokenAuthenticator's terser error.
+        cfg = AuthConfig.model_construct(mode="bearer", bearer_token=SecretStr("   "))
+        with pytest.raises(ValueError, match="SQLLENS_AUTH__BEARER_TOKEN"):
+            build_authenticator(cfg)
+
+    def test_none_mode_with_no_token_ok(self) -> None:
+        # Sanity: the validator must not affect the default (and most common) mode.
+        cfg = AuthConfig(mode="none")
+        assert cfg.mode == "none"
         assert cfg.bearer_token is None

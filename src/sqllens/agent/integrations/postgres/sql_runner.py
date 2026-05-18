@@ -1,10 +1,16 @@
 """PostgreSQL implementation of SqlRunner interface."""
 
+import uuid
 from typing import Optional
 import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
+from sqllens.safety.limits import rows_to_capped_df
+from sqllens.safety.readonly import is_read_shaped
+
+
+_DEFAULT_MAX_ROWS = 10_000
 
 
 class PostgresRunner(SqlRunner):
@@ -18,6 +24,8 @@ class PostgresRunner(SqlRunner):
         database: Optional[str] = None,
         user: Optional[str] = None,
         password: Optional[str] = None,
+        statement_timeout_ms: int = 0,
+        max_rows: int = _DEFAULT_MAX_ROWS,
         **kwargs,
     ):
         """Initialize with PostgreSQL connection parameters.
@@ -32,6 +40,8 @@ class PostgresRunner(SqlRunner):
             database: Database name
             user: Database user
             password: Database password
+            statement_timeout_ms: Per-query timeout in milliseconds (0 disables)
+            max_rows: Hard ceiling on rows returned per SELECT
             **kwargs: Additional psycopg2 connection parameters (sslmode, connect_timeout, etc.)
         """
         try:
@@ -62,6 +72,14 @@ class PostgresRunner(SqlRunner):
                 "Either provide connection_string OR (host, database, and user) parameters"
             )
 
+        if statement_timeout_ms < 0:
+            raise ValueError(
+                f"statement_timeout_ms must be >= 0 (got {statement_timeout_ms}); "
+                "use 0 to disable"
+            )
+        self._statement_timeout_ms = statement_timeout_ms
+        self._max_rows = max_rows
+
     async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
         """Execute SQL query against PostgreSQL database and return results as DataFrame.
 
@@ -70,43 +88,51 @@ class PostgresRunner(SqlRunner):
             context: Tool execution context
 
         Returns:
-            DataFrame with query results
+            DataFrame with query results. For SELECTs, ``df.attrs['truncated']`` is True
+            when the result was capped at ``max_rows`` and the agent should re-issue
+            with a narrower WHERE / LIMIT.
 
         Raises:
-            psycopg2.Error: If query execution fails
+            psycopg2.Error: If query execution fails (including statement_timeout firing).
         """
-        # Connect to the database using either connection string or parameters
         if self.connection_string:
             conn = self.psycopg2.connect(self.connection_string)
         else:
             conn = self.psycopg2.connect(**self.connection_params)
 
-        cursor = conn.cursor(cursor_factory=self.psycopg2.extras.RealDictCursor)
-
         try:
-            # Execute the query
-            cursor.execute(args.sql)
+            if self._statement_timeout_ms > 0:
+                setup = conn.cursor()
+                try:
+                    setup.execute(
+                        "SET statement_timeout = %s", (int(self._statement_timeout_ms),)
+                    )
+                finally:
+                    setup.close()
 
-            # Determine if this is a SELECT query or modification query
-            query_type = args.sql.strip().upper().split()[0]
+            if is_read_shaped(args.sql):
+                # Named cursors are server-side and stream from a portal; they
+                # require an open transaction (psycopg2's default autocommit=False).
+                cursor_name = f"sqllens_{uuid.uuid4().hex}"
+                cursor = conn.cursor(
+                    name=cursor_name,
+                    cursor_factory=self.psycopg2.extras.RealDictCursor,
+                )
+                try:
+                    cursor.execute(args.sql)
+                    rows = cursor.fetchmany(self._max_rows + 1)
+                finally:
+                    cursor.close()
+                return rows_to_capped_df(rows, self._max_rows)
 
-            if query_type == "SELECT":
-                # Fetch results for SELECT queries
-                rows = cursor.fetchall()
-                if not rows:
-                    # Return empty DataFrame
-                    return pd.DataFrame()
-
-                # Convert rows to list of dictionaries
-                results_data = [dict(row) for row in rows]
-                return pd.DataFrame(results_data)
-            else:
-                # For non-SELECT queries (INSERT, UPDATE, DELETE, etc.)
+            cursor = conn.cursor()
+            try:
+                cursor.execute(args.sql)
                 conn.commit()
                 rows_affected = cursor.rowcount
-                # Return a DataFrame indicating rows affected
-                return pd.DataFrame({"rows_affected": [rows_affected]})
+            finally:
+                cursor.close()
+            return pd.DataFrame({"rows_affected": [rows_affected]})
 
         finally:
-            cursor.close()
             conn.close()
