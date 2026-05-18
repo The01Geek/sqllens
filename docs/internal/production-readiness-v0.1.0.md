@@ -121,19 +121,23 @@ DB missing) to clear single-line messages with exit code 2.
 
 ### Code correctness
 
-#### C-2. Private `mcp._session_manager` access kills the server on SDK refactor
-**File:** [`src/sqllens/transport/http.py:91`](../../src/sqllens/transport/http.py#L91) ·
-[`tests/integration/conftest.py:105`](../../tests/integration/conftest.py#L105) ·
+#### C-2. Private `mcp._session_manager` access kills the server on SDK refactor — **FIXED in PR #43**
+**File:** [`src/sqllens/transport/http.py`](../../src/sqllens/transport/http.py) ·
+[`tests/integration/conftest.py`](../../tests/integration/conftest.py) ·
 **Category:** Bug / Edge case
 
 `mcp` SDK's pre-1.0 stability guarantees are weak. If they rename
 `_session_manager`, HTTP mode fails at startup with a bare `AttributeError`.
-The integration fixture makes the same private access, compounding the blast
+The integration fixture made the same private access, compounding the blast
 radius.
 
-**Fix:** Wrap in `try/except AttributeError` with an actionable error
-message, and open an upstream issue against `mcp` to expose a stable
-accessor.
+**Fix landed:** `build_asgi_app` now reads the documented public
+`mcp.session_manager` property at a single guarded site; on `AttributeError`
+it raises a `RuntimeError` whose message names this file as the place to
+update. The integration fixture no longer makes any direct SDK-attribute
+reach — it calls `build_asgi_app(cfg)` and hands the result to uvicorn.
+Regression pinned by
+[`tests/unit/test_transport_http.py`](../../tests/unit/test_transport_http.py)::`test_build_asgi_app_raises_runtimeerror_when_session_manager_missing`.
 
 ### Test coverage
 
@@ -283,7 +287,7 @@ file on POSIX.
 
 | # | File:line | Issue | Direction |
 |---|---|---|---|
-| C-1 | [`transport/http.py:48-62`](../../src/sqllens/transport/http.py#L48-L62) | `build_asgi_app` returns an app without the `_SessionManagerLifespan` wrapper that `run()` applies inline at line 91 — a production-shaped public name with test-shaped behaviour. Latent: no callers today, but the "testable seam" docstring invites future mount-style misuse that 500s post-deploy. **Tracking:** #39 |  Split into `build_asgi_app` (wrapped, mount-ready) + `build_asgi_app_bare` (manual lifespan); have `run()` and the integration fixture both delegate; drop the broken `session_manager_for` stub. Land together with C-2. |
+| C-1 | [`transport/http.py`](../../src/sqllens/transport/http.py) | **FIXED in PR #43 (issue #39).** `build_asgi_app` now returns the fully lifespan-wrapped, mount-ready app; a private `_build_asgi_app_bare` returns the auth + path-normalized stack plus the `FastMCP` handle for the single in-tree guarded SDK-attribute access. `run()` and the integration fixture both delegate to `build_asgi_app`. The broken `session_manager_for` stub has been deleted. C-2 (private `_session_manager` access) is also addressed by this PR's switch to the public `mcp.session_manager` property. Regression pinned by [`tests/unit/test_transport_http.py`](../../tests/unit/test_transport_http.py). |
 | C-3 | [`tools/query_database.py:18-25`](../../src/sqllens/tools/query_database.py#L18) | `_AGENT` global singleton: non-atomic check-then-set races under HTTP load; also silently binds first-caller `cfg`. | `asyncio.Lock` around init; compare config identity / hash and reject mismatched calls. |
 | C-4 | [`auth/__init__.py:36-41`](../../src/sqllens/auth/__init__.py) | `mode="jwt"` passes `None` fields to `JwtAuthenticator` with no validation. | `model_validator` on `AuthConfig` rejecting `mode="jwt"` until implemented (see P-2). |
 | C-5 | [`config.py:165-172`](../../src/sqllens/config.py#L165) | BOM check re-opens the TOML after a failed parse — TOCTOU window can drop the BOM-specific error. | Cache `_resolved_toml_path()` before the inner `try`. |
@@ -354,7 +358,7 @@ file on POSIX.
 - `sqllens upgrade` / lightweight PyPI JSON poll on `serve` start (gated by `SQLLENS_NO_UPDATE_CHECK=1`).
 - Remove the duplicate `version` subcommand at `cli.py:47-51` (`--version` is canonical).
 - Remove dead `tomli` conditional dep at `pyproject.toml:35` (requires-python is ≥3.11).
-- Remove dead `session_manager_for` at `http.py:65-77`, or add a test asserting `NotImplementedError`.
+- ~~Remove dead `session_manager_for` at `http.py:65-77`, or add a test asserting `NotImplementedError`.~~ **Done in PR #43** — stub deleted as part of the C-1 fix.
 - `docs/internal/setup/config-loading.md` callout: env-over-TOML can defeat a locked-down admin config (see S-11 too).
 
 ### Test coverage
