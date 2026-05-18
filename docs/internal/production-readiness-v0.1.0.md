@@ -202,6 +202,8 @@ env, a forgotten mock could hit the real Anthropic API.
 session-scoped fixture that monkeypatches `sqllens.agent.factory.build_agent`
 (or the Anthropic client constructor) to a stub.
 
+**Tracking:** #74
+
 ### Product / UX
 
 #### P-1. First-run path requires `git clone`
