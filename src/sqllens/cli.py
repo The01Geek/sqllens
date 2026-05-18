@@ -78,7 +78,6 @@ def _loopback_policy_violated(cfg: Config) -> bool:
         and not _is_loopback_host(cfg.server.host)
     )
 
-
 def _version_callback(value: bool) -> None:
     if value:
         console.print(f"sqllens {__version__}")
