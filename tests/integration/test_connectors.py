@@ -98,9 +98,14 @@ class TestPostgresRunner:
 
     async def test_statement_timeout_raises_within_a_second(self, postgres_url: str) -> None:
         """pg_sleep(2) with a 500ms timeout must error in under 1s."""
+        import psycopg2
+
         runner = build_sql_runner(postgres_url, statement_timeout_ms=500)
         start = time.monotonic()
-        with pytest.raises(Exception):  # noqa: B017 — psycopg2.errors.QueryCanceled
+        # Catch QueryCanceled specifically — a bare ``Exception`` would also
+        # pass for unrelated failures (connection refused, ImportError on a
+        # missing driver) and silently mis-pass when the timeout never fires.
+        with pytest.raises(psycopg2.errors.QueryCanceled):
             await runner.run_sql(RunSqlToolArgs(sql="SELECT pg_sleep(2)"), _ctx())
         elapsed = time.monotonic() - start
         assert elapsed < 1.5, f"timeout fired too slowly ({elapsed:.2f}s)"
@@ -135,6 +140,43 @@ class TestMysqlRunner:
         assert df.attrs[TRUNCATED_ATTR] is True
         assert df.attrs[MAX_ROWS_ATTR] == max_rows
 
+    async def test_huge_select_does_not_drain_after_cap(self, mysql_url: str) -> None:
+        """Regression: ``SSDictCursor.close()`` MUST NOT be added to the streaming path.
+
+        PyMySQL's ``SSCursor.close()`` drains every remaining row off the wire to
+        keep the connection in sync. Adding ``cursor.close()`` to ``run_sql`` would
+        pass every other current test (they all use tiny result sets) while
+        defeating the row cap on huge result sets — the runner would still return
+        ``max_rows`` rows, but only after pulling millions of rows over the wire.
+
+        Construct a cross-join of ``information_schema.columns`` against itself
+        three times — this produces tens of millions of rows on a typical MySQL
+        install. With ``max_rows=5`` the runner must return in under a second:
+        anything resembling a full drain would take many minutes. Wall-clock
+        time is the only signal that distinguishes "streamed + capped" from
+        "drained + capped".
+        """
+        max_rows = 5
+        sql = (
+            "SELECT a.TABLE_NAME FROM information_schema.columns a "
+            "CROSS JOIN information_schema.columns b "
+            "CROSS JOIN information_schema.columns c"
+        )
+        runner = build_sql_runner(mysql_url, max_rows=max_rows)
+        start = time.monotonic()
+        df = await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+        elapsed = time.monotonic() - start
+
+        assert len(df) == max_rows
+        assert df.attrs[TRUNCATED_ATTR] is True
+        # Bound is generous (1.5s) for slow CI runners. A full drain would be
+        # orders of magnitude over this; tightening further would just produce
+        # flakes without sharpening the signal.
+        assert elapsed < 1.5, (
+            f"cap returned in {elapsed:.2f}s — far too slow; cursor likely "
+            "drained the full result set (SSDictCursor.close() was probably added)"
+        )
+
     async def test_statement_timeout_raises_within_a_second(self, mysql_url: str) -> None:
         """A long-running SELECT with a 500ms timeout must error in under ~2s.
 
@@ -144,6 +186,8 @@ class TestMysqlRunner:
         cross-join of ``information_schema.columns`` against itself produces
         a long-running join the executor actually loops over.
         """
+        import pymysql
+
         runner = build_sql_runner(mysql_url, statement_timeout_ms=500)
         sql = (
             "SELECT COUNT(*) FROM information_schema.columns a "
@@ -151,7 +195,11 @@ class TestMysqlRunner:
             "CROSS JOIN information_schema.columns c"
         )
         start = time.monotonic()
-        with pytest.raises(Exception):  # noqa: B017 — pymysql.err.OperationalError
+        # MAX_EXECUTION_TIME interruption surfaces as
+        # ``pymysql.err.OperationalError`` (errno 3024). A bare ``Exception``
+        # would also pass for unrelated failures and silently mis-pass when
+        # the timeout never fires.
+        with pytest.raises(pymysql.err.OperationalError):
             await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
         elapsed = time.monotonic() - start
         assert elapsed < 2.0, f"timeout fired too slowly ({elapsed:.2f}s)"

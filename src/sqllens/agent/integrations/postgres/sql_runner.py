@@ -72,6 +72,11 @@ class PostgresRunner(SqlRunner):
                 "Either provide connection_string OR (host, database, and user) parameters"
             )
 
+        if statement_timeout_ms < 0:
+            raise ValueError(
+                f"statement_timeout_ms must be >= 0 (got {statement_timeout_ms}); "
+                "use 0 to disable"
+            )
         self._statement_timeout_ms = statement_timeout_ms
         self._max_rows = max_rows
 

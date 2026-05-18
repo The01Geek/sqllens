@@ -64,15 +64,32 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
             query_type = args.sql.strip().upper().split()[0]
 
             if query_type == "SELECT":
-                # Handle SELECT queries with results
+                # Read truncation signal once so empty and non-empty branches
+                # agree. A runner contract that returns an empty DataFrame with
+                # ``df.attrs[TRUNCATED_ATTR] is True`` must still surface the
+                # "re-issue narrower" hint to the LLM, not "no rows".
+                row_cap_hit = bool(df.attrs.get(TRUNCATED_ATTR, False))
+                cap_size = int(df.attrs.get(MAX_ROWS_ATTR, 0))
+                truncation_note = ""
+                if row_cap_hit:
+                    truncation_note = (
+                        f"\n\nResult truncated at {cap_size} rows. "
+                        "Re-issue with an explicit LIMIT or narrower WHERE clause."
+                    )
+
                 if df.empty:
-                    result = "Query executed successfully. No rows returned."
+                    result = (
+                        f"Query executed successfully. No rows returned.{truncation_note}"
+                    )
+                    description = "No rows returned"
+                    if row_cap_hit:
+                        description += f" (truncated at row cap {cap_size})"
                     ui_component = UiComponent(
                         rich_component=DataFrameComponent(
                             rows=[],
                             columns=[],
                             title="Query Results",
-                            description="No rows returned",
+                            description=description,
                         ),
                         simple_component=SimpleTextComponent(text=result),
                     )
@@ -81,6 +98,8 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         "columns": [],
                         "query_type": query_type,
                         "results": [],
+                        "truncated": row_cap_hit,
+                        "max_rows": cap_size,
                     }
                 else:
                     # Convert DataFrame to records
@@ -101,15 +120,6 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         results_preview = (
                             results_preview[:1000]
                             + "\n(Results truncated to 1000 characters for preview.)"
-                        )
-
-                    row_cap_hit = bool(df.attrs.get(TRUNCATED_ATTR, False))
-                    cap_size = int(df.attrs.get(MAX_ROWS_ATTR, 0))
-                    truncation_note = ""
-                    if row_cap_hit:
-                        truncation_note = (
-                            f"\n\nResult truncated at {cap_size} rows. "
-                            "Re-issue with an explicit LIMIT or narrower WHERE clause."
                         )
 
                     result = (
@@ -139,8 +149,8 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         "query_type": query_type,
                         "results": results_data,
                         "output_file": filename,
-                        TRUNCATED_ATTR: row_cap_hit,
-                        MAX_ROWS_ATTR: cap_size,
+                        "truncated": row_cap_hit,
+                        "max_rows": cap_size,
                     }
             else:
                 # For non-SELECT queries (INSERT, UPDATE, DELETE, etc.)
