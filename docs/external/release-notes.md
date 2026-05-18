@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 18, 2026
+
+- **[Fix] Postgres and MySQL query errors are no longer masked by cleanup-time exceptions** — When a query against Postgres or MySQL failed mid-execution (for example, a statement timeout, a dropped connection, or an aborted transaction), a secondary error raised while closing the cursor or connection could replace the original error before it reached your assistant. The assistant then saw a generic transport error such as "broken pipe on close" instead of the actual cause and could not re-plan with a tighter `WHERE` or `LIMIT`. The original query error now reaches the assistant intact, and cleanup-time failures are recorded in the server log as warnings so chronic teardown problems remain diagnosable. The Postgres connector also no longer leaks a database connection when allocating the cursor itself fails. (#61)
+
 ## May 17, 2026
 
 - **[Fix] Read-only guard now rejects `SELECT ... INTO` on Postgres and T-SQL** — The read-only SQL guard previously accepted statements like `SELECT * INTO new_table FROM users`, which create a new table on Postgres and T-SQL (including `INTO TEMP` and `INTO UNLOGGED` variants) and write a session variable on MySQL (`SELECT ... INTO @var`). These statements are now rejected at parse time, including when nested inside common table expressions or used as an operand of `UNION`, `INTERSECT`, or `EXCEPT`. This restores the documented "read-only by default" guarantee for the default configuration. (#41)
