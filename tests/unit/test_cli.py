@@ -266,18 +266,22 @@ def test_serve_no_preflight_announces_the_skip(tmp_path: Path) -> None:
 
 
 def _write_serve_config(tmp_path: Path, *, host: str, transport: str = "http") -> Path:
-    # Minimum viable TOML. Serve tests pair this with SQLLENS_LLM__API_KEY set
-    # so the api_key gate (which fires *before* the loopback guard in `serve`)
-    # passes and the test exercises the actual guard. Validate tests reuse the
-    # same helper without setting api_key — `validate` has no api_key gate, so
-    # the loopback guard is reached directly. transport defaults to "http"
-    # (triggers the guard); auth.mode defaults to "none".
+    # Minimum viable TOML, with api_key baked in. Serve tests also set
+    # SQLLENS_LLM__API_KEY (env wins, identical value — harmless). Validate
+    # tests reuse this helper and rely on the baked api_key so the O-8
+    # would-fail-to-start gate (api_key unset -> exit 1) does not derail tests
+    # that target an orthogonal concern (the loopback guard / insecure
+    # breadcrumb). transport defaults to "http" (triggers the guard);
+    # auth.mode defaults to "none".
     cfg_path = tmp_path / "sqllens.toml"
     cfg_path.write_text(
         textwrap.dedent(
             f"""\
             [database]
             url = "sqlite:///./demo.db"
+
+            [llm]
+            api_key = "sk-ant-test"
 
             [server]
             transport = "{transport}"
@@ -351,6 +355,9 @@ def test_serve_insecure_opt_out_via_toml(
             [database]
             url = "sqlite:///./demo.db"
 
+            [llm]
+            api_key = "sk-ant-test"
+
             [auth]
             insecure = true
 
@@ -417,12 +424,12 @@ def test_serve_allows_loopback_with_auth_none(
     assert called == [True]
 
 
-def test_serve_allows_non_loopback_with_jwt_mode(
+def test_serve_rejects_jwt_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The guard fires only on auth.mode=='none'. jwt is scaffolded but not
-    # implemented; pinning the bypass here prevents a future refactor (e.g.
-    # `auth.mode != "bearer"`) from reintroducing the hole when JWT lands.
+    # C-4 / P-2: jwt is unimplemented. serve must fail fast at Config.load with
+    # the actionable message instead of starting a server that 401s every
+    # request. The server's run() must never be reached.
     monkeypatch.setenv("SQLLENS_LLM__API_KEY", "sk-ant-test")
     monkeypatch.setenv("SQLLENS_AUTH__MODE", "jwt")
     monkeypatch.delenv("SQLLENS_AUTH__INSECURE", raising=False)
@@ -434,9 +441,10 @@ def test_serve_allows_non_loopback_with_jwt_mode(
     monkeypatch.setattr(sqllens.server, "run", lambda _cfg: called.append(True))
 
     result = runner.invoke(app, ["serve", "-c", str(cfg_path)])
-    assert result.exit_code == 0, result.stdout
-    assert called == [True]
-    assert "Refusing to start" not in result.stdout
+    assert result.exit_code == 2, result.stdout
+    assert called == []
+    assert "not implemented" in result.stderr
+    assert "jwt" in result.stderr
 
 
 def test_serve_allows_non_loopback_with_bearer_auth(
@@ -553,6 +561,9 @@ def test_validate_insecure_opt_out_via_toml(
             """\
             [database]
             url = "sqlite:///./demo.db"
+
+            [llm]
+            api_key = "sk-ant-test"
 
             [auth]
             insecure = true
@@ -771,11 +782,11 @@ def test_loopback_policy_violated_false_on_bearer_mode() -> None:
 
 
 def test_loopback_policy_violated_false_on_jwt_mode() -> None:
-    # Pins the third Literal value of `auth.mode`. The CLI-invoke test
-    # `test_serve_allows_non_loopback_with_jwt_mode` already covers this end-
-    # to-end, but a regression that re-introduced `auth.mode != "bearer"`
-    # inside the predicate would only fail the slower invoke suite — the
-    # direct truth-table tests are the canary that prevents that drift.
+    # Pins the third Literal value of `auth.mode` at the predicate level. jwt is
+    # rejected at Config.load (see test_serve_rejects_jwt_mode), so this uses
+    # model_construct (via _build_cfg) to reach the predicate directly: a
+    # regression that re-introduced `auth.mode != "bearer"` inside the predicate
+    # is still caught here even though jwt can no longer load.
     from sqllens.cli import _loopback_policy_violated
 
     cfg = _build_cfg(transport="http", mode="jwt", host="0.0.0.0")
@@ -791,3 +802,160 @@ def test_loopback_policy_violated_false_on_localhost_hostname() -> None:
 
     cfg = _build_cfg(transport="http", mode="none", host="localhost")
     assert _loopback_policy_violated(cfg) is False
+
+
+# ---------------------------------------------------------------------------
+# Batch 1.2: config & validate trust footguns (#90)
+# ---------------------------------------------------------------------------
+
+
+_LEAK_CANARY_TOKEN = "LEAKCANARY123"  # 13 chars: triggers the >=16 bearer guard
+
+
+def _write_full_config(
+    tmp_path: Path,
+    *,
+    auth_block: str,
+    api_key_line: str = 'api_key = "sk-ant-test"',
+) -> Path:
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            f"""\
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [llm]
+            {api_key_line}
+
+            {auth_block}
+
+            [server]
+            transport = "stdio"
+            host = "127.0.0.1"
+            """
+        )
+    )
+    return cfg_path
+
+
+def test_validate_rejects_jwt_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # C-4 / P-2: a green `validate` must not mask an unimplemented-jwt config.
+    monkeypatch.delenv("SQLLENS_AUTH__MODE", raising=False)
+    cfg_path = _write_full_config(tmp_path, auth_block='[auth]\nmode = "jwt"')
+
+    result = runner.invoke(app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 2, result.stdout
+    assert "not implemented" in result.stderr
+    assert "jwt" in result.stderr
+    assert "Config OK" not in result.stdout
+
+
+def test_validate_jwt_mode_via_env_also_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SQLLENS_AUTH__MODE", "jwt")
+    cfg_path = _write_full_config(tmp_path, auth_block='[auth]\nmode = "none"')
+
+    result = runner.invoke(app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 2, result.stdout
+    assert "not implemented" in result.stderr
+
+
+def test_validate_validation_error_does_not_leak_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # S-11: a ValidationError's raw input (here: a too-short bearer token) must
+    # never reach stderr. The actionable message must still surface.
+    monkeypatch.delenv("SQLLENS_AUTH__MODE", raising=False)
+    monkeypatch.delenv("SQLLENS_AUTH__BEARER_TOKEN", raising=False)
+    cfg_path = _write_full_config(
+        tmp_path,
+        auth_block=f'[auth]\nmode = "bearer"\nbearer_token = "{_LEAK_CANARY_TOKEN}"',
+    )
+
+    result = runner.invoke(app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 2, result.stdout
+    assert _LEAK_CANARY_TOKEN not in result.stderr
+    assert _LEAK_CANARY_TOKEN not in result.stdout
+    # rich wraps stderr at the console width; collapse whitespace before the
+    # substring check so the assertion isn't sensitive to wrap position.
+    assert "at least 16 characters" in " ".join(result.stderr.split())
+
+
+def test_serve_validation_error_does_not_leak_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # S-11, serve side: same redaction guarantee on the serve Config.load path.
+    monkeypatch.setenv("SQLLENS_LLM__API_KEY", "sk-ant-test")
+    monkeypatch.delenv("SQLLENS_AUTH__MODE", raising=False)
+    monkeypatch.delenv("SQLLENS_AUTH__BEARER_TOKEN", raising=False)
+    cfg_path = _write_full_config(
+        tmp_path,
+        auth_block=f'[auth]\nmode = "bearer"\nbearer_token = "{_LEAK_CANARY_TOKEN}"',
+    )
+
+    result = runner.invoke(app, ["serve", "-c", str(cfg_path)])
+    assert result.exit_code == 2, result.stdout
+    assert _LEAK_CANARY_TOKEN not in result.stderr
+    assert _LEAK_CANARY_TOKEN not in result.stdout
+    assert "at least 16 characters" in " ".join(result.stderr.split())
+
+
+def test_validate_exit_zero_when_genuinely_ok(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # O-8 exit 0: api key present, no policy violation, no probes selected.
+    monkeypatch.delenv("SQLLENS_AUTH__MODE", raising=False)
+    cfg_path = _write_full_config(tmp_path, auth_block='[auth]\nmode = "none"')
+
+    result = runner.invoke(app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "Config OK" in result.stdout
+
+
+def test_validate_exit_one_when_api_key_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # O-8 exit 1: schema parses but the server would fail to start.
+    monkeypatch.delenv("SQLLENS_LLM__API_KEY", raising=False)
+    monkeypatch.delenv("SQLLENS_AUTH__MODE", raising=False)
+    cfg_path = _write_full_config(
+        tmp_path, auth_block='[auth]\nmode = "none"', api_key_line=""
+    )
+
+    result = runner.invoke(app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 1, result.stdout
+    assert "Config OK" in result.stdout
+    assert "api_key NOT SET" in result.stdout
+    assert "llm.api_key" in result.stderr
+
+
+def test_validate_exit_two_on_schema_error(tmp_path: Path) -> None:
+    # O-8 exit 2: schema-invalid config (top-level extra key — Config forbids
+    # extras, so this is a ValidationError, distinct from would-fail-to-start).
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text('bogus_top_level = 1\n[database]\nurl = "sqlite:///./demo.db"\n')
+
+    result = runner.invoke(app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 2, result.stdout
+    assert "Config OK" not in result.stdout
+
+
+def test_validate_check_llm_runs_before_exit_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # O-8 ordering: selected probes run before the api-key-unset exit so
+    # --check-llm output is not suppressed. With api_key unset, --check-llm
+    # fails first (PreflightError -> exit 2), proving the probe ran.
+    monkeypatch.delenv("SQLLENS_LLM__API_KEY", raising=False)
+    monkeypatch.delenv("SQLLENS_AUTH__MODE", raising=False)
+    cfg_path = _write_full_config(
+        tmp_path, auth_block='[auth]\nmode = "none"', api_key_line=""
+    )
+
+    result = runner.invoke(app, ["validate", "-c", str(cfg_path), "--check-llm"])
+    assert result.exit_code == 2, result.stdout
+    assert "Preflight failed" in result.stderr

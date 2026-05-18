@@ -123,6 +123,19 @@ class AuthConfig(BaseModel):
     jwt_audience: str | None = None
 
     @model_validator(mode="after")
+    def _reject_unimplemented_jwt(self) -> AuthConfig:
+        # JWT is scaffolded (auth/jwt.py) but unimplemented — it raises only at
+        # request time. Without this guard, mode='jwt' loads cleanly, ``validate``
+        # prints ``Config OK``, the server starts, and every request 401s: a green
+        # check against a dead server. Reject at config-validation so BOTH
+        # ``serve`` and ``validate`` (which share ``Config.load``) fail fast with
+        # an actionable message instead of a terse enum error. Runs first so the
+        # jwt message wins over the bearer-token validators for a jwt config.
+        if self.mode == "jwt":
+            raise ValueError(JWT_NOT_IMPLEMENTED_MESSAGE)
+        return self
+
+    @model_validator(mode="after")
     def _bearer_requires_token(self) -> AuthConfig:
         # Without this guard, mode='bearer' without a usable token (None, empty, or
         # whitespace-only — a real footgun from shell env vars like
@@ -132,6 +145,14 @@ class AuthConfig(BaseModel):
             self.bearer_token is None or not self.bearer_token.get_secret_value().strip()
         ):
             raise ValueError(BEARER_TOKEN_MISSING_MESSAGE)
+        # A too-short token is trivially brute-forceable. Length is measured on
+        # the stripped value so it matches what BearerTokenAuthenticator stores
+        # and what _extract_bearer compares against. The None/empty/whitespace
+        # cases are already handled above, so bearer_token is usable here.
+        if self.mode == "bearer":
+            token = self.bearer_token.get_secret_value().strip()  # type: ignore[union-attr]
+            if len(token) < MIN_BEARER_TOKEN_LENGTH:
+                raise ValueError(BEARER_TOKEN_TOO_SHORT_MESSAGE)
         return self
 
     @model_validator(mode="after")
@@ -275,6 +296,28 @@ BEARER_TOKEN_MISSING_MESSAGE = (
     "Either set SQLLENS_AUTH__BEARER_TOKEN in your environment, "
     'add `bearer_token = "..."` to the [auth] section of sqllens.toml, '
     "or set auth.mode to a different value (none|jwt)."
+)
+
+
+# Minimum accepted bearer-token length (post-strip). Shared by the AuthConfig
+# validator and BearerTokenAuthenticator so the construction-time guard and the
+# config-load guard agree. 16 chars is the floor; operators should generate a
+# much longer random token (see BEARER_TOKEN_TOO_SHORT_MESSAGE).
+MIN_BEARER_TOKEN_LENGTH = 16
+
+
+BEARER_TOKEN_TOO_SHORT_MESSAGE = (
+    f"auth.bearer_token must be at least {MIN_BEARER_TOKEN_LENGTH} characters; "
+    "a short token is trivially brute-forceable. Generate a strong one with "
+    "`openssl rand -hex 32`."
+)
+
+
+# ``mode='jwt'`` parses against the Literal but JWT is unimplemented — reject it
+# at config-validation time (see AuthConfig._reject_unimplemented_jwt) so a
+# green ``validate`` can't mask a server that 401s every request.
+JWT_NOT_IMPLEMENTED_MESSAGE = (
+    'auth.mode="jwt" is not implemented yet; use "bearer" or "none".'
 )
 
 

@@ -57,9 +57,9 @@ class TestNoAuth:
 class TestBearerAuth:
     async def test_correct_token_works(self, make_server) -> None:
         handle = make_server(
-            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token"))
+            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789"))
         )
-        headers = {"Authorization": "Bearer good-token"}
+        headers = {"Authorization": "Bearer good-token-0123456789"}
         async with streamablehttp_client(handle.mcp_url, headers=headers) as (
             read,
             write,
@@ -72,7 +72,7 @@ class TestBearerAuth:
 
     async def test_wrong_token_returns_401(self, make_server) -> None:
         handle = make_server(
-            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token"))
+            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789"))
         )
         async with httpx.AsyncClient() as client:
             r = await client.post(
@@ -97,7 +97,7 @@ class TestBearerAuth:
 
     async def test_missing_token_returns_401(self, make_server) -> None:
         handle = make_server(
-            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token"))
+            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789"))
         )
         async with httpx.AsyncClient() as client:
             r = await client.post(

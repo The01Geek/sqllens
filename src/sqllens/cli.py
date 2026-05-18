@@ -33,6 +33,31 @@ console = Console()
 # errors to stderr keeps that channel clean. Other commands follow suit.
 err_console = Console(stderr=True)
 
+def _format_config_error(exc: Exception) -> str:
+    """Render a config-load exception for stderr without leaking secrets.
+
+    A pydantic ``ValidationError``'s ``str()`` embeds the offending *input*
+    values — bearer token, LLM API key, DSN password. Rendering only
+    ``loc``/``msg``/``type`` from ``errors(include_url=False)`` keeps the
+    actionable message (our validators' text lives in ``msg``) while dropping
+    the ``input``/``ctx`` fields that carry the secret. Non-``ValidationError``
+    exceptions are config-load errors (file-not-found, BOM, TOML syntax) that
+    do not carry secret input, so their ``str()`` is safe as-is.
+    """
+    from pydantic import ValidationError
+
+    if not isinstance(exc, ValidationError):
+        return str(exc)
+    lines: list[str] = []
+    for err in exc.errors(include_url=False):
+        loc = ".".join(str(part) for part in err.get("loc", ()))
+        msg = err.get("msg", "")
+        etype = err.get("type", "")
+        prefix = f"{loc}: " if loc else ""
+        lines.append(f"{prefix}{msg} [{etype}]")
+    return "\n".join(lines)
+
+
 def _is_loopback_host(host: str) -> bool:
     # Recognizes the entire 127.0.0.0/8 IPv4 loopback range and ::1, plus
     # IPv4-mapped IPv6 loopback (e.g. ::ffff:127.0.0.1) — the IPv4-mapped form
@@ -148,7 +173,7 @@ def serve(
     try:
         cfg = Config.load(config)
     except Exception as e:
-        err_console.print(f"[red]Config error:[/red] {escape(str(e))}")
+        err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
         raise typer.Exit(code=2) from e
     if cfg.llm.api_key is None:
         err_console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
@@ -203,7 +228,7 @@ def validate(
     try:
         cfg = Config.load(config)
     except Exception as e:
-        err_console.print(f"[red]Invalid:[/red] {escape(str(e))}")
+        err_console.print(f"[red]Invalid:[/red] {escape(_format_config_error(e))}")
         raise typer.Exit(code=2) from e
     # Mirror serve's guard so CI / pre-deploy linting catches the
     # misconfiguration before `serve` would refuse to start.
@@ -244,6 +269,18 @@ def validate(
             err_console.print(f"[red]Preflight failed:[/red] {escape(str(e))}")
             raise typer.Exit(code=2) from e
         console.print(f"  [green]{label} OK[/green]")
+
+    # O-8 exit-code contract: 0 = genuinely OK, 1 = parses but the server would
+    # fail to start (api_key unset — serve exits 2 on this), 2 = parse/schema
+    # error (handled above). Deploy/CI scripts need to distinguish a
+    # would-fail-to-start config from a clean one; a bare exit 0 hid that.
+    # Run selected probes first (above) so --check-llm output is not suppressed,
+    # then signal would-fail-to-start.
+    if cfg.llm.api_key is None:
+        err_console.print(
+            f"[red]Would fail to start:[/red] {escape(API_KEY_MISSING_MESSAGE)}"
+        )
+        raise typer.Exit(code=1)
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +411,10 @@ collection = "sqllens"
 similarity_threshold = 0.7
 
 [auth]
-mode = "none"            # one of: none, bearer, jwt
+mode = "none"            # one of: none, bearer (jwt is not implemented yet)
+# For mode = "bearer", set a strong random token (>= 32 random bytes), e.g.
+# generate one with:  openssl rand -hex 32
+# bearer_token = "..."   # or set SQLLENS_AUTH__BEARER_TOKEN env var
 
 [server]
 transport = "stdio"      # one of: stdio, http
