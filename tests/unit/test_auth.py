@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from sqllens.auth import (
     AuthError,
@@ -83,3 +83,35 @@ class TestBuildAuthenticator:
     def test_jwt_mode_returns_scaffold(self) -> None:
         cfg = AuthConfig(mode="jwt", jwt_jwks_url="https://example.com/jwks.json")
         assert isinstance(build_authenticator(cfg), JwtAuthenticator)
+
+
+class TestAuthConfigValidation:
+    """The model-level validator guards against silent misconfiguration at config
+    load — a stored ``bearer_token`` with ``mode != 'bearer'`` would otherwise be
+    accepted, the token would never be consulted, and the server would run
+    unauthenticated under ``NoOpAuthenticator``.
+    """
+
+    def test_token_with_mode_none_raises(self) -> None:
+        with pytest.raises(ValidationError) as exc:
+            AuthConfig(mode="none", bearer_token=SecretStr("x"))
+        msg = str(exc.value)
+        # Names the offending field and the actual mode.
+        assert "bearer_token" in msg
+        assert "'none'" in msg
+        # Both fixes are spelled out.
+        assert "mode='bearer'" in msg
+        assert "SQLLENS_AUTH__BEARER_TOKEN" in msg
+
+    def test_token_with_mode_jwt_raises(self) -> None:
+        with pytest.raises(ValidationError, match="bearer_token"):
+            AuthConfig(mode="jwt", bearer_token=SecretStr("x"))
+
+    def test_token_with_mode_bearer_accepted(self) -> None:
+        cfg = AuthConfig(mode="bearer", bearer_token=SecretStr("x"))
+        assert cfg.bearer_token is not None
+        assert cfg.bearer_token.get_secret_value() == "x"
+
+    def test_no_token_with_mode_none_accepted(self) -> None:
+        cfg = AuthConfig(mode="none")
+        assert cfg.bearer_token is None

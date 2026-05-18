@@ -267,6 +267,32 @@ def test_cli_validate_fails_on_plain_malformed_toml(tmp_path: Path) -> None:
     assert "Invalid" in result.stdout
 
 
+def test_cli_validate_rejects_bearer_token_without_bearer_mode(tmp_path: Path) -> None:
+    # An operator who sets ``bearer_token`` but forgets ``mode = "bearer"`` would
+    # otherwise get a server running under ``NoOpAuthenticator`` with the token
+    # silently ignored. ``sqllens validate`` must fail loudly at config load.
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [llm]
+            api_key = "sk-ant-test"
+
+            [auth]
+            bearer_token = "hunter2"
+            """
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 2, result.stdout
+    assert "bearer_token" in result.stdout
+    assert "SQLLENS_AUTH__BEARER_TOKEN" in result.stdout
+
+
 def test_build_agent_raises_when_api_key_missing(tmp_path: Path) -> None:
     # Defense-in-depth contract: ``cli.serve`` gates ``None`` already, but
     # programmatic embedders / tests that build an Agent directly must get a

@@ -22,7 +22,7 @@ import shlex
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -84,6 +84,21 @@ class AuthConfig(BaseModel):
     jwt_jwks_url: str | None = None
     jwt_issuer: str | None = None
     jwt_audience: str | None = None
+
+    @model_validator(mode="after")
+    def _token_only_with_bearer_mode(self) -> AuthConfig:
+        # Reject a stored bearer_token when the mode isn't "bearer". Otherwise the
+        # token sits unused, the active authenticator is NoOpAuthenticator, and
+        # the server runs completely unauthenticated despite the operator
+        # believing bearer auth is enabled. Loud config-load failure beats silent
+        # production exposure.
+        if self.mode != "bearer" and self.bearer_token is not None:
+            raise ValueError(
+                "auth.bearer_token is set but auth.mode is "
+                f"{self.mode!r}. Either set auth.mode='bearer' to use it, "
+                "or remove bearer_token / unset SQLLENS_AUTH__BEARER_TOKEN."
+            )
+        return self
 
 
 class ServerConfig(BaseModel):
