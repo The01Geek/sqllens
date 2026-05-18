@@ -277,19 +277,21 @@ class _SessionManagerLifespan:
                     # Catches the direct BaseException subclasses that
                     # `except Exception` does not — most relevantly
                     # asyncio.CancelledError (task cancellation interrupting
-                    # startup), plus KeyboardInterrupt / SystemExit.
-                    # __aenter__ was
-                    # interrupted before the session manager finished
-                    # acquiring. Drop the partially-acquired CM (calling
-                    # __aexit__ on a CM whose __aenter__ never completed is
-                    # undefined per PEP 343) and finalize the instance —
-                    # same as the Exception branch — so a host driving a
-                    # follow-up lifespan scope gets the single-shot
-                    # rejection / idempotent ack instead of re-running run()
-                    # against a session manager in an unknown state. Then
-                    # re-raise: a BaseException (most importantly
-                    # CancelledError) must propagate cooperatively and must
-                    # never be swallowed into a spurious startup.complete.
+                    # startup), plus KeyboardInterrupt / SystemExit (and any
+                    # other direct BaseException, e.g. GeneratorExit).
+                    # __aenter__ was interrupted before the session manager
+                    # finished acquiring. Drop the partially-acquired CM
+                    # (calling __aexit__ on a CM whose __aenter__ never
+                    # completed is undefined per PEP 343) and apply the same
+                    # state finalization as the Exception branch (_cm = None,
+                    # _shutdown_done = True) — but, unlike that branch, send
+                    # no protocol message — so a host driving a follow-up
+                    # lifespan scope gets the single-shot rejection /
+                    # idempotent ack instead of re-running run() against a
+                    # session manager in an unknown state. Then re-raise: a
+                    # BaseException (most importantly CancelledError) must
+                    # propagate cooperatively and must never be swallowed
+                    # into a spurious startup.complete.
                     self._cm = None
                     self._shutdown_done = True
                     logger.exception(

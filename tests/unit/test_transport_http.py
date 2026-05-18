@@ -409,12 +409,14 @@ def test_lifespan_startup_base_exception_finalizes_and_propagates(
     adapter = _SessionManagerLifespan(_noop_inner, sm)
 
     receive, send, sent = _make_io([{"type": "lifespan.startup"}])
-    with pytest.raises(type(base_exc)):
+    with pytest.raises(type(base_exc)) as excinfo:
         asyncio.run(adapter({"type": "lifespan"}, receive, send))
 
-    # The interrupted scope sent NO protocol message at all (the
-    # BaseException path re-raises so cancellation propagates), and the
-    # instance is finalized without a CM leak.
+    # Bare ``raise`` re-raises the *same* instance — not a wrapped/chained
+    # substitute (e.g. ``raise X from exc``) — so cancellation propagates
+    # cooperatively. The interrupted scope sent NO protocol message at all,
+    # and the instance is finalized without a CM leak.
+    assert excinfo.value is base_exc
     assert sent == []
     assert adapter._cm is None
     assert adapter._started is False
