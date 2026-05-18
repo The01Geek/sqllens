@@ -530,3 +530,26 @@ def test_loopback_policy_violated_false_on_bearer_mode() -> None:
 
     cfg = _build_cfg(transport="http", mode="bearer", host="0.0.0.0")
     assert _loopback_policy_violated(cfg) is False
+
+
+def test_loopback_policy_violated_false_on_jwt_mode() -> None:
+    # Pins the third Literal value of `auth.mode`. The CLI-invoke test
+    # `test_serve_allows_non_loopback_with_jwt_mode` already covers this end-
+    # to-end, but a regression that re-introduced `auth.mode != "bearer"`
+    # inside the predicate would only fail the slower invoke suite — the
+    # direct truth-table tests are the canary that prevents that drift.
+    from sqllens.cli import _loopback_policy_violated
+
+    cfg = _build_cfg(transport="http", mode="jwt", host="0.0.0.0")
+    assert _loopback_policy_violated(cfg) is False
+
+
+def test_loopback_policy_violated_false_on_localhost_hostname() -> None:
+    # Exercises the predicate's hostname branch (case-insensitive "localhost"
+    # special-case in `_is_loopback_host`). The other direct tests use IP
+    # literals; this pins that `_loopback_policy_violated` composes the
+    # hostname branch correctly, not just the ip_address branch.
+    from sqllens.cli import _loopback_policy_violated
+
+    cfg = _build_cfg(transport="http", mode="none", host="localhost")
+    assert _loopback_policy_violated(cfg) is False
