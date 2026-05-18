@@ -190,6 +190,30 @@ def test_lifespan_shutdown_failure_sends_failed_not_complete() -> None:
     assert "boom" in sent[-1]["message"]
 
 
+def test_lifespan_startup_failure_sends_failed_not_complete() -> None:
+    """Symmetric twin of the shutdown failure test: __aenter__ raising must
+    surface as ``lifespan.startup.failed`` (not ``.complete``) and the
+    exception message must reach the host.
+
+    Issue #59 audit conclusion: the startup-failure branch had the same
+    contract as the shutdown twin but no regression test pinning it. The
+    contract is: ``logger.exception`` preserves the traceback, ``.failed``
+    carries the exception message to the host, and no ``.complete`` is sent
+    after a failure. Without this test, a future refactor that swapped the
+    event types or silently swallowed the exception would not be caught
+    at construction time.
+    """
+    sm = _FakeSessionManager(startup_exc=RuntimeError("startup-boom"))
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io([{"type": "lifespan.startup"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    types = [m["type"] for m in sent]
+    assert "lifespan.startup.complete" not in types
+    assert sent[-1]["type"] == "lifespan.startup.failed"
+    assert "startup-boom" in sent[-1]["message"]
+
+
 def test_lifespan_duplicate_startup_is_rejected() -> None:
     """A second lifespan.startup must not silently replace ``self._cm``."""
     sm = _FakeSessionManager()
