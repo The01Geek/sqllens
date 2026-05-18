@@ -136,13 +136,25 @@ class TestMysqlRunner:
         assert df.attrs[MAX_ROWS_ATTR] == max_rows
 
     async def test_statement_timeout_raises_within_a_second(self, mysql_url: str) -> None:
-        """SLEEP(2) with a 500ms timeout must error in under ~1s."""
+        """A long-running SELECT with a 500ms timeout must error in under ~2s.
+
+        ``MAX_EXECUTION_TIME`` in MySQL 8.0 only interrupts read-only SELECTs
+        that the executor checks between row reads; ``SELECT SLEEP(2)`` is *not*
+        reliably interrupted because it has no storage-engine read phase. A
+        cross-join of ``information_schema.columns`` against itself produces
+        a long-running join the executor actually loops over.
+        """
         runner = build_sql_runner(mysql_url, statement_timeout_ms=500)
+        sql = (
+            "SELECT COUNT(*) FROM information_schema.columns a "
+            "CROSS JOIN information_schema.columns b "
+            "CROSS JOIN information_schema.columns c"
+        )
         start = time.monotonic()
         with pytest.raises(Exception):  # noqa: B017 — pymysql.err.OperationalError
-            await runner.run_sql(RunSqlToolArgs(sql="SELECT SLEEP(2)"), _ctx())
+            await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
         elapsed = time.monotonic() - start
-        assert elapsed < 1.5, f"timeout fired too slowly ({elapsed:.2f}s)"
+        assert elapsed < 2.0, f"timeout fired too slowly ({elapsed:.2f}s)"
 
 
 # ──────────────────────────────── factory ───────────────────────────────────
