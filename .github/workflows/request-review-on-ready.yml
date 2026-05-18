@@ -56,6 +56,14 @@ concurrency:
 jobs:
   precheck:
     runs-on: ubuntu-latest
+    # Explicit (plan §4 matrix): the first-ready gate reads check-runs and PR
+    # commits. On a public repo these are unauth-readable (verified: the gate
+    # query succeeded in self-test), but pinning checks/pull-requests: read
+    # removes any token-scope ambiguity at zero cost.
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
     outputs:
       enabled: ${{ steps.extract.outputs.enabled }}
       should_run: ${{ steps.route.outputs.should_run }}
@@ -114,12 +122,26 @@ jobs:
             # Authorization gate (cost control on a public repo): the clicker
             # must be an allowed bot OR a write/admin collaborator. check_run
             # carries no PR actor, so authorize github.event.sender.login.
+            if [ -z "$SENDER" ]; then
+              echo "::warning::check_run rerequest has an empty sender.login; cannot authorize — skipping (cost control)."
+              exit 0
+            fi
+            # App actors arrive as `name[bot]`; allowed_bots stores bare
+            # logins. Strip the suffix on the sender side before comparing
+            # (mirrors dedupe-pr-events' `*"[bot]"` detection) so the
+            # documented allowed-bot Re-run path actually matches.
+            SENDER_BARE="${SENDER%\[bot\]}"
             authorized=false
             IFS=',' read -ra BOTS <<< "$ALLOWED_BOTS"
             for b in "${BOTS[@]}"; do
-              [ "$(echo "$b" | xargs)" = "$SENDER" ] && authorized=true
+              bt="$(echo "$b" | xargs)"
+              [ -n "$bt" ] && { [ "$bt" = "$SENDER" ] || [ "$bt" = "$SENDER_BARE" ]; } \
+                && authorized=true
             done
             if [ "$authorized" != "true" ]; then
+              # Collaborator fallback only applies to human logins; an App
+              # actor 404s here (expected) and stays unauthorized unless it
+              # matched allowed_bots above.
               PERM=$(gh api "repos/$REPO/collaborators/$SENDER/permission" \
                        --jq '.permission' 2>/dev/null || echo "none")
               case "$PERM" in
@@ -146,8 +168,11 @@ jobs:
             # Re-resolve the PR's CURRENT head — the whole point of the
             # feature. check_run.head_sha is the (possibly stale) commit the
             # old check was attached to.
+            # `|| echo ""` so a gh failure reaches the graceful no-op below
+            # instead of aborting the step red under `set -e` (matching the
+            # sibling gh calls on this path).
             HEAD=$(gh pr view "$PR" --repo "$REPO" --json headRefOid \
-                     --jq '.headRefOid')
+                     --jq '.headRefOid' 2>/dev/null || echo "")
             if [ -z "$HEAD" ] || [ "$HEAD" = "null" ]; then
               echo "::warning::Could not resolve current HEAD for PR #$PR; no-op."
               exit 0
@@ -173,6 +198,9 @@ jobs:
           # Re-run only). Fail CLOSED on query error: a missed first review is
           # recoverable via the Re-run button; an unwanted re-review is what
           # §0 forbids.
+          # A truncated/empty body that still exits 0 yields a non-numeric
+          # count; treating that as 0 would fail OPEN (re-review on a repeat
+          # toggle), which §0 forbids. Require a bare integer or fail closed.
           if ! EXISTING=$(gh api --paginate \
                 "repos/$REPO/commits/$HEAD/check-runs" \
                 --jq '[.check_runs[] | select(.name=="Devflow Review")] | length' \
@@ -180,7 +208,11 @@ jobs:
             echo "::warning::Check-run query failed for $HEAD; failing closed (no auto-review). Use the Re-run button if a review is needed."
             exit 0
           fi
-          if [ "${EXISTING:-0}" = "0" ]; then
+          if ! [[ "$EXISTING" =~ ^[0-9]+$ ]]; then
+            echo "::warning::Non-numeric check-run count ('$EXISTING') for $HEAD; failing closed (no auto-review)."
+            exit 0
+          fi
+          if [ "$EXISTING" = "0" ]; then
             # head_sha alone can miss checks on earlier commits after a push;
             # scan the PR's commit list as a backstop.
             if ! COMMITS=$(gh pr view "$PR" --repo "$REPO" --json commits \
@@ -195,13 +227,17 @@ jobs:
                 echo "::warning::Check-run query failed for commit $sha; failing closed (no auto-review)."
                 exit 0
               fi
+              if ! [[ "$n" =~ ^[0-9]+$ ]]; then
+                echo "::warning::Non-numeric check-run count ('$n') for commit $sha; failing closed (no auto-review)."
+                exit 0
+              fi
               if [ "$n" != "0" ]; then
                 EXISTING="$n"
                 break
               fi
             done
           fi
-          if [ "${EXISTING:-0}" != "0" ]; then
+          if [ "$EXISTING" != "0" ]; then
             echo "::notice::Devflow Review already ran for PR #$PR; skipping auto-trigger (use the check's Re-run button to re-review)."
             exit 0
           fi
@@ -238,11 +274,23 @@ jobs:
             -f 'output[title]=Devflow review running' \
             -f "output[summary]=$SUMMARY" \
             --jq '.id')
+          # An HTTP-success-but-no-.id response would leave finalize_check's
+          # `!= ''` gate skipped and the check hung in_progress forever (the
+          # exact hang plan §6.3 guards against). Fail loudly instead.
+          if ! [[ "$ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::check-run POST returned no numeric id ('$ID'); cannot create 'Devflow Review' check."
+            exit 1
+          fi
           echo "check_run_id=$ID" >> "$GITHUB_OUTPUT"
           echo "::notice::Created 'Devflow Review' check run $ID at $HEAD_SHA."
 
   review:
-    needs: [precheck, create_check]
+    # NOT needs: create_check — the formal verdict is the authoritative
+    # artifact and must still post even if the Checks-API POST fails
+    # (plan §6.3 "degraded but not silent"; the first-ready gate has already
+    # consumed the one-shot, so a skipped review here would be silent loss).
+    # create_check runs in parallel; finalize_check joins both.
+    needs: precheck
     if: needs.precheck.outputs.enabled == 'true' && needs.precheck.outputs.should_run == 'true'
     # A reusable workflow's effective GITHUB_TOKEN cannot exceed the caller
     # job's permissions; granting id-token: write here matches what claude.yml
@@ -374,14 +422,22 @@ jobs:
           REVIEW_RESULT: ${{ needs.review.result }}
         run: |
           set -euo pipefail
-          if [ "$REVIEW_RESULT" = "success" ]; then
-            CONCLUSION=success
-          else
-            CONCLUSION=failure
-          fi
-          gh api -X PATCH "repos/$REPO/check-runs/$CHECK_RUN_ID" \
+          # Map the review job result to a check conclusion. A
+          # concurrency-cancelled or skipped review is NOT a review failure —
+          # surfacing it as a red `failure` is misleading; use `cancelled`/
+          # `neutral` so a superseded Re-run doesn't look like a REJECT.
+          case "$REVIEW_RESULT" in
+            success)   CONCLUSION=success ;;
+            cancelled) CONCLUSION=cancelled ;;
+            skipped)   CONCLUSION=neutral ;;
+            *)         CONCLUSION=failure ;;
+          esac
+          if ! gh api -X PATCH "repos/$REPO/check-runs/$CHECK_RUN_ID" \
             -f status='completed' \
             -f conclusion="$CONCLUSION" \
             -f "output[title]=Devflow review $CONCLUSION" \
-            -f 'output[summary]=See the formal review verdict on the PR. Click Re-run on this check to re-review the current HEAD.'
+            -f 'output[summary]=See the formal review verdict on the PR. Click Re-run on this check to re-review the current HEAD.'; then
+            echo "::error::Failed to finalize check $CHECK_RUN_ID; it may hang in_progress. Re-run the check or PATCH it manually."
+            exit 1
+          fi
           echo "::notice::Finalized check $CHECK_RUN_ID as $CONCLUSION (review job result: $REVIEW_RESULT)."

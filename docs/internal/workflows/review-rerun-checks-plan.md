@@ -25,9 +25,11 @@ How the design enforces this:
 | `@claude run /devflow:review` comment | ✅ (manual) | Existing `claude.yml` path; user-initiated. |
 | Any CI check re-run | ❌ | precheck `name == 'Devflow Review'` guard (§3.2, §6.6). |
 
-The "first-ready gate" is the **only new behavioral guard** the requirement
-adds on top of the Check-Run design; everything else already complies because
-no `synchronize` trigger exists anywhere in the review path.
+The first-ready gate and the **`check_run` sender authorization gate** (§6.2,
+mandatory) are the two new behavioral guards this design adds. Everything else
+already complies because no `synchronize` trigger exists anywhere in the
+review path. The auth gate is not optional — removing it re-opens the
+public-repo budget-drain vector.
 
 ---
 
@@ -334,6 +336,31 @@ Per `CLAUDE.md`, the `main-protected` ruleset (ID 15633058) requires exactly:
    pre-existing open PRs gain the button without a ready transition.
 
 ---
+
+## 8a. Known limitations / post-review follow-ups
+
+Surfaced by the self-review on the implementing PR (#86):
+
+1. **`check_run` path checkout reviews the default branch, not the PR HEAD
+   (open).** `claude-runner.yml`'s `actions/checkout` has no `ref:`; a
+   `check_run` event is delivered on `main`, so any review step that reads the
+   *working tree* sees `main`. The `/devflow:review` skill is driven by
+   `gh pr diff` / `gh api` keyed by the resolved `pr_number` (HEAD-correct via
+   the API), and the ready path checks out the PR ref normally — so the
+   ready-path self-test reviewed the right code. But the Re-run path's local
+   file reads are still `main`-bound. A proper fix requires plumbing a PR ref
+   into `claude-runner.yml`, which §2 deliberately keeps verbatim; that is a
+   separate, deliberate change. Until then the `check_run` Re-run is
+   diff-correct but not guaranteed working-tree-correct. Tracked as follow-up.
+2. **`gh pr view --json commits` 100-commit cap.** The first-ready backstop
+   scan silently truncates on PRs with >100 commits; a `Devflow Review` check
+   on an older commit would be invisible, weakening "exactly once" on very
+   large PRs. Acceptable for now (head-SHA query is the primary signal);
+   paginate if it ever bites.
+3. **Re-run mints a new check at current HEAD; the originally-clicked check
+   stays `completed` on its old SHA.** Two `Devflow Review` checks can exist
+   across commits. Intended (each check is SHA-pinned) but noted here so it
+   isn't mistaken for a bug.
 
 ## 9. Out of scope (explicitly not doing)
 
