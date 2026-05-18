@@ -87,11 +87,14 @@ class AuthConfig(BaseModel):
 
     @model_validator(mode="after")
     def _token_only_with_bearer_mode(self) -> AuthConfig:
-        # Reject a stored bearer_token when the mode isn't "bearer". Otherwise the
-        # token sits unused, the active authenticator is NoOpAuthenticator, and
-        # the server runs completely unauthenticated despite the operator
-        # believing bearer auth is enabled. Loud config-load failure beats silent
-        # production exposure.
+        # Reject a stored bearer_token when the mode isn't "bearer". The token
+        # sits unused under any other mode; the most dangerous case is mode='none',
+        # where the active authenticator is NoOpAuthenticator and the server runs
+        # completely unauthenticated despite the operator believing bearer auth is
+        # enabled. mode='jwt' is a milder but still confusing variant — JWT is
+        # active while the stale bearer token implies the wrong credential will
+        # authorize. Loud config-load failure beats silent misconfiguration in
+        # either case.
         if self.mode != "bearer" and self.bearer_token is not None:
             raise ValueError(
                 "auth.bearer_token is set but auth.mode is "
