@@ -27,7 +27,7 @@ Top-level keys (all required to be present in the merged config, though most hav
 | `[database]` | `url` | `name` defaults to `"primary"`. `read_only` defaults to `true` (enforced by the SQL parser guard, not the SQLite driver). `statement_timeout_ms` defaults to `30_000` (30s; `0` disables on Postgres/MySQL). `max_rows` defaults to `10_000`, bounded `1..1_000_000`. Both are applied per-runner via the engine's native primitive and surface a truncation hint to the LLM — see [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md). |
 | `[llm]` | — | Currently `provider` is locked to `"anthropic"`. `model` defaults to `claude-sonnet-4-5-20250929`. `api_key` is a `SecretStr | None` and is **optional** at config-load time; `sqllens serve` checks it before building the agent, `sqllens validate` doesn't. |
 | `[memory]` | — | All defaulted. `persist_dir = Path("./chroma")` (relative to CWD). |
-| `[auth]` | — | `mode` defaults to `"none"`. `jwt` mode is scaffolded but not implemented. |
+| `[auth]` | — | `mode` defaults to `"none"`. `jwt` mode is scaffolded but not implemented. `insecure` (default `false`, env `SQLLENS_AUTH__INSECURE`) opts out of the `serve` boot-time guard that refuses `mode=none` + non-loopback HTTP host — see [authentication/overview.md](../authentication/overview.md#none--srcsqllensauthnonepy). |
 | `[server]` | — | `transport` defaults to `"stdio"`. `host`/`port` only used for `transport = "http"`. |
 | `[agent]` | — | `max_tool_iterations` defaults to `20`. Raised from the framework's built-in `10` — real-world schema exploration requires more iterations. Env var: `SQLLENS_AGENT__MAX_TOOL_ITERATIONS`. |
 
