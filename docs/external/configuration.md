@@ -69,6 +69,7 @@ Configures authentication for the HTTP transport. The stdio transport does not n
 |---|---|---|
 | `mode` | String | One of `none`, `bearer`, or `jwt`. See the [authentication modes](#authentication-modes) below. |
 | `bearer_token` | String | The shared token required by `bearer` mode. Prefer setting this with `SQLLENS_AUTH__BEARER_TOKEN`. |
+| `insecure` | Boolean | Defaults to `false`. Set to `true` (or `SQLLENS_AUTH__INSECURE=1`) to acknowledge running `mode = "none"` on a non-loopback host. See [Running without authentication on a non-loopback host](#running-without-authentication-on-a-non-loopback-host). |
 
 ### Authentication modes
 
@@ -77,6 +78,21 @@ Configures authentication for the HTTP transport. The stdio transport does not n
 | `none` | Loopback only. Use this when the only client is an assistant on the same machine. |
 | `bearer` | A single shared token is required on every request. |
 | `jwt` | Scaffolded but not yet implemented. Do not use in production. |
+
+### Running without authentication on a non-loopback host
+
+By default, `sqllens serve` refuses to start when **all** of the following are true:
+
+- `server.transport = "http"`
+- `auth.mode = "none"`
+- `server.host` is not a loopback address (anything other than `localhost`, `127.0.0.1`, or `::1`)
+
+This includes the wildcard binds `0.0.0.0` and `::` that container images use by default. The server exits with an error explaining the situation. To start it anyway, choose one of:
+
+- **Recommended**: Switch to bearer authentication. Set `SQLLENS_AUTH__MODE=bearer` together with `SQLLENS_AUTH__BEARER_TOKEN=<a long random string>`.
+- **Closed-network override**: Set `SQLLENS_AUTH__INSECURE=1` (or `auth.insecure = true` in the TOML file) to acknowledge the configuration. Use this only when network reach to the SQL Lens port is already restricted by other means, for example a private Docker network with no published host port, a private subnet, or a sidecar container that is the only client.
+
+When the override is active, `sqllens serve` prints a warning naming the bound host on startup.
 
 ## Section: `[server]`
 

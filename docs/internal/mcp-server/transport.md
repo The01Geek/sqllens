@@ -66,6 +66,12 @@ FastMCP defaults to rejecting non-loopback `Host` headers with HTTP 421 ("Misdir
 
 CLAUDE.md "Gotchas" again: `--network=host` on Docker Desktop puts the container in Docker Desktop's internal WSL distro — a different network namespace than the user's WSL. Native processes in user-WSL (curl, MCP Inspector, IDEs) can't reach `127.0.0.1:<port>` on the container. **Always use port mapping** (`-p HOST:CONTAINER`) for local dev unless you specifically need host-shared networking. This isn't a transport-layer bug — it's an environment quirk — but the transport layer is where you'll first notice it as "the port doesn't answer."
 
+## Startup safety guard: HTTP + auth=none + non-loopback host
+
+Before the HTTP transport is built, `sqllens serve` in [src/sqllens/cli.py](../../../src/sqllens/cli.py) refuses to start an unauthenticated HTTP server bound to a non-loopback interface. The guard fires when **all three** are true: `cfg.server.transport == "http"`, `cfg.auth.mode == "none"`, and `_is_loopback_host(cfg.server.host)` returns false. Loopback acceptance is narrow on purpose — the literal string `"localhost"` plus any IP address whose `ipaddress.ip_address(...).is_loopback` is true. No DNS is performed: wildcard binds (`0.0.0.0`, `::`), public addresses, and arbitrary hostnames all fail closed. Exit code is `2`.
+
+The override is `auth.insecure = true` (env: `SQLLENS_AUTH__INSECURE=1`) for closed-network deployments. When set, `serve` prints a yellow warning naming the bound host and proceeds. Full discussion in [authentication/overview.md](../authentication/overview.md#none--srcsqllensauthnonepy).
+
 ## `_AuthMiddleware` — auth runs per-request
 
 Even though FastMCP multiplexes sessions, the auth check runs per HTTP request, not per MCP session. The `Authenticator` is built once in `build_asgi_app` in [transport/http.py](../../../src/sqllens/transport/http.py); each request's headers are passed to `authenticator.authenticate(headers)`.

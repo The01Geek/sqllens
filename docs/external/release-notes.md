@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 18, 2026
+
+- **[Improvement] Refuse to start an unauthenticated HTTP server on a non-loopback host** — `sqllens serve` now exits with an error when the HTTP transport is configured with `auth.mode = "none"` and bound to anything other than a loopback address (`localhost`, `127.0.0.1`, or `::1`). This closes a silent footgun where the default Docker image, which binds `0.0.0.0` inside the container, would publish an unauthenticated MCP endpoint to any client that could reach the host port. To resolve the error, switch to bearer authentication by setting `SQLLENS_AUTH__MODE=bearer` with `SQLLENS_AUTH__BEARER_TOKEN`; for closed-network deployments, set `SQLLENS_AUTH__INSECURE=1` (or `auth.insecure = true`) to acknowledge the configuration and proceed with a warning. (#56)
+
 ## May 16, 2026
 
 - **[Feature] One-command Claude Desktop setup** — Connecting SQL Lens to Claude Desktop is now a single command: `sqllens claude-desktop install --db <url>`. The installer writes a configuration file, merges an entry into Claude Desktop's settings while preserving any existing preferences and other MCP servers, and saves a timestamped backup of the settings file before changing it. On Windows, the installer also generates the launcher script that was previously assembled by hand. Run with `--dry-run` to preview the changes before they are written. Works on Windows, macOS, and Linux. (#25)

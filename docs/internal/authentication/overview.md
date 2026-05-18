@@ -41,6 +41,10 @@ Allows every request, returns an empty `AuthContext()`. The right choice for:
 - localhost-bound HTTP (`server.host = "127.0.0.1"`)
 - HTTP behind a trusted reverse proxy that handles auth itself
 
+**Loopback safety guard.** `sqllens serve` refuses to start when `server.transport = "http"` and `auth.mode = "none"` and `server.host` is **not** a loopback address. The check lives in `serve` in [src/sqllens/cli.py](../../../src/sqllens/cli.py) and consults `_is_loopback_host(host)`, which accepts the literal string `"localhost"` plus any IP address (IPv4 or IPv6) whose `ipaddress.ip_address(...).is_loopback` is true. **No DNS resolution** is performed: hostnames other than `"localhost"`, wildcard binds (`0.0.0.0`, `::`), and any unparseable string fail closed. Triggering the guard exits with code `2` and a message naming the offending `server.host` and pointing to bearer auth or the override below.
+
+The override is `auth.insecure = true` (env: `SQLLENS_AUTH__INSECURE=1`), intended for closed-network deployments (private subnet, Docker network with no host-port publish, sidecar) where the operator has accepted responsibility for network reachability. When the override is set, `serve` emits a yellow `Warning:` line naming the bound host and proceeds. The flag does nothing in stdio mode and nothing when `auth.mode` is `bearer` or `jwt` — it only relaxes the `none`-on-non-loopback invariant.
+
 ### `bearer` — [src/sqllens/auth/bearer.py](../../../src/sqllens/auth/bearer.py)
 
 Static bearer token configured at startup. Clients send `Authorization: Bearer <token>`. Implementation notes:

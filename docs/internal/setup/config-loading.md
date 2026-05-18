@@ -27,7 +27,7 @@ Top-level keys (all required to be present in the merged config, though most hav
 | `[database]` | `url` | `name` defaults to `"primary"`. `read_only` defaults to `true` (enforced by the SQL parser guard, not the SQLite driver). |
 | `[llm]` | — | Currently `provider` is locked to `"anthropic"`. `model` defaults to `claude-sonnet-4-5-20250929`. `api_key` is a `SecretStr | None` and is **optional** at config-load time; `sqllens serve` checks it before building the agent, `sqllens validate` doesn't. |
 | `[memory]` | — | All defaulted. `persist_dir = Path("./chroma")` (relative to CWD). |
-| `[auth]` | — | `mode` defaults to `"none"`. `jwt` mode is scaffolded but not implemented. |
+| `[auth]` | — | `mode` defaults to `"none"`. `insecure` defaults to `false` — set it (or `SQLLENS_AUTH__INSECURE=1`) to opt out of the `sqllens serve` loopback safety guard that otherwise refuses to start an unauthenticated HTTP server on a non-loopback host; see [authentication/overview.md](../authentication/overview.md#none--srcsqllensauthnonepy). `jwt` mode is scaffolded but not implemented. |
 | `[server]` | — | `transport` defaults to `"stdio"`. `host`/`port` only used for `transport = "http"`. |
 | `[agent]` | — | `max_tool_iterations` defaults to `20`. Raised from the framework's built-in `10` — real-world schema exploration requires more iterations. Env var: `SQLLENS_AGENT__MAX_TOOL_ITERATIONS`. |
 
@@ -75,6 +75,10 @@ Mitigation: `sqllens claude-desktop install` always writes BOM-free UTF-8 via Py
 `sqllens serve` enforces the precondition in [src/sqllens/cli.py](../../../src/sqllens/cli.py) immediately after `Config.load`: if `cfg.llm.api_key is None` it exits 2 with `Config error: llm.api_key is not set. Either set SQLLENS_LLM__API_KEY in your environment, or add api_key = "..." to the [llm] section of sqllens.toml.` This keeps `validate` as a real pre-flight lint command and `serve` as the runtime-readiness check.
 
 The agent factory ([src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py)) still calls `cfg.llm.api_key.get_secret_value()` unchanged — that's a defensive second layer; the CLI is the authoritative gate.
+
+### 3. Unauthenticated HTTP on a non-loopback host
+
+`sqllens serve` in [src/sqllens/cli.py](../../../src/sqllens/cli.py) refuses to start when `server.transport == "http"`, `auth.mode == "none"`, and `server.host` is not a loopback address (helper: `_is_loopback_host`). Exit code is `2`, with a message that names the offending `server.host` value and suggests either switching to `SQLLENS_AUTH__MODE=bearer` (with `SQLLENS_AUTH__BEARER_TOKEN`) or setting `SQLLENS_AUTH__INSECURE=1` to override for closed-network deployments. Loopback acceptance is intentionally narrow: the literal hostname `"localhost"` plus any IP address whose `ipaddress.ip_address(...).is_loopback` is true. No DNS is consulted — `0.0.0.0`, `::`, public addresses, and arbitrary hostnames all fail closed. Full description of the guard and override is in [authentication/overview.md](../authentication/overview.md#none--srcsqllensauthnonepy).
 
 ### Error rendering note
 
