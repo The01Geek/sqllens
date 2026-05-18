@@ -72,7 +72,7 @@ Configures authentication for the HTTP transport. The stdio transport does not n
 | Field | Type | Description |
 |---|---|---|
 | `mode` | String | One of `none`, `bearer`, or `jwt`. See the [authentication modes](#authentication-modes) below. |
-| `bearer_token` | String | The shared token required by `bearer` mode. Prefer setting this with `SQLLENS_AUTH__BEARER_TOKEN`. |
+| `bearer_token` | String | The shared token required by `bearer` mode. Prefer setting this with `SQLLENS_AUTH__BEARER_TOKEN`. SQL Lens refuses to start if `mode = "bearer"` and this value is missing, empty, or only whitespace. |
 | `insecure` | Boolean | Defaults to `false`. Set to `true` (or `SQLLENS_AUTH__INSECURE=1`) to acknowledge that `mode = "none"` on a non-loopback host is intentional for a closed-network deployment. See [Non-loopback safety guard](#non-loopback-safety-guard) below. |
 
 ### Authentication modes
@@ -80,8 +80,10 @@ Configures authentication for the HTTP transport. The stdio transport does not n
 | Mode | When to use |
 |---|---|
 | `none` | Loopback only. `sqllens serve` refuses to start when this mode is paired with `transport = "http"` and a non-loopback host. See [Non-loopback safety guard](#non-loopback-safety-guard) below. |
-| `bearer` | A single shared token is required on every request. The recommended mode for any deployment that listens on a public or shared interface. |
+| `bearer` | A single shared token is required on every request. Requires `bearer_token` to be set to a non-blank value. The recommended mode for any deployment that listens on a public or shared interface. |
 | `jwt` | Scaffolded but not yet implemented. Do not use in production. |
+
+**Note:** If you select `mode = "bearer"` without providing a usable token, both `sqllens serve` and `sqllens validate` exit with an actionable error that names the `SQLLENS_AUTH__BEARER_TOKEN` environment variable, the `[auth]` section of `sqllens.toml`, and the alternate `mode` values (`none` or `jwt`). This prevents a misconfigured server from starting silently and rejecting every request at runtime.
 
 ### Non-loopback safety guard
 

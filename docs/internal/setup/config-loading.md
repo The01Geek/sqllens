@@ -76,6 +76,14 @@ Mitigation: `sqllens claude-desktop install` always writes BOM-free UTF-8 via Py
 
 The agent factory ([src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py)) still calls `cfg.llm.api_key.get_secret_value()` unchanged — that's a defensive second layer; the CLI is the authoritative gate.
 
+### 3. `auth.mode = "bearer"` without a usable `bearer_token`
+
+`AuthConfig._bearer_requires_token` (a pydantic `@model_validator(mode="after")` in [src/sqllens/config.py](../../../src/sqllens/config.py)) rejects `mode = "bearer"` when `bearer_token` is `None`, empty, or whitespace-only. The check fires inside `Config.load()`, so both `sqllens serve` and `sqllens validate` exit 2 through the generic `except Exception` block — no special-case CLI branch is needed (contrast with `llm.api_key`, where `validate` deliberately stays permissive).
+
+The `ValidationError` message is `BEARER_TOKEN_MISSING_MESSAGE` from [src/sqllens/config.py](../../../src/sqllens/config.py); it names `SQLLENS_AUTH__BEARER_TOKEN`, the `[auth]` TOML stanza, and the alternate `mode` values (`none|jwt`). Because the literal `[auth]` is a bracket-shaped substring, the constant is rendered through `rich.markup.escape` the same way `API_KEY_MISSING_MESSAGE` is — see the [Error rendering note](#error-rendering-note) below.
+
+Defense-in-depth: `build_authenticator` in [src/sqllens/auth/__init__.py](../../../src/sqllens/auth/__init__.py) repeats the same check (and emits the same constant) for callers that bypass validation via `AuthConfig.model_construct(...)`. `BearerTokenAuthenticator.__init__` also strips whitespace and rejects empty/whitespace-only tokens — mirroring `_extract_bearer`'s inbound `.strip()` so a config like `bearer_token = "  secret  "` never silently fails to match a client sending `Authorization: Bearer secret`. See [authentication/overview.md](../authentication/overview.md#bearer--srcsqllensauthbearerpy).
+
 ### Error rendering note
 
 CLI error printing routes the variable part through `rich.markup.escape` so messages that contain bracket-shaped substrings (`[llm]`, `[type=missing, …]` from pydantic) render verbatim. Without escaping, rich silently strips bare bracket expressions it can't interpret as a style, which would drop crucial substrings from the user's view.
