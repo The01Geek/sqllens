@@ -195,13 +195,17 @@ class _SessionManagerLifespan:
     - ``lifespan.startup`` failed in ``__aenter__`` (the partially-acquired
       context manager reference is dropped *without* ``__aexit__`` —
       calling ``__aexit__`` on a CM whose ``__aenter__`` never completed
-      is undefined per PEP 343).
+      is undefined per PEP 343), or
+    - ``lifespan.shutdown`` arrived with no prior ``lifespan.startup`` (a
+      misbehaving host) — the instance is finalized and the shutdown is
+      answered ``shutdown.failed``, not ``shutdown.complete``.
 
     After finalization, the CM reference is gone and a subsequent
     ``lifespan.shutdown`` is acknowledged with ``shutdown.complete``
-    without re-entering ``__aexit__``. ``__aexit__`` is invoked at most
-    once over an instance's lifetime, and never on a CM whose
-    ``__aenter__`` failed. If a host drives more than one lifespan scope
+    without re-entering ``__aexit__`` (except the shutdown-without-startup
+    path above, whose own ``shutdown`` is answered ``shutdown.failed``).
+    ``__aexit__`` is invoked at most once over an instance's lifetime, and
+    never on a CM whose ``__aenter__`` failed. If a host drives more than one lifespan scope
     against the same app (uncommon outside test harnesses), mount a fresh
     adapter via ``build_asgi_app`` for each.
     """
@@ -326,11 +330,7 @@ class _SessionManagerLifespan:
                     # the _shutdown_done idempotent branch, so reaching here
                     # with cm is None and not _started means startup was never
                     # attempted. A host that does this is misbehaving; surface
-                    # it rather than masking the bug with a clean ack. (The
-                    # other cm-is-None case — started, CM already captured-and-
-                    # cleared — is unreachable here because that path always
-                    # set _shutdown_done and returned above; if it ever became
-                    # reachable it falls through to the clean ack below.)
+                    # it rather than masking the bug with a clean ack.
                     self._shutdown_done = True
                     logger.warning(
                         "lifespan.shutdown received without prior lifespan.startup"

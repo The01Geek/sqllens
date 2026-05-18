@@ -289,6 +289,9 @@ def test_lifespan_startup_baseexception_propagates_not_caught() -> None:
 
     # The signal escaped; no startup.failed ack was fabricated for it.
     assert sent == []
+    # The raise traversed the awaited CM method (not run()), so this pins
+    # the `except Exception` site specifically, not an upstream escape.
+    assert sm.aenter_calls == 1
 
 
 def test_lifespan_shutdown_baseexception_propagates_not_caught() -> None:
@@ -307,6 +310,9 @@ def test_lifespan_shutdown_baseexception_propagates_not_caught() -> None:
     types = [m["type"] for m in sent]
     assert types == ["lifespan.startup.complete"]
     assert "lifespan.shutdown.failed" not in types
+    # The raise traversed __aexit__ (not run()/__aenter__), pinning the
+    # shutdown `except Exception` site specifically.
+    assert sm.aexit_calls == 1
 
 
 def test_lifespan_unknown_message_type_is_logged_and_loop_continues() -> None:
