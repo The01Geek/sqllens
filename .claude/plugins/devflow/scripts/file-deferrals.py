@@ -59,8 +59,10 @@ def _gh_login():
     Tries gh api user first (works for personal access tokens). Falls back
     to GITHUB_ACTOR, then "(unknown)", on ANY gh failure mode — not just the
     canonical 403 "Resource not accessible by integration" you get when
-    GITHUB_TOKEN in Actions lacks user:read. That includes expired tokens,
-    5xx, DNS errors, rate-limiting, and gh-not-on-PATH (FileNotFoundError).
+    GITHUB_TOKEN in Actions lacks user:read. That covers any non-zero gh
+    exit or empty stdout (403, expired tokens, 5xx, DNS errors,
+    rate-limiting) as well as any OS-level spawn failure (gh missing from
+    PATH, present-but-not-executable, wrong arch) — all OSError subclasses.
     filed_by is informational only — never gate logic — so we degrade
     rather than fail the run, but we leave a stderr breadcrumb so operators
     can see when the primary lookup didn't work.
@@ -72,9 +74,10 @@ def _gh_login():
         if r.returncode == 0 and r.stdout.strip():
             return r.stdout.strip()
         rc_info = str(r.returncode)
-        stderr_info = (r.stderr or "").strip().splitlines()[0][:120] if r.stderr else ""
-    except FileNotFoundError:
-        pass
+        _err_lines = (r.stderr or "").strip().splitlines()
+        stderr_info = _err_lines[0][:120] if _err_lines else ""
+    except OSError as e:
+        stderr_info = f"{type(e).__name__}: {e}"[:120]
     sys.stderr.write(
         f"file-deferrals.py: gh api user unavailable "
         f"(rc={rc_info}, stderr={stderr_info!r}), falling back to GITHUB_ACTOR\n"
