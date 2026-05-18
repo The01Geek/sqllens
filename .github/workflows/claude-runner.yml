@@ -136,6 +136,12 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Pass the workflow's own GITHUB_TOKEN so the action skips its
+          # OIDC → app-token exchange, which 401s for jobs running inside a
+          # reusable workflow_call from pull_request_target (anthropics/
+          # claude-code-action#443, #721). Cost: progress comment and final
+          # review post under `github-actions[bot]` instead of `@claude`.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           allowed_bots: ${{ steps.extract.outputs.allowed_bots }}
 
           additional_permissions: |
