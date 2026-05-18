@@ -9,6 +9,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from sqllens import cli
@@ -334,7 +335,7 @@ def test_env_bearer_mode_without_token_rejected_at_load(
     )
     monkeypatch.setenv("SQLLENS_AUTH__MODE", "bearer")
     monkeypatch.delenv("SQLLENS_AUTH__BEARER_TOKEN", raising=False)
-    with pytest.raises(Exception) as exc:
+    with pytest.raises(ValidationError) as exc:
         Config.load(cfg_path)
     assert "SQLLENS_AUTH__BEARER_TOKEN" in str(exc.value)
 

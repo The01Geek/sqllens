@@ -22,7 +22,11 @@ class BearerTokenAuthenticator(Authenticator):
     """Compare the request's bearer token against a configured value."""
 
     def __init__(self, expected_token: str) -> None:
-        if not expected_token:
+        # ``.strip()`` matches AuthConfig._bearer_requires_token's whitespace-aware
+        # check, so a token bypassing the validator (e.g. via ``model_construct``)
+        # still gets rejected at the innermost layer rather than producing an
+        # authenticator that no inbound request can satisfy.
+        if not expected_token.strip():
             raise ValueError("bearer token must not be empty")
         # Hold the comparison value as bytes so hmac.compare_digest gets a
         # consistent type and we don't allocate on every request.

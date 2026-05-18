@@ -56,6 +56,12 @@ class TestBearerTokenAuthenticator:
         with pytest.raises(ValueError):
             BearerTokenAuthenticator("")
 
+    def test_rejects_whitespace_expected_token(self) -> None:
+        # Innermost-layer guard against a whitespace-only token slipping through
+        # an AuthConfig that bypassed validation (see build_authenticator path).
+        with pytest.raises(ValueError):
+            BearerTokenAuthenticator("   ")
+
 
 class TestJwtAuthenticator:
     """JWT is scaffolded only — a placeholder verifier that refuses requests."""
@@ -115,4 +121,6 @@ class TestAuthConfigValidator:
 
     def test_none_mode_with_no_token_ok(self) -> None:
         # Sanity: the validator must not affect the default (and most common) mode.
-        AuthConfig(mode="none")
+        cfg = AuthConfig(mode="none")
+        assert cfg.mode == "none"
+        assert cfg.bearer_token is None
