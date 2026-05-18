@@ -146,7 +146,10 @@ def test_serve_insecure_opt_out_via_toml(
     assert "Refusing to start" not in result.stdout
 
 
-@pytest.mark.parametrize("host", ["127.0.0.1", "127.0.0.2", "::1", "localhost"])
+@pytest.mark.parametrize(
+    "host",
+    ["127.0.0.1", "127.0.0.2", "::1", "localhost", "Localhost", "LOCALHOST"],
+)
 def test_serve_allows_loopback_with_auth_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: str
 ) -> None:
