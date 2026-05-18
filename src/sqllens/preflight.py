@@ -44,7 +44,10 @@ def probe_database(cfg: Config) -> None:
 
     Does **not** run a query — that would burn round-trips and could trigger
     permission checks unrelated to reachability. For PG/MySQL the connect
-    timeout is bounded so a wedged host can't extend startup indefinitely.
+    timeout is bounded by ``_DB_CONNECT_TIMEOUT_SECONDS`` so a wedged host
+    can't extend startup indefinitely; SQLite has no connect-timeout knob
+    (the underlying ``open()`` is unbounded on a wedged remote mount but
+    effectively instant for local files).
 
     Raises:
         PreflightError: with ``subsystem='database'`` and the driver error as
@@ -64,9 +67,8 @@ def probe_database(cfg: Config) -> None:
         path = rest
         if path.startswith("/") and not path.startswith("//"):
             path = path[1:]
-        # ``timeout`` is sqlite3's lock-wait, not a connect timeout — the file
-        # open itself is the only network-ish step (over NFS etc.) and isn't
-        # bounded by this kwarg. For local files this is effectively instant.
+        # sqlite3's ``timeout`` is lock-wait, NOT connect-timeout — passed only
+        # for completeness; the file open() is the only blocking step.
         try:
             with contextlib.closing(
                 sqlite3.connect(path or ":memory:", timeout=_DB_CONNECT_TIMEOUT_SECONDS)
@@ -79,6 +81,8 @@ def probe_database(cfg: Config) -> None:
     if scheme.startswith("postgres"):
         import psycopg2
 
+        # psycopg2 only accepts ``postgresql://`` — collapse the legacy
+        # ``postgres://`` and SQLAlchemy-style ``postgresql+psycopg2://`` forms.
         normalized = "postgresql://" + rest
         try:
             with contextlib.closing(
@@ -95,7 +99,7 @@ def probe_database(cfg: Config) -> None:
         parsed = urlparse(url)
         if not parsed.hostname or not parsed.username:
             raise PreflightError(
-                "database", "mysql url must include user, host, and database name"
+                "database", "mysql url must include user and host"
             )
         try:
             with contextlib.closing(
@@ -123,10 +127,10 @@ def probe_llm(cfg: Config) -> None:
     """Construct the Anthropic client via ``AnthropicLlmService`` to validate config.
 
     Goes through ``AnthropicLlmService`` rather than ``anthropic.Anthropic``
-    directly so ``ANTHROPIC_BASE_URL`` / ``ANTHROPIC_API_KEY`` env fallback
-    and the friendly ``ImportError`` framing match what ``build_agent`` will
-    produce later. No network round-trip — that would cost a token-billed
-    ``messages.create`` and slow restarts.
+    directly so ``ANTHROPIC_BASE_URL`` / ``ANTHROPIC_API_KEY`` / ``ANTHROPIC_MODEL``
+    env fallback and the model-default behavior match what ``build_agent`` will
+    instantiate at serve time. No network round-trip — that would cost a
+    token-billed ``messages.create`` and slow restarts.
     """
     if cfg.llm.api_key is None:
         raise PreflightError("llm", API_KEY_MISSING_MESSAGE)
@@ -168,7 +172,11 @@ def probe_memory(cfg: Config) -> None:
             "memory", f"persist_dir {persist_dir} is not writable: {exc}"
         ) from exc
     finally:
-        sentinel.unlink(missing_ok=True)
+        # missing_ok=True only suppresses FileNotFoundError; the sentinel
+        # could still be unremovable on a permission flip between touch and
+        # unlink. Don't let cleanup-noise shadow the real probe result.
+        with contextlib.suppress(OSError):
+            sentinel.unlink(missing_ok=True)
 
 
 def probe_auth(cfg: Config) -> None:
@@ -180,6 +188,12 @@ def probe_auth(cfg: Config) -> None:
     """
     try:
         build_authenticator(cfg.auth)
+    except ValueError as exc:
+        # build_authenticator raises ValueError with an actionable message
+        # ("auth.mode='bearer' requires auth.bearer_token to be set"). Pass
+        # the message through unmodified — the "ValueError:" prefix would
+        # otherwise read as an internal bug rather than a config oversight.
+        raise PreflightError("auth", str(exc)) from exc
     except Exception as exc:
         raise PreflightError("auth", f"{type(exc).__name__}: {exc}") from exc
 
@@ -190,8 +204,10 @@ _PROBES = (probe_database, probe_llm, probe_memory, probe_auth)
 def run_preflight(cfg: Config) -> None:
     """Run every probe in order, raising at the first failure.
 
-    Probes are ordered by likely fix latency for the operator — DB and LLM
-    config are usually the noisy edges; memory and auth are typically static.
+    Ordering is most-likely-to-fail first: a typo in ``database.url`` or
+    ``llm.api_key`` is the common operator mistake; ``memory.persist_dir``
+    and ``auth.mode`` rarely change. Surfacing the noisy edges early means
+    the operator doesn't wait on slower probes to learn about a config typo.
     """
     for probe in _PROBES:
         probe(cfg)

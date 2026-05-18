@@ -79,8 +79,9 @@ def serve(
         "--no-preflight",
         envvar="SQLLENS_NO_PREFLIGHT",
         help=(
-            "Skip eager DB/LLM/Chroma/auth probes. Use when the database may not "
-            "be ready at startup (e.g. waiting on a sidecar)."
+            "Skip eager DB/LLM/Chroma/auth probes. Useful in container "
+            "orchestrators where dependencies come up after the server, or in "
+            "tests. Otherwise leave on — the probes are your fail-fast guard."
         ),
     ),
 ) -> None:
@@ -97,7 +98,9 @@ def serve(
     if cfg.llm.api_key is None:
         console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
         raise typer.Exit(code=2)
-    if not no_preflight:
+    if no_preflight:
+        console.print("[yellow]Preflight skipped (--no-preflight).[/yellow]")
+    else:
         try:
             run_preflight(cfg)
         except PreflightError as e:

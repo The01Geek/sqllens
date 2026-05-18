@@ -90,8 +90,7 @@ def test_serve_preflight_blocks_on_unwritable_persist_dir(tmp_path: Path) -> Non
         result = runner.invoke(app, ["serve", "--config", str(cfg_path)])
 
     assert result.exit_code == 2
-    assert "Preflight failed:" in result.stdout
-    assert "memory" in result.stdout
+    assert "Preflight failed: memory:" in result.stdout
     mock_run.assert_not_called()
 
 
@@ -106,13 +105,12 @@ def test_serve_preflight_blocks_on_bearer_without_token(tmp_path: Path) -> None:
         result = runner.invoke(app, ["serve", "--config", str(cfg_path)])
 
     assert result.exit_code == 2
-    assert "Preflight failed:" in result.stdout
-    assert "auth" in result.stdout
+    assert "Preflight failed: auth:" in result.stdout
     mock_run.assert_not_called()
 
 
 def test_serve_preflight_blocks_on_bad_database(tmp_path: Path) -> None:
-    # SQLite refuses to open a database file inside a non-existent directory.
+    # Parent directory does not exist, so sqlite3.connect's underlying open() fails.
     cfg_path = _write_config(
         tmp_path / "sqllens.toml",
         db_url=f"sqlite:///{tmp_path / 'missing-subdir' / 'db.sqlite'}",
@@ -123,8 +121,7 @@ def test_serve_preflight_blocks_on_bad_database(tmp_path: Path) -> None:
         result = runner.invoke(app, ["serve", "--config", str(cfg_path)])
 
     assert result.exit_code == 2
-    assert "Preflight failed:" in result.stdout
-    assert "database" in result.stdout
+    assert "Preflight failed: database:" in result.stdout
     mock_run.assert_not_called()
 
 
@@ -211,5 +208,19 @@ def test_validate_check_db_reports_failure(tmp_path: Path) -> None:
     result = runner.invoke(app, ["validate", "--config", str(cfg_path), "--check-db"])
 
     assert result.exit_code == 2
-    assert "Preflight failed:" in result.stdout
-    assert "database" in result.stdout
+    assert "Preflight failed: database:" in result.stdout
+
+
+def test_serve_no_preflight_announces_the_skip(tmp_path: Path) -> None:
+    cfg_path = _write_config(
+        tmp_path / "sqllens.toml",
+        db_url=f"sqlite:///{tmp_path / 'missing-subdir' / 'db.sqlite'}",
+        memory_dir=str(tmp_path / "chroma"),
+    )
+
+    with patch("sqllens.server.run") as mock_run:
+        result = runner.invoke(app, ["serve", "--config", str(cfg_path), "--no-preflight"])
+
+    assert result.exit_code == 0, result.stdout
+    assert "Preflight skipped" in result.stdout
+    mock_run.assert_called_once()
