@@ -7,8 +7,8 @@ Env scrubbing now lives in the top-level ``tests/conftest.py`` (shared by
 unit + integration). This file adds only the two fixtures specific to the
 ``query_database`` tool tests:
 
-- ``_reset_query_database_singleton`` — guards the process-wide ``_AGENT``
-  module global so test ordering can't mask isolation bugs.
+- ``_reset_query_database_singleton`` — guards the process-wide
+  ``_AGENT_STATE`` module global so test ordering can't mask isolation bugs.
 - ``agent_stub_factory`` — exposes the ``StubAgent`` class from
   ``_agent_stubs.py`` so tests build agent-shaped stubs without a real LLM
   or ChromaDB instance.

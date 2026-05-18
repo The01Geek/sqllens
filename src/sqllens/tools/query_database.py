@@ -124,14 +124,17 @@ async def query_database_impl(cfg: Config, question: str) -> str:
 
     answer, is_error = components_to_markdown(components)
     if is_error:
-        # Agent-reported query failure — SQL-execution error category. ``answer``
-        # is the agent's own error text; #14 requires it reach the caller as
-        # actionable, categorized detail, so it is intentionally *not* collapsed
-        # into the sanitized internal message. It is still logged server-side so
-        # this branch keeps the same operator-debugging trail as every sibling
-        # branch. Fully stripping any infra detail the *vendored* agent may have
-        # folded into that text is out of scope for issue #91 (the root cause is
-        # in src/sqllens/agent/, which this file-disjoint issue must not touch).
+        # Agent-reported query failure — SQL-execution error category. S-10's
+        # structural leak (raw exception-string interpolation in the except
+        # blocks above) is fixed; this path is different: ``answer`` is the
+        # agent's own structured error report, and #14 requires it reach the
+        # caller as actionable, categorized detail — collapsing it into the
+        # sanitized internal message would defeat the category split's whole
+        # purpose. Logged server-side so this branch keeps the same
+        # operator-debugging trail as every sibling branch. Heuristically
+        # content-scrubbing agent-authored text for possible infra substrings
+        # is unspecified by #91 and would risk mangling legitimate SQL detail
+        # the calling agent needs, so it is deliberately not attempted here.
         logger.warning("agent reported query failure: %s", answer)
         raise RuntimeError(f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}")
     return answer
