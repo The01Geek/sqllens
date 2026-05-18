@@ -92,8 +92,26 @@ class TestAuthConfigValidator:
         assert "auth.mode" in msg
 
     def test_bearer_with_empty_token_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="bearer_token"):
+        # Same actionable-message check as the None case — a misset shell env var
+        # like ``SQLLENS_AUTH__BEARER_TOKEN=`` deserves the same guidance.
+        with pytest.raises(ValidationError) as exc:
             AuthConfig(mode="bearer", bearer_token=SecretStr(""))
+        msg = str(exc.value)
+        assert "SQLLENS_AUTH__BEARER_TOKEN" in msg
+        assert "auth.mode" in msg
+
+    def test_bearer_with_whitespace_token_rejected(self) -> None:
+        # Whitespace-only tokens (env var with trailing newline, templated config with
+        # a stray space) would otherwise pass the truthiness check and break silently.
+        with pytest.raises(ValidationError, match="SQLLENS_AUTH__BEARER_TOKEN"):
+            AuthConfig(mode="bearer", bearer_token=SecretStr("   "))
+
+    def test_build_authenticator_raises_when_validator_bypassed(self) -> None:
+        # ``model_construct`` skips validators. ``build_authenticator`` must still
+        # surface the actionable message, not an opaque ``AttributeError``.
+        cfg = AuthConfig.model_construct(mode="bearer", bearer_token=None)
+        with pytest.raises(ValueError, match="SQLLENS_AUTH__BEARER_TOKEN"):
+            build_authenticator(cfg)
 
     def test_none_mode_with_no_token_ok(self) -> None:
         # Sanity: the validator must not affect the default (and most common) mode.

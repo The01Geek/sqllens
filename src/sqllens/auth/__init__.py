@@ -12,7 +12,7 @@ from sqllens.auth.base import AuthContext, Authenticator, AuthError
 from sqllens.auth.bearer import BearerTokenAuthenticator
 from sqllens.auth.jwt import JwtAuthenticator
 from sqllens.auth.none import NoOpAuthenticator
-from sqllens.config import AuthConfig
+from sqllens.config import BEARER_TOKEN_MISSING_MESSAGE, AuthConfig
 
 __all__ = [
     "AuthContext",
@@ -30,8 +30,13 @@ def build_authenticator(cfg: AuthConfig) -> Authenticator:
     if cfg.mode == "none":
         return NoOpAuthenticator()
     if cfg.mode == "bearer":
-        # AuthConfig's model validator guarantees bearer_token is set when mode='bearer'.
-        assert cfg.bearer_token is not None
+        # Defense-in-depth: AuthConfig's model validator normally enforces this, but
+        # callers that bypass validation via ``model_construct`` (as a few test fixtures
+        # do) reach this path with bearer_token unset. Raising here keeps the actionable
+        # message intact under ``python -O`` (which strips ``assert``) and matches the
+        # pattern in ``agent.factory.build_agent``.
+        if cfg.bearer_token is None:
+            raise ValueError(BEARER_TOKEN_MISSING_MESSAGE)
         return BearerTokenAuthenticator(cfg.bearer_token.get_secret_value())
     if cfg.mode == "jwt":
         return JwtAuthenticator(

@@ -117,11 +117,12 @@ class AuthConfig(BaseModel):
 
     @model_validator(mode="after")
     def _bearer_requires_token(self) -> AuthConfig:
-        # Without this guard, mode='bearer' with no token loads cleanly and the
-        # server starts — every request is then rejected at auth time with no
-        # startup signal that the config is broken.
+        # Without this guard, mode='bearer' without a usable token (None, empty, or
+        # whitespace-only — a real footgun from shell env vars like
+        # ``SQLLENS_AUTH__BEARER_TOKEN=``) loads cleanly and the server starts. Every
+        # request is then rejected at auth time with no startup signal.
         if self.mode == "bearer" and (
-            self.bearer_token is None or not self.bearer_token.get_secret_value()
+            self.bearer_token is None or not self.bearer_token.get_secret_value().strip()
         ):
             raise ValueError(BEARER_TOKEN_MISSING_MESSAGE)
         return self

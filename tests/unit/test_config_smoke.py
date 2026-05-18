@@ -267,10 +267,59 @@ def test_cli_validate_fails_on_plain_malformed_toml(tmp_path: Path) -> None:
     assert "Invalid" in result.stdout
 
 
+def _bearer_no_token_toml() -> str:
+    return textwrap.dedent(
+        """\
+        [database]
+        url = "sqlite:///./demo.db"
+
+        [llm]
+        api_key = "sk-ant-test"
+
+        [auth]
+        mode = "bearer"
+        """
+    )
+
+
+def _assert_bearer_message_substrings(stdout: str) -> None:
+    # Three load-bearing substrings: the offending field, the env-var fix, and the
+    # TOML section header (the last one also catches rich-markup-escape regressions).
+    assert "bearer_token" in stdout
+    assert "SQLLENS_AUTH__BEARER_TOKEN" in stdout
+    assert "[auth]" in stdout
+
+
 def test_cli_serve_fails_when_bearer_mode_has_no_token(tmp_path: Path) -> None:
     # Without the AuthConfig validator, this config would load cleanly and the
     # server would start — every request then rejected at auth time, with no
     # startup signal. The validator must surface the misconfig at Config.load().
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(_bearer_no_token_toml())
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["serve", "-c", str(cfg_path)])
+    assert result.exit_code == 2
+    _assert_bearer_message_substrings(result.stdout)
+
+
+def test_cli_validate_fails_when_bearer_mode_has_no_token(tmp_path: Path) -> None:
+    # ``validate`` is the command operators typically run before deployment — it
+    # must surface the same actionable error as ``serve`` for the same broken config.
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(_bearer_no_token_toml())
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["validate", "-c", str(cfg_path)])
+    assert result.exit_code == 2
+    _assert_bearer_message_substrings(result.stdout)
+
+
+def test_env_bearer_mode_without_token_rejected_at_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Env-driven bearer mode with no token must also fail at Config.load(). Guards
+    # against a future regression switching the validator from ``mode="after"`` to
+    # ``mode="before"`` (where the env-supplied ``bearer_token`` may not yet be
+    # populated).
     cfg_path = tmp_path / "sqllens.toml"
     cfg_path.write_text(
         textwrap.dedent(
@@ -280,18 +329,14 @@ def test_cli_serve_fails_when_bearer_mode_has_no_token(tmp_path: Path) -> None:
 
             [llm]
             api_key = "sk-ant-test"
-
-            [auth]
-            mode = "bearer"
             """
         )
     )
-    runner = CliRunner()
-    result = runner.invoke(cli.app, ["serve", "-c", str(cfg_path)])
-    assert result.exit_code == 2
-    assert "bearer_token" in result.stdout
-    assert "SQLLENS_AUTH__BEARER_TOKEN" in result.stdout
-    assert "[auth]" in result.stdout
+    monkeypatch.setenv("SQLLENS_AUTH__MODE", "bearer")
+    monkeypatch.delenv("SQLLENS_AUTH__BEARER_TOKEN", raising=False)
+    with pytest.raises(Exception) as exc:
+        Config.load(cfg_path)
+    assert "SQLLENS_AUTH__BEARER_TOKEN" in str(exc.value)
 
 
 def test_build_agent_raises_when_api_key_missing(tmp_path: Path) -> None:
