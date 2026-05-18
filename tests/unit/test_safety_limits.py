@@ -158,3 +158,48 @@ class TestSqliteRunnerTimeout:
         # we'd see "interrupted" here.
         df = await runner.run_sql(RunSqlToolArgs(sql="SELECT 1 AS n"), _ctx())
         assert df.iloc[0]["n"] == 1
+
+
+class _NoopFileSystem:
+    """Test stub — RunSqlTool only uses `write_file`, and we don't care where it lands."""
+
+    async def write_file(
+        self, filename: str, content: str, context: Any, overwrite: bool = False
+    ) -> None:
+        return None
+
+
+class TestRunSqlToolTruncationSurface:
+    """The LLM-visible truncation hint is the only signal the agent gets to re-issue
+    with a narrower query. A regression that drops it leaves the agent silently
+    consuming partial results."""
+
+    @pytest.mark.asyncio
+    async def test_truncation_note_in_result_for_llm(self) -> None:
+        from sqllens.agent.tools.run_sql import RunSqlTool
+        from sqllens.safety.limits import mark_truncation
+
+        df = pd.DataFrame({"n": list(range(7))})
+        mark_truncation(df, truncated=True, max_rows=7)
+
+        tool = RunSqlTool(sql_runner=_StaticRunner(df), file_system=_NoopFileSystem())
+        out = await tool.execute(_ctx(), RunSqlToolArgs(sql="SELECT n FROM t"))
+        assert out.success is True
+        assert "Result truncated at 7 rows" in out.result_for_llm
+        assert "Re-issue with an explicit LIMIT or narrower WHERE clause" in out.result_for_llm
+        assert out.metadata["truncated"] is True
+        assert out.metadata["max_rows"] == 7
+
+    @pytest.mark.asyncio
+    async def test_no_truncation_note_when_under_cap(self) -> None:
+        from sqllens.agent.tools.run_sql import RunSqlTool
+        from sqllens.safety.limits import mark_truncation
+
+        df = pd.DataFrame({"n": list(range(3))})
+        mark_truncation(df, truncated=False, max_rows=10)
+
+        tool = RunSqlTool(sql_runner=_StaticRunner(df), file_system=_NoopFileSystem())
+        out = await tool.execute(_ctx(), RunSqlToolArgs(sql="SELECT n FROM t"))
+        assert "Result truncated" not in out.result_for_llm
+        assert "Re-issue" not in out.result_for_llm
+        assert out.metadata["truncated"] is False

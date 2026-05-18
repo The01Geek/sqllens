@@ -15,9 +15,9 @@ from collections.abc import Iterable
 from sqllens.agent.core.components import UiComponent
 from sqllens.agent.core.rich_component import ComponentType
 
-# Runner-side row caps (DatabaseConfig.max_rows, default 10_000) bound the
-# DataFrame size before it reaches this renderer; this cap only protects the
-# MCP client from rendering a 10_000-row Markdown table.
+# DatabaseConfig.max_rows bounds DataFrame size before it reaches this renderer;
+# this cap only protects the MCP client from rendering a multi-thousand-row
+# Markdown table when max_rows is raised above the rendering budget.
 _MAX_ROWS_RENDERED = 500
 
 
