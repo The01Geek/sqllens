@@ -86,6 +86,30 @@ def test_probe_database_mysql_url_requires_user_and_host() -> None:
     assert "user and host" in exc_info.value.detail
 
 
+def test_probe_database_postgres_missing_driver_raises_clean_preflight_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Setting the entry to None in sys.modules makes ``import psycopg2``
+    # raise ImportError without touching whatever is (or isn't) installed.
+    monkeypatch.setitem(__import__("sys").modules, "psycopg2", None)
+    with pytest.raises(PreflightError) as exc_info:
+        probe_database(_cfg(db_url="postgresql://user:pw@localhost:5432/db"))
+    assert exc_info.value.subsystem == "database"
+    assert "sqllens[postgres]" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ImportError)
+
+
+def test_probe_database_mysql_missing_driver_raises_clean_preflight_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "pymysql", None)
+    with pytest.raises(PreflightError) as exc_info:
+        probe_database(_cfg(db_url="mysql://user:pw@localhost:3306/db"))
+    assert exc_info.value.subsystem == "database"
+    assert "sqllens[mysql]" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, ImportError)
+
+
 # ---------------------------------------------------------------------------
 # probe_llm
 # ---------------------------------------------------------------------------

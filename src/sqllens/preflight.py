@@ -8,11 +8,11 @@ missing bearer token) is deferred until the first ``query_database`` call and
 gets collapsed into the agent's blanket exception handler — operators see only
 "Please try again" in their MCP client while the real error sits in stderr.
 
-Each probe is intentionally side-effect-light: open and immediately close a
-connection (no query), construct the LLM client (no API round-trip), ensure
-the persist dir is writable (no collection creation, so the 80 MB embedding
-download stays lazy), and build the authenticator (catches bearer-mode
-configs missing a token).
+Each probe is intentionally minimal: open and immediately close a connection
+(no query), construct the LLM client (no API round-trip), create the persist
+dir and touch a sentinel file to confirm writability (no Chroma collection
+open, so the 80 MB embedding download stays lazy), and build the
+authenticator (catches bearer-mode configs missing a token).
 """
 
 from __future__ import annotations
@@ -79,7 +79,13 @@ def probe_database(cfg: Config) -> None:
         return
 
     if scheme.startswith("postgres"):
-        import psycopg2
+        try:
+            import psycopg2
+        except ImportError as exc:
+            raise PreflightError(
+                "database",
+                "postgres driver not installed — run: pip install 'sqllens[postgres]'",
+            ) from exc
 
         # psycopg2 only accepts ``postgresql://`` — collapse the legacy
         # ``postgres://`` and SQLAlchemy-style ``postgresql+psycopg2://`` forms.
@@ -94,7 +100,13 @@ def probe_database(cfg: Config) -> None:
         return
 
     if scheme.startswith("mysql"):
-        import pymysql
+        try:
+            import pymysql
+        except ImportError as exc:
+            raise PreflightError(
+                "database",
+                "mysql driver not installed — run: pip install 'sqllens[mysql]'",
+            ) from exc
 
         parsed = urlparse(url)
         if not parsed.hostname or not parsed.username:
