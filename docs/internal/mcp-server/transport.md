@@ -49,7 +49,7 @@ ASGI host (uvicorn, FastAPI mount, Starlette, …)
   ↓
 _SessionManagerLifespan   — starts/stops FastMCP's session manager via ASGI lifespan
   ↓
-_PathNormalizer            — fixes "/" and "/mcp/" path mismatches
+_PathNormalizer            — fixes "/" and "/mcp/" path mismatches; serves /healthz
   ↓
 _AuthMiddleware            — runs the configured Authenticator
   ↓
@@ -76,9 +76,25 @@ FastMCP registers its endpoint at the **bare** path `/mcp`. Every MCP client we 
 | `/` | 307 redirect to `/mcp/` — browser-friendly so opening the URL in a tab doesn't 404. |
 | `/mcp/` | **Rewrite** `scope["path"]` to `/mcp` and pass through. No redirect, because POST clients that don't follow 307 redirects would lose their request body otherwise. |
 | `/mcp` | Pass through unchanged. |
+| `/healthz` | **Short-circuit**: emit a 200 liveness JSON and return, *before* `_AuthMiddleware`. See "Liveness probe" below. |
 | Anything else | Pass through (FastMCP will 404 if it doesn't recognize it). |
 
 The reason this isn't done with a Starlette `Mount` is recorded in the docstring at the top of `transport/http.py`: `Mount` has surprising trailing-slash semantics, and the single-server SQL Lens transport doesn't need path-based dispatch.
+
+## Liveness probe: `GET /healthz`
+
+`HEALTHZ_PATH = "/healthz"` (module constant in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py)) is an **unauthenticated** liveness endpoint. `_PathNormalizer.__call__` checks `path == HEALTHZ_PATH` before any other branch and calls `_send_health(send)`, which writes HTTP 200 with the body **exactly** `{"status":"ok"}` (15 bytes — `json.dumps(..., separators=(",", ":"))`, no spaces) and `content-type: application/json`.
+
+Two properties are deliberate and pinned by tests:
+
+- **Pre-auth.** The short-circuit lives in `_PathNormalizer`, which sits *above* `_AuthMiddleware` in the stack. A probe to `/healthz` therefore needs no `Authorization` header even when `auth.mode = "bearer"`. Covered by `tests/integration/test_http_transport.py::TestHealthz::test_healthz_no_auth` and `::test_healthz_bypasses_bearer_auth`.
+- **Liveness only, not readiness.** It asserts solely that the ASGI process is up and the event loop is serving requests. It does **not** check database, ChromaDB, or LLM reachability — a server that answers `/healthz` 200 may still fail a `query_database` call. There is no readiness endpoint; add one explicitly if orchestration needs dependency-aware gating.
+
+`_send_health` shares the response writer with `_send_401` via the `_send_json(send, status, body, *, extra_headers=())` helper; only `_send_401` passes the `WWW-Authenticate` header through `extra_headers`.
+
+### Docker `HEALTHCHECK` consumes it
+
+[docker/Dockerfile](../../../docker/Dockerfile)'s `HEALTHCHECK` probes `GET http://127.0.0.1:8765/healthz` (previously it `urlopen`'d the POST-only `/mcp/` endpoint). The old command swallowed all failures with a trailing `2>/dev/null || exit 0`, so a dead or broken container always reported *healthy*; that escape hatch was removed. The probe now exits non-zero — and the container reports **unhealthy** to the orchestrator — whenever the server is not serving. The body bytes are not asserted by the Dockerfile (it only checks `urllib.request.urlopen` does not raise), but the integration test pins the literal `{"status":"ok"}` so external probes can byte-match if they choose.
 
 ## Footgun 2: FastMCP's Host-header check
 
@@ -96,7 +112,7 @@ On success, the resulting `AuthContext` is stashed on `scope["state"]["auth"]` s
 
 On failure, `AuthError` becomes HTTP 401 with a JSON body `{"error": "unauthorized", "reason": <short>}` and a `WWW-Authenticate: Bearer realm="sqllens"` header. The reason is `e.reason` from the `AuthError`; the underlying credential is never echoed back. See [authentication/overview.md](../authentication/overview.md).
 
-Lifespan and websocket scopes bypass both `_AuthMiddleware` and `_PathNormalizer` — they only act on `scope["type"] == "http"`.
+Lifespan and websocket scopes bypass both `_AuthMiddleware` and `_PathNormalizer` — they only act on `scope["type"] == "http"`. `GET /healthz` is also never seen by `_AuthMiddleware`: `_PathNormalizer` short-circuits it one layer earlier (see "Liveness probe" above), so the auth check never runs for that path.
 
 ## `_SessionManagerLifespan` — why this exists
 
@@ -109,10 +125,11 @@ If the lifespan adapter is missing, requests reach the routing layer but then fa
 `_SessionManagerLifespan` is a **single-shot adapter**: one instance handles exactly one lifecycle. The instance finalizes — refuses any further `lifespan.startup` — once any of:
 
 - `lifespan.shutdown` completed (the CM exited via `__aexit__`), or
-- `lifespan.shutdown` failed in `__aexit__` (the CM raised on exit; reusing it is unsafe), or
-- `lifespan.startup` failed in `__aenter__` (the partially-acquired CM reference is dropped *without* calling `__aexit__` — PEP 343 makes `__aexit__` on a never-entered CM undefined).
+- `lifespan.shutdown` raised in `__aexit__` (the CM raised on exit; reusing it is unsafe). This covers **both** the `except Exception` arm — reported to the host as `lifespan.shutdown.failed` — **and** the `except BaseException` arm: an `asyncio.CancelledError` (task cancellation interrupting the close), `KeyboardInterrupt`, or `SystemExit` finalizes the instance and is **re-raised with no protocol message sent**, so cancellation propagates cooperatively instead of being acked `shutdown.complete`. Both arms set `_shutdown_done`, or
+- `lifespan.startup` failed in `__aenter__` (the partially-acquired CM reference is dropped *without* calling `__aexit__` — PEP 343 makes `__aexit__` on a never-entered CM undefined), or
+- `lifespan.shutdown` arrived with **no prior `lifespan.startup`** — a misbehaving host. The instance is finalized and that shutdown is answered `shutdown.failed`, not `shutdown.complete` (see *Lifespan failure-path contract* below).
 
-After finalization the CM reference is gone (`self._cm = None`) and the `self._shutdown_done` flag is set. A subsequent `lifespan.shutdown` is acknowledged with `shutdown.complete` **without** re-entering `__aexit__`, so the exactly-once enter/exit pair that FastMCP's session manager expects is preserved. A subsequent `lifespan.startup` on a new scope is rejected with `lifespan.startup.failed` and the message `"single-shot instance already shut down"` — distinct from the `"duplicate lifespan.startup"` rejection raised when two startups arrive within the same not-yet-shut-down instance. Hosts that drive more than one lifespan scope against the same app (uncommon outside test harnesses) should mount a fresh adapter via `build_asgi_app` per scope.
+After finalization the CM reference is gone (`self._cm = None`) and the `self._shutdown_done` flag is set. A subsequent `lifespan.shutdown` is acknowledged with `shutdown.complete` **without** re-entering `__aexit__` (except the shutdown-without-startup path above, whose *own* shutdown is answered `shutdown.failed`), so the exactly-once enter/exit pair that FastMCP's session manager expects is preserved. A subsequent `lifespan.startup` on a new scope is rejected with `lifespan.startup.failed` and the message `"single-shot instance already shut down"` — distinct from the `"duplicate lifespan.startup"` rejection raised when two startups arrive within the same not-yet-shut-down instance. Hosts that drive more than one lifespan scope against the same app (uncommon outside test harnesses) should mount a fresh adapter via `build_asgi_app` per scope.
 
 Implementation notes: the shutdown path captures `cm = self._cm` and clears `self._cm = None` **before** awaiting `__aexit__`, so even a refactor that inserted another `__aexit__` site before the `_shutdown_done` assignment could not double-exit the same CM. The startup-failure branch also clears `self._cm` and sets `self._shutdown_done = True`, so a partially-acquired CM is never reachable from any later message. Both failure messages are formatted as `f"{type(exc).__name__}: {exc}"` (e.g. `"RuntimeError: boom"`) so hosts logging the wire message can distinguish exception types, not just values.
 
@@ -121,8 +138,10 @@ Regression coverage in `tests/unit/test_transport_http.py`:
 - `test_lifespan_duplicate_startup_is_rejected` — two startups within one instance → second one fails with `"duplicate"` in the message.
 - `test_lifespan_post_shutdown_startup_is_rejected` — startup after a clean shutdown → fails with `"shut down"` in the message; `run()` / `__aenter__` are not re-invoked on the session manager.
 - `test_lifespan_post_shutdown_shutdown_is_idempotent` — a second `lifespan.shutdown` returns `shutdown.complete` without a second `__aexit__` call.
-- `test_lifespan_shutdown_failure_still_finalizes_instance` — a shutdown that raised in `__aexit__` still finalizes; a subsequent startup gets single-shot rejection and a subsequent shutdown is idempotent.
+- `test_lifespan_shutdown_failure_still_finalizes_instance` — a shutdown that raised an `Exception` in `__aexit__` still finalizes; a subsequent startup gets single-shot rejection and a subsequent shutdown is idempotent.
+- `test_lifespan_shutdown_base_exception_finalizes_and_propagates` — parametrized over `CancelledError` / `KeyboardInterrupt` / `SystemExit`: a `BaseException` interrupting `__aexit__` finalizes the instance, sends **neither** `shutdown.complete` **nor** `shutdown.failed`, and re-raises so cancellation propagates cooperatively; a follow-up startup gets single-shot rejection and a follow-up shutdown is idempotent (no second `__aexit__`).
 - `test_lifespan_startup_failure_finalizes_instance` — a startup that raised in `__aenter__` finalizes the instance; a follow-up shutdown does **not** call `__aexit__` (no PEP-343 violation), and a follow-up startup gets single-shot rejection. Also pins the `RuntimeError: boom` message format on the failure path.
+- `test_lifespan_shutdown_without_startup_surfaces_failed` — a `lifespan.shutdown` with no prior `lifespan.startup` is answered `lifespan.shutdown.failed` (message contains `"without prior startup"`), `run()`/`__aenter__`/`__aexit__` are never invoked, and the instance is finalized so a follow-up startup gets single-shot rejection.
 
 The `_FakeSessionManager` test fake counts `run_calls`, `aenter_calls`, and `aexit_calls` so these tests can pin **both** halves of the exactly-once contract (no double-exit AND no double-enter) rather than only the wire-message shape.
 
@@ -139,7 +158,11 @@ If `__call__` receives a `lifespan` message whose `type` is neither `lifespan.st
 The adapter pins a symmetric contract for both lifespan failure paths — startup and shutdown — and the unit suite locks both ends in:
 
 - **Startup failure**: if `session_manager.run().__aenter__()` raises, the adapter logs the traceback via `logger.exception(...)`, drops its `_cm` reference to `None`, sends `{"type": "lifespan.startup.failed", "message": str(exc)}`, and returns. Pinning the `failed` message (not `complete`) is what stops a broken startup from being misreported as a healthy one. Covered by `tests/unit/test_transport_http.py::test_lifespan_startup_failure_sends_failed_not_complete`.
-- **Shutdown failure**: if `__aexit__` raises, the adapter logs the traceback via `logger.exception(...)`, sends `{"type": "lifespan.shutdown.failed", "message": str(exc)}`, and returns — never `lifespan.shutdown.complete`. Covered by `tests/unit/test_transport_http.py::test_lifespan_shutdown_failure_sends_failed_not_complete`.
+- **Shutdown failure (`Exception`)**: if `__aexit__` raises an `Exception`, the adapter logs the traceback via `logger.exception(...)`, sends `{"type": "lifespan.shutdown.failed", "message": str(exc)}`, and returns — never `lifespan.shutdown.complete`. Covered by `tests/unit/test_transport_http.py::test_lifespan_shutdown_failure_sends_failed_not_complete`.
+- **Shutdown interrupted (`BaseException`)**: a direct `BaseException` subclass that `except Exception` does not catch — most relevantly `asyncio.CancelledError` from task cancellation during the close, plus `KeyboardInterrupt` / `SystemExit` — finalizes the instance (`_shutdown_done = True`, symmetric with the `Exception` arm so a follow-up scope gets the single-shot rejection / idempotent ack rather than re-entering `__aexit__` on a half-closed CM), logs the interrupting exception **type** via `logger.exception(...)`, sends **no protocol message at all**, and **re-raises**. This is deliberate: a `CancelledError` must propagate cooperatively and must never be swallowed into a spurious `lifespan.shutdown.complete`. Covered by `tests/unit/test_transport_http.py::test_lifespan_shutdown_base_exception_finalizes_and_propagates` (parametrized over the three subtypes; `GeneratorExit` is omitted because it cannot be driven through `asyncio.run` in the harness). This closed the deferred review finding from issue #88 (carried from #75).
+- **Shutdown without prior startup** (behaviour change, issue #75): if `lifespan.shutdown` arrives when startup was never attempted (`_cm is None and not _started`, and `_shutdown_done` is *not* already set so the failed-startup-then-shutdown idempotent branch did not fire), the adapter now logs a warning (`"lifespan.shutdown received without prior lifespan.startup"`) and replies `{"type": "lifespan.shutdown.failed", "message": "shutdown without prior startup"}`. Previously this silently emitted `lifespan.shutdown.complete`, masking a misbehaving ASGI host. The instance is finalized (`_shutdown_done = True`). Covered by `tests/unit/test_transport_http.py::test_lifespan_shutdown_without_startup_surfaces_failed`.
+
+The startup `__aenter__` `except Exception` block is **deliberately scoped to `Exception`, never `BaseException` or a bare `except`**: `BaseException`-only subclasses — `asyncio.CancelledError`, `KeyboardInterrupt`, `SystemExit` — propagate so structured-concurrency cancellation and interpreter teardown unwind the host cleanly instead of being swallowed and misreported as a `startup.failed` ack (locked by `tests/unit/test_transport_http.py::test_lifespan_startup_baseexception_propagates_not_caught`). The shutdown `__aexit__` path differs by design (issue #88): its `except BaseException` arm finalizes the instance and **re-raises** without fabricating any ack — so cancellation still propagates cooperatively, but a follow-up scope sees a finalized single-shot instance rather than a half-closed CM. The shutdown-side propagation-without-ack contract is locked by `::test_lifespan_shutdown_baseexception_propagates_not_caught` and `::test_lifespan_shutdown_base_exception_finalizes_and_propagates`. The `_FakeSessionManager` test fake accepts `BaseException` for its `startup_exc`/`shutdown_exc` injection points so these signals can be exercised.
 
 Three incidental defensive properties round out the contract:
 

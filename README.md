@@ -133,7 +133,7 @@ Three install paths, all produced by the same release pipeline:
 - [x] Phase 1 — Spike: agent lifted, scaffold in place, SQLite Chinook demo runs locally.
 - [x] Phase 2 — Auth (none + bearer), SQL safety guard, Streamable HTTP transport, integration tests.
 - [x] Phase 3 — Distribution: PyPI workflow, multi-arch Docker image, MCPB bundle, real-DB connector tests.
-- [ ] Phase 4 — JWT verifier (JWKS + shared-secret), permission scopes, integration with [Guidoo](https://github.com/Radman-LLC/guidoo).
+- [ ] Phase 4 — JWT verifier (JWKS + shared-secret), permission scopes.
 
 ## Contributing
 
