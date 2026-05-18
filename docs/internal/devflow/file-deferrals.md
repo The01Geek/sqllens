@@ -26,7 +26,7 @@ Exit codes: `0` = at least one group filed successfully (or `--dry-run`); `1` = 
 1. Reads the manifest and groups findings by source file.
 2. For each group, files a GitHub issue via `gh issue create`.
 3. Computes a deterministic deferral ID (`dfr-<6-hex>`) from each finding's `file`, `symbol`, `kind`, and `summary` fields — the same manifest always produces the same IDs, keeping the verdict engine's signature match stable across regenerations.
-4. Rewrites the manifest atomically, adding `follow_up.{issue, url, filed_at, filed_by}` to each entry.
+4. Rewrites the manifest atomically: each successfully-filed entry gains its `id` (the deterministic deferral ID from step 3) and `follow_up.{issue, url, filed_at, filed_by}`; the top-level `deferrals`, `generated_at`, and `filed_at` keys are refreshed. Entries whose group failed to file are dropped (if every group fails, exit code `1` and the manifest is left untouched).
 
 ## `filed_by` and GitHub login resolution
 

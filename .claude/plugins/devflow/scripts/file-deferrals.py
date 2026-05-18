@@ -61,9 +61,11 @@ def _gh_login():
     canonical 403 "Resource not accessible by integration" you get when
     GITHUB_TOKEN in Actions lacks user:read. That covers any non-zero gh
     exit or empty stdout (403, expired tokens, 5xx, DNS errors,
-    rate-limiting) as well as any OS-level spawn failure that surfaces as
-    an OSError subclass (gh missing from PATH, present-but-not-executable,
-    wrong arch, fd/memory exhaustion). filed_by is informational only —
+    rate-limiting) as well as any OS-level spawn failure: these all
+    surface as an OSError subclass and are handled uniformly (the
+    breadcrumb records only the exception class name) — e.g. gh missing
+    from PATH, not executable, wrong arch, or fd/memory exhaustion.
+    filed_by is informational only —
     never gate logic — so we degrade rather than fail the run, but we
     leave a stderr breadcrumb so operators can see when the primary lookup
     didn't work. (A non-OSError like UnicodeDecodeError from exotic gh
