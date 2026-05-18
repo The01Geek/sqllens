@@ -233,28 +233,42 @@ def test_lifespan_shutdown_after_failed_startup_is_clean_noop() -> None:
     assert sent2 == [{"type": "lifespan.shutdown.complete"}]
 
 
-def test_lifespan_unknown_message_type_terminates_loop() -> None:
-    """An unknown lifespan message type must not park the handler in an
-    infinite warn-and-continue loop — log once and return so a misbehaving
-    host can't hold the lifespan task open indefinitely.
+def test_lifespan_unknown_message_type_is_logged_and_loop_continues() -> None:
+    """An unknown lifespan message type must be logged and skipped, with the
+    loop continuing to wait for a recognized message rather than exiting (which
+    would leave a subsequent valid startup/shutdown unhandled).
     """
     sm = _FakeSessionManager()
     adapter = _SessionManagerLifespan(_noop_inner, sm)
-    receive, send, sent = _make_io([{"type": "lifespan.bogus"}])
+    receive, send, sent = _make_io(
+        [
+            {"type": "lifespan.bogus"},
+            {"type": "lifespan.startup"},
+            {"type": "lifespan.shutdown"},
+        ]
+    )
     asyncio.run(adapter({"type": "lifespan"}, receive, send))
-    assert sent == []
+    types = [m["type"] for m in sent]
+    assert types == ["lifespan.startup.complete", "lifespan.shutdown.complete"]
 
 
-def test_lifespan_missing_message_type_terminates_loop() -> None:
-    """A malformed lifespan message with no ``type`` key must not KeyError
-    out of ``_handle_lifespan`` (bypassing the failed-reply path); falls
-    through to the unknown-message handler instead.
+def test_lifespan_missing_message_type_is_logged_and_loop_continues() -> None:
+    """A malformed lifespan message with no ``type`` key must not KeyError out
+    of ``_handle_lifespan``; it falls through to the unknown-message handler
+    (logged) and the loop continues to process the next valid message.
     """
     sm = _FakeSessionManager()
     adapter = _SessionManagerLifespan(_noop_inner, sm)
-    receive, send, sent = _make_io([{"foo": "bar"}])
+    receive, send, sent = _make_io(
+        [
+            {"foo": "bar"},
+            {"type": "lifespan.startup"},
+            {"type": "lifespan.shutdown"},
+        ]
+    )
     asyncio.run(adapter({"type": "lifespan"}, receive, send))
-    assert sent == []
+    types = [m["type"] for m in sent]
+    assert types == ["lifespan.startup.complete", "lifespan.shutdown.complete"]
 
 
 def test_lifespan_duplicate_startup_is_rejected() -> None:
