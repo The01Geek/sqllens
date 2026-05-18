@@ -116,8 +116,11 @@ class _FakeSessionManager:
 
     ``run()`` returns an async context manager whose ``__aexit__`` raises
     ``shutdown_exc`` if set. ``__aenter__`` raises ``startup_exc`` if set.
-    ``aexit_calls`` counts how many times ``__aexit__`` ran, which lets
-    regression tests assert the adapter never double-exits.
+    ``run_calls`` / ``aenter_calls`` / ``aexit_calls`` count invocations so
+    regression tests can pin BOTH halves of the exactly-once contract: no
+    double-exit AND no double-enter (the latter catches refactors that
+    accidentally invoke ``run()`` / ``__aenter__`` on the single-shot
+    rejection path before checking ``_shutdown_done``).
     """
 
     def __init__(
@@ -127,12 +130,16 @@ class _FakeSessionManager:
     ) -> None:
         self._startup_exc = startup_exc
         self._shutdown_exc = shutdown_exc
+        self.run_calls = 0
+        self.aenter_calls = 0
         self.aexit_calls = 0
 
     def run(self) -> _FakeSessionManager:
+        self.run_calls += 1
         return self
 
     async def __aenter__(self) -> _FakeSessionManager:
+        self.aenter_calls += 1
         if self._startup_exc is not None:
             raise self._startup_exc
         return self
@@ -179,6 +186,7 @@ def test_lifespan_shutdown_failure_sends_failed_not_complete() -> None:
     types = [m["type"] for m in sent]
     assert "lifespan.shutdown.complete" not in types
     assert sent[-1]["type"] == "lifespan.shutdown.failed"
+    assert "RuntimeError" in sent[-1]["message"]
     assert "boom" in sent[-1]["message"]
 
 
@@ -224,13 +232,18 @@ def test_lifespan_post_shutdown_startup_is_rejected() -> None:
     ]
     assert sm.aexit_calls == 1
 
-    # Second scope: startup must be rejected as single-shot, not "duplicate".
+    # Second scope: startup must be rejected as single-shot, not "duplicate",
+    # and the rejection path must NOT re-invoke run() / __aenter__ on the
+    # session manager (which would create a fresh-but-leaked CM if the
+    # _shutdown_done check were ever reordered after the run() call).
     receive2, send2, sent2 = _make_io([{"type": "lifespan.startup"}])
     asyncio.run(adapter({"type": "lifespan"}, receive2, send2))
     assert len(sent2) == 1
     assert sent2[0]["type"] == "lifespan.startup.failed"
     assert "shut down" in sent2[0]["message"].lower()
     assert "duplicate" not in sent2[0]["message"].lower()
+    assert sm.run_calls == 1
+    assert sm.aenter_calls == 1
 
 
 def test_lifespan_post_shutdown_shutdown_is_idempotent() -> None:
@@ -290,6 +303,8 @@ def test_lifespan_shutdown_failure_still_finalizes_instance() -> None:
     asyncio.run(adapter({"type": "lifespan"}, receive3, send3))
     assert sent3 == [{"type": "lifespan.shutdown.complete"}]
     assert sm.aexit_calls == 1
+    assert sm.run_calls == 1
+    assert sm.aenter_calls == 1
 
 
 def test_lifespan_startup_failure_finalizes_instance() -> None:
@@ -327,3 +342,5 @@ def test_lifespan_startup_failure_finalizes_instance() -> None:
     asyncio.run(adapter({"type": "lifespan"}, receive3, send3))
     assert sent3[0]["type"] == "lifespan.startup.failed"
     assert "shut down" in sent3[0]["message"].lower()
+    assert sm.run_calls == 1
+    assert sm.aenter_calls == 1
