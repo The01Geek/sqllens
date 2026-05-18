@@ -56,7 +56,7 @@ echo "→ vendoring sqllens + dependencies for $PLATFORM_TAG"
     --target "$STAGE/server/vendor" \
     --no-cache-dir \
     --quiet \
-    ".[postgres,mysql]" )
+    ".[all]" )
 
 # Trim *.dist-info/RECORD which contain absolute paths and bloat the bundle.
 find "$STAGE/server/vendor" -name "RECORD" -delete 2>/dev/null || true

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
 """Build a configured ``Agent`` instance from SQL Lens config.
 
 This module is the boundary between the agent framework (``sqllens.agent.core``,

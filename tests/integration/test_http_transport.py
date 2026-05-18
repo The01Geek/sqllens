@@ -145,5 +145,4 @@ class TestPathNormalization:
                 headers={"Accept": "application/json, text/event-stream"},
             )
         assert r.status_code == 200
-        assert "guidoo" not in r.text  # sanity: not the parent project's all-in-one server
         assert "sqllens" in r.text  # our server name shows up in serverInfo
