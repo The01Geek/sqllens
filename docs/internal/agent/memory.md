@@ -4,14 +4,18 @@ How the agent recalls prior successful tool uses, and what tunables affect retri
 
 ## What the memory feature actually does
 
-When the agent successfully answers a question, it can call `SaveQuestionToolArgsTool` to record three things in a Chroma collection:
+There are two persistence modes, both backed by the same Chroma collection:
+
+**Tool-use memory (structured).** When the agent successfully answers a question, it can call `SaveQuestionToolArgsTool` to record three things:
 - the original natural-language question
 - the name of the tool used (typically `RunSqlTool`)
 - the args passed to that tool (the generated SQL, table names, filters)
 
-The question is the embedded text; the tool name and args ride along as Chroma metadata. The next time a similar question comes in, the agent can call `SearchSavedCorrectToolUsesTool` with the new question — Chroma returns the nearest neighbours by cosine similarity, and the agent uses the previous SQL as a starting point instead of re-deriving it from scratch.
+The question is the embedded text; the tool name and args ride along as Chroma metadata. The next time a similar question comes in, the agent calls `SearchSavedCorrectToolUsesTool` with the new question — Chroma returns the nearest neighbours by cosine similarity, and the agent uses the previous SQL as a starting point instead of re-deriving it from scratch.
 
-This is what `cfg.memory.similarity_threshold` controls: results with a similarity score below the threshold are filtered out before the agent sees them.
+**Text memory (free-form).** The agent can also call `SaveTextMemoryTool` to record free-form notes — domain vocabulary, semantic hints, "column X actually means Y in this schema", etc. These are stored in the same Chroma collection but as text-memory entries rather than tool-arg recordings. The default system prompt (`src/sqllens/agent/core/system_prompt/default.py`) gates its text-memory instructions on `has_text_memory = "save_text_memory" in tool_names`, so the tool must be registered for the LLM to be told about it.
+
+`cfg.memory.similarity_threshold` controls both: results with a similarity score below the threshold are filtered out before the agent sees them.
 
 ## Wiring
 
@@ -24,14 +28,25 @@ memory = ChromaAgentMemory(
 )
 ```
 
-The two memory tools are then registered alongside `RunSqlTool` inside `build_agent` ([factory.py](../../../src/sqllens/agent/factory.py)):
+The three memory tools are then registered alongside `RunSqlTool` inside `build_agent` ([factory.py](../../../src/sqllens/agent/factory.py)):
 
 ```python
 tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
-tools.register_local_tool(SearchSavedCorrectToolUsesTool(), access_groups=access)
+tools.register_local_tool(
+    SearchSavedCorrectToolUsesTool(
+        default_similarity_threshold=cfg.memory.similarity_threshold,
+    ),
+    access_groups=access,
+)
+tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
 ```
 
-And the memory is handed to the `Agent` constructor as `agent_memory=memory` so the framework can reference it from internal code paths.
+Two things to note about this wiring:
+
+- `cfg.memory.similarity_threshold` is threaded into `SearchSavedCorrectToolUsesTool` as a constructor argument. The LLM can still override it per call via the tool's `similarity_threshold` parameter, but when the LLM omits it the operator-facing config knob takes effect. (Before this wiring landed, the configured value was dead — the runtime fallback was a hardcoded `0.7` inside the tool's `execute()`. See issue #76.)
+- `SaveTextMemoryTool` must be registered for the default system prompt to enable its text-memory branch (`has_text_memory` check in [src/sqllens/agent/core/system_prompt/default.py](../../../src/sqllens/agent/core/system_prompt/default.py)). Drop the registration and the LLM never sees the tool — free-form domain knowledge can't be persisted.
+
+The memory itself is handed to the `Agent` constructor as `agent_memory=memory` so the framework can reference it from internal code paths.
 
 ## Config knobs
 
@@ -41,7 +56,7 @@ All three live under `[memory]` in `sqllens.toml` (or `SQLLENS_MEMORY__*` env va
 |---|---|---|---|
 | `persist_dir` | `./chroma` (relative to CWD) | `SQLLENS_MEMORY__PERSIST_DIR` | Directory on disk for the Chroma collection. Created on first use. |
 | `collection` | `sqllens` | `SQLLENS_MEMORY__COLLECTION` | Logical collection name inside the persisted store. Letting two processes share a `persist_dir` with different collections is supported but rarely useful. |
-| `similarity_threshold` | `0.7` | `SQLLENS_MEMORY__SIMILARITY_THRESHOLD` | Cosine similarity floor in `[0.0, 1.0]`. Hits below this are dropped. |
+| `similarity_threshold` | `0.7` | `SQLLENS_MEMORY__SIMILARITY_THRESHOLD` | Cosine similarity floor in `[0.0, 1.0]`. Hits below this are dropped. Used as the *server-configured default*: the LLM may override it per call via the `similarity_threshold` parameter on `search_saved_correct_tool_uses`, including the legitimate value `0.0` (return everything) which is preserved exactly — not coerced. |
 
 Schema definition: `MemoryConfig` in [src/sqllens/config.py](../../../src/sqllens/config.py).
 
@@ -61,11 +76,11 @@ This is the single knob most worth tuning per-database.
 - **Too low (e.g. 0.3)** → unrelated past questions surface. The agent gets distracting wrong-shape examples and may copy SQL that doesn't fit.
 - **Default 0.7** is a reasonable starting point for English questions over a single schema. If queries vary a lot in length or jargon, lower it; if the same question gets asked in many slightly-different forms, raise it.
 
-There is no per-question override at runtime — it's process-global. Reload the process to change it.
+The configured value is the *server-side default*. The LLM may pass a per-call `similarity_threshold` argument to `search_saved_correct_tool_uses` to override it for one search; in particular, `0.0` is a legitimate value meaning "return all neighbours" and is preserved (not coerced to the default) thanks to the explicit `is not None` check in `SearchSavedCorrectToolUsesTool.execute()`. Restart the process to change the *default* once the LLM stops overriding it.
 
 ## Async-over-thread pattern
 
-`ChromaAgentMemory` exposes async methods (`save_tool_usage`, `search_similar_usage`, `get_recent_memories`, `delete_by_id`, `save_text_memory`, `search_text_memories`), but ChromaDB's Python client is synchronous. The implementation defines a sync inner function and runs it on a `ThreadPoolExecutor` so the agent's async loop doesn't block.
+`ChromaAgentMemory` exposes async methods (`save_tool_usage`, `search_similar_usage`, `get_recent_memories`, `delete_by_id`, `save_text_memory`, `search_text_memories`), all of which are reachable from the agent: the first two via `SaveQuestionToolArgsTool` / `SearchSavedCorrectToolUsesTool`, `save_text_memory` via the now-registered `SaveTextMemoryTool`, and the rest via internal code paths on `agent_memory` itself. ChromaDB's Python client is synchronous, so each method defines a sync inner function and runs it on a `ThreadPoolExecutor` so the agent's async loop doesn't block.
 
 If you're profiling and see Chroma operations blocking, check that the executor is actually being used — bypassing it is an easy regression.
 
@@ -73,7 +88,7 @@ If you're profiling and see Chroma operations blocking, check that the executor 
 
 The upstream framework also defined memory backends other than Chroma; those were dropped during the lift. `ChromaAgentMemory` is the only concrete `AgentMemory` implementation in SQL Lens. The abstract `AgentMemory` interface lives at [src/sqllens/agent/capabilities/agent_memory/base.py](../../../src/sqllens/agent/capabilities/agent_memory/base.py) — if a second backend is ever needed, that's the contract to implement.
 
-The third upstream memory tool — `SaveTextMemoryTool` (in [agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py)) — is defined in the lifted code but **not registered** in `factory.py`. It would let the agent save free-text notes (not just tool-arg recordings). If/when we want that, register it alongside the existing two tools.
+All three memory tool classes defined in [agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py) — `SaveQuestionToolArgsTool`, `SearchSavedCorrectToolUsesTool`, and `SaveTextMemoryTool` — are now registered in `factory.py`. There is no dedicated search tool for text memories on the LLM surface today; text memories saved via `save_text_memory` are read back through the agent's internal code paths over `agent_memory.search_text_memories`.
 
 ## Debugging memory hits
 

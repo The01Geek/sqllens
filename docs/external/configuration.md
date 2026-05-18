@@ -56,12 +56,18 @@ Defines the language model SQL Lens uses to translate questions into SQL.
 
 ## Section: `[memory]`
 
-Configures the local vector store SQL Lens uses to remember question and answer pairs.
+Configures the local vector store SQL Lens uses to remember helpful context across questions. Two kinds of entries are stored in this vector store:
+
+- **Successful question-and-answer patterns**: when SQL Lens answers a question well, it can save the question, the tool it used, and the arguments it passed, so a similar future question can reuse that approach instead of re-deriving it.
+- **Free-form notes**: SQL Lens can also save short text notes (for example, "in this schema, `cust_seg` means customer segment") so future questions can land on the right tables and columns.
+
+Both kinds of entries live in the same ChromaDB collection on disk.
 
 | Field | Type | Description |
 |---|---|---|
 | `persist_dir` | String | Directory where ChromaDB writes its database files. |
 | `collection` | String | The collection name within the vector store. Use a different name per database if you run several SQL Lens instances on the same machine. |
+| `similarity_threshold` | Number | Minimum cosine similarity, between `0.0` and `1.0`, for a saved entry to be returned when SQL Lens searches its memory. Defaults to `0.7`. Lower the value if useful past answers are being missed; raise it if irrelevant past answers are surfacing. This value is the server-side default and can be overridden per call by the assistant when warranted. |
 
 The first time SQL Lens runs, ChromaDB downloads roughly 80 MB of embedding model weights into `persist_dir`. Allow time and network access for this initial step.
 
@@ -72,7 +78,7 @@ Configures authentication for the HTTP transport. The stdio transport does not n
 | Field | Type | Description |
 |---|---|---|
 | `mode` | String | One of `none`, `bearer`, or `jwt`. See the [authentication modes](#authentication-modes) below. |
-| `bearer_token` | String | The shared token required by `bearer` mode. Prefer setting this with `SQLLENS_AUTH__BEARER_TOKEN`. SQL Lens refuses to start if `mode = "bearer"` and this value is missing, empty, or only whitespace. |
+| `bearer_token` | String | The shared token required by `bearer` mode. Prefer setting this with `SQLLENS_AUTH__BEARER_TOKEN`. SQL Lens refuses to start if `mode = "bearer"` and this value is missing, empty, or only whitespace; setting it without also setting `mode = "bearer"` is likewise rejected at config load — pair them, or remove `bearer_token`. |
 | `insecure` | Boolean | Defaults to `false`. Set to `true` (or `SQLLENS_AUTH__INSECURE=1`) to acknowledge that `mode = "none"` on a non-loopback host is intentional for a closed-network deployment. See [Non-loopback safety guard](#non-loopback-safety-guard) below. |
 
 ### Authentication modes
@@ -125,6 +131,8 @@ sqllens validate -c path/to/sqllens.toml
 ```
 
 The command exits with a clear error message if any required field is missing or has the wrong type. `llm.api_key` is **not** required for validation: when the key is absent, the summary line marks it explicitly as `llm: anthropic / <model> (api_key NOT SET)` and validation still exits successfully. The key is enforced when you run `sqllens serve`.
+
+Validation also rejects an `auth.bearer_token` that is set while `auth.mode` is anything other than `"bearer"`. This is the most common bearer-auth misconfiguration: setting `SQLLENS_AUTH__BEARER_TOKEN` and assuming the token alone enables bearer auth. Either set `auth.mode = "bearer"` to use the token, or remove `bearer_token` and unset `SQLLENS_AUTH__BEARER_TOKEN`.
 
 If `sqllens.toml` starts with a UTF-8 byte-order mark (BOM), validation reports it by name and prints rewrite commands for PowerShell 7+, PowerShell 5.1, and bash. PowerShell 5.1's `Set-Content -Encoding utf8` and `Out-File -Encoding utf8` both add a BOM; use `Set-Content -Encoding utf8NoBOM` (PowerShell 7+) or `[System.IO.File]::WriteAllText(...)` to write a BOM-free file.
 

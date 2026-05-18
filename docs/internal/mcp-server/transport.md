@@ -25,6 +25,21 @@ The lazy import matters: stdio is the common case for IDE installations (Claude 
 
 The FastMCP library handles everything — framing, request/response cycle, lifecycle. Auth is not applicable (the parent process owns the pipe), so `_AuthMiddleware` is not in the picture. If you set `auth.mode = "bearer"` and `transport = "stdio"`, the auth config is silently unused.
 
+### stdout is the JSON-RPC channel — operator messages go to stderr
+
+Under stdio transport, FastMCP reads/writes JSON-RPC frames on the same stdout the CLI inherits from its parent. Anything else written to stdout — a Rich-rendered `Config error: …` line, a Python traceback, a stray `print` — is interleaved into the protocol stream and surfaces on the client side as a parse error.
+
+The CLI defends against this by routing every operator-facing error through a dedicated `err_console = Console(stderr=True)` defined at module scope in [src/sqllens/cli.py](../../../src/sqllens/cli.py). All error paths that fire *before* `run(cfg)` — i.e. before FastMCP has taken over stdout — use `err_console`:
+
+- `sqllens init` "already exists" failure.
+- `sqllens serve` `Config.load` exception and the `cfg.llm.api_key is None` precondition failure (both labelled `Config error:`), the non-loopback/insecure refusal (labelled `Refusing to start:`), the `SQLLENS_AUTH__INSECURE=1` and `--no-preflight` warnings, and the `Preflight failed:` error.
+- `sqllens validate` `Config.load` exception and the non-loopback/insecure refusal (both labelled `Invalid:`), plus any `Preflight failed:` from a `--check-*` probe.
+- `sqllens claude-desktop install` `InstallError` (labelled `Error:`) and the unexpected-exception framing (labelled `Unexpected error:` with a "file an issue" line).
+
+Success/data output stays on stdout — `sqllens version`, `Wrote <path>` from `init`, `Config OK` + the validate summary, and the installer's `format_install_result` table. None of those belong to `serve`: the commands that write them (`init`, `validate`, `version`, `claude-desktop install`) never start FastMCP, so their stdout writes can't collide with the JSON-RPC frame stream. `serve` itself emits *no* success output to stdout — every operator message before `run(cfg)` goes to `err_console`, and once `run(cfg)` is reached FastMCP owns stdout.
+
+Tests pin the contract from both sides: the expected error substring lands on stderr **and** stdout is asserted to be empty for the same invocation (`tests/unit/test_cli.py::test_config_load_failure_goes_to_stderr`, `test_init_already_exists_error_goes_to_stderr`; matching stderr-side assertions in `tests/unit/test_cli_claude_desktop.py` and `tests/unit/test_config_smoke.py`). When adding a new operator-error site in `cli.py`, use `err_console.print(...)` rather than `console.print(...)`.
+
 ## HTTP mode — the three middleware layers
 
 `build_asgi_app(cfg)` in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py) builds the full stack around FastMCP's Streamable HTTP app and returns the **mount-ready** ASGI app:
@@ -88,6 +103,32 @@ Lifespan and websocket scopes bypass both `_AuthMiddleware` and `_PathNormalizer
 FastMCP exposes a session manager that must be active while requests are served — it owns per-session state. The ASGI host (uvicorn, FastAPI mount, custom Starlette app) drives lifespan startup/shutdown events; `_SessionManagerLifespan` intercepts them to call `session_manager.run().__aenter__()` on startup and `__aexit__` on shutdown.
 
 If the lifespan adapter is missing, requests reach the routing layer but then fail inside FastMCP with an opaque SDK assertion (`"Task group is not initialized. Make sure to use run()."`) on the first call. Issue #39 was exactly this: `build_asgi_app` used to return a bare app without the lifespan wrapper, so any external mount silently skipped session-manager startup. The fix in PR #43 moved the wrapper inside `build_asgi_app`, and `tests/unit/test_transport_http.py::test_build_asgi_app_returns_lifespan_wrapped` pins the contract at construction time.
+
+### Single-shot instance semantics (issue #60)
+
+`_SessionManagerLifespan` is a **single-shot adapter**: one instance handles exactly one lifecycle. The instance finalizes — refuses any further `lifespan.startup` — once any of:
+
+- `lifespan.shutdown` completed (the CM exited via `__aexit__`), or
+- `lifespan.shutdown` failed in `__aexit__` (the CM raised on exit; reusing it is unsafe), or
+- `lifespan.startup` failed in `__aenter__` (the partially-acquired CM reference is dropped *without* calling `__aexit__` — PEP 343 makes `__aexit__` on a never-entered CM undefined).
+
+After finalization the CM reference is gone (`self._cm = None`) and the `self._shutdown_done` flag is set. A subsequent `lifespan.shutdown` is acknowledged with `shutdown.complete` **without** re-entering `__aexit__`, so the exactly-once enter/exit pair that FastMCP's session manager expects is preserved. A subsequent `lifespan.startup` on a new scope is rejected with `lifespan.startup.failed` and the message `"single-shot instance already shut down"` — distinct from the `"duplicate lifespan.startup"` rejection raised when two startups arrive within the same not-yet-shut-down instance. Hosts that drive more than one lifespan scope against the same app (uncommon outside test harnesses) should mount a fresh adapter via `build_asgi_app` per scope.
+
+Implementation notes: the shutdown path captures `cm = self._cm` and clears `self._cm = None` **before** awaiting `__aexit__`, so even a refactor that inserted another `__aexit__` site before the `_shutdown_done` assignment could not double-exit the same CM. The startup-failure branch also clears `self._cm` and sets `self._shutdown_done = True`, so a partially-acquired CM is never reachable from any later message. Both failure messages are formatted as `f"{type(exc).__name__}: {exc}"` (e.g. `"RuntimeError: boom"`) so hosts logging the wire message can distinguish exception types, not just values.
+
+Regression coverage in `tests/unit/test_transport_http.py`:
+
+- `test_lifespan_duplicate_startup_is_rejected` — two startups within one instance → second one fails with `"duplicate"` in the message.
+- `test_lifespan_post_shutdown_startup_is_rejected` — startup after a clean shutdown → fails with `"shut down"` in the message; `run()` / `__aenter__` are not re-invoked on the session manager.
+- `test_lifespan_post_shutdown_shutdown_is_idempotent` — a second `lifespan.shutdown` returns `shutdown.complete` without a second `__aexit__` call.
+- `test_lifespan_shutdown_failure_still_finalizes_instance` — a shutdown that raised in `__aexit__` still finalizes; a subsequent startup gets single-shot rejection and a subsequent shutdown is idempotent.
+- `test_lifespan_startup_failure_finalizes_instance` — a startup that raised in `__aenter__` finalizes the instance; a follow-up shutdown does **not** call `__aexit__` (no PEP-343 violation), and a follow-up startup gets single-shot rejection. Also pins the `RuntimeError: boom` message format on the failure path.
+
+The `_FakeSessionManager` test fake counts `run_calls`, `aenter_calls`, and `aexit_calls` so these tests can pin **both** halves of the exactly-once contract (no double-exit AND no double-enter) rather than only the wire-message shape.
+
+### Unknown lifespan messages
+
+If `__call__` receives a `lifespan` message whose `type` is neither `lifespan.startup` nor `lifespan.shutdown`, the adapter logs a warning (`"unknown lifespan message type: %s"`) and continues the receive loop. The ASGI spec is open-ended about lifespan message types; logging-and-continuing is preferred over exiting the loop (which would leave any subsequent valid startup/shutdown unhandled) or raising (which would crash the host).
 
 ### SDK-attribute access — `mcp.session_manager`
 

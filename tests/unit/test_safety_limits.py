@@ -296,3 +296,109 @@ class TestRunSqlToolTruncationSurface:
         assert "Result truncated" not in out.result_for_llm
         assert "Re-issue" not in out.result_for_llm
         assert out.metadata["truncated"] is False
+
+    @pytest.mark.asyncio
+    async def test_truncation_signal_surfaced_on_empty_result(self) -> None:
+        """An empty DataFrame stamped with ``truncated=True`` must still tell the LLM
+        the result was capped, not "no rows".
+
+        Today's runners never produce this shape — they fetchmany before checking
+        truncation — but the producer/consumer contract permits it, and a future
+        adapter that buffers + filters could land here. The empty branch must
+        propagate the truncation signal so the agent re-issues a narrower query
+        instead of silently concluding "no matches."
+        """
+        from sqllens.agent.tools.run_sql import RunSqlTool
+        from sqllens.safety.limits import mark_truncation
+
+        df = pd.DataFrame()
+        mark_truncation(df, truncated=True, max_rows=50)
+
+        tool = RunSqlTool(sql_runner=_StaticRunner(df), file_system=_NoopFileSystem())
+        out = await tool.execute(_ctx(), RunSqlToolArgs(sql="SELECT n FROM t"))
+        assert out.success is True
+        assert "No rows returned" in out.result_for_llm
+        assert "Result truncated at 50 rows" in out.result_for_llm
+        assert "Re-issue with an explicit LIMIT or narrower WHERE clause" in out.result_for_llm
+        assert out.metadata["truncated"] is True
+        assert out.metadata["max_rows"] == 50
+        assert out.metadata["row_count"] == 0
+
+
+class TestRunnerNegativeTimeoutRejection:
+    """Symmetric with ``RowCapRunner``'s ``max_rows < 1`` rejection: a negative
+    ``statement_timeout_ms`` is a configuration error (most likely a unit-confusion
+    typo), not a request to disable the guard. Disabling uses 0.
+
+    All three runners (SQLite / Postgres / MySQL) carry the same guard; each
+    must reject negatives independently of the pydantic ``ge=0`` constraint on
+    ``DatabaseConfig`` so programmatic embedders and tests that construct a
+    runner directly (bypassing config validation) still get the check.
+    """
+
+    def test_sqlite_rejects_negative_timeout(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="statement_timeout_ms must be"):
+            SqliteRunner(database_path=str(tmp_path / "x.db"), statement_timeout_ms=-1)
+
+    def test_sqlite_zero_timeout_accepted(self, tmp_path: Path) -> None:
+        # The disable path stays a valid configuration.
+        SqliteRunner(database_path=str(tmp_path / "x.db"), statement_timeout_ms=0)
+
+    def test_postgres_rejects_negative_timeout(self) -> None:
+        psycopg2 = pytest.importorskip("psycopg2")
+        del psycopg2  # only needed to skip when the driver is unavailable
+        from sqllens.agent.integrations.postgres import PostgresRunner
+
+        with pytest.raises(ValueError, match="statement_timeout_ms must be"):
+            PostgresRunner(
+                connection_string="postgresql://u:p@h:5432/db",
+                statement_timeout_ms=-1,
+            )
+
+    def test_mysql_rejects_negative_timeout(self) -> None:
+        pymysql = pytest.importorskip("pymysql")
+        del pymysql
+        from sqllens.agent.integrations.mysql import MySQLRunner
+
+        with pytest.raises(ValueError, match="statement_timeout_ms must be"):
+            MySQLRunner(
+                host="h",
+                database="d",
+                user="u",
+                password="p",
+                statement_timeout_ms=-1,
+            )
+
+
+class TestDatabaseConfigTimeoutUpperBound:
+    """Catch unit-confusion typos at config-load time rather than letting them
+    silently install a 35-day timeout on a server that probably expected 3
+    minutes. The 24h ceiling is generous enough for any legitimate analytics
+    job but rejects the common ``seconds-passed-as-millis`` mistake."""
+
+    def test_rejects_above_24h(self) -> None:
+        from pydantic import ValidationError
+
+        from sqllens.config import DatabaseConfig
+
+        with pytest.raises(ValidationError):
+            # 3_000_000_000 ms ≈ 35 days — classic unit-confusion typo (likely
+            # microseconds intended, or someone treating the field as a
+            # nanosecond/microsecond knob).
+            DatabaseConfig(url="sqlite:///x.db", statement_timeout_ms=3_000_000_000)
+
+    def test_rejects_just_above_24h(self) -> None:
+        """Pin the off-by-one: 86_400_001 must reject so a future ``le``→``lt``
+        flip (or vice versa) is caught."""
+        from pydantic import ValidationError
+
+        from sqllens.config import DatabaseConfig
+
+        with pytest.raises(ValidationError):
+            DatabaseConfig(url="sqlite:///x.db", statement_timeout_ms=86_400_001)
+
+    def test_accepts_exactly_24h(self) -> None:
+        from sqllens.config import DatabaseConfig
+
+        cfg = DatabaseConfig(url="sqlite:///x.db", statement_timeout_ms=86_400_000)
+        assert cfg.statement_timeout_ms == 86_400_000
