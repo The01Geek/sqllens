@@ -68,8 +68,9 @@ def build_asgi_app(cfg: Config) -> ASGIApp:
     # Read via the documented public ``session_manager`` property rather than
     # ``_session_manager``: depending on documented surface is the only thing
     # that gives us a stable SDK contract. The AttributeError guard converts
-    # a future SDK rename/removal into a build-time RuntimeError instead of
-    # an opaque attribute error far from the cause.
+    # a future SDK rename/removal into a build-time RuntimeError whose
+    # message names this file and the mcp SDK as the likely cause, instead
+    # of an opaque AttributeError with no actionable hint.
     try:
         session_manager = mcp.session_manager
     except AttributeError as exc:
@@ -87,8 +88,10 @@ def _build_asgi_app_bare(cfg: Config) -> tuple[ASGIApp, FastMCP]:
     "Bare" means lifespan-bare only: path normalization and authentication
     middleware are still applied. Returns the app and the underlying
     ``FastMCP`` instance so the caller can wire up the session-manager
-    lifespan itself. The only in-tree consumer is ``build_asgi_app``; the
-    split exists to keep the SDK-attribute reach at a single guarded site.
+    lifespan itself. Production callers reach this only via
+    ``build_asgi_app``; the unit suite also calls it directly to assert
+    the inner stack composition. The split exists to keep the
+    SDK-attribute reach at a single guarded site.
     """
     mcp = build_server(cfg)
     inner = mcp.streamable_http_app()
