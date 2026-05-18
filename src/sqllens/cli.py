@@ -24,6 +24,19 @@ app = typer.Typer(
 )
 console = Console()
 
+# Hosts treated as loopback for the auth-mode guard in ``serve``. Plain string
+# match against ``cfg.server.host`` — we do not attempt DNS resolution or
+# wildcard expansion ("0.0.0.0", "::", and any external interface IP must
+# require auth or the SQLLENS_AUTH__INSECURE opt-out).
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+INSECURE_NON_LOOPBACK_MESSAGE = (
+    "Refusing to start an unauthenticated HTTP server on a non-loopback interface "
+    "(server.host={host!r}, auth.mode=none). Set SQLLENS_AUTH__MODE=bearer with a "
+    "SQLLENS_AUTH__BEARER_TOKEN, or SQLLENS_AUTH__INSECURE=1 to override for "
+    "closed-network deployments."
+)
+
 
 def _version_callback(value: bool) -> None:
     if value:
@@ -85,6 +98,17 @@ def serve(
         raise typer.Exit(code=2) from e
     if cfg.llm.api_key is None:
         console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
+        raise typer.Exit(code=2)
+    if (
+        cfg.server.transport == "http"
+        and cfg.auth.mode == "none"
+        and cfg.server.host not in _LOOPBACK_HOSTS
+        and not cfg.auth.insecure
+    ):
+        console.print(
+            f"[red]Refusing to start:[/red] "
+            f"{escape(INSECURE_NON_LOOPBACK_MESSAGE.format(host=cfg.server.host))}"
+        )
         raise typer.Exit(code=2)
     run(cfg)
 
