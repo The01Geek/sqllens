@@ -22,7 +22,11 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
+# Operator status and errors go to stderr so they never collide with the
+# JSON-RPC stream on stdout under the stdio MCP transport. Stdout is reserved
+# for command output that callers may pipe (e.g. `sqllens version`).
 console = Console()
+err_console = Console(stderr=True)
 
 
 def _version_callback(value: bool) -> None:
@@ -61,7 +65,7 @@ def init(
 ) -> None:
     """Write a sample sqllens.toml to the current directory."""
     if path.exists() and not force:
-        console.print(f"[red]{path} already exists. Use --force to overwrite.[/red]")
+        err_console.print(f"[red]{path} already exists. Use --force to overwrite.[/red]")
         raise typer.Exit(code=1)
     path.write_text(_SAMPLE_CONFIG)
     console.print(f"[green]Wrote {path}[/green]")
@@ -81,10 +85,10 @@ def serve(
     try:
         cfg = Config.load(config)
     except Exception as e:
-        console.print(f"[red]Config error:[/red] {escape(str(e))}")
+        err_console.print(f"[red]Config error:[/red] {escape(str(e))}")
         raise typer.Exit(code=2) from e
     if cfg.llm.api_key is None:
-        console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
+        err_console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
         raise typer.Exit(code=2)
     run(cfg)
 
@@ -99,7 +103,7 @@ def validate(
     try:
         cfg = Config.load(config)
     except Exception as e:
-        console.print(f"[red]Invalid:[/red] {escape(str(e))}")
+        err_console.print(f"[red]Invalid:[/red] {escape(str(e))}")
         raise typer.Exit(code=2) from e
     console.print("[green]Config OK[/green]")
     console.print(f"  database: {cfg.database.name} ({cfg.database.url.split('://')[0]})")
@@ -200,14 +204,14 @@ def claude_desktop_install(
         )
         result = run_install(options, dry_run=dry_run, force=force)
     except InstallError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
+        err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
     except Exception as exc:
         # Friendly framing only; re-raising would dump a Python traceback right
         # after the framing line and contradict the "we've handled this" UX.
         # The chained exception is preserved on the typer.Exit via __cause__
         # for any future debug hook or test that inspects it.
-        console.print(
+        err_console.print(
             f"[red]Unexpected error:[/red] {type(exc).__name__}: {exc}\n"
             "This is likely a bug — please file an issue at "
             "https://github.com/The01Geek/sqllens/issues"
