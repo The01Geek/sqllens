@@ -150,20 +150,33 @@ class TestMysqlRunner:
         huge result sets — the runner would still return ``max_rows`` rows,
         but only after pulling millions of rows over the wire.
 
-        Cross-join ``information_schema.columns`` against itself — even on a
-        fresh MySQL this produces millions of rows. With ``max_rows=5`` the
-        runner must return in under a second: a full drain would take many
-        seconds at minimum. Wall-clock time is the only signal that
-        distinguishes "streamed + capped" from "drained + capped". A 2-way
-        join (not 3-way) is plenty for the signal and avoids piling
-        unnecessary server-side iteration work on the CI MySQL.
+        The source must be **large but fast-to-first-row** so wall-clock time
+        isolates "stopped after the cap" from "drained the whole set". A
+        cross-join of a 10-row inline digits table to the 8th power is 10**8
+        rows, but MySQL's nested-loop join emits the first rows immediately —
+        ``SSDictCursor`` + ``fetchmany(max_rows + 1)`` returns in
+        milliseconds. A full drain (what ``SSCursor.close()`` would force)
+        would have to pull 100M rows over the wire: many seconds at minimum.
+        A constant-derived source (vs. ``information_schema``) keeps the join
+        fast-to-first-row regardless of the CI server's catalog size.
+
+        ``statement_timeout_ms=0`` disables ``MAX_EXECUTION_TIME``: this test
+        exercises the stream cap, not the timeout. The ``build_sql_runner``
+        default (30s) would otherwise interrupt the never-finishing full scan
+        and surface as a query error instead of the cap-vs-drain signal.
         """
         max_rows = 5
-        sql = (
-            "SELECT a.TABLE_NAME FROM information_schema.columns a "
-            "CROSS JOIN information_schema.columns b"
+        digits = (
+            "(SELECT 0 AS d UNION ALL SELECT 1 UNION ALL SELECT 2 "
+            "UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 "
+            "UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 "
+            "UNION ALL SELECT 9)"
         )
-        runner = build_sql_runner(mysql_url, max_rows=max_rows)
+        # 10**8 rows: a left-deep nested-loop cross-join that streams the
+        # first row instantly but never finishes within the test window.
+        joins = " ".join(f"CROSS JOIN {digits} d{i}" for i in range(1, 8))
+        sql = f"SELECT d0.d FROM {digits} d0 {joins}"
+        runner = build_sql_runner(mysql_url, max_rows=max_rows, statement_timeout_ms=0)
         start = time.monotonic()
         df = await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
         elapsed = time.monotonic() - start
