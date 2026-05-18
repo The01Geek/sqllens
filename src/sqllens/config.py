@@ -46,6 +46,25 @@ class DatabaseConfig(BaseModel):
     )
     name: str = Field(default="primary", description="Display name shown via list_data_sources")
     read_only: bool = Field(default=True, description="Reject non-SELECT statements via SQL parser")
+    statement_timeout_ms: int = Field(
+        default=30_000,
+        ge=0,
+        description=(
+            "Server-side statement timeout in milliseconds. Applied via "
+            "SET statement_timeout (Postgres), SET SESSION MAX_EXECUTION_TIME (MySQL), "
+            "or a progress-handler deadline (SQLite). 0 disables (Postgres/MySQL only)."
+        ),
+    )
+    max_rows: int = Field(
+        default=10_000,
+        ge=1,
+        le=1_000_000,
+        description=(
+            "Hard ceiling on rows materialised per query. Runners stream via fetchmany "
+            "and stop at max_rows; the agent is told the result was truncated so it can "
+            "re-issue a narrower query."
+        ),
+    )
 
 
 class LLMConfig(BaseModel):
