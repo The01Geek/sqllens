@@ -63,7 +63,7 @@ Env vars beat TOML — the convention containerized deploys expect.
 
 | Mode | When to use |
 |---|---|
-| `none` | Loopback only. `sqllens serve` refuses to start with `auth.mode=none` and HTTP transport on a non-loopback host unless `SQLLENS_AUTH__INSECURE=1` is set (closed-network override). The default for `sqllens init`. |
+| `none` | Loopback only. `sqllens serve` refuses to start with `auth.mode=none` and `server.transport=http` bound to a non-loopback host unless `SQLLENS_AUTH__INSECURE=1` is set (closed-network override). The default for `sqllens init`. |
 | `bearer` | Single shared token. Set `auth.bearer_token` in TOML or `SQLLENS_AUTH__BEARER_TOKEN` in env. |
 | `jwt` | **Scaffolded — not implemented yet.** The verifier interface is locked; the implementation lands in a follow-up. Don't deploy with this mode. |
 

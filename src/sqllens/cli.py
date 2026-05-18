@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import sys
 from pathlib import Path
@@ -24,13 +25,21 @@ app = typer.Typer(
 )
 console = Console()
 
-# Hosts treated as loopback for the auth-mode guard in ``serve``. Plain string
-# match against ``cfg.server.host`` — we do not attempt DNS resolution or
-# wildcard expansion ("0.0.0.0", "::", and any external interface IP must
-# require auth or the SQLLENS_AUTH__INSECURE opt-out).
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+def _is_loopback_host(host: str) -> bool:
+    # Recognizes the entire 127.0.0.0/8 IPv4 loopback range and ::1 (plus
+    # IPv4-mapped IPv6 loopback like ::ffff:127.0.0.1), not just the canonical
+    # spellings. No DNS resolution — wildcards ("0.0.0.0", "::") and arbitrary
+    # external hostnames fail closed and must use bearer auth or the
+    # SQLLENS_AUTH__INSECURE opt-out.
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
-INSECURE_NON_LOOPBACK_MESSAGE = (
+
+_INSECURE_NON_LOOPBACK_MESSAGE = (
     "Refusing to start an unauthenticated HTTP server on a non-loopback interface "
     "(server.host={host!r}, auth.mode=none). Set SQLLENS_AUTH__MODE=bearer with a "
     "SQLLENS_AUTH__BEARER_TOKEN, or SQLLENS_AUTH__INSECURE=1 to override for "
@@ -102,14 +111,19 @@ def serve(
     if (
         cfg.server.transport == "http"
         and cfg.auth.mode == "none"
-        and cfg.server.host not in _LOOPBACK_HOSTS
-        and not cfg.auth.insecure
+        and not _is_loopback_host(cfg.server.host)
     ):
+        if not cfg.auth.insecure:
+            console.print(
+                f"[red]Refusing to start:[/red] "
+                f"{escape(_INSECURE_NON_LOOPBACK_MESSAGE.format(host=cfg.server.host))}"
+            )
+            raise typer.Exit(code=2)
         console.print(
-            f"[red]Refusing to start:[/red] "
-            f"{escape(INSECURE_NON_LOOPBACK_MESSAGE.format(host=cfg.server.host))}"
+            f"[yellow]Warning:[/yellow] SQLLENS_AUTH__INSECURE=1 — starting "
+            f"unauthenticated HTTP server on {escape(cfg.server.host)}. "
+            "Closed-network deployments only."
         )
-        raise typer.Exit(code=2)
     run(cfg)
 
 
