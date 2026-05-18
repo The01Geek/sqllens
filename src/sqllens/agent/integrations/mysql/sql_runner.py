@@ -47,6 +47,11 @@ class MySQLRunner(SqlRunner):
                 "PyMySQL package is required. Install with: pip install pymysql"
             ) from e
 
+        if statement_timeout_ms < 0:
+            raise ValueError(
+                f"statement_timeout_ms must be >= 0 (got {statement_timeout_ms}); "
+                "use 0 to disable"
+            )
         self.host = host
         self.database = database
         self.user = user
