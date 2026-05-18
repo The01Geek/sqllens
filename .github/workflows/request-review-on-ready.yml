@@ -41,10 +41,16 @@ permissions:
   pull-requests: write
 
 concurrency:
-  # Collapse a ready-path run and a check Re-run for the same PR so a Re-run
-  # mid-review cancels the stale one. github.run_id is the last-resort key
-  # for events where no PR number is resolvable yet (the job no-ops anyway).
-  group: request-review-on-ready-${{ github.event.pull_request.number || github.event.check_run.pull_requests[0].number || github.run_id }}
+  # Per-PR AND per-event-source lane. The event_name suffix is load-bearing:
+  # `pull_request` and `pull_request_target` both fire for one ready_for_review
+  # and both carry the same pull_request.number — without the suffix the
+  # dedupe-loser variant (which no-ops in ~15s) would cancel the canonical
+  # variant mid-review via cancel-in-progress, and the auto-review would never
+  # run. Scoping by source keeps cancel-in-progress useful where it matters
+  # (a second check_run Re-run collapses an in-flight earlier Re-run for the
+  # same PR) while isolating the dedupe pair. github.run_id is the last-resort
+  # key for events with no resolvable PR (the job no-ops anyway).
+  group: request-review-on-ready-${{ github.event.pull_request.number || github.event.check_run.pull_requests[0].number || github.run_id }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
