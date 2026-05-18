@@ -9,6 +9,7 @@ import ipaddress
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
@@ -16,6 +17,9 @@ from rich.markup import escape
 
 from sqllens import __version__
 from sqllens.config import API_KEY_MISSING_MESSAGE
+
+if TYPE_CHECKING:
+    from sqllens.config import Config
 
 app = typer.Typer(
     name="sqllens",
@@ -32,14 +36,17 @@ def _is_loopback_host(host: str) -> bool:
     # False for these on Python 3.11.x and 3.12.0-3.12.3 (gh-117566, fixed in
     # 3.12.4 / 3.13). No DNS resolution — wildcards ("0.0.0.0", "::") and
     # arbitrary external hostnames fail closed and must use bearer auth or
-    # the SQLLENS_AUTH__INSECURE opt-out. Hostname comparison is
-    # case-insensitive per RFC 1035, so "Localhost" / "LOCALHOST" are
-    # recognized too.
-    if host.lower() == "localhost":
-        return True
+    # the SQLLENS_AUTH__INSECURE opt-out. The single literal hostname
+    # "localhost" is matched case-insensitively (RFC 1035); no other
+    # hostnames are recognized. Non-string input (None, ints, etc. from a
+    # future refactor) also fails closed rather than raising — this is a
+    # security guard and a traceback in place of a refusal would be misread
+    # as "the guard didn't apply".
     try:
+        if host.lower() == "localhost":
+            return True
         addr = ipaddress.ip_address(host)
-    except ValueError:
+    except (ValueError, AttributeError, TypeError):
         return False
     if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
         return addr.ipv4_mapped.is_loopback
@@ -52,6 +59,23 @@ _INSECURE_NON_LOOPBACK_MESSAGE = (
     "SQLLENS_AUTH__BEARER_TOKEN, or SQLLENS_AUTH__INSECURE=1 to override for "
     "closed-network deployments."
 )
+
+
+def _loopback_policy_violated(cfg: Config) -> bool:
+    """True when the unauthenticated-non-loopback policy condition holds.
+
+    Callers (``serve``, ``validate``) combine this with ``cfg.auth.insecure``:
+    when the policy condition holds and the operator has *not* set
+    ``SQLLENS_AUTH__INSECURE=1`` they hard-fail; with the opt-out set they
+    proceed and emit a visible breadcrumb. This helper does not consult
+    ``cfg.auth.insecure`` itself so callers can phrase the warning/error
+    message in surface-appropriate terms.
+    """
+    return (
+        cfg.server.transport == "http"
+        and cfg.auth.mode == "none"
+        and not _is_loopback_host(cfg.server.host)
+    )
 
 
 def _version_callback(value: bool) -> None:
@@ -115,11 +139,7 @@ def serve(
     if cfg.llm.api_key is None:
         console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
         raise typer.Exit(code=2)
-    if (
-        cfg.server.transport == "http"
-        and cfg.auth.mode == "none"
-        and not _is_loopback_host(cfg.server.host)
-    ):
+    if _loopback_policy_violated(cfg):
         if not cfg.auth.insecure:
             console.print(
                 f"[red]Refusing to start:[/red] "
@@ -146,11 +166,26 @@ def validate(
     except Exception as e:
         console.print(f"[red]Invalid:[/red] {escape(str(e))}")
         raise typer.Exit(code=2) from e
+    # Mirror serve's guard so CI / pre-deploy linting catches the
+    # misconfiguration before `serve` would refuse to start.
+    violated = _loopback_policy_violated(cfg)
+    if violated and not cfg.auth.insecure:
+        console.print(
+            f"[red]Invalid:[/red] "
+            f"{escape(_INSECURE_NON_LOOPBACK_MESSAGE.format(host=cfg.server.host))}"
+        )
+        raise typer.Exit(code=2)
     console.print("[green]Config OK[/green]")
     console.print(f"  database: {cfg.database.name} ({cfg.database.url.split('://')[0]})")
     llm_suffix = "" if cfg.llm.api_key is not None else " (api_key NOT SET)"
     console.print(f"  llm:      {cfg.llm.provider} / {cfg.llm.model}{llm_suffix}")
-    console.print(f"  auth:     {cfg.auth.mode}")
+    auth_line = f"  auth:     {cfg.auth.mode}"
+    if violated:
+        auth_line += (
+            f" [yellow](SQLLENS_AUTH__INSECURE=1 — non-loopback host "
+            f"{escape(cfg.server.host)} with auth.mode=none)[/yellow]"
+        )
+    console.print(auth_line)
     console.print(f"  transport: {cfg.server.transport}")
 
 
