@@ -62,12 +62,11 @@ class StubAgent:
         components: Iterable[UiComponent] | None = None,
         *,
         raise_exc: BaseException | None = None,
-        on_aclose: list[bool] | None = None,
     ) -> None:
         self._components = list(components or [])
         self._raise_exc = raise_exc
-        self._on_aclose = on_aclose
         self.send_message_calls: list[tuple[Any, str]] = []
+        self.aclose_called: bool = False
 
     def send_message(self, request_context: Any, message: str) -> AsyncIterator[UiComponent]:
         self.send_message_calls.append((request_context, message))
@@ -80,5 +79,4 @@ class StubAgent:
             for comp in self._components:
                 yield comp
         finally:
-            if self._on_aclose is not None:
-                self._on_aclose[0] = True
+            self.aclose_called = True

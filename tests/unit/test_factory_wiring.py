@@ -33,24 +33,7 @@ from sqllens.config import (
     MemoryConfig,
 )
 
-
-def _build_test_config(
-    persist_dir: Path,
-    agent: AgentRuntimeConfig | None = None,
-) -> Config:
-    """Build a Config from kwargs, bypassing env-var resolution.
-
-    Passing every nested model explicitly avoids the default_factory
-    re-reading env (which otherwise picks up empty-string overrides
-    that fail Literal validation in some test environments).
-    """
-    return Config(
-        database=DatabaseConfig(url="sqlite:///:memory:"),
-        llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
-        memory=MemoryConfig(persist_dir=persist_dir),
-        auth=AuthConfig(mode="none"),
-        agent=agent or AgentRuntimeConfig(),
-    )
+from ._config_builders import build_test_config
 
 
 def _unwrap(tool: object) -> object:
@@ -65,7 +48,7 @@ def test_run_sql_scratch_anchored_to_absolute_tempdir(tmp_path: Path) -> None:
     the ``file_system=`` kwarg silently re-introduces the Windows-only
     Claude Desktop CWD failure.
     """
-    cfg = _build_test_config(persist_dir=tmp_path / "chroma")
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
     agent = build_agent(cfg)
 
     run_sql_tool = _unwrap(agent.tool_registry._tools["run_sql"])
@@ -84,14 +67,14 @@ def test_default_max_tool_iterations_is_twenty(tmp_path: Path) -> None:
     a regression that drops this default would silently re-introduce the
     "tool iteration limit reached" cutoff users hit on first-time queries.
     """
-    cfg = _build_test_config(persist_dir=tmp_path / "chroma")
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
     agent = build_agent(cfg)
     assert agent.config.max_tool_iterations == 20
 
 
 def test_max_tool_iterations_flows_through_config(tmp_path: Path) -> None:
     """A config override must reach the underlying agent unchanged."""
-    cfg = _build_test_config(
+    cfg = build_test_config(
         persist_dir=tmp_path / "chroma",
         agent=AgentRuntimeConfig(max_tool_iterations=42),
     )
