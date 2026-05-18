@@ -80,6 +80,17 @@ class AuthConfig(BaseModel):
 
     mode: Literal["none", "bearer", "jwt"] = "none"
     bearer_token: SecretStr | None = Field(default=None, description="Required when mode=bearer")
+    # Opt-out for the cli.serve loopback guard: closed-network deployments
+    # (private VPC, k8s ClusterIP, host-only Docker network) can set
+    # SQLLENS_AUTH__INSECURE=1 to acknowledge that mode=none on a non-loopback
+    # host is intentional. The CLI guard refuses to start otherwise.
+    insecure: bool = Field(
+        default=False,
+        description=(
+            "Acknowledge mode=none on a non-loopback host "
+            "(closed-network deployments only)"
+        ),
+    )
     # JWT fields land in Phase 4 — placeholder so config schema is stable.
     jwt_jwks_url: str | None = None
     jwt_issuer: str | None = None
