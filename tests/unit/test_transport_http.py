@@ -311,6 +311,11 @@ def test_lifespan_shutdown_baseexception_propagates_not_caught() -> None:
     types = [m["type"] for m in sent]
     assert types == ["lifespan.startup.complete"]
     assert "lifespan.shutdown.failed" not in types
+    # The raise traversed __aexit__ (not run()/__aenter__), pinning the
+    # shutdown `except Exception` site specifically.
+    assert sm.aexit_calls == 1
+
+
 # Exact named-type coverage for issue #101's deferred review findings.
 # The pre-existing BaseException-propagation tests above use
 # ``KeyboardInterrupt``; the findings on PR #100 specifically name
@@ -341,9 +346,11 @@ def test_lifespan_startup_named_baseexception_propagates_uncaught(
     adapter = _SessionManagerLifespan(_noop_inner, sm)
     receive, send, sent = _make_io([{"type": "lifespan.startup"}])
 
-    with caplog.at_level(logging.ERROR, logger="sqllens.transport.http"):
-        with pytest.raises(exc_type):
-            asyncio.run(adapter({"type": "lifespan"}, receive, send))
+    with (
+        caplog.at_level(logging.ERROR, logger="sqllens.transport.http"),
+        pytest.raises(exc_type),
+    ):
+        asyncio.run(adapter({"type": "lifespan"}, receive, send))
 
     # No ack fabricated for the signal (the `except Exception` arm — which
     # holds the only logger.exception call — was never entered).
@@ -371,9 +378,11 @@ def test_lifespan_shutdown_named_baseexception_propagates_uncaught(
         [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
     )
 
-    with caplog.at_level(logging.ERROR, logger="sqllens.transport.http"):
-        with pytest.raises(exc_type):
-            asyncio.run(adapter({"type": "lifespan"}, receive, send))
+    with (
+        caplog.at_level(logging.ERROR, logger="sqllens.transport.http"),
+        pytest.raises(exc_type),
+    ):
+        asyncio.run(adapter({"type": "lifespan"}, receive, send))
 
     types = [m["type"] for m in sent]
     assert types == ["lifespan.startup.complete"]
