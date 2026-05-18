@@ -61,11 +61,13 @@ def _gh_login():
     canonical 403 "Resource not accessible by integration" you get when
     GITHUB_TOKEN in Actions lacks user:read. That covers any non-zero gh
     exit or empty stdout (403, expired tokens, 5xx, DNS errors,
-    rate-limiting) as well as any OS-level spawn failure (gh missing from
-    PATH, present-but-not-executable, wrong arch) — all OSError subclasses.
-    filed_by is informational only — never gate logic — so we degrade
-    rather than fail the run, but we leave a stderr breadcrumb so operators
-    can see when the primary lookup didn't work.
+    rate-limiting) as well as any OS-level spawn failure that surfaces as
+    an OSError subclass (gh missing from PATH, present-but-not-executable,
+    wrong arch, fd/memory exhaustion). filed_by is informational only —
+    never gate logic — so we degrade rather than fail the run, but we
+    leave a stderr breadcrumb so operators can see when the primary lookup
+    didn't work. (A non-OSError like UnicodeDecodeError from exotic gh
+    output is out of scope by design — the `.login` field is ASCII.)
     """
     rc_info = "no-binary"
     stderr_info = ""
@@ -77,6 +79,7 @@ def _gh_login():
         _err_lines = (r.stderr or "").strip().splitlines()
         stderr_info = _err_lines[0][:120] if _err_lines else ""
     except OSError as e:
+        rc_info = f"spawn-error ({type(e).__name__})"
         stderr_info = f"{type(e).__name__}: {e}"[:120]
     sys.stderr.write(
         f"file-deferrals.py: gh api user unavailable "
