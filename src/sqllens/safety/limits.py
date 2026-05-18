@@ -3,19 +3,15 @@
 
 """Row-cap enforcement for SqlRunner implementations.
 
-The per-runner adapters (``postgres/mysql/sqlite/sql_runner.py``) stream rows
-via ``fetchmany(max_rows + 1)`` and stamp ``df.attrs['truncated']`` themselves
-— that is the primary defence against unbounded materialisation. This
-``RowCapRunner`` decorator is the **secondary** defence: it post-processes the
-returned DataFrame and re-applies the cap, so a future runner that forgets to
-stream still cannot return more than ``max_rows`` rows downstream.
-
-The truncation signal lives on ``df.attrs`` (a pandas-standard dict carried by
-DataFrames). ``RunSqlTool`` reads it to surface a re-issue hint to the agent.
+The per-runner adapters stream rows via ``fetchmany(max_rows + 1)`` and stamp
+truncation metadata on the returned DataFrame. ``RowCapRunner`` is a secondary
+guard that re-applies the cap on the way back out — so a future runner that
+forgets to stream still cannot return more than ``max_rows`` rows downstream.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -31,22 +27,31 @@ MAX_ROWS_ATTR = "max_rows"
 
 
 def mark_truncation(df: pd.DataFrame, *, truncated: bool, max_rows: int) -> None:
-    """Stamp a DataFrame with row-cap metadata.
-
-    Helper used by per-runner adapters so the truncation contract is in one
-    place. ``RunSqlTool`` reads the same attrs to surface a re-issue hint to
-    the agent.
-    """
+    """Stamp a DataFrame with row-cap metadata that ``RunSqlTool`` reads."""
     df.attrs[TRUNCATED_ATTR] = truncated
     df.attrs[MAX_ROWS_ATTR] = max_rows
 
 
-class RowCapRunner(SqlRunner):
-    """Decorator that enforces ``max_rows`` on the returned DataFrame.
+def rows_to_capped_df(rows: Iterable[Mapping], max_rows: int) -> pd.DataFrame:
+    """Trim ``rows`` to ``max_rows``, build a DataFrame, stamp truncation attrs.
 
-    Wrapped after the per-runner adapter; runs before any other downstream
-    consumer. Safe to stack with ``ReadOnlyGuardRunner``.
+    Callers pass the result of ``cursor.fetchmany(max_rows + 1)`` — the +1
+    sentinel lets us detect truncation without a second round trip.
     """
+    rows = list(rows)
+    truncated = len(rows) > max_rows
+    if truncated:
+        rows = rows[:max_rows]
+    if not rows:
+        df = pd.DataFrame()
+    else:
+        df = pd.DataFrame([dict(row) for row in rows])
+    mark_truncation(df, truncated=truncated, max_rows=max_rows)
+    return df
+
+
+class RowCapRunner(SqlRunner):
+    """Decorator that enforces ``max_rows`` on the returned DataFrame."""
 
     def __init__(self, inner: SqlRunner, *, max_rows: int) -> None:
         if max_rows < 1:

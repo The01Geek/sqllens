@@ -96,10 +96,6 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         filename, csv_content, context, overwrite=True
                     )
 
-                    # Build the LLM-visible result: a CSV preview (capped at 1000 chars
-                    # so the agent doesn't pay for the full table on big results) plus,
-                    # when the row cap fired, a re-issue hint so the agent stops asking
-                    # for the same unbounded query in a tighter loop.
                     results_preview = csv_content
                     if len(results_preview) > 1000:
                         results_preview = (
@@ -143,8 +139,8 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         "query_type": query_type,
                         "results": results_data,
                         "output_file": filename,
-                        "truncated": row_cap_hit,
-                        "max_rows": cap_size,
+                        TRUNCATED_ATTR: row_cap_hit,
+                        MAX_ROWS_ATTR: cap_size,
                     }
             else:
                 # For non-SELECT queries (INSERT, UPDATE, DELETE, etc.)

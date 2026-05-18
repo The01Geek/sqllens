@@ -5,7 +5,7 @@ import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
-from sqllens.safety.limits import mark_truncation
+from sqllens.safety.limits import rows_to_capped_df
 
 
 _DEFAULT_MAX_ROWS = 10_000
@@ -83,9 +83,9 @@ class MySQLRunner(SqlRunner):
             conn.ping(reconnect=True)
 
             if self._statement_timeout_ms > 0:
-                # MAX_EXECUTION_TIME (ms) only affects read-only SELECTs in MySQL 5.7.4+
-                # / MariaDB; on non-SELECTs the setting is a no-op (which is fine — the
-                # read-only guard rejects those upstream in production).
+                # MAX_EXECUTION_TIME (ms) only affects SELECTs in MySQL 5.7.4+ /
+                # MariaDB; for non-SELECTs the setting is a no-op (acceptable since
+                # the read-only guard rejects those upstream in production).
                 setup = conn.cursor()
                 try:
                     setup.execute(
@@ -98,27 +98,16 @@ class MySQLRunner(SqlRunner):
             query_type = args.sql.strip().upper().split()[0]
 
             if query_type == "SELECT":
-                # SSDictCursor is unbuffered — rows stream from the server instead of
-                # the driver materialising the full result set into memory before we
-                # see it. The +1 sentinel detects truncation without a separate COUNT.
+                # SSDictCursor streams from the server instead of materialising the
+                # whole result set in the driver. We deliberately do NOT call
+                # cursor.close() on this path — PyMySQL's SSCursor.close() drains
+                # every remaining row from the wire to keep the connection in sync,
+                # which would defeat the row cap for huge result sets. The outer
+                # ``finally: conn.close()`` tears the socket down server-side.
                 cursor = conn.cursor(self.pymysql.cursors.SSDictCursor)
-                try:
-                    cursor.execute(args.sql)
-                    rows = cursor.fetchmany(self._max_rows + 1)
-                finally:
-                    cursor.close()
-
-                truncated = len(rows) > self._max_rows
-                if truncated:
-                    rows = rows[: self._max_rows]
-
-                if not rows:
-                    df = pd.DataFrame()
-                else:
-                    df = pd.DataFrame([dict(row) for row in rows])
-
-                mark_truncation(df, truncated=truncated, max_rows=self._max_rows)
-                return df
+                cursor.execute(args.sql)
+                rows = cursor.fetchmany(self._max_rows + 1)
+                return rows_to_capped_df(rows, self._max_rows)
 
             cursor = conn.cursor(self.pymysql.cursors.DictCursor)
             try:

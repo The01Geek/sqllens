@@ -6,7 +6,7 @@ import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
-from sqllens.safety.limits import mark_truncation
+from sqllens.safety.limits import rows_to_capped_df
 
 
 _DEFAULT_MAX_ROWS = 10_000
@@ -96,7 +96,6 @@ class PostgresRunner(SqlRunner):
 
         try:
             if self._statement_timeout_ms > 0:
-                # Cast to int prevents driver mis-typing of subclassed ints.
                 setup = conn.cursor()
                 try:
                     setup.execute(
@@ -108,8 +107,8 @@ class PostgresRunner(SqlRunner):
             query_type = args.sql.strip().upper().split()[0]
 
             if query_type == "SELECT":
-                # Named (server-side) cursor streams rows; the +1 sentinel lets us
-                # detect truncation without a separate COUNT.
+                # Named cursors are server-side and stream from a portal; they
+                # require an open transaction (psycopg2's default autocommit=False).
                 cursor_name = f"sqllens_{uuid.uuid4().hex}"
                 cursor = conn.cursor(
                     name=cursor_name,
@@ -120,30 +119,16 @@ class PostgresRunner(SqlRunner):
                     rows = cursor.fetchmany(self._max_rows + 1)
                 finally:
                     cursor.close()
+                return rows_to_capped_df(rows, self._max_rows)
 
-                truncated = len(rows) > self._max_rows
-                if truncated:
-                    rows = rows[: self._max_rows]
-
-                if not rows:
-                    df = pd.DataFrame()
-                else:
-                    df = pd.DataFrame([dict(row) for row in rows])
-
-                mark_truncation(df, truncated=truncated, max_rows=self._max_rows)
-                return df
-            else:
-                # Non-SELECT path is defensive — ReadOnlyGuardRunner should block this
-                # upstream in production. Kept so smoke tests against a writable DB still
-                # exercise the same return shape.
-                cursor = conn.cursor()
-                try:
-                    cursor.execute(args.sql)
-                    conn.commit()
-                    rows_affected = cursor.rowcount
-                finally:
-                    cursor.close()
-                return pd.DataFrame({"rows_affected": [rows_affected]})
+            cursor = conn.cursor()
+            try:
+                cursor.execute(args.sql)
+                conn.commit()
+                rows_affected = cursor.rowcount
+            finally:
+                cursor.close()
+            return pd.DataFrame({"rows_affected": [rows_affected]})
 
         finally:
             conn.close()

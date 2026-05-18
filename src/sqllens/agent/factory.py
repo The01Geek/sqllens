@@ -64,8 +64,6 @@ def build_agent(cfg: Config) -> Agent:
         statement_timeout_ms=cfg.database.statement_timeout_ms,
         max_rows=cfg.database.max_rows,
     )
-    # Decorator order matters: ReadOnly runs first (parse-time reject), then
-    # RowCap is the post-execution belt-and-suspenders on the per-runner cap.
     sql_runner = RowCapRunner(sql_runner, max_rows=cfg.database.max_rows)
     if cfg.database.read_only:
         sql_runner = ReadOnlyGuardRunner(sql_runner, dialect=_sqlglot_dialect(cfg.database.url))
@@ -109,11 +107,9 @@ def build_sql_runner(
 ) -> SqlRunner:
     """Pick the right SQL runner from the database URL prefix.
 
-    ``statement_timeout_ms`` and ``max_rows`` are passed through to the runner so
-    the per-engine safety primitives (SET statement_timeout / MAX_EXECUTION_TIME /
-    progress handler, plus fetchmany(max_rows + 1)) run inside the runner itself.
-    Defaults keep the integration-test call sites (``build_sql_runner(url)``)
-    working without modification.
+    ``statement_timeout_ms`` and ``max_rows`` are threaded through so the
+    per-engine timeout (SET statement_timeout / MAX_EXECUTION_TIME / progress
+    handler) and ``fetchmany(max_rows + 1)`` stream cap run inside the runner.
     """
     scheme = url.split("://", 1)[0].lower()
     if scheme.startswith("sqlite"):

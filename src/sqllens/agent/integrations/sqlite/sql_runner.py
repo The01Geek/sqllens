@@ -6,14 +6,10 @@ import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
-from sqllens.safety.limits import mark_truncation
+from sqllens.safety.limits import rows_to_capped_df
 
 
 _DEFAULT_MAX_ROWS = 10_000
-
-# Frequency (in VM instructions) at which SQLite invokes the progress handler.
-# Smaller = tighter deadline check; larger = less per-op overhead. 1000 keeps
-# the overhead negligible while still giving sub-millisecond cancellation.
 _PROGRESS_HANDLER_INSTRUCTIONS = 1000
 
 
@@ -70,25 +66,13 @@ class SqliteRunner(SqlRunner):
 
             if query_type == "SELECT":
                 rows = cursor.fetchmany(self._max_rows + 1)
-                truncated = len(rows) > self._max_rows
-                if truncated:
-                    rows = rows[: self._max_rows]
-
-                if not rows:
-                    df = pd.DataFrame()
-                else:
-                    df = pd.DataFrame([dict(row) for row in rows])
-
-                mark_truncation(df, truncated=truncated, max_rows=self._max_rows)
-                return df
+                return rows_to_capped_df(rows, self._max_rows)
 
             conn.commit()
             rows_affected = cursor.rowcount
             return pd.DataFrame({"rows_affected": [rows_affected]})
 
         finally:
-            # Clearing the handler before close is paranoia — the handler holds a
-            # closure over ``deadline`` only, no DB or fd references.
             if self._statement_timeout_ms > 0:
                 conn.set_progress_handler(None, 0)
             cursor.close()
