@@ -8,11 +8,15 @@ missing bearer token) is deferred until the first ``query_database`` call and
 gets collapsed into the agent's blanket exception handler — operators see only
 "Please try again" in their MCP client while the real error sits in stderr.
 
-Each probe is intentionally minimal: open and immediately close a connection
-(no query), construct the LLM client (no API round-trip), create the persist
-dir and touch a sentinel file to confirm writability (no Chroma collection
-open, so the 80 MB embedding download stays lazy), and build the
-authenticator (catches bearer-mode configs missing a token).
+The probes are side-effect-light by design — except ``probe_memory``, which
+necessarily writes to disk: it creates the persist dir (and any missing
+parents) and touches then removes a sentinel file to confirm writability,
+since ``os.access`` alone gives wrong answers under EUID/ACL setups. Even
+``probe_memory`` avoids opening a Chroma collection so the ~80 MB embedding
+download stays lazy. The remaining probes are non-mutating: open and
+immediately close a connection (no query), construct the LLM client (no
+API round-trip), and build the authenticator (catches bearer-mode configs
+missing a token).
 """
 
 from __future__ import annotations
