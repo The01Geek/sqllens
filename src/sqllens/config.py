@@ -22,7 +22,7 @@ import shlex
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -114,6 +114,17 @@ class AuthConfig(BaseModel):
     jwt_jwks_url: str | None = None
     jwt_issuer: str | None = None
     jwt_audience: str | None = None
+
+    @model_validator(mode="after")
+    def _bearer_requires_token(self) -> AuthConfig:
+        # Without this guard, mode='bearer' with no token loads cleanly and the
+        # server starts — every request is then rejected at auth time with no
+        # startup signal that the config is broken.
+        if self.mode == "bearer" and (
+            self.bearer_token is None or not self.bearer_token.get_secret_value()
+        ):
+            raise ValueError(BEARER_TOKEN_MISSING_MESSAGE)
+        return self
 
 
 class ServerConfig(BaseModel):
@@ -224,6 +235,14 @@ def _resolved_toml_path() -> Path | None:
 API_KEY_MISSING_MESSAGE = (
     "llm.api_key is not set. Either set SQLLENS_LLM__API_KEY in your environment, "
     'or add `api_key = "..."` to the [llm] section of sqllens.toml.'
+)
+
+# Contains literal ``[auth]`` — same rich-markup caveat as ``API_KEY_MISSING_MESSAGE``.
+BEARER_TOKEN_MISSING_MESSAGE = (
+    "auth.mode='bearer' requires auth.bearer_token to be set. "
+    "Either set SQLLENS_AUTH__BEARER_TOKEN in your environment, "
+    'add `bearer_token = "..."` to the [auth] section of sqllens.toml, '
+    "or set auth.mode to a different value (none|jwt)."
 )
 """Shared by ``cli.serve`` (exits 2 before agent build) and ``agent.factory.build_agent``
 (raises before dereferencing the secret). The factory guard catches the residual

@@ -30,8 +30,8 @@ def build_authenticator(cfg: AuthConfig) -> Authenticator:
     if cfg.mode == "none":
         return NoOpAuthenticator()
     if cfg.mode == "bearer":
-        if cfg.bearer_token is None:
-            raise ValueError("auth.mode='bearer' requires auth.bearer_token to be set")
+        # AuthConfig's model validator guarantees bearer_token is set when mode='bearer'.
+        assert cfg.bearer_token is not None
         return BearerTokenAuthenticator(cfg.bearer_token.get_secret_value())
     if cfg.mode == "jwt":
         return JwtAuthenticator(
