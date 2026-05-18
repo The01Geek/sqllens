@@ -1,5 +1,6 @@
 """PostgreSQL implementation of SqlRunner interface."""
 
+import contextlib
 from typing import Optional
 import pandas as pd
 
@@ -108,5 +109,12 @@ class PostgresRunner(SqlRunner):
                 return pd.DataFrame({"rows_affected": [rows_affected]})
 
         finally:
-            cursor.close()
-            conn.close()
+            # Suppress secondary exceptions during cleanup so the primary
+            # query error (e.g. statement_timeout / "current transaction is
+            # aborted") reaches the LLM intact rather than being masked by
+            # InternalError / InterfaceError from closing a cursor or
+            # connection in an indeterminate state.
+            with contextlib.suppress(Exception):
+                cursor.close()
+            with contextlib.suppress(Exception):
+                conn.close()

@@ -1,5 +1,6 @@
 """MySQL implementation of SqlRunner interface."""
 
+import contextlib
 from typing import Optional
 import pandas as pd
 
@@ -89,4 +90,9 @@ class MySQLRunner(SqlRunner):
             return df
 
         finally:
-            conn.close()
+            # Suppress secondary exceptions during cleanup so the primary
+            # query error (e.g. max_statement_time / lost-connection) reaches
+            # the LLM intact rather than being masked by InterfaceError /
+            # BrokenPipeError from closing an indeterminate-state connection.
+            with contextlib.suppress(Exception):
+                conn.close()
