@@ -22,6 +22,10 @@ def _clean_config_env(monkeypatch) -> None:
     # slate.
     monkeypatch.delenv("SQLLENS_CONFIG", raising=False)
     monkeypatch.delenv("SQLLENS_LLM__API_KEY", raising=False)
+    # Cleared so AuthConfig._token_only_with_bearer_mode doesn't reject configs
+    # in unrelated tests because a CI runner or developer shell happens to have
+    # the bearer token set globally.
+    monkeypatch.delenv("SQLLENS_AUTH__BEARER_TOKEN", raising=False)
     # The sub-section models (``DatabaseConfig``, ``LLMConfig``, ``MemoryConfig``,
     # ``AuthConfig``, ``ServerConfig``) are plain ``BaseModel`` — see the
     # architectural note in ``config.py`` and issue #26 for why they intentionally
