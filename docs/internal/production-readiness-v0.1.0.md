@@ -169,6 +169,8 @@ empty-component case returns `"(no answer)"`. None of this is tested.
 survives, truncation note format, empty columns fallback at line 70, cell
 formatting for None/Decimal/datetime/NaN (see also P0 Product gaps below).
 
+**Tracking:** #71
+
 #### T-2. Zero coverage of `tools/query_database.py` (+ exposes a singleton bug)
 **File:** [`src/sqllens/tools/query_database.py`](../../src/sqllens/tools/query_database.py) ·
 **Category:** No-test area / Bug
