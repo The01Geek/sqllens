@@ -111,6 +111,91 @@ def test_probe_database_mysql_missing_driver_raises_clean_preflight_error(
 
 
 @pytest.mark.parametrize(
+    "db_url",
+    [
+        "postgres://user:pw@localhost:5432/db",
+        "postgresql://user:pw@localhost:5432/db",
+        "postgresql+psycopg2://user:pw@localhost:5432/db",
+    ],
+)
+def test_probe_database_postgres_normalizes_dsn_to_postgresql_scheme(
+    db_url: str,
+) -> None:
+    # psycopg2 only accepts ``postgresql://``; the probe rewrites the legacy
+    # ``postgres://`` and SQLAlchemy-style ``postgresql+psycopg2://`` forms.
+    # Assert on the DSN psycopg2.connect actually receives.
+    psycopg2 = pytest.importorskip("psycopg2")
+    with patch.object(psycopg2, "connect") as mock_connect:
+        probe_database(_cfg(db_url=db_url))
+
+    mock_connect.assert_called_once()
+    dsn = mock_connect.call_args.args[0]
+    assert dsn == "postgresql://user:pw@localhost:5432/db"
+    assert mock_connect.call_args.kwargs["connect_timeout"] == 5
+
+
+def test_probe_database_postgres_wraps_driver_error_with_cause() -> None:
+    psycopg2 = pytest.importorskip("psycopg2")
+
+    class FakePgError(psycopg2.Error):
+        pass
+
+    with patch.object(psycopg2, "connect", side_effect=FakePgError("unreachable")):
+        with pytest.raises(PreflightError) as exc_info:
+            probe_database(_cfg(db_url="postgres://user:pw@localhost:5432/db"))
+
+    assert exc_info.value.subsystem == "database"
+    assert "FakePgError" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, psycopg2.Error)
+
+
+def test_probe_database_mysql_maps_connect_kwargs() -> None:
+    # test_probe_database_mysql_url_requires_user_and_host only covers the
+    # early-validation guard. Assert the full url -> pymysql.connect kwargs
+    # mapping (host, port-default, user, password-default, db path strip).
+    pymysql = pytest.importorskip("pymysql")
+    with patch.object(pymysql, "connect") as mock_connect:
+        probe_database(_cfg(db_url="mysql://alice:s3cret@db.internal:3307/shop"))
+
+    mock_connect.assert_called_once()
+    kwargs = mock_connect.call_args.kwargs
+    assert kwargs["host"] == "db.internal"
+    assert kwargs["port"] == 3307
+    assert kwargs["user"] == "alice"
+    assert kwargs["password"] == "s3cret"
+    assert kwargs["database"] == "shop"
+    assert kwargs["connect_timeout"] == 5
+
+
+def test_probe_database_mysql_applies_port_password_db_defaults() -> None:
+    # No port -> 3306, no password -> "", no path -> "" (lstrip of "").
+    pymysql = pytest.importorskip("pymysql")
+    with patch.object(pymysql, "connect") as mock_connect:
+        probe_database(_cfg(db_url="mysql://bob@db.internal"))
+
+    kwargs = mock_connect.call_args.kwargs
+    assert kwargs["host"] == "db.internal"
+    assert kwargs["port"] == 3306
+    assert kwargs["user"] == "bob"
+    assert kwargs["password"] == ""
+    assert kwargs["database"] == ""
+
+
+def test_probe_database_mysql_wraps_driver_error_with_cause() -> None:
+    pymysql = pytest.importorskip("pymysql")
+
+    with patch.object(
+        pymysql, "connect", side_effect=pymysql.MySQLError("unreachable")
+    ):
+        with pytest.raises(PreflightError) as exc_info:
+            probe_database(_cfg(db_url="mysql://alice:pw@db.internal:3306/shop"))
+
+    assert exc_info.value.subsystem == "database"
+    assert "MySQLError" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, pymysql.MySQLError)
+
+
+@pytest.mark.parametrize(
     ("driver_module", "db_url"),
     [
         ("sqlite3", "sqlite:///:memory:"),
@@ -158,6 +243,27 @@ def test_probe_llm_constructs_anthropic_service_without_round_trip() -> None:
     kwargs = mock_service.call_args.kwargs
     assert kwargs["api_key"] == "sk-ant-real-test"
     assert "model" in kwargs
+
+
+def test_probe_llm_constructor_anthropic_error_becomes_preflight_error() -> None:
+    # When AnthropicLlmService's constructor raises an anthropic.AnthropicError
+    # (e.g. a malformed base_url or client-side validation), the probe must
+    # translate it to PreflightError(subsystem="llm") with the original
+    # exception chained via __cause__ — not let it escape raw.
+    import anthropic
+
+    original = anthropic.AnthropicError("nope")
+    with patch(
+        "sqllens.agent.integrations.AnthropicLlmService",
+        side_effect=original,
+    ):
+        with pytest.raises(PreflightError) as exc_info:
+            probe_llm(_cfg(api_key="sk-ant-real-test"))
+
+    assert exc_info.value.subsystem == "llm"
+    assert "AnthropicError" in exc_info.value.detail
+    assert "nope" in exc_info.value.detail
+    assert exc_info.value.__cause__ is original
 
 
 def test_probe_llm_does_not_swallow_programmer_errors() -> None:
