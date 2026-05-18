@@ -236,6 +236,12 @@ API_KEY_MISSING_MESSAGE = (
     "llm.api_key is not set. Either set SQLLENS_LLM__API_KEY in your environment, "
     'or add `api_key = "..."` to the [llm] section of sqllens.toml.'
 )
+"""Shared by ``cli.serve`` (exits 2 before agent build) and ``agent.factory.build_agent``
+(raises before dereferencing the secret). The factory guard catches the residual
+bypass paths — programmatic embedders and tests that build an ``Agent`` without
+going through the CLI — so they get the same actionable message instead of an
+opaque ``AttributeError``."""
+
 
 # Contains literal ``[auth]`` — same rich-markup caveat as ``API_KEY_MISSING_MESSAGE``.
 BEARER_TOKEN_MISSING_MESSAGE = (
@@ -244,11 +250,6 @@ BEARER_TOKEN_MISSING_MESSAGE = (
     'add `bearer_token = "..."` to the [auth] section of sqllens.toml, '
     "or set auth.mode to a different value (none|jwt)."
 )
-"""Shared by ``cli.serve`` (exits 2 before agent build) and ``agent.factory.build_agent``
-(raises before dereferencing the secret). The factory guard catches the residual
-bypass paths — programmatic embedders and tests that build an ``Agent`` without
-going through the CLI — so they get the same actionable message instead of an
-opaque ``AttributeError``."""
 
 
 _UTF8_BOM = b"\xef\xbb\xbf"
