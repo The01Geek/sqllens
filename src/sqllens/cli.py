@@ -27,9 +27,10 @@ console = Console()
 
 
 def _is_loopback_host(host: str) -> bool:
-    # Fail closed: wildcards ("0.0.0.0", "::") and unresolved hostnames are not
-    # loopback. No DNS resolution by design — the guard MUST not depend on
-    # whatever the DNS happens to say at startup time.
+    # Fail closed: any non-loopback IP and any unparseable hostname (wildcards
+    # like 0.0.0.0/::, public/private addresses, hostnames that aren't
+    # literally "localhost") return False. No DNS resolution by design — the
+    # guard MUST not depend on whatever the DNS happens to say at startup.
     if host.lower() == "localhost":
         return True
     try:

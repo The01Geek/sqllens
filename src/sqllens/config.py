@@ -84,7 +84,8 @@ class AuthConfig(BaseModel):
         default=False,
         description=(
             "Acknowledge mode=none on a non-loopback host "
-            "(closed-network deployments only); opts out of the cli.serve loopback guard."
+            "(closed-network deployments only); relaxes the loopback-only invariant "
+            "for auth.mode=none HTTP servers."
         ),
     )
     # JWT fields land in Phase 4 — placeholder so config schema is stable.

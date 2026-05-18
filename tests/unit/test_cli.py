@@ -80,13 +80,49 @@ def test_serve_refuses_non_loopback_when_auth_none(
     monkeypatch.delenv("SQLLENS_AUTH__INSECURE", raising=False)
     monkeypatch.delenv("SQLLENS_AUTH__MODE", raising=False)
     cfg_path = _write_serve_config(tmp_path, host=host)
+    called = _stub_server_run(monkeypatch)
 
     result = runner.invoke(app, ["serve", "-c", str(cfg_path)])
     assert result.exit_code == 2, result.stdout
+    assert called == [], "run() must NOT be invoked when the guard refuses"
     assert "Refusing to start" in result.stdout
     assert host in result.stdout
     assert "SQLLENS_AUTH__MODE=bearer" in result.stdout
     assert "SQLLENS_AUTH__INSECURE=1" in result.stdout
+
+
+@pytest.mark.parametrize("host", ["[::1]", "127.0.0.1:8765", ""])
+def test_serve_refuses_unparseable_host_forms(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: str
+) -> None:
+    # ipaddress.ip_address() rejects bracketed, host:port, and empty forms.
+    # Pinning the fail-closed behavior so a future "helpful normalization" PR
+    # can't silently widen the loopback set.
+    monkeypatch.setenv("SQLLENS_LLM__API_KEY", "sk-ant-test")
+    monkeypatch.delenv("SQLLENS_AUTH__INSECURE", raising=False)
+    monkeypatch.delenv("SQLLENS_AUTH__MODE", raising=False)
+    cfg_path = _write_serve_config(tmp_path, host=host)
+    called = _stub_server_run(monkeypatch)
+
+    result = runner.invoke(app, ["serve", "-c", str(cfg_path)])
+    assert result.exit_code == 2, result.stdout
+    assert called == []
+    assert "Refusing to start" in result.stdout
+
+
+def test_serve_allows_ipv6_zone_id_loopback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ipaddress accepts the zone-id form ("::1%lo") and reports is_loopback=True.
+    monkeypatch.setenv("SQLLENS_LLM__API_KEY", "sk-ant-test")
+    monkeypatch.delenv("SQLLENS_AUTH__INSECURE", raising=False)
+    monkeypatch.delenv("SQLLENS_AUTH__MODE", raising=False)
+    cfg_path = _write_serve_config(tmp_path, host="::1%lo")
+    called = _stub_server_run(monkeypatch)
+
+    result = runner.invoke(app, ["serve", "-c", str(cfg_path)])
+    assert result.exit_code == 0, result.stdout
+    assert called == [True]
 
 
 def test_serve_insecure_env_var_opt_out_bypasses_guard(
@@ -199,3 +235,30 @@ def test_serve_stdio_transport_skips_loopback_guard(
     result = runner.invoke(app, ["serve", "-c", str(cfg_path)])
     assert result.exit_code == 0, result.stdout
     assert called == [True]
+
+
+def test_auth_config_insecure_defaults_false() -> None:
+    from sqllens.config import AuthConfig
+
+    assert AuthConfig().insecure is False
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [("1", True), ("true", True), ("0", False), ("false", False)],
+)
+def test_auth_config_insecure_env_coercion(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raw: str, expected: bool
+) -> None:
+    # Pydantic-settings parses bool env vars per its standard rules; pin the
+    # subset we rely on so a future field-type change can't silently flip the
+    # guard's opt-out into a different shape.
+    from sqllens.config import Config
+
+    monkeypatch.setenv("SQLLENS_LLM__API_KEY", "sk-ant-test")
+    monkeypatch.setenv("SQLLENS_AUTH__INSECURE", raw)
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text('[database]\nurl = "sqlite:///./demo.db"\n')
+
+    cfg = Config.load(cfg_path)
+    assert cfg.auth.insecure is expected
