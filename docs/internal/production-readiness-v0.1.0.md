@@ -407,7 +407,7 @@ file on POSIX.
 ## Suggested release plan
 
 ### v0.1.0-rc.1 — safety & ops baseline (target: 2–3 weeks)
-**Must land:** S-1, S-2, S-3, S-4, C-2, C-3, C-4, T-1, T-2, T-3, P-1, P-2, P-3, P-4, P-5, P-6, O-1, O-4, O-5, O-7, O-8, O-12, O-13, O-14, O-16.
+**Must land:** S-1, S-2, S-3, S-4, C-3, C-4, T-1, T-2, T-3, P-1, P-2, P-3, P-4, P-5, P-6, O-1, O-4, O-5, O-7, O-8, O-12, O-13, O-14, O-16. (~~C-1~~ and ~~C-2~~ landed early via PR #43.)
 
 Rationale: every P0 + the highest-trust-impact P1s (the bypass-corpus tests
 in T-4, the timeout/row-cap in S-3, the Docker default in S-2). Without
