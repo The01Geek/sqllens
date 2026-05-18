@@ -255,11 +255,11 @@ class _SessionManagerLifespan:
                 except Exception as exc:
                     # Broad by design: every startup failure must surface as
                     # lifespan.startup.failed so the ASGI host doesn't hang
-                    # waiting for an ack. BaseException subclasses
-                    # (asyncio.CancelledError, KeyboardInterrupt, SystemExit,
-                    # MemoryError) are deliberately *not* caught — they signal
-                    # cancellation or interpreter teardown and must propagate
-                    # to unwind the host cleanly.
+                    # waiting for an ack. BaseException-only subclasses
+                    # (asyncio.CancelledError, KeyboardInterrupt, SystemExit)
+                    # are deliberately *not* caught — they signal cancellation
+                    # or interpreter teardown and must propagate to unwind the
+                    # host cleanly.
                     # Drop the partially-acquired CM and finalize the
                     # instance: calling __aexit__ on a CM whose __aenter__
                     # never completed is undefined per PEP 343, and a host
@@ -305,12 +305,11 @@ class _SessionManagerLifespan:
                     except Exception as exc:
                         # Broad by design: any __aexit__ failure must surface
                         # as lifespan.shutdown.failed so the ASGI host doesn't
-                        # hang waiting for an ack. BaseException subclasses
-                        # (asyncio.CancelledError, KeyboardInterrupt,
-                        # SystemExit, MemoryError) are deliberately *not*
-                        # caught — they signal cancellation or interpreter
-                        # teardown and must propagate to unwind the host
-                        # cleanly.
+                        # hang waiting for an ack. BaseException-only
+                        # subclasses (asyncio.CancelledError, KeyboardInterrupt,
+                        # SystemExit) are deliberately *not* caught — they
+                        # signal cancellation or interpreter teardown and must
+                        # propagate to unwind the host cleanly.
                         self._shutdown_done = True
                         logger.exception("session manager shutdown failed")
                         await send(
@@ -327,7 +326,11 @@ class _SessionManagerLifespan:
                     # the _shutdown_done idempotent branch, so reaching here
                     # with cm is None and not _started means startup was never
                     # attempted. A host that does this is misbehaving; surface
-                    # it rather than masking the bug with a clean ack.
+                    # it rather than masking the bug with a clean ack. (The
+                    # other cm-is-None case — started, CM already captured-and-
+                    # cleared — is unreachable here because that path always
+                    # set _shutdown_done and returned above; if it ever became
+                    # reachable it falls through to the clean ack below.)
                     self._shutdown_done = True
                     logger.warning(
                         "lifespan.shutdown received without prior lifespan.startup"

@@ -125,8 +125,8 @@ class _FakeSessionManager:
 
     def __init__(
         self,
-        startup_exc: Exception | None = None,
-        shutdown_exc: Exception | None = None,
+        startup_exc: BaseException | None = None,
+        shutdown_exc: BaseException | None = None,
     ) -> None:
         self._startup_exc = startup_exc
         self._shutdown_exc = shutdown_exc
@@ -252,11 +252,61 @@ def test_lifespan_shutdown_without_startup_surfaces_failed() -> None:
     types = [m["type"] for m in sent]
     assert "lifespan.shutdown.complete" not in types
     assert sent[-1]["type"] == "lifespan.shutdown.failed"
-    assert "startup" in sent[-1]["message"].lower()
+    # Pin the distinguishing phrase, not just any "startup" substring, so
+    # this can't be conflated with the duplicate / single-shot messages.
+    assert "without prior startup" in sent[-1]["message"].lower()
     # Never-entered CM: run()/__aenter__/__aexit__ all untouched.
     assert sm.run_calls == 0
     assert sm.aenter_calls == 0
     assert sm.aexit_calls == 0
+
+    # The branch finalizes the instance (_shutdown_done = True), matching
+    # every other failure path in this file: a follow-up scope's startup
+    # must get the single-shot rejection, not a fresh run().
+    receive2, send2, sent2 = _make_io([{"type": "lifespan.startup"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive2, send2))
+    assert sent2[-1]["type"] == "lifespan.startup.failed"
+    assert "single-shot" in sent2[-1]["message"].lower()
+    assert sm.run_calls == 0
+
+
+def test_lifespan_startup_baseexception_propagates_not_caught() -> None:
+    """Concern 1 contract: a BaseException-only subclass raised from
+    ``__aenter__`` must propagate out of ``_handle_lifespan`` rather than be
+    converted into a ``lifespan.startup.failed`` reply.
+
+    Pins the documented breadth of the startup ``except Exception`` (it must
+    stay ``Exception``, never widen to ``BaseException``/bare ``except``): if
+    a future refactor caught ``BaseException``, structured-concurrency
+    cancellation of the lifespan task would be silently swallowed.
+    """
+    sm = _FakeSessionManager(startup_exc=KeyboardInterrupt("interrupt"))
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io([{"type": "lifespan.startup"}])
+
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    # The signal escaped; no startup.failed ack was fabricated for it.
+    assert sent == []
+
+
+def test_lifespan_shutdown_baseexception_propagates_not_caught() -> None:
+    """Symmetric twin: a BaseException-only subclass raised from ``__aexit__``
+    must propagate, not be converted into ``lifespan.shutdown.failed``.
+    """
+    sm = _FakeSessionManager(shutdown_exc=KeyboardInterrupt("interrupt"))
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io(
+        [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    types = [m["type"] for m in sent]
+    assert types == ["lifespan.startup.complete"]
+    assert "lifespan.shutdown.failed" not in types
 
 
 def test_lifespan_unknown_message_type_is_logged_and_loop_continues() -> None:
