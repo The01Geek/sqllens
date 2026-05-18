@@ -169,17 +169,34 @@ Regression pinned by
 
 ### Test coverage
 
-#### T-1. Zero coverage of `tools/_format.py`
+#### T-1. Zero coverage of `tools/_format.py` — **RESOLVED**
 **File:** [`src/sqllens/tools/_format.py`](../../src/sqllens/tools/_format.py) ·
-**Category:** No-test area
+**Category:** No-test area · **Status:** Fixed by #71
 
 The `is_error` detection drives whether the MCP tool returns `isError: true`,
-dataframe rendering truncates at 50 rows with a footer note, and the
-empty-component case returns `"(no answer)"`. None of this is tested.
+dataframe rendering truncates at `_MAX_ROWS_RENDERED` rows with a footer note,
+and the empty-component case returns `"(no answer)"`. None of this was tested.
 
-**Fix:** Unit tests for each branch — error wins over text, last TEXT
-survives, truncation note format, empty columns fallback at line 70, cell
-formatting for None/Decimal/datetime/NaN (see also P0 Product gaps below).
+**Resolution:** [`tests/unit/test_format.py`](../../tests/unit/test_format.py)
+pins every branch of `components_to_markdown` and `_render_dataframe`:
+
+- Error-card precedence (error wins over text and tables; surfaces
+  `description` verbatim; falls back to `"Agent reported an error"` when
+  `description` is missing).
+- Last-TEXT-wins suppression of intermediate reasoning, with a whitespace-only
+  guard so trailing blank `TEXT` components cannot clobber a real answer.
+- Empty stream and empty-dataframe both collapse to `"(no answer)"`.
+- Mixed table + text response puts tables first, then a blank line, then the
+  summary.
+- `_render_dataframe`: columns fallback from `rows[0].keys()` when `columns`
+  is empty, explicit `columns` override row-key order and drop unlisted keys,
+  missing keys render as empty cells (no `KeyError`), truncation footer fires
+  at exactly `_MAX_ROWS_RENDERED + 1` rows with the expected `"Showing first
+  N of M rows."` wording.
+- Cell coercion pinned for `None` / `Decimal` / `datetime` (naive `str(...)`
+  — overlaps with P-5 below, which proposes nicer formatting) and for
+  unescaped `|` characters inside cell values (known limitation guarded
+  against accidental change in either direction).
 
 **Tracking:** #71
 
