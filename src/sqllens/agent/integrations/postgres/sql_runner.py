@@ -7,6 +7,7 @@ import pandas as pd
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
 from sqllens.safety.limits import rows_to_capped_df
+from sqllens.safety.readonly import is_read_shaped
 
 
 _DEFAULT_MAX_ROWS = 10_000
@@ -104,9 +105,7 @@ class PostgresRunner(SqlRunner):
                 finally:
                     setup.close()
 
-            query_type = args.sql.strip().upper().split()[0]
-
-            if query_type == "SELECT":
+            if is_read_shaped(args.sql):
                 # Named cursors are server-side and stream from a portal; they
                 # require an open transaction (psycopg2's default autocommit=False).
                 cursor_name = f"sqllens_{uuid.uuid4().hex}"

@@ -123,6 +123,99 @@ class TestSqliteRunnerCap:
         assert df.attrs[MAX_ROWS_ATTR] == 10
 
 
+class TestReadShapedDetection:
+    """Regression guard for CVE-style CTE bypass of the row cap.
+
+    Issue #37 review found that `args.sql.strip().upper().split()[0] == "SELECT"`
+    routed `WITH ... SELECT` queries to the non-streaming branch (cursor.execute
+    + commit + rowcount), bypassing fetchmany(max_rows+1). The fix is the
+    `is_read_shaped` helper which accepts SELECT / WITH / UNION / INTERSECT /
+    EXCEPT as the first keyword. These tests pin that contract.
+    """
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT 1",
+            "select 1",
+            "  SELECT 1  ",
+            "WITH t AS (SELECT 1) SELECT * FROM t",
+            "with recursive x(n) AS (SELECT 1) SELECT * FROM x",
+            "SELECT 1 UNION SELECT 2",
+            "(SELECT 1) UNION (SELECT 2)",
+            "(WITH t AS (SELECT 1) SELECT * FROM t)",
+            "\n\tSELECT 1",
+        ],
+    )
+    def test_read_shaped_accepts(self, sql: str) -> None:
+        from sqllens.safety.readonly import is_read_shaped
+
+        assert is_read_shaped(sql) is True
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "",
+            "   ",
+            "INSERT INTO t VALUES (1)",
+            "UPDATE t SET n = 1",
+            "DELETE FROM t",
+            "DROP TABLE t",
+            "CREATE TABLE t (n INT)",
+            "ALTER TABLE t ADD COLUMN x INT",
+        ],
+    )
+    def test_read_shaped_rejects(self, sql: str) -> None:
+        from sqllens.safety.readonly import is_read_shaped
+
+        assert is_read_shaped(sql) is False
+
+
+class TestSqliteRunnerCteRowCap:
+    """Regression: CTE queries (`WITH ... SELECT`) must honor max_rows.
+
+    Before the fix, the runner classified by first keyword == "SELECT" only,
+    so a CTE fell through to the non-streaming branch and returned a
+    rows_affected DataFrame instead of capped rows.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cte_row_cap_truncates(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "cte.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE t (n INTEGER)")
+        conn.executemany("INSERT INTO t (n) VALUES (?)", [(i,) for i in range(50)])
+        conn.commit()
+        conn.close()
+
+        sql = "WITH src AS (SELECT n FROM t) SELECT n FROM src"
+        runner = SqliteRunner(database_path=str(db_path), max_rows=10)
+        df = await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+
+        # The streaming branch produced an "n" column, not a rows_affected DF.
+        assert "n" in df.columns
+        assert "rows_affected" not in df.columns
+        assert len(df) == 10
+        assert df.attrs[TRUNCATED_ATTR] is True
+        assert df.attrs[MAX_ROWS_ATTR] == 10
+
+    @pytest.mark.asyncio
+    async def test_recursive_cte_row_cap_truncates(self, tmp_path: Path) -> None:
+        """The exact attack shape from issue #37: WITH RECURSIVE with no LIMIT."""
+        db_path = tmp_path / "rcte.db"
+        sql = (
+            "WITH RECURSIVE x(n) AS ("
+            "  SELECT 1 UNION ALL SELECT n + 1 FROM x WHERE n < 100"
+            ") SELECT n FROM x"
+        )
+        runner = SqliteRunner(database_path=str(db_path), max_rows=10)
+        df = await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+
+        assert "n" in df.columns
+        assert len(df) == 10
+        assert df.attrs[TRUNCATED_ATTR] is True
+
+
 class TestSqliteRunnerTimeout:
     @pytest.mark.asyncio
     async def test_progress_handler_interrupts_long_query(self, tmp_path: Path) -> None:

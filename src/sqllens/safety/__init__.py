@@ -28,7 +28,7 @@ from sqllens.safety.limits import (
     RowCapRunner,
     mark_truncation,
 )
-from sqllens.safety.readonly import UnsafeSqlError, assert_select_only
+from sqllens.safety.readonly import UnsafeSqlError, assert_select_only, is_read_shaped
 
 if TYPE_CHECKING:
     from sqllens.agent.core.tool import ToolContext
@@ -40,6 +40,7 @@ __all__ = [
     "RowCapRunner",
     "UnsafeSqlError",
     "assert_select_only",
+    "is_read_shaped",
     "mark_truncation",
 ]
 

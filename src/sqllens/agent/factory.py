@@ -102,7 +102,7 @@ def build_agent(cfg: Config) -> Agent:
 def build_sql_runner(
     url: str,
     *,
-    statement_timeout_ms: int = 0,
+    statement_timeout_ms: int = 30_000,
     max_rows: int = 10_000,
 ) -> SqlRunner:
     """Pick the right SQL runner from the database URL prefix.

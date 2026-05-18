@@ -63,7 +63,7 @@ Dialect picked from the URL scheme prefix:
 
 Unsupported schemes raise `ValueError` — the calling CLI layer turns that into a "Config error: …" exit 2.
 
-`statement_timeout_ms` and `max_rows` are threaded as keyword arguments into every runner so each engine can apply its native primitives (Postgres `SET statement_timeout`, MySQL `SET SESSION MAX_EXECUTION_TIME`, SQLite progress-handler deadline) and stream with `fetchmany(max_rows + 1)`. Callers outside `build_agent` (programmatic embedders, tests) can pass either keyword; defaults match `DatabaseConfig` (`0` = disabled timeout, `10_000` rows).
+`statement_timeout_ms` and `max_rows` are threaded as keyword arguments into every runner so each engine can apply its native primitives (Postgres `SET statement_timeout`, MySQL `SET SESSION MAX_EXECUTION_TIME`, SQLite progress-handler deadline) and stream with `fetchmany(max_rows + 1)`. Callers outside `build_agent` (programmatic embedders, tests) can pass either keyword; defaults match `DatabaseConfig` (`30_000` ms timeout, `10_000` rows).
 
 `_sqlglot_dialect(url)` maps the same scheme to a sqlglot dialect name (`"sqlite"`, `"postgres"`, `"mysql"`) for the read-only guard. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md).
 
