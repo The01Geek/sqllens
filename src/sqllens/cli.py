@@ -5,9 +5,12 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
@@ -15,6 +18,9 @@ from rich.markup import escape
 
 from sqllens import __version__
 from sqllens.config import API_KEY_MISSING_MESSAGE
+
+if TYPE_CHECKING:
+    from sqllens.config import Config
 
 app = typer.Typer(
     name="sqllens",
@@ -26,6 +32,54 @@ console = Console()
 # `sqllens serve` shares stdout with the stdio MCP JSON-RPC stream; routing
 # errors to stderr keeps that channel clean. Other commands follow suit.
 err_console = Console(stderr=True)
+
+def _is_loopback_host(host: str) -> bool:
+    # Recognizes the entire 127.0.0.0/8 IPv4 loopback range and ::1, plus
+    # IPv4-mapped IPv6 loopback (e.g. ::ffff:127.0.0.1) — the IPv4-mapped form
+    # is unwrapped explicitly because CPython's IPv6Address.is_loopback returns
+    # False for these on Python 3.11.x and 3.12.0-3.12.3 (gh-117566, fixed in
+    # 3.12.4 / 3.13). No DNS resolution — wildcards ("0.0.0.0", "::") and
+    # arbitrary external hostnames fail closed and must use bearer auth or
+    # the SQLLENS_AUTH__INSECURE opt-out. The single literal hostname
+    # "localhost" is matched case-insensitively (RFC 1035); no other
+    # hostnames are recognized. Non-string input (None, ints, etc. from a
+    # future refactor) also fails closed rather than raising — this is a
+    # security guard and a traceback in place of a refusal would be misread
+    # as "the guard didn't apply".
+    try:
+        if host.lower() == "localhost":
+            return True
+        addr = ipaddress.ip_address(host)
+    except (ValueError, AttributeError, TypeError):
+        return False
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        return addr.ipv4_mapped.is_loopback
+    return addr.is_loopback
+
+
+_INSECURE_NON_LOOPBACK_MESSAGE = (
+    "Refusing to start an unauthenticated HTTP server on a non-loopback interface "
+    "(server.host={host!r}, auth.mode=none). Set SQLLENS_AUTH__MODE=bearer with a "
+    "SQLLENS_AUTH__BEARER_TOKEN, or SQLLENS_AUTH__INSECURE=1 to override for "
+    "closed-network deployments."
+)
+
+
+def _loopback_policy_violated(cfg: Config) -> bool:
+    """True when the unauthenticated-non-loopback policy condition holds.
+
+    Callers (``serve``, ``validate``) combine this with ``cfg.auth.insecure``:
+    when the policy condition holds and the operator has *not* set
+    ``SQLLENS_AUTH__INSECURE=1`` they hard-fail; with the opt-out set they
+    proceed and emit a visible breadcrumb. This helper does not consult
+    ``cfg.auth.insecure`` itself so callers can phrase the warning/error
+    message in surface-appropriate terms.
+    """
+    return (
+        cfg.server.transport == "http"
+        and cfg.auth.mode == "none"
+        and not _is_loopback_host(cfg.server.host)
+    )
 
 
 def _version_callback(value: bool) -> None:
@@ -76,9 +130,20 @@ def serve(
     config: Path | None = typer.Option(
         None, "--config", "-c", help="Path to sqllens.toml. Falls back to env / ./sqllens.toml."
     ),
+    no_preflight: bool = typer.Option(
+        False,
+        "--no-preflight",
+        envvar="SQLLENS_NO_PREFLIGHT",
+        help=(
+            "Skip eager DB/LLM/Chroma/auth probes. Useful in container "
+            "orchestrators where dependencies come up after the server, or in "
+            "tests. Otherwise leave on — the probes are your fail-fast guard."
+        ),
+    ),
 ) -> None:
     """Start the MCP server."""
     from sqllens.config import Config
+    from sqllens.preflight import PreflightError, run_preflight
     from sqllens.server import run
 
     try:
@@ -89,27 +154,97 @@ def serve(
     if cfg.llm.api_key is None:
         err_console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
         raise typer.Exit(code=2)
+    if _loopback_policy_violated(cfg):
+        if not cfg.auth.insecure:
+            err_console.print(
+                f"[red]Refusing to start:[/red] "
+                f"{escape(_INSECURE_NON_LOOPBACK_MESSAGE.format(host=cfg.server.host))}"
+            )
+            raise typer.Exit(code=2)
+        err_console.print(
+            f"[yellow]Warning:[/yellow] SQLLENS_AUTH__INSECURE=1 — starting "
+            f"unauthenticated HTTP server on {escape(cfg.server.host)}. "
+            "Closed-network deployments only."
+        )
+    if no_preflight:
+        err_console.print("[yellow]Preflight skipped (--no-preflight).[/yellow]")
+    else:
+        try:
+            run_preflight(cfg)
+        except PreflightError as e:
+            err_console.print(f"[red]Preflight failed:[/red] {escape(str(e))}")
+            raise typer.Exit(code=2) from e
     run(cfg)
 
 
 @app.command(name="validate")
 def validate(
     config: Path | None = typer.Option(None, "--config", "-c"),
+    check_db: bool = typer.Option(False, "--check-db", help="Probe the database connection."),
+    check_llm: bool = typer.Option(False, "--check-llm", help="Probe the LLM client."),
+    check_memory: bool = typer.Option(
+        False, "--check-memory", help="Probe the Chroma persist directory."
+    ),
+    check_auth: bool = typer.Option(False, "--check-auth", help="Probe the authenticator."),
 ) -> None:
-    """Validate config without starting the server."""
+    """Validate config without starting the server.
+
+    Schema is always validated. Pass any combination of ``--check-*`` flags to
+    also run the corresponding preflight probe — same checks ``serve`` runs.
+    """
     from sqllens.config import Config
+    from sqllens.preflight import (
+        PreflightError,
+        probe_auth,
+        probe_database,
+        probe_llm,
+        probe_memory,
+    )
 
     try:
         cfg = Config.load(config)
     except Exception as e:
         err_console.print(f"[red]Invalid:[/red] {escape(str(e))}")
         raise typer.Exit(code=2) from e
+    # Mirror serve's guard so CI / pre-deploy linting catches the
+    # misconfiguration before `serve` would refuse to start.
+    violated = _loopback_policy_violated(cfg)
+    if violated and not cfg.auth.insecure:
+        err_console.print(
+            f"[red]Invalid:[/red] "
+            f"{escape(_INSECURE_NON_LOOPBACK_MESSAGE.format(host=cfg.server.host))}"
+        )
+        raise typer.Exit(code=2)
     console.print("[green]Config OK[/green]")
     console.print(f"  database: {cfg.database.name} ({cfg.database.url.split('://')[0]})")
     llm_suffix = "" if cfg.llm.api_key is not None else " (api_key NOT SET)"
     console.print(f"  llm:      {cfg.llm.provider} / {cfg.llm.model}{llm_suffix}")
-    console.print(f"  auth:     {cfg.auth.mode}")
+    auth_line = f"  auth:     {cfg.auth.mode}"
+    if violated:
+        auth_line += (
+            f" [yellow](SQLLENS_AUTH__INSECURE=1 — non-loopback host "
+            f"{escape(cfg.server.host)} with auth.mode=none)[/yellow]"
+        )
+    console.print(auth_line)
     console.print(f"  transport: {cfg.server.transport}")
+
+    selected: list[tuple[str, Callable[..., None]]] = []
+    if check_db:
+        selected.append(("database", probe_database))
+    if check_llm:
+        selected.append(("llm", probe_llm))
+    if check_memory:
+        selected.append(("memory", probe_memory))
+    if check_auth:
+        selected.append(("auth", probe_auth))
+
+    for label, probe in selected:
+        try:
+            probe(cfg)
+        except PreflightError as e:
+            err_console.print(f"[red]Preflight failed:[/red] {escape(str(e))}")
+            raise typer.Exit(code=2) from e
+        console.print(f"  [green]{label} OK[/green]")
 
 
 # ---------------------------------------------------------------------------

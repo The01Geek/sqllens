@@ -13,6 +13,7 @@ from sqllens.agent.components import (
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.capabilities.file_system import FileSystem
 from sqllens.agent.integrations.local import LocalFileSystem
+from sqllens.safety.limits import MAX_ROWS_ATTR, TRUNCATED_ATTR
 
 
 class RunSqlTool(Tool[RunSqlToolArgs]):
@@ -63,15 +64,35 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
             query_type = args.sql.strip().upper().split()[0]
 
             if query_type == "SELECT":
-                # Handle SELECT queries with results
+                # Read the truncation signal before branching so the empty
+                # branch also surfaces the "re-issue narrower" hint instead of
+                # silently reporting "no rows". The constants index the
+                # producer-side ``df.attrs`` contract; the metadata dict below
+                # uses the literal wire-format keys ``"truncated"`` and
+                # ``"max_rows"`` so a future rename of those constants does not
+                # accidentally rename the public JSON-RPC schema.
+                row_cap_hit = bool(df.attrs.get(TRUNCATED_ATTR, False))
+                cap_size = int(df.attrs.get(MAX_ROWS_ATTR, 0))
+                truncation_note = ""
+                if row_cap_hit:
+                    truncation_note = (
+                        f"\n\nResult truncated at {cap_size} rows. "
+                        "Re-issue with an explicit LIMIT or narrower WHERE clause."
+                    )
+
                 if df.empty:
-                    result = "Query executed successfully. No rows returned."
+                    result = (
+                        f"Query executed successfully. No rows returned.{truncation_note}"
+                    )
+                    description = "No rows returned"
+                    if row_cap_hit:
+                        description += f" (truncated at row cap {cap_size})"
                     ui_component = UiComponent(
                         rich_component=DataFrameComponent(
                             rows=[],
                             columns=[],
                             title="Query Results",
-                            description="No rows returned",
+                            description=description,
                         ),
                         simple_component=SimpleTextComponent(text=result),
                     )
@@ -80,6 +101,8 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         "columns": [],
                         "query_type": query_type,
                         "results": [],
+                        "truncated": row_cap_hit,
+                        "max_rows": cap_size,
                     }
                 else:
                     # Convert DataFrame to records
@@ -95,21 +118,27 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         filename, csv_content, context, overwrite=True
                     )
 
-                    # Create result text for LLM with truncated results
                     results_preview = csv_content
                     if len(results_preview) > 1000:
                         results_preview = (
                             results_preview[:1000]
-                            + "\n(Results truncated to 1000 characters. FOR LARGE RESULTS YOU DO NOT NEED TO SUMMARIZE THESE RESULTS OR PROVIDE OBSERVATIONS. THE NEXT STEP SHOULD BE A VISUALIZE_DATA CALL)"
+                            + "\n(Results truncated to 1000 characters for preview.)"
                         )
 
-                    result = f"{results_preview}\n\nResults saved to file: {filename}\n\n**IMPORTANT: FOR VISUALIZE_DATA USE FILENAME: {filename}**"
+                    result = (
+                        f"{results_preview}\n\nResults saved to file: {filename}"
+                        f"{truncation_note}"
+                    )
 
-                    # Create DataFrame component for UI
+                    description = (
+                        f"SQL query returned {row_count} rows with {len(columns)} columns"
+                    )
+                    if row_cap_hit:
+                        description += f" (truncated at row cap {cap_size})"
                     dataframe_component = DataFrameComponent.from_records(
                         records=cast(List[Dict[str, Any]], results_data),
                         title="Query Results",
-                        description=f"SQL query returned {row_count} rows with {len(columns)} columns",
+                        description=description,
                     )
 
                     ui_component = UiComponent(
@@ -123,6 +152,8 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         "query_type": query_type,
                         "results": results_data,
                         "output_file": filename,
+                        "truncated": row_cap_hit,
+                        "max_rows": cap_size,
                     }
             else:
                 # For non-SELECT queries (INSERT, UPDATE, DELETE, etc.)

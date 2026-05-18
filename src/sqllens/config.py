@@ -22,7 +22,7 @@ import shlex
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -46,6 +46,32 @@ class DatabaseConfig(BaseModel):
     )
     name: str = Field(default="primary", description="Display name shown via list_data_sources")
     read_only: bool = Field(default=True, description="Reject non-SELECT statements via SQL parser")
+    statement_timeout_ms: int = Field(
+        default=30_000,
+        ge=0,
+        # 24h ceiling rejects values so large they almost certainly reflect a
+        # unit-confusion typo (microseconds passed as ms, an epoch timestamp
+        # pasted in, etc.). Sub-second typos in the other direction
+        # (seconds-meant-as-ms producing too-short timeouts) are not catchable
+        # mechanically and stay the operator's responsibility.
+        le=24 * 60 * 60 * 1000,
+        description=(
+            "Server-side statement timeout in milliseconds. Applied via "
+            "SET statement_timeout (Postgres), SET SESSION MAX_EXECUTION_TIME (MySQL), "
+            "or a progress-handler deadline (SQLite). 0 disables (Postgres/MySQL only). "
+            "Upper bound is 24h (86_400_000) to catch unit-confusion typos."
+        ),
+    )
+    max_rows: int = Field(
+        default=10_000,
+        ge=1,
+        le=1_000_000,
+        description=(
+            "Hard ceiling on rows materialised per query. Runners stream via fetchmany "
+            "and stop at max_rows; the agent is told the result was truncated so it can "
+            "re-issue a narrower query."
+        ),
+    )
 
 
 class LLMConfig(BaseModel):
@@ -80,10 +106,33 @@ class AuthConfig(BaseModel):
 
     mode: Literal["none", "bearer", "jwt"] = "none"
     bearer_token: SecretStr | None = Field(default=None, description="Required when mode=bearer")
+    # Opt-out for the cli.serve loopback guard: closed-network deployments
+    # (private VPC, k8s ClusterIP, host-only Docker network) can set
+    # SQLLENS_AUTH__INSECURE=1 to acknowledge that mode=none on a non-loopback
+    # host is intentional. The CLI guard refuses to start otherwise.
+    insecure: bool = Field(
+        default=False,
+        description=(
+            "Acknowledge mode=none on a non-loopback host "
+            "(closed-network deployments only)"
+        ),
+    )
     # JWT fields land in Phase 4 — placeholder so config schema is stable.
     jwt_jwks_url: str | None = None
     jwt_issuer: str | None = None
     jwt_audience: str | None = None
+
+    @model_validator(mode="after")
+    def _bearer_requires_token(self) -> AuthConfig:
+        # Without this guard, mode='bearer' without a usable token (None, empty, or
+        # whitespace-only — a real footgun from shell env vars like
+        # ``SQLLENS_AUTH__BEARER_TOKEN=``) loads cleanly and the server starts. Every
+        # request is then rejected at auth time with no startup signal.
+        if self.mode == "bearer" and (
+            self.bearer_token is None or not self.bearer_token.get_secret_value().strip()
+        ):
+            raise ValueError(BEARER_TOKEN_MISSING_MESSAGE)
+        return self
 
 
 class ServerConfig(BaseModel):
@@ -200,6 +249,15 @@ API_KEY_MISSING_MESSAGE = (
 bypass paths — programmatic embedders and tests that build an ``Agent`` without
 going through the CLI — so they get the same actionable message instead of an
 opaque ``AttributeError``."""
+
+
+# Contains literal ``[auth]`` — same rich-markup caveat as ``API_KEY_MISSING_MESSAGE``.
+BEARER_TOKEN_MISSING_MESSAGE = (
+    "auth.mode='bearer' requires auth.bearer_token to be set. "
+    "Either set SQLLENS_AUTH__BEARER_TOKEN in your environment, "
+    'add `bearer_token = "..."` to the [auth] section of sqllens.toml, '
+    "or set auth.mode to a different value (none|jwt)."
+)
 
 
 _UTF8_BOM = b"\xef\xbb\xbf"
