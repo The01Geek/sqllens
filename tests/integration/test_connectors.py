@@ -149,18 +149,18 @@ class TestMysqlRunner:
         defeating the row cap on huge result sets — the runner would still return
         ``max_rows`` rows, but only after pulling millions of rows over the wire.
 
-        Construct a cross-join of ``information_schema.columns`` against itself
-        three times — this produces tens of millions of rows on a typical MySQL
-        install. With ``max_rows=5`` the runner must return in under a second:
-        anything resembling a full drain would take many minutes. Wall-clock
-        time is the only signal that distinguishes "streamed + capped" from
-        "drained + capped".
+        Cross-join ``information_schema.columns`` against itself — even on a
+        fresh MySQL this produces millions of rows. With ``max_rows=5`` the
+        runner must return in under a second: a full drain would take many
+        seconds at minimum. Wall-clock time is the only signal that
+        distinguishes "streamed + capped" from "drained + capped". A 2-way
+        join (not 3-way) is plenty for the signal and avoids piling
+        unnecessary server-side iteration work on the CI MySQL.
         """
         max_rows = 5
         sql = (
             "SELECT a.TABLE_NAME FROM information_schema.columns a "
-            "CROSS JOIN information_schema.columns b "
-            "CROSS JOIN information_schema.columns c"
+            "CROSS JOIN information_schema.columns b"
         )
         runner = build_sql_runner(mysql_url, max_rows=max_rows)
         start = time.monotonic()
