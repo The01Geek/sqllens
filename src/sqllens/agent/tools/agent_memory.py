@@ -46,8 +46,8 @@ class SearchSavedCorrectToolUsesParams(BaseModel):
     similarity_threshold: Optional[float] = Field(
         default=None,
         description=(
-            "Minimum similarity score for results (0.0-1.0). When omitted, the "
-            "server-configured default (memory.similarity_threshold) is used."
+            "Minimum similarity score for results (0.0-1.0). "
+            "When omitted, the server-configured default is used."
         ),
     )
     tool_name_filter: Optional[str] = Field(
@@ -125,6 +125,7 @@ class SearchSavedCorrectToolUsesTool(Tool[SearchSavedCorrectToolUsesParams]):
     """Tool for searching saved tool usage patterns."""
 
     def __init__(self, *, default_similarity_threshold: float = 0.7) -> None:
+        super().__init__()
         self._default_similarity_threshold = default_similarity_threshold
 
     @property
