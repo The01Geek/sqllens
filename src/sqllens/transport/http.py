@@ -190,6 +190,7 @@ class _SessionManagerLifespan:
         self.inner = inner
         self.session_manager = session_manager
         self._cm = None
+        self._started = False
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "lifespan":
@@ -200,22 +201,43 @@ class _SessionManagerLifespan:
     async def _handle_lifespan(self, scope: Scope, receive: Receive, send: Send) -> None:
         while True:
             message = await receive()
-            if message["type"] == "lifespan.startup":
+            msg_type = message["type"]
+            if msg_type == "lifespan.startup":
+                if self._started:
+                    # ASGI hosts must not send startup twice; if they do, refuse
+                    # rather than leaking the original session-manager context.
+                    logger.error("duplicate lifespan.startup received; ignoring")
+                    await send(
+                        {
+                            "type": "lifespan.startup.failed",
+                            "message": "duplicate lifespan.startup",
+                        }
+                    )
+                    return
                 try:
                     self._cm = self.session_manager.run()
                     await self._cm.__aenter__()
                 except Exception as exc:  # pragma: no cover — startup failures
+                    logger.exception("session manager startup failed")
                     await send({"type": "lifespan.startup.failed", "message": str(exc)})
                     return
+                self._started = True
                 await send({"type": "lifespan.startup.complete"})
-            elif message["type"] == "lifespan.shutdown":
+            elif msg_type == "lifespan.shutdown":
                 if self._cm is not None:
                     try:
                         await self._cm.__aexit__(None, None, None)
-                    except Exception:
+                    except Exception as exc:
                         logger.exception("session manager shutdown failed")
+                        await send(
+                            {"type": "lifespan.shutdown.failed", "message": str(exc)}
+                        )
+                        return
                 await send({"type": "lifespan.shutdown.complete"})
                 return
+            else:
+                # Unknown lifespan message — surface it instead of looping silently.
+                logger.warning("unknown lifespan message type: %s", msg_type)
 
 
 # ───────────────────────────── helpers ──────────────────────────────────────

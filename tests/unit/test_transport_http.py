@@ -20,6 +20,7 @@ otherwise only covers indirectly.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -105,3 +106,91 @@ def test_build_asgi_app_raises_runtimeerror_when_session_manager_missing(
 
     with pytest.raises(RuntimeError, match="FastMCP no longer exposes"):
         build_asgi_app(_cfg(tmp_path))
+
+
+# ─────────────────── _SessionManagerLifespan failure paths ──────────────────
+
+
+class _FakeSessionManager:
+    """Stand-in for FastMCP's session manager.
+
+    ``run()`` returns an async context manager whose ``__aexit__`` raises
+    ``shutdown_exc`` if set. ``__aenter__`` raises ``startup_exc`` if set.
+    """
+
+    def __init__(
+        self,
+        startup_exc: Exception | None = None,
+        shutdown_exc: Exception | None = None,
+    ) -> None:
+        self._startup_exc = startup_exc
+        self._shutdown_exc = shutdown_exc
+
+    def run(self) -> _FakeSessionManager:
+        return self
+
+    async def __aenter__(self) -> _FakeSessionManager:
+        if self._startup_exc is not None:
+            raise self._startup_exc
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+        if self._shutdown_exc is not None:
+            raise self._shutdown_exc
+
+
+def _make_io(messages: list[dict]) -> tuple[callable, callable, list[dict]]:
+    """Build (receive, send, sent) suitable for driving an ASGI lifespan loop."""
+    queue = list(messages)
+    sent: list[dict] = []
+
+    async def receive() -> dict:
+        return queue.pop(0)
+
+    async def send(msg: dict) -> None:
+        sent.append(msg)
+
+    return receive, send, sent
+
+
+async def _noop_inner(scope, receive, send):  # type: ignore[no-untyped-def]
+    return
+
+
+def test_lifespan_shutdown_failure_sends_failed_not_complete() -> None:
+    """Regression: __aexit__ raising must surface as lifespan.shutdown.failed.
+
+    Critical finding from the code review on PR #43 — the prior implementation
+    logged the exception and then sent ``lifespan.shutdown.complete`` anyway,
+    so uvicorn would report a clean shutdown despite the session manager
+    failing to close.
+    """
+    sm = _FakeSessionManager(shutdown_exc=RuntimeError("boom"))
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io(
+        [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
+    )
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    types = [m["type"] for m in sent]
+    assert "lifespan.shutdown.complete" not in types
+    assert sent[-1]["type"] == "lifespan.shutdown.failed"
+    assert "boom" in sent[-1]["message"]
+
+
+def test_lifespan_duplicate_startup_is_rejected() -> None:
+    """A second lifespan.startup must not silently replace ``self._cm``."""
+    sm = _FakeSessionManager()
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io(
+        [
+            {"type": "lifespan.startup"},
+            {"type": "lifespan.startup"},
+        ]
+    )
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    types = [m["type"] for m in sent]
+    assert types[0] == "lifespan.startup.complete"
+    assert types[-1] == "lifespan.startup.failed"
+    assert "duplicate" in sent[-1]["message"].lower()
