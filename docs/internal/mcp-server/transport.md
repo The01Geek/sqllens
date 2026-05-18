@@ -89,6 +89,32 @@ FastMCP exposes a session manager that must be active while requests are served 
 
 If the lifespan adapter is missing, requests reach the routing layer but then fail inside FastMCP with an opaque SDK assertion (`"Task group is not initialized. Make sure to use run()."`) on the first call. Issue #39 was exactly this: `build_asgi_app` used to return a bare app without the lifespan wrapper, so any external mount silently skipped session-manager startup. The fix in PR #43 moved the wrapper inside `build_asgi_app`, and `tests/unit/test_transport_http.py::test_build_asgi_app_returns_lifespan_wrapped` pins the contract at construction time.
 
+### Single-shot instance semantics (issue #60)
+
+`_SessionManagerLifespan` is a **single-shot adapter**: one instance handles exactly one lifecycle. The instance finalizes — refuses any further `lifespan.startup` — once any of:
+
+- `lifespan.shutdown` completed (the CM exited via `__aexit__`), or
+- `lifespan.shutdown` failed in `__aexit__` (the CM raised on exit; reusing it is unsafe), or
+- `lifespan.startup` failed in `__aenter__` (the partially-acquired CM reference is dropped *without* calling `__aexit__` — PEP 343 makes `__aexit__` on a never-entered CM undefined).
+
+After finalization the CM reference is gone (`self._cm = None`) and the `self._shutdown_done` flag is set. A subsequent `lifespan.shutdown` is acknowledged with `shutdown.complete` **without** re-entering `__aexit__`, so the exactly-once enter/exit pair that FastMCP's session manager expects is preserved. A subsequent `lifespan.startup` on a new scope is rejected with `lifespan.startup.failed` and the message `"single-shot instance already shut down"` — distinct from the `"duplicate lifespan.startup"` rejection raised when two startups arrive within the same not-yet-shut-down instance. Hosts that drive more than one lifespan scope against the same app (uncommon outside test harnesses) should mount a fresh adapter via `build_asgi_app` per scope.
+
+Implementation notes: the shutdown path captures `cm = self._cm` and clears `self._cm = None` **before** awaiting `__aexit__`, so even a refactor that inserted another `__aexit__` site before the `_shutdown_done` assignment could not double-exit the same CM. The startup-failure branch also clears `self._cm` and sets `self._shutdown_done = True`, so a partially-acquired CM is never reachable from any later message. Both failure messages are formatted as `f"{type(exc).__name__}: {exc}"` (e.g. `"RuntimeError: boom"`) so hosts logging the wire message can distinguish exception types, not just values.
+
+Regression coverage in `tests/unit/test_transport_http.py`:
+
+- `test_lifespan_duplicate_startup_is_rejected` — two startups within one instance → second one fails with `"duplicate"` in the message.
+- `test_lifespan_post_shutdown_startup_is_rejected` — startup after a clean shutdown → fails with `"shut down"` in the message; `run()` / `__aenter__` are not re-invoked on the session manager.
+- `test_lifespan_post_shutdown_shutdown_is_idempotent` — a second `lifespan.shutdown` returns `shutdown.complete` without a second `__aexit__` call.
+- `test_lifespan_shutdown_failure_still_finalizes_instance` — a shutdown that raised in `__aexit__` still finalizes; a subsequent startup gets single-shot rejection and a subsequent shutdown is idempotent.
+- `test_lifespan_startup_failure_finalizes_instance` — a startup that raised in `__aenter__` finalizes the instance; a follow-up shutdown does **not** call `__aexit__` (no PEP-343 violation), and a follow-up startup gets single-shot rejection. Also pins the `RuntimeError: boom` message format on the failure path.
+
+The `_FakeSessionManager` test fake counts `run_calls`, `aenter_calls`, and `aexit_calls` so these tests can pin **both** halves of the exactly-once contract (no double-exit AND no double-enter) rather than only the wire-message shape.
+
+### Unknown lifespan messages
+
+If `__call__` receives a `lifespan` message whose `type` is neither `lifespan.startup` nor `lifespan.shutdown`, the adapter logs a warning (`"unknown lifespan message type: %s"`) and continues the receive loop. The ASGI spec is open-ended about lifespan message types; logging-and-continuing is preferred over exiting the loop (which would leave any subsequent valid startup/shutdown unhandled) or raising (which would crash the host).
+
 ### SDK-attribute access — `mcp.session_manager`
 
 `_SessionManagerLifespan` needs a handle to FastMCP's session manager. We read the documented public `session_manager` property on `FastMCP` (not the private `_session_manager` attribute) so that a future `mcp` SDK rename/removal is a build-time failure, not a request-time `AttributeError`. The access is guarded with `try/except AttributeError` inside `build_asgi_app`; on miss it raises `RuntimeError("FastMCP no longer exposes a session_manager attribute; the mcp SDK likely renamed or removed it. …")` naming this file as the place to update. The guard is exercised by `tests/unit/test_transport_http.py::test_build_asgi_app_raises_runtimeerror_when_session_manager_missing`.

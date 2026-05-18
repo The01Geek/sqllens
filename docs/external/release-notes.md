@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 18, 2026
+
+- **[Fix] HTTP transport handles repeated lifespan events cleanly under unusual ASGI hosts** — When an ASGI host drives more than one lifespan scope against the same SQL Lens app (uncommon outside test harnesses), the HTTP transport now rejects a startup that arrives after the server has already shut down with the clear message `single-shot instance already shut down`, instead of the misleading `duplicate lifespan.startup` it returned previously. A repeated shutdown is acknowledged as `lifespan.shutdown.complete` without re-entering the session manager's exit handler, and startup failures now report the exception type in addition to the message (for example, `RuntimeError: boom`). Users running `sqllens serve` are not affected — uvicorn drives exactly one lifespan per process. (#70)
+
 ## May 17, 2026
 
 - **[Fix] Read-only guard now rejects `SELECT ... INTO` on Postgres and T-SQL** — The read-only SQL guard previously accepted statements like `SELECT * INTO new_table FROM users`, which create a new table on Postgres and T-SQL (including `INTO TEMP` and `INTO UNLOGGED` variants) and write a session variable on MySQL (`SELECT ... INTO @var`). These statements are now rejected at parse time, including when nested inside common table expressions or used as an operand of `UNION`, `INTERSECT`, or `EXCEPT`. This restores the documented "read-only by default" guarantee for the default configuration. (#41)
