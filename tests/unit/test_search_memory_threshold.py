@@ -142,11 +142,12 @@ async def test_explicit_zero_threshold_is_preserved() -> None:
     memory = _RecordingAgentMemory()
     tool = SearchSavedCorrectToolUsesTool(default_similarity_threshold=0.5)
 
-    await tool.execute(
+    result = await tool.execute(
         _context(memory),
         SearchSavedCorrectToolUsesParams(question="q", similarity_threshold=0.0),
     )
 
+    assert result.success is True
     assert memory.last_call["similarity_threshold"] == 0.0
 
 
@@ -156,9 +157,10 @@ async def test_explicit_threshold_overrides_server_default() -> None:
     memory = _RecordingAgentMemory()
     tool = SearchSavedCorrectToolUsesTool(default_similarity_threshold=0.42)
 
-    await tool.execute(
+    result = await tool.execute(
         _context(memory),
         SearchSavedCorrectToolUsesParams(question="q", similarity_threshold=0.9),
     )
 
+    assert result.success is True
     assert memory.last_call["similarity_threshold"] == 0.9
