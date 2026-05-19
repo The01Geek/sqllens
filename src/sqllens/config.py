@@ -23,7 +23,7 @@ import shlex
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -197,14 +197,25 @@ class ServerConfig(BaseModel):
 
 
 class AuditConfig(BaseModel):
-    """Audit-logging surface. Wired into the agent factory in a later issue.
+    """Audit-logging surface. The agent factory consumes this in a later issue.
 
-    Mirrors the knobs the future factory needs to construct/configure a
+    Mirrors what the future factory needs to construct/configure a
     ``LoggingAuditLogger``: ``log_level`` is a friendly string the factory will
-    translate to a Python ``logging`` level int; ``include_response_text`` and
-    ``sanitize_parameters`` map to ``AuditLogger``'s ``include_full_text`` and
-    ``sanitize_parameters`` knobs. No factory wiring here (Wave B).
+    translate to a Python ``logging`` level int for
+    ``LoggingAuditLogger(log_level=...)``. ``include_response_text`` and
+    ``sanitize_parameters`` correspond to the ``include_full_text`` and
+    ``sanitize_parameters`` arguments of ``AuditLogger``'s ``log_ai_response``
+    / ``log_tool_invocation`` methods (per-call arguments, not constructor
+    parameters). No factory wiring lands here — this issue defines the surface
+    only.
     """
+
+    # extra="forbid" so a misspelled key inside [agent.audit] (e.g.
+    # `sanitize_paramters`) fails loudly at load instead of silently reverting
+    # to the privacy-safe default — matching AuthConfig's "loud config-load
+    # failure beats silent misconfiguration" posture. The top-level
+    # Config(extra="forbid") only guards top-level keys, not nested tables.
+    model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
     log_level: Literal["critical", "error", "warning", "info", "debug"] = "info"
@@ -268,6 +279,8 @@ class Config(BaseSettings):
         try:
             toml_path = _LOAD_TOML_PATH.get()
         except LookupError:
+            # Not an error: the var is unset because this is a direct Config()
+            # construction outside any Config.load — resolve the path fresh.
             toml_path = _resolved_toml_path()
         sources: list[PydanticBaseSettingsSource] = [init_settings, env_settings]
         if toml_path is not None:

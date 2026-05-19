@@ -71,6 +71,14 @@ def test_dialect_strips_driver_suffix(url: str, expected: str) -> None:
     assert DatabaseConfig(url=url).dialect == expected
 
 
+def test_dialect_returns_whole_string_when_no_scheme_separator() -> None:
+    # Pins current (intentionally permissive) behavior: DatabaseConfig.url has
+    # no format validator, so a malformed DSN with no "://" yields the whole
+    # string rather than raising. A future consumer that wires `dialect` into
+    # runner selection should add url validation, not change this property.
+    assert DatabaseConfig(url="not-a-dsn").dialect == "not-a-dsn"
+
+
 # --- O-1: ServerConfig.log_level -------------------------------------------
 
 
@@ -212,3 +220,106 @@ def test_bom_error_path_resolves_toml_path_once(
         Config.load(bom_toml)
 
     assert calls == 1
+
+
+def test_successful_load_resolves_toml_path_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The dominant code path: a *successful* load must also resolve exactly
+    # once (load() stashes into _LOAD_TOML_PATH; settings_customise_sources
+    # reads the stash instead of re-resolving). Guards the TOCTOU close on the
+    # success path, not just the BOM-error path.
+    cfg_path = _minimal_toml(tmp_path)
+
+    real = config_mod._resolved_toml_path
+    calls = 0
+
+    def _spy() -> Path | None:
+        nonlocal calls
+        calls += 1
+        return real()
+
+    monkeypatch.setattr(config_mod, "_resolved_toml_path", _spy)
+
+    Config.load(cfg_path)
+
+    assert calls == 1
+
+
+def test_load_does_not_leak_toml_path_into_direct_construction(
+    tmp_path: Path,
+) -> None:
+    # The _LOAD_TOML_PATH ContextVar must be reset in load()'s finally so a
+    # subsequent direct Config(...) construction resolves independently and
+    # does not parse against the prior load's TOML.
+    other = tmp_path / "other.toml"
+    other.write_text('[database]\nurl = "sqlite:///from-toml.db"\n')
+    Config.load(other)
+
+    cfg = Config(database=DatabaseConfig(url="sqlite:///direct.db"))
+    assert cfg.database.url == "sqlite:///direct.db"
+
+
+# --- extra="forbid" backward-compatibility contract ------------------------
+
+
+def test_unknown_top_level_key_rejected(tmp_path: Path) -> None:
+    # The compatibility contract the CHANGELOG sells: extra="forbid" is in
+    # force, so an unknown top-level key is rejected (this is also why
+    # config_version had to be a real declared field). Top-level keys must
+    # precede any table header in TOML, hence the bespoke file.
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            """\
+            bogus_top_level = 1
+
+            [database]
+            url = "sqlite:///./demo.db"
+
+            [llm]
+            api_key = "sk-ant-test"
+            """
+        )
+    )
+    with pytest.raises(ValidationError):
+        Config.load(cfg_path)
+
+
+def test_audit_rejects_unknown_nested_key() -> None:
+    # A misspelled key in [agent.audit] must fail loudly, not silently revert
+    # to the privacy-safe default.
+    with pytest.raises(ValidationError):
+        AuditConfig(sanitize_paramters=False)  # type: ignore[call-arg]
+
+
+def test_minimal_legacy_toml_still_loads_with_new_defaults(
+    tmp_path: Path,
+) -> None:
+    # A pre-existing TOML with none of the new keys still loads, and every new
+    # field takes its backward-compatible default.
+    cfg = Config.load(_minimal_toml(tmp_path))
+    assert cfg.config_version == 1
+    assert cfg.server.log_level == "info"
+    assert cfg.agent.show_sql is True
+    assert cfg.agent.audit.enabled is False
+
+
+# --- resolution precedence + coercion --------------------------------------
+
+
+def test_env_beats_toml_for_new_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Documented resolution order: env wins over TOML. Pin it for a new field.
+    monkeypatch.setenv("SQLLENS_AGENT__SHOW_SQL", "true")
+    cfg = Config.load(_minimal_toml(tmp_path, "\n[agent]\nshow_sql = false\n"))
+    assert cfg.agent.show_sql is True
+
+
+def test_invalid_config_version_env_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SQLLENS_CONFIG_VERSION", "not-an-int")
+    with pytest.raises(ValidationError):
+        Config.load(_minimal_toml(tmp_path))
