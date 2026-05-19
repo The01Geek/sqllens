@@ -53,7 +53,10 @@ Cross-cutting modules can be imported from anywhere:
 ```
 client POST /mcp/
   ↓
-_PathNormalizer        — rewrites scope.path "/mcp/" → "/mcp" so FastMCP matches
+_PathNormalizer        — rewrites scope.path "/mcp/" → "/mcp" so FastMCP matches;
+                          short-circuits /healthz + /readyz (pre-host-check, pre-auth)
+  ↓
+TrustedHostMiddleware  — rejects a disallowed Host with 400 (DNS-rebinding defense)
   ↓
 _AuthMiddleware        — runs the configured Authenticator; 401 on AuthError
   ↓

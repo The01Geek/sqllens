@@ -82,18 +82,38 @@ Start the server with `sqllens serve` and point your client at `http://127.0.0.1
 
 **Warning:** If you change `host` to anything other than a loopback address (for example, when running in a container that binds `0.0.0.0`), SQL Lens refuses to start with `auth.mode = "none"`. Switch to bearer auth by setting `SQLLENS_AUTH__MODE=bearer` and `SQLLENS_AUTH__BEARER_TOKEN=$(openssl rand -hex 32)`, or set `SQLLENS_AUTH__INSECURE=1` for closed-network deployments. See [Configuration: Non-loopback safety guard](configuration.md#non-loopback-safety-guard).
 
-### Health Check Endpoint
+### Health and Readiness Endpoints
 
-When running over HTTP, SQL Lens exposes an unauthenticated liveness endpoint at `GET /healthz`. It returns HTTP 200 with the body `{"status":"ok"}` while the server process is up and serving requests. No `Authorization` header is required, even when bearer authentication is enabled, so orchestrator health probes work without a token.
+When running over HTTP, SQL Lens exposes two unauthenticated probe endpoints. Neither requires an `Authorization` header, even when bearer authentication is enabled, and both answer regardless of the request `Host`, so orchestrator probes work without a token.
+
+**Liveness: `GET /healthz`.** Returns HTTP 200 with the body `{"status":"ok"}` while the server process is up and serving requests.
 
 ```bash
 curl http://127.0.0.1:8765/healthz
 # {"status":"ok"}
 ```
 
-Use this endpoint for container and orchestrator health checks (Docker, Kubernetes liveness probes, load balancers). The published Docker image already uses `/healthz` for its built-in `HEALTHCHECK`, so a container that stops serving is correctly reported as unhealthy.
+Use this endpoint for container and orchestrator liveness checks (Docker, Kubernetes liveness probes, load balancers). The published Docker image already uses `/healthz` for its built-in `HEALTHCHECK`, so a container that stops serving is correctly reported as unhealthy.
 
-**Note:** `/healthz` is a liveness check only. It confirms the server is running, not that the database, vector memory store, or language model are reachable. A successful response does not guarantee that a query will succeed.
+**Note:** `/healthz` is a liveness check only. It confirms the server process is running, not that startup has finished or that the database, vector memory store, or language model are reachable. A successful response does not guarantee that a query will succeed.
+
+**Readiness: `GET /readyz`.** Returns HTTP 503 with the body `{"status":"not ready"}` while the agent is still warming up at startup (this includes a one-time embedding-model download of roughly 80 MB), then HTTP 200 with the body `{"status":"ready"}` once warmup completes.
+
+```bash
+curl -i http://127.0.0.1:8765/readyz
+# HTTP/1.1 503 ...   {"status":"not ready"}   (during startup)
+# HTTP/1.1 200 ...   {"status":"ready"}       (once warmed up)
+```
+
+Use `/readyz` for Kubernetes readiness probes or load-balancer gating so traffic is held back until the server has finished starting up. `/healthz` is intentionally independent of readiness, so a slow start does not make a live container look dead.
+
+### Host Header Validation
+
+When the server binds a specific host, only requests whose `Host` header matches the configured host or a loopback name (`127.0.0.1`, `localhost`, `::1`) are accepted; any other host is rejected with HTTP 400. This is a built-in defense against DNS-rebinding attacks. If you bind all interfaces with `0.0.0.0` (or `::`), any `Host` is accepted, because binding every interface is treated as an explicit choice to do so. If you front SQL Lens with a reverse proxy under a custom domain, set `server.host` to that domain so the proxied requests are accepted.
+
+### Plain-HTTP Credential Warning
+
+SQL Lens does not terminate TLS itself — run it behind a reverse proxy for HTTPS. If you enable bearer authentication while binding a non-loopback host, SQL Lens logs a warning at startup that bearer credentials would travel in cleartext on the connection it listens on. The server still starts; terminate TLS in front of SQL Lens (or bind a loopback interface) to clear the warning.
 
 ## See also
 

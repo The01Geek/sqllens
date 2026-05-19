@@ -6,9 +6,11 @@ How HTTP requests are authenticated, what modes are available, and where to plug
 
 Only on the HTTP transport. The stdio transport assumes the parent process is trusted — adding bearer-token auth to stdio would do nothing useful (the parent already owns the pipe), so the auth config is silently unused when `transport = "stdio"`.
 
-For HTTP, `_AuthMiddleware` runs **per request, before** the FastMCP handler. See [mcp-server/transport.md](../mcp-server/transport.md).
+For HTTP, `_AuthMiddleware` runs **per request, before** the FastMCP handler but **after** `TrustedHostMiddleware` (which rejects a disallowed `Host` with HTTP 400 before auth even runs — DNS-rebinding defense, issue #107 S-8). See [mcp-server/transport.md](../mcp-server/transport.md).
 
-**Exception: `GET /healthz`.** The liveness probe is intentionally unauthenticated. `_PathNormalizer` short-circuits `/healthz` with a 200 JSON response *above* `_AuthMiddleware` in the stack, so the auth check never runs for that path even under `auth.mode = "bearer"`. It exposes no data (only `{"status":"ok"}`) and no DB/LLM signal, so requiring a token would only break orchestrator health probes for no security gain. Details in [mcp-server/transport.md](../mcp-server/transport.md) "Liveness probe".
+**Exception: `GET /healthz` and `GET /readyz`.** The liveness and readiness probes are intentionally unauthenticated. `_PathNormalizer` short-circuits both with a JSON response at the *outermost* layer of the stack — above both `TrustedHostMiddleware` and `_AuthMiddleware` — so the auth check never runs for those paths even under `auth.mode = "bearer"`, and they answer regardless of the request `Host`. They expose no data (only `{"status":"ok"}` / `{"status":"ready"}` / `{"status":"not ready"}`) and no DB/LLM signal, so requiring a token would only break orchestrator probes for no security gain. Details in [mcp-server/transport.md](../mcp-server/transport.md) "Liveness probe" and "Readiness probe".
+
+**Plain-HTTP credential warning (issue #107 S-9).** When `auth.mode` is `bearer`/`jwt` and `server.host` is non-loopback, `build_asgi_app` logs a one-line advisory that bearer/JWT credentials cross that hop in cleartext (SQL Lens delegates TLS to a fronting proxy). It is advisory only and does not refuse to start. Details in [mcp-server/transport.md](../mcp-server/transport.md) "Plain-HTTP credential warning".
 
 ## The `Authenticator` protocol
 

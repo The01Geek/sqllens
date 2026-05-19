@@ -40,16 +40,21 @@ Success/data output stays on stdout — `sqllens version`, `Wrote <path>` from `
 
 Tests pin the contract from both sides: the expected error substring lands on stderr **and** stdout is asserted to be empty for the same invocation (`tests/unit/test_cli.py::test_config_load_failure_goes_to_stderr`, `test_init_already_exists_error_goes_to_stderr`; matching stderr-side assertions in `tests/unit/test_cli_claude_desktop.py` and `tests/unit/test_config_smoke.py`). When adding a new operator-error site in `cli.py`, use `err_console.print(...)` rather than `console.print(...)`.
 
-## HTTP mode — the three middleware layers
+## HTTP mode — the middleware stack
 
 `build_asgi_app(cfg)` in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py) builds the full stack around FastMCP's Streamable HTTP app and returns the **mount-ready** ASGI app:
 
 ```
 ASGI host (uvicorn, FastAPI mount, Starlette, …)
   ↓
-_SessionManagerLifespan   — starts/stops FastMCP's session manager via ASGI lifespan
+_SessionManagerLifespan   — starts/stops FastMCP's session manager via ASGI
+                             lifespan; eagerly builds the agent at startup
   ↓
-_PathNormalizer            — fixes "/" and "/mcp/" path mismatches; serves /healthz
+_PathNormalizer            — fixes "/" and "/mcp/" path mismatches; serves
+                             /healthz and /readyz (pre-host-check, pre-auth)
+  ↓
+TrustedHostMiddleware      — rejects a disallowed Host with 400 (DNS-rebinding
+                             defense); allowlist derived from server.host
   ↓
 _AuthMiddleware            — runs the configured Authenticator
   ↓
@@ -58,10 +63,12 @@ mcp.streamable_http_app()  — FastMCP's Streamable HTTP handler
 
 `run(cfg)` is a thin uvicorn launcher that delegates to `build_asgi_app(cfg)` — there is no longer a duplicated middleware-stack assembly in `run`.
 
+`build_asgi_app` also calls `_warn_if_plaintext_credentials(cfg)` at build time — see "Plain-HTTP credential warning" below.
+
 ### `build_asgi_app` vs `_build_asgi_app_bare`
 
 - `build_asgi_app(cfg) -> ASGIApp` is the **only** supported public entry point. The returned app includes the lifespan adapter, so callers mounting it under FastAPI/Starlette/uvicorn get a working session manager without having to wire lifespan themselves.
-- `_build_asgi_app_bare(cfg) -> tuple[ASGIApp, FastMCP]` is a private helper that returns the path-normalized + authenticated app **without** the lifespan adapter, plus the underlying `FastMCP` instance. It exists for two reasons: (1) so `build_asgi_app` itself can wrap the bare app with the lifespan adapter at a single, guarded SDK-access site, and (2) so the unit suite can assert the inner stack composition without bringing up a session manager. Out-of-tree code should not depend on it.
+- `_build_asgi_app_bare(cfg, readiness) -> tuple[ASGIApp, FastMCP]` is a private helper that returns the path-normalized + host-validated + authenticated app **without** the lifespan adapter, plus the underlying `FastMCP` instance. It takes the shared `_Readiness` holder so `_PathNormalizer` can answer `/readyz`. It exists for two reasons: (1) so `build_asgi_app` itself can wrap the bare app with the lifespan adapter at a single, guarded SDK-access site, and (2) so the unit suite can assert the inner stack composition without bringing up a session manager. Out-of-tree code should not depend on it.
 
 The integration test fixture (`tests/integration/conftest.py`) calls `build_asgi_app(cfg)` directly and hands the result to a real `uvicorn.Server` with `lifespan="on"` — there is no longer a hand-rolled `_AuthMiddleware` + `_PathNormalizer` + `_SessionManagerLifespan` stack in the fixture.
 
@@ -76,8 +83,9 @@ FastMCP registers its endpoint at the **bare** path `/mcp`. Every MCP client we 
 | `/` | 307 redirect to `/mcp/` — browser-friendly so opening the URL in a tab doesn't 404. |
 | `/mcp/` | **Rewrite** `scope["path"]` to `/mcp` and pass through. No redirect, because POST clients that don't follow 307 redirects would lose their request body otherwise. |
 | `/mcp` | Pass through unchanged. |
-| `/healthz` | **Short-circuit**: emit a 200 liveness JSON and return, *before* `_AuthMiddleware`. See "Liveness probe" below. |
-| Anything else | Pass through (FastMCP will 404 if it doesn't recognize it). |
+| `/healthz` | **Short-circuit**: emit a 200 liveness JSON and return, *before* `TrustedHostMiddleware` and `_AuthMiddleware`. See "Liveness probe" below. |
+| `/readyz` | **Short-circuit**: emit a 200/503 readiness JSON and return, *before* `TrustedHostMiddleware` and `_AuthMiddleware`. See "Readiness probe" below. |
+| Anything else | Pass through (`TrustedHostMiddleware` then validates `Host`; FastMCP will 404 if the path is unrecognized). |
 
 The reason this isn't done with a Starlette `Mount` is recorded in the docstring at the top of `transport/http.py`: `Mount` has surprising trailing-slash semantics, and the single-server SQL Lens transport doesn't need path-based dispatch.
 
@@ -87,18 +95,52 @@ The reason this isn't done with a Starlette `Mount` is recorded in the docstring
 
 Two properties are deliberate and pinned by tests:
 
-- **Pre-auth.** The short-circuit lives in `_PathNormalizer`, which sits *above* `_AuthMiddleware` in the stack. A probe to `/healthz` therefore needs no `Authorization` header even when `auth.mode = "bearer"`. Covered by `tests/integration/test_http_transport.py::TestHealthz::test_healthz_no_auth` and `::test_healthz_bypasses_bearer_auth`.
-- **Liveness only, not readiness.** It asserts solely that the ASGI process is up and the event loop is serving requests. It does **not** check database, ChromaDB, or LLM reachability — a server that answers `/healthz` 200 may still fail a `query_database` call. There is no readiness endpoint; add one explicitly if orchestration needs dependency-aware gating.
+- **Pre-host-check, pre-auth.** The short-circuit lives in `_PathNormalizer`, which is the *outermost* layer of the bare stack — above both `TrustedHostMiddleware` and `_AuthMiddleware`. A probe to `/healthz` therefore needs no `Authorization` header even when `auth.mode = "bearer"`, and answers regardless of the request `Host`. Covered by `tests/integration/test_http_transport.py::TestHealthz::test_healthz_no_auth` and `::test_healthz_bypasses_bearer_auth`.
+- **Liveness only, not readiness.** It asserts solely that the ASGI process is up and the event loop is serving requests. It does **not** check database, ChromaDB, or LLM reachability, and is **never gated on agent-warmup readiness** — a server that answers `/healthz` 200 may still be warming up the agent or fail a `query_database` call. Use `GET /readyz` (below) for warmup-aware gating.
 
 `_send_health` shares the response writer with `_send_401` via the `_send_json(send, status, body, *, extra_headers=())` helper; only `_send_401` passes the `WWW-Authenticate` header through `extra_headers`.
+
+## Readiness probe: `GET /readyz`
+
+`READYZ_PATH = "/readyz"` (module constant in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py)) is an **unauthenticated** readiness endpoint, added in issue #107 (O-5). Where `/healthz` answers "is the process up", `/readyz` answers "has the agent finished its cold-start warmup". `_PathNormalizer.__call__` checks `path == READYZ_PATH` (immediately after the `/healthz` branch) and calls `_send_readiness(send, self._readiness.ready)`:
+
+- **Not ready** → HTTP `503` with body exactly `{"status":"not ready"}` (compact `json.dumps(..., separators=(",", ":"))`, no spaces).
+- **Ready** → HTTP `200` with body exactly `{"status":"ready"}`.
+
+The flag flips exactly once. A shared `_Readiness` holder object (a `__slots__` class wrapping a single `ready: bool`, **not** a bare bool — so writer and reader share it by reference) is created in `build_asgi_app`, threaded through `_build_asgi_app_bare` into `_PathNormalizer`, and also handed to `_SessionManagerLifespan`. At lifespan startup, after the FastMCP session-manager CM is entered, `_SessionManagerLifespan` calls `build_agent(self._cfg)` exactly once and then sets `readiness.ready = True`. This is single-threaded (one startup, pre-request) so no lock is used.
+
+Deliberate, test-pinned properties:
+
+- **Pre-host-check, pre-auth.** Same outermost-layer short-circuit as `/healthz` — no `Authorization` header required even under `auth.mode = "bearer"`, and answers regardless of the request `Host`.
+- **Eager warmup happens inside the lifespan startup `try`.** If `build_agent` raises, the failure surfaces as `lifespan.startup.failed` through the existing startup-failure handling (it is **not** swallowed); the ASGI host then aborts the process. Note: at that point the session-manager CM has already been entered, and the failure path drops it without `__aexit__` — acceptable only because the host aborts on `startup.failed`.
+- **Known limitation.** The eager warmup builds a *throwaway* agent and does **not** seed the request-path agent cache, so the first real `query_database` still pays the ChromaDB / embedding-model cold start. Tracked in follow-up issue #116; do not document the warmup as eliminating first-query latency.
+
+Regression coverage: `tests/integration/test_http_transport.py` exercises the live `/readyz` path; `tests/unit/test_transport_http.py` covers `_send_readiness` and the readiness wiring.
 
 ### Docker `HEALTHCHECK` consumes it
 
 [docker/Dockerfile](../../../docker/Dockerfile)'s `HEALTHCHECK` probes `GET http://127.0.0.1:8765/healthz` (previously it `urlopen`'d the POST-only `/mcp/` endpoint). The old command swallowed all failures with a trailing `2>/dev/null || exit 0`, so a dead or broken container always reported *healthy*; that escape hatch was removed. The probe now exits non-zero — and the container reports **unhealthy** to the orchestrator — whenever the server is not serving. The body bytes are not asserted by the Dockerfile (it only checks `urllib.request.urlopen` does not raise), but the integration test pins the literal `{"status":"ok"}` so external probes can byte-match if they choose.
 
-## Footgun 2: FastMCP's Host-header check
+## Host-header validation: `TrustedHostMiddleware` (S-8)
 
-FastMCP defaults to rejecting non-loopback `Host` headers with HTTP 421 ("Misdirected Request"). This is a defence against DNS-rebinding attacks but bites when running SQL Lens in a container and connecting from a host process. CLAUDE.md "Gotchas" covers the specifics — short version: connect from the same network namespace so `127.0.0.1` resolves locally, or configure FastMCP's transport security explicitly when exposing remotely. SQL Lens does not currently expose a knob for relaxing this; it inherits the FastMCP default.
+SQL Lens wraps the auth/MCP stack in Starlette's `TrustedHostMiddleware` (added in issue #107, S-8) as a DNS-rebinding defense. A request whose `Host` is not on the allowlist is rejected with **HTTP 400** before it can reach `_AuthMiddleware` or the MCP handler. `_PathNormalizer` is deliberately the outermost layer, so `/healthz` and `/readyz` short-circuit *before* host validation and always answer regardless of `Host`.
+
+The allowlist comes from `_allowed_hosts(cfg)`:
+
+| `cfg.server.host` | `allowed_hosts` |
+|---|---|
+| Bind-all wildcard (`0.0.0.0` or `::`) | `["*"]` — binding every interface is an explicit operator choice to accept any `Host`. |
+| Any concrete host (e.g. `127.0.0.1`, `example.com`) | The configured host plus the loopback names `127.0.0.1`, `localhost`, `::1`, order-preserving deduped (a host already equal to `127.0.0.1` is not listed twice). |
+
+`_allowed_hosts` assumes `cfg.server.host` is a bare host with **no embedded port**: `TrustedHostMiddleware` strips the port from the inbound `Host` header before matching but **not** from the allowlist entries, so an entry like `example.com:8443` would never match a port-stripped header.
+
+### FastMCP's own Host-header check (footgun)
+
+Separately, FastMCP defaults to rejecting non-loopback `Host` headers with HTTP 421 ("Misdirected Request") — its own DNS-rebinding defense, which bites when running SQL Lens in a container and connecting from a host process. CLAUDE.md "Gotchas" covers the specifics — short version: connect from the same network namespace so `127.0.0.1` resolves locally, or configure FastMCP's transport security explicitly when exposing remotely. SQL Lens does not currently expose a knob for relaxing this; it inherits the FastMCP default. Note this is a *distinct* layer from our `TrustedHostMiddleware`: a disallowed host hits our 400 first; an allowed-but-non-loopback host can still trip FastMCP's 421.
+
+## Plain-HTTP credential warning (S-9)
+
+At build time, `build_asgi_app` calls `_warn_if_plaintext_credentials(cfg)`. When `auth.mode` is `bearer` or `jwt` **and** `cfg.server.host` is non-loopback (per `_is_loopback_host`, which mirrors `cli._is_loopback_host`: full `127.0.0.0/8`, `::1`, IPv4-mapped IPv6 loopback, and the literal `localhost`, no DNS), it emits a single `logger.warning` advising that SQL Lens delegates TLS to a fronting proxy, so bearer/JWT credentials would cross this hop in cleartext. This is **advisory only** — it does **not** refuse to start (the unauthenticated-non-loopback *refusal* lives in `cli.py` and is out of scope here). No warning fires for `auth.mode = "none"` or a loopback host. `jwt` is included for forward-compat with the Phase-4 scaffold, but a validated `Config` cannot carry `mode == "jwt"` today, so in practice this fires only for `bearer`.
 
 ## Footgun 3 (Docker Desktop / WSL2): `--network=host`
 
@@ -112,11 +154,19 @@ On success, the resulting `AuthContext` is stashed on `scope["state"]["auth"]` s
 
 On failure, `AuthError` becomes HTTP 401 with a JSON body `{"error": "unauthorized", "reason": <short>}` and a `WWW-Authenticate: Bearer realm="sqllens"` header. The reason is `e.reason` from the `AuthError`; the underlying credential is never echoed back. See [authentication/overview.md](../authentication/overview.md).
 
-Lifespan and websocket scopes bypass both `_AuthMiddleware` and `_PathNormalizer` — they only act on `scope["type"] == "http"`. `GET /healthz` is also never seen by `_AuthMiddleware`: `_PathNormalizer` short-circuits it one layer earlier (see "Liveness probe" above), so the auth check never runs for that path.
+Lifespan and websocket scopes bypass both `_AuthMiddleware` and `_PathNormalizer` — they only act on `scope["type"] == "http"`. `GET /healthz` and `GET /readyz` are also never seen by `_AuthMiddleware`: `_PathNormalizer` short-circuits them one layer earlier (see "Liveness probe" / "Readiness probe" above), so the auth check never runs for those paths.
+
+### Header decoding: UTF-8 first, latin-1 fallback (C-6)
+
+`_decode_headers` runs every raw header byte pair through `_try_decode`, which decodes **UTF-8 first and falls back to latin-1** only on `UnicodeDecodeError` (issue #107, C-6). The ASGI spec under-specifies header byte encoding and HTTP/2 HPACK can carry arbitrary octets, so a bearer token whose non-ASCII bytes are valid UTF-8 now round-trips instead of being mojibake'd by the prior hard latin-1 decode. ASCII is a subset of both encodings, so existing ASCII/latin-1 tokens are unaffected; latin-1 maps all 256 byte values, so the fallback never raises.
 
 ## `_SessionManagerLifespan` — why this exists
 
 FastMCP exposes a session manager that must be active while requests are served — it owns per-session state. The ASGI host (uvicorn, FastAPI mount, custom Starlette app) drives lifespan startup/shutdown events; `_SessionManagerLifespan` intercepts them to call `session_manager.run().__aenter__()` on startup and `__aexit__` on shutdown.
+
+### Eager agent warmup at startup (O-5)
+
+Immediately after entering the session-manager CM on `lifespan.startup`, the adapter calls `build_agent(self._cfg)` exactly once and sets the shared `_Readiness.ready` flag to `True`. This is single-threaded (one startup, before any request) so no lock is taken. The `build_agent` call is kept **inside the existing startup `try`** on purpose: a build failure must surface as `lifespan.startup.failed` (handled by the startup-failure branches below), never be swallowed. Because the session-manager CM is already entered when `build_agent` runs, a failure here drops an entered CM without `__aexit__` — acceptable only because the ASGI host aborts the process on `startup.failed`. The readiness flag is what `GET /readyz` reports; see "Readiness probe" above, including the issue #116 throwaway-agent limitation.
 
 If the lifespan adapter is missing, requests reach the routing layer but then fail inside FastMCP with an opaque SDK assertion (`"Task group is not initialized. Make sure to use run()."`) on the first call. Issue #39 was exactly this: `build_asgi_app` used to return a bare app without the lifespan wrapper, so any external mount silently skipped session-manager startup. The fix in PR #43 moved the wrapper inside `build_asgi_app`, and `tests/unit/test_transport_http.py::test_build_asgi_app_returns_lifespan_wrapped` pins the contract at construction time.
 
