@@ -21,14 +21,25 @@ name: Request Review on Ready
 
 on:
   pull_request:
-    types: [ready_for_review]
+    types: [ready_for_review, synchronize]
   # Both pull_request and pull_request_target fire for every ready_for_review
   # event regardless of actor; the precheck job's dedupe step routes each
   # actor to exactly one variant (bot actors → _target so secrets resolve,
   # humans → pull_request) so the review job runs once. Actor allowlisting
   # happens later via project-config.claude.allowed_bots inside the runner.
+  #
+  # `synchronize` (a new commit pushed to an open PR) closes a deadlock:
+  # `Devflow Review` is a REQUIRED status check, but the first-ready gate
+  # auto-reviews EXACTLY ONCE, attaching the check to that commit only. Any
+  # later commit (every implementation agent pushes "address review" /
+  # "/simplify" / "docs" commits after the one-shot review) leaves the new
+  # HEAD with NO `Devflow Review` check → the required context is missing
+  # → the PR is blocked forever with no API-accessible re-trigger. The
+  # `synchronize` route below re-reviews the new HEAD, but ONLY when that
+  # HEAD has no already-passing `Devflow Review` check (cost guard: a push
+  # that someone already reviewed-green is not re-run; drafts are skipped).
   pull_request_target:
-    types: [ready_for_review]
+    types: [ready_for_review, synchronize]
   # Per-check Re-run on the `Devflow Review` check. Delivered to the default
   # branch in a non-PR context (repo secrets resolve like `push`). The
   # precheck `name == 'Devflow Review'` guard is load-bearing: this event
@@ -80,8 +91,10 @@ jobs:
           set -euo pipefail
           echo "enabled=$(echo "$CONFIG_JSON" | jq -r '.workflows["request-review-on-ready"] // false')" >> "$GITHUB_OUTPUT"
           echo "allowed_bots=$(echo "$CONFIG_JSON" | jq -r '.claude.allowed_bots // ""')" >> "$GITHUB_OUTPUT"
-      # Runs for all events; its should_run output is only consulted on the
-      # ready_for_review path (check_run is neither pull_request variant).
+      # Runs for all events; its should_run output is consulted on the
+      # ready_for_review AND synchronize paths to keep the review exactly
+      # once across the pull_request / pull_request_target pair (check_run
+      # is neither pull_request variant and routes by sender instead).
       - id: dedupe
         uses: ./.github/actions/dedupe-pr-events
       - id: route
@@ -91,9 +104,10 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           DEDUPE_OK: ${{ steps.dedupe.outputs.should_run }}
           ALLOWED_BOTS: ${{ steps.extract.outputs.allowed_bots }}
-          # ready_for_review path inputs
+          # ready_for_review / synchronize path inputs
           PR_READY: ${{ github.event.pull_request.number }}
           SHA_READY: ${{ github.event.pull_request.head.sha }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
           # check_run path inputs
           CR_NAME: ${{ github.event.check_run.name }}
           CR_ACTION: ${{ github.event.action }}
@@ -181,6 +195,54 @@ jobs:
             emit pr_number "$PR"
             emit head_sha "$HEAD"
             echo "::notice::Re-running Devflow Review for PR #$PR at current HEAD $HEAD (requested by $SENDER)."
+            exit 0
+          fi
+
+          # --- synchronize (new commit pushed to an open PR) path ---
+          # Closes the required-check deadlock: the first-ready gate
+          # auto-reviews EXACTLY ONCE, so any commit pushed after that
+          # one-shot review leaves the new HEAD with no `Devflow Review`
+          # check and the (required) context blocks the PR forever. Here we
+          # re-review the new HEAD, but ONLY when it has no already-passing
+          # `Devflow Review` check (cost guard) and the PR is not a draft.
+          # Same actor dedupe as the ready path so the review runs exactly
+          # once across the pull_request / pull_request_target pair.
+          if [ "$CR_ACTION" = "synchronize" ]; then
+            if [ "$DEDUPE_OK" != "true" ]; then
+              echo "::notice::Non-canonical synchronize variant for actor; deferring to the other variant."
+              exit 0
+            fi
+            if [ "$PR_DRAFT" = "true" ]; then
+              echo "::notice::synchronize on a draft PR; skipping (drafts cannot merge — no review needed yet)."
+              exit 0
+            fi
+            PR="$PR_READY"
+            HEAD="$SHA_READY"
+            # Cost guard: skip if THIS head already has a *passing* Devflow
+            # Review check (event re-delivery, or a push already reviewed
+            # green). Fail CLOSED on query error, consistent with the
+            # first-ready gate: a missed re-review is recoverable by the
+            # next push or the manual Re-run button; a spurious LLM
+            # re-review is precisely the cost this guard exists to prevent.
+            if ! PASSING=$(gh api --paginate \
+                  "repos/$REPO/commits/$HEAD/check-runs" \
+                  --jq '[.check_runs[] | select(.name=="Devflow Review" and .conclusion=="success")] | length' \
+                  2>/dev/null); then
+              echo "::warning::Check-run query failed for $HEAD; failing closed (no synchronize re-review). Push again or use the Re-run button."
+              exit 0
+            fi
+            if ! [[ "$PASSING" =~ ^[0-9]+$ ]]; then
+              echo "::warning::Non-numeric passing-check count ('$PASSING') for $HEAD; failing closed (no synchronize re-review)."
+              exit 0
+            fi
+            if [ "$PASSING" != "0" ]; then
+              echo "::notice::HEAD $HEAD already has a passing Devflow Review check; skipping synchronize re-review."
+              exit 0
+            fi
+            emit should_run true
+            emit pr_number "$PR"
+            emit head_sha "$HEAD"
+            echo "::notice::synchronize on PR #$PR HEAD $HEAD has no passing Devflow Review check; triggering re-review."
             exit 0
           fi
 
