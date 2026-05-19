@@ -8,6 +8,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import sys
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -18,7 +19,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from sqllens import __version__
-from sqllens.config import API_KEY_MISSING_MESSAGE
+from sqllens.config import API_KEY_MISSING_MESSAGE, ConfigBomError
 
 if TYPE_CHECKING:
     from sqllens.config import Config
@@ -35,6 +36,26 @@ console = Console()
 err_console = Console(stderr=True)
 
 
+def _has_tomldecode_in_chain(exc: BaseException) -> bool:
+    """True if ``exc`` or any exception in its cause/context chain is a
+    ``tomllib.TOMLDecodeError``.
+
+    A future pydantic-settings upgrade could wrap the parser error rather than
+    propagating it raw (see ``test_bom_free_malformed_toml_preserves_original_error``),
+    so the allowlist match walks ``__cause__``/``__context__`` instead of testing
+    only the top-level type. The walk is depth-bounded and cycle-guarded because
+    chained exceptions can, in pathological cases, form a loop.
+    """
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        if isinstance(cur, tomllib.TOMLDecodeError):
+            return True
+        seen.add(id(cur))
+        cur = cur.__cause__ or cur.__context__
+    return False
+
+
 def _format_config_error(exc: Exception) -> str:
     """Render a config-load exception for stderr without leaking secrets.
 
@@ -42,22 +63,40 @@ def _format_config_error(exc: Exception) -> str:
     (bearer token, API key, DSN password) for schema-validation failures —
     including plain-``str`` fields like ``database.url`` whose value is not a
     self-masking ``SecretStr``. Emit only ``loc``/``msg``/``type``, dropping
-    ``input``/``ctx``. Non-``ValidationError`` config-load errors (file-not-found,
-    BOM, TOML syntax) are passed through: their messages are the actionable
-    remediation and do not embed schema input. A ``tomllib`` *syntax* error on a
-    secret-bearing line can still echo that line verbatim — config files are
-    expected to be operator-readable, so that residual is accepted, not scrubbed.
+    ``input``/``ctx``.
+
+    For non-``ValidationError`` errors, ``str(exc)`` is echoed *only* for an
+    allowlist of types whose message is structurally incapable of carrying
+    config values: ``ConfigBomError`` (file path + rewrite commands only),
+    ``tomllib.TOMLDecodeError`` (line/column coordinate only — the parser never
+    interpolates the offending source line), and ``OSError``/``ImportError``
+    (errno+path / module name only). Any other exception type is treated as
+    untrusted: its message is suppressed and only the class name is shown,
+    because an unrecognised ``str(exc)`` could interpolate a secret-bearing
+    config line or environment value.
     """
-    if not isinstance(exc, ValidationError):
+    if isinstance(exc, ValidationError):
+        lines: list[str] = []
+        for err in exc.errors(include_url=False):
+            loc = ".".join(str(part) for part in err.get("loc", ()))
+            msg = err.get("msg", "")
+            etype = err.get("type", "")
+            prefix = f"{loc}: " if loc else ""
+            lines.append(f"{prefix}{msg} [{etype}]")
+        return "\n".join(lines)
+
+    if (
+        isinstance(exc, ConfigBomError | OSError | ImportError)
+        or _has_tomldecode_in_chain(exc)
+    ):
         return str(exc)
-    lines: list[str] = []
-    for err in exc.errors(include_url=False):
-        loc = ".".join(str(part) for part in err.get("loc", ()))
-        msg = err.get("msg", "")
-        etype = err.get("type", "")
-        prefix = f"{loc}: " if loc else ""
-        lines.append(f"{prefix}{msg} [{etype}]")
-    return "\n".join(lines)
+
+    return (
+        f"{type(exc).__name__} while loading configuration. The underlying "
+        "message is withheld because it may quote a secret-bearing line from "
+        "your config file or environment. Check the config file syntax near "
+        "any secret values (api_key, bearer_token, database.url)."
+    )
 
 
 def _is_loopback_host(host: str) -> bool:

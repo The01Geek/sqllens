@@ -987,3 +987,72 @@ def test_format_config_error_redacts_plain_str_input() -> None:
         assert "dsn is malformed" in rendered
     else:  # pragma: no cover - validator always raises
         raise AssertionError("expected ValidationError")
+
+
+def test_format_config_error_suppresses_unknown_exception_message() -> None:
+    # Carried from #122 / #125: the old code returned str(exc) for *any*
+    # non-ValidationError, so an unrecognised exception whose message quoted a
+    # secret-bearing config line would leak it. Unknown types must now have
+    # their message withheld and only the class name shown.
+    from sqllens.cli import _format_config_error
+
+    secret = "sk-ant-LEAKED-CANARY"
+
+    class _WeirdConfigError(Exception):
+        pass
+
+    rendered = _format_config_error(
+        _WeirdConfigError(f'api_key = "{secret}"  # offending line')
+    )
+    assert secret not in rendered
+    assert "_WeirdConfigError" in rendered
+
+
+def test_format_config_error_suppresses_bare_valueerror() -> None:
+    # A bare ValueError is not on the allowlist (only the ConfigBomError
+    # subclass is) — its message is untrusted and must be withheld.
+    from sqllens.cli import _format_config_error
+
+    secret = "p@ssw0rd-CANARY"
+    rendered = _format_config_error(ValueError(f"bad value: {secret}"))
+    assert secret not in rendered
+    assert "ValueError" in rendered
+
+
+def test_format_config_error_passes_through_bom_error() -> None:
+    # ConfigBomError's message is operator-safe (path + rewrite commands only)
+    # and actionable — it must pass through verbatim.
+    from sqllens.cli import _format_config_error
+    from sqllens.config import ConfigBomError
+
+    msg = "/etc/sqllens.toml starts with a UTF-8 BOM, which Python's TOML parser rejects."
+    assert _format_config_error(ConfigBomError(msg)) == msg
+
+
+def test_format_config_error_passes_through_tomldecode_and_chain() -> None:
+    # tomllib.TOMLDecodeError carries only a line/column coordinate (no source
+    # line), so it is safe and actionable — both raw and wrapped in another
+    # exception's cause chain (guards against a future pydantic-settings that
+    # wraps the parser error).
+    import tomllib
+
+    from sqllens.cli import _format_config_error
+
+    try:
+        tomllib.loads('api_key = "secret" garbage')
+    except tomllib.TOMLDecodeError as raw:
+        assert _format_config_error(raw) == str(raw)
+        assert "secret" not in str(raw)
+        wrapped = RuntimeError("settings source failed")
+        wrapped.__cause__ = raw
+        assert _format_config_error(wrapped) == "settings source failed"
+    else:  # pragma: no cover - input is invalid TOML
+        raise AssertionError("expected TOMLDecodeError")
+
+
+def test_format_config_error_passes_through_oserror() -> None:
+    # FileNotFoundError/PermissionError messages are errno + path only.
+    from sqllens.cli import _format_config_error
+
+    rendered = _format_config_error(FileNotFoundError(2, "No such file", "/x/sqllens.toml"))
+    assert "/x/sqllens.toml" in rendered
