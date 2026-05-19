@@ -30,6 +30,7 @@ wipe. Both fallbacks are deliberately isolated to this module.
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
@@ -38,6 +39,8 @@ from sqllens.agent.core.tool import ToolContext
 from sqllens.agent.core.user.models import User
 from sqllens.agent.integrations.chromadb.agent_memory import ChromaAgentMemory
 from sqllens.memory.schema import MemoryBundle, SchemaDoc, SqlPair, SqlPairsBlock
+
+logger = logging.getLogger("sqllens.memory")
 
 if TYPE_CHECKING:
     from sqllens.config import Config
@@ -98,6 +101,10 @@ class MemoryStore:
         pairs: list[SqlPair] = []
         docs: list[SchemaDoc] = []
         for metadata in metadatas:
+            # Chroma can return a row with no metadata (None) — skip explicitly
+            # rather than letting AttributeError abort the whole enumeration.
+            if not isinstance(metadata, dict):
+                continue
             try:
                 if metadata.get("is_text_memory"):
                     docs.append(SchemaDoc(content=metadata.get("content", "")))
@@ -109,9 +116,12 @@ class MemoryStore:
                 if not sql:
                     continue
                 pairs.append(SqlPair(question=metadata.get("question", ""), sql=sql))
-            except (TypeError, ValueError, ValidationError):
+            except (TypeError, ValueError, ValidationError) as exc:
                 # Corrupt/non-conforming stored row — skip rather than abort
                 # the whole enumeration (and the import that seeds off it).
+                # Logged (not silent) so a wholesale model-reconstruction
+                # regression is observable, not an empty-export mystery.
+                logger.warning("skipping unrepresentable memory row: %s", exc)
                 continue
 
         return MemoryBundle(

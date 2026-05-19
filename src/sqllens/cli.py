@@ -442,10 +442,19 @@ def import_memory(
             )
         )
     except Exception as e:
+        wiped = clear and not dry_run
+        data_loss = (
+            "The collection was wiped (--clear) and the import did not "
+            "complete — memory may now be empty or partial.\n"
+            if wiped
+            else ""
+        )
         err_console.print(
-            f"[red]Memory store error:[/red] {escape(str(e))}\n"
-            "The embedding model downloads on first use (~80 MB); also check "
-            "the configured persist_dir is writable."
+            f"[red]Memory store error ({type(e).__name__}):[/red] {escape(str(e))}\n"
+            f"{data_loss}"
+            "If this is a first-use or storage issue: the embedding model "
+            "downloads on first use (~80 MB); check the configured persist_dir "
+            "is writable."
         )
         raise typer.Exit(code=1) from e
 
@@ -490,9 +499,10 @@ def export_memory(
         text = export_bundle(store, fmt)
     except Exception as e:
         err_console.print(
-            f"[red]Memory store error:[/red] {escape(str(e))}\n"
-            "The embedding model downloads on first use (~80 MB); also check "
-            "the configured persist_dir is readable."
+            f"[red]Memory store error ({type(e).__name__}):[/red] {escape(str(e))}\n"
+            "If this is a first-use or storage issue: the embedding model "
+            "downloads on first use (~80 MB); check the configured persist_dir "
+            "is readable."
         )
         raise typer.Exit(code=1) from e
     try:
