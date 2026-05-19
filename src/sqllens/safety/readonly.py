@@ -96,6 +96,17 @@ _ALWAYS_DENIED_FUNCS: frozenset[str] = frozenset(
     {"generate_series", "exploding_generate_series"}
 )
 
+# Resolved denylists, computed once at import (all inputs are module
+# constants). ``assert_select_only`` runs on every generated query, so this
+# stays off the hot path.
+_DENIED_BY_DIALECT: dict[str, frozenset[str]] = {
+    dialect: names | _ALWAYS_DENIED_FUNCS
+    for dialect, names in _SIDE_EFFECT_FUNCS.items()
+}
+_DENIED_UNION: frozenset[str] = frozenset(_ALWAYS_DENIED_FUNCS).union(
+    *_SIDE_EFFECT_FUNCS.values()
+)
+
 
 def _denied_funcs(dialect: str | None) -> frozenset[str]:
     """Return the set of refused function names for ``dialect``.
@@ -104,12 +115,7 @@ def _denied_funcs(dialect: str | None) -> frozenset[str]:
     denylist — fail-closed, matching the existing "parse failure is unsafe"
     invariant.
     """
-    if dialect in _SIDE_EFFECT_FUNCS:
-        return _SIDE_EFFECT_FUNCS[dialect] | _ALWAYS_DENIED_FUNCS
-    union: set[str] = set(_ALWAYS_DENIED_FUNCS)
-    for names in _SIDE_EFFECT_FUNCS.values():
-        union |= names
-    return frozenset(union)
+    return _DENIED_BY_DIALECT.get(dialect, _DENIED_UNION) if dialect else _DENIED_UNION
 
 
 def _func_name_candidates(node: exp.Func) -> set[str]:

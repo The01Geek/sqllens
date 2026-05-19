@@ -136,7 +136,7 @@ _BYPASS_CORPUS: list[tuple[str, str | None]] = [
         "WITH x AS (DELETE FROM accounts WHERE id = 1 RETURNING id) SELECT * FROM x",
         "postgres",
     ),
-    # SELECT ... INTO (the #41 work — kept in the corpus so it stays pinned).
+    # SELECT ... INTO — kept in the corpus so it stays pinned.
     ("SELECT * INTO new_tbl FROM users", "postgres"),
     # Plain DML/DDL roots.
     ("INSERT INTO users VALUES (1, 'a')", "sqlite"),

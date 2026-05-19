@@ -108,24 +108,21 @@ class PostgresRunner(SqlRunner):
             conn = self.psycopg2.connect(**self.connection_params)
 
         try:
-            if self._read_only:
-                # Force every transaction on this session read-only regardless
-                # of the DB role — a guard miss still cannot mutate. Not a
-                # transactional statement, so no commit needed.
-                ro = conn.cursor()
-                try:
-                    ro.execute(
-                        "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"
-                    )
-                finally:
-                    ro.close()
-
-            if self._statement_timeout_ms > 0:
+            if self._read_only or self._statement_timeout_ms > 0:
                 setup = conn.cursor()
                 try:
-                    setup.execute(
-                        "SET statement_timeout = %s", (int(self._statement_timeout_ms),)
-                    )
+                    if self._read_only:
+                        # Force every transaction on this session read-only
+                        # regardless of the DB role — a guard miss still
+                        # cannot mutate. Not transactional; no commit needed.
+                        setup.execute(
+                            "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"
+                        )
+                    if self._statement_timeout_ms > 0:
+                        setup.execute(
+                            "SET statement_timeout = %s",
+                            (int(self._statement_timeout_ms),),
+                        )
                 finally:
                     setup.close()
 

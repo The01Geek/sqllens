@@ -96,25 +96,22 @@ class MySQLRunner(SqlRunner):
         try:
             conn.ping(reconnect=True)
 
-            if self._read_only:
-                # Force the session read-only regardless of the DB role — a
-                # guard miss still cannot mutate.
-                ro = conn.cursor()
-                try:
-                    ro.execute("SET SESSION TRANSACTION READ ONLY")
-                finally:
-                    ro.close()
-
-            if self._statement_timeout_ms > 0:
-                # MAX_EXECUTION_TIME (ms) only affects SELECTs in MySQL 5.7.4+ /
-                # MariaDB; for non-SELECTs the setting is a no-op (acceptable since
-                # the read-only guard rejects those upstream in production).
+            if self._read_only or self._statement_timeout_ms > 0:
                 setup = conn.cursor()
                 try:
-                    setup.execute(
-                        "SET SESSION MAX_EXECUTION_TIME = %s",
-                        (int(self._statement_timeout_ms),),
-                    )
+                    if self._read_only:
+                        # Force the session read-only regardless of the DB
+                        # role — a guard miss still cannot mutate.
+                        setup.execute("SET SESSION TRANSACTION READ ONLY")
+                    if self._statement_timeout_ms > 0:
+                        # MAX_EXECUTION_TIME (ms) only affects SELECTs in MySQL
+                        # 5.7.4+ / MariaDB; for non-SELECTs the setting is a
+                        # no-op (acceptable since the read-only guard rejects
+                        # those upstream in production).
+                        setup.execute(
+                            "SET SESSION MAX_EXECUTION_TIME = %s",
+                            (int(self._statement_timeout_ms),),
+                        )
                 finally:
                     setup.close()
 
