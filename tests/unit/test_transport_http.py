@@ -53,6 +53,8 @@ from sqllens.transport.http import (
     build_asgi_app,
 )
 
+from ._agent_stubs import StubAgent
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHINOOK_DB = REPO_ROOT / "examples" / "sqlite-demo" / "chinook.db"
 
@@ -1433,7 +1435,10 @@ def test_build_asgi_app_warmup_primes_singleton_with_closed_over_cfg(
 
     def fake_build_agent(c: Config):
         builds.append(c)
-        return object()
+        # A real agent-shaped stub: prime_agent now also runs _warm_memory,
+        # which touches agent.agent_memory.get_recent_memories to force the
+        # boot-time cold start. StubAgent carries a StubAgentMemory.
+        return StubAgent()
 
     monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
 
@@ -1444,3 +1449,6 @@ def test_build_asgi_app_warmup_primes_singleton_with_closed_over_cfg(
     assert len(builds) == 1
     assert query_database_module._AGENT_STATE is not None
     assert query_database_module._AGENT_STATE[1] is cfg
+    # The boot-time warm step ran against the primed singleton's memory.
+    primed_agent = query_database_module._AGENT_STATE[0]
+    assert len(primed_agent.agent_memory.get_recent_memories_calls) == 1

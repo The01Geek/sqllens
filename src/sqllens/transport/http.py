@@ -514,13 +514,14 @@ class _SessionManagerLifespan:
                 if self.on_startup is not None:
                     try:
                         await self.on_startup()
-                    except Exception:
+                    except Exception as exc:
                         # Best-effort: a failed warmup (bad API key, DB
-                        # unreachable, ChromaDB open error) must not stop the
-                        # server from booting — the request path retries the
-                        # build on the first query and surfaces a clean MCP
-                        # error there. Log the full traceback for operators.
-                        # BaseException (asyncio.CancelledError on lifespan-task
+                        # unreachable, ChromaDB open error, embedding-model
+                        # download failure) must not stop the server from
+                        # booting — the request path retries the build on the
+                        # first query and surfaces a clean MCP error there.
+                        # Log the full traceback for operators. BaseException
+                        # (asyncio.CancelledError on lifespan-task
                         # cancellation, KeyboardInterrupt, SystemExit) is
                         # deliberately *not* caught: it must propagate to
                         # unwind the host. Only the propagation outcome mirrors
@@ -528,9 +529,18 @@ class _SessionManagerLifespan:
                         # finalization is needed here because the session
                         # manager is already fully entered (_started is True),
                         # so there is no partially-acquired resource to drop.
+                        # The exception type/category is on the summary line
+                        # (not just the traceback) because this is the only
+                        # operator signal that the server booted *degraded* —
+                        # /healthz still returns 200 — and it must be greppable
+                        # without expanding the traceback, mirroring the
+                        # session-manager-startup log above.
                         logger.exception(
-                            "eager agent warmup failed; the first query will "
-                            "rebuild and pay the cold-start cost"
+                            "eager agent warmup failed (%s: %s); the server "
+                            "started degraded — the first query will rebuild "
+                            "and pay the cold-start cost",
+                            type(exc).__name__,
+                            exc,
                         )
                 # Latch readiness once the startup sequence — session manager
                 # up plus the best-effort warmup *attempt* — has finished,
