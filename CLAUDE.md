@@ -44,12 +44,12 @@ The agent's `send_message` returns an async stream of `UiComponent` objects; `to
 
 ## The pruning choice (lifted agent code)
 
-When extracting `sqllens.agent` we made a deliberate **aggressive-pruning** choice: copy only the modules transitively required by our two MCP tools, rather than carry the entire upstream framework. The original tree had 283 Python files; we kept ~110.
+When extracting `sqllens.agent` we made a deliberate **aggressive-pruning** choice: copy only the modules transitively required by the MCP tools we ship, rather than carry the entire upstream framework. The original tree had 283 Python files; we kept ~110. v0.2 reintroduces a chart-emitting tool as a first-party `EmitChartTool` (`src/sqllens/agent/tools/emit_chart.py`) — not lifted from upstream — to back the `visualize_data` MCP tool.
 
 **What this means for debugging:**
 
 - If you hit unexpected behavior in the agent — wrong prompt, missing capability, unfamiliar code path, broken integration — **check the upstream source first** before assuming it's our bug. The reference copy lives on disk in the parent project we extracted from (the maintainer knows the path).
-- Useful directories in the upstream to consult: `core/agent/`, `tools/`, `components/`, `integrations/anthropic/`, `integrations/chromadb/`, `integrations/postgres/`, `capabilities/`. We pruned `examples/`, `legacy/`, `web_components/`, `servers/`, most of `agents/`, 24 unused integration backends, and three of five tools (`visualize_data`, `python`, `file_system`).
+- Useful directories in the upstream to consult: `core/agent/`, `tools/`, `components/`, `integrations/anthropic/`, `integrations/chromadb/`, `integrations/postgres/`, `capabilities/`. We pruned `examples/`, `legacy/`, `web_components/`, `servers/`, most of `agents/`, 24 unused integration backends, and three of five upstream tools (upstream's visualize_data, python, file_system). The chart capability has since been reintroduced as the first-party `EmitChartTool` described above; the other two remain pruned.
 - If a module we *did* copy references something we *didn't*, the import will fail at startup. The fix is usually one of: copy the missing module, replace it with a stub, or remove the dependency by simplifying our caller.
 
 **Upstream brand cleanliness — strict rule:**

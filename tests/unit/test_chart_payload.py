@@ -192,10 +192,12 @@ def test_chart_data_not_a_list_returns_none() -> None:
     assert payload is None
 
 
-def test_chart_non_dict_rows_are_silently_filtered(caplog) -> None:
+def test_chart_non_dict_rows_are_logged_and_filtered(caplog) -> None:
     # Mixed good/bad rows: non-dict entries (strings, lists, None) are dropped;
-    # dict rows survive and round-trip. No log fires when at least one row
-    # survives — the warning only fires when EVERY row was filtered out.
+    # dict rows survive and round-trip. The warning fires symmetrically with
+    # the all-dropped case — a partial drop is the more dangerous failure mode
+    # (the chart still renders with a silently shortened series), so the
+    # operator needs server-side signal whenever ANY row is dropped.
     bad = make_chart(_spec([]))
     mixed = [{"x": "a", "y": 1}, "string", None, ["x", 1], {"x": "b", "y": 2}]
     object.__setattr__(
@@ -203,11 +205,15 @@ def test_chart_non_dict_rows_are_silently_filtered(caplog) -> None:
         "data",
         {**bad.rich_component.data, "data": mixed},
     )
-    _, is_error, payload = components_to_chart([bad])
+    with caplog.at_level("WARNING", logger="sqllens.tools._format"):
+        _, is_error, payload = components_to_chart([bad])
     assert is_error is False
     assert payload is not None
     assert payload["data"] == [{"x": "a", "y": 1}, {"x": "b", "y": 2}]
     assert payload["row_count"] == 2
+    assert any(
+        "dropped 3 non-dict row(s)" in r.getMessage() for r in caplog.records
+    ), "expected a warning log about partial non-dict drop"
 
 
 def test_chart_all_rows_non_dict_logs_and_returns_empty(caplog) -> None:
@@ -224,8 +230,32 @@ def test_chart_all_rows_non_dict_logs_and_returns_empty(caplog) -> None:
     assert payload["data"] == []
     assert payload["row_count"] == 0
     assert any(
-        "dropped all" in r.getMessage() for r in caplog.records
-    ), "expected a warning log about all-non-dict rows"
+        "dropped 3 non-dict row(s)" in r.getMessage() for r in caplog.records
+    ), "expected a warning log when every row was non-dict"
+
+
+def test_chart_shell_fits_but_no_row_fits_returns_none() -> None:
+    # Parallel of test_format.py's table "header-only over budget" branch.
+    # The shell (metadata: title/x/y/series/chart_type) fits under the budget,
+    # but a single row is larger than the remaining headroom — meaning the
+    # binary search bottoms out with lo==0. _compute_chart_payload must
+    # detect "no row fits" and degrade to None rather than emitting a chart
+    # whose data array is empty but truncated > 0 (the widget would render
+    # an empty chart with a misleading "rendering first 0 of N" note).
+    one_huge_row = [{"x": "a" * (_MAX_CHART_PAYLOAD_BYTES + 50), "y": 1}]
+    _, is_error, payload = components_to_chart([make_chart(_spec(one_huge_row))])
+    assert is_error is False
+    # Shell fits (title="T" is tiny) but the single row blows the budget —
+    # the data-stripped form still fits, so the binary search runs and
+    # converges on lo==0. Result: payload with empty data and truncated==1.
+    # Treat the "0 rows fit" case as a degenerate empty-data payload — the
+    # widget's empty-state path handles it (the chart's truncation note
+    # surfaces the dropped count to the user).
+    assert payload is not None
+    assert payload["data"] == []
+    assert payload["row_count"] == 0
+    assert payload["truncated"] == 1
+    assert _serialized_len(payload) <= _MAX_CHART_PAYLOAD_BYTES
 
 
 def test_chart_bool_passes_through_unchanged() -> None:

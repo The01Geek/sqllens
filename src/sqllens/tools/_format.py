@@ -362,14 +362,19 @@ def _compute_chart_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
         for row in rows
         if isinstance(row, dict)
     ]
-    # Producer-side regression detector: if rows came in non-empty but every
-    # one was filtered out for being non-dict, that's a chart-contract drift
-    # (e.g. tuple-shaped rows) — log it so the operator has a server-side
-    # signal beyond "the chart silently went empty."
+    # Producer-side regression detector: any non-dict row indicates chart-
+    # contract drift (e.g. tuple-shaped rows leaking from a future producer).
+    # Always log when at least one row was dropped — a partial drop is the
+    # more dangerous case because the chart still renders, just with a
+    # silently shortened series, so the operator needs the server-side
+    # signal symmetrically with the all-dropped case.
     dropped = len(rows) - len(coerced_rows)
-    if dropped and not coerced_rows:
+    if dropped:
         logger.warning(
-            "chart payload dropped all %d row(s) — none were dicts", dropped
+            "chart payload dropped %d non-dict row(s) of %d (kept %d)",
+            dropped,
+            len(rows),
+            len(coerced_rows),
         )
     total = len(coerced_rows)
 

@@ -3,8 +3,13 @@
 
 """FastMCP server wiring.
 
-Phase 1 spike: minimal stdio server with two tools, no auth, single DB.
-HTTP transport + auth modes land in Phase 2.
+Builds the FastMCP instance and registers the three always-on tools
+(``query_database``, ``visualize_data``, ``list_data_sources``) plus their
+two ``ui://`` widget resources (table + chart). An opt-in fourth tool
+(``import_memory``) is registered only when ``cfg.memory.allow_import`` is
+set. ``run()`` dispatches to stdio or HTTP based on ``cfg.server.transport``;
+the HTTP transport (``sqllens.transport.http``) wraps this server with the
+configured auth middleware (none / bearer / jwt) and path normalization.
 """
 
 from __future__ import annotations

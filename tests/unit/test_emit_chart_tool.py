@@ -113,9 +113,26 @@ def test_pie_with_series_rejected() -> None:
     assert "pie charts must not specify a 'series'" in str(exc.value)
 
 
+def test_pie_with_empty_string_series_rejected() -> None:
+    # series="" is the silent-regression case the load-bearing comment in
+    # _validate_chart_shape calls out: a truthy-only pie check would
+    # accept this and propagate the empty string into the spec. Pin both
+    # sides (pie / heatmap) so a future refactor flipping `is not None` to
+    # a truthy test on the pie branch fails this test loudly.
+    with pytest.raises(ValidationError) as exc:
+        EmitChartParams(**_params(chart_type="pie", series=""))
+    assert "pie charts must not specify a 'series'" in str(exc.value)
+
+
 def test_heatmap_without_series_rejected() -> None:
     with pytest.raises(ValidationError) as exc:
         EmitChartParams(**_params(chart_type="heatmap"))
+    assert "heatmap requires 'series'" in str(exc.value)
+
+
+def test_heatmap_with_empty_string_series_rejected() -> None:
+    with pytest.raises(ValidationError) as exc:
+        EmitChartParams(**_params(chart_type="heatmap", series=""))
     assert "heatmap requires 'series'" in str(exc.value)
 
 
@@ -125,10 +142,16 @@ def test_pie_without_series_is_valid() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_error_path_returns_structured_failure(monkeypatch) -> None:
-    # Force the spec assembly to blow up so the broad except (mirroring
-    # RunSqlTool) returns ToolResult(success=False) with an error
-    # NotificationComponent, not an unhandled exception.
+async def test_execute_error_path_returns_structured_failure(
+    monkeypatch, caplog
+) -> None:
+    # Force the spec assembly to blow up so the broad except returns
+    # ToolResult(success=False) with an error NotificationComponent, not an
+    # unhandled exception. Verify: (1) the raw exception text is preserved on
+    # ``ToolResult.error`` (for operator/telemetry use), (2) the LLM- and
+    # widget-visible messages are sanitized — raw ``str(e)`` must NOT leak
+    # into the iframe or LLM context, (3) ``logger.exception`` fires so the
+    # operator gets the full traceback server-side.
     params = EmitChartParams(**_params())
 
     class Boom:
@@ -136,10 +159,17 @@ async def test_execute_error_path_returns_structured_failure(monkeypatch) -> Non
             raise RuntimeError("kaboom")
 
     monkeypatch.setattr(params, "x", Boom())
-    result = await EmitChartTool().execute(_ctx(), params)
+    with caplog.at_level("ERROR", logger="sqllens.agent.tools.emit_chart"):
+        result = await EmitChartTool().execute(_ctx(), params)
 
     assert result.success is False
     assert "kaboom" in result.error
+    assert "kaboom" not in result.result_for_llm
+    assert "internal error; see server logs" in result.result_for_llm
     assert result.ui_component.rich_component.type == ComponentType.NOTIFICATION
     assert result.ui_component.rich_component.level == "error"
+    assert "kaboom" not in result.ui_component.rich_component.message
     assert result.metadata["error_type"] == "chart_error"
+    assert any(
+        "emit_chart execute failed" in r.getMessage() for r in caplog.records
+    ), "expected a logger.exception call on the broad-except path"

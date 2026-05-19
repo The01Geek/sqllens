@@ -11,6 +11,7 @@ The same DSL dict is both the ``ChartComponent.data`` payload and the JSON the
 MCP layer writes to ``_meta["sqllens/chart"]``.
 """
 
+import logging
 from typing import Any, Dict, List, Literal, Optional, Type, get_args
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -23,6 +24,8 @@ from sqllens.agent.components import (
     UiComponent,
 )
 from sqllens.agent.core.tool import Tool, ToolContext, ToolResult
+
+logger = logging.getLogger("sqllens.agent.tools.emit_chart")
 
 # 200 rows is generous for any human-readable chart while keeping the LLM
 # tool-call payload small. Enforced by a Pydantic validator so an over-cap
@@ -159,17 +162,25 @@ class EmitChartTool(Tool[EmitChartParams]):
                 metadata={"chart_spec": spec},
             )
         except Exception as e:
-            error_message = f"Error emitting chart: {str(e)}"
+            # The args are already Pydantic-validated, so reaching this path is
+            # an implementation bug (e.g. a producer overriding ``model_dump``
+            # incorrectly). Log the full traceback server-side and surface a
+            # sanitized message to the LLM / widget — never echo raw exception
+            # text into the iframe or LLM context. ``ToolResult.error`` keeps
+            # the raw string for the agent's internal bookkeeping (tests + any
+            # future telemetry that wants to count by exception type).
+            logger.exception("emit_chart execute failed")
+            sanitized = "Error emitting chart: internal error; see server logs"
             return ToolResult(
                 success=False,
-                result_for_llm=error_message,
+                result_for_llm=sanitized,
                 ui_component=UiComponent(
                     rich_component=NotificationComponent(
                         type=ComponentType.NOTIFICATION,
                         level="error",
-                        message=error_message,
+                        message=sanitized,
                     ),
-                    simple_component=SimpleTextComponent(text=error_message),
+                    simple_component=SimpleTextComponent(text=sanitized),
                 ),
                 error=str(e),
                 metadata={"error_type": "chart_error"},
