@@ -20,7 +20,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from packaging.requirements import Requirement
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 
@@ -54,7 +54,7 @@ def _locked_versions() -> dict[str, Version]:
             continue
         try:
             req = Requirement(line)
-        except Exception:
+        except InvalidRequirement:
             continue
         exact = [s.version for s in req.specifier if s.operator == "=="]
         if exact:
