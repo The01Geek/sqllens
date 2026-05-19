@@ -260,6 +260,48 @@ def test_load_does_not_leak_toml_path_into_direct_construction(
     assert cfg.database.url == "sqlite:///direct.db"
 
 
+def test_failed_non_bom_load_resets_toml_path(tmp_path: Path) -> None:
+    # The finally block must reset _LOAD_TOML_PATH on the *non-BOM* failure
+    # exit path too (e.g. a TOML missing [database]); otherwise a stale path
+    # leaks into the next construction.
+    bad = tmp_path / "bad.toml"
+    bad.write_text('[llm]\napi_key = "sk-ant-test"\n')  # no [database] -> ValidationError
+    with pytest.raises(ValidationError):
+        Config.load(bad)
+
+    cfg = Config(database=DatabaseConfig(url="sqlite:///direct.db"))
+    assert cfg.database.url == "sqlite:///direct.db"
+
+
+def test_bom_error_path_resets_toml_path(tmp_path: Path) -> None:
+    # The most intricate exit path: env mutation -> ContextVar set -> BOM
+    # ValueError -> message swap -> ContextVar reset -> env restore. Assert
+    # the var is cleared so a later direct construction resolves fresh.
+    bom_toml = tmp_path / "sqllens.toml"
+    bom_toml.write_bytes(b"\xef\xbb\xbf[database]\nurl = 'sqlite:///x.db'\n")
+    with pytest.raises(ValueError, match="UTF-8 BOM"):
+        Config.load(bom_toml)
+
+    cfg = Config(database=DatabaseConfig(url="sqlite:///direct.db"))
+    assert cfg.database.url == "sqlite:///direct.db"
+
+
+def test_direct_config_honors_sqllens_config_env_via_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Direct Config() (no Config.load) must hit the LookupError fallback in
+    # settings_customise_sources and still resolve a real TOML pointed at by
+    # SQLLENS_CONFIG (the fallback's non-None path branch).
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        '[database]\nurl = "sqlite:///from-env-toml.db"\n'
+        '[llm]\napi_key = "sk-ant-test"\n'
+    )
+    monkeypatch.setenv("SQLLENS_CONFIG", str(cfg_path))
+    cfg = Config()
+    assert cfg.database.url == "sqlite:///from-env-toml.db"
+
+
 # --- extra="forbid" backward-compatibility contract ------------------------
 
 

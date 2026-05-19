@@ -193,6 +193,9 @@ class ServerConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8765
     # Field + validation only; uvicorn / logging wiring lands in a later issue.
+    # Domain deliberately includes uvicorn's "trace"; AuditConfig.log_level
+    # below is the narrower stdlib-logging domain (no "trace"). The future
+    # wiring must not conflate the two — they map to different sinks.
     log_level: Literal["critical", "error", "warning", "info", "debug", "trace"] = "info"
 
 
@@ -206,15 +209,17 @@ class AuditConfig(BaseModel):
     ``sanitize_parameters`` correspond to the ``include_full_text`` and
     ``sanitize_parameters`` arguments of ``AuditLogger``'s ``log_ai_response``
     / ``log_tool_invocation`` methods (per-call arguments, not constructor
-    parameters). No factory wiring lands here — this issue defines the surface
-    only.
+    parameters). ``enabled`` is the master gate: when False (the default) the
+    factory builds no audit logger and the other three fields are inert. No
+    factory wiring lands here — this issue defines the surface only.
     """
 
     # extra="forbid" so a misspelled key inside [agent.audit] (e.g.
-    # `sanitize_paramters`) fails loudly at load instead of silently reverting
-    # to the privacy-safe default — matching AuthConfig's "loud config-load
-    # failure beats silent misconfiguration" posture. The top-level
-    # Config(extra="forbid") only guards top-level keys, not nested tables.
+    # `sanitize_paramters`) fails loudly at load — via TOML *or* the
+    # SQLLENS_AGENT__AUDIT__ env path — instead of silently reverting to the
+    # privacy-safe default. This is an audit/privacy surface, so a silent
+    # revert is the worst outcome. The top-level Config(extra="forbid") only
+    # guards top-level keys, not nested tables, hence the per-model setting.
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
@@ -238,6 +243,15 @@ class AgentRuntimeConfig(BaseModel):
     # Field only — rendering consumes it in a later issue.
     show_sql: bool = True
     audit: AuditConfig = Field(default_factory=lambda: AuditConfig())
+
+
+# Set by Config.load to the single resolved TOML Path for the duration of one
+# load; settings_customise_sources reads it instead of re-resolving. Unset
+# (LookupError on .get()) for direct Config() construction. A ContextVar keeps
+# concurrent in-process loads from clobbering each other's resolved path.
+_LOAD_TOML_PATH: contextvars.ContextVar[Path | None] = contextvars.ContextVar(
+    "_LOAD_TOML_PATH"
+)
 
 
 class Config(BaseSettings):
@@ -334,15 +348,6 @@ class Config(BaseSettings):
                     os.environ.pop("SQLLENS_CONFIG", None)
                 else:
                     os.environ["SQLLENS_CONFIG"] = prior
-
-
-# Set by Config.load to the single resolved TOML Path for the duration of one
-# load; settings_customise_sources reads it instead of re-resolving. Unset
-# (LookupError on .get()) for direct Config() construction. A ContextVar keeps
-# concurrent in-process loads from clobbering each other's resolved path.
-_LOAD_TOML_PATH: contextvars.ContextVar[Path | None] = contextvars.ContextVar(
-    "_LOAD_TOML_PATH"
-)
 
 
 def _resolved_toml_path() -> Path | None:
