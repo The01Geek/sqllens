@@ -14,6 +14,9 @@ cfg.database    →  build_sql_runner(url,
                                                         RowCapRunner (max_rows belt-and-suspenders)
                                                           ↓ (if cfg.database.read_only)
                                                         ReadOnlyGuardRunner (sqlglot dialect-aware)
+                                                          ↓ (if cfg.rls non-empty)
+                                                        RlsGuardRunner (sqlglot AST rewrite —
+                                                          predicate injection + fail-secure proof)
 cfg.memory      →  ChromaAgentMemory                 →  persists under cfg.memory.persist_dir
                    LocalFileSystem                   →  scratch root = tempfile.gettempdir() / "sqllens"
 ToolRegistry    →  RunSqlTool                          (executes generated SQL, writes a scratch CSV,
@@ -27,7 +30,7 @@ ToolRegistry    →  RunSqlTool                          (executes generated SQL
                                                               agent_memory, AgentConfig(max_tool_iterations))
 ```
 
-Call order on every query is the reverse of construction: **ReadOnlyGuardRunner → RowCapRunner → engine runner**. The parser rejects before any connection opens; the engine runner streams with `fetchmany(max_rows + 1)` and sets its native statement-timeout primitive; the decorator clamps the result a second time on the way back. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full timeout/cap story.
+Call order on every query is the reverse of construction. With RLS unconfigured: **ReadOnlyGuardRunner → RowCapRunner → engine runner**. With RLS configured (`cfg.rls` non-empty): **RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner** — the RLS rewrite runs *first* so the read-only guard validates the *rewritten* SQL. The parser rejects before any connection opens; the engine runner streams with `fetchmany(max_rows + 1)` and sets its native statement-timeout primitive; the decorator clamps the result a second time on the way back. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full timeout/cap story and [database-connectors/row-level-security.md](../database-connectors/row-level-security.md) for the RLS rewrite.
 
 ## API-key check is here, not in config
 
