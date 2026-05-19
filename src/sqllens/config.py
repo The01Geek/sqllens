@@ -329,8 +329,9 @@ class RlsRule(BaseModel):
     # value/value_from_metadata, operator allowlist) must hold for the rule's
     # lifetime, not just at construction — a security-config object should not
     # be mutable into an invalid state after load. The validator's operator
-    # normalization uses object.__setattr__, which pydantic permits during
-    # post-validation even on a frozen model.
+    # normalization uses object.__setattr__, which bypasses pydantic's frozen
+    # check entirely; it runs inside the mode="after" validator so the rule is
+    # already canonical before any caller sees it.
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     table: str = Field(description="Base table the predicate applies to")

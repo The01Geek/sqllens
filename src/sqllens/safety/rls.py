@@ -17,14 +17,14 @@ guard's posture:
 
 * **Fail-secure, proven not assumed.** Rather than filtering only the SQL
   shapes it recognizes and silently passing the rest, the rewrite tracks every
-  ``exp.Table`` node it injected a predicate into or resolved as a CTE/derived
-  reference, then re-walks the tree: any reference to a protected table that
-  cannot be accounted for blocks the query. A parse failure, a scope-analysis
-  failure, a missing dynamic value, a value that fails sanitization, or any
-  unexpected rewrite error likewise blocks. The rewrite never returns SQL it
-  could not prove fully scoped — :class:`RlsError` is raised and
-  :class:`~sqllens.safety.RlsGuardRunner` turns that into a blocked query,
-  never an unfiltered execution.
+  protected-table node it injected a predicate into or resolved as a
+  CTE/derived reference, then re-walks the tree: any reference to a protected
+  table that cannot be accounted for blocks the query. A non-query statement,
+  a parse failure, a scope-analysis failure, a missing dynamic value, a value
+  that fails sanitization, or any unexpected rewrite error likewise blocks.
+  The rewrite never returns SQL it could not prove fully scoped —
+  :class:`RlsError` is raised and :class:`~sqllens.safety.RlsGuardRunner`
+  turns that into a blocked query, never an unfiltered execution.
 * **No string interpolation.** Identifiers come only from config (validated
   against a strict allowlist at load time, never request-influenced) and
   values are always built as sqlglot literal nodes, never spliced into SQL
@@ -192,6 +192,19 @@ def apply_rls(
             f"(got {len(statements)})"
         )
     tree = statements[0]
+
+    # Fail-secure on non-query shapes. Scope analysis can only reason about
+    # SELECT/UNION-shaped reads; statements like Postgres ``TABLE orders``
+    # parse to a non-Query root (an Alias) that exposes no ``exp.Table`` node,
+    # so the scope walk and the backstop below would never see the protected
+    # read and would silently pass it through. The agent emits SELECT reads;
+    # anything that is not a query is something we cannot prove scoped — block
+    # it rather than guess.
+    if not isinstance(tree, exp.Query):
+        raise RlsError(
+            "row-level security can only scope SELECT-shaped reads; refusing "
+            f"to execute a {type(tree).__name__} statement"
+        )
 
     rules_by_table: dict[str, list[RlsRule]] = {}
     for rule in rules:

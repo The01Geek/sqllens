@@ -298,6 +298,41 @@ class TestApplyRlsScopeCoverage:
                 dialect="sqlite",
             )
 
+    def test_table_command_blocks_fail_secure(self) -> None:
+        # Postgres `TABLE orders` is semantically `SELECT * FROM orders` but
+        # parses to a non-Query root with no exp.Table node — the scope walk
+        # and backstop would never see the protected read. Fail-secure: block.
+        for stmt in ("TABLE orders", "TABLE orders"):
+            with pytest.raises(RlsError, match="SELECT-shaped"):
+                apply_rls(stmt, [_rule(value="acme")], dialect="postgres")
+
+    def test_recursive_cte_named_like_table_does_not_read_base_table(
+        self,
+    ) -> None:
+        # A recursive CTE named `orders` shadows base table `orders` for the
+        # whole WITH scope (standard SQL): every `orders` here is the working
+        # table, not the base table, so there is no protected read to filter
+        # and the query is correctly emitted unchanged (not a fail-open).
+        sql = (
+            "WITH RECURSIVE orders AS (SELECT 1 AS id UNION "
+            "SELECT id FROM orders) SELECT * FROM orders"
+        )
+        out = apply_rls(sql, [_rule(value="acme")], dialect="sqlite")
+        assert "tenant_id" not in out
+        _assert_filtered_and_readonly(out)
+
+    def test_recursive_cte_distinct_name_filters_base_table(self) -> None:
+        # When the recursive CTE has its own name, the real base-table reads
+        # inside its anchor and recursive term ARE filtered.
+        sql = (
+            "WITH RECURSIVE tree AS (SELECT id FROM orders UNION "
+            "SELECT o.id FROM orders o JOIN tree t ON o.parent = t.id) "
+            "SELECT * FROM tree"
+        )
+        out = apply_rls(sql, [_rule(value="acme")], dialect="sqlite")
+        assert out.count("tenant_id") == 2
+        _assert_filtered_and_readonly(out)
+
     def test_mixed_real_base_and_cte_reference(self) -> None:
         out = apply_rls(
             "WITH scoped AS (SELECT id FROM orders) "
