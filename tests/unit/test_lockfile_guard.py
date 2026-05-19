@@ -50,6 +50,13 @@ def _locked_versions(lockfile_text: str) -> dict[str, Version]:
     parsing. Comment text and option lines (``-r``, ``-e``) are skipped, and
     only ``==`` pins are recorded — a package present under a non-``==`` pin
     reads as *absent* (the intended signal for a hand-edited lock).
+
+    A canonical package pinned ``==`` twice to *different* versions raises
+    ``ValueError`` rather than silently last-write-wins, which would otherwise
+    validate only the surviving pin while the contradictory artifact ships. An
+    exact-duplicate pin (same version twice) is idempotent and accepted. (A
+    ``==`` pin *contradicted by a non-``==`` pin* is not detected here — non-
+    ``==`` pins are treated as absent by the rule above, by design.)
     """
     pinned: dict[str, Version] = {}
     folded = re.sub(r"\\[ \t]*\r?\n", " ", lockfile_text)
@@ -61,11 +68,23 @@ def _locked_versions(lockfile_text: str) -> dict[str, Version]:
             req = Requirement(line)
         except InvalidRequirement:
             continue
-        # A version that survived Requirement() parsing in an "==" specifier
-        # is already PEP 440-valid, so Version() cannot raise here.
+        # A concrete version that survived Requirement() parsing in an "=="
+        # specifier is already PEP 440-valid, so the Version() construction
+        # below cannot raise for any pin pip freeze / pip-compile emits (they
+        # never emit prefix matches). The deliberate ValueError for conflicting
+        # pins is separate. A hand-edited "pkg==1.4.*" would let InvalidVersion
+        # propagate — out of scope: the real artifact format never produces it.
         exact = [s.version for s in req.specifier if s.operator == "=="]
         if exact:
-            pinned[canonicalize_name(req.name)] = Version(exact[0])
+            name = canonicalize_name(req.name)
+            version = Version(exact[0])
+            prior = pinned.get(name)
+            if prior is not None and prior != version:
+                raise ValueError(
+                    f"lockfile pins {name!r} '==' twice with conflicting "
+                    f"versions {prior} and {version}"
+                )
+            pinned[name] = version
     return pinned
 
 
@@ -92,16 +111,60 @@ def _bound_violations(pyproject_text: str, lockfile_text: str) -> list[str]:
 
 
 def _force_include_target(pyproject_text: str) -> object:
-    return (
-        tomllib.loads(pyproject_text)
-        .get("tool", {})
-        .get("hatch", {})
-        .get("build", {})
-        .get("targets", {})
-        .get("wheel", {})
-        .get("force-include", {})
-        .get("requirements.txt")
+    """Resolve ``[tool.hatch.build.targets.wheel.force-include]."requirements.txt"``.
+
+    Walks the table path defensively: a missing key *or* an intermediate level
+    hand-edited to a non-table scalar both resolve to ``None`` so the caller's
+    assertion fails with a readable "got: None" message, rather than an opaque
+    ``AttributeError`` from calling ``.get`` on a ``str``/``int``. A non-string
+    *leaf* value (``"requirements.txt" = 42``) is returned verbatim, not
+    coerced — the caller's ``== "sqllens/requirements.txt"`` equality check
+    rejects it loudly with a readable ``got: 42``.
+    """
+    node: object = tomllib.loads(pyproject_text)
+    for key in (
+        "tool",
+        "hatch",
+        "build",
+        "targets",
+        "wheel",
+        "force-include",
+        "requirements.txt",
+    ):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(key)
+    return node
+
+
+def _read_or_fail(path: Path) -> str:
+    """Read ``path`` as UTF-8, failing the guard with an actionable message.
+
+    A missing, unreadable, or non-UTF-8 ``pyproject.toml`` /
+    ``requirements.txt`` is itself a drift signal the guard exists to catch.
+    The failure message names *which* file and *which* of the three distinct
+    fault classes occurred (missing / not valid UTF-8 / unreadable, the order
+    the ``except`` clauses below test them), instead of a raw
+    ``OSError``/``UnicodeDecodeError`` traceback. The trailing ``raise`` is
+    unreachable (``pytest.fail`` is typed ``NoReturn``); it makes the ``-> str``
+    contract locally enforced rather than incidentally satisfied, so the
+    function cannot silently fall through to an implicit ``None`` return if
+    the ``except``/``fail`` structure is later edited.
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        detail = f"is missing ({exc!r})"
+    except UnicodeDecodeError as exc:
+        detail = f"is not valid UTF-8 ({exc!r})"
+    except OSError as exc:
+        detail = f"is unreadable ({exc!r})"
+    pytest.fail(
+        f"lockfile guard could not read build-critical file {path}: it "
+        f"{detail} — fix the file before the lockfile drift guard can "
+        "validate it"
     )
+    raise AssertionError("unreachable: pytest.fail did not raise")  # pragma: no cover
 
 
 # --- Logic tests (run unconditionally against synthetic fixtures) -----------
@@ -210,6 +273,86 @@ def test_logic_force_include_target_extracted() -> None:
     assert _force_include_target(partial) is None
 
 
+def test_logic_force_include_scalar_intermediate_is_none() -> None:
+    # An intermediate table hand-edited to a non-table scalar must resolve to
+    # None (-> readable assertion failure in the caller), not AttributeError.
+    scalar_mid = "[tool.hatch]\nbuild = 'oops-a-string'\n"
+    assert _force_include_target(scalar_mid) is None
+    # Scalar at the level just above the leaf key is equally defended.
+    scalar_leaf_parent = '[tool.hatch.build.targets.wheel]\nforce-include = 42\n'
+    assert _force_include_target(scalar_leaf_parent) is None
+    # A scalar at the very first hop (`tool` itself non-table) exercises the
+    # guard on the first iteration, a distinct position from the deeper cases.
+    assert _force_include_target("tool = 42\n") is None
+
+
+def test_logic_duplicate_conflicting_pin_raises() -> None:
+    # A contradictory hand-edited / merge-conflicted lock (same canonical
+    # package pinned '==' to two different versions) must raise, not
+    # last-write-wins into validating only the surviving pin. `Alpha` also
+    # proves the conflict is detected across canonical-name normalization.
+    conflicting = _CLEAN_LOCK + "Alpha==1.5\n"  # alpha already ==1.4
+    with pytest.raises(ValueError, match=r"conflicting versions 1\.4 and 1\.5"):
+        _locked_versions(conflicting)
+    # The realistic shape: a merge-conflicted `--generate-hashes` lock where
+    # the contradictory pin carries a folded `--hash` continuation. The fold
+    # must happen before the conflict check, else the dup is never seen.
+    folded = _CLEAN_LOCK + "alpha==1.5 \\\n    --hash=sha256:bad\n"
+    with pytest.raises(ValueError, match=r"conflicting versions 1\.4 and 1\.5"):
+        _locked_versions(folded)
+    # Reverse order: the non-canonical surface name (`Alpha`) is seen FIRST,
+    # the canonical one second. This pins that the dict is keyed by
+    # canonicalize_name (not raw req.name) regardless of which form arrives
+    # first — the `<<<`-side of a merge conflict is often the upper-cased pin.
+    reverse = "Alpha==1.4\nalpha==1.5\n"
+    with pytest.raises(ValueError, match=r"conflicting versions 1\.4 and 1\.5"):
+        _locked_versions(reverse)
+
+
+def test_logic_duplicate_identical_pin_is_idempotent() -> None:
+    # An exact-duplicate pin (same version twice) is harmless redundancy and
+    # must not raise — only contradictory pins are an error.
+    redundant = _CLEAN_LOCK + "alpha==1.4\n"
+    assert _locked_versions(redundant)["alpha"] == Version("1.4")
+    assert _missing_core_deps(_SYNTH_PYPROJECT, redundant) == []
+    assert _bound_violations(_SYNTH_PYPROJECT, redundant) == []
+    # Same version under a different surface name (Alpha vs alpha) must also
+    # be idempotent — proves canonicalize_name keys the dict, not just the
+    # conflict comparison; otherwise this would spuriously raise.
+    assert _locked_versions(_CLEAN_LOCK + "Alpha==1.4\n")["alpha"] == Version("1.4")
+
+
+def test_logic_read_or_fail_returns_utf8_contents(tmp_path: Path) -> None:
+    # The success path is otherwise only exercised by the #112-gated
+    # test_real_* tests; pin it so the success path returns the decoded
+    # contents as a str (a smoke test against an accidental None/bytes return
+    # or a wrong-encoding regression that mangles non-ASCII content).
+    f = tmp_path / "requirements.txt"
+    f.write_text("alpha==1.4  # café\n", encoding="utf-8")
+    assert _read_or_fail(f) == "alpha==1.4  # café\n"
+
+
+def test_logic_read_or_fail_surfaces_actionable_message(tmp_path: Path) -> None:
+    # Each fault class must trip the guard with a distinct, fault-specific
+    # message — not a single generic string that hides which failure occurred.
+    # All three arms are pinned because the except-clause ordering is
+    # load-bearing (FileNotFoundError subclasses OSError): a reorder that
+    # moved `except OSError` first would misclassify a missing file as
+    # "unreadable", and only asserting all three arms catches that.
+    bad = tmp_path / "requirements.txt"
+    bad.write_bytes(b"\xff\xfe not valid utf-8 \x80")
+    with pytest.raises(pytest.fail.Exception, match="is not valid UTF-8"):
+        _read_or_fail(bad)
+    # A missing file trips a distinct missing-specific message.
+    with pytest.raises(pytest.fail.Exception, match="it is missing"):
+        _read_or_fail(tmp_path / "does-not-exist.txt")
+    # A non-FileNotFound OSError trips the generic "unreadable" arm. Reading a
+    # directory raises an OSError subclass — IsADirectoryError on POSIX,
+    # PermissionError on Windows; either way it routes to the OSError arm.
+    with pytest.raises(pytest.fail.Exception, match="is unreadable"):
+        _read_or_fail(tmp_path)
+
+
 # --- Integration tests (skip until PR #112 lands the real lockfile) ---------
 
 _real = pytest.mark.skipif(
@@ -221,8 +364,8 @@ _real = pytest.mark.skipif(
 @_real
 def test_real_lockfile_covers_all_core_dependencies() -> None:
     missing = _missing_core_deps(
-        PYPROJECT.read_text(encoding="utf-8"),
-        LOCKFILE.read_text(encoding="utf-8"),
+        _read_or_fail(PYPROJECT),
+        _read_or_fail(LOCKFILE),
     )
     assert not missing, (
         f"core pyproject deps absent (or not '=='-pinned) in requirements.txt: "
@@ -234,8 +377,8 @@ def test_real_lockfile_covers_all_core_dependencies() -> None:
 @_real
 def test_real_lockfile_pins_satisfy_pyproject_bounds() -> None:
     violations = _bound_violations(
-        PYPROJECT.read_text(encoding="utf-8"),
-        LOCKFILE.read_text(encoding="utf-8"),
+        _read_or_fail(PYPROJECT),
+        _read_or_fail(LOCKFILE),
     )
     assert not violations, (
         "lockfile drifted outside pyproject.toml's declared ranges "
@@ -252,7 +395,7 @@ def test_real_wheel_force_includes_lockfile() -> None:
     is the fast, deterministic check that the packaging glue is in place. (A
     full build-and-inspect lives in the release pipeline, not this unit test.)
     """
-    target = _force_include_target(PYPROJECT.read_text(encoding="utf-8"))
+    target = _force_include_target(_read_or_fail(PYPROJECT))
     assert target == "sqllens/requirements.txt", (
         "pyproject.toml must force-include 'requirements.txt' as "
         f"'sqllens/requirements.txt' in the wheel; got: {target!r}"
