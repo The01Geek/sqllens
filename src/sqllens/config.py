@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import contextvars
 import os
+import re
 import shlex
 from pathlib import Path
 from typing import Literal
@@ -254,6 +255,145 @@ class AgentRuntimeConfig(BaseModel):
     audit: AuditConfig = Field(default_factory=lambda: AuditConfig())
 
 
+# Strict identifier allowlist for RLS table/column names. A bare SQL identifier
+# only: ASCII letter or underscore, then letters/digits/underscores. No dots
+# (schema-qualified names are out of scope for v1), no quotes, no whitespace,
+# no operators. This is the CWE-89/CWE-284 posture — request-influenced
+# strings never reach the SQL text as identifiers; only names matching this
+# pattern (validated at config load, never per request) are emitted, and
+# values are always built as sqlglot literal nodes (see safety/rls.py).
+_RLS_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Permitted comparison operators for an RLS predicate. Kept deliberately small:
+# equality/inequality, the four ordered comparisons, and set membership. Each
+# maps to a sqlglot expression class in safety/rls.py; adding an operator here
+# without adding the mapping there fails closed (the rewrite raises and the
+# fail-secure runner blocks the query).
+_RLS_OPERATORS: frozenset[str] = frozenset({"=", "!=", "<", "<=", ">", ">=", "in"})
+
+
+RLS_BAD_IDENTIFIER_MESSAGE = (
+    "rls rule {field}={value!r} is not a bare SQL identifier. Use only ASCII "
+    "letters, digits, and underscores (must not start with a digit); "
+    "schema-qualified or quoted names are not supported."
+)
+
+
+RLS_BAD_OPERATOR_MESSAGE = (
+    "rls rule operator={value!r} is not supported. Allowed operators: "
+    + ", ".join(sorted(_RLS_OPERATORS))
+    + "."
+)
+
+
+RLS_VALUE_SOURCE_MESSAGE = (
+    "rls rule for {table}.{column} must set exactly one of `value` (static) "
+    "or `value_from_metadata` (resolved per request from caller-supplied MCP "
+    "metadata); got {got}."
+)
+
+
+RLS_IN_REQUIRES_LIST_MESSAGE = (
+    "rls rule for {table}.{column} uses operator 'in', so a static `value` "
+    "must be a non-empty list."
+)
+
+
+RLS_METADATA_KEY_MESSAGE = (
+    "rls rule for {table}.{column}: value_from_metadata={value!r} is not a "
+    "valid metadata key. Use only ASCII letters, digits, and underscores "
+    "(must not start with a digit)."
+)
+
+
+class RlsRule(BaseModel):
+    """One row-level-security predicate to inject into generated SQL.
+
+    Each rule says: every base-table reference to ``table`` (in any SELECT
+    scope — subquery, CTE body, join) gets an extra ``WHERE`` predicate
+    ``table.column <operator> <value>``, AND-combined with whatever the agent
+    already generated. ``value`` is a fixed literal; ``value_from_metadata``
+    instead names a key resolved per request from the caller-supplied MCP
+    metadata. Exactly one of the two must be set.
+
+    Enforcement and fail-secure behaviour live in ``safety/rls.py`` /
+    ``RlsGuardRunner``; this model only validates that a rule is well-formed
+    at config-load time so ``sqllens validate`` rejects a typo instead of the
+    query failing later.
+    """
+
+    # extra="forbid": a misspelled key inside a [[rls]] table (e.g. `colum`)
+    # must fail loudly at load, not silently drop the predicate — a dropped
+    # RLS predicate is an unfiltered query, the exact failure this feature
+    # exists to prevent.
+    model_config = ConfigDict(extra="forbid")
+
+    table: str = Field(description="Base table the predicate applies to")
+    column: str = Field(description="Column on `table` the predicate compares")
+    operator: str = Field(
+        default="=",
+        description="Comparison operator: one of = != < <= > >= in",
+    )
+    value: str | int | float | bool | list[str | int | float | bool] | None = Field(
+        default=None,
+        description="Static predicate value. Mutually exclusive with value_from_metadata.",
+    )
+    value_from_metadata: str | None = Field(
+        default=None,
+        description=(
+            "Resolve the predicate value per request from this caller-supplied "
+            "MCP metadata key. Mutually exclusive with value."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate(self) -> RlsRule:
+        for field in ("table", "column"):
+            name = getattr(self, field)
+            if not _RLS_IDENTIFIER_RE.match(name):
+                raise ValueError(
+                    RLS_BAD_IDENTIFIER_MESSAGE.format(field=field, value=name)
+                )
+        op = self.operator.strip().lower()
+        if op not in _RLS_OPERATORS:
+            raise ValueError(RLS_BAD_OPERATOR_MESSAGE.format(value=self.operator))
+        # Normalize so downstream consumers see the canonical lower-case form.
+        object.__setattr__(self, "operator", op)
+
+        has_static = self.value is not None
+        has_dynamic = self.value_from_metadata is not None
+        if has_static == has_dynamic:
+            got = (
+                "both"
+                if has_static and has_dynamic
+                else "neither"
+            )
+            raise ValueError(
+                RLS_VALUE_SOURCE_MESSAGE.format(
+                    table=self.table, column=self.column, got=got
+                )
+            )
+        if has_dynamic and not _RLS_IDENTIFIER_RE.match(
+            self.value_from_metadata or ""
+        ):
+            raise ValueError(
+                RLS_METADATA_KEY_MESSAGE.format(
+                    table=self.table,
+                    column=self.column,
+                    value=self.value_from_metadata,
+                )
+            )
+        if op == "in" and has_static and not (
+            isinstance(self.value, list) and len(self.value) > 0
+        ):
+            raise ValueError(
+                RLS_IN_REQUIRES_LIST_MESSAGE.format(
+                    table=self.table, column=self.column
+                )
+            )
+        return self
+
+
 # Set by Config.load to the single resolved TOML Path for the duration of one
 # load; settings_customise_sources reads it instead of re-resolving. Unset
 # (LookupError on .get()) for direct Config() construction. A ContextVar keeps
@@ -283,6 +423,8 @@ class Config(BaseSettings):
     auth: AuthConfig = Field(default_factory=lambda: AuthConfig())
     server: ServerConfig = Field(default_factory=lambda: ServerConfig())
     agent: AgentRuntimeConfig = Field(default_factory=lambda: AgentRuntimeConfig())
+    # Opt-in row-level-security predicates; empty disables the guard entirely.
+    rls: list[RlsRule] = Field(default_factory=list)
 
     @classmethod
     def settings_customise_sources(

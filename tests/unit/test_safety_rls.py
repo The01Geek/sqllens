@@ -1,0 +1,472 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
+"""Unit tests for row-level security: config validation, the sqlglot AST
+rewrite engine, the fail-secure ``RlsGuardRunner``, factory composition, and
+the per-request metadata plumbing seams.
+
+The rewrite is exercised against a small representative demo schema
+(``customers``, ``orders``) covering single-table, subquery, CTE, join, and
+pre-existing-WHERE shapes. Every rewritten statement is asserted to still pass
+``assert_select_only`` — the read-only guard runs on the rewritten SQL.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pandas as pd
+import pytest
+from pydantic import SecretStr, ValidationError
+
+from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs
+from sqllens.agent.core.tool import ToolContext
+from sqllens.agent.factory import build_agent
+from sqllens.config import (
+    AgentRuntimeConfig,
+    AuthConfig,
+    Config,
+    DatabaseConfig,
+    LLMConfig,
+    MemoryConfig,
+    RlsRule,
+)
+from sqllens.safety import (
+    ReadOnlyGuardRunner,
+    RlsError,
+    RlsGuardRunner,
+    apply_rls,
+)
+from sqllens.safety.readonly import assert_select_only
+
+
+def _rule(**kw: object) -> RlsRule:
+    base: dict[str, object] = {"table": "orders", "column": "tenant_id"}
+    base.update(kw)
+    return RlsRule(**base)  # type: ignore[arg-type]
+
+
+# ─────────────────────────── config validation ──────────────────────────────
+
+
+class TestRlsRuleValidation:
+    def test_valid_static_rule(self) -> None:
+        r = _rule(value="acme")
+        assert r.operator == "="
+        assert r.value == "acme"
+
+    def test_valid_dynamic_rule(self) -> None:
+        r = _rule(value_from_metadata="tenant_id")
+        assert r.value_from_metadata == "tenant_id"
+
+    def test_operator_normalized_to_lowercase(self) -> None:
+        assert _rule(value=[1], operator="IN").operator == "in"
+
+    @pytest.mark.parametrize("bad", ["orders; DROP", "ord ers", "1orders", "a.b", '"x"'])
+    def test_bad_table_identifier_rejected(self, bad: str) -> None:
+        with pytest.raises(ValidationError, match="bare SQL identifier"):
+            _rule(table=bad, value="x")
+
+    def test_bad_column_identifier_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="bare SQL identifier"):
+            _rule(column="col-1", value="x")
+
+    def test_unsupported_operator_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="not supported"):
+            _rule(value="x", operator="LIKE")
+
+    def test_both_value_and_metadata_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="exactly one"):
+            _rule(value="x", value_from_metadata="k")
+
+    def test_neither_value_nor_metadata_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="exactly one"):
+            _rule()
+
+    def test_in_with_non_list_static_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must be a non-empty list"):
+            _rule(value="x", operator="in")
+
+    def test_in_with_empty_list_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="must be a non-empty list"):
+            _rule(value=[], operator="in")
+
+    def test_bad_metadata_key_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="valid metadata key"):
+            _rule(value_from_metadata="bad key")
+
+    def test_unknown_key_in_rule_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            RlsRule(table="orders", column="t", value="x", colmn="typo")  # type: ignore[call-arg]
+
+    def test_misconfigured_rule_fails_config_load(self, tmp_path: Path) -> None:
+        """A bad rule is rejected building the Config (what ``sqllens
+        validate`` does), not deferred to query time."""
+        with pytest.raises(ValidationError):
+            Config(
+                database=DatabaseConfig(url="sqlite:///:memory:"),
+                llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
+                memory=MemoryConfig(persist_dir=tmp_path),
+                auth=AuthConfig(mode="none"),
+                rls=[{"table": "bad-name", "column": "c", "value": "x"}],  # type: ignore[list-item]
+            )
+
+
+# ─────────────────────────── engine: static rules ───────────────────────────
+
+
+def _assert_filtered_and_readonly(sql: str, dialect: str = "sqlite") -> None:
+    assert_select_only(sql, dialect=dialect)
+
+
+class TestApplyRlsStatic:
+    def test_no_rules_is_passthrough(self) -> None:
+        assert apply_rls("SELECT * FROM orders", []) == "SELECT * FROM orders"
+
+    def test_single_table(self) -> None:
+        out = apply_rls(
+            "SELECT id FROM orders",
+            [_rule(value="acme")],
+            dialect="sqlite",
+        )
+        assert "tenant_id" in out and "'acme'" in out
+        _assert_filtered_and_readonly(out)
+
+    def test_existing_where_is_and_combined_and_preserved(self) -> None:
+        out = apply_rls(
+            "SELECT id FROM orders WHERE total > 100",
+            [_rule(value="acme")],
+            dialect="sqlite",
+        )
+        assert "total" in out and "100" in out
+        assert "tenant_id" in out
+        assert " AND " in out.upper()
+        _assert_filtered_and_readonly(out)
+
+    def test_join_predicate_qualified_by_alias(self) -> None:
+        out = apply_rls(
+            "SELECT o.id FROM orders o JOIN customers c ON o.cust = c.id",
+            [_rule(value="acme")],
+            dialect="sqlite",
+        )
+        # Predicate must be qualified by the table's alias, not bare.
+        assert "o.tenant_id" in out.replace('"', "")
+        _assert_filtered_and_readonly(out)
+
+    def test_subquery_scope_is_filtered(self) -> None:
+        out = apply_rls(
+            "SELECT * FROM (SELECT id FROM orders) sub",
+            [_rule(value="acme")],
+            dialect="sqlite",
+        )
+        assert "tenant_id" in out
+        _assert_filtered_and_readonly(out)
+
+    def test_cte_body_filtered_not_cte_reference(self) -> None:
+        out = apply_rls(
+            "WITH scoped AS (SELECT id FROM orders) SELECT * FROM scoped",
+            [_rule(value="acme")],
+            dialect="sqlite",
+        )
+        # Exactly one predicate: inside the CTE body. The outer `FROM scoped`
+        # references the CTE alias (not a base table) and must NOT be filtered.
+        assert out.count("tenant_id") == 1
+        _assert_filtered_and_readonly(out)
+
+    def test_every_matching_reference_filtered(self) -> None:
+        out = apply_rls(
+            "SELECT id FROM orders UNION SELECT id FROM orders",
+            [_rule(value="acme")],
+            dialect="sqlite",
+        )
+        assert out.count("tenant_id") == 2
+        _assert_filtered_and_readonly(out)
+
+    def test_unrelated_table_untouched(self) -> None:
+        out = apply_rls(
+            "SELECT * FROM customers",
+            [_rule(value="acme")],
+            dialect="sqlite",
+        )
+        assert "tenant_id" not in out
+
+    def test_static_in_operator(self) -> None:
+        out = apply_rls(
+            "SELECT id FROM orders",
+            [_rule(value=["a", "b"], operator="in")],
+            dialect="sqlite",
+        )
+        assert "IN" in out.upper() and "'a'" in out and "'b'" in out
+        _assert_filtered_and_readonly(out)
+
+    def test_numeric_value(self) -> None:
+        out = apply_rls(
+            "SELECT id FROM orders",
+            [_rule(column="region_id", value=7)],
+            dialect="sqlite",
+        )
+        assert "region_id" in out and "7" in out
+        _assert_filtered_and_readonly(out)
+
+
+# ─────────────────────────── engine: dynamic + fail-secure ──────────────────
+
+
+class TestApplyRlsDynamicFailSecure:
+    def test_dynamic_value_present(self) -> None:
+        out = apply_rls(
+            "SELECT id FROM orders",
+            [_rule(value_from_metadata="tenant_id")],
+            dialect="sqlite",
+            metadata={"tenant_id": "acme"},
+        )
+        assert "'acme'" in out
+        _assert_filtered_and_readonly(out)
+
+    def test_missing_dynamic_value_blocks(self) -> None:
+        with pytest.raises(RlsError, match="not supplied"):
+            apply_rls(
+                "SELECT id FROM orders",
+                [_rule(value_from_metadata="tenant_id")],
+                dialect="sqlite",
+                metadata={},
+            )
+
+    @pytest.mark.parametrize(
+        "bad",
+        ["tab\tnull", "x\x00y", "newline\ninjection", "a" * 5000],
+    )
+    def test_suspicious_string_value_blocks(self, bad: str) -> None:
+        with pytest.raises(RlsError, match="suspicious"):
+            apply_rls(
+                "SELECT id FROM orders",
+                [_rule(value_from_metadata="tenant_id")],
+                dialect="sqlite",
+                metadata={"tenant_id": bad},
+            )
+
+    @pytest.mark.parametrize("bad", [None, {"a": 1}, b"bytes", ["nested"]])
+    def test_wrong_typed_dynamic_value_blocks(self, bad: object) -> None:
+        with pytest.raises(RlsError):
+            apply_rls(
+                "SELECT id FROM orders",
+                [_rule(value_from_metadata="tenant_id")],
+                dialect="sqlite",
+                metadata={"tenant_id": bad},
+            )
+
+    def test_dynamic_in_requires_nonempty_list(self) -> None:
+        with pytest.raises(RlsError, match="non-empty list"):
+            apply_rls(
+                "SELECT id FROM orders",
+                [_rule(value_from_metadata="tids", operator="in")],
+                dialect="sqlite",
+                metadata={"tids": "not-a-list"},
+            )
+
+    def test_dynamic_in_present(self) -> None:
+        out = apply_rls(
+            "SELECT id FROM orders",
+            [_rule(value_from_metadata="tids", operator="in")],
+            dialect="sqlite",
+            metadata={"tids": ["a", "b"]},
+        )
+        assert "IN" in out.upper() and "'a'" in out
+        _assert_filtered_and_readonly(out)
+
+    def test_parse_failure_blocks(self) -> None:
+        with pytest.raises(RlsError, match="could not parse"):
+            apply_rls(
+                "SELECT FROM WHERE ((",
+                [_rule(value="acme")],
+                dialect="sqlite",
+            )
+
+    def test_multiple_statements_blocks(self) -> None:
+        with pytest.raises(RlsError, match="exactly one"):
+            apply_rls(
+                "SELECT 1; SELECT 2",
+                [_rule(value="acme")],
+                dialect="sqlite",
+            )
+
+
+# ─────────────────────────── RlsGuardRunner ─────────────────────────────────
+
+
+class _RecordingRunner:
+    def __init__(self) -> None:
+        self.calls: list[RunSqlToolArgs] = []
+
+    async def run_sql(
+        self, args: RunSqlToolArgs, context: object
+    ) -> pd.DataFrame:
+        self.calls.append(args)
+        return pd.DataFrame()
+
+
+def _ctx(metadata: dict | None = None) -> ToolContext:
+    return ToolContext.model_construct(metadata=metadata or {})
+
+
+class TestRlsGuardRunner:
+    @pytest.mark.asyncio
+    async def test_rewritten_sql_reaches_inner_runner(self) -> None:
+        inner = _RecordingRunner()
+        guard = RlsGuardRunner(inner, [_rule(value="acme")], dialect="sqlite")
+        await guard.run_sql(RunSqlToolArgs(sql="SELECT id FROM orders"), _ctx())
+        assert len(inner.calls) == 1
+        assert "tenant_id" in inner.calls[0].sql
+
+    @pytest.mark.asyncio
+    async def test_missing_dynamic_value_blocks_before_inner(self) -> None:
+        inner = _RecordingRunner()
+        guard = RlsGuardRunner(
+            inner, [_rule(value_from_metadata="tenant_id")], dialect="sqlite"
+        )
+        with pytest.raises(RlsError, match="refusing to execute"):
+            await guard.run_sql(
+                RunSqlToolArgs(sql="SELECT id FROM orders"), _ctx({})
+            )
+        assert inner.calls == []
+
+    @pytest.mark.asyncio
+    async def test_dynamic_value_from_context_metadata(self) -> None:
+        inner = _RecordingRunner()
+        guard = RlsGuardRunner(
+            inner, [_rule(value_from_metadata="tenant_id")], dialect="sqlite"
+        )
+        await guard.run_sql(
+            RunSqlToolArgs(sql="SELECT id FROM orders"),
+            _ctx({"tenant_id": "acme"}),
+        )
+        assert "'acme'" in inner.calls[0].sql
+
+    @pytest.mark.asyncio
+    async def test_unexpected_error_fails_closed(self, monkeypatch) -> None:
+        inner = _RecordingRunner()
+        guard = RlsGuardRunner(inner, [_rule(value="acme")], dialect="sqlite")
+
+        def _boom(*a: object, **k: object) -> str:
+            raise RuntimeError("kaboom")
+
+        monkeypatch.setattr("sqllens.safety.apply_rls", _boom)
+        with pytest.raises(RlsError, match="guard errored"):
+            await guard.run_sql(RunSqlToolArgs(sql="SELECT 1"), _ctx())
+        assert inner.calls == []
+
+    @pytest.mark.asyncio
+    async def test_static_rule_works_with_empty_metadata(self) -> None:
+        """Static rules need no per-request channel — enforced on stdio too."""
+        inner = _RecordingRunner()
+        guard = RlsGuardRunner(inner, [_rule(value="acme")], dialect="sqlite")
+        await guard.run_sql(RunSqlToolArgs(sql="SELECT id FROM orders"), _ctx())
+        assert "'acme'" in inner.calls[0].sql
+
+
+# ─────────────────────────── factory composition ────────────────────────────
+
+
+def _cfg(tmp_path: Path, rls: list[RlsRule]) -> Config:
+    return Config(
+        database=DatabaseConfig(url="sqlite:///:memory:"),
+        llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
+        memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
+        auth=AuthConfig(mode="none"),
+        agent=AgentRuntimeConfig(),
+        rls=rls,
+    )
+
+
+def _unwrap(tool: object) -> object:
+    return getattr(tool, "_wrapped_tool", tool)
+
+
+class TestFactoryComposition:
+    def test_rls_guard_outermost_ahead_of_readonly(self, tmp_path: Path) -> None:
+        agent = build_agent(_cfg(tmp_path, [_rule(value="acme")]))
+        runner = _unwrap(agent.tool_registry._tools["run_sql"]).sql_runner
+        assert isinstance(runner, RlsGuardRunner)
+        # Read-only guard validates the *rewritten* SQL → it sits inside RLS.
+        assert isinstance(runner._inner, ReadOnlyGuardRunner)
+
+    def test_no_rls_guard_when_no_rules(self, tmp_path: Path) -> None:
+        agent = build_agent(_cfg(tmp_path, []))
+        runner = _unwrap(agent.tool_registry._tools["run_sql"]).sql_runner
+
+        def _walk(r: object) -> bool:
+            while r is not None:
+                if isinstance(r, RlsGuardRunner):
+                    return True
+                r = getattr(r, "_inner", None)
+            return False
+
+        assert not _walk(runner)
+
+
+# ─────────────────────────── metadata plumbing seams ────────────────────────
+
+
+class TestMetadataPlumbing:
+    @pytest.mark.asyncio
+    async def test_query_database_forwards_metadata_to_request_context(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """``query_database_impl`` must put caller metadata onto the
+        ``RequestContext`` it hands the agent."""
+        from sqllens.tools import query_database as qd
+
+        seen: dict = {}
+
+        class _RecordingAgent:
+            def send_message(self, request_context, message, *, conversation_id=None):
+                seen["metadata"] = dict(request_context.metadata)
+
+                async def _gen():
+                    if False:
+                        yield  # pragma: no cover
+
+                return _gen()
+
+        async def _fake_agent_for(_cfg: Config):
+            return _RecordingAgent()
+
+        monkeypatch.setattr(qd, "_agent_for", _fake_agent_for)
+        cfg = _cfg(tmp_path, [])
+        await qd.query_database_impl(cfg, "q", metadata={"tenant_id": "acme"})
+        assert seen["metadata"] == {"tenant_id": "acme"}
+
+    def test_request_metadata_extracts_meta_extras(self) -> None:
+        from sqllens.server import _request_metadata
+
+        class _Meta:
+            model_extra: dict = {"tenant_id": "acme"}  # noqa: RUF012
+
+        class _RC:
+            meta = _Meta()
+
+        class _Ctx:
+            request_context = _RC()
+
+        assert _request_metadata(_Ctx()) == {"tenant_id": "acme"}
+
+    def test_request_metadata_failsafe_on_no_request(self) -> None:
+        from sqllens.server import _request_metadata
+
+        class _Ctx:
+            @property
+            def request_context(self) -> object:
+                raise ValueError("not in a request")
+
+        assert _request_metadata(_Ctx()) == {}
+
+    def test_request_metadata_handles_none_meta(self) -> None:
+        from sqllens.server import _request_metadata
+
+        class _RC:
+            meta = None
+
+        class _Ctx:
+            request_context = _RC()
+
+        assert _request_metadata(_Ctx()) == {}
