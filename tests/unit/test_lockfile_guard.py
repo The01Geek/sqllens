@@ -19,6 +19,7 @@ bug in the guard surfaces now rather than the moment #112 merges.
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -51,7 +52,7 @@ def _locked_versions(lockfile_text: str) -> dict[str, Version]:
     reads as *absent* (the intended signal for a hand-edited lock).
     """
     pinned: dict[str, Version] = {}
-    folded = lockfile_text.replace("\\\n", " ")
+    folded = re.sub(r"\\[ \t]*\r?\n", " ", lockfile_text)
     for raw in folded.splitlines():
         line = raw.split("#", 1)[0].split("--hash", 1)[0].strip()
         if not line or line.startswith("-"):
@@ -183,6 +184,18 @@ def test_logic_parses_pip_compile_generate_hashes_dialect() -> None:
         "alpha==1.4 \\\n    --hash=sha256:aaaa \\\n    --hash=sha256:bbbb\n"
         "beta==2.9 \\\n    --hash=sha256:cccc\n"
         "gamma-pkg==0.7\nmodern==1.5\n"
+    )
+    assert _missing_core_deps(_SYNTH_PYPROJECT, lock) == []
+    assert _bound_violations(_SYNTH_PYPROJECT, lock) == []
+
+
+def test_logic_folds_continuation_with_trailing_whitespace() -> None:
+    # pip-compile / hand edits emit `pkg==X \ ` (backslash + trailing
+    # space/tab) before the newline. The fold must tolerate it, else the
+    # pin is dropped and a valid lock reads as missing -> false CI failure.
+    lock = (
+        "alpha==1.4 \\ \n    --hash=sha256:aaaa\n"
+        "beta==2.9\ngamma-pkg==0.7\nmodern==1.5\n"
     )
     assert _missing_core_deps(_SYNTH_PYPROJECT, lock) == []
     assert _bound_violations(_SYNTH_PYPROJECT, lock) == []
