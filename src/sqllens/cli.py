@@ -20,6 +20,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from sqllens import __version__
+from sqllens._errors import validation_error_lines
 from sqllens.config import API_KEY_MISSING_MESSAGE, ConfigBomError
 
 if TYPE_CHECKING:
@@ -95,14 +96,7 @@ def _format_config_error(exc: Exception) -> str:
     name is surfaced.
     """
     if isinstance(exc, ValidationError):
-        lines: list[str] = []
-        for err in exc.errors(include_url=False):
-            loc = ".".join(str(part) for part in err.get("loc", ()))
-            msg = err.get("msg", "")
-            etype = err.get("type", "")
-            prefix = f"{loc}: " if loc else ""
-            lines.append(f"{prefix}{msg} [{etype}]")
-        return "\n".join(lines)
+        return "\n".join(validation_error_lines(exc, with_type=True))
 
     if isinstance(exc, _SAFE_CONFIG_ERROR_TYPES):
         return str(exc)
@@ -447,6 +441,156 @@ def claude_desktop_install(
         console.print(line)
 
 
+@app.command(name="import-memory")
+def import_memory(
+    path: Path = typer.Argument(..., help="Bundle file to import (JSON or CSV)."),
+    config: Path | None = typer.Option(
+        None, "--config", "-c", help="Path to sqllens.toml. Falls back to env / ./sqllens.toml."
+    ),
+    fmt: str = typer.Option("json", "--format", help="Bundle format (json or csv)."),
+    clear: bool = typer.Option(
+        False, "--clear", help="Wipe the collection before importing (prompts to confirm)."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Validate and report without writing anything."
+    ),
+    batch_size: int = typer.Option(
+        100, "--batch-size", min=1, help="Writes issued before yielding."
+    ),
+) -> None:
+    """Bulk-load a curated memory bundle into the configured store."""
+    import asyncio
+
+    from sqllens.config import Config
+    from sqllens.memory import MemoryStore, import_bundle
+    from sqllens.memory.io import VALID_FORMATS, BundleFormatError, parse_csv, parse_json
+
+    if fmt not in VALID_FORMATS:
+        err_console.print(f"[red]Error:[/red] --format must be 'json' or 'csv' (got {escape(fmt)})")
+        raise typer.Exit(code=1)
+    try:
+        cfg = Config.load(config)
+    except Exception as e:
+        err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
+        raise typer.Exit(code=2) from e
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        err_console.print(f"[red]Error:[/red] cannot read {escape(str(path))}: {escape(str(e))}")
+        raise typer.Exit(code=1) from e
+    try:
+        bundle = parse_csv(text) if fmt == "csv" else parse_json(text)
+    except BundleFormatError as e:
+        err_console.print(f"[red]Invalid bundle:[/red] {escape(str(e))}")
+        raise typer.Exit(code=1) from e
+
+    if clear and not dry_run:
+        typer.confirm(
+            f"This wipes every memory in collection '{cfg.memory.collection}'. Continue?",
+            abort=True,
+        )
+
+    try:
+        store = MemoryStore(cfg)
+    except Exception as e:
+        err_console.print(
+            f"[red]Memory store error ({type(e).__name__}):[/red] {escape(str(e))}\n"
+            "If this is a first-use or storage issue: the embedding model "
+            "downloads on first use (~80 MB); check the configured persist_dir "
+            "is writable."
+        )
+        raise typer.Exit(code=1) from e
+    try:
+        report = asyncio.run(
+            import_bundle(
+                store, bundle, dry_run=dry_run, clear=clear, batch_size=batch_size
+            )
+        )
+    except Exception as e:
+        # Store constructed OK, so a wipe (if --clear) already ran before the
+        # failure — the collection may now be empty or partial.
+        data_loss = (
+            "The collection was wiped (--clear) and the import did not "
+            "complete — memory may now be empty or partial.\n"
+            if clear and not dry_run
+            else ""
+        )
+        err_console.print(
+            f"[red]Memory import error ({type(e).__name__}):[/red] {escape(str(e))}\n"
+            f"{data_loss}"
+            "If this is a first-use or storage issue: the embedding model "
+            "downloads on first use (~80 MB); check the configured persist_dir "
+            "is writable."
+        )
+        raise typer.Exit(code=1) from e
+
+    prefix = "[yellow](dry-run)[/yellow] " if dry_run else ""
+    console.print(
+        f"{prefix}saved={report.saved} "
+        f"skipped_duplicate={report.skipped_duplicate} "
+        f"errors={len(report.errors)}"
+    )
+    for err in report.errors:
+        err_console.print(
+            f"  [red]{escape(err.kind)}[{err.index}]:[/red] {escape(err.message)}"
+        )
+    if report.errors:
+        raise typer.Exit(code=1)
+
+
+@app.command(name="export-memory")
+def export_memory(
+    path: Path = typer.Argument(..., help="Destination file for the exported bundle."),
+    config: Path | None = typer.Option(
+        None, "--config", "-c", help="Path to sqllens.toml. Falls back to env / ./sqllens.toml."
+    ),
+    fmt: str = typer.Option("json", "--format", help="Bundle format."),
+) -> None:
+    """Export the configured memory store to a bundle file."""
+    from sqllens.config import Config
+    from sqllens.memory import MemoryCorruptionError, MemoryStore, export_bundle
+    from sqllens.memory.io import VALID_FORMATS
+
+    if fmt not in VALID_FORMATS:
+        err_console.print(f"[red]Error:[/red] --format must be 'json' or 'csv' (got {escape(fmt)})")
+        raise typer.Exit(code=1)
+    try:
+        cfg = Config.load(config)
+    except Exception as e:
+        err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
+        raise typer.Exit(code=2) from e
+
+    try:
+        store = MemoryStore(cfg)
+        result = export_bundle(store, fmt)
+    except MemoryCorruptionError as e:
+        # Refuse to write a destroyed/near-empty backup as if it succeeded —
+        # the documented "export before --clear" path makes a false success
+        # here a permanent data-loss trap.
+        err_console.print(
+            f"[red]Refusing to export:[/red] {escape(str(e))}\n"
+            "No file was written. Investigate the store before relying on a "
+            "backup."
+        )
+        raise typer.Exit(code=1) from e
+    except Exception as e:
+        err_console.print(
+            f"[red]Memory store error ({type(e).__name__}):[/red] {escape(str(e))}\n"
+            "If this is a first-use or storage issue: the embedding model "
+            "downloads on first use (~80 MB); check the configured persist_dir "
+            "is readable."
+        )
+        raise typer.Exit(code=1) from e
+    try:
+        path.write_text(result.text, encoding="utf-8")
+    except OSError as e:
+        err_console.print(f"[red]Error:[/red] cannot write {escape(str(path))}: {escape(str(e))}")
+        raise typer.Exit(code=1) from e
+    for warning in result.warnings:
+        err_console.print(f"[yellow]Warning:[/yellow] {escape(warning)}")
+    console.print(f"[green]Wrote {escape(str(path))}[/green]")
+
+
 _SAMPLE_CONFIG = """\
 # SQL Lens configuration. See https://github.com/The01Geek/sqllens for docs.
 
@@ -464,6 +608,10 @@ model = "claude-sonnet-4-5-20250929"
 persist_dir = "./chroma"
 collection = "sqllens"
 similarity_threshold = 0.7
+# allow_import = false   # set true to expose the import_memory MCP tool
+                         # (memory-poisoning risk — trusted operators only).
+                         # The import-memory / export-memory CLI commands work
+                         # regardless of this flag.
 
 [auth]
 mode = "none"            # one of: none, bearer (jwt is not implemented yet)

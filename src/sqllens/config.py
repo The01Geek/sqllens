@@ -110,6 +110,14 @@ class MemoryConfig(BaseModel):
     similarity_threshold: float = Field(
         default=0.7, ge=0.0, le=1.0, description="Minimum cosine similarity for memory hits"
     )
+    allow_import: bool = Field(
+        default=False,
+        description=(
+            "Expose the import_memory MCP tool. OFF by default: a remote client "
+            "that can write memory can poison future SQL generation. Enable only "
+            "for trusted operators. The CLI import/export commands are unaffected."
+        ),
+    )
 
 
 class AuthConfig(BaseModel):
