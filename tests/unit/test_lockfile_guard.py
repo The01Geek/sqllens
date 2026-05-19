@@ -100,47 +100,73 @@ def _force_include_target(pyproject_text: str) -> object:
 
 # --- Logic tests (run unconditionally against synthetic fixtures) -----------
 
+# `Gamma_Pkg[extra]` (mixed case + underscore + extra) only matches a
+# `gamma-pkg==` lock pin if canonicalize_name normalizes both sides — so the
+# canonicalization path is genuinely exercised, not an identity match.
+# `legacy` (marker false on py3+) must be dropped; `modern` (marker true)
+# must be kept — both arms of the marker filter are driven.
 _SYNTH_PYPROJECT = """
 [project]
 dependencies = [
     "alpha>=1.0,<2",
     "beta>=2.0,<3",
-    "gamma[extra]>=0.5,<1",
+    "Gamma_Pkg[extra]>=0.5,<1",
     "legacy>=1.0; python_version < '3.0'",
+    "modern>=1.0; python_version >= '3.0'",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]
 "requirements.txt" = "sqllens/requirements.txt"
 """
 
+_CLEAN_LOCK = (
+    "# header\nalpha==1.4\nbeta==2.9\n--hash=sha256:deadbeef\n"
+    "gamma-pkg==0.7\nmodern==1.5\n"
+)
+
 
 def test_logic_clean_lockfile_passes() -> None:
-    lock = "# header\nalpha==1.4\nbeta==2.9\n--hash=sha256:deadbeef\ngamma==0.7\n"
-    assert _missing_core_deps(_SYNTH_PYPROJECT, lock) == []
-    assert _bound_violations(_SYNTH_PYPROJECT, lock) == []
+    assert _missing_core_deps(_SYNTH_PYPROJECT, _CLEAN_LOCK) == []
+    assert _bound_violations(_SYNTH_PYPROJECT, _CLEAN_LOCK) == []
 
 
-def test_logic_detects_bound_drift() -> None:
-    lock = "alpha==1.4\nbeta==3.1\ngamma==0.7\n"  # beta past <3
+def test_logic_detects_upper_bound_drift() -> None:
+    lock = _CLEAN_LOCK.replace("beta==2.9", "beta==3.1")  # past <3
     violations = _bound_violations(_SYNTH_PYPROJECT, lock)
     assert any("beta" in v for v in violations), violations
 
 
+def test_logic_detects_lower_bound_drift() -> None:
+    lock = _CLEAN_LOCK.replace("alpha==1.4", "alpha==0.9")  # below >=1.0
+    violations = _bound_violations(_SYNTH_PYPROJECT, lock)
+    assert any("alpha" in v for v in violations), violations
+
+
 def test_logic_detects_missing_dependency() -> None:
-    lock = "alpha==1.4\ngamma==0.7\n"  # beta absent
-    assert _missing_core_deps(_SYNTH_PYPROJECT, lock) == ["beta"]
+    lock = _CLEAN_LOCK.replace("beta==2.9\n", "")  # beta absent
+    missing = _missing_core_deps(_SYNTH_PYPROJECT, lock)
+    assert "beta" in missing
+    # marker-dropped `legacy` is never "missing"; satisfied-marker `modern` is present.
+    assert "legacy" not in missing
+    assert "modern" not in missing
 
 
-def test_logic_drops_env_excluded_marker() -> None:
-    # `legacy` is python_version < '3.0' so it is dropped and never "missing".
-    lock = "alpha==1.4\nbeta==2.9\ngamma==0.7\n"
-    assert _missing_core_deps(_SYNTH_PYPROJECT, lock) == []
+def test_logic_marker_filter_keeps_and_drops() -> None:
+    names = {r.name for r in _core_requirements(_SYNTH_PYPROJECT)}
+    assert "legacy" not in names  # python_version < '3.0' → dropped
+    assert "modern" in names  # python_version >= '3.0' → kept
 
 
 def test_logic_canonicalizes_extras_and_names() -> None:
-    # pyproject `gamma[extra]` must match a bare `gamma==` lockfile pin.
-    lock = "alpha==1.4\nbeta==2.9\ngamma==0.7\n"
-    assert "gamma" not in _missing_core_deps(_SYNTH_PYPROJECT, lock)
+    # pyproject `Gamma_Pkg[extra]` must match a `gamma-pkg==` lock pin.
+    assert "Gamma_Pkg" not in _missing_core_deps(_SYNTH_PYPROJECT, _CLEAN_LOCK)
+
+
+def test_logic_non_exact_pin_reads_as_absent() -> None:
+    # A non-`==` pin is the documented signal for a hand-edited lock: the
+    # package is treated as absent so the completeness check fires.
+    lock = _CLEAN_LOCK.replace("beta==2.9", "beta>=2.0")
+    assert "beta" in _missing_core_deps(_SYNTH_PYPROJECT, lock)
 
 
 def test_logic_force_include_target_extracted() -> None:
@@ -163,8 +189,9 @@ def test_real_lockfile_covers_all_core_dependencies() -> None:
         LOCKFILE.read_text(encoding="utf-8"),
     )
     assert not missing, (
-        f"core pyproject dependencies absent from requirements.txt: {missing}. "
-        "The lockfile must record every direct runtime dependency."
+        f"core pyproject deps absent (or not '=='-pinned) in requirements.txt: "
+        f"{missing}. The lockfile must record every direct runtime dependency "
+        "with an exact pin."
     )
 
 
