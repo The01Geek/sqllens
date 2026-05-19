@@ -51,3 +51,56 @@ async def test_tool_errors_on_bad_input(tmp_path, monkeypatch) -> None:
     with pytest.raises(Exception) as excinfo:
         await mcp.call_tool("import_memory", {"bundle_json": "{ not json"})
     assert "Invalid memory bundle" in str(excinfo.value)
+
+
+async def test_tool_signals_error_when_every_item_fails(
+    tmp_path, monkeypatch
+) -> None:
+    """A run that saves nothing but collects per-item errors must reach the
+    client as a failure, not an isError:false success."""
+    patch_fake_embeddings(monkeypatch)
+    cfg = _cfg(tmp_path, allow_import=True)
+
+    async def always_fail(self, question: str, sql: str) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        "sqllens.memory.store.MemoryStore.add_sql_pair", always_fail
+    )
+    mcp = build_server(cfg)
+    with pytest.raises(Exception) as excinfo:
+        await mcp.call_tool(
+            "import_memory",
+            {"bundle_json": '{"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]}}'},
+        )
+    assert "saved nothing" in str(excinfo.value)
+
+
+async def test_tool_store_failure_does_not_leak_persist_path(
+    tmp_path, monkeypatch
+) -> None:
+    """A Chroma/disk failure must reach the client sanitized — never the raw
+    exception (which can carry the on-disk persist path)."""
+    patch_fake_embeddings(monkeypatch)
+    cfg = _cfg(tmp_path, allow_import=True)
+    secret_path = str(tmp_path / "chroma")
+
+    async def boom(self, question: str, sql: str) -> None:
+        raise RuntimeError(f"chroma exploded at {secret_path}/internal.db")
+
+    monkeypatch.setattr(
+        "sqllens.memory.store.MemoryStore.add_schema_doc", boom
+    )
+    # schema_doc save raises a generic RuntimeError (not systemic) so it is
+    # caught per-item; with zero saves the tool raises the masked message.
+    monkeypatch.setattr(
+        "sqllens.memory.store.MemoryStore.add_sql_pair", boom
+    )
+    mcp = build_server(cfg)
+    with pytest.raises(Exception) as excinfo:
+        await mcp.call_tool(
+            "import_memory",
+            {"bundle_json": '{"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]}}'},
+        )
+    msg = str(excinfo.value)
+    assert secret_path not in msg

@@ -81,6 +81,26 @@ def build_server(cfg: Config) -> FastMCP:
                     "Memory import failed while writing to the store; "
                     "the bundle was not (fully) saved. Check the server logs."
                 ) from exc
+            # A run that saved nothing but collected per-item errors is a
+            # failed import, not a success — returning it as a plain string
+            # would reach the client as isError:false. Per the CLAUDE.md
+            # isError contract the calling agent needs a structured failure
+            # signal; the per-item detail is still in the message.
+            if report.saved == 0 and report.errors:
+                # Per-item messages are raw exception text and can carry the
+                # on-disk persist path / driver internals; the full detail goes
+                # to the server log, the client gets a sanitized count only.
+                logger.error(
+                    "import_memory: every item failed (%d errors, 0 saved): %s",
+                    len(report.errors),
+                    "; ".join(
+                        f"{e.kind}[{e.index}]: {e.message}" for e in report.errors
+                    ),
+                )
+                raise RuntimeError(
+                    f"Memory import saved nothing — all {len(report.errors)} "
+                    "item(s) failed. Nothing was written. Check the server logs."
+                )
             return report.to_markdown()
 
     return mcp

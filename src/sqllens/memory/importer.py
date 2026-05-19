@@ -12,10 +12,21 @@ within the incoming batch.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 
 from sqllens.memory.schema import ImportItemError, ImportReport, MemoryBundle
 from sqllens.memory.store import MemoryStore
+
+logger = logging.getLogger("sqllens.memory")
+
+# A failure of one of these kinds is environmental/systemic (out of memory,
+# disk full, interpreter teardown), not a property of the single item being
+# saved. Catching it per-item would flatten one root cause into thousands of
+# identical per-row errors and report a wholly-failed import as a long list of
+# "errors" instead of failing fast. Let these propagate so the caller (CLI /
+# MCP tool) surfaces one clear, actionable failure.
+_SYSTEMIC_ERRORS = (MemoryError, OSError, SystemError)
 
 
 def _norm(text: str) -> str:
@@ -82,6 +93,17 @@ async def import_bundle(
             if not dry_run:
                 try:
                     await save(item)
+                except _SYSTEMIC_ERRORS:
+                    # Environmental failure — abort the whole import rather
+                    # than recording it as one of N per-item errors. Partial
+                    # progress so far is intentionally lost; the caller must
+                    # treat this as a hard failure (and re-run when fixed).
+                    logger.exception(
+                        "import aborted: systemic failure saving %s[%d]",
+                        kind,
+                        index,
+                    )
+                    raise
                 except Exception as exc:
                     report.errors.append(
                         ImportItemError(kind=kind, index=index, message=str(exc))

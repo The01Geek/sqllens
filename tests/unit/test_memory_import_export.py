@@ -244,6 +244,57 @@ async def test_per_item_save_failure_is_reported_not_fatal(
     assert "boom" in report.errors[0].message
 
 
+async def test_systemic_error_aborts_import_not_per_item(
+    store: MemoryStore, monkeypatch
+) -> None:
+    """A MemoryError/disk-full is environmental — fail fast, don't flatten it
+    into one per-item error per row."""
+
+    async def oom(question: str, sql: str) -> None:
+        raise MemoryError("out of memory")
+
+    monkeypatch.setattr(store, "add_sql_pair", oom)
+    with pytest.raises(MemoryError):
+        await import_bundle(store, _BUNDLE)
+
+
+async def test_disk_full_aborts_import(store: MemoryStore, monkeypatch) -> None:
+    async def disk_full(question: str, sql: str) -> None:
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(store, "add_sql_pair", disk_full)
+    with pytest.raises(OSError, match="No space left"):
+        await import_bundle(store, _BUNDLE)
+
+
+async def test_incremental_import_then_export_union(store: MemoryStore) -> None:
+    """import A, then non-overlapping B without --clear, export the union; the
+    dedup baseline is seeded from the live store, not just identical
+    re-imports."""
+    a = MemoryBundle.model_validate(
+        {"sql_pairs": {"pairs": [{"question": "qa", "sql": "SELECT 1"}]}}
+    )
+    b = MemoryBundle.model_validate(
+        {"sql_pairs": {"pairs": [{"question": "qb", "sql": "SELECT 2"}]}}
+    )
+    first = await import_bundle(store, a)
+    assert first.saved == 1
+
+    second = await import_bundle(store, b)
+    assert second.saved == 1
+    assert second.skipped_duplicate == 0
+
+    exported = export_bundle(store, "json")
+    reparsed = parse_json(exported.text)
+    assert reparsed.sql_pairs is not None
+    assert {p.sql for p in reparsed.sql_pairs.pairs} == {"SELECT 1", "SELECT 2"}
+
+    # Re-importing the union must now dedup entirely against the live store.
+    again = await import_bundle(store, reparsed)
+    assert again.saved == 0
+    assert again.skipped_duplicate == 2
+
+
 async def test_clear_wipes_first(store: MemoryStore) -> None:
     await import_bundle(store, _BUNDLE)
     assert store.iter_all().sql_pairs is not None
