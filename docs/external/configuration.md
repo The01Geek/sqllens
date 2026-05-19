@@ -133,7 +133,7 @@ Tunes how the natural-language agent behaves.
 | Field | Type | Description |
 |---|---|---|
 | `max_tool_iterations` | Integer | Maximum number of internal tool calls (schema lookups, memory searches, and the final query) the agent may make while answering one question. Defaults to `20`; valid range is `1` to `100`. Raise it if questions against an unfamiliar database fail because the agent runs out of steps while exploring the schema. |
-| `show_sql` | Boolean | Defaults to `true`. Reserved to control whether the generated SQL is shown alongside query results. It is accepted and validated but has no effect yet. |
+| `show_details` | Boolean | Defaults to `true`. When on, every `query_database` answer also surfaces the SQL the agent executed: as a fenced ` ```sql ` block appended to the Markdown answer, and (on hosts that render interactive widgets, such as Claude Desktop) as a collapsible "Executed SQL" section above the result grid. Set to `false` to restore the pre-feature answer-only output. The environment override is `SQLLENS_AGENT__SHOW_DETAILS`. Questions that the agent answers from prior context (no SQL executed) and non-SELECT queries that the safety guard rejects produce no SQL block, with or without this setting. |
 
 ### Section: `[agent.audit]`
 
