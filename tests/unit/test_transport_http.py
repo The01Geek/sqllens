@@ -21,6 +21,7 @@ otherwise only covers indirectly.
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 import pytest
@@ -313,6 +314,136 @@ def test_lifespan_shutdown_baseexception_propagates_not_caught() -> None:
     # The raise traversed __aexit__ (not run()/__aenter__), pinning the
     # shutdown `except Exception` site specifically.
     assert sm.aexit_calls == 1
+
+
+# Exact named-type coverage for issue #101's deferred review findings.
+# The pre-existing BaseException-propagation tests above use
+# ``KeyboardInterrupt``; the findings on PR #100 specifically name
+# ``asyncio.CancelledError`` and ``SystemExit``. These parametrized tests
+# pin those exact types so the disproofs are airtight:
+#
+#  - Finding 1 (logger.exception logs CancelledError/SystemExit at ERROR):
+#    the startup/shutdown ``except Exception`` arms cannot catch a
+#    BaseException-only subclass, so ``logger.exception`` is never reached
+#    and no ERROR record is emitted — asserted explicitly via ``caplog``.
+#    ``test_lifespan_startup_plain_exception_emits_error_log`` is the
+#    positive control: it proves the same caplog/logger wiring DOES capture
+#    an ERROR record on the Exception path, so the absence assertions here
+#    cannot pass vacuously if a future refactor severs log propagation.
+#  - Finding 3 (partially-entered CM dropped without __aexit__ when
+#    interrupted mid-entry): a CancelledError raised *from* ``__aenter__``
+#    means entry was suspended and did not complete; ``__aexit__`` must NOT
+#    run on it (PEP 343), pinned via ``aexit_calls == 0``.
+#
+# The injected exception is a sentinel instance and ``excinfo.value is
+# sentinel`` is asserted, so the tests pin that the *injected* signal
+# propagated unconverted — not a look-alike synthesized by the runner.
+_BASE_EXC_NAMED_TYPES = [asyncio.CancelledError, SystemExit]
+
+
+@pytest.mark.parametrize("exc_type", _BASE_EXC_NAMED_TYPES)
+def test_lifespan_startup_named_baseexception_propagates_uncaught(
+    exc_type: type[BaseException], caplog: pytest.LogCaptureFixture
+) -> None:
+    """A BaseException-only subclass raised from ``__aenter__`` propagates
+    out of ``_handle_lifespan`` unchanged: no fabricated ``startup.failed``;
+    the interruption is logged exactly once at ERROR via ``logger.exception``
+    (the #100 contract — a possible session-manager resource leak must be
+    visible to operators); and ``__aexit__`` is never called on the CM whose
+    ``__aenter__`` was interrupted mid-entry.
+    """
+    sentinel = exc_type("issue-101-startup-sentinel")
+    sm = _FakeSessionManager(startup_exc=sentinel)
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io([{"type": "lifespan.startup"}])
+
+    with (
+        caplog.at_level(logging.ERROR, logger="sqllens.transport.http"),
+        pytest.raises(exc_type) as excinfo,
+    ):
+        asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    # The *injected* signal propagated unconverted (not a runner-synthesized
+    # look-alike): pins the disproof to the exact instance raised.
+    assert excinfo.value is sentinel
+    # No ack fabricated for the signal: the `except BaseException` arm
+    # finalizes and re-raises without sending a protocol message.
+    assert sent == []
+    # Per the #100 contract the interruption is logged once at ERROR via
+    # logger.exception so a possible resource leak is visible to operators.
+    err = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(err) == 1
+    assert "startup interrupted by" in err[0].getMessage()
+    assert exc_type.__name__ in err[0].getMessage()
+    # The raise traversed the awaited CM entry, pinning the startup
+    # `except Exception` site specifically (not an upstream escape).
+    assert sm.aenter_calls == 1
+    # Interrupted mid-entry: the partially-acquired CM must NOT be exited
+    # (calling __aexit__ on a CM whose __aenter__ never completed is
+    # undefined per PEP 343).
+    assert sm.aexit_calls == 0
+
+
+@pytest.mark.parametrize("exc_type", _BASE_EXC_NAMED_TYPES)
+def test_lifespan_shutdown_named_baseexception_propagates_uncaught(
+    exc_type: type[BaseException], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Symmetric twin: a BaseException-only subclass raised from ``__aexit__``
+    propagates unchanged — no fabricated ``shutdown.failed``; the interruption
+    is logged exactly once at ERROR via ``logger.exception`` (the #100
+    contract).
+    """
+    sentinel = exc_type("issue-101-shutdown-sentinel")
+    sm = _FakeSessionManager(shutdown_exc=sentinel)
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io(
+        [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
+    )
+
+    with (
+        caplog.at_level(logging.ERROR, logger="sqllens.transport.http"),
+        pytest.raises(exc_type) as excinfo,
+    ):
+        asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    assert excinfo.value is sentinel
+    types = [m["type"] for m in sent]
+    assert types == ["lifespan.startup.complete"]
+    assert "lifespan.shutdown.failed" not in types
+    # Per the #100 contract the interruption is logged once at ERROR.
+    err = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(err) == 1
+    assert "shutdown interrupted by" in err[0].getMessage()
+    assert exc_type.__name__ in err[0].getMessage()
+    # __aenter__ completed (startup precondition) and the raise traversed
+    # __aexit__ (not run()/__aenter__), pinning the shutdown `except
+    # Exception` site specifically.
+    assert sm.aenter_calls == 1
+    assert sm.aexit_calls == 1
+
+
+def test_lifespan_startup_plain_exception_emits_error_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Positive control for the Finding-1 disproof above.
+
+    The two named-BaseException tests assert NO ERROR record is captured.
+    That absence is only meaningful if the same caplog/logger wiring is
+    actually capable of seeing an ERROR from ``sqllens.transport.http``.
+    Here a plain ``Exception`` takes the ``except Exception`` arm, which
+    calls ``logger.exception`` — proving the pipeline is live. If a future
+    refactor severed log propagation (e.g. a NullHandler + propagate=False),
+    THIS test fails, flagging that the absence assertions have gone vacuous.
+    """
+    sm = _FakeSessionManager(startup_exc=RuntimeError("plain-boom"))
+    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    receive, send, sent = _make_io([{"type": "lifespan.startup"}])
+
+    with caplog.at_level(logging.ERROR, logger="sqllens.transport.http"):
+        asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] != []
+    assert sent[-1]["type"] == "lifespan.startup.failed"
 
 
 def test_lifespan_unknown_message_type_is_logged_and_loop_continues() -> None:
