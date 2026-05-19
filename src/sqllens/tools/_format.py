@@ -35,11 +35,10 @@ _MAX_TABLE_PAYLOAD_BYTES = 130 * 1024
 
 
 def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
-    # query_type mirrors RunSqlTool.execute's own derivation (first whitespace
-    # token, upper-cased) so the surfaced label matches what the SQL tool used
-    # internally. row_count is threaded from the table payload when a DataFrame
-    # was produced (the run_sql STATUS_CARD metadata only carries the SQL
-    # string — it is tool_call.arguments, i.e. RunSqlToolArgs.sql).
+    # query_type mirrors RunSqlTool.execute's derivation (first token, upper)
+    # so the label matches the SQL tool's internal classification. row_count
+    # is threaded from the table payload because the run_sql STATUS_CARD
+    # metadata carries only the SQL string (tool_call.arguments == RunSqlToolArgs).
     tokens = sql.strip().split()
     info: dict = {
         "sql": sql,

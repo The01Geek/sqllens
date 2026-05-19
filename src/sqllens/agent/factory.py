@@ -101,14 +101,12 @@ def build_agent(cfg: Config) -> Agent:
     # default system prompt switches on its presence via has_text_memory.
     tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
 
-    # Per-instance UI-feature map. The framework default gates the
-    # tool-arguments card to the "admin" group only, and the static resolver
-    # puts every request in DEFAULT_USER_GROUP — so the executed-SQL card never
-    # reaches a client. When show_details is on, extend *only* the
-    # tool_arguments entry to also admit DEFAULT_USER_GROUP. A fresh list is
-    # built (never the shared DEFAULT_UI_FEATURES list) so the module-level
-    # default is not mutated; tool_error / memory_detailed_results stay
-    # admin-only.
+    # The framework default gates the tool-arguments card to "admin" only and
+    # the static resolver puts every request in DEFAULT_USER_GROUP, so the
+    # executed-SQL card never reaches a client. show_details admits that group
+    # to *only* tool_arguments (other admin features stay locked — deliberate,
+    # per issue #129). A fresh list (not the shared DEFAULT_UI_FEATURES list)
+    # keeps the module-level default unmutated across instances.
     ui_features = UiFeatures()
     if cfg.agent.show_details:
         tool_args_groups = list(

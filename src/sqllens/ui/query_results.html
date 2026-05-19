@@ -94,7 +94,19 @@ const state = {
   sql: "",
 };
 
+// Two stable children: the SQL section is immutable for a result, so it is
+// painted once by ingest() into sqlHost and never touched by render().
+// render() owns gridHost only — clearing it on every filter/sort/page must
+// not destroy (and collapse) the user's expanded "Executed SQL" panel.
 const root = document.getElementById("root");
+root.textContent = "";
+const sqlHost = document.createElement("div");
+const gridHost = document.createElement("div");
+const _waiting = document.createElement("div");
+_waiting.className = "empty";
+_waiting.textContent = "Waiting for results…";
+gridHost.appendChild(_waiting);
+root.append(sqlHost, gridHost);
 
 function isNumeric(colIndex) {
   return state.types[state.columns[colIndex]] === "number";
@@ -172,9 +184,9 @@ function exportCsv() {
 }
 
 function renderSqlSection() {
-  // Collapsible, collapsed by default — the executed SQL is QA detail, not
-  // the primary answer. Degrades cleanly: no section when state.sql is empty
-  // (show_details off, or a no-SQL / text-only answer).
+  // Collapsed by default — executed SQL is QA detail, not the primary answer.
+  // Called once per result from ingest(), never from render().
+  sqlHost.textContent = "";
   if (!state.sql) return;
   const details = document.createElement("details");
   details.className = "sql";
@@ -185,7 +197,7 @@ function renderSqlSection() {
   code.textContent = state.sql;
   pre.appendChild(code);
   details.append(summary, pre);
-  root.appendChild(details);
+  sqlHost.appendChild(details);
 }
 
 function render() {
@@ -197,14 +209,13 @@ function render() {
   const start = state.page * PAGE_SIZE;
   const pageRows = sorted.slice(start, start + PAGE_SIZE);
 
-  root.textContent = "";
-  renderSqlSection();
+  gridHost.textContent = "";
 
   if (!state.columns.length) {
     const d = document.createElement("div");
     d.className = "empty";
     d.textContent = "No tabular result for this query.";
-    root.appendChild(d);
+    gridHost.appendChild(d);
     return;
   }
 
@@ -228,7 +239,7 @@ function render() {
   if (state.truncated > 0) msg += ` (${state.truncated} truncated)`;
   meta.textContent = msg;
   bar.append(search, csvBtn, meta);
-  root.appendChild(bar);
+  gridHost.appendChild(bar);
 
   const wrap = document.createElement("div");
   wrap.className = "wrap";
@@ -265,7 +276,7 @@ function render() {
   }
   table.appendChild(tbody);
   wrap.appendChild(table);
-  root.appendChild(wrap);
+  gridHost.appendChild(wrap);
 
   const pager = document.createElement("div");
   pager.className = "pager";
@@ -281,7 +292,7 @@ function render() {
   pos.className = "meta";
   pos.textContent = `page ${state.page + 1} / ${pages}`;
   pager.append(prev, next, pos);
-  root.appendChild(pager);
+  gridHost.appendChild(pager);
 }
 
 function ingest(result) {
@@ -289,6 +300,7 @@ function ingest(result) {
   const queryInfo = meta[QUERY_META_KEY];
   state.sql =
     queryInfo && typeof queryInfo.sql === "string" ? queryInfo.sql : "";
+  renderSqlSection();
 
   const payload = meta[META_KEY];
   if (!payload || !Array.isArray(payload.columns)) {
@@ -309,11 +321,11 @@ function ingest(result) {
 }
 
 function showNotice(text) {
-  root.textContent = "";
+  gridHost.textContent = "";
   const d = document.createElement("div");
   d.className = "empty";
   d.textContent = text;
-  root.appendChild(d);
+  gridHost.appendChild(d);
 }
 
 const app = new App({ name: "sqllens-query-results", version: "1.0.0" }, {});
