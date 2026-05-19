@@ -210,13 +210,9 @@ def build_asgi_app(cfg: Config) -> ASGIApp:
             "or update sqllens.transport.http.build_asgi_app."
         ) from exc
 
-    # Eagerly prime the request-path agent singleton at lifespan startup so
-    # the ~80 MB cold start (DB connect, ChromaDB open, agent wiring) is paid
-    # at boot, not on the first query. prime_agent delegates to the same
-    # _agent_for double-checked cache query_database serves from, so the
-    # object graph is built exactly once and the warmup *is* the request-path
-    # singleton (not a discarded second build). Imported lazily to keep this
-    # factory's import graph flat.
+    # Prime the request-path agent singleton at lifespan startup (best-effort,
+    # see _handle_lifespan). prime_agent owns the why; the import is lazy to
+    # keep this transport factory's import graph off the agent/tool tree.
     async def _warmup() -> None:
         from sqllens.tools.query_database import prime_agent
 

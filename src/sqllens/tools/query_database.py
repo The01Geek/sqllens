@@ -94,10 +94,9 @@ async def prime_agent(cfg: Config) -> None:
     warmup) use this to pay the cold-start cost (DB connect, ChromaDB open,
     agent wiring) at boot instead of on the first ``query_database`` call.
 
-    Best-effort by contract: it propagates any build failure to the caller,
-    which decides whether a failed warmup should block startup. The request
-    path's own cold-start handling is unchanged — a failed warmup leaves
-    ``_AGENT_STATE`` ``None`` and the first query rebuilds as before.
+    Propagates any build failure to the caller (which decides whether a
+    failed warmup should block startup); ``_agent_for``'s own retry contract
+    is unchanged.
     """
     await _agent_for(cfg)
 
