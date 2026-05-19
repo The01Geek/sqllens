@@ -62,7 +62,7 @@ Dialect picked from the URL scheme prefix:
 |---|---|---|
 | `sqlite://` | `SqliteRunner` | `sqlite:///abs/path.db` → `/abs/path.db`; `sqlite://:memory:` preserved. |
 | `postgres://`, `postgresql://`, `postgresql+psycopg2://`, … | `PostgresRunner` | SQLAlchemy-style schemes are normalized to `postgresql://` for psycopg2. |
-| `mysql://` | `MySQLRunner` | Parsed with `urlparse`; requires user, host, and database name. |
+| `mysql://` | `MySQLRunner` | Parsed with `urlparse`; requires user, host, and database name. `urllib.parse.unquote` is applied to the username and password so percent-encoded characters (e.g. `%2F` → `/`) are decoded before being passed to pymysql — matching the behaviour of SQLAlchemy's `make_url`. |
 
 Unsupported schemes raise `ValueError` — the calling CLI layer turns that into a "Config error: …" exit 2.
 
