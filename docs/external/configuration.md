@@ -124,6 +124,33 @@ Configures the transport SQL Lens uses to talk to the assistant.
 | `transport` | String | Either `stdio` or `http`. |
 | `host` | String | The interface to bind on when `transport = "http"`. Defaults to `127.0.0.1`. |
 | `port` | Integer | The TCP port to listen on when `transport = "http"`. Defaults to `8765`. |
+| `log_level` | String | One of `critical`, `error`, `warning`, `info`, `debug`, or `trace`. Defaults to `info`. The value is validated at config load. A future release will use it to set the server log verbosity; it has no effect yet. |
+
+## Section: `[agent]`
+
+Tunes how the natural-language agent behaves.
+
+| Field | Type | Description |
+|---|---|---|
+| `max_tool_iterations` | Integer | Maximum number of internal tool calls (schema lookups, memory searches, and the final query) the agent may make while answering one question. Defaults to `20`; valid range is `1` to `100`. Raise it if questions against an unfamiliar database fail because the agent runs out of steps while exploring the schema. |
+| `show_sql` | Boolean | Defaults to `true`. Reserved to control whether the generated SQL is shown alongside query results. It is accepted and validated but has no effect yet. |
+
+### Section: `[agent.audit]`
+
+Defines the audit-logging surface. These fields are accepted and validated today but are **not yet wired to any behavior** — they reserve the configuration shape for a future audit-logging feature.
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | Boolean | Defaults to `false`. The master switch for audit logging. When it is off, the other fields in this section have no effect. |
+| `log_level` | String | One of `critical`, `error`, `warning`, `info`, or `debug`. Defaults to `info`. The verbosity that audit records will be written at. |
+| `include_response_text` | Boolean | Defaults to `false`. When enabled, audit records will include the full response text. Leave it off unless you specifically need response bodies in your audit trail. |
+| `sanitize_parameters` | Boolean | Defaults to `true`. When enabled, query parameter values are sanitized before being written to the audit trail. |
+
+**Note:** Unlike other sections, an unrecognized key inside `[agent.audit]` is rejected at config load rather than silently ignored. Because this is a privacy-sensitive surface, a misspelled key (for example, `sanitize_paramters`) fails loudly instead of quietly reverting to the safe default.
+
+## Top-level field: `config_version`
+
+A single top-level integer, `config_version`, defaults to `1`. It is accepted and validated but currently has no effect. It is reserved so future releases can detect and migrate older configuration files. You do not need to set it.
 
 ## Validating a configuration
 
