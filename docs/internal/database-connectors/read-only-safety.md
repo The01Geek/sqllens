@@ -2,20 +2,21 @@
 
 Why the agent can't accidentally `DROP TABLE`, can't hang the server on `SELECT generate_series(1, 1e9)`, and can't OOM the process by materialising a billion-row result. Source-of-truth reference for [src/sqllens/safety/readonly.py](../../../src/sqllens/safety/readonly.py), [src/sqllens/safety/limits.py](../../../src/sqllens/safety/limits.py), and [src/sqllens/safety/__init__.py](../../../src/sqllens/safety/__init__.py).
 
-## The three safety layers
+## The four safety layers
 
-CLAUDE.md says: *"Read-only by default, enforced by a `sqlglot` parser guard."* That covers the *kind* of SQL that may run. Two further orthogonal guards bound *how much work* an accepted SELECT may do:
+CLAUDE.md says: *"Read-only by default, enforced by a `sqlglot` parser guard."* That covers the *kind* of SQL that may run. Three further orthogonal guards bound *how much work* an accepted SELECT may do and add redundant mutation barriers:
 
-1. **Parser guard** — `assert_select_only` / `ReadOnlyGuardRunner` rejects anything that isn't a single `SELECT` / `WITH`. See [What the guard does](#what-the-guard-does).
-2. **Per-query timeout** — each runner sets its native statement-timeout primitive before executing user SQL. See [Statement timeout](#statement-timeout).
-3. **Row cap** — each runner streams via `cursor.fetchmany(max_rows + 1)` and stops at `max_rows`; `RowCapRunner` re-applies the cap on the returned DataFrame as a second-line check. See [Row cap and truncation surface](#row-cap-and-truncation-surface).
+1. **Parser guard** — `assert_select_only` / `ReadOnlyGuardRunner` rejects anything that isn't a single `SELECT` / `WITH`, rejects nested DML/DDL, rejects `SELECT … INTO`, and rejects a per-dialect denylist of side-effecting / DoS / RCE functions (e.g. `load_extension`, `pg_sleep`, `sleep`, `generate_series`). See [What the guard does](#what-the-guard-does).
+2. **Driver-level read-only** — when `database.read_only = true` (the default), each connector enforces read-only at the session/connection layer before any user SQL runs: SQLite opens via the `mode=ro` URI and sets `PRAGMA query_only=ON`; Postgres calls psycopg2's `conn.set_session(readonly=True)` right after connect; MySQL executes `SET SESSION TRANSACTION READ ONLY`. Defence-in-depth backstop so a parser-guard miss still cannot mutate. See [Driver-level read-only enforcement](#driver-level-read-only-enforcement).
+3. **Per-query timeout** — each runner sets its native statement-timeout primitive before executing user SQL. See [Statement timeout](#statement-timeout).
+4. **Row cap** — each runner streams via `cursor.fetchmany(max_rows + 1)` and stops at `max_rows`; `RowCapRunner` re-applies the cap on the returned DataFrame as a second-line check. See [Row cap and truncation surface](#row-cap-and-truncation-surface).
 
 These are *defence in depth*, not a single line of defence. You should also:
 1. Use a database role with no DML/DDL privileges (the operator's job, not the code's).
 2. Keep `database.read_only = true` in `sqllens.toml` (the default).
 3. Leave `statement_timeout_ms` and `max_rows` at their defaults (30 000 ms / 10 000 rows) unless you have a concrete reason to change them.
 
-Either layer alone is insufficient: a misconfigured role + a code path that bypasses the parser is bad; a strict parser + a permissive role is also bad if something ever sidesteps the guard; a strict parser with no timeout or row cap leaves the door open for resource-exhaustion DoS via a guard-passing `SELECT * FROM huge CROSS JOIN huge`. All layers, always.
+No single layer alone is sufficient: a misconfigured role + a code path that bypasses the parser is bad; a strict parser + a permissive role is bad if something ever sidesteps the guard; a strict parser with no timeout or row cap leaves the door open for resource-exhaustion DoS via a guard-passing `SELECT * FROM huge CROSS JOIN huge`. All layers, always.
 
 ## What the guard does
 
@@ -25,18 +26,42 @@ Either layer alone is insufficient: a misconfigured role + a code path that bypa
 2. **Parse with `sqlglot`** (dialect-aware). Parse failure → `UnsafeSqlError`. Rationale in the module docstring: *"we'd rather block a query we can't understand than execute it."* This is opinionated and intentional.
 3. **Reject multiple statements.** `sqlglot.parse` returns a list; anything but length 1 is rejected. Stops `SELECT 1; DROP TABLE x` style payloads.
 4. **Whitelist root expression types:** `Select`, `Union`, `Intersect`, `Except`, `With` (CTE chains). Anything else — `Insert`, `Update`, `Delete`, `Drop`, `Create`, `Alter`, `Pragma`, `Truncate`, etc. — is rejected by the negative-type-check at the root.
-5. **Walk the entire parse tree** and reject if any DML/DDL node is nested *anywhere* — e.g. `WITH x AS (DELETE FROM ... RETURNING *) SELECT * FROM x` (Postgres syntax). Without the walk, a CTE could smuggle a mutation past the root check.
+5. **Walk the entire parse tree** and reject if any DML/DDL node is nested *anywhere* — e.g. `WITH x AS (DELETE FROM ... RETURNING *) SELECT * FROM x` (Postgres syntax). Without the walk, a CTE could smuggle a mutation past the root check. The denied node types are `exp.Insert`, `exp.Update`, `exp.Delete`, `exp.Drop`, `exp.Create`, and the ALTER node. The ALTER node was renamed `exp.AlterTable` → `exp.Alter` partway through sqlglot's 25.x line, so `_ALTER_TYPE` is resolved at import via `getattr(exp, "Alter", None) or getattr(exp, "AlterTable", None)` to work across the whole pinned range; if a future sqlglot exposes neither name the module raises `RuntimeError` at import (an explicit raise, not an `assert` — `assert` is stripped under `python -O` and this is a security invariant) so a nested ALTER can never silently slip the deny-walk.
 6. **Reject `SELECT ... INTO`.** On Postgres and T-SQL, `SELECT * INTO new_tbl FROM users` is semantically a write (it creates `new_tbl`), and MySQL's `SELECT ... INTO @var` writes a session variable. sqlglot parses all of these as `exp.Select` with `args["into"]` set — *not* as `exp.Create` — so the DML/DDL deny-walk in rule 5 would miss them. The same `walk()` loop therefore also rejects any `exp.Select` whose `into` arg is non-`None`, covering root-level statements, CTE-nested forms, set-operation operands (`SELECT ... INTO ... UNION ...`), and the `INTO TEMP` / `INTO UNLOGGED` variants (same node shape).
+7. **Reject side-effecting / DoS / RCE functions.** A syntactically valid `SELECT` can still call `load_extension` (SQLite RCE), `pg_read_file` (Postgres data exfiltration), or `SLEEP(60)` (MySQL DoS) — the root-type and DML/DDL walk do not see these. The guard maintains a per-dialect denylist (`_SIDE_EFFECT_FUNCS`) and a dialect-independent list (`_ALWAYS_DENIED_FUNCS`) and checks every `exp.Func` node in the walk against them. Both `exp.Anonymous` nodes (unknown functions, matched by written name) and typed `exp.Func` subclasses (known functions like `generate_series`, matched via `sql_names()`) are covered. For an unknown or `None` dialect the guard applies the union of every dialect's denylist — fail-closed.
 
-The walk also normalizes between sqlglot versions: older versions yield `(node, parent, key)` tuples; newer ones yield bare nodes. The code handles both.
+  | Dialect | Denied functions |
+  |---|---|
+  | `sqlite` | `load_extension` |
+  | `postgres` | `dblink_exec`, `pg_sleep`, `pg_terminate_backend`, `pg_cancel_backend`, `pg_read_file`, `pg_read_binary_file`, `pg_ls_dir`, `lo_import`, `lo_export` |
+  | `mysql` | `sleep`, `load_file`, `benchmark` |
+  | all dialects | `generate_series`, `exploding_generate_series` (resource-exhaustion DoS) |
+
+The `walk()` call yields bare `exp.Expression` nodes (sqlglot is pinned `>=25.0,<26`; the pre-v20 `(node, parent, key)` tuple form is out of range, so the old tuple-vs-bare-node normalisation shim was removed).
+
+### Why sqlglot is pinned `>=25.0,<26`
+
+The guard relies on sqlglot's parse-tree shape and the `walk()` contract: which node classes a statement decomposes into, that `walk()` yields bare nodes, and the `exp.Alter`/`exp.AlterTable` naming. A breaking major could silently change any of these and turn the parser guard fail-open without a test failure on a stale tree. `pyproject.toml` therefore pins `sqlglot>=25.0,<26` (alongside conservative `<next-major` upper bounds on every other runtime dependency, so a breaking major can't land in CI unnoticed while `pip install -e ".[dev,all]"` still resolves the installed versions). Before widening the sqlglot bound, the bypass corpus regression net — `TestCorpusStaysRejected` in [tests/unit/test_safety.py](../../../tests/unit/test_safety.py) — must stay green against the new version.
 
 ## What the guard does **not** check
 
-- **Side-effecting functions inside a SELECT.** Postgres lets you write `SELECT pg_terminate_backend(...)`, MySQL lets you write `SELECT SLEEP(60)`. The guard does not parse function semantics; if you're paranoid about this, lock it down at the database role level. (Note that the statement timeout will still cut a long-running `SELECT SLEEP(60)` short.)
 - **Procedure calls.** `CALL some_proc()` parses as a `Command` in sqlglot; that's not in the allow-list, so it's rejected.
-- **Read amplification / pathological queries.** The parser allows them — the statement-timeout and row-cap layers (below) are what bound their cost.
+- **Read amplification / pathological queries** (other than the denylisted functions). A `SELECT * FROM huge CROSS JOIN huge` that does not invoke a denylisted function passes the parser — the statement-timeout and row-cap layers are what bound its cost.
+- **Functions not in the denylist.** The denylist covers the highest-risk known functions per dialect; a newly added database function that isn't listed will pass the guard. Use a database role with minimal privileges as the authoritative backstop — the guard is defence-in-depth, not a substitute for least-privilege access control.
 
-If a query the guard would accept causes side effects in your database, the **database role is the correct place to fix it**, not the parser.
+## Driver-level read-only enforcement
+
+When `database.read_only = true` (the default), each connector enforces read-only at the driver/session layer **before** the user SQL runs — a parser-guard miss still cannot mutate:
+
+| Engine | Mechanism | Notes |
+|---|---|---|
+| SQLite | `sqlite3.connect(_readonly_uri(path), uri=True)` (the `mode=ro` URI) **plus** `PRAGMA query_only = ON` with a readback check | SQLite has no DB role to fall back on. The `mode=ro` URI is skipped for `:memory:` (it would open a *separate* empty database, breaking every query), so `query_only` is the belt-and-suspenders backstop that still applies there and on any URI edge case. SQLite silently ignores unknown pragmas, so the runner reads `PRAGMA query_only` back and raises `sqlite3.OperationalError` if it did not take (fail-closed). |
+| Postgres | `conn.set_session(readonly=True)` (psycopg2), called immediately after `connect()` and before any cursor executes | Forces the session read-only regardless of the DB role. It must run before the implicit transaction opens — an in-transaction `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY` would *not* work under psycopg2's default `autocommit=False`, since SESSION CHARACTERISTICS only governs *subsequent* transactions and the single never-committed transaction the SELECT runs in would stay read-write. |
+| MySQL | `SET SESSION TRANSACTION READ ONLY` | Forces the session read-only mode; combined with `MAX_EXECUTION_TIME` setup in a single cursor when both are active. |
+
+The `_readonly_uri(path)` helper in [src/sqllens/agent/integrations/sqlite/sql_runner.py](../../../src/sqllens/agent/integrations/sqlite/sql_runner.py) builds the SQLite URI and is factored out as a pure function so the URI construction is unit-testable without a live database file. It percent-encodes the path (keeping `/`) so an unescaped `?` or `#` in the database path cannot truncate the URI and silently drop the `mode=ro` query string.
+
+`read_only=False` disables driver-level enforcement and the parser guard simultaneously (controlled by `cfg.database.read_only`). Do not set it to `false` in production.
 
 ## Statement timeout
 
@@ -80,8 +105,24 @@ class ReadOnlyGuardRunner(SqlRunner):
             assert_select_only(args.sql, dialect=self._dialect)
         except UnsafeSqlError as e:
             raise UnsafeSqlError(f"refusing to execute non-SELECT SQL: {e}") from e
+        except Exception as e:
+            # Fail closed: any unexpected error from the parser layer (e.g. a
+            # sqlglot AST shape change within the pinned range) blocks the
+            # query rather than escaping as an unstructured crash. Logged with
+            # a traceback so a genuine guard bug is diagnosable instead of
+            # looking like a user typing bad SQL.
+            logger.warning(
+                "read-only guard raised an unexpected %s; failing closed",
+                type(e).__name__, exc_info=True,
+            )
+            raise UnsafeSqlError(
+                f"refusing to execute SQL: read-only guard errored "
+                f"({type(e).__name__}: {e})"
+            ) from e
         return await self._inner.run_sql(args, context)
 ```
+
+The second `except Exception` branch is the fail-closed backstop: the only way a query reaches the inner runner is if `assert_select_only` returns cleanly. A parser bug, an unexpected sqlglot AST change inside the pinned range, or any other unforeseen error becomes an `UnsafeSqlError` (refused, surfaced to the LLM) and a logged `WARNING` with a traceback — never a silent pass-through or an unstructured crash.
 
 `build_agent` in [src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py) composes the runner stack in order — innermost (raw runner) outward:
 
@@ -90,13 +131,14 @@ sql_runner = build_sql_runner(
     cfg.database.url,
     statement_timeout_ms=cfg.database.statement_timeout_ms,
     max_rows=cfg.database.max_rows,
+    read_only=cfg.database.read_only,
 )
 sql_runner = RowCapRunner(sql_runner, max_rows=cfg.database.max_rows)
 if cfg.database.read_only:
     sql_runner = ReadOnlyGuardRunner(sql_runner, dialect=_sqlglot_dialect(cfg.database.url))
 ```
 
-Resulting call order on every query: **ReadOnlyGuardRunner → RowCapRunner → engine runner**. The parser rejects unsafe SQL before any connection opens; the engine runner streams and applies its native timeout; the decorator clamps the result on the way back out.
+Resulting call order on every query: **ReadOnlyGuardRunner → RowCapRunner → engine runner**. The parser rejects unsafe SQL (including denylisted functions) before any connection opens; the engine runner enforces driver-level read-only, streams, and applies its native timeout; the decorator clamps the result on the way back out.
 
 The composition pattern is deliberate: none of these wrappers touch the lifted agent code, so re-syncing from upstream won't disturb them. See [agent/factory.md](../agent/factory.md).
 
@@ -140,3 +182,14 @@ Unit tests live under [tests/unit/](../../../tests/unit/). When extending the ru
 - A set-operation-operand smuggle attempt (`SELECT ... UNION SELECT ...`) — `walk()` descends into operands, so the rule should still fire from the `Union` / `Intersect` / `Except` root.
 
 The `SELECT ... INTO` rule (rule 6) is regression-tested by `TestSelectIntoRejected` in [tests/unit/test_safety.py](../../../tests/unit/test_safety.py), parametrised over Postgres + T-SQL × {base, `INTO TEMP`, `INTO UNLOGGED`}, the CTE-nested form, the UNION-operand form, and MySQL `SELECT ... INTO @var`.
+
+Other regression classes in [tests/unit/test_safety.py](../../../tests/unit/test_safety.py) pin the rest of the surface:
+
+- `TestSideEffectFunctionsRejected` / `TestDenylistEdgeCases` — the per-dialect function denylist (rule 7) and its case-insensitive / nested-call edges.
+- `TestBenignTypedFunctionLiteralsPass` — proves a benign read whose *string literal* equals a denied name (e.g. `SELECT md5('pg_sleep')`) is **not** rejected, locking in the `_func_name_candidates` typed-node behaviour.
+- `TestCorpusStaysRejected` — the bypass corpus regression net that must stay green before widening the sqlglot pin.
+- `TestGuardDoesNotCrashOnPinnedSqlglot` — the guard parses/walks cleanly across the pinned range (covers the `exp.Alter`/`exp.AlterTable` resolution).
+- `TestGuardFailsClosedOnUnexpectedError` — an unexpected internal error becomes a refused `UnsafeSqlError`, not a crash or a pass-through.
+- `TestSqliteReadOnlyUri` / `TestReadOnlyUriSpecialChars` / `TestSqliteConnectorReadOnlyEnforced` — the SQLite `_readonly_uri` builder, its `?`/`#` percent-encoding, and the connector-level `mode=ro` + `PRAGMA query_only` enforcement.
+
+Connector-level read-only against live Postgres/MySQL is exercised by [tests/integration/test_connectors.py](../../../tests/integration/test_connectors.py) under the `connectors` marker.

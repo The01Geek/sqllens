@@ -84,6 +84,22 @@ class TestPostgresRunner:
                 _ctx(),
             )
 
+    async def test_connector_read_only_blocks_write_without_guard(
+        self, postgres_url: str
+    ) -> None:
+        """S-7: the connector-level read-only backstop rejects a write even
+        when the parser guard is NOT in the stack (a guard miss must still be
+        unable to mutate). ``build_sql_runner`` defaults ``read_only=True``.
+        """
+        import psycopg2
+
+        runner = build_sql_runner(postgres_url)  # no ReadOnlyGuardRunner wrap
+        with pytest.raises(psycopg2.errors.ReadOnlySqlTransaction):
+            await runner.run_sql(
+                RunSqlToolArgs(sql=f"CREATE TABLE t_{uuid.uuid4().hex} (a INT)"),
+                _ctx(),
+            )
+
     async def test_max_rows_cap_truncates(self, postgres_url: str) -> None:
         """generate_series of max_rows + 1 must return exactly max_rows with a truncation marker."""
         max_rows = 50
@@ -124,6 +140,24 @@ class TestMysqlRunner:
     async def test_writes_blocked_by_guard(self, mysql_url: str) -> None:
         runner = ReadOnlyGuardRunner(build_sql_runner(mysql_url), dialect="mysql")
         with pytest.raises(UnsafeSqlError):
+            await runner.run_sql(
+                RunSqlToolArgs(sql=f"CREATE TABLE t_{uuid.uuid4().hex} (a INT)"),
+                _ctx(),
+            )
+
+    async def test_connector_read_only_blocks_write_without_guard(
+        self, mysql_url: str
+    ) -> None:
+        """S-7: the connector-level read-only backstop rejects a write even
+        when the parser guard is NOT in the stack. ``build_sql_runner``
+        defaults ``read_only=True`` → ``SET SESSION TRANSACTION READ ONLY``.
+        """
+        import pymysql
+
+        runner = build_sql_runner(mysql_url)  # no ReadOnlyGuardRunner wrap
+        # 1792 ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION — PyMySQL maps it to
+        # OperationalError/InternalError depending on version; assert the base.
+        with pytest.raises(pymysql.Error):
             await runner.run_sql(
                 RunSqlToolArgs(sql=f"CREATE TABLE t_{uuid.uuid4().hex} (a INT)"),
                 _ctx(),
