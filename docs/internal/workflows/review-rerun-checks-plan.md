@@ -164,19 +164,17 @@ gh api -X POST repos/$REPO/check-runs \
   -f head_sha="$HEAD_SHA" \
   -f status='in_progress' \
   -f 'output[title]=Devflow review running' \
-  -f 'output[summary]=/devflow:review is executing. The formal verdict is posted as a separate PR review; this check reflects whether the review *process* completed.'
+  -f 'output[summary]=/devflow:review is executing. This is a required status check that encodes the verdict: it PASSES on APPROVE and FAILS on REJECT (a REJECT blocks merge). The full verdict is also posted as a formal PR review.'
 ```
 
 Output `check_run_id` (parse `.id` from the POST response). The
 `details_url` should point at the current workflow run
 (`https://github.com/$REPO/actions/runs/${{ github.run_id }}`).
 
-> **Semantics to document in the summary:** this check's conclusion means
-> "the review process ran to completion", *not* the APPROVE/REJECT verdict.
-> The verdict remains the formal `gh pr review` object (which already blocks
-> merge on CHANGES_REQUESTED). Conflating the two would require parsing the
-> LLM's verdict out of band; out of scope and fragile. Keep the check a
-> process signal + re-run handle.
+> **Semantics:** this check's conclusion encodes the APPROVE/REJECT
+> *verdict*, not merely whether the review process completed (see §3.5 and
+> §5). It is a required status check — a REJECT conclusion (`failure`)
+> blocks auto-merge.
 
 ### 3.4 `review` job (needs: [precheck, create_check])
 
@@ -191,16 +189,30 @@ review body, progress-comment protocol, and report override are untouched.
 
 ### 3.5 `finalize_check` job (needs: [precheck, create_check, review], if: always())
 
-Permissions: `checks: write`.
+Permissions: `checks: write`, `pull-requests: read`.
 
-```bash
-CONCLUSION=$([ "${{ needs.review.result }}" = "success" ] && echo success || echo failure)
-gh api -X PATCH repos/$REPO/check-runs/$CHECK_RUN_ID \
-  -f status='completed' \
-  -f conclusion="$CONCLUSION" \
-  -f 'output[title]=Devflow review '"$CONCLUSION" \
-  -f 'output[summary]=See the formal review verdict on the PR. Click Re-run on this check to re-review the current HEAD.'
-```
+`pull-requests: read` is required so this job can call the PR reviews and
+comments API to detect the verdict.
+
+The conclusion encodes the review verdict, not merely whether the job
+succeeded. Mapping:
+
+| review job result | verdict probe | `CONCLUSION` | `TITLE` |
+|---|---|---|---|
+| `cancelled` or `skipped` | — | `neutral` | "Devflow review not run (cancelled/skipped)" |
+| `success`, `PR_NUMBER` empty | — | `success` | "Devflow review: APPROVE" |
+| `success` | last review `state == CHANGES_REQUESTED` | `failure` | "Devflow review: REJECT — changes requested" |
+| `success` | last review body matches `^## Verdict: REJECT` | `failure` | "Devflow review: REJECT — changes requested" |
+| `success` | no review state; PR comment body matches `^## Verdict: REJECT` | `failure` | "Devflow review: REJECT — changes requested" |
+| `success` | none of the above | `success` | "Devflow review: APPROVE" |
+| any other result | — | `failure` | "Devflow review process failed" |
+
+The comment-body fallback covers the documented `gh pr review` permission-failure
+path, where the skill falls back to `gh pr comment` and includes the
+`## Verdict: REJECT` line.
+
+A `neutral` conclusion on a required check does **not** block merge, so a
+superseded or cancelled re-run never presents as a REJECT.
 
 `if: always()` so a failed/cancelled review still closes the check (otherwise it
 hangs `in_progress` forever and the Re-run button never appears).
@@ -212,7 +224,8 @@ hangs `in_progress` forever and the Re-run button never appears).
 | Job | Trigger context | Needs |
 |---|---|---|
 | precheck | all three | `contents: read`, `pull-requests: read`, plus `gh` via `GITHUB_TOKEN` |
-| create_check / finalize_check | any | `checks: write`, `contents: read` |
+| create_check | any | `checks: write`, `contents: read` |
+| finalize_check | any | `checks: write`, `pull-requests: read` |
 | review (reusable) | inherits caller | `contents: read`, `pull-requests: write`, `id-token: write` (already declared in the existing `review` job) |
 
 `check_run` is **not** `pull_request_target`, so the `id-token`/app-token 401
@@ -237,18 +250,27 @@ concurrency:
 
 ## 5. Branch protection
 
-Per `CLAUDE.md`, the `main-protected` ruleset (ID 15633058) requires exactly:
-`Lint + unit + transport (py3.11)`, `(py3.12)`, `Connector tests (Postgres + MySQL)`.
+Per `CLAUDE.md`, the `main-protected` ruleset (ID 15633058) has the following
+required status checks:
 
-**Decision: do NOT add `Devflow Review` to required checks in v1.** Reasons:
-- The check's conclusion is a *process* signal, not the verdict; making it
-  required would block merges on review-runner flakiness, not on REJECTs.
-- The authoritative merge gate for a REJECT is already the formal
-  `gh pr review --request-changes` (a CHANGES_REQUESTED review blocks merge via
-  the existing review-decision protection, independent of this check).
-- If we later want "no merge until a fresh review ran", that's a separate,
-  deliberate ruleset change (add the context to rulesets/15633058 and document
-  it in `CLAUDE.md`'s "CI status check names are load-bearing" section).
+- `Devflow Review` — **verdict gate**. `finalize_check` concludes `failure` on a
+  REJECT and `success` on APPROVE (see §3.5). Because it is a required check, a
+  REJECT blocks auto-merge. `neutral` (cancelled/superseded) does not block.
+- `Lint + unit + transport (py3.12)`
+
+`Lint + unit + transport (py3.11)` and `Connector tests (Postgres + MySQL)` run
+on every PR but are not in the ruleset's required set; treat them as must-pass
+by convention.
+
+**`Devflow Review` must remain enabled in `project-config.yml`** — disabling the
+workflow while the check name is a required context would block every PR.
+
+> **History:** the original implementation plan (§3.3 comment "out of scope and
+> fragile", §9 out-of-scope list) deferred verdict encoding to avoid parsing LLM
+> output. The current implementation reads the formal GitHub review object
+> (`CHANGES_REQUESTED` state or the `## Verdict: REJECT` line posted by the
+> skill), which is reliable and requires no free-form LLM output parsing. The
+> check was subsequently added to the ruleset as a required context.
 
 ---
 
