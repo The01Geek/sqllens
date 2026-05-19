@@ -5,6 +5,7 @@ This page lists user-visible changes in each released version of SQL Lens. For t
 ## May 19, 2026
 
 - **[Feature] Interactive results widget for `query_database`** — On assistants that support inline app widgets — currently Claude Desktop and claude.ai — a `query_database` answer is now also displayed as an interactive table you can sort by column, filter with a search box, page through, and export to CSV, alongside the same plain-text answer. Every other assistant continues to receive the identical Markdown table as before, and no configuration or change is required on your side. This first release covers tables only; charts are not yet included. (#121)
+- **[Improvement] Configuration errors fail closed so unrecognized error types cannot leak secrets** — Secret redaction in configuration error output now covers all configuration-load failures, not just field-validation errors. SQL Lens prints the error message only when its kind is known to be safe (such as a file-not-found, byte-order-mark, or syntax error); for any unrecognized error type that might quote a secret-bearing line from your file or environment, the message is withheld and a generic notice naming the fields to check (`api_key`, `bearer_token`, `database.url`) is shown instead. The same protection now also applies when `sqllens claude-desktop install` validates the configuration it generates, so an installer-time error cannot echo the API key you passed in. (#126)
 
 ## May 18, 2026
 

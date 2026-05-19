@@ -24,7 +24,7 @@ from __future__ import annotations
 import contextlib
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from sqllens.auth import build_authenticator
 from sqllens.config import API_KEY_MISSING_MESSAGE, Config
@@ -122,8 +122,11 @@ def probe_database(cfg: Config) -> None:
                 pymysql.connect(
                     host=parsed.hostname,
                     port=parsed.port or 3306,
-                    user=parsed.username,
-                    password=parsed.password or "",
+                    # urlparse does not percent-decode credentials; SQLAlchemy's
+                    # make_url does. Decode here so a password containing e.g. '/'
+                    # written as %2F authenticates instead of being sent literally.
+                    user=unquote(parsed.username),
+                    password=unquote(parsed.password) if parsed.password else "",
                     database=(parsed.path or "").lstrip("/"),
                     connect_timeout=_DB_CONNECT_TIMEOUT_SECONDS,
                 )

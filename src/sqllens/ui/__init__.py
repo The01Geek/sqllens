@@ -20,7 +20,7 @@ logger = logging.getLogger("sqllens.ui")
 
 def _read_widget_html() -> str:
     try:
-        return files("sqllens.ui").joinpath("query_results.html").read_text(encoding="utf-8")
+        html = files("sqllens.ui").joinpath("query_results.html").read_text(encoding="utf-8")
     except (FileNotFoundError, OSError, UnicodeDecodeError, ModuleNotFoundError) as e:
         # A missing asset almost always means the wheel's hatch include globs
         # (see pyproject.toml [tool.hatch.build.targets.wheel].include) dropped
@@ -30,12 +30,26 @@ def _read_widget_html() -> str:
         logger.error(
             "query_database widget asset (query_results.html) could not be "
             "loaded; the installed wheel is likely missing it — apps-aware "
-            "hosts will not render results."
+            "hosts will not render results.",
+            exc_info=True,
         )
         raise RuntimeError(
             "query_database result widget asset is unavailable; "
             "reinstall sqllens or check the wheel packaging"
         ) from e
+    if not html.strip():
+        # A truncated/empty asset would otherwise be @cache-memoized and render
+        # a blank iframe with no diagnostic. Fail with the same actionable error.
+        logger.error(
+            "query_database widget asset (query_results.html) is empty; the "
+            "installed wheel is likely truncated — apps-aware hosts will not "
+            "render results."
+        )
+        raise RuntimeError(
+            "query_database result widget asset is empty; "
+            "reinstall sqllens or check the wheel packaging"
+        )
+    return html
 
 
 @cache

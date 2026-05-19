@@ -3,11 +3,14 @@
 
 """Unit tests for ``sqllens.ui`` widget-asset loading.
 
-Pins two deliberate contracts the widget loader makes (CLAUDE.md flags wheel
-include-glob drops as a recurring regression class):
+Pins three deliberate contracts the widget loader makes (the asset is shipped
+via the wheel include globs in ``pyproject.toml``; a drop or truncation must
+fail loudly, not silently render a blank iframe):
 
 - a missing/unreadable asset raises an *actionable* ``RuntimeError`` rather
-  than FastMCP's generic resource error, and
+  than FastMCP's generic resource error,
+- an empty/truncated asset raises the same actionable error instead of being
+  cached and rendered as a blank iframe, and
 - ``@cache`` must not poison-cache a read failure — a transient/packaging
   fault must re-attempt (and succeed) on the next fetch.
 """
@@ -58,6 +61,21 @@ def test_real_read_failure_surfaces_runtimeerror(monkeypatch) -> None:
 
     monkeypatch.setattr(ui, "files", lambda _pkg: _Missing())
     with pytest.raises(RuntimeError, match="reinstall sqllens"):
+        ui.load_widget_html()
+
+
+def test_empty_asset_raises_actionable_runtimeerror(monkeypatch) -> None:
+    # A truncated wheel asset reads as an empty/whitespace string; it must not
+    # be memoized and rendered as a blank iframe.
+    class _Empty:
+        def joinpath(self, *_a, **_k):
+            return self
+
+        def read_text(self, *_a, **_k):
+            return "   \n\t  "
+
+    monkeypatch.setattr(ui, "files", lambda _pkg: _Empty())
+    with pytest.raises(RuntimeError, match="asset is empty"):
         ui.load_widget_html()
 
 

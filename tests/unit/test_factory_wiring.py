@@ -201,3 +201,22 @@ def test_readonly_guard_wraps_iff_read_only_enabled(
         leaf = leaf._inner
     assert isinstance(leaf, SqliteRunner)
     assert leaf._read_only is read_only
+
+
+def test_build_sql_runner_mysql_percent_decodes_credentials() -> None:
+    """A '/' in a MySQL password must be written %2F in the URL (a raw '/'
+    breaks urlparse host detection) and must reach the MySQLRunner decoded.
+    Without the unquote, the literal '%2F' is sent as the password and auth
+    fails with a misleading "Access denied (using password: YES)".
+    """
+    pytest.importorskip("pymysql")
+    from sqllens.agent.factory import build_sql_runner
+    from sqllens.agent.integrations.mysql import MySQLRunner
+
+    runner = build_sql_runner(
+        "mysql+pymysql://user%40corp:p%2Fw%3As@db.internal:3306/shop"
+    )
+
+    assert isinstance(runner, MySQLRunner)
+    assert runner.user == "user@corp"
+    assert runner.password == "p/w:s"
