@@ -8,18 +8,20 @@ from __future__ import annotations
 import ipaddress
 import os
 import sys
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
 from pydantic import ValidationError
+from pydantic_settings import SettingsError
 from rich.console import Console
 from rich.markup import escape
 
 from sqllens import __version__
 from sqllens._errors import validation_error_lines
-from sqllens.config import API_KEY_MISSING_MESSAGE
+from sqllens.config import API_KEY_MISSING_MESSAGE, ConfigBomError
 
 if TYPE_CHECKING:
     from sqllens.config import Config
@@ -36,6 +38,44 @@ console = Console()
 err_console = Console(stderr=True)
 
 
+# Non-``ValidationError`` exception types whose ``str()`` is structurally
+# incapable of carrying a config value, so echoing it cannot leak a secret:
+#
+# - ``ConfigBomError``    — message is ``_bom_error_message(path)`` by
+#                           construction: a file path + rewrite commands only.
+# - ``tomllib.TOMLDecodeError`` — CPython's parser emits a line/column
+#                           coordinate only; it never interpolates the
+#                           offending source line. This invariant is the
+#                           enforcement point of
+#                           ``test_real_tomldecodeerror_with_secret_scrubbed``
+#                           and must be re-checked on any supported-CPython
+#                           bump rather than assumed for an unbounded range.
+# - ``SettingsError``     — pydantic-settings' env/secrets/TOML parse failures
+#                           name the *field* and *source* only and chain the
+#                           underlying value-bearing error via ``__cause__``;
+#                           the ``SettingsError`` message itself omits the
+#                           value by design. It would also be the wrapper type
+#                           if a future pydantic-settings re-raised a
+#                           ``TOMLDecodeError`` through it, so allowlisting it
+#                           is expected to cover that case without a
+#                           cause-chain walk (see _format_config_error's
+#                           docstring for why the chain is not trusted) —
+#                           but this rests on observed behaviour pinned by
+#                           ``test_real_settingserror_with_secret_scrubbed``,
+#                           which gates any pydantic-settings bump, not on a
+#                           documented forward-compat contract.
+# - ``OSError`` / ``ImportError`` — filesystem errors from ``Config.load``
+#                           carry errno + path; import errors carry a module
+#                           name. Neither carries a config value.
+_SAFE_CONFIG_ERROR_TYPES = (
+    ConfigBomError,
+    tomllib.TOMLDecodeError,
+    SettingsError,
+    OSError,
+    ImportError,
+)
+
+
 def _format_config_error(exc: Exception) -> str:
     """Render a config-load exception for stderr without leaking secrets.
 
@@ -43,15 +83,31 @@ def _format_config_error(exc: Exception) -> str:
     (bearer token, API key, DSN password) for schema-validation failures —
     including plain-``str`` fields like ``database.url`` whose value is not a
     self-masking ``SecretStr``. Emit only ``loc``/``msg``/``type``, dropping
-    ``input``/``ctx``. Non-``ValidationError`` config-load errors (file-not-found,
-    BOM, TOML syntax) are passed through: their messages are the actionable
-    remediation and do not embed schema input. A ``tomllib`` *syntax* error on a
-    secret-bearing line can still echo that line verbatim — config files are
-    expected to be operator-readable, so that residual is accepted, not scrubbed.
+    ``input``/``ctx``.
+
+    For non-``ValidationError`` errors, ``str(exc)`` is echoed only for the
+    ``_SAFE_CONFIG_ERROR_TYPES`` allowlist (see the comment on that tuple for
+    why each entry's message cannot carry a config value). The match is on the
+    exception's own type, not its ``__cause__``/``__context__`` chain: an
+    unrelated secret-bearing exception can acquire a safe type in its implicit
+    context merely by being raised inside an ``except`` block, so trusting the
+    chain would widen the leak surface past the allowlist. Any other exception
+    type is treated as untrusted — its message is suppressed and only the class
+    name is surfaced.
     """
-    if not isinstance(exc, ValidationError):
+    if isinstance(exc, ValidationError):
+        return "\n".join(validation_error_lines(exc, with_type=True))
+
+    if isinstance(exc, _SAFE_CONFIG_ERROR_TYPES):
         return str(exc)
-    return "\n".join(validation_error_lines(exc, with_type=True))
+
+    return (
+        f"configuration could not be loaded ({type(exc).__name__}). The "
+        "original error text is withheld because an unrecognised error type "
+        "may quote a secret-bearing value from your config file or "
+        "environment. Re-run after checking the syntax around api_key, "
+        "bearer_token, and database.url."
+    )
 
 
 def _is_loopback_host(host: str) -> bool:
