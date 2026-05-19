@@ -21,14 +21,18 @@ vendored agent memory engine, so the rest of the package never reaches into
 
 Enumeration and ``clear`` use the synchronous private ``_get_collection()``
 seam directly: the vendored class has no public "give me every memory"
-enumerator (only ``get_recent_*`` with a limit) and no public clear. This is
-the documented fallback, deliberately isolated to this module.
+enumerator (only ``get_recent_*`` with a limit). A public ``clear_memories``
+exists but is ``async``, ``ToolContext``-bound, and deletes row-by-row; the
+synchronous bulk ``collection.delete(ids=...)`` here is simpler for a full
+wipe. Both fallbacks are deliberately isolated to this module.
 """
 
 from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING
+
+from pydantic import ValidationError
 
 from sqllens.agent.core.tool import ToolContext
 from sqllens.agent.core.user.models import User
@@ -80,6 +84,12 @@ class MemoryStore:
         tool memories carrying a ``sql`` arg (→ SQL pairs) and text memories
         (→ schema docs). Any other tool memory the live agent may have written
         is not representable in the bundle format and is skipped.
+
+        A single corrupt or non-conforming row (unparseable ``args_json``, or a
+        value the bundle models reject — e.g. a live-agent memory longer than
+        the import limits) is skipped, not fatal: ``iter_all`` is also the
+        dedup baseline for ``import_bundle``, so one bad row must not abort
+        every export and import.
         """
         collection = self._mem._get_collection()
         # Skip embedding vectors/documents (largest per-row payload, unused here).
@@ -88,16 +98,21 @@ class MemoryStore:
         pairs: list[SqlPair] = []
         docs: list[SchemaDoc] = []
         for metadata in metadatas:
-            if metadata.get("is_text_memory"):
-                docs.append(SchemaDoc(content=metadata.get("content", "")))
+            try:
+                if metadata.get("is_text_memory"):
+                    docs.append(SchemaDoc(content=metadata.get("content", "")))
+                    continue
+                if metadata.get("tool_name") != RUN_SQL_TOOL_NAME:
+                    continue
+                args = json.loads(metadata.get("args_json", "{}"))
+                sql = args.get("sql")
+                if not sql:
+                    continue
+                pairs.append(SqlPair(question=metadata.get("question", ""), sql=sql))
+            except (TypeError, ValueError, ValidationError):
+                # Corrupt/non-conforming stored row — skip rather than abort
+                # the whole enumeration (and the import that seeds off it).
                 continue
-            if metadata.get("tool_name") != RUN_SQL_TOOL_NAME:
-                continue
-            args = json.loads(metadata.get("args_json", "{}"))
-            sql = args.get("sql")
-            if not sql:
-                continue
-            pairs.append(SqlPair(question=metadata.get("question", ""), sql=sql))
 
         return MemoryBundle(
             sql_pairs=SqlPairsBlock(pairs=pairs) if pairs else None,

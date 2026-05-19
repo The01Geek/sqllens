@@ -97,12 +97,67 @@ async def test_imported_pair_stored_with_run_sql_shape(
 
 
 async def test_dry_run_writes_nothing(store: MemoryStore) -> None:
+    before = export_bundle(store, "json")
     report = await import_bundle(store, _BUNDLE, dry_run=True)
     assert report.saved == 3
-    assert export_bundle(store, "json") == export_bundle(store, "json")
+    assert export_bundle(store, "json") == before
     after = store.iter_all()
     assert after.sql_pairs is None
     assert after.schema_docs is None
+
+
+async def test_dry_run_with_clear_preserves_store(store: MemoryStore) -> None:
+    await import_bundle(store, _BUNDLE)
+    before = export_bundle(store, "json")
+    report = await import_bundle(store, _BUNDLE, dry_run=True, clear=True)
+    # clear is skipped on a dry-run, so existing memory is still the baseline
+    assert report.saved == 0
+    assert report.skipped_duplicate == 3
+    assert export_bundle(store, "json") == before
+
+
+async def test_iter_all_skips_unrepresentable_and_corrupt_rows(
+    store: MemoryStore,
+) -> None:
+    await import_bundle(store, _BUNDLE)
+    collection = store._mem._get_collection()
+    # A non-run_sql tool memory and a run_sql memory with corrupt args_json —
+    # both must be skipped, not crash export / dedup-seeding.
+    collection.upsert(
+        ids=["other-tool", "corrupt-args"],
+        documents=["q1", "q2"],
+        metadatas=[
+            {"question": "q1", "tool_name": "some_other_tool", "args_json": "{}"},
+            {"question": "q2", "tool_name": "run_sql", "args_json": "{not json"},
+        ],
+    )
+    bundle = store.iter_all()
+    assert bundle.sql_pairs is not None
+    assert {p.sql for p in bundle.sql_pairs.pairs} == {
+        "SELECT count(*) FROM users",
+        "SELECT count(*) FROM u WHERE active",
+    }
+
+
+async def test_per_item_save_failure_is_reported_not_fatal(
+    store: MemoryStore, monkeypatch
+) -> None:
+    calls = {"n": 0}
+
+    real_add = store.add_sql_pair
+
+    async def flaky_add(question: str, sql: str) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("boom")
+        await real_add(question, sql)
+
+    monkeypatch.setattr(store, "add_sql_pair", flaky_add)
+    report = await import_bundle(store, _BUNDLE)
+    assert report.saved == 2  # 1 pair failed, 1 pair + 1 doc saved
+    assert len(report.errors) == 1
+    assert report.errors[0].kind == "sql_pair"
+    assert "boom" in report.errors[0].message
 
 
 async def test_clear_wipes_first(store: MemoryStore) -> None:

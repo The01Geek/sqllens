@@ -434,12 +434,20 @@ def import_memory(
             abort=True,
         )
 
-    store = MemoryStore(cfg)
-    report = asyncio.run(
-        import_bundle(
-            store, bundle, dry_run=dry_run, clear=clear, batch_size=batch_size
+    try:
+        store = MemoryStore(cfg)
+        report = asyncio.run(
+            import_bundle(
+                store, bundle, dry_run=dry_run, clear=clear, batch_size=batch_size
+            )
         )
-    )
+    except Exception as e:
+        err_console.print(
+            f"[red]Memory store error:[/red] {escape(str(e))}\n"
+            "The embedding model downloads on first use (~80 MB); also check "
+            "the configured persist_dir is writable."
+        )
+        raise typer.Exit(code=1) from e
 
     prefix = "[yellow](dry-run)[/yellow] " if dry_run else ""
     console.print(
@@ -477,8 +485,16 @@ def export_memory(
         err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
         raise typer.Exit(code=2) from e
 
-    store = MemoryStore(cfg)
-    text = export_bundle(store, fmt)
+    try:
+        store = MemoryStore(cfg)
+        text = export_bundle(store, fmt)
+    except Exception as e:
+        err_console.print(
+            f"[red]Memory store error:[/red] {escape(str(e))}\n"
+            "The embedding model downloads on first use (~80 MB); also check "
+            "the configured persist_dir is readable."
+        )
+        raise typer.Exit(code=1) from e
     try:
         path.write_text(text, encoding="utf-8")
     except OSError as e:

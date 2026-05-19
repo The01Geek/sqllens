@@ -40,7 +40,9 @@ async def test_tool_imports_and_reports(tmp_path, monkeypatch) -> None:
         {"bundle_json": '{"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]}}'},
     )
     text = str(result)
-    assert "saved" in text and "1" in text
+    assert "| saved | 1 |" in text
+    assert "| skipped (duplicate) | 0 |" in text
+    assert "| errors | 0 |" in text
 
 
 async def test_tool_errors_on_bad_input(tmp_path, monkeypatch) -> None:

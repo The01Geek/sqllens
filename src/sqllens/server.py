@@ -54,7 +54,17 @@ def build_server(cfg: Config) -> FastMCP:
                 bundle = parse_json(bundle_json)
             except BundleFormatError as exc:
                 raise RuntimeError(f"Invalid memory bundle: {exc}") from exc
-            report = await import_bundle(store, bundle)
+            try:
+                report = await import_bundle(store, bundle)
+            except Exception as exc:
+                # Per the CLAUDE.md isError contract: a Chroma/embedding/disk
+                # failure must reach the client as a clear message, never a
+                # raw traceback (which can also leak the persist path).
+                logger.exception("import_memory tool failed")
+                raise RuntimeError(
+                    "Memory import failed while writing to the store; "
+                    "the bundle was not (fully) saved. Check the server logs."
+                ) from exc
             return report.to_markdown()
 
     return mcp
