@@ -124,7 +124,8 @@ def components_to_table(
         # size-capped (row_count is the kept prefix, truncated the dropped
         # tail), but the SQL ran against the whole set. ``.get`` keeps a
         # partial future payload from raising an unsanitized KeyError past
-        # query_database_impl_with_table's except blocks (S-10).
+        # query_database_impl_with_table's except blocks (which sanitize
+        # driver-exception strings into a stable internal-error message).
         row_count = (
             payload.get("row_count", 0) + payload.get("truncated", 0)
             if payload is not None

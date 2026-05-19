@@ -111,7 +111,14 @@ def test_show_details_on_unlocks_only_tool_arguments(tmp_path: Path) -> None:
 def test_show_details_off_keeps_tool_arguments_admin_only(tmp_path: Path) -> None:
     """show_details=False → tool_arguments stays admin-gated, so the static
     user never sees the executed-SQL card (pre-feature behavior).
+
+    Also exercises the actual gate function the agent calls
+    (can_user_access_feature) with the resolved static user, end-to-end:
+    config → factory → AgentConfig.ui_features → gate verdict. This pins
+    the chain the _format.py docstring's "show_details off → no SQL card
+    is ever emitted" invariant depends on.
     """
+    from sqllens.agent import User
     from sqllens.agent.core.agent.config import UiFeature
 
     cfg = build_test_config(
@@ -122,6 +129,46 @@ def test_show_details_off_keeps_tool_arguments_admin_only(tmp_path: Path) -> Non
 
     fga = agent.config.ui_features.feature_group_access
     assert fga[UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS] == ["admin"]
+
+    static_user = User(id="anyone", group_memberships=["default"])
+    assert (
+        agent.config.ui_features.can_user_access_feature(
+            UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS, static_user
+        )
+        is False
+    )
+
+
+def test_show_details_on_grants_static_user_access_to_tool_arguments(
+    tmp_path: Path,
+) -> None:
+    """End-to-end gate check for the show_details=True chain: config → factory
+    → AgentConfig.ui_features.can_user_access_feature returns True for the
+    static DEFAULT_USER_GROUP user, which is what the agent calls before
+    yielding the run_sql STATUS_CARD. This is the missing integration link
+    between the access-list state (already pinned) and the framework gate
+    function (previously trusted by inspection)."""
+    from sqllens.agent import User
+    from sqllens.agent.core.agent.config import UiFeature
+
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    assert cfg.agent.show_details is True
+    agent = build_agent(cfg)
+
+    static_user = User(id="anyone", group_memberships=["default"])
+    assert (
+        agent.config.ui_features.can_user_access_feature(
+            UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS, static_user
+        )
+        is True
+    )
+    # And the other admin features are still locked for the static user.
+    assert (
+        agent.config.ui_features.can_user_access_feature(
+            UiFeature.UI_FEATURE_SHOW_TOOL_ERROR, static_user
+        )
+        is False
+    )
 
 
 def test_save_text_memory_tool_is_registered(tmp_path: Path) -> None:

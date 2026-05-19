@@ -56,9 +56,12 @@ def build_server(cfg: Config) -> FastMCP:
     async def query_database(question: str) -> str | CallToolResult:
         """Ask a question in natural language. Returns a Markdown table or text answer.
 
-        Unless the operator sets ``agent.show_details = false``, the answer also
-        includes the executed SQL — as a fenced ``sql`` block in the text and,
-        for apps-aware hosts, as structured data the result widget renders.
+        When ``agent.show_details`` is on (the default) and the agent
+        successfully executed a SQL query, the answer also includes the
+        executed SQL — as a fenced ``sql`` block in the text and, for
+        apps-aware hosts, as structured data the result widget renders.
+        Non-SELECT / no-SQL / error responses omit the SQL block; setting
+        ``agent.show_details = false`` suppresses it unconditionally.
         """
         markdown, table, query_info = await query_database_impl_with_table(
             cfg, question
