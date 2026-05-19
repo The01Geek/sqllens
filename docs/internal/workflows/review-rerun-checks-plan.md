@@ -203,7 +203,7 @@ review body, progress-comment protocol, and report override are untouched.
 
 ### 3.5 `finalize_check` job (needs: [precheck, create_check, review], if: always())
 
-Permissions: `checks: write`.
+Permissions: `checks: write`, `pull-requests: write` (write required for stale-REJECT dismissal — see below).
 
 ```bash
 CONCLUSION=$([ "${{ needs.review.result }}" = "success" ] && echo success || echo failure)
@@ -217,6 +217,14 @@ gh api -X PATCH repos/$REPO/check-runs/$CHECK_RUN_ID \
 `if: always()` so a failed/cancelled review still closes the check (otherwise it
 hangs `in_progress` forever and the Re-run button never appears).
 
+**Stale-REJECT dismissal (auto-path safety net).** After finalizing the check, when `CONCLUSION=success` (APPROVE verdict) and `PR_NUMBER` is set, `finalize_check` calls `.claude/plugins/devflow/scripts/dismiss-stale-rejections.sh "$PR_NUMBER" "$REPO"` to dismiss any outstanding `CHANGES_REQUESTED` review left by an earlier REJECT. This is necessary because:
+
+- A `--request-changes` review (posted by the REJECT path) makes the PR's `reviewDecision: CHANGES_REQUESTED` sticky — it is not superseded by a later `--comment` or `--approve` review.
+- The REJECT and the subsequent APPROVE may be posted by different bot identities (`github-actions[bot]` for the auto path; another identity for the manual `@claude` path), so no single actor can dismiss the other's review automatically.
+- Without dismissal, the PR stays wedged at `reviewDecision: CHANGES_REQUESTED` even with a green required check and an APPROVE verdict — merge is blocked despite the approval.
+
+The call is best-effort: a non-zero exit is logged as a `::warning::` but never fails the job (the required check is already finalized and the verdict stands). The same script is also called from the review skill's Phase 4.4 final step, which covers the manual `@claude run /devflow:review` path.
+
 ---
 
 ## 4. Permissions & event-context matrix
@@ -224,7 +232,8 @@ hangs `in_progress` forever and the Re-run button never appears).
 | Job | Trigger context | Needs |
 |---|---|---|
 | precheck | all three | `contents: read`, `pull-requests: read`, plus `gh` via `GITHUB_TOKEN` |
-| create_check / finalize_check | any | `checks: write`, `contents: read` |
+| create_check | any | `checks: write`, `contents: read` |
+| finalize_check | any | `checks: write`, `pull-requests: write` (dismissals API), `contents: read` (trusted checkout of `dismiss-stale-rejections.sh` on `pull_request_target`) |
 | review (reusable) | inherits caller | `contents: read`, `pull-requests: write`, `id-token: write` (already declared in the existing `review` job) |
 
 `check_run` is **not** `pull_request_target`, so the `id-token`/app-token 401
