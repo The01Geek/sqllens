@@ -28,7 +28,7 @@ Defines the database SQL Lens connects to.
 |---|---|---|
 | `url` | String | A SQLAlchemy connection URL. See the [URL formats](#database-url-formats) section below. |
 | `name` | String | A short name for the database, surfaced to the assistant. |
-| `read_only` | Boolean | When true (the default), only `SELECT` statements are allowed. Generated SQL is parsed before execution, and non-`SELECT` statements are rejected. |
+| `read_only` | Boolean | When true (the default), only `SELECT` statements are allowed. Generated SQL is parsed before execution, and non-`SELECT` statements — including statements hidden inside subqueries or common table expressions, and known unsafe or denial-of-service database functions — are rejected. As a second line of defense, the database connection itself is also opened in read-only mode, so a write cannot reach your database even if it somehow slips past the parser. Keep this enabled in production. |
 | `statement_timeout_ms` | Integer | Maximum time (in milliseconds) a single query may run before the database aborts it. Default is `30000` (30 seconds). `0` disables the timeout on every engine. Raise this for long-running analytical queries; lower it for tightly-bounded interactive use. |
 | `max_rows` | Integer | Hard ceiling on the number of rows a single query may return. Default is `10000`; valid range is `1` to `1000000`. When a query would return more rows, SQL Lens trims the result and tells the assistant the answer was truncated so it can re-issue a narrower query (for example, by adding a `LIMIT` clause or a more specific `WHERE` filter). |
 
