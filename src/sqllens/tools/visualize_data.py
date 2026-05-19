@@ -40,9 +40,10 @@ async def visualize_data_impl_with_chart(
     Same agent path and same three error categories as ``query_database``:
     tool-internal failures raise ``_INTERNAL_ERROR_MESSAGE``, agent-reported
     SQL failures raise ``_SQL_EXECUTION_ERROR_PREFIX + answer``, and
-    ``UnsafeSqlError`` is re-raised verbatim. ``chart`` is ``None`` on the
-    error path or whenever no ChartComponent is present (apps-aware callers
-    attach it to ``_meta``; everyone else ignores it and reads the Markdown).
+    ``UnsafeSqlError`` is re-raised verbatim. Errors *raise*; they do not
+    return ``(markdown, None)``. On a successful result, ``chart`` is ``None``
+    whenever no ChartComponent is present (apps-aware callers attach it to
+    ``_meta``; everyone else ignores it and reads the Markdown).
     """
     try:
         agent = await get_agent(cfg)

@@ -352,7 +352,7 @@ async def test_concurrent_first_calls_build_once(
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
 ) -> None:
-    """C-3: ``_agent_for`` builds exactly once and does so under the lock.
+    """C-3: ``get_agent`` builds exactly once and does so under the lock.
 
     Two concrete regression signals, both of which fail if the C-3 fix is
     reverted:
@@ -474,7 +474,7 @@ async def test_prime_agent_is_noop_when_request_path_already_built(
     Exercises the reverse ordering of
     ``test_prime_agent_primes_request_path_singleton``: when a request
     already populated ``_AGENT_STATE``, a subsequent ``prime_agent`` hits
-    ``_agent_for``'s ``_AGENT_STATE is None`` fast path and must NOT run a
+    ``get_agent``'s ``_AGENT_STATE is None`` fast path and must NOT run a
     second ``build_agent``.
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
@@ -500,7 +500,7 @@ async def test_prime_agent_concurrent_with_request_builds_once(
 ) -> None:
     """#116: warmup racing the first request still builds exactly once.
 
-    ``prime_agent`` delegates to the same ``_agent_for`` the request path
+    ``prime_agent`` delegates to the same ``get_agent`` the request path
     uses, so the existing ``_AGENT_LOCK`` serializes the cold start. Two
     regression signals, mirroring ``test_concurrent_first_calls_build_once``
     so the test is structurally capable of catching a ``_AGENT_LOCK``

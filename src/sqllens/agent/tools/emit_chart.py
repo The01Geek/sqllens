@@ -78,8 +78,11 @@ class EmitChartParams(BaseModel):
     def _validate_chart_shape(self) -> "EmitChartParams":
         # The one non-obvious DSL rule: 'series' is reused as the value-field
         # name for heatmaps (the z dimension), so it is required there and
-        # forbidden for pie (which is inherently single-series).
-        if self.chart_type == "pie" and self.series:
+        # forbidden for pie (which is inherently single-series). Both checks
+        # use ``is not None`` / falsy explicitly so ``series=""`` is rejected
+        # the same way on both sides — a truthy-only pie check would silently
+        # accept an empty string and propagate it into the spec.
+        if self.chart_type == "pie" and self.series is not None:
             raise ValueError("pie charts must not specify a 'series' field")
         if self.chart_type == "heatmap" and not self.series:
             raise ValueError(

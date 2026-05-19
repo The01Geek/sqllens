@@ -164,3 +164,86 @@ def test_chart_empty_data_returns_none_payload() -> None:
     assert payload is not None
     assert payload["data"] == []
     assert payload["row_count"] == 0
+
+
+def test_chart_payload_construction_failure_degrades_to_none(monkeypatch) -> None:
+    # Parallel of test_format.py::test_table_payload_construction_failure_...
+    # Pin the _build_chart_payload broad-except wrapper: a raise inside
+    # _compute_chart_payload must NOT escape visualize_data's sanitized error
+    # taxonomy — instead the widget degrades to None (Markdown stands).
+    import sqllens.tools._format as fmt
+
+    def boom(_rich):
+        raise RuntimeError("pathological chart spec")
+
+    monkeypatch.setattr(fmt, "_compute_chart_payload", boom)
+    _, is_error, payload = components_to_chart([make_chart(_spec([{"x": "a", "y": 1}]))])
+    assert is_error is False
+    assert payload is None
+
+
+def test_chart_data_not_a_list_returns_none() -> None:
+    bad = make_chart(_spec([]))
+    # Replace the inner spec["data"] with a non-list — the list-guard in
+    # _compute_chart_payload must catch it before the row-comprehension runs.
+    object.__setattr__(bad.rich_component, "data", {**bad.rich_component.data, "data": "oops"})
+    _, is_error, payload = components_to_chart([bad])
+    assert is_error is False
+    assert payload is None
+
+
+def test_chart_non_dict_rows_are_silently_filtered(caplog) -> None:
+    # Mixed good/bad rows: non-dict entries (strings, lists, None) are dropped;
+    # dict rows survive and round-trip. No log fires when at least one row
+    # survives — the warning only fires when EVERY row was filtered out.
+    bad = make_chart(_spec([]))
+    mixed = [{"x": "a", "y": 1}, "string", None, ["x", 1], {"x": "b", "y": 2}]
+    object.__setattr__(
+        bad.rich_component,
+        "data",
+        {**bad.rich_component.data, "data": mixed},
+    )
+    _, is_error, payload = components_to_chart([bad])
+    assert is_error is False
+    assert payload is not None
+    assert payload["data"] == [{"x": "a", "y": 1}, {"x": "b", "y": 2}]
+    assert payload["row_count"] == 2
+
+
+def test_chart_all_rows_non_dict_logs_and_returns_empty(caplog) -> None:
+    bad = make_chart(_spec([]))
+    object.__setattr__(
+        bad.rich_component,
+        "data",
+        {**bad.rich_component.data, "data": ["a", "b", None]},
+    )
+    with caplog.at_level("WARNING", logger="sqllens.tools._format"):
+        _, is_error, payload = components_to_chart([bad])
+    assert is_error is False
+    assert payload is not None
+    assert payload["data"] == []
+    assert payload["row_count"] == 0
+    assert any(
+        "dropped all" in r.getMessage() for r in caplog.records
+    ), "expected a warning log about all-non-dict rows"
+
+
+def test_chart_bool_passes_through_unchanged() -> None:
+    # isinstance(True, int) is True — the bool branch must be checked BEFORE
+    # the int branch so True/False survive as JSON booleans, not coerced.
+    rows = [{"x": "a", "y": True}, {"x": "b", "y": False}]
+    _, _, payload = components_to_chart([make_chart(_spec(rows))])
+    assert payload is not None
+    assert payload["data"][0]["y"] is True
+    assert payload["data"][1]["y"] is False
+
+
+def test_chart_decimal_non_finite_degrades_to_none() -> None:
+    rows = [
+        {"x": "a", "y": Decimal("NaN")},
+        {"x": "b", "y": Decimal("Infinity")},
+    ]
+    _, _, payload = components_to_chart([make_chart(_spec(rows))])
+    assert payload is not None
+    assert payload["data"][0]["y"] is None
+    assert payload["data"][1]["y"] is None

@@ -24,6 +24,7 @@ from ._config_builders import build_test_config
 pytestmark = pytest.mark.asyncio
 
 _WIDGET_URI = "ui://sqllens/query-results.html"
+_CHART_WIDGET_URI = "ui://sqllens/chart-results.html"
 
 
 def _query_database_fn(mcp):
@@ -34,6 +35,10 @@ def _query_database_fn(mcp):
     into content blocks and drops the structured wrapper.
     """
     return mcp._tool_manager.get_tool("query_database").fn
+
+
+def _visualize_data_fn(mcp):
+    return mcp._tool_manager.get_tool("visualize_data").fn
 
 
 async def test_widget_resource_registered(tmp_path: Path) -> None:
@@ -106,4 +111,80 @@ async def test_query_database_returns_plain_str_when_no_table(
 
     result = await _query_database_fn(mcp)("question?")
     assert result == "just text"
+    assert not isinstance(result, CallToolResult)
+
+
+# ───────────────────────── chart widget wiring ──────────────────────────────
+
+
+async def test_chart_widget_resource_registered(tmp_path: Path) -> None:
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+
+    resources = await mcp.list_resources()
+    matching = [r for r in resources if str(r.uri) == _CHART_WIDGET_URI]
+    assert len(matching) == 1
+    assert matching[0].mimeType == "text/html;profile=mcp-app"
+
+
+async def test_visualize_data_advertises_ui_meta(tmp_path: Path) -> None:
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+
+    tools = {t.name: t for t in await mcp.list_tools()}
+    assert tools["visualize_data"].meta == {"ui": {"resourceUri": _CHART_WIDGET_URI}}
+
+
+async def test_chart_widget_resource_serves_html(tmp_path: Path) -> None:
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+
+    contents = await mcp.read_resource(_CHART_WIDGET_URI)
+    body = "".join(c.content for c in contents)
+    assert "<!doctype html>" in body.lower()
+    assert "echarts.min.js" in body
+    assert "app-with-deps.js" in body
+
+
+async def test_visualize_data_returns_calltoolresult_with_meta_when_chart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+
+    chart_payload = {
+        "chart_type": "bar",
+        "title": "T",
+        "x": {"field": "x", "label": "X", "type": "category"},
+        "y": {"field": "y", "label": "Y", "type": "value"},
+        "series": None,
+        "data": [{"x": "a", "y": 1}],
+        "row_count": 1,
+        "truncated": 0,
+    }
+
+    async def fake_impl(_cfg, _q):
+        return "rendered chart", chart_payload
+
+    monkeypatch.setattr(server_module, "visualize_data_impl_with_chart", fake_impl)
+
+    result = await _visualize_data_fn(mcp)("chart it")
+    assert isinstance(result, CallToolResult)
+    assert result.meta == {"sqllens/chart": chart_payload}
+    assert result.content[0].text == "rendered chart"
+
+
+async def test_visualize_data_returns_plain_str_when_no_chart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+
+    async def fake_impl(_cfg, _q):
+        return "text-only answer", None
+
+    monkeypatch.setattr(server_module, "visualize_data_impl_with_chart", fake_impl)
+
+    result = await _visualize_data_fn(mcp)("question?")
+    assert result == "text-only answer"
     assert not isinstance(result, CallToolResult)

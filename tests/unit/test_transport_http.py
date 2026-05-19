@@ -194,7 +194,7 @@ def _stub_eager_build_agent(monkeypatch: pytest.MonkeyPatch) -> None:
     """Neutralize the eager warmup's ``build_agent`` for the lifespan tests.
 
     The eager warmup now runs through the ``on_startup`` hook, which delegates
-    to ``prime_agent`` → ``_agent_for`` → ``build_agent``. The agent singleton
+    to ``prime_agent`` → ``get_agent`` → ``build_agent``. The agent singleton
     lives in ``sqllens.tools._agent`` (shared by ``query_database`` and
     ``visualize_data``), so the build seam and the process-wide
     ``_AGENT_STATE`` are patched there. Building a real agent (sqlite connect +
@@ -1426,7 +1426,7 @@ def test_build_asgi_app_warmup_primes_singleton_with_closed_over_cfg(
     non-None. This exercises it: awaiting ``app.on_startup()`` must build
     the agent and populate ``_AGENT_STATE`` keyed by the SAME ``cfg``
     object ``build_asgi_app`` closed over — the cross-call-site
-    config-identity invariant that keeps ``_agent_for``'s mismatch warning
+    config-identity invariant that keeps ``get_agent``'s mismatch warning
     from false-firing after warmup.
     """
     from sqllens.tools import _agent as agent_module

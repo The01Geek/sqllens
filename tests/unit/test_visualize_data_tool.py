@@ -134,20 +134,64 @@ async def test_send_message_failure_is_sanitized(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     original = OSError("could not connect host=db.internal port=5432 user=admin")
     stub = agent_stub_factory(raise_exc=original)
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    with pytest.raises(RuntimeError) as excinfo:
-        await visualize_data_impl_with_chart(cfg, "q")
+    with caplog.at_level(logging.ERROR, logger="sqllens.tools.visualize_data"):
+        with pytest.raises(RuntimeError) as excinfo:
+            await visualize_data_impl_with_chart(cfg, "q")
 
     message = str(excinfo.value)
     assert message == "internal error; see server logs"
     for secret in ("db.internal", "5432", "admin"):
         assert secret not in message
     assert excinfo.value.__cause__ is original
+    # The other half of the S-10 contract (parity with query_database): the
+    # secret IS preserved server-side via `logger.exception` so operators can
+    # still debug. A regression that downgrades to `logger.warning` without
+    # exc_info would break this.
+    logged = "\n".join(r.getMessage() for r in caplog.records) + "\n" + "\n".join(
+        str(r.exc_info[1]) for r in caplog.records if r.exc_info
+    )
+    assert "db.internal" in logged
+
+
+@pytest.mark.asyncio
+async def test_build_failure_leaves_singleton_none_for_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """Mirror of test_query_database::test_build_agent_raises_leaves_singleton_none
+    for the visualize_data entry point. The shared singleton must reset on a
+    failed cold start so a retry can succeed — same invariant whether the first
+    call enters via query_database or visualize_data.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    builds: list[Config] = []
+    original = RuntimeError("boom on first build host=secret.db")
+
+    def flaky_build_agent(c: Config):
+        builds.append(c)
+        if len(builds) == 1:
+            raise original
+        return agent_stub_factory([make_chart(_spec([{"genre": "Rock", "revenue": 1}]))])
+
+    monkeypatch.setattr(agent_module, "build_agent", flaky_build_agent)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await visualize_data_impl_with_chart(cfg, "q1")
+    assert str(excinfo.value) == "internal error; see server logs"
+    assert "secret.db" not in str(excinfo.value)
+    assert agent_module._AGENT_STATE is None
+
+    _, chart = await visualize_data_impl_with_chart(cfg, "q2")
+    assert chart is not None
+    assert len(builds) == 2
 
 
 @pytest.mark.asyncio

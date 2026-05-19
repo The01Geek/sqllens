@@ -362,6 +362,15 @@ def _compute_chart_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
         for row in rows
         if isinstance(row, dict)
     ]
+    # Producer-side regression detector: if rows came in non-empty but every
+    # one was filtered out for being non-dict, that's a chart-contract drift
+    # (e.g. tuple-shaped rows) — log it so the operator has a server-side
+    # signal beyond "the chart silently went empty."
+    dropped = len(rows) - len(coerced_rows)
+    if dropped and not coerced_rows:
+        logger.warning(
+            "chart payload dropped all %d row(s) — none were dicts", dropped
+        )
     total = len(coerced_rows)
 
     payload: dict = {
