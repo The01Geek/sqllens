@@ -1,10 +1,12 @@
 # MCP tools (the public surface)
 
-The two tools that MCP clients see. Source-of-truth reference for [src/sqllens/server.py](../../../src/sqllens/server.py), [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py), [src/sqllens/tools/list_data_sources.py](../../../src/sqllens/tools/list_data_sources.py), and [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py).
+The tools that MCP clients see. Source-of-truth reference for [src/sqllens/server.py](../../../src/sqllens/server.py), [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py), [src/sqllens/tools/list_data_sources.py](../../../src/sqllens/tools/list_data_sources.py), and [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py).
+
+Two tools are **always** registered (`query_database`, `list_data_sources`). A third, `import_memory`, is registered **only when `cfg.memory.allow_import` is true** — see [`import_memory` — opt-in third tool](#import_memory--opt-in-third-tool) below.
 
 ## Registration
 
-`build_server` in [src/sqllens/server.py](../../../src/sqllens/server.py) registers exactly two tools — plus one `ui://` resource backing the `query_database` widget — on a fresh `FastMCP("sqllens")` instance per call:
+`build_server` in [src/sqllens/server.py](../../../src/sqllens/server.py) always registers the two core tools — plus one `ui://` resource backing the `query_database` widget — on a fresh `FastMCP("sqllens")` instance per call, and conditionally a third:
 
 ```python
 def build_server(cfg: Config) -> FastMCP:
@@ -46,7 +48,7 @@ The docstrings are the user-facing tool descriptions that the calling AI client 
 
 [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) does the actual work:
 
-1. **Lazy, race-safe singleton agent.** The agent and the `Config` that built it are stored together as one atomically-assigned tuple, `_AGENT_STATE: tuple[Agent, Config] | None`, and built on the first call via `build_agent(cfg)` (see [agent/factory.md](../agent/factory.md)). `_agent_for` is `async` and guards the cold start with an `asyncio.Lock` (`_AGENT_LOCK`) using **double-checked locking**: the outer `_AGENT_STATE is None` test is a fast path that skips the lock once the agent exists; correctness comes from the inner re-check after awaiting the lock, so two concurrent first calls cannot both run `build_agent` (an ~80 MB embedding-model download). A later call whose `cfg` is a *different object* (identity check, not `==` — see "Why both tools take `cfg` from the closure") is still served by the original agent, but logs an explicit warning instead of silently honoring a config it is not using. The agent itself is safe for concurrent in-flight async requests because each request gets its own `RequestContext`.
+1. **Lazy, race-safe singleton agent.** The agent and the `Config` that built it are stored together as one atomically-assigned tuple, `_AGENT_STATE: tuple[Agent, Config] | None`, and built on the first call via `build_agent(cfg)` (see [agent/factory.md](../agent/factory.md)). `_agent_for` is `async` and guards the cold start with an `asyncio.Lock` (`_AGENT_LOCK`) using **double-checked locking**: the outer `_AGENT_STATE is None` test is a fast path that skips the lock once the agent exists; correctness comes from the inner re-check after awaiting the lock, so two concurrent first calls cannot both run `build_agent` (an ~80 MB embedding-model download). A later call whose `cfg` is a *different object* (identity check, not `==` — see "Why both core tools take `cfg` from the closure") is still served by the original agent, but logs an explicit warning instead of silently honoring a config it is not using. The agent itself is safe for concurrent in-flight async requests because each request gets its own `RequestContext`.
 2. **Empty `RequestContext`.** SQL Lens has no per-request headers/cookies/metadata to forward — auth is enforced at the transport layer, and the agent is single-user (see [agent/factory.md](../agent/factory.md) "user resolver"). So the context is always `RequestContext(headers={}, cookies={}, metadata={})`.
 3. **Stream collapse.** The agent yields an async stream of `UiComponent` objects (text snippets, dataframes, status cards). MCP tools must return a single string, so we collect the stream into a list and pass it to `components_to_table` (the success path; `components_to_markdown` is now a thin wrapper over it — see "The MCP App interactive table widget").
 4. **Categorized, sanitized error surfacing.** Failures are re-raised as `RuntimeError`, which FastMCP (`mcp.server.fastmcp` — the official SDK, not the standalone `fastmcp` package) converts to a tool result with `isError: true`, formatting the client text as `Error executing tool query_database: <message>`. The *raised message* is therefore the contract, and it is split into three observable categories (see "The error/success contract" below) so the calling agent gets structured failure signal without leaking infrastructure detail. CLAUDE.md forbids letting the LLM apologize inside a successful tool result — the calling agent needs structured failure signal.
@@ -89,7 +91,32 @@ This raised the `mcp` pin to `>=1.26.0,<2` (the lowest 1.x exposing `meta=` on b
 
 If we ever want richer introspection (table list, row counts), it should be a *separate* tool — `list_data_sources` is meant to stay fast and offline.
 
-## Why both tools take `cfg` from the closure, not a parameter
+## `import_memory` — opt-in third tool
+
+`build_server` registers a third tool, `import_memory(bundle_json: str)`, **only when `cfg.memory.allow_import` is true** (`MemoryConfig.allow_import`, default `False`, env `SQLLENS_MEMORY__ALLOW_IMPORT`):
+
+```python
+if cfg.memory.allow_import:
+    from sqllens.memory import MemoryStore, import_bundle
+    from sqllens.memory.io import BundleFormatError, parse_json
+
+    store = MemoryStore(cfg)
+
+    @mcp.tool()
+    async def import_memory(bundle_json: str) -> str:
+        ...
+```
+
+It is **off by default** because a remote client that can write memory can poison future SQL generation — imported question→SQL pairs are retrieved at query time exactly like agent-learned ones. Enable only for trusted operators. The `sqllens import-memory` / `export-memory` CLI commands are independent of this flag and always work.
+
+Behaviour and contract:
+
+- **JSON only.** The tool takes a single `bundle_json` string. There is no CSV over MCP; CSV is a CLI-only convenience. It calls `parse_json` then `import_bundle` with default `clear=False`, `dry_run=False`.
+- **Success result.** Returns `ImportReport.to_markdown()` — a `| metric | count |` table of `saved` / `skipped (duplicate)` / `errors`, with a per-error list appended when any item failed. This is a normal (`isError: false`) result even if individual items errored; a partial import is reported, not raised.
+- **Error contract.** Per CLAUDE.md's `isError` rule: a parse failure raises `RuntimeError("Invalid memory bundle: <detail>")` (the detail is the secret-safe `validation_error_lines` rendering — never the offending input). A store/write failure (Chroma, embedding download, disk) raises a sanitized `RuntimeError("Memory import failed while writing to the store; ... Check the server logs.")` with the full traceback logged via `logger.exception` so the persist path is not leaked to the client.
+- **Closure-bound store.** The `MemoryStore` is constructed once at registration time and closed over by the tool, mirroring how the two core tools close over `cfg` (next section). The bundle file format, dedup rules, and storage shape are documented in [agent/memory.md](../agent/memory.md#first-party-importexport-srcsqllensmemory).
+
+## Why both core tools take `cfg` from the closure, not a parameter
 
 `build_server(cfg)` is called once per process from `run()` in [src/sqllens/server.py](../../../src/sqllens/server.py) (stdio) or `build_asgi_app`/`run` in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py) (HTTP). The tools are closures over that `cfg`. MCP's `@mcp.tool()` decorator wants a function whose parameters become the tool schema — passing `cfg` as an argument would either pollute the schema or require a workaround. The closure pattern is the path of least resistance.
 

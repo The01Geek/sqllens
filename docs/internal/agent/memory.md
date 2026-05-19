@@ -90,6 +90,60 @@ The upstream framework also defined memory backends other than Chroma; those wer
 
 All three memory tool classes defined in [agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py) — `SaveQuestionToolArgsTool`, `SearchSavedCorrectToolUsesTool`, and `SaveTextMemoryTool` — are now registered in `factory.py`. There is no dedicated search tool for text memories on the LLM surface today; text memories saved via `save_text_memory` are read back through the agent's internal code paths over `agent_memory.search_text_memories`.
 
+## First-party import/export (`src/sqllens/memory/`)
+
+Memory is normally grown one query at a time by the agent itself. The `src/sqllens/memory/` package adds a way to **bulk-load curated knowledge** (hand-written question→SQL pairs and schema docs) and to **export** what has accumulated. This package is first-party — it lives *outside* the vendored `agent/` tree, so it is fully linted and SPDX-headed — and it is the only first-party code that reaches into the vendored `ChromaAgentMemory`.
+
+### Package layout
+
+| Module | Responsibility |
+|---|---|
+| [src/sqllens/memory/schema.py](../../../src/sqllens/memory/schema.py) | Pydantic models for the bundle file format and the import report. |
+| [src/sqllens/memory/io.py](../../../src/sqllens/memory/io.py) | Parse/serialize a bundle to and from JSON and CSV. |
+| [src/sqllens/memory/store.py](../../../src/sqllens/memory/store.py) | `MemoryStore` — thin adapter over the vendored `ChromaAgentMemory`. |
+| [src/sqllens/memory/importer.py](../../../src/sqllens/memory/importer.py) | `import_bundle` — dedup + write a validated bundle into a store. |
+| [src/sqllens/memory/exporter.py](../../../src/sqllens/memory/exporter.py) | `export_bundle` — enumerate a store and serialize it. |
+
+### Bundle file format
+
+JSON is canonical and round-trips losslessly. The root is a JSON object with two optional top-level blocks:
+
+- `sql_pairs` — an object with `training_type: "sql_pairs"` and `pairs`, a list of `{question, sql}` objects.
+- `schema_docs` — a list of `{training_type: "schema_docs", content}` objects (free-form domain notes).
+
+CSV is a convenience for SQL pairs **only** — a 2-column sheet whose header must be exactly `question,sql`. CSV carries no schema docs; exporting a store that contains schema docs to CSV silently omits them. Use JSON for a lossless round-trip.
+
+Validation limits (enforced by the pydantic models, `extra="forbid"` on every model): `question` ≤ 1000 chars, `sql` ≤ 10000 chars, `schema_docs` `content` ≤ 50000 chars. Every string field must be non-blank after stripping. A model rejection during parse is rendered through [src/sqllens/_errors.py](../../../src/sqllens/_errors.py)'s `validation_error_lines` so the offending input (which could be an oversized SQL string) is never echoed back.
+
+### How imported SQL pairs are stored (retrieval-shape contract)
+
+`MemoryStore.add_sql_pair` must write a pair in the **exact shape the agent writes at query time** or retrieval will never match it. It calls `ChromaAgentMemory.save_tool_usage` with `tool_name="run_sql"` (`RUN_SQL_TOOL_NAME` in [store.py](../../../src/sqllens/memory/store.py) — the default name of `RunSqlTool`), `args={"sql": ...}`, `success=True`, and `metadata={"source": "import"}`. `RUN_SQL_TOOL_NAME` is asserted against the live tool in the test suite (`tests/unit/test_run_sql_tool_name.py`) so a future rename of `RunSqlTool` can't silently break retrieval. Schema docs go in via `save_text_memory` (same path the agent's `SaveTextMemoryTool` uses).
+
+`MemoryStore` constructs `ChromaAgentMemory` exactly as `build_agent` does (same `persist_dir` / `collection`), so the CLI and the live server operate on the same collection. `iter_all` / `clear` reach the private `_get_collection()` seam directly: the vendored class exposes no public "enumerate everything" method (only `get_recent_*` with a limit), and its public `clear_memories` is async and row-by-row. Both fallbacks are deliberately isolated to `store.py` (see its module docstring). `iter_all` only re-materializes the two kinds the bundle can represent (`run_sql` tool memories with a `sql` arg → SQL pairs; text memories → schema docs); any other live-agent tool memory, or a corrupt/oversized row, is skipped (one aggregate `WARNING`), never fatal — because `iter_all` is also the dedup baseline for an import. **Wholesale failure is not tolerated:** if the collection has at least `_WHOLESALE_MIN_ROWS` (5) rows and ≥`_WHOLESALE_SKIP_RATIO` (90%) of them fail to reconstruct (e.g. a chromadb/schema version skew making every `args_json` unparseable), `iter_all` raises `MemoryCorruptionError` instead of silently returning an empty bundle — otherwise a destroyed store would export as a "successful" empty backup and hand the importer an empty dedup baseline that re-saves every duplicate. `MemoryStore.last_skipped_rows` records the most recent non-fatal skip count; `export_bundle` returns an `ExportResult(text, warnings)` so the CLI/MCP layer surfaces empty-store, partial-skip, and CSV-drops-schema-docs losses instead of printing an unconditional green success. The MCP `import_memory` tool serializes concurrent calls behind an `asyncio.Lock` (single closure-bound `MemoryStore`) and reports `MemoryCorruptionError` as a distinct sanitized message, separate from the generic store-write failure.
+
+### Dedup (v1, exact-match only)
+
+`import_bundle` skips an item if an identical one is already stored **or** repeated earlier in the same batch. "Identical" means equal after normalization: strip, collapse internal whitespace, lowercase (`_norm` in [importer.py](../../../src/sqllens/memory/importer.py)). For SQL pairs the dedup key is the normalized `(question, sql)` tuple; for schema docs it is the normalized `content`. The seen-set is seeded from `store.iter_all()` *after* an optional `--clear`, so re-importing the same file is a no-op (zero saved). There is no fuzzy/semantic dedup in v1.
+
+`clear=True` wipes the collection before importing. `dry_run=True` validates and reports but writes nothing **and skips the clear** (so a dry-run's dedup baseline is the still-populated store). `batch_size` bounds how many writes are issued before `await asyncio.sleep(0)` yields, keeping large imports cooperative. A per-item write failure is recorded in `ImportReport.errors` and does not abort the rest of the batch.
+
+### CLI commands
+
+Two Typer commands in [src/sqllens/cli.py](../../../src/sqllens/cli.py):
+
+```bash
+sqllens import-memory PATH [--format json|csv] [--clear] [--dry-run] [--batch-size N] [-c CONFIG]
+sqllens export-memory PATH [--format json|csv] [-c CONFIG]
+```
+
+`import-memory` exit codes: `2` for a config-load error (consistent with `serve`/`validate`), `1` for a bad `--format`, an unreadable file, an invalid bundle, a store/import failure, or any per-item import error in the report. `--clear` prompts for confirmation (`typer.confirm(..., abort=True)`) unless combined with `--dry-run`. If a `--clear` import fails *after* the store was constructed, the error message states the collection may now be empty/partial (the wipe already ran). Store/import errors carry the standard "embedding model downloads on first use (~80 MB); check persist_dir" hint. **The CLI commands work regardless of `allow_import`** — that flag only gates the MCP tool.
+
+### The `import_memory` MCP tool (opt-in, default OFF)
+
+`build_server` ([src/sqllens/server.py](../../../src/sqllens/server.py)) registers a third tool, `import_memory(bundle_json: str)`, **only when `cfg.memory.allow_import` is true**. The flag is `MemoryConfig.allow_import` (default `False`, env `SQLLENS_MEMORY__ALLOW_IMPORT`). It defaults OFF because a remote client that can write memory can **poison future SQL generation** — imported pairs are retrieved at query time exactly like agent-learned ones. Enable only for trusted operators.
+
+The tool accepts JSON only (no CSV over MCP), runs `import_bundle` with default `clear=False` / `dry_run=False`, and returns `ImportReport.to_markdown()` (a saved/skipped/errors table). Per the CLAUDE.md `isError` contract, a parse failure raises `RuntimeError("Invalid memory bundle: ...")` and a store/write failure raises a sanitized `RuntimeError` (logged via `logger.exception`, never leaking the persist path or a raw traceback). The `MemoryStore` is constructed once at registration time and closed over by the tool. See [mcp-server/tools.md](../mcp-server/tools.md#import_memory--opt-in-third-tool) for how this fits the public tool surface.
+
 ## Debugging memory hits
 
 The agent decides on its own when to call `SearchSavedCorrectToolUsesTool`. If memory doesn't seem to help:
