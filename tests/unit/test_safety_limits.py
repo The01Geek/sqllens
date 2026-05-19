@@ -208,7 +208,9 @@ class TestSqliteRunnerCteRowCap:
             "  SELECT 1 UNION ALL SELECT n + 1 FROM x WHERE n < 100"
             ") SELECT n FROM x"
         )
-        runner = SqliteRunner(database_path=str(db_path), max_rows=10)
+        # read_only=False: exercises the row-cap primitive, not read-only.
+        # The default mode=ro URI can't open a not-yet-created temp DB file.
+        runner = SqliteRunner(database_path=str(db_path), max_rows=10, read_only=False)
         df = await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
 
         assert "n" in df.columns
@@ -233,8 +235,12 @@ class TestSqliteRunnerTimeout:
             "  SELECT 1 UNION ALL SELECT n + 1 FROM x WHERE n < 10000000"
             ") SELECT COUNT(*) AS c FROM x"
         )
+        # read_only=False: exercises the timeout primitive, not read-only.
         runner = SqliteRunner(
-            database_path=str(db_path), statement_timeout_ms=200, max_rows=10
+            database_path=str(db_path),
+            statement_timeout_ms=200,
+            max_rows=10,
+            read_only=False,
         )
         start = time.monotonic()
         with pytest.raises(sqlite3.OperationalError, match="interrupted"):
@@ -246,7 +252,13 @@ class TestSqliteRunnerTimeout:
     async def test_handler_disabled_when_timeout_zero(self, tmp_path: Path) -> None:
         """statement_timeout_ms=0 must not register a progress handler."""
         db_path = tmp_path / "no-to.db"
-        runner = SqliteRunner(database_path=str(db_path), statement_timeout_ms=0, max_rows=10)
+        # read_only=False: exercises the timeout-disabled path, not read-only.
+        runner = SqliteRunner(
+            database_path=str(db_path),
+            statement_timeout_ms=0,
+            max_rows=10,
+            read_only=False,
+        )
         # A trivial query must complete — if the deadline check were always firing
         # we'd see "interrupted" here.
         df = await runner.run_sql(RunSqlToolArgs(sql="SELECT 1 AS n"), _ctx())

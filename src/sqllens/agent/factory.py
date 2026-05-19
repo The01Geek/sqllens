@@ -66,6 +66,7 @@ def build_agent(cfg: Config) -> Agent:
         cfg.database.url,
         statement_timeout_ms=cfg.database.statement_timeout_ms,
         max_rows=cfg.database.max_rows,
+        read_only=cfg.database.read_only,
     )
     sql_runner = RowCapRunner(sql_runner, max_rows=cfg.database.max_rows)
     if cfg.database.read_only:
@@ -116,12 +117,17 @@ def build_sql_runner(
     *,
     statement_timeout_ms: int = 30_000,
     max_rows: int = 10_000,
+    read_only: bool = True,
 ) -> SqlRunner:
     """Pick the right SQL runner from the database URL prefix.
 
     ``statement_timeout_ms`` and ``max_rows`` are threaded through so the
     per-engine timeout (SET statement_timeout / MAX_EXECUTION_TIME / progress
     handler) and ``fetchmany(max_rows + 1)`` stream cap run inside the runner.
+
+    ``read_only`` is threaded through so the connector enforces read-only at
+    the driver/session layer (SQLite ``mode=ro`` URI, Postgres/MySQL read-only
+    transaction) — defence-in-depth so a parser-guard miss still cannot mutate.
     """
     scheme = url.split("://", 1)[0].lower()
     if scheme.startswith("sqlite"):
@@ -133,6 +139,7 @@ def build_sql_runner(
             database_path=path or ":memory:",
             statement_timeout_ms=statement_timeout_ms,
             max_rows=max_rows,
+            read_only=read_only,
         )
     if scheme.startswith("postgres"):
         # SQLAlchemy-style scheme like "postgresql+psycopg2" needs to be normalized
@@ -142,6 +149,7 @@ def build_sql_runner(
             connection_string=normalized,
             statement_timeout_ms=statement_timeout_ms,
             max_rows=max_rows,
+            read_only=read_only,
         )
     if scheme.startswith("mysql"):
         parsed = urlparse(url)
@@ -155,6 +163,7 @@ def build_sql_runner(
             password=parsed.password or "",
             statement_timeout_ms=statement_timeout_ms,
             max_rows=max_rows,
+            read_only=read_only,
         )
     raise ValueError(f"unsupported database scheme: {scheme!r} (expected sqlite/postgres/mysql)")
 

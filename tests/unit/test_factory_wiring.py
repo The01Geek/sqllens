@@ -16,6 +16,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import pytest
 from pydantic import SecretStr
 
 from sqllens.agent.factory import build_agent
@@ -150,3 +151,53 @@ def test_database_timeout_and_cap_flow_through_to_runner(tmp_path: Path) -> None
     assert isinstance(inner, SqliteRunner)
     assert inner._statement_timeout_ms == 1234
     assert inner._max_rows == 77
+
+
+@pytest.mark.parametrize("read_only", [True, False])
+def test_readonly_guard_wraps_iff_read_only_enabled(
+    tmp_path: Path, read_only: bool
+) -> None:
+    """``ReadOnlyGuardRunner`` wraps the stack iff ``database.read_only=True``.
+
+    A refactor that flips the default or drops the conditional wrap silently
+    disables the parser guard — this pins the wiring both ways. When enabled
+    the guard must be the OUTERMOST decorator (parse-time reject before any
+    row-cap / engine work).
+    """
+    from sqllens.agent.integrations.sqlite import SqliteRunner
+    from sqllens.safety import ReadOnlyGuardRunner
+
+    cfg = Config(
+        database=DatabaseConfig(url="sqlite:///:memory:", read_only=read_only),
+        llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
+        memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
+        auth=AuthConfig(mode="none"),
+        agent=AgentRuntimeConfig(),
+    )
+    agent = build_agent(cfg)
+    runner = _unwrap(agent.tool_registry._tools["run_sql"]).sql_runner
+
+    if read_only:
+        assert isinstance(runner, ReadOnlyGuardRunner), (
+            "read_only=True must wrap the runner in ReadOnlyGuardRunner"
+        )
+    else:
+        assert not isinstance(runner, ReadOnlyGuardRunner), (
+            "read_only=False must NOT wrap in ReadOnlyGuardRunner"
+        )
+
+        def _walk(r: object) -> bool:
+            while r is not None:
+                if isinstance(r, ReadOnlyGuardRunner):
+                    return True
+                r = getattr(r, "_inner", None)
+            return False
+
+        assert not _walk(runner), "no ReadOnlyGuardRunner anywhere in the stack"
+
+    # The connector-level read-only flag must track the same config flag.
+    leaf = runner
+    while getattr(leaf, "_inner", None) is not None:
+        leaf = leaf._inner
+    assert isinstance(leaf, SqliteRunner)
+    assert leaf._read_only is read_only

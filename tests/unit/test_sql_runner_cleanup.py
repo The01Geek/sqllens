@@ -78,7 +78,12 @@ async def test_mysql_runner_preserves_primary_when_close_raises(
 
     from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 
-    runner = MySQLRunner(host="h", database="d", user="u", password="p")
+    # read_only=False: this test pins the cleanup-error-shadowing contract via
+    # exact conn/cursor call counts; the read-only session SET adds an extra
+    # cursor interaction orthogonal to what's under test.
+    runner = MySQLRunner(
+        host="h", database="d", user="u", password="p", read_only=False
+    )
 
     with pytest.raises(_PrimaryError, match="max_statement_time"):
         await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
@@ -147,7 +152,11 @@ async def test_postgres_runner_preserves_primary_when_close_raises(
 
     from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
 
-    runner = PostgresRunner(connection_string="postgresql://u:p@h/d")
+    # read_only=False — see the read_only note above; this test pins exact
+    # cursor/conn close call counts, orthogonal to the read-only session SET.
+    runner = PostgresRunner(
+        connection_string="postgresql://u:p@h/d", read_only=False
+    )
 
     with pytest.raises(_PrimaryError, match="statement_timeout"):
         await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
@@ -180,7 +189,11 @@ async def test_postgres_runner_close_failure_alone_does_not_raise(
 
     from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
 
-    runner = PostgresRunner(connection_string="postgresql://u:p@h/d")
+    # read_only=False — see the read_only note above; this test pins exact
+    # cursor/conn close call counts, orthogonal to the read-only session SET.
+    runner = PostgresRunner(
+        connection_string="postgresql://u:p@h/d", read_only=False
+    )
     df = await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
 
     assert df.to_dict(orient="records") == [{"x": 1}]
