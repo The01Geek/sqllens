@@ -275,6 +275,24 @@ class TestTrustedHost:
         assert r.status_code == 200
         assert r.text == '{"status":"ok"}'
 
+    async def test_probes_answer_under_disallowed_host(self, make_server) -> None:
+        """The issue acceptance criterion ("disallowed-Host rejection +
+        /healthz & /readyz still answer") pinned directly: both probes must
+        answer 200 even when the inbound ``Host`` would be rejected by
+        ``TrustedHostMiddleware`` for a normal request, because the probe
+        short-circuits sit ahead of it. Composed coverage (allowed-Host probe +
+        disallowed-Host MCP rejection) does not prove this combination.
+        """
+        handle = make_server(AuthConfig(mode="none"))
+        evil = {"Host": "evil.example.com"}
+        async with httpx.AsyncClient() as client:
+            h = await client.get(handle.base_url + "/healthz", headers=evil)
+            ry = await client.get(handle.base_url + "/readyz", headers=evil)
+        assert h.status_code == 200
+        assert h.text == '{"status":"ok"}'
+        assert ry.status_code == 200
+        assert ry.text == '{"status":"ready"}'
+
 
 # ─────────────────────── O-5: eager warmup + /readyz ────────────────────────
 

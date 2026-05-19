@@ -823,10 +823,12 @@ class TestHeaderDecode:
         assert decoded == {"authorization": "Bearer \xff"}
 
     def test_try_decode_prefers_utf8(self) -> None:
-        assert _try_decode("ünî".encode()) == "ünî"
+        # Returns (decoded, used_fallback); valid UTF-8 → no fallback.
+        assert _try_decode("ünî".encode()) == ("ünî", False)
 
     def test_try_decode_latin1_fallback(self) -> None:
-        assert _try_decode(b"\xff\xfe") == "\xff\xfe"
+        # Invalid UTF-8 → latin-1 fallback, flagged so the caller can log it.
+        assert _try_decode(b"\xff\xfe") == ("\xff\xfe", True)
 
 
 # ───────────────── S-8: loopback predicate + allowed hosts ──────────────────
@@ -960,6 +962,31 @@ def test_no_warn_when_auth_mode_none(
     with caplog.at_level(logging.WARNING, logger=_WARN_LOGGER):
         _warn_if_plaintext_credentials(cfg)
     assert _warn_records(caplog) == []
+
+
+def test_build_asgi_app_invokes_plaintext_credentials_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S-9 call-site wiring: ``build_asgi_app`` must actually invoke
+    ``_warn_if_plaintext_credentials``.
+
+    The other S-9 tests call the pure function directly, so deleting the call
+    site in ``build_asgi_app`` would leave them all green. This pins the wiring
+    by spying on the function and asserting it is called exactly once with the
+    real ``cfg`` for a bearer + non-loopback config.
+    """
+    seen: list[Config] = []
+    monkeypatch.setattr(
+        "sqllens.transport.http._warn_if_plaintext_credentials",
+        lambda cfg: seen.append(cfg),
+    )
+    cfg = _cfg_with(
+        tmp_path,
+        auth=AuthConfig(mode="bearer", bearer_token=SecretStr("a-real-token-0123456789")),
+        host="0.0.0.0",
+    )
+    build_asgi_app(cfg)
+    assert seen == [cfg]
 
 
 # ─────────────── T-6: _AuthMiddleware direct unit coverage ──────────────────
@@ -1115,11 +1142,39 @@ def test_readyz_returns_503_before_warmup() -> None:
     start = next(m for m in sent if m["type"] == "http.response.start")
     assert start["status"] == 503
     assert _body_of(sent) == b'{"status":"not ready"}'
+    # 503 carries Retry-After so orchestrator gates back off instead of
+    # hot-looping while warmup is in flight.
+    assert (b"retry-after", b"1") in start["headers"]
+
+
+def test_readyz_200_has_no_retry_after() -> None:
+    readiness = _Readiness()
+    readiness.mark_ready()
+    sent = _run_path("/readyz", readiness)
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    assert start["status"] == 200
+    assert not any(h[0] == b"retry-after" for h in start["headers"])
+
+
+def test_readiness_latch_is_monotonic_and_readonly() -> None:
+    """The write-once invariant is structural: ``ready`` is read-only and the
+    only mutator latches True and never clears, so a buggy call site cannot
+    flap a ready server back to "not ready".
+    """
+    r = _Readiness()
+    assert r.ready is False
+    r.mark_ready()
+    assert r.ready is True
+    r.mark_ready()  # idempotent
+    assert r.ready is True
+    with pytest.raises(AttributeError):
+        r.ready = False  # type: ignore[misc]
+    assert r.ready is True
 
 
 def test_readyz_returns_200_after_warmup() -> None:
     readiness = _Readiness()
-    readiness.ready = True
+    readiness.mark_ready()
     sent = _run_path("/readyz", readiness)
     start = next(m for m in sent if m["type"] == "http.response.start")
     assert start["status"] == 200
@@ -1218,3 +1273,19 @@ def test_eager_build_agent_failure_surfaces_startup_failed(
     assert adapter._cm is None
     assert adapter._started is False
     assert adapter._shutdown_done is True
+
+    # (c) The instance is finalized: a *subsequent* lifespan.startup must get
+    # the single-shot rejection rather than re-running run()/__aenter__ (which
+    # would leak a fresh session-manager context after a failed warmup). This
+    # pins the inline comment's promise that the warmup-failure path leaves
+    # the adapter in the same terminal state as an __aenter__ failure.
+    receive2, send2, sent2 = _make_io([{"type": "lifespan.startup"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive2, send2))
+    assert sent2[-1]["type"] == "lifespan.startup.failed"
+    assert "single-shot" in sent2[-1]["message"]
+    # No re-entry: run()/__aenter__ counts unchanged from the first attempt.
+    assert sm.run_calls == 1
+    assert sm.aenter_calls == 1
+    assert sm.aexit_calls == 0
+    # Readiness stays latched-off across the rejected retry.
+    assert readiness.ready is False

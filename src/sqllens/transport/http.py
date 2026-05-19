@@ -67,26 +67,46 @@ only — never gated on agent-warmup readiness (use ``/readyz`` for that)."""
 READYZ_PATH = "/readyz"
 """Unauthenticated readiness probe path.
 
-Returns ``503`` until the eager agent warmup (ChromaDB init + the ~80 MB
-embedding-model download) completes at lifespan startup, then ``200``.
-Short-circuited in ``_PathNormalizer`` next to ``HEALTHZ_PATH`` — ahead of
-both ``TrustedHostMiddleware`` and ``_AuthMiddleware`` — so orchestrators can
-gate traffic on warmup without an ``Authorization`` header and regardless of
-the request ``Host``."""
+Returns ``503`` until the eager warmup at lifespan startup completes, then
+``200``. The warmup constructs an agent via ``build_agent`` so the
+*process-level* cold-start cost is paid before the port opens — ChromaDB
+init plus the one-time ~80 MB embedding-model download, both of which are
+cached process-wide and so benefit any subsequent agent. It does **not**
+prime ``query_database``'s request-path agent singleton (that is built
+independently on the first query, by design — see
+``tools/query_database._agent_for``); ``/readyz=200`` therefore attests
+that the heavy shared caches are warm, not that the request-path agent has
+already been constructed. Short-circuited in ``_PathNormalizer`` next to
+``HEALTHZ_PATH`` — ahead of both ``TrustedHostMiddleware`` and
+``_AuthMiddleware`` — so orchestrators can gate traffic on warmup without
+an ``Authorization`` header and regardless of the request ``Host``."""
 
 
 class _Readiness:
-    """Shared mutable readiness flag: written once by ``_SessionManagerLifespan``
-    at lifespan startup, read by ``_PathNormalizer``'s ``/readyz`` branch.
+    """Shared readiness latch: flipped once by ``_SessionManagerLifespan`` at
+    lifespan startup (after eager agent warmup), read by ``_PathNormalizer``'s
+    ``/readyz`` branch.
 
     A holder object (not a bare ``bool``) is required so the writer and reader
-    share the flag by reference.
+    share the latch by reference. The write-once invariant is structural, not
+    convention: ``ready`` is a read-only property and the only mutator
+    (``mark_ready``) sets it to ``True`` and can never clear it, so a buggy
+    call site cannot regress an already-ready server back to "not ready"
+    (which would make ``/readyz`` flap 200→503 under load).
     """
 
-    __slots__ = ("ready",)
+    __slots__ = ("_ready",)
 
     def __init__(self) -> None:
-        self.ready = False
+        self._ready = False
+
+    @property
+    def ready(self) -> bool:
+        return self._ready
+
+    def mark_ready(self) -> None:
+        """Latch readiness on. Idempotent; never clears."""
+        self._ready = True
 
 
 def _is_loopback_host(host: str) -> bool:
@@ -254,8 +274,10 @@ class _PathNormalizer:
 
     Everything else passes through. The probe short-circuits sit ahead of
     ``TrustedHostMiddleware`` and ``_AuthMiddleware`` (this is the outermost
-    layer of the bare stack) so they always answer regardless of ``Host`` or
-    ``Authorization``.
+    layer of the bare stack) so, for ``http``-scoped requests, they always
+    answer regardless of ``Host`` or ``Authorization``. Non-``http`` scopes
+    (e.g. ``lifespan``, ``websocket``) take the early pass-through above and
+    are never short-circuited here.
     """
 
     def __init__(self, inner: ASGIApp, readiness: _Readiness) -> None:
@@ -334,10 +356,15 @@ class _SessionManagerLifespan:
       ``asyncio.CancelledError`` interrupting the close is re-raised after
       finalizing with *no* protocol message sent, so cancellation
       propagates cooperatively instead of being acked complete), or
-    - ``lifespan.startup`` raised in ``__aenter__`` (the partially-acquired
-      context manager reference is dropped *without* ``__aexit__`` —
-      calling ``__aexit__`` on a CM whose ``__aenter__`` never completed
-      is undefined per PEP 343 — an ``Exception`` is reported to the host
+    - ``lifespan.startup`` raised in ``__aenter__`` *or in the subsequent
+      eager agent warmup* (``build_agent``, which runs after a successful
+      ``__aenter__`` but still inside the same startup ``try``) — the
+      acquired/partially-acquired context manager reference is dropped
+      *without* ``__aexit__``: calling ``__aexit__`` on a CM whose
+      ``__aenter__`` never completed is undefined per PEP 343, and on the
+      warmup-failure path the host aborts the process on
+      ``startup.failed`` so the entered CM is reclaimed by teardown — an
+      ``Exception`` is reported to the host
       as ``lifespan.startup.failed``, while a ``BaseException`` such as
       ``asyncio.CancelledError`` interrupting startup is re-raised after
       finalizing with *no* protocol message sent, so cancellation
@@ -406,8 +433,14 @@ class _SessionManagerLifespan:
                 try:
                     self._cm = self.session_manager.run()
                     await self._cm.__aenter__()
-                    # Eager agent warmup so the first real query doesn't pay
-                    # cold-start latency. Single-threaded here (one startup,
+                    # Eager warmup: build (and discard) an agent so the
+                    # *process-level* cold-start cost — ChromaDB init plus the
+                    # one-time ~80 MB embedding-model download, both cached
+                    # process-wide — is paid before the port opens. This does
+                    # NOT populate query_database's request-path singleton
+                    # (built independently on first query, by design); it warms
+                    # the shared heavy caches that singleton will then reuse.
+                    # Single-threaded here (one startup,
                     # pre-request) so no lock is needed. Kept inside the
                     # existing try on purpose: a build_agent failure must
                     # surface as lifespan.startup.failed via the handling
@@ -417,7 +450,7 @@ class _SessionManagerLifespan:
                     # without __aexit__ — acceptable because the host aborts
                     # the process on startup.failed, reclaiming it.
                     build_agent(self._cfg)
-                    self._readiness.ready = True
+                    self._readiness.mark_ready()
                 except Exception as exc:
                     # Broad by design: every startup failure must surface as
                     # lifespan.startup.failed so the ASGI host doesn't hang
@@ -571,7 +604,7 @@ class _SessionManagerLifespan:
 # ───────────────────────────── helpers ──────────────────────────────────────
 
 
-def _try_decode(b: bytes) -> str:
+def _try_decode(b: bytes) -> tuple[str, bool]:
     """Decode a raw header byte string UTF-8-first, latin-1 as fallback.
 
     The ASGI spec leaves header byte encoding under-specified and HTTP/2
@@ -581,15 +614,32 @@ def _try_decode(b: bytes) -> str:
     tokens are unaffected. latin-1 maps every one of the 256 byte values to a
     code point and so never raises — the fallback always succeeds, decoding a
     latin-1-only (invalid-UTF-8) byte rather than erroring.
+
+    Returns ``(decoded, used_fallback)`` so the caller can emit a diagnostic
+    naming the offending header — silently forking the interpretation of an
+    invalid-UTF-8 header would make encoding-related auth failures
+    undiagnosable.
     """
     try:
-        return b.decode("utf-8")
+        return b.decode("utf-8"), False
     except UnicodeDecodeError:
-        return b.decode("latin-1")
+        return b.decode("latin-1"), True
 
 
 def _decode_headers(raw: list[tuple[bytes, bytes]]) -> dict[str, str]:
-    return {_try_decode(k): _try_decode(v) for k, v in raw}
+    decoded: dict[str, str] = {}
+    for k, v in raw:
+        name, name_fallback = _try_decode(k)
+        value, value_fallback = _try_decode(v)
+        if name_fallback or value_fallback:
+            # Header name only — never the value (it may carry a credential).
+            # debug, not warning: a non-UTF-8 header is unusual but not in
+            # itself an error; this is a breadcrumb for auth-decode triage.
+            logger.debug(
+                "header %r decoded via latin-1 fallback (invalid UTF-8)", name
+            )
+        decoded[name] = value
+    return decoded
 
 
 async def _send_json(
@@ -624,8 +674,16 @@ async def _send_readiness(send: Send, ready: bool) -> None:
     # {"status":"not ready"}. Compact separators mirror _send_health so
     # orchestrator probes can match on the literal body bytes.
     status, payload = (200, "ready") if ready else (503, "not ready")
+    # Retry-After on the 503 lets orchestrator readiness gates back off
+    # gracefully instead of hot-looping while warmup is in flight.
+    extra: tuple[tuple[bytes, bytes], ...] = (
+        () if ready else ((b"retry-after", b"1"),)
+    )
     await _send_json(
-        send, status, json.dumps({"status": payload}, separators=(",", ":")).encode()
+        send,
+        status,
+        json.dumps({"status": payload}, separators=(",", ":")).encode(),
+        extra_headers=extra,
     )
 
 
