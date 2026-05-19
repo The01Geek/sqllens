@@ -124,6 +124,10 @@ Make output scannable using bullet points, numbered lists, and clear headings.
 - Do not create or edit documentation files outside of `[[INTERNAL_DOC_LOCATION]]`
 - Use the repository's `CLAUDE.md` for guidance on style and conventions
 
+**Code References in Documentation:**
+- Reference source files by bare path only (e.g., `src/server.py`) — **never append line numbers** (e.g., do not write `server.py:42` or `server.py:42-57`)
+- Line numbers change as code evolves and create documentation rot; use function or class names instead
+
 **Output:**
 - Do NOT create NEW markdown files to summarize your analysis
 - DO edit EXISTING documentation files in `[[INTERNAL_DOC_LOCATION]]` to fix inaccuracies
