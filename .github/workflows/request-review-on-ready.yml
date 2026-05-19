@@ -500,8 +500,22 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       checks: write
-      pull-requests: read
+      # write (not read): on an APPROVE verdict this job dismisses any stale
+      # CHANGES_REQUESTED review left by an earlier REJECT — the dismissals
+      # API requires pull-requests:write. Without this, a PR that was once
+      # rejected stays wedged at reviewDecision=CHANGES_REQUESTED even after
+      # a later APPROVE + green required check (the APPROVE-with-notes review
+      # is COMMENTED and never supersedes; the REJECT may also be a different
+      # bot identity). This is the auto-path safety net; the skill's Phase
+      # 4.4 final step does the same and covers the manual @claude path too.
+      pull-requests: write
     steps:
+      # Trusted checkout for dismiss-stale-rejections.sh. On
+      # pull_request_target actions/checkout defaults to the BASE ref (the
+      # default branch), NOT PR head — exactly right for a pull-requests:write
+      # job: the script that runs with the write token is the trusted in-repo
+      # copy, never PR-author-controlled code.
+      - uses: actions/checkout@v6
       - id: finalize
         env:
           GH_TOKEN: ${{ github.token }}
@@ -582,3 +596,19 @@ jobs:
             exit 1
           fi
           echo "::notice::Finalized check $CHECK_RUN_ID as $CONCLUSION ($TITLE; review job result: $REVIEW_RESULT)."
+
+          # Auto-path safety net (same script the skill's Phase 4.4 final
+          # step calls — single source of truth). CONCLUSION=success here
+          # means the review succeeded AND the verdict was APPROVE (REJECT
+          # maps to failure; the empty-PR fallback also yields success but
+          # has no PR_NUMBER, so the guard skips it — never dismiss without
+          # a PR). Best-effort: a non-zero exit is logged but never fails
+          # the job — the required check is already finalized and the
+          # verdict stands regardless of this merge-gate cleanup.
+          if [ "$CONCLUSION" = "success" ] && [ -n "${PR_NUMBER:-}" ]; then
+            if .claude/plugins/devflow/scripts/dismiss-stale-rejections.sh "$PR_NUMBER" "$REPO"; then
+              echo "::notice::Stale-REJECT dismissal completed for PR #$PR_NUMBER (no-op if none were outstanding)."
+            else
+              echo "::warning::dismiss-stale-rejections.sh exited non-zero for PR #$PR_NUMBER; the PR may stay blocked at reviewDecision=CHANGES_REQUESTED — dismiss it manually."
+            fi
+          fi
