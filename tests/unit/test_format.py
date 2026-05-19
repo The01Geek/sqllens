@@ -206,7 +206,7 @@ def test_markdown_pipe_in_cell_value_is_escaped_or_documented() -> None:
 
 
 def test_table_empty_stream_returns_none_payload() -> None:
-    markdown, is_error, payload = components_to_table([])
+    markdown, is_error, payload, _ = components_to_table([])
     assert (markdown, is_error) == ("(no answer)", False)
     assert payload is None
 
@@ -216,7 +216,7 @@ def test_table_error_card_returns_none_payload() -> None:
         _ui(DataFrameComponent(rows=[{"id": 1}])),
         _ui(StatusCardComponent(title="x", status="error", description="boom")),
     ]
-    markdown, is_error, payload = components_to_table(stream)
+    markdown, is_error, payload, _ = components_to_table(stream)
     assert is_error is True
     assert markdown == "boom"
     assert payload is None
@@ -228,7 +228,7 @@ def test_table_small_dataframe_exact_payload() -> None:
         columns=["name", "age"],
         column_types={"age": "number", "name": "string"},
     )
-    markdown, is_error, payload = components_to_table([_ui(df)])
+    markdown, is_error, payload, _ = components_to_table([_ui(df)])
     assert is_error is False
     assert markdown.startswith("| name | age |")
     assert payload == {
@@ -246,7 +246,7 @@ def test_table_explicit_column_types_round_trip() -> None:
         columns=["a"],
         column_types={"a": "number"},
     )
-    _, _, payload = components_to_table([_ui(df)])
+    _, _, payload, _ = components_to_table([_ui(df)])
     assert payload is not None
     assert payload["column_types"] == {"a": "number"}
 
@@ -266,7 +266,7 @@ def test_table_column_types_inferred_from_production_from_records() -> None:
         ]
     )
     assert df.column_types == {}  # producer really emits no types
-    _, _, payload = components_to_table([_ui(df)])
+    _, _, payload, _ = components_to_table([_ui(df)])
     assert payload is not None
     assert payload["column_types"] == {"id": "number", "score": "number"}
     assert "name" not in payload["column_types"]
@@ -283,7 +283,7 @@ def test_table_inference_ignores_null_cells_and_rejects_non_finite() -> None:
             {"qty": 7, "ratio": "2.0", "blank": None},
         ]
     )
-    _, _, payload = components_to_table([_ui(df)])
+    _, _, payload, _ = components_to_table([_ui(df)])
     assert payload is not None
     assert payload["column_types"] == {"qty": "number"}
 
@@ -296,7 +296,7 @@ def test_table_explicit_column_type_overrides_inference() -> None:
         columns=["zip"],
         column_types={"zip": "string"},
     )
-    _, _, payload = components_to_table([_ui(df)])
+    _, _, payload, _ = components_to_table([_ui(df)])
     assert payload is not None
     assert payload["column_types"] == {"zip": "string"}
 
@@ -306,7 +306,7 @@ def test_table_non_mapping_column_types_degrades_not_crashes() -> None:
     # inferred-only types, never nuke the whole widget payload.
     df = DataFrameComponent.from_records([{"n": 1}, {"n": 2}])
     object.__setattr__(df, "column_types", ["not", "a", "mapping"])
-    _, is_error, payload = components_to_table([_ui(df)])
+    _, is_error, payload, _ = components_to_table([_ui(df)])
     assert is_error is False
     assert payload is not None
     assert payload["column_types"] == {"n": "number"}
@@ -323,7 +323,7 @@ def test_table_cell_coercion_mirrors_markdown_path() -> None:
         ],
         columns=["null_cell", "decimal_cell", "datetime_cell"],
     )
-    _, _, payload = components_to_table([_ui(df)])
+    _, _, payload, _ = components_to_table([_ui(df)])
     assert payload is not None
     assert payload["rows"] == [["None", "1.50", "2026-01-02 03:04:05"]]
 
@@ -333,7 +333,7 @@ def test_table_last_dataframe_wins() -> None:
         _ui(DataFrameComponent(rows=[{"a": 1}], columns=["a"])),
         _ui(DataFrameComponent(rows=[{"b": 2}], columns=["b"])),
     ]
-    _, _, payload = components_to_table(stream)
+    _, _, payload, _ = components_to_table(stream)
     assert payload is not None
     assert payload["columns"] == ["b"]
     assert payload["rows"] == [["2"]]
@@ -345,7 +345,7 @@ def test_table_oversized_payload_truncates_under_budget() -> None:
     big = "x" * 200
     rows = [{"c": f"{i}-{big}"} for i in range(4000)]
     df = DataFrameComponent(rows=rows, columns=["c"])
-    _, is_error, payload = components_to_table([_ui(df)])
+    _, is_error, payload, _ = components_to_table([_ui(df)])
     assert is_error is False
     assert payload is not None
     assert payload["truncated"] > 0
@@ -359,7 +359,7 @@ def test_table_header_only_over_budget_returns_none() -> None:
     # payload can't fit, so there is nothing useful to hand the widget.
     huge_col = "h" * (_MAX_TABLE_PAYLOAD_BYTES + 50)
     df = DataFrameComponent(rows=[{huge_col: 1}], columns=[huge_col])
-    _, is_error, payload = components_to_table([_ui(df)])
+    _, is_error, payload, _ = components_to_table([_ui(df)])
     assert is_error is False
     assert payload is None
 
@@ -370,7 +370,7 @@ def test_table_header_fits_but_no_row_fits_returns_empty_payload() -> None:
     # The payload is non-None (the widget can still show "0 of N, N truncated").
     huge_cell = "x" * (_MAX_TABLE_PAYLOAD_BYTES + 50)
     df = DataFrameComponent(rows=[{"c": huge_cell}], columns=["c"])
-    _, is_error, payload = components_to_table([_ui(df)])
+    _, is_error, payload, _ = components_to_table([_ui(df)])
     assert is_error is False
     assert payload is not None
     assert payload["rows"] == []
@@ -391,7 +391,7 @@ def test_table_payload_construction_failure_degrades_to_markdown_only(
 
     monkeypatch.setattr(fmt, "_compute_table_payload", boom)
     stream = [_ui(DataFrameComponent(rows=[{"id": 1}], columns=["id"]))]
-    markdown, is_error, payload = components_to_table(stream)
+    markdown, is_error, payload, _ = components_to_table(stream)
     assert is_error is False
     assert markdown.startswith("| id |")
     assert payload is None
@@ -399,6 +399,100 @@ def test_table_payload_construction_failure_degrades_to_markdown_only(
 
 def test_table_present_but_empty_dataframe_returns_none() -> None:
     stream = [_ui(DataFrameComponent(rows=[], columns=[]))]
-    markdown, is_error, payload = components_to_table(stream)
+    markdown, is_error, payload, _ = components_to_table(stream)
     assert (markdown, is_error) == ("(no answer)", False)
     assert payload is None
+
+
+# ───────────────────────── query_info (executed SQL) ────────────────────────
+
+
+def _sql_card(sql: str, status: str = "success") -> UiComponent:
+    # Mirrors the agent's run_sql STATUS_CARD: metadata == tool_call.arguments,
+    # and RunSqlToolArgs has exactly one field, `sql`.
+    return _ui(
+        StatusCardComponent(
+            title="Executing run_sql",
+            status=status,
+            description="ran",
+            metadata={"sql": sql},
+        )
+    )
+
+
+def test_query_info_extracted_from_run_sql_status_card() -> None:
+    stream = [
+        _sql_card("SELECT id FROM users", status="running"),
+        _ui(DataFrameComponent(rows=[{"id": 1}, {"id": 2}], columns=["id"])),
+        _sql_card("SELECT id FROM users", status="success"),
+        _ui(RichTextComponent(content="two users")),
+    ]
+    _, is_error, payload, query_info = components_to_table(stream)
+    assert is_error is False
+    assert query_info == {
+        "sql": "SELECT id FROM users",
+        "query_type": "SELECT",
+        "row_count": 2,
+    }
+    assert payload is not None and payload["row_count"] == 2
+
+
+def test_query_info_deduped_across_running_then_completed() -> None:
+    # The card streams twice with identical metadata; last-wins must yield a
+    # single query_info, not two extractions.
+    stream = [
+        _sql_card("select 1", status="running"),
+        _sql_card("select 1", status="success"),
+    ]
+    _, _, _, query_info = components_to_table(stream)
+    assert query_info is not None
+    assert query_info["sql"] == "select 1"
+    # query_type derivation upper-cases the first token regardless of input case.
+    assert query_info["query_type"] == "SELECT"
+    # No DataFrame in the stream → row_count omitted, not None-valued.
+    assert "row_count" not in query_info
+
+
+def test_query_info_absent_when_no_sql_card() -> None:
+    stream = [_ui(RichTextComponent(content="just a text answer"))]
+    _, _, _, query_info = components_to_table(stream)
+    assert query_info is None
+
+
+def test_query_info_none_on_error_path() -> None:
+    # A guard-rejected non-SELECT (default read-only deployment) surfaces as an
+    # error status card; query_info must be None, no error raised here.
+    stream = [
+        _sql_card("DELETE FROM users", status="running"),
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="error",
+                description="refusing to execute non-SELECT SQL",
+                metadata={"sql": "DELETE FROM users"},
+            )
+        ),
+    ]
+    markdown, is_error, payload, query_info = components_to_table(stream)
+    assert is_error is True
+    assert query_info is None
+    assert payload is None
+    assert markdown == "refusing to execute non-SELECT SQL"
+
+
+def test_query_info_ignores_non_sql_status_cards() -> None:
+    # Other tools also emit STATUS_CARDs (metadata == their args). Only a
+    # string under the `sql` key identifies the executed-SQL card.
+    stream = [
+        _ui(
+            StatusCardComponent(
+                title="Executing save_text_memory",
+                status="success",
+                description="saved",
+                metadata={"text": "a note", "tags": ["x"]},
+            )
+        ),
+        _ui(RichTextComponent(content="done")),
+    ]
+    _, _, _, query_info = components_to_table(stream)
+    assert query_info is None
