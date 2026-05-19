@@ -232,14 +232,20 @@ def apply_rls(
         select = scope.expression
         if not isinstance(select, exp.Select):
             continue
-        for table in scope.tables:
+        # Walk ``scope.sources.values()`` (not ``scope.tables``) to find every
+        # real base-table source. When a sibling derived/CTE alias collides on
+        # the same source key (e.g. ``FROM (SELECT 1) AS orders, orders``),
+        # sqlglot renames the colliding base-table source to ``orders_2``;
+        # looking up by the bare alias_or_name would silently miss it and
+        # classify the real base read as a CTE reference. Iterating values
+        # visits every renamed source by identity, not by key.
+        base_table_sources: list[exp.Table] = [
+            v for v in scope.sources.values() if isinstance(v, exp.Table)
+        ]
+        base_source_ids: set[int] = {id(t) for t in base_table_sources}
+        for table in base_table_sources:
             name = table.name.lower()
             if name not in rules_by_table:
-                continue
-            source = scope.sources.get(table.alias_or_name)
-            if not isinstance(source, exp.Table):
-                # Resolves to a CTE / derived-table scope, not a base table.
-                reference_ids.add(id(table))
                 continue
             qualifier = table.alias_or_name
             for rule in rules_by_table[name]:
@@ -249,6 +255,15 @@ def apply_rls(
                     _predicate(rule, qualifier, value), append=True, copy=False
                 )
             injected_ids.add(id(table))
+        # Tables in this scope's FROM/JOINs that are NOT base-table sources
+        # resolve to a CTE/derived scope (their name binds to a sibling Scope
+        # source in scope.sources). They are references whose rows came from
+        # the filtered body and must NOT be filtered again.
+        for table in scope.tables:
+            if id(table) in base_source_ids:
+                continue
+            if table.name.lower() in rules_by_table:
+                reference_ids.add(id(table))
 
     for table in tree.find_all(exp.Table):
         # Check both the .name and .alias slots. A protected name appearing as

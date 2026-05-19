@@ -348,6 +348,28 @@ class TestApplyRlsScopeCoverage:
         assert out.count("tenant_id") == 2
         _assert_filtered_and_readonly(out)
 
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT * FROM (SELECT 1) AS orders, orders",
+            "SELECT * FROM (SELECT 1) AS orders CROSS JOIN orders",
+            "SELECT * FROM (SELECT 1) AS orders LEFT JOIN orders ON 1=1",
+        ],
+    )
+    def test_derived_alias_colliding_with_sibling_base_table(
+        self, sql: str
+    ) -> None:
+        # A derived subquery aliased with a protected name and a sibling base
+        # reference to that same protected name produces a scope.sources key
+        # collision; sqlglot renames the base-table source to <name>_2. A
+        # lookup by alias_or_name would silently miss the renamed source and
+        # classify the real base read as a CTE reference (a fail-open). The
+        # rewrite must scan sources by value, not by key, so the renamed base
+        # source is still injected.
+        out = apply_rls(sql, [_rule(value="acme")], dialect="sqlite")
+        assert "tenant_id" in out
+        _assert_filtered_and_readonly(out)
+
     def test_mixed_real_base_and_cte_reference(self) -> None:
         out = apply_rls(
             "WITH scoped AS (SELECT id FROM orders) "
