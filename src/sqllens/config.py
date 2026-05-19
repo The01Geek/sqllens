@@ -326,11 +326,15 @@ JWT_NOT_IMPLEMENTED_MESSAGE = (
 class ConfigBomError(ValueError):
     """Raised by ``Config.load`` when the resolved TOML begins with a UTF-8 BOM.
 
-    Subclasses ``ValueError`` so the historical contract holds: callers that
-    ``except ValueError`` (or ``except (ValueError, OSError, ...)``) still catch
-    it, and ``except TOMLDecodeError`` still misses it. The dedicated type lets
-    ``cli._format_config_error`` recognise this message as operator-safe
-    without resorting to fragile message-string matching.
+    Subclasses ``ValueError`` so existing ``except ValueError`` /
+    ``except (ValueError, OSError, ...)`` callers in ``cli`` and ``installers``
+    keep catching it. It is deliberately **not** a ``tomllib.TOMLDecodeError``
+    subclass, so an embedder that narrowly catches only ``TOMLDecodeError``
+    continues to see the BOM case escape (the documented pre-existing
+    behaviour) — note ``except ValueError`` is a strict superset that also
+    catches every ``TOMLDecodeError``; the two are not disjoint. The dedicated
+    type lets ``cli._format_config_error`` recognise this message as
+    operator-safe without fragile message-string matching.
 
     The constructor takes the offending ``Path`` and builds the message itself
     via ``_bom_error_message``, so "an instance's ``str()`` is exactly the
@@ -343,6 +347,14 @@ class ConfigBomError(ValueError):
     def __init__(self, path: Path) -> None:
         self.path = path
         super().__init__(_bom_error_message(path))
+
+    # BaseException.__reduce__ defaults to (type, self.args); self.args is the
+    # built message string, so a default unpickle would call
+    # ConfigBomError(<message-str>) and re-run _bom_error_message on the
+    # message. Round-trip on the Path instead so an unpickled instance is
+    # identical to the original.
+    def __reduce__(self) -> tuple[type[ConfigBomError], tuple[Path]]:
+        return (self.__class__, (self.path,))
 
 
 _UTF8_BOM = b"\xef\xbb\xbf"

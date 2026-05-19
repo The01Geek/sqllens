@@ -744,19 +744,20 @@ class TestRunInstall:
         fake_config_json: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        # A non-allowlisted exception caught by the installer's
-        # `except (ValueError, OSError, ImportError)` (a bare ValueError that
-        # is NOT ConfigBomError/SettingsError) must have its message withheld
-        # in the InstallError, with the class name appearing exactly once (no
-        # `Cause: ValueError: ValueError ...` doubling now that the installer
-        # dropped its own type prefix).
+        # An unforeseen NON-(ValueError/OSError/ImportError) exception — here a
+        # RuntimeError — must still be caught (the installer now `except
+        # Exception`s so the secret-bearing generated TOML is always reverted
+        # and the message always scrubbed, instead of escaping to cli.py's raw
+        # f"{exc}" backstop with no revert). Its message is withheld, the class
+        # name appears exactly once, and the generated TOML is reverted.
         from sqllens.installers import claude_desktop as installer_mod
 
         monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
         secret = "sk-ant-INSTALLER-SUPPRESS-CANARY"
+        toml_path = base_options.working_dir / "sqllens.toml"
 
         def boom(*_: object, **__: object) -> None:
-            raise ValueError(f'api_key = "{secret}"')
+            raise RuntimeError(f'api_key = "{secret}"')
 
         monkeypatch.setattr(installer_mod, "validate_toml", boom)
         with pytest.raises(InstallError) as excinfo:
@@ -771,7 +772,9 @@ class TestRunInstall:
         msg = str(excinfo.value)
         assert "failed validation" in msg
         assert secret not in msg
-        assert msg.count("ValueError") == 1
+        assert msg.count("RuntimeError") == 1
+        # Broadened catch must still revert the secret-bearing generated TOML.
+        assert not toml_path.exists()
 
     def test_cmd_conflict_reverts_toml(
         self,

@@ -1116,3 +1116,63 @@ def test_format_config_error_passes_through_oserror() -> None:
 
     rendered = _format_config_error(FileNotFoundError(2, "No such file", "/x/sqllens.toml"))
     assert "/x/sqllens.toml" in rendered
+
+
+def test_bom_config_with_secret_scrubbed_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # End-to-end: a real BOM-prefixed TOML holding live secrets, through the
+    # actual Config.load path, then _format_config_error. Pins the whole
+    # contract (Config.load raises ConfigBomError(path) → allowlisted →
+    # str() is BOM remediation only) so a regression anywhere along it — a
+    # refactor of the raise site, or a pydantic-settings upgrade that wraps
+    # the BOM TOMLDecodeError before _has_utf8_bom is consulted — fails here
+    # instead of leaking the secret in serve/validate output.
+    from sqllens.cli import _format_config_error
+    from sqllens.config import Config
+
+    monkeypatch.delenv("SQLLENS_CONFIG", raising=False)
+    cfg = tmp_path / "sqllens.toml"
+    cfg.write_bytes(
+        b"\xef\xbb\xbf"
+        b'[database]\nurl = "postgresql://u:DSN-CANARY-PW@h/db"\n'
+        b'[llm]\napi_key = "sk-ant-API-CANARY"\n'
+    )
+    try:
+        Config.load(cfg)
+    except Exception as exc:
+        rendered = _format_config_error(exc)
+    else:  # pragma: no cover - BOM always raises
+        raise AssertionError("expected ConfigBomError")
+    assert "DSN-CANARY-PW" not in rendered
+    assert "sk-ant-API-CANARY" not in rendered
+    assert "UTF-8 BOM" in rendered
+    assert str(cfg) in rendered
+
+
+def test_real_settingserror_with_secret_scrubbed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Converts the _SAFE_CONFIG_ERROR_TYPES comment's load-bearing claim
+    # ("SettingsError names field+source only; the value is chained via
+    # __cause__, never interpolated") from a documented assumption into a
+    # version-pinned, enforced invariant. A malformed nested env var holding
+    # a canary secret must produce a real pydantic-settings SettingsError
+    # whose rendered form omits the canary — catching a future
+    # pydantic-settings upgrade that started interpolating the value.
+    from pydantic_settings import SettingsError
+
+    from sqllens.cli import _format_config_error
+    from sqllens.config import Config
+
+    monkeypatch.delenv("SQLLENS_CONFIG", raising=False)
+    monkeypatch.setenv("SQLLENS_DATABASE", '{"url": "postgresql://u:ENV-CANARY-PW@h')
+    try:
+        Config.load()
+    except Exception as exc:
+        assert isinstance(exc, SettingsError)
+        rendered = _format_config_error(exc)
+    else:  # pragma: no cover - malformed env always raises
+        raise AssertionError("expected SettingsError")
+    assert "ENV-CANARY-PW" not in rendered
+    assert "database" in rendered

@@ -49,14 +49,11 @@ err_console = Console(stderr=True)
 #                           name the *field* and *source* only and chain the
 #                           underlying value-bearing error via ``__cause__``;
 #                           the ``SettingsError`` message itself omits the
-#                           value by design. This is also the type a future
+#                           value by design. It is also the type a future
 #                           pydantic-settings would wrap a ``TOMLDecodeError``
-#                           in — covering that case without a cause-chain walk
-#                           (an earlier chain walk also followed ``__context__``,
-#                           which is set implicitly by any ``raise`` inside an
-#                           ``except`` block and so could echo an unrelated
-#                           secret-bearing exception that merely had a
-#                           ``TOMLDecodeError`` in its implicit context).
+#                           in, so allowlisting it covers that case without a
+#                           cause-chain walk (see _format_config_error's
+#                           docstring for why the chain is not trusted).
 # - ``OSError`` / ``ImportError`` — filesystem errors from ``Config.load``
 #                           carry errno + path; import errors carry a module
 #                           name. Neither carries a config value.

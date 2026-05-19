@@ -575,24 +575,27 @@ def run_install(
                 ) from exc
             cmd_written = True
 
-    # pydantic's ValidationError and tomllib.TOMLDecodeError both subclass
-    # ValueError; OSError covers filesystem hiccups in Config.load.
-    # ImportError is included because Config.load can pull in optional
-    # backends (e.g. SQLAlchemy psycopg) — a missing extra is a user-fixable
-    # config issue, not an unexpected bug, and we still need to revert.
+    # Catch *any* exception, not just (ValueError, OSError, ImportError): we
+    # just wrote a TOML embedding the user's --api-key / --db secret, so on
+    # ANY validate_toml failure we must (a) revert to avoid leaving a
+    # half-applied state and (b) route the message through
+    # _format_config_error so a value-bearing exception (a pydantic
+    # ValidationError, or an unforeseen error type) cannot echo that secret.
+    # A narrower tuple let non-(ValueError/OSError/ImportError) exceptions
+    # escape to cli.py's generic backstop, which prints raw f"{exc}" and does
+    # NOT revert — an unscrubbed leak + orphaned files. _format_config_error
+    # fails closed (unknown types → message withheld), so the broad catch is
+    # safe; the InstallError preserves the original via __cause__ for debug.
     try:
         validate_toml(toml_path, api_key=options.api_key)
-    except (ValueError, OSError, ImportError) as exc:
+    except Exception as exc:
         _revert_toml(toml_path, existing_toml)
         if cmd_path is not None and cmd_written:
             _revert_cmd_bytes(cmd_path, existing_cmd_bytes)
-        # Render through the shared config-error formatter rather than raw
-        # f"{exc}": a pydantic ValidationError here embeds the very --api-key /
-        # --db values we just wrote into the generated TOML. Lazy import keeps
-        # the cli → installers import direction acyclic. No `type(exc).__name__`
-        # prefix — _format_config_error already names the type for the
-        # suppressed branch, and the allowlisted/ValidationError branches are
-        # self-describing; prefixing would double the class name.
+        # Lazy import keeps the cli → installers import direction acyclic. No
+        # `type(exc).__name__` prefix — _format_config_error already names the
+        # type for the suppressed branch, and the allowlisted/ValidationError
+        # branches are self-describing; prefixing would double the class name.
         from sqllens.cli import _format_config_error
 
         raise InstallError(
