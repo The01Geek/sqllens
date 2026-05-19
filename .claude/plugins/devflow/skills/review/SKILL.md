@@ -605,6 +605,14 @@ Map the verdict to a `gh pr review` action:
 
 where `$REPORT` is the full report from 4.1. If `gh pr review` fails (e.g. you cannot review your own PR as the same GitHub identity, or the token lacks permission), fall back to `gh pr comment $ARGUMENTS --body "$REPORT"` and note in your chat output that the formal review could not be posted. **Never silently skip this step on a REJECT** — the whole point is that the rejection must be impossible to miss.
 
+**Then, on any APPROVE form only (APPROVE / APPROVE with notes / APPROVE WITH CAVEAT), clear a stale REJECT.** A prior REJECT's `--request-changes` review stays the PR's effective `reviewDecision` until *dismissed*; the APPROVE-with-notes `--comment` review never supersedes it, and the REJECT may be a different bot identity (auto path posts as `github-actions[bot]`, manual `@claude` as another), so no later review clears it either. Without this the PR is wedged at `reviewDecision: CHANGES_REQUESTED` forever, contradicting the green check and this APPROVE. On REJECT, **skip this** — the changes-request must stand. Run (idempotent, safe to re-run):
+
+```bash
+.claude/plugins/devflow/scripts/dismiss-stale-rejections.sh "$ARGUMENTS"
+```
+
+If it exits non-zero (token scope), say so in chat output and that the PR stays blocked until dismissed manually. **A dismissal failure never downgrades the verdict** — the verdict stands; only merge-gate housekeeping failed.
+
 ---
 
 ## Common Mistakes
@@ -614,5 +622,6 @@ where `$REPORT` is the full report from 4.1. If `gh pr review` fails (e.g. you c
 - Treating an agent's verbalized confidence as load-bearing — Phase 3.2's corroboration count (mechanical, signature-based) is the stronger signal. A 95%-confident single-source finding is weaker than a 3-of-5 corroborated one.
 - Dispatching `pr-review-toolkit:type-design-analyzer` on a diff where `has_new_types` is false — the gate exists because that analyzer over-fires when the word *class* appears in YAML, markdown, or comments. Honor the gate.
 - Posting a REJECT verdict only to chat without `gh pr review --request-changes` — Phase 4.4 exists because chat-only rejections get missed and the PR ships anyway.
+- Posting an APPROVE without dismissing a prior REJECT's `CHANGES_REQUESTED` review (Phase 4.4 final step) — "the required check is green so it'll merge" is the trap: a sticky changes-request keeps `reviewDecision: CHANGES_REQUESTED` and wedges the PR despite the green check and APPROVE verdict.
 - Paraphrasing Phase 0.5 in a way that loses the `engine_self_modifying` override — the first row of the table overrides all others; the full engine must run on engine-self-modifying diffs because typos in SKILL.md or agent files silently break every future review.
 - Skipping `/devflow:review-and-fix`'s Step 2.5 web-verification gate for single-source Critical findings — auto-applied fixes from confidently-stated-but-wrong external-tool claims are a known false-positive vector. (This skill itself doesn't run Step 2.5; flag it as a mistake when reviewing changes to `/devflow:review-and-fix`.)

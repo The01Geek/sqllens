@@ -49,8 +49,110 @@ jobs:
             echo "effort=$(echo "$CONFIG_JSON" | jq -r '.claude.effort // "medium"')"
           } >> "$GITHUB_OUTPUT"
 
-  claude:
+  # Dedupe a MANUAL `@claude run /devflow:review` against the AUTOMATED
+  # request-review-on-ready path. Both are independent triggers: a commit
+  # push fires request-review-on-ready's `synchronize` re-review, and the
+  # human who pushed it typically also comments `@claude run /devflow:review`
+  # within a second or two. Without this gate BOTH run a full (billable) LLM
+  # review of the same HEAD and post their own status comment — the observed
+  # "two comments" bug (PR #113, 15:06:55 synchronize + 15:06:56 comment).
+  #
+  # Policy ("auto suppresses manual"): if request-review-on-ready is already
+  # in-flight for this PR's CURRENT head — either an in_progress `Devflow
+  # Review` check on that exact SHA, or a queued/in_progress
+  # request-review-on-ready run on the PR's branch (covers the sub-second
+  # race before create_check POSTs the check) — skip the manual review and
+  # leave a one-line pointer instead. Deliberately fail-OPEN (default
+  # suppress=false): a missed suppression just reproduces today's recoverable
+  # double-comment, whereas a wrong suppression would silently swallow a
+  # review the user explicitly asked for. This is the opposite failure
+  # direction from request-review-on-ready's fail-closed gates, by design.
+  #
+  # Only `/devflow:review` is deduped — NOT `/devflow:review-and-fix` (that
+  # auto-applies fixes and has no automated equivalent), and not any other
+  # @claude flow (Q&A, pr-description, security-review), which all fall
+  # through with suppress=false untouched.
+  review_dedupe:
     needs: config
+    if: needs.config.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: read
+      actions: read
+    outputs:
+      suppress: ${{ steps.guard.outputs.suppress }}
+    steps:
+      - id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BODY: ${{ github.event.comment.body || github.event.review.body || github.event.issue.body }}
+          PR: ${{ github.event.issue.number || github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          emit() { echo "suppress=$1" >> "$GITHUB_OUTPUT"; }
+          emit false  # fail-OPEN default: manual review proceeds unless we prove auto is in-flight
+
+          # First-match-wins: review-and-fix (no automated counterpart, never
+          # dedupe) is matched BEFORE the /devflow:review substring it
+          # contains; anything else is not a review request.
+          case "$BODY" in
+            *"/devflow:review-and-fix"*)
+              echo "::notice::/devflow:review-and-fix has no auto path; not deduping."
+              exit 0 ;;
+            *"/devflow:review"*) : ;;
+            *)
+              echo "::notice::Not a /devflow:review request; nothing to dedupe."
+              exit 0 ;;
+          esac
+
+          if [ -z "${PR:-}" ] || [ "$PR" = "null" ]; then
+            echo "::notice::No PR number on this event; fail-open (manual review proceeds)."
+            exit 0
+          fi
+
+          HEAD=$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null || echo "")
+          BRANCH=$(gh pr view "$PR" --repo "$REPO" --json headRefName --jq .headRefName 2>/dev/null || echo "")
+          if [ -z "$HEAD" ] || [ "$HEAD" = "null" ]; then
+            echo "::notice::Could not resolve PR #$PR HEAD; fail-open (manual review proceeds)."
+            exit 0
+          fi
+
+          # Signal 1: an in-flight `Devflow Review` check on THIS exact HEAD.
+          IC=$(gh api --paginate "repos/$REPO/commits/$HEAD/check-runs" \
+                 --jq '.check_runs[] | select(.name=="Devflow Review" and (.status=="queued" or .status=="in_progress")) | .id' \
+                 2>/dev/null | grep -c . || true)
+          [[ "$IC" =~ ^[0-9]+$ ]] || IC=0
+
+          # Signal 2: a queued/in_progress request-review-on-ready run on the
+          # PR's branch. Covers the <1s synchronize-vs-comment race where the
+          # auto run has started but create_check has not POSTed the check yet
+          # (an in-flight auto run on the same branch is, by that workflow's
+          # own first-ready/synchronize design, reviewing the latest HEAD).
+          IR=0
+          if [ -n "$BRANCH" ] && [ "$BRANCH" != "null" ]; then
+            IR=$(gh run list --repo "$REPO" \
+                   --workflow request-review-on-ready.yml \
+                   --branch "$BRANCH" \
+                   --json status \
+                   --jq '[.[] | select(.status=="queued" or .status=="in_progress")] | length' \
+                   2>/dev/null || echo 0)
+          fi
+          [[ "$IR" =~ ^[0-9]+$ ]] || IR=0
+
+          if [ "$IC" != "0" ] || [ "$IR" != "0" ]; then
+            emit true
+            NOTE="ℹ️ An automated **Devflow Review** is already running for this commit (\`${HEAD:0:7}\`). Skipping this manual \`/devflow:review\` to avoid a duplicate review and double comments. Use the **Re-run** button on the \`Devflow Review\` check if you need to re-review."
+            gh pr comment "$PR" --repo "$REPO" --body "$NOTE" 2>/dev/null || true
+            echo "::notice::Suppressed manual /devflow:review for PR #$PR (in-flight check=$IC run=$IR)."
+            exit 0
+          fi
+          echo "::notice::No in-flight auto review for PR #$PR HEAD $HEAD; manual review proceeds."
+
+  claude:
+    needs: [config, review_dedupe]
     # Fires on @claude mentions that DO NOT contain `/devflow:implement` —
     # those are claimed by claude-implement.yml, whose conditions are the
     # exact inverse. The `!contains(.../devflow:implement)` clause is
@@ -73,6 +175,7 @@ jobs:
     # enumerate every body-bearing field on both sides and apply this transform.
     if: |
       needs.config.outputs.enabled == 'true' &&
+      needs.review_dedupe.outputs.suppress != 'true' &&
       (
         (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && !contains(github.event.comment.body, '/devflow:implement')) ||
         (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') && !contains(github.event.comment.body, '/devflow:implement')) ||
@@ -217,6 +320,7 @@ jobs:
             Bash(.claude/plugins/devflow/scripts/branch-for-issue.py:*),
             Bash(.claude/plugins/devflow/scripts/file-deferrals.py:*),
             Bash(.claude/plugins/devflow/scripts/match-deferrals.py:*),
+            Bash(.claude/plugins/devflow/scripts/dismiss-stale-rejections.sh:*),
             Bash(pip install:*),
             Bash(pip:*),
             Bash(python:*),
