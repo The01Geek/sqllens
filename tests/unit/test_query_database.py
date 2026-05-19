@@ -424,6 +424,29 @@ async def test_with_table_no_sql_card_means_no_sql_block(
     assert table is not None
 
 
+def test_append_sql_block_emits_executed_sql_heading() -> None:
+    # Pins the client-visible heading literal — a regression that drops or
+    # mangles "**Executed SQL:**" would silently change the text-fallback
+    # contract for non-apps MCP clients.
+    from sqllens.tools.query_database import _append_sql_block
+
+    out = _append_sql_block("answer", {"sql": "SELECT 1", "query_type": "SELECT"})
+    assert out == "answer\n\n**Executed SQL:**\n\n```sql\nSELECT 1\n```"
+
+
+def test_append_sql_block_returns_unchanged_on_malformed_query_info() -> None:
+    # Defensive branches: falsy query_info, missing "sql" key, empty/None sql
+    # must all return the markdown byte-for-byte unchanged — preventing leaks
+    # like ```sql\n\n``` or ```sql\nNone\n``` if a future producer degrades.
+    from sqllens.tools.query_database import _append_sql_block
+
+    assert _append_sql_block("md", None) == "md"
+    assert _append_sql_block("md", {}) == "md"
+    assert _append_sql_block("md", {"query_type": "SELECT"}) == "md"
+    assert _append_sql_block("md", {"sql": ""}) == "md"
+    assert _append_sql_block("md", {"sql": None}) == "md"
+
+
 @pytest.mark.asyncio
 async def test_concurrent_first_calls_build_once(
     tmp_path: Path,

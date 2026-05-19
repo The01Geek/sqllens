@@ -478,6 +478,23 @@ def test_query_info_absent_when_no_sql_card() -> None:
     assert query_info is None
 
 
+def test_query_info_with_sql_card_and_empty_dataframe() -> None:
+    # The S-10-defended branch the row_count `.get` was hardened for:
+    # SQL card present, _build_table_payload returns None (empty DataFrame).
+    # query_info must still be built (sql/query_type) but row_count omitted —
+    # the `.get(..., 0)` is masked here because payload is None entirely.
+    stream = [
+        _sql_card("SELECT 1", status="running"),
+        _ui(DataFrameComponent(rows=[], columns=[])),
+        _sql_card("SELECT 1", status="success"),
+    ]
+    _, is_error, payload, query_info = components_to_table(stream)
+    assert is_error is False
+    assert payload is None
+    assert query_info == {"sql": "SELECT 1", "query_type": "SELECT"}
+    assert "row_count" not in query_info
+
+
 def test_query_info_none_on_error_path() -> None:
     # Faithfully mirror the real guard-rejection stream: the agent emits ONE
     # StatusCardComponent (metadata == tool_call.arguments == {"sql": ...}),
