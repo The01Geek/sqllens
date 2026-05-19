@@ -17,6 +17,7 @@ One database is configured per running instance. Generated SQL is parsed and rej
 
 - **[Getting started](getting-started.md)** — Install SQL Lens, point it at the bundled demo database, and run your first question.
 - **[Configuration](configuration.md)** — All configurable fields in `sqllens.toml`, environment variables, and database URL formats.
+- **[Managing memory](managing-memory.md)** — Bulk-load curated question-and-answer pairs and notes, or export what SQL Lens has learned.
 - **[Install on Claude Desktop (Windows)](install-claude-desktop-windows.md)** — One-command installer and full manual fallback for connecting SQL Lens to Claude Desktop on a fresh Windows machine.
 - **[Release notes](release-notes.md)** — User-visible changes in each released version.
 

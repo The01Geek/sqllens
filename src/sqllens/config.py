@@ -17,12 +17,13 @@ and secrets.
 
 from __future__ import annotations
 
+import contextvars
 import os
 import shlex
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -73,6 +74,16 @@ class DatabaseConfig(BaseModel):
         ),
     )
 
+    @property
+    def dialect(self) -> str:
+        """SQLAlchemy URL scheme with any ``+driver`` suffix stripped.
+
+        ``sqlite:///demo.db`` → ``sqlite``; ``mysql+pymysql://...`` → ``mysql``;
+        ``postgresql+psycopg://...`` → ``postgresql``.
+        """
+        scheme = self.url.split("://", 1)[0]
+        return scheme.split("+", 1)[0]
+
 
 class LLMConfig(BaseModel):
     """LLM provider settings. v1: Anthropic only."""
@@ -98,6 +109,14 @@ class MemoryConfig(BaseModel):
     collection: str = Field(default="sqllens", description="ChromaDB collection name")
     similarity_threshold: float = Field(
         default=0.7, ge=0.0, le=1.0, description="Minimum cosine similarity for memory hits"
+    )
+    allow_import: bool = Field(
+        default=False,
+        description=(
+            "Expose the import_memory MCP tool. OFF by default: a remote client "
+            "that can write memory can poison future SQL generation. Enable only "
+            "for trusted operators. The CLI import/export commands are unaffected."
+        ),
     )
 
 
@@ -181,6 +200,41 @@ class ServerConfig(BaseModel):
     transport: Literal["stdio", "http"] = "stdio"
     host: str = "127.0.0.1"
     port: int = 8765
+    # Field + validation only; uvicorn / logging wiring lands in a later issue.
+    # Domain deliberately includes uvicorn's "trace"; AuditConfig.log_level
+    # below is the narrower stdlib-logging domain (no "trace"). The future
+    # wiring must not conflate the two — they map to different sinks.
+    log_level: Literal["critical", "error", "warning", "info", "debug", "trace"] = "info"
+
+
+class AuditConfig(BaseModel):
+    """Audit-logging surface. The agent factory consumes this in a later issue.
+
+    Mirrors what the future factory needs to construct/configure a
+    ``LoggingAuditLogger``: ``log_level`` is a friendly string the factory will
+    translate to a Python ``logging`` level int for
+    ``LoggingAuditLogger(log_level=...)``. ``include_response_text`` maps to
+    the ``include_full_text`` per-call argument of
+    ``AuditLogger.log_ai_response``; ``sanitize_parameters`` maps to the
+    ``sanitize_parameters`` per-call argument of
+    ``AuditLogger.log_tool_invocation`` (per-call arguments, not constructor
+    parameters). ``enabled`` is the master gate: when False (the default) the
+    factory builds no audit logger and the other three fields are inert. No
+    factory wiring lands here — this issue defines the surface only.
+    """
+
+    # extra="forbid" so a misspelled key inside [agent.audit] (e.g.
+    # `sanitize_paramters`) fails loudly at load — via TOML *or* the
+    # SQLLENS_AGENT__AUDIT__ env path — instead of silently reverting to the
+    # privacy-safe default. This is an audit/privacy surface, so a silent
+    # revert is the worst outcome. The top-level Config(extra="forbid") only
+    # guards top-level keys, not nested tables, hence the per-model setting.
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    log_level: Literal["critical", "error", "warning", "info", "debug"] = "info"
+    include_response_text: bool = False
+    sanitize_parameters: bool = True
 
 
 class AgentRuntimeConfig(BaseModel):
@@ -194,6 +248,19 @@ class AgentRuntimeConfig(BaseModel):
     # (catalog lookups + memory searches + final query) routinely needs more
     # than 10 tool calls on untrained databases. Upper bound caps runaway loops.
     max_tool_iterations: int = Field(default=20, ge=1, le=100)
+    # Future toggle: prefix query_database results with the generated SQL.
+    # Field only — rendering consumes it in a later issue.
+    show_sql: bool = True
+    audit: AuditConfig = Field(default_factory=lambda: AuditConfig())
+
+
+# Set by Config.load to the single resolved TOML Path for the duration of one
+# load; settings_customise_sources reads it instead of re-resolving. Unset
+# (LookupError on .get()) for direct Config() construction. A ContextVar keeps
+# concurrent in-process loads from clobbering each other's resolved path.
+_LOAD_TOML_PATH: contextvars.ContextVar[Path | None] = contextvars.ContextVar(
+    "_LOAD_TOML_PATH"
+)
 
 
 class Config(BaseSettings):
@@ -204,6 +271,11 @@ class Config(BaseSettings):
         env_nested_delimiter="__",
         extra="forbid",
     )
+
+    # Accepted-but-ignored for now: a future schema migration can branch on it.
+    # Must be a real declared field — model_config sets extra="forbid", so an
+    # unknown top-level key would otherwise be rejected.
+    config_version: int = 1
 
     database: DatabaseConfig
     llm: LLMConfig = Field(default_factory=lambda: LLMConfig())
@@ -222,7 +294,17 @@ class Config(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         # Resolution order: init kwargs (used by tests/programmatic) → env → toml → defaults.
-        toml_path = _resolved_toml_path()
+        # When called from Config.load the path was already resolved once (after the
+        # SQLLENS_CONFIG mutation, before cls()) and stashed here; reuse it so the
+        # BOM re-read in load's except branch sees the exact same Path — no TOCTOU
+        # window from a second _resolved_toml_path() call. Direct Config()
+        # construction (tests/programmatic) has no stashed value and resolves here.
+        try:
+            toml_path = _LOAD_TOML_PATH.get()
+        except LookupError:
+            # Not an error: the var is unset because this is a direct Config()
+            # construction outside any Config.load — resolve the path fresh.
+            toml_path = _resolved_toml_path()
         sources: list[PydanticBaseSettingsSource] = [init_settings, env_settings]
         if toml_path is not None:
             sources.append(
@@ -251,7 +333,14 @@ class Config(BaseSettings):
         prior = os.environ.get("SQLLENS_CONFIG")
         if path is not None:
             os.environ["SQLLENS_CONFIG"] = str(path)
+        token = None
         try:
+            # Resolve exactly once — after the SQLLENS_CONFIG mutation above so
+            # the cached value matches what settings_customise_sources will see,
+            # and before cls() so the same Path drives both the parse source and
+            # the BOM re-read below. Closes the C-5 TOCTOU window.
+            resolved = _resolved_toml_path()
+            token = _LOAD_TOML_PATH.set(resolved)
             try:
                 return cls()
             except Exception as exc:
@@ -260,11 +349,12 @@ class Config(BaseSettings):
                 # its original message. (Don't be tempted to switch on the
                 # "Invalid statement (at line 1, column 1)" string tomllib emits;
                 # it's a side effect, not the trigger.)
-                resolved = _resolved_toml_path()
                 if resolved is not None and _has_utf8_bom(resolved):
                     raise ConfigBomError(resolved) from exc
                 raise
         finally:
+            if token is not None:
+                _LOAD_TOML_PATH.reset(token)
             if path is not None:
                 if prior is None:
                     os.environ.pop("SQLLENS_CONFIG", None)
