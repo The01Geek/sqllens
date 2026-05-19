@@ -65,7 +65,7 @@ _ALLOWED_ROOT_TYPES: tuple[type[exp.Expression], ...] = (
 # DML/DDL node types refused anywhere in the tree. The ALTER node was renamed
 # ``exp.AlterTable`` → ``exp.Alter`` partway through sqlglot's 25.x line, so a
 # bare ``exp.Alter`` reference AttributeErrors on the low end of the pinned
-# ``>=25.0,<26`` range (25.0.x ships only ``AlterTable``) while a bare
+# ``>=25.0,<31`` range (25.0.x ships only ``AlterTable``) while a bare
 # ``exp.AlterTable`` AttributeErrors on 30.x. Resolve whichever the installed
 # version exposes so the guard works across the whole pinned range.
 _ALTER_TYPE: type[exp.Expression] | None = getattr(exp, "Alter", None) or getattr(
@@ -212,7 +212,7 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
     denied_funcs = _denied_funcs(dialect)
 
     # Reject DML/DDL nested anywhere in the tree (e.g. via CTEs). ``walk()``
-    # yields bare ``exp.Expression`` nodes (sqlglot is pinned ``>=25.0,<26``;
+    # yields bare ``exp.Expression`` nodes (sqlglot is pinned ``>=25.0,<31``;
     # the pre-v20 ``(node, parent, key)`` tuple form is out of range).
     for sub in stmt.walk():
         if isinstance(sub, _DML_DDL_TYPES):
