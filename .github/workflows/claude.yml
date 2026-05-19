@@ -121,9 +121,17 @@ jobs:
           fi
 
           # Signal 1: an in-flight `Devflow Review` check on THIS exact HEAD.
-          IC=$(gh api --paginate "repos/$REPO/commits/$HEAD/check-runs" \
+          # A query failure stays fail-open (IC=0 → not suppressed) but is
+          # surfaced as a ::warning:: so a permanently-failing signal is
+          # distinguishable from "no auto run existed".
+          if RAW_IC=$(gh api --paginate "repos/$REPO/commits/$HEAD/check-runs" \
                  --jq '.check_runs[] | select(.name=="Devflow Review" and (.status=="queued" or .status=="in_progress")) | .id' \
-                 2>/dev/null | grep -c . || true)
+                 2>/dev/null); then
+            IC=$(printf '%s' "$RAW_IC" | grep -c . || true)
+          else
+            echo "::warning::Signal 1 (check-runs) query failed for $HEAD; treating as 0 (fail-open — manual review may proceed)."
+            IC=0
+          fi
           [[ "$IC" =~ ^[0-9]+$ ]] || IC=0
 
           # Signal 2: a queued/in_progress request-review-on-ready run on the
@@ -133,12 +141,15 @@ jobs:
           # own first-ready/synchronize design, reviewing the latest HEAD).
           IR=0
           if [ -n "$BRANCH" ] && [ "$BRANCH" != "null" ]; then
-            IR=$(gh run list --repo "$REPO" \
+            if ! IR=$(gh run list --repo "$REPO" \
                    --workflow request-review-on-ready.yml \
                    --branch "$BRANCH" \
                    --json status \
                    --jq '[.[] | select(.status=="queued" or .status=="in_progress")] | length' \
-                   2>/dev/null || echo 0)
+                   2>/dev/null); then
+              echo "::warning::Signal 2 (run-list) query failed for branch $BRANCH; treating as 0 (fail-open)."
+              IR=0
+            fi
           fi
           [[ "$IR" =~ ^[0-9]+$ ]] || IR=0
 

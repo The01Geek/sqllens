@@ -499,6 +499,11 @@ jobs:
     if: always() && needs.create_check.outputs.check_run_id != ''
     runs-on: ubuntu-latest
     permissions:
+      # Job-level permissions REPLACE workflow-level (they do not merge), so
+      # contents:read must be re-declared here or actions/checkout below
+      # cannot clone (mirrors precheck/create_check/review, which all
+      # re-declare it for the same reason).
+      contents: read
       checks: write
       # write (not read): on an APPROVE verdict this job dismisses any stale
       # CHANGES_REQUESTED review left by an earlier REJECT — the dismissals
@@ -510,12 +515,22 @@ jobs:
       # 4.4 final step does the same and covers the manual @claude path too.
       pull-requests: write
     steps:
-      # Trusted checkout for dismiss-stale-rejections.sh. On
-      # pull_request_target actions/checkout defaults to the BASE ref (the
-      # default branch), NOT PR head — exactly right for a pull-requests:write
-      # job: the script that runs with the write token is the trusted in-repo
-      # copy, never PR-author-controlled code.
+      # Trusted checkout for dismiss-stale-rejections.sh. This workflow fires
+      # on BOTH pull_request (human-authored PRs, routed here by
+      # dedupe-pr-events) and pull_request_target. On the pull_request
+      # trigger actions/checkout WITHOUT an explicit ref defaults to the PR
+      # MERGE ref — i.e. PR-author-controlled code — which would then run
+      # with this job's pull-requests:write token (script-injection /
+      # privilege-escalation). Pin to the repo default branch so the
+      # write-token job always runs the trusted in-repo copy regardless of
+      # trigger. fetch-depth:1 (only the script is needed) and
+      # persist-credentials:false (gh uses GH_TOKEN; don't leave the
+      # actions token in .git/config) are defense-in-depth.
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: false
       - id: finalize
         env:
           GH_TOKEN: ${{ github.token }}
@@ -557,21 +572,38 @@ jobs:
                 TITLE='Devflow review: APPROVE'
               else
                 VERDICT=approve
-                REVIEWS_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews?per_page=100" 2>/dev/null || echo '[]')
-                STATE=$(echo "$REVIEWS_JSON" | jq -r 'last.state // ""' 2>/dev/null || echo "")
-                RBODY=$(echo "$REVIEWS_JSON" | jq -r 'last.body // ""' 2>/dev/null || echo "")
-                if [ "$STATE" = "CHANGES_REQUESTED" ]; then
-                  VERDICT=reject
-                elif printf '%s\n' "$RBODY" | grep -qE '^##[[:space:]]+Verdict:[[:space:]]*REJECT'; then
-                  VERDICT=reject
-                elif [ -z "$STATE" ]; then
-                  # gh pr review unavailable (e.g. same-identity self-review):
-                  # the skill falls back to `gh pr comment` with the report.
-                  if gh api "repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" \
-                       --jq '.[].body' 2>/dev/null \
-                       | grep -qE '^##[[:space:]]+Verdict:[[:space:]]*REJECT'; then
+                # VERDICT_DETERMINED gates the irreversible dismissal below.
+                # The conclusion still defaults to success on a swallowed
+                # lookup error (changing that is out of scope and could
+                # itself wedge PRs), but a verdict reached by DEFAULT under
+                # a failed query must NOT trigger dismissal of a possibly-
+                # still-valid REJECT. Only a POSITIVELY observed APPROVE
+                # dismisses.
+                VERDICT_DETERMINED=false
+                if REVIEWS_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews?per_page=100" 2>/dev/null); then
+                  VERDICT_DETERMINED=true
+                  STATE=$(echo "$REVIEWS_JSON" | jq -r 'last.state // ""' 2>/dev/null || echo "")
+                  RBODY=$(echo "$REVIEWS_JSON" | jq -r 'last.body // ""' 2>/dev/null || echo "")
+                  if [ "$STATE" = "CHANGES_REQUESTED" ]; then
                     VERDICT=reject
+                  elif printf '%s\n' "$RBODY" | grep -qE '^##[[:space:]]+Verdict:[[:space:]]*REJECT'; then
+                    VERDICT=reject
+                  elif [ -z "$STATE" ]; then
+                    # gh pr review unavailable (e.g. same-identity self-review):
+                    # the skill falls back to `gh pr comment` with the report.
+                    if COMMENTS=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" \
+                                    --jq '.[].body' 2>/dev/null); then
+                      printf '%s\n' "$COMMENTS" \
+                        | grep -qE '^##[[:space:]]+Verdict:[[:space:]]*REJECT' \
+                        && VERDICT=reject
+                    else
+                      # Fallback was REQUIRED (no review state) but its query
+                      # failed: verdict is unknown, not a positive APPROVE.
+                      VERDICT_DETERMINED=false
+                    fi
                   fi
+                else
+                  echo "::warning::finalize_check: reviews API query failed for PR #$PR_NUMBER; verdict not positively determined — concluding success but NOT dismissing any review."
                 fi
                 if [ "$VERDICT" = reject ]; then
                   CONCLUSION=failure
@@ -598,14 +630,15 @@ jobs:
           echo "::notice::Finalized check $CHECK_RUN_ID as $CONCLUSION ($TITLE; review job result: $REVIEW_RESULT)."
 
           # Auto-path safety net (same script the skill's Phase 4.4 final
-          # step calls — single source of truth). CONCLUSION=success here
-          # means the review succeeded AND the verdict was APPROVE (REJECT
-          # maps to failure; the empty-PR fallback also yields success but
-          # has no PR_NUMBER, so the guard skips it — never dismiss without
-          # a PR). Best-effort: a non-zero exit is logged but never fails
-          # the job — the required check is already finalized and the
-          # verdict stands regardless of this merge-gate cleanup.
-          if [ "$CONCLUSION" = "success" ] && [ -n "${PR_NUMBER:-}" ]; then
+          # step calls — single source of truth). Gated on a POSITIVELY
+          # determined APPROVE: CONCLUSION=success (REJECT maps to failure),
+          # a real PR_NUMBER (the empty-PR fallback yields success without
+          # one), AND VERDICT_DETERMINED=true (the verdict came from a
+          # successful lookup, not a default under a swallowed API error —
+          # otherwise a correlated GitHub degradation could silently dismiss
+          # a still-valid REJECT). Best-effort: a non-zero exit is logged
+          # but never fails the job — the check is already finalized.
+          if [ "$CONCLUSION" = "success" ] && [ -n "${PR_NUMBER:-}" ] && [ "${VERDICT_DETERMINED:-false}" = "true" ]; then
             if .claude/plugins/devflow/scripts/dismiss-stale-rejections.sh "$PR_NUMBER" "$REPO"; then
               echo "::notice::Stale-REJECT dismissal completed for PR #$PR_NUMBER (no-op if none were outstanding)."
             else

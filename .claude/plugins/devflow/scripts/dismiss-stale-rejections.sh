@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dismiss any still-outstanding CHANGES_REQUESTED reviews on a PR.
+# Dismiss Devflow Review's own still-outstanding CHANGES_REQUESTED reviews.
 #
 # Called after a Devflow Review APPROVE verdict to clear a prior REJECT's
 # `--request-changes` review. GitHub keeps that review the PR's effective
@@ -9,42 +9,54 @@
 # so no later review clears it. Without an explicit dismissal the PR is
 # wedged at reviewDecision=CHANGES_REQUESTED despite a green required check.
 #
+# Scope: ONLY reviews whose body is a Devflow Review report (starts with the
+# `# Review Report` marker the skill's Phase 4.1 emits) are dismissed. A
+# human reviewer's `--request-changes` does NOT carry that marker and is
+# left untouched — an automated APPROVE must never silently clear a human's
+# block.
+#
 # The caller decides WHEN to run this (APPROVE only — never on REJECT, the
 # changes-request must stand). This script does not inspect the verdict.
 #
 # Usage: dismiss-stale-rejections.sh PR_NUMBER [REPO]
 #   PR_NUMBER  the pull request number
-#   REPO       owner/name; defaults to `gh repo view`'s nameWithOwner
+#   REPO       owner/name; defaults to `$DEVFLOW_GH repo view`'s nameWithOwner
 #
-# Idempotent: only reviews still in the CHANGES_REQUESTED state are
-# selected, so already-dismissed ones are skipped and re-runs are harmless.
+# Re-run safe: a dismissed review's state becomes DISMISSED so it no longer
+# matches the filter; re-running this script after a successful pass is a
+# genuine no-op. (It still dismisses any NEW Devflow-report CHANGES_REQUESTED
+# that appeared since — that is the intended behavior, not non-idempotency.)
 # Best-effort per review: a failed dismissal is logged and the rest still
 # run; the verdict never depends on this housekeeping.
 #
 # Requires: gh (authenticated), jq. Needs pull-requests:write — the
 # dismissals API can dismiss ANY reviewer's review (required for the
-# cross-identity case).
+# cross-identity case). $DEVFLOW_GH overrides the `gh` binary for tests
+# (same seam as the rest of devflow; see lib/fetch-pr-context.sh).
 #
 # Exit codes:
-#   0  all stale reviews dismissed, or none were outstanding (no-op)
-#   1  one or more dismissals failed (caller may warn; never fatal there)
+#   0  all matching reviews dismissed, or none were outstanding (no-op)
+#   1  list query failed, or one or more dismissals failed (caller may
+#      warn; never fatal there)
 #   2  bad arguments
 
 set -euo pipefail
+: "${DEVFLOW_GH:=gh}"
 
 if [ "$#" -lt 1 ] || [ -z "${1:-}" ]; then
   echo "usage: dismiss-stale-rejections.sh PR_NUMBER [REPO]" >&2
   exit 2
 fi
 PR="$1"
-REPO="${2:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}"
+REPO="${2:-$("$DEVFLOW_GH" repo view --json nameWithOwner --jq .nameWithOwner)}"
 
-# Capture the list in one call so the loop runs in THIS shell (not a pipe
-# subshell): a per-review failure flag then survives, no recount round-trip
-# is needed, and we still distinguish a list-call failure (exit 1, nothing
-# dismissed) from a clean no-op (no outstanding reviews).
-if ! IDS=$(gh api "repos/$REPO/pulls/$PR/reviews?per_page=100" \
-             --jq '.[] | select(.state=="CHANGES_REQUESTED") | .id'); then
+# One paginated call (consistent with claude.yml Signal 1) so the loop runs
+# in THIS shell, not a pipe subshell: a per-review failure flag survives, no
+# recount round-trip is needed, and a list-call failure (exit 1, nothing
+# dismissed) stays distinct from a clean no-op (no matching reviews). The
+# body-marker filter is what scopes this to Devflow's own reviews.
+if ! IDS=$("$DEVFLOW_GH" api --paginate "repos/$REPO/pulls/$PR/reviews?per_page=100" \
+             --jq '.[] | select(.state=="CHANGES_REQUESTED" and ((.body // "") | startswith("# Review Report"))) | .id'); then
   echo "WARNING: could not list reviews for PR #$PR — dismiss manually." >&2
   exit 1
 fi
@@ -52,12 +64,14 @@ fi
 FAILED=0
 while read -r RID; do
   [ -n "$RID" ] || continue
-  if gh api -X PUT "repos/$REPO/pulls/$PR/reviews/$RID/dismissals" \
+  # Capture stderr so a real failure cause (404/422/429/5xx) is surfaced
+  # rather than collapsed into a misleading permissions guess.
+  if ERR=$("$DEVFLOW_GH" api -X PUT "repos/$REPO/pulls/$PR/reviews/$RID/dismissals" \
        -f message="Superseded by a later APPROVE verdict from Devflow Review (review $RID predates the current passing review)." \
-       -f event=DISMISS >/dev/null 2>&1; then
+       -f event=DISMISS 2>&1 >/dev/null); then
     echo "Dismissed stale CHANGES_REQUESTED review $RID on PR #$PR."
   else
-    echo "WARNING: could not dismiss review $RID on PR #$PR (token may lack pull-requests:write) — dismiss it manually." >&2
+    echo "WARNING: could not dismiss review $RID on PR #$PR — dismiss it manually. (${ERR:-no error output})" >&2
     FAILED=1
   fi
 done <<< "$IDS"
