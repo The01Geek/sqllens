@@ -589,13 +589,15 @@ def run_install(
         # Render through the shared config-error formatter rather than raw
         # f"{exc}": a pydantic ValidationError here embeds the very --api-key /
         # --db values we just wrote into the generated TOML. Lazy import keeps
-        # the cli → installers import direction acyclic.
+        # the cli → installers import direction acyclic. No `type(exc).__name__`
+        # prefix — _format_config_error already names the type for the
+        # suppressed branch, and the allowlisted/ValidationError branches are
+        # self-describing; prefixing would double the class name.
         from sqllens.cli import _format_config_error
 
         raise InstallError(
-            f"Generated sqllens.toml failed validation; aborting before touching "
-            f"{options.config_path}.\n  Cause: {type(exc).__name__}: "
-            f"{_format_config_error(exc)}"
+            f"Generated sqllens.toml failed validation; aborting before "
+            f"touching {options.config_path}.\n  Cause: {_format_config_error(exc)}"
         ) from exc
 
     # Only mutate the user's JSON when the merge would actually change it.

@@ -697,10 +697,12 @@ class TestRunInstall:
         fake_config_json: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        # #125: a pydantic ValidationError raised by validate_toml embeds the
-        # offending input — here the --db DSN password the installer just wrote
-        # into the generated TOML. The InstallError surfaced to the operator
-        # must route through _format_config_error and not echo that secret.
+        # #125 wiring test: stubs validate_toml to raise a real pydantic
+        # ValidationError whose input embeds a DSN secret (the shape
+        # Config.load would produce from the generated --db). Verifies
+        # run_install routes the failure through _format_config_error (secret
+        # scrubbed, msg preserved) and still reverts — not the full
+        # generator→Config.load→formatter integration.
         from pydantic import BaseModel, ValidationError, model_validator
 
         from sqllens.installers import claude_desktop as installer_mod
@@ -735,6 +737,41 @@ class TestRunInstall:
         assert "failed validation" in msg
         assert "database.url is malformed" in msg
         assert secret not in msg
+
+    def test_validation_failure_unknown_exception_is_suppressed(
+        self,
+        base_options: InstallOptions,
+        fake_config_json: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # A non-allowlisted exception caught by the installer's
+        # `except (ValueError, OSError, ImportError)` (a bare ValueError that
+        # is NOT ConfigBomError/SettingsError) must have its message withheld
+        # in the InstallError, with the class name appearing exactly once (no
+        # `Cause: ValueError: ValueError ...` doubling now that the installer
+        # dropped its own type prefix).
+        from sqllens.installers import claude_desktop as installer_mod
+
+        monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
+        secret = "sk-ant-INSTALLER-SUPPRESS-CANARY"
+
+        def boom(*_: object, **__: object) -> None:
+            raise ValueError(f'api_key = "{secret}"')
+
+        monkeypatch.setattr(installer_mod, "validate_toml", boom)
+        with pytest.raises(InstallError) as excinfo:
+            run_install(
+                base_options,
+                dry_run=False,
+                force=False,
+                platform_name="linux",
+                which=lambda _: "/usr/local/bin/sqllens",
+                now=_fixed_now,
+            )
+        msg = str(excinfo.value)
+        assert "failed validation" in msg
+        assert secret not in msg
+        assert msg.count("ValueError") == 1
 
     def test_cmd_conflict_reverts_toml(
         self,

@@ -260,7 +260,7 @@ class Config(BaseSettings):
                 # it's a side effect, not the trigger.)
                 resolved = _resolved_toml_path()
                 if resolved is not None and _has_utf8_bom(resolved):
-                    raise ConfigBomError(_bom_error_message(resolved)) from exc
+                    raise ConfigBomError(resolved) from exc
                 raise
         finally:
             if path is not None:
@@ -329,10 +329,20 @@ class ConfigBomError(ValueError):
     Subclasses ``ValueError`` so the historical contract holds: callers that
     ``except ValueError`` (or ``except (ValueError, OSError, ...)``) still catch
     it, and ``except TOMLDecodeError`` still misses it. The dedicated type lets
-    ``cli._format_config_error`` recognise this message as operator-safe (it
-    carries only the file path and rewrite commands, never config values)
+    ``cli._format_config_error`` recognise this message as operator-safe
     without resorting to fragile message-string matching.
+
+    The constructor takes the offending ``Path`` and builds the message itself
+    via ``_bom_error_message``, so "an instance's ``str()`` is exactly the
+    BOM remediation text for some path — never a config value" is true by
+    construction for *every* instance, not by the convention that only
+    ``Config.load`` raises it. That is what justifies ``_format_config_error``
+    trusting this type unconditionally.
     """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        super().__init__(_bom_error_message(path))
 
 
 _UTF8_BOM = b"\xef\xbb\xbf"
