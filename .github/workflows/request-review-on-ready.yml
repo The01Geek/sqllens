@@ -235,17 +235,21 @@ jobs:
             # first-ready gate: a missed re-review is recoverable by the
             # next push or the manual Re-run button; a spurious LLM
             # re-review is precisely the cost this guard exists to prevent.
-            # --slurp collects every page into one array before the jq
-            # filter runs; without it --paginate applies the filter
-            # per page and concatenates, so a >100-check-run commit
-            # yields a multi-line count that trips the ^[0-9]+$ guard.
-            if ! PASSING=$(gh api --paginate --slurp \
+            # Emit ONE line per matching check-run and count lines, rather
+            # than `| length` per page: --paginate concatenates the jq
+            # output of every page, so a per-page `length` yields a
+            # multi-line count ("2\n0") on a >100-check-run commit. A
+            # value stream concatenates correctly across pages; line
+            # count is then exact. (--slurp would also work but is not
+            # reliable with --jq on older gh on the runner.)
+            if ! _RUNS=$(gh api --paginate \
                   "repos/$REPO/commits/$HEAD/check-runs" \
-                  --jq '[.[].check_runs[] | select(.name=="Devflow Review" and .conclusion=="success")] | length' \
+                  --jq '.check_runs[] | select(.name=="Devflow Review" and .conclusion=="success") | .id' \
                   2>/dev/null); then
               echo "::warning::Check-run query failed for $HEAD; failing closed (no synchronize re-review). Push again or use the Re-run button."
               exit 0
             fi
+            PASSING=$(printf '%s' "$_RUNS" | grep -c . || true)
             if ! [[ "$PASSING" =~ ^[0-9]+$ ]]; then
               echo "::warning::Non-numeric passing-check count ('$PASSING') for $HEAD; failing closed (no synchronize re-review)."
               exit 0
@@ -278,16 +282,18 @@ jobs:
           # A truncated/empty body that still exits 0 yields a non-numeric
           # count; treating that as 0 would fail OPEN (re-review on a repeat
           # toggle), which §0 forbids. Require a bare integer or fail closed.
-          # --slurp: aggregate all pages before the jq filter (see the
-          # synchronize cost-guard above) so a >100-check-run commit
-          # cannot produce a multi-line, non-numeric count.
-          if ! EXISTING=$(gh api --paginate --slurp \
+          # Value-stream + line count, not per-page `| length` (see the
+          # synchronize cost-guard above): --paginate concatenates jq
+          # output per page, so `length` would yield a multi-line count
+          # on a >100-check-run commit.
+          if ! _RUNS=$(gh api --paginate \
                 "repos/$REPO/commits/$HEAD/check-runs" \
-                --jq '[.[].check_runs[] | select(.name=="Devflow Review")] | length' \
+                --jq '.check_runs[] | select(.name=="Devflow Review") | .id' \
                 2>/dev/null); then
             echo "::warning::Check-run query failed for $HEAD; failing closed (no auto-review). Use the Re-run button if a review is needed."
             exit 0
           fi
+          EXISTING=$(printf '%s' "$_RUNS" | grep -c . || true)
           if ! [[ "$EXISTING" =~ ^[0-9]+$ ]]; then
             echo "::warning::Non-numeric check-run count ('$EXISTING') for $HEAD; failing closed (no auto-review)."
             exit 0
@@ -301,12 +307,13 @@ jobs:
               exit 0
             fi
             for sha in $COMMITS; do
-              if ! n=$(gh api --paginate --slurp "repos/$REPO/commits/$sha/check-runs" \
-                    --jq '[.[].check_runs[] | select(.name=="Devflow Review")] | length' \
+              if ! _RUNS=$(gh api --paginate "repos/$REPO/commits/$sha/check-runs" \
+                    --jq '.check_runs[] | select(.name=="Devflow Review") | .id' \
                     2>/dev/null); then
                 echo "::warning::Check-run query failed for commit $sha; failing closed (no auto-review)."
                 exit 0
               fi
+              n=$(printf '%s' "$_RUNS" | grep -c . || true)
               if ! [[ "$n" =~ ^[0-9]+$ ]]; then
                 echo "::warning::Non-numeric check-run count ('$n') for commit $sha; failing closed (no auto-review)."
                 exit 0
