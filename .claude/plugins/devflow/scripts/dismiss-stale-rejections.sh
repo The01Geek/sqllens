@@ -9,10 +9,17 @@
 # so no later review clears it. Without an explicit dismissal the PR is
 # wedged at reviewDecision=CHANGES_REQUESTED despite a green required check.
 #
-# Scope: ONLY reviews whose body is a Devflow Review report (starts with the
-# `# Review Report` marker the skill's Phase 4.1 emits) are dismissed. A
-# human reviewer's `--request-changes` does NOT carry that marker and is
-# left untouched — an automated APPROVE must never silently clear a human's
+# Scope: ONLY reviews whose body is a Devflow Review formal verdict are
+# dismissed. Two body shapes are matched:
+#   1. New stub format (post-#135 consolidation): the formal review body
+#      starts with `## Verdict: REJECT` — the full Phase 4.1 report lives
+#      in the progress comment, not the review body, so the review carries
+#      only a short verdict stub.
+#   2. Legacy format (pre-#135): the formal review body starts with
+#      `# Review Report` (kept for backward compatibility with any
+#      pre-consolidation reviews still outstanding on long-lived PRs).
+# A human reviewer's `--request-changes` carries neither marker and is left
+# untouched — an automated APPROVE must never silently clear a human's
 # block.
 #
 # The caller decides WHEN to run this (APPROVE only — never on REJECT, the
@@ -56,7 +63,7 @@ REPO="${2:-$("$DEVFLOW_GH" repo view --json nameWithOwner --jq .nameWithOwner)}"
 # dismissed) stays distinct from a clean no-op (no matching reviews). The
 # body-marker filter is what scopes this to Devflow's own reviews.
 if ! IDS=$("$DEVFLOW_GH" api --paginate "repos/$REPO/pulls/$PR/reviews?per_page=100" \
-             --jq '.[] | select(.state=="CHANGES_REQUESTED" and ((.body // "") | startswith("# Review Report"))) | .id'); then
+             --jq '.[] | select(.state=="CHANGES_REQUESTED" and ((.body // "") | (startswith("## Verdict: REJECT") or startswith("# Review Report")))) | .id'); then
   echo "WARNING: could not list reviews for PR #$PR — dismiss manually." >&2
   exit 1
 fi
