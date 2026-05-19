@@ -6,18 +6,25 @@
 The agent generates SQL from natural language. Before that SQL is executed,
 every configured :class:`~sqllens.config.RlsRule` is injected as an extra
 ``WHERE`` predicate so a request can only see the rows it is allowed to see.
-The predicate is added to **every** SELECT scope that references the rule's
-table — top-level query, subquery, CTE body, joined sub-select — and is
-AND-combined with whatever filter the agent already produced.
+Scopes are resolved with sqlglot's scope analyzer so a base-table reference
+is filtered in **every** SELECT scope it appears in — top-level query,
+subquery, CTE body, joined sub-select — while a same-named CTE/derived-table
+*reference* is correctly left alone (its rows already came from the filtered
+body). The predicate is AND-combined with whatever filter the agent produced.
 
 This is an application-layer enforcement, deliberately mirroring the read-only
 guard's posture:
 
-* **Fail-secure.** A parse failure, a missing dynamic value, a value that
-  fails sanitization, or any unexpected rewrite error blocks the query. The
-  rewrite never returns SQL it could not fully scope — :class:`RlsError` is
-  raised and :class:`~sqllens.safety.RlsGuardRunner` turns that into a blocked
-  query, never an unfiltered execution.
+* **Fail-secure, proven not assumed.** Rather than filtering only the SQL
+  shapes it recognizes and silently passing the rest, the rewrite tracks every
+  ``exp.Table`` node it injected a predicate into or resolved as a CTE/derived
+  reference, then re-walks the tree: any reference to a protected table that
+  cannot be accounted for blocks the query. A parse failure, a scope-analysis
+  failure, a missing dynamic value, a value that fails sanitization, or any
+  unexpected rewrite error likewise blocks. The rewrite never returns SQL it
+  could not prove fully scoped — :class:`RlsError` is raised and
+  :class:`~sqllens.safety.RlsGuardRunner` turns that into a blocked query,
+  never an unfiltered execution.
 * **No string interpolation.** Identifiers come only from config (validated
   against a strict allowlist at load time, never request-influenced) and
   values are always built as sqlglot literal nodes, never spliced into SQL
@@ -31,6 +38,7 @@ from typing import Any
 
 import sqlglot
 from sqlglot import expressions as exp
+from sqlglot.optimizer.scope import traverse_scope
 
 from sqllens.config import RlsRule
 
@@ -155,39 +163,6 @@ def _predicate(rule: RlsRule, qualifier: str, value: _Scalar | list[_Scalar]) ->
     return op_cls(this=col, expression=exp.convert(value))
 
 
-def _cte_names(tree: exp.Expression) -> set[str]:
-    """Names bound by ``WITH`` anywhere in the tree.
-
-    A reference to one of these is a CTE alias, not a base table, so it must
-    not be filtered — its rows already came from the (filtered) CTE body.
-    Lower-cased for case-insensitive matching against table references.
-    """
-    names: set[str] = set()
-    for cte in tree.find_all(exp.CTE):
-        alias = cte.alias
-        if alias:
-            names.add(alias.lower())
-    return names
-
-
-def _scope_tables(select: exp.Select) -> list[exp.Table]:
-    """Base-table sources owned directly by ``select`` (its FROM + JOINs).
-
-    Tables inside a subquery used as a source belong to that subquery's own
-    ``exp.Select`` (handled in its own iteration), so they are intentionally
-    excluded here — only ``exp.Table`` nodes that are the direct source of
-    this scope's FROM/JOINs are returned.
-    """
-    tables: list[exp.Table] = []
-    from_ = select.args.get("from")
-    if isinstance(from_, exp.From) and isinstance(from_.this, exp.Table):
-        tables.append(from_.this)
-    for join in select.args.get("joins", []) or []:
-        if isinstance(join.this, exp.Table):
-            tables.append(join.this)
-    return tables
-
-
 def apply_rls(
     sql: str,
     rules: list[RlsRule],
@@ -198,9 +173,9 @@ def apply_rls(
     """Rewrite ``sql`` so every configured RLS predicate is enforced.
 
     Returns the rewritten SQL. Raises :class:`RlsError` if the statement
-    cannot be parsed, a dynamic value is missing/suspicious, or anything else
-    prevents fully scoping the query — the caller must treat that as a blocked
-    query and never execute ``sql`` unfiltered.
+    cannot be parsed or scope-analyzed, a dynamic value is missing/suspicious,
+    or a reference to a protected table cannot be proven scoped — the caller
+    must treat that as a blocked query and never execute ``sql`` unfiltered.
     """
     if not rules:
         return sql
@@ -222,20 +197,55 @@ def apply_rls(
     for rule in rules:
         rules_by_table.setdefault(rule.table.lower(), []).append(rule)
 
-    cte_names = _cte_names(tree)
+    try:
+        scopes = traverse_scope(tree)
+    except Exception as e:
+        # Scope analysis is how we distinguish a real base table from a
+        # same-named CTE/derived reference. If it cannot run, we cannot prove
+        # scoping — fail-secure rather than fall back to a name-only heuristic.
+        raise RlsError(
+            f"could not analyze SQL scopes for row-level security: {e}"
+        ) from e
 
-    for select in tree.find_all(exp.Select):
-        for table in _scope_tables(select):
+    # Track every protected-table node we accounted for: either we injected a
+    # predicate for it (a real base-table read), or its name resolves to a
+    # CTE/derived scope here (a reference whose rows came from the filtered
+    # body, so it must NOT be filtered again). Anything left over is a
+    # reference we could not prove safe — block it.
+    injected_ids: set[int] = set()
+    reference_ids: set[int] = set()
+
+    for scope in scopes:
+        select = scope.expression
+        if not isinstance(select, exp.Select):
+            continue
+        for table in scope.tables:
             name = table.name.lower()
-            if name in cte_names:
+            if name not in rules_by_table:
                 continue
-            matched = rules_by_table.get(name)
-            if not matched:
+            source = scope.sources.get(table.alias_or_name)
+            if not isinstance(source, exp.Table):
+                # Resolves to a CTE / derived-table scope, not a base table.
+                reference_ids.add(id(table))
                 continue
             qualifier = table.alias_or_name
-            for rule in matched:
+            for rule in rules_by_table[name]:
                 value = _resolve_value(rule, meta)
                 # append=True AND-combines with any existing WHERE.
-                select.where(_predicate(rule, qualifier, value), append=True, copy=False)
+                select.where(
+                    _predicate(rule, qualifier, value), append=True, copy=False
+                )
+            injected_ids.add(id(table))
+
+    for table in tree.find_all(exp.Table):
+        if table.name.lower() not in rules_by_table:
+            continue
+        if id(table) in injected_ids or id(table) in reference_ids:
+            continue
+        raise RlsError(
+            f"could not prove row-level-security scoping for a reference to "
+            f"protected table {table.name!r} (unsupported SQL shape); "
+            "blocking the query"
+        )
 
     return tree.sql(dialect=dialect)

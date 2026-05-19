@@ -43,6 +43,15 @@ logger = logging.getLogger("sqllens.tools.query_database")
 _INTERNAL_ERROR_MESSAGE = "internal error; see server logs"
 _SQL_EXECUTION_ERROR_PREFIX = "SQL execution error: "
 
+# Internal agent-control keys that the agent reads off
+# ``request_context.metadata`` (e.g. ``starter_ui_request`` at
+# agent/core/agent/agent.py, ``ui_features_available`` injected into the tool
+# context). Caller-supplied MCP ``_meta`` now flows into that same mapping for
+# row-level-security dynamic values, so these keys are stripped at the boundary
+# — untrusted request metadata must not be able to steer internal agent
+# control flow, only supply RLS predicate values.
+_RESERVED_METADATA_KEYS = frozenset({"starter_ui_request", "ui_features_available"})
+
 # Lazy-built singleton — first call wires the agent, subsequent calls reuse it.
 # The agent and the ``Config`` that built it are stored as one tuple assigned
 # atomically: the cfg-mismatch warning's correctness depends on the two never
@@ -178,11 +187,18 @@ async def query_database_impl_with_table(
         logger.exception("agent construction failed")
         raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
     # Per-request metadata (caller-supplied MCP metadata, used by the
-    # row-level-security guard) flows in here. dict() copies so a caller's
-    # mapping can't be mutated downstream, and an absent/empty mapping keeps
-    # the prior empty-context behaviour byte-for-byte.
+    # row-level-security guard) flows in here. Reserved internal-control keys
+    # are stripped so untrusted request metadata cannot steer agent control
+    # flow; the dict comprehension also copies so a caller's mapping can't be
+    # mutated downstream, and an absent/empty mapping keeps the prior
+    # empty-context behaviour byte-for-byte.
+    safe_metadata = {
+        k: v
+        for k, v in (metadata or {}).items()
+        if k not in _RESERVED_METADATA_KEYS
+    }
     request_context = RequestContext(
-        headers={}, cookies={}, metadata=dict(metadata or {})
+        headers={}, cookies={}, metadata=safe_metadata
     )
 
     components = []

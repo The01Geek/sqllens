@@ -325,8 +325,13 @@ class RlsRule(BaseModel):
     # extra="forbid": a misspelled key inside a [[rls]] table (e.g. `colum`)
     # must fail loudly at load, not silently drop the predicate — a dropped
     # RLS predicate is an unfiltered query, the exact failure this feature
-    # exists to prevent.
-    model_config = ConfigDict(extra="forbid")
+    # exists to prevent. frozen=True: the validated invariants (XOR of
+    # value/value_from_metadata, operator allowlist) must hold for the rule's
+    # lifetime, not just at construction — a security-config object should not
+    # be mutable into an invalid state after load. The validator's operator
+    # normalization uses object.__setattr__, which pydantic permits during
+    # post-validation even on a frozen model.
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     table: str = Field(description="Base table the predicate applies to")
     column: str = Field(description="Column on `table` the predicate compares")

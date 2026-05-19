@@ -55,6 +55,17 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
     if meta is None:
         return {}
     extra = getattr(meta, "model_extra", None)
+    if extra is None:
+        # meta present but no extras attribute — either the caller sent only
+        # declared fields, or the MCP SDK changed how _meta extras surface.
+        # Logged at debug so a "every dynamic RLS query suddenly blocks"
+        # incident is traceable to this seam rather than looking like the
+        # caller never sent metadata.
+        logger.debug(
+            "request _meta present but exposes no model_extra; "
+            "dynamic RLS rules will see no metadata"
+        )
+        return {}
     return dict(extra) if extra else {}
 
 

@@ -62,6 +62,13 @@ class TestRlsRuleValidation:
     def test_operator_normalized_to_lowercase(self) -> None:
         assert _rule(value=[1], operator="IN").operator == "in"
 
+    def test_rule_is_frozen(self) -> None:
+        # Security-config invariants (XOR value/value_from_metadata, operator
+        # allowlist) must hold for the rule's lifetime, not just at load.
+        r = _rule(value="acme")
+        with pytest.raises(ValidationError):
+            r.value_from_metadata = "tenant_id"
+
     @pytest.mark.parametrize("bad", ["orders; DROP", "ord ers", "1orders", "a.b", '"x"'])
     def test_bad_table_identifier_rejected(self, bad: str) -> None:
         with pytest.raises(ValidationError, match="bare SQL identifier"):
@@ -206,6 +213,100 @@ class TestApplyRlsStatic:
             dialect="sqlite",
         )
         assert "region_id" in out and "7" in out
+        _assert_filtered_and_readonly(out)
+
+
+# ───────────────── engine: every-scope coverage + fail-secure shapes ─────────
+
+
+class TestApplyRlsScopeCoverage:
+    """The acceptance criterion is 'filters every matching table reference'.
+
+    These exercise scopes the naive FROM/JOIN walk missed, and assert the
+    fail-secure backstop blocks (rather than silently passing) any protected
+    table reference the rewrite cannot prove scoped.
+    """
+
+    def test_cte_alias_colliding_with_protected_table_filters_body(self) -> None:
+        # Regression: a CTE named like a protected base table previously made
+        # the global cte-name set skip the real base-table read inside the CTE
+        # body — an unfiltered query. The body must now be filtered.
+        out = apply_rls(
+            "WITH orders AS (SELECT id FROM orders) SELECT * FROM orders",
+            [_rule(value="acme")],
+            dialect="sqlite",
+        )
+        # Exactly one predicate: inside the CTE body (the real base table).
+        # The outer `FROM orders` is the CTE reference and must not be filtered.
+        assert out.count("tenant_id") == 1
+        _assert_filtered_and_readonly(out)
+
+    def test_recursive_cte_colliding_name_filters_body(self) -> None:
+        out = apply_rls(
+            "WITH RECURSIVE orders AS (SELECT id FROM orders) "
+            "SELECT * FROM orders",
+            [_rule(value="acme")],
+            dialect="sqlite",
+        )
+        assert out.count("tenant_id") == 1
+        _assert_filtered_and_readonly(out)
+
+    def test_where_in_subquery_is_filtered(self) -> None:
+        out = apply_rls(
+            "SELECT * FROM customers WHERE id IN (SELECT cust FROM orders)",
+            [_rule(value="acme")],
+            dialect="sqlite",
+        )
+        assert out.count("tenant_id") == 1
+        _assert_filtered_and_readonly(out)
+
+    def test_comma_join_is_filtered(self) -> None:
+        out = apply_rls(
+            "SELECT * FROM orders, customers",
+            [_rule(value="acme")],
+            dialect="sqlite",
+        )
+        assert "tenant_id" in out
+        _assert_filtered_and_readonly(out)
+
+    def test_schema_qualified_table_is_filtered(self) -> None:
+        out = apply_rls(
+            "SELECT * FROM public.orders",
+            [_rule(value="acme")],
+            dialect="sqlite",
+        )
+        assert "tenant_id" in out
+        _assert_filtered_and_readonly(out)
+
+    def test_parenthesized_table_source_is_filtered(self) -> None:
+        out = apply_rls(
+            "SELECT * FROM (orders)",
+            [_rule(value="acme")],
+            dialect="sqlite",
+        )
+        assert "tenant_id" in out
+        _assert_filtered_and_readonly(out)
+
+    def test_unprovable_shape_blocks_fail_secure(self) -> None:
+        # `(orders) o` aliases a parenthesized bare table: there is no SELECT
+        # scope to attach a WHERE to, so the rewrite cannot prove the read is
+        # scoped. Fail-secure: block, never pass it through unfiltered.
+        with pytest.raises(RlsError, match="could not prove"):
+            apply_rls(
+                "SELECT * FROM (orders) o",
+                [_rule(value="acme")],
+                dialect="sqlite",
+            )
+
+    def test_mixed_real_base_and_cte_reference(self) -> None:
+        out = apply_rls(
+            "WITH scoped AS (SELECT id FROM orders) "
+            "SELECT * FROM scoped JOIN orders ON scoped.id = orders.id",
+            [_rule(value="acme")],
+            dialect="sqlite",
+        )
+        # One predicate in the CTE body, one for the real base-table join.
+        assert out.count("tenant_id") == 2
         _assert_filtered_and_readonly(out)
 
 
@@ -434,6 +535,43 @@ class TestMetadataPlumbing:
         monkeypatch.setattr(qd, "_agent_for", _fake_agent_for)
         cfg = _cfg(tmp_path, [])
         await qd.query_database_impl(cfg, "q", metadata={"tenant_id": "acme"})
+        assert seen["metadata"] == {"tenant_id": "acme"}
+
+    @pytest.mark.asyncio
+    async def test_reserved_metadata_keys_stripped_from_request_context(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Caller-supplied metadata must not be able to steer internal agent
+        control flow (``starter_ui_request`` / ``ui_features_available``);
+        those keys are stripped at the boundary, RLS keys pass through."""
+        from sqllens.tools import query_database as qd
+
+        seen: dict = {}
+
+        class _RecordingAgent:
+            def send_message(self, request_context, message, *, conversation_id=None):
+                seen["metadata"] = dict(request_context.metadata)
+
+                async def _gen():
+                    if False:
+                        yield  # pragma: no cover
+
+                return _gen()
+
+        async def _fake_agent_for(_cfg: Config):
+            return _RecordingAgent()
+
+        monkeypatch.setattr(qd, "_agent_for", _fake_agent_for)
+        cfg = _cfg(tmp_path, [])
+        await qd.query_database_impl(
+            cfg,
+            "q",
+            metadata={
+                "tenant_id": "acme",
+                "starter_ui_request": True,
+                "ui_features_available": ["evil"],
+            },
+        )
         assert seen["metadata"] == {"tenant_id": "acme"}
 
     def test_request_metadata_extracts_meta_extras(self) -> None:
