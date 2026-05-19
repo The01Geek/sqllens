@@ -108,6 +108,7 @@ Choose ONE of these paths:
 - Use Markdown formatting with clear structure
 - Include: Overview, Key Components, Code Examples, Configuration, Important Notes
 - Follow existing documentation style and formatting in `[[INTERNAL_DOC_LOCATION]]`
+- Reference source files by bare path only (e.g., `src/sqllens/server.py`) — **never append line numbers** (e.g., do not write `server.py:42`); use function or class names instead, as line numbers change as code evolves
 
 ### Editing Existing Documentation
 - Update content to match current code

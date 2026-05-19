@@ -137,7 +137,7 @@ For each category, create **1-3 seed documents** that cover the most important t
 
 **Seed document quality standards:**
 - Must contain real, accurate content derived from reading the actual codebase
-- Must include file paths, class names, or code examples from the actual code
+- Must include file paths and class names from the actual code — use bare paths like `src/server.py`, never append line numbers (line numbers change as code evolves)
 - Must be useful to a developer on day one — not placeholder text
 - Follow existing documentation style and formatting in `[[INTERNAL_DOC_LOCATION]]` if any docs already exist
 
@@ -169,7 +169,7 @@ Before completing, verify:
 - [ ] Created 3-15 flat subdirectories organized by business domain
 - [ ] No nested subdirectories (one level only)
 - [ ] Created 1-3 seed documents per category with real content from the codebase
-- [ ] Seed documents reference actual file paths, classes, or code patterns
+- [ ] Seed documents reference actual file paths and class names (bare paths only — no line numbers)
 - [ ] No placeholder/stub files with "TODO" content
 - [ ] Existing documentation preserved (moved, not deleted)
 - [ ] Category names use lowercase-with-hyphens
