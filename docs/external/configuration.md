@@ -77,8 +77,8 @@ Configures authentication for the HTTP transport. The stdio transport does not n
 
 | Field | Type | Description |
 |---|---|---|
-| `mode` | String | One of `none`, `bearer`, or `jwt`. See the [authentication modes](#authentication-modes) below. |
-| `bearer_token` | String | The shared token required by `bearer` mode. Prefer setting this with `SQLLENS_AUTH__BEARER_TOKEN`. SQL Lens refuses to start if `mode = "bearer"` and this value is missing, empty, or only whitespace; setting it without also setting `mode = "bearer"` is likewise rejected at config load — pair them, or remove `bearer_token`. |
+| `mode` | String | One of `none` or `bearer`. (`jwt` is reserved but not yet implemented and is rejected at startup — see the [authentication modes](#authentication-modes) below.) |
+| `bearer_token` | String | The shared token required by `bearer` mode. Prefer setting this with `SQLLENS_AUTH__BEARER_TOKEN`. The token must be at least 16 characters long after surrounding whitespace is trimmed; SQL Lens recommends generating a strong random one with `openssl rand -hex 32`. SQL Lens refuses to start if `mode = "bearer"` and this value is missing, empty, only whitespace, or shorter than 16 characters; setting it without also setting `mode = "bearer"` is likewise rejected at config load — pair them, or remove `bearer_token`. |
 | `insecure` | Boolean | Defaults to `false`. Set to `true` (or `SQLLENS_AUTH__INSECURE=1`) to acknowledge that `mode = "none"` on a non-loopback host is intentional for a closed-network deployment. See [Non-loopback safety guard](#non-loopback-safety-guard) below. |
 
 ### Authentication modes
@@ -86,10 +86,10 @@ Configures authentication for the HTTP transport. The stdio transport does not n
 | Mode | When to use |
 |---|---|
 | `none` | Loopback only. `sqllens serve` refuses to start when this mode is paired with `transport = "http"` and a non-loopback host. See [Non-loopback safety guard](#non-loopback-safety-guard) below. |
-| `bearer` | A single shared token is required on every request. Requires `bearer_token` to be set to a non-blank value. The recommended mode for any deployment that listens on a public or shared interface. |
-| `jwt` | Scaffolded but not yet implemented. Do not use in production. |
+| `bearer` | A single shared token is required on every request. Requires `bearer_token` to be set to a non-blank value of at least 16 characters. The recommended mode for any deployment that listens on a public or shared interface. |
+| `jwt` | Reserved but not yet implemented. SQL Lens rejects `mode = "jwt"` at configuration-validation time, so both `sqllens validate` and `sqllens serve` fail immediately with a clear message rather than starting a server that rejects every request. Use `none` or `bearer`. |
 
-**Note:** If you select `mode = "bearer"` without providing a usable token, both `sqllens serve` and `sqllens validate` exit with an actionable error that names the `SQLLENS_AUTH__BEARER_TOKEN` environment variable, the `[auth]` section of `sqllens.toml`, and the alternate `mode` values (`none` or `jwt`). This prevents a misconfigured server from starting silently and rejecting every request at runtime.
+**Note:** If you select `mode = "bearer"` without providing a usable token (missing, blank, or shorter than 16 characters), both `sqllens serve` and `sqllens validate` exit with an actionable error that names the `SQLLENS_AUTH__BEARER_TOKEN` environment variable and the `[auth]` section of `sqllens.toml`, and suggests generating a strong token with `openssl rand -hex 32`. This prevents a misconfigured server from starting silently and rejecting every request at runtime.
 
 ### Non-loopback safety guard
 
@@ -110,7 +110,7 @@ The check is there to prevent an unauthenticated SQL endpoint from being exposed
 
 - **Closed-network override**: set `SQLLENS_AUTH__INSECURE=1` (or `auth.insecure = true` in `sqllens.toml`). Use this only when the listener is reachable solely from a trusted network — for example, a private VPC, a Kubernetes ClusterIP service, or a host-only Docker network. When the override is active, SQL Lens still prints a yellow warning at startup so the choice is visible in the logs.
 
-The guard does not affect `transport = "stdio"`, and it does not affect `bearer` or `jwt` modes.
+The guard does not affect `transport = "stdio"`, and it does not affect `bearer` mode.
 
 ## Section: `[server]`
 
@@ -130,9 +130,19 @@ Before starting the server, run:
 sqllens validate -c path/to/sqllens.toml
 ```
 
-The command exits with a clear error message if any required field is missing or has the wrong type. `llm.api_key` is **not** required for validation: when the key is absent, the summary line marks it explicitly as `llm: anthropic / <model> (api_key NOT SET)` and validation still exits successfully. The key is enforced when you run `sqllens serve`.
+`sqllens validate` uses three exit codes so automation can tell the difference between a broken file and a file that is structurally fine but not yet ready to serve:
+
+| Exit code | Meaning |
+|---|---|
+| `0` | The configuration is valid and the server would start. |
+| `1` | The configuration parses correctly, but the server would refuse to start because `llm.api_key` is not set. The `Config OK` summary still prints, followed by a `Would fail to start:` notice. |
+| `2` | The file failed to parse or a field is missing or has the wrong type. |
+
+`llm.api_key` is **not** required for the file to parse: when the key is absent, the summary line marks it explicitly as `llm: anthropic / <model> (api_key NOT SET)`, validation prints the `Would fail to start:` notice, and the command exits with code `1`. The key is enforced (with exit code `2`) when you run `sqllens serve`.
 
 Validation also rejects an `auth.bearer_token` that is set while `auth.mode` is anything other than `"bearer"`. This is the most common bearer-auth misconfiguration: setting `SQLLENS_AUTH__BEARER_TOKEN` and assuming the token alone enables bearer auth. Either set `auth.mode = "bearer"` to use the token, or remove `bearer_token` and unset `SQLLENS_AUTH__BEARER_TOKEN`.
+
+**Note:** When a field fails validation, SQL Lens reports only the field location, the reason, and the error type. It never echoes the rejected value back to the terminal, so secrets such as your bearer token, Anthropic API key, or a database password embedded in a connection URL are not exposed in error output or logs.
 
 If `sqllens.toml` starts with a UTF-8 byte-order mark (BOM), validation reports it by name and prints rewrite commands for PowerShell 7+, PowerShell 5.1, and bash. PowerShell 5.1's `Set-Content -Encoding utf8` and `Out-File -Encoding utf8` both add a BOM; use `Set-Content -Encoding utf8NoBOM` (PowerShell 7+) or `[System.IO.File]::WriteAllText(...)` to write a BOM-free file.
 

@@ -104,6 +104,8 @@ class MemoryConfig(BaseModel):
 class AuthConfig(BaseModel):
     """Authentication mode."""
 
+    # "jwt" stays in the Literal for schema stability and the JwtAuthenticator
+    # scaffold, but _reject_unimplemented_jwt rejects it at load — use none|bearer.
     mode: Literal["none", "bearer", "jwt"] = "none"
     bearer_token: SecretStr | None = Field(default=None, description="Required when mode=bearer")
     # Opt-out for the cli.serve loopback guard: closed-network deployments
@@ -122,16 +124,36 @@ class AuthConfig(BaseModel):
     jwt_issuer: str | None = None
     jwt_audience: str | None = None
 
+    # Pydantic runs mode="after" validators in definition order; jwt rejection
+    # is defined first so a jwt config gets JWT_NOT_IMPLEMENTED_MESSAGE rather
+    # than the misleading "bearer_token set with non-bearer mode" message from
+    # _token_only_with_bearer_mode.
+    @model_validator(mode="after")
+    def _reject_unimplemented_jwt(self) -> AuthConfig:
+        # mode='jwt' parses against the Literal but JWT only raises at request
+        # time, so without this guard `validate` prints Config OK against a
+        # server that 401s every request.
+        if self.mode == "jwt":
+            raise ValueError(JWT_NOT_IMPLEMENTED_MESSAGE)
+        return self
+
     @model_validator(mode="after")
     def _bearer_requires_token(self) -> AuthConfig:
-        # Without this guard, mode='bearer' without a usable token (None, empty, or
-        # whitespace-only — a real footgun from shell env vars like
-        # ``SQLLENS_AUTH__BEARER_TOKEN=``) loads cleanly and the server starts. Every
-        # request is then rejected at auth time with no startup signal.
-        if self.mode == "bearer" and (
-            self.bearer_token is None or not self.bearer_token.get_secret_value().strip()
-        ):
+        # mode='bearer' with an unusable token (None, empty, or whitespace-only
+        # — a footgun from shell env vars like ``SQLLENS_AUTH__BEARER_TOKEN=``)
+        # would otherwise load cleanly and fail every request at auth time with
+        # no startup signal. Length is measured post-strip to match what
+        # BearerTokenAuthenticator stores and _extract_bearer compares against.
+        if self.mode != "bearer":
+            return self
+        token = (
+            "" if self.bearer_token is None
+            else self.bearer_token.get_secret_value().strip()
+        )
+        if not token:
             raise ValueError(BEARER_TOKEN_MISSING_MESSAGE)
+        if len(token) < MIN_BEARER_TOKEN_LENGTH:
+            raise ValueError(BEARER_TOKEN_TOO_SHORT_MESSAGE)
         return self
 
     @model_validator(mode="after")
@@ -274,7 +296,29 @@ BEARER_TOKEN_MISSING_MESSAGE = (
     "auth.mode='bearer' requires auth.bearer_token to be set. "
     "Either set SQLLENS_AUTH__BEARER_TOKEN in your environment, "
     'add `bearer_token = "..."` to the [auth] section of sqllens.toml, '
-    "or set auth.mode to a different value (none|jwt)."
+    "or set auth.mode to a different value (none)."
+)
+
+
+# Minimum accepted bearer-token length (post-strip). Shared by the AuthConfig
+# validator and BearerTokenAuthenticator so the construction-time guard and the
+# config-load guard agree. 16 chars is the floor; operators should generate a
+# much longer random token (see BEARER_TOKEN_TOO_SHORT_MESSAGE).
+MIN_BEARER_TOKEN_LENGTH = 16
+
+
+BEARER_TOKEN_TOO_SHORT_MESSAGE = (
+    f"auth.bearer_token must be at least {MIN_BEARER_TOKEN_LENGTH} characters; "
+    "a short token is trivially brute-forceable. Generate a strong one with "
+    "`openssl rand -hex 32`."
+)
+
+
+# ``mode='jwt'`` parses against the Literal but JWT is unimplemented — reject it
+# at config-validation time (see AuthConfig._reject_unimplemented_jwt) so a
+# green ``validate`` can't mask a server that 401s every request.
+JWT_NOT_IMPLEMENTED_MESSAGE = (
+    'auth.mode="jwt" is not implemented yet; use "bearer" or "none".'
 )
 
 

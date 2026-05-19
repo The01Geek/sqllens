@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
+from pydantic import ValidationError
 from rich.console import Console
 from rich.markup import escape
 
@@ -32,6 +33,32 @@ console = Console()
 # `sqllens serve` shares stdout with the stdio MCP JSON-RPC stream; routing
 # errors to stderr keeps that channel clean. Other commands follow suit.
 err_console = Console(stderr=True)
+
+
+def _format_config_error(exc: Exception) -> str:
+    """Render a config-load exception for stderr without leaking secrets.
+
+    A pydantic ``ValidationError``'s ``str()`` can embed the offending input
+    (bearer token, API key, DSN password) for schema-validation failures —
+    including plain-``str`` fields like ``database.url`` whose value is not a
+    self-masking ``SecretStr``. Emit only ``loc``/``msg``/``type``, dropping
+    ``input``/``ctx``. Non-``ValidationError`` config-load errors (file-not-found,
+    BOM, TOML syntax) are passed through: their messages are the actionable
+    remediation and do not embed schema input. A ``tomllib`` *syntax* error on a
+    secret-bearing line can still echo that line verbatim — config files are
+    expected to be operator-readable, so that residual is accepted, not scrubbed.
+    """
+    if not isinstance(exc, ValidationError):
+        return str(exc)
+    lines: list[str] = []
+    for err in exc.errors(include_url=False):
+        loc = ".".join(str(part) for part in err.get("loc", ()))
+        msg = err.get("msg", "")
+        etype = err.get("type", "")
+        prefix = f"{loc}: " if loc else ""
+        lines.append(f"{prefix}{msg} [{etype}]")
+    return "\n".join(lines)
+
 
 def _is_loopback_host(host: str) -> bool:
     # Recognizes the entire 127.0.0.0/8 IPv4 loopback range and ::1, plus
@@ -148,7 +175,7 @@ def serve(
     try:
         cfg = Config.load(config)
     except Exception as e:
-        err_console.print(f"[red]Config error:[/red] {escape(str(e))}")
+        err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
         raise typer.Exit(code=2) from e
     if cfg.llm.api_key is None:
         err_console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
@@ -203,7 +230,7 @@ def validate(
     try:
         cfg = Config.load(config)
     except Exception as e:
-        err_console.print(f"[red]Invalid:[/red] {escape(str(e))}")
+        err_console.print(f"[red]Invalid:[/red] {escape(_format_config_error(e))}")
         raise typer.Exit(code=2) from e
     # Mirror serve's guard so CI / pre-deploy linting catches the
     # misconfiguration before `serve` would refuse to start.
@@ -244,6 +271,15 @@ def validate(
             err_console.print(f"[red]Preflight failed:[/red] {escape(str(e))}")
             raise typer.Exit(code=2) from e
         console.print(f"  [green]{label} OK[/green]")
+
+    # Exit-code contract: 0 = OK, 1 = parses but would fail to start (api_key
+    # unset), 2 = parse/schema error (raised above). Probes run before this so
+    # --check-llm output is not suppressed by the early exit.
+    if cfg.llm.api_key is None:
+        err_console.print(
+            f"[red]Would fail to start:[/red] {escape(API_KEY_MISSING_MESSAGE)}"
+        )
+        raise typer.Exit(code=1)
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +410,10 @@ collection = "sqllens"
 similarity_threshold = 0.7
 
 [auth]
-mode = "none"            # one of: none, bearer, jwt
+mode = "none"            # one of: none, bearer (jwt is not implemented yet)
+# For mode = "bearer", set a strong random token (>= 32 random bytes), e.g.
+# generate one with:  openssl rand -hex 32
+# bearer_token = "..."   # or set SQLLENS_AUTH__BEARER_TOKEN env var
 
 [server]
 transport = "stdio"      # one of: stdio, http
