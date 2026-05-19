@@ -68,8 +68,11 @@ Both kinds of entries live in the same ChromaDB collection on disk.
 | `persist_dir` | String | Directory where ChromaDB writes its database files. |
 | `collection` | String | The collection name within the vector store. Use a different name per database if you run several SQL Lens instances on the same machine. |
 | `similarity_threshold` | Number | Minimum cosine similarity, between `0.0` and `1.0`, for a saved entry to be returned when SQL Lens searches its memory. Defaults to `0.7`. Lower the value if useful past answers are being missed; raise it if irrelevant past answers are surfacing. This value is the server-side default and can be overridden per call by the assistant when warranted. |
+| `allow_import` | Boolean | Defaults to `false`. When set to `true`, SQL Lens exposes an extra `import_memory` tool to the connected assistant so it can bulk-load curated knowledge over the connection. Leave this off unless you trust every client that can reach the server: a client able to write memory can influence future SQL generation. The `sqllens import-memory` and `sqllens export-memory` commands work regardless of this setting. See [Managing memory](managing-memory.md). |
 
 The first time SQL Lens runs, ChromaDB downloads roughly 80 MB of embedding model weights into `persist_dir`. Allow time and network access for this initial step.
+
+You can also bulk-load curated question-and-answer pairs and free-form notes from a file, or export what SQL Lens has learned, with the `sqllens import-memory` and `sqllens export-memory` commands. See [Managing memory](managing-memory.md).
 
 ## Section: `[auth]`
 
@@ -121,6 +124,33 @@ Configures the transport SQL Lens uses to talk to the assistant.
 | `transport` | String | Either `stdio` or `http`. |
 | `host` | String | The interface to bind on when `transport = "http"`. Defaults to `127.0.0.1`. |
 | `port` | Integer | The TCP port to listen on when `transport = "http"`. Defaults to `8765`. |
+| `log_level` | String | One of `critical`, `error`, `warning`, `info`, `debug`, or `trace`. Defaults to `info`. The value is validated at config load. A future release will use it to set the server log verbosity; it has no effect yet. |
+
+## Section: `[agent]`
+
+Tunes how the natural-language agent behaves.
+
+| Field | Type | Description |
+|---|---|---|
+| `max_tool_iterations` | Integer | Maximum number of internal tool calls (schema lookups, memory searches, and the final query) the agent may make while answering one question. Defaults to `20`; valid range is `1` to `100`. Raise it if questions against an unfamiliar database fail because the agent runs out of steps while exploring the schema. |
+| `show_sql` | Boolean | Defaults to `true`. Reserved to control whether the generated SQL is shown alongside query results. It is accepted and validated but has no effect yet. |
+
+### Section: `[agent.audit]`
+
+Defines the audit-logging surface. These fields are accepted and validated today but are **not yet wired to any behavior** — they reserve the configuration shape for a future audit-logging feature.
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | Boolean | Defaults to `false`. The master switch for audit logging. When it is off, the other fields in this section have no effect. |
+| `log_level` | String | One of `critical`, `error`, `warning`, `info`, or `debug`. Defaults to `info`. The verbosity that audit records will be written at. |
+| `include_response_text` | Boolean | Defaults to `false`. When enabled, audit records will include the full response text. Leave it off unless you specifically need response bodies in your audit trail. |
+| `sanitize_parameters` | Boolean | Defaults to `true`. When enabled, query parameter values are sanitized before being written to the audit trail. |
+
+**Note:** Unlike other sections, an unrecognized key inside `[agent.audit]` is rejected at config load rather than silently ignored. Because this is a privacy-sensitive surface, a misspelled key (for example, `sanitize_paramters`) fails loudly instead of quietly reverting to the safe default.
+
+## Top-level field: `config_version`
+
+A single top-level integer, `config_version`, defaults to `1`. It is accepted and validated but currently has no effect. It is reserved so future releases can detect and migrate older configuration files. You do not need to set it.
 
 ## Validating a configuration
 
