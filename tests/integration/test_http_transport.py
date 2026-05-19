@@ -50,6 +50,25 @@ class TestNoAuth:
                 assert "sqlite" in body
                 assert "read-only" in body
 
+    async def test_widget_resource_read_through_auth(self, make_server) -> None:
+        # The MCP App widget must be reachable as a ui:// resource through the
+        # full HTTP + auth-middleware stack, not just via build_server().
+        handle = make_server(AuthConfig(mode="none"))
+        async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                listed = await session.list_resources()
+                uris = [str(r.uri) for r in listed.resources]
+                assert "ui://sqllens/query-results.html" in uris
+
+                result = await session.read_resource(
+                    "ui://sqllens/query-results.html"
+                )
+                contents = result.contents
+                assert len(contents) == 1
+                assert contents[0].mimeType == "text/html;profile=mcp-app"
+                assert "app-with-deps.js" in contents[0].text
+
 
 # ─────────────────────── auth: bearer token ─────────────────────────────────
 

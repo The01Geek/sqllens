@@ -20,7 +20,14 @@ from sqllens.agent.components.rich.data.dataframe import DataFrameComponent
 from sqllens.agent.components.rich.feedback.status_card import StatusCardComponent
 from sqllens.agent.components.rich.text import RichTextComponent
 from sqllens.agent.core.components import UiComponent
-from sqllens.tools._format import _MAX_ROWS_RENDERED, _render_dataframe, components_to_markdown
+from sqllens.tools._format import (
+    _MAX_ROWS_RENDERED,
+    _MAX_TABLE_PAYLOAD_BYTES,
+    _render_dataframe,
+    _serialized_len,
+    components_to_markdown,
+    components_to_table,
+)
 
 
 def _ui(rich) -> UiComponent:
@@ -192,3 +199,111 @@ def test_markdown_pipe_in_cell_value_is_escaped_or_documented() -> None:
     assert body_line == "| a|b |"
     # The escaped form is explicitly NOT what we produce today.
     assert "a\\|b" not in rendered
+
+
+# ───────────────────────── components_to_table ──────────────────────────────
+
+
+def test_table_empty_stream_returns_none_payload() -> None:
+    markdown, is_error, payload = components_to_table([])
+    assert (markdown, is_error) == ("(no answer)", False)
+    assert payload is None
+
+
+def test_table_error_card_returns_none_payload() -> None:
+    stream = [
+        _ui(DataFrameComponent(rows=[{"id": 1}])),
+        _ui(StatusCardComponent(title="x", status="error", description="boom")),
+    ]
+    markdown, is_error, payload = components_to_table(stream)
+    assert is_error is True
+    assert markdown == "boom"
+    assert payload is None
+
+
+def test_table_small_dataframe_exact_payload() -> None:
+    df = DataFrameComponent(
+        rows=[{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}],
+        columns=["name", "age"],
+        column_types={"age": "number", "name": "string"},
+    )
+    markdown, is_error, payload = components_to_table([_ui(df)])
+    assert is_error is False
+    assert markdown.startswith("| name | age |")
+    assert payload == {
+        "columns": ["name", "age"],
+        "rows": [["Alice", "30"], ["Bob", "25"]],
+        "column_types": {"age": "number", "name": "string"},
+        "row_count": 2,
+        "truncated": 0,
+    }
+
+
+def test_table_column_types_round_trip() -> None:
+    df = DataFrameComponent(
+        rows=[{"a": 1}],
+        columns=["a"],
+        column_types={"a": "number"},
+    )
+    _, _, payload = components_to_table([_ui(df)])
+    assert payload is not None
+    assert payload["column_types"] == {"a": "number"}
+
+
+def test_table_cell_coercion_mirrors_markdown_path() -> None:
+    df = DataFrameComponent(
+        rows=[
+            {
+                "null_cell": None,
+                "decimal_cell": Decimal("1.50"),
+                "datetime_cell": datetime(2026, 1, 2, 3, 4, 5),
+            }
+        ],
+        columns=["null_cell", "decimal_cell", "datetime_cell"],
+    )
+    _, _, payload = components_to_table([_ui(df)])
+    assert payload is not None
+    assert payload["rows"] == [["None", "1.50", "2026-01-02 03:04:05"]]
+
+
+def test_table_last_dataframe_wins() -> None:
+    stream = [
+        _ui(DataFrameComponent(rows=[{"a": 1}], columns=["a"])),
+        _ui(DataFrameComponent(rows=[{"b": 2}], columns=["b"])),
+    ]
+    _, _, payload = components_to_table(stream)
+    assert payload is not None
+    assert payload["columns"] == ["b"]
+    assert payload["rows"] == [["2"]]
+
+
+def test_table_oversized_payload_truncates_under_budget() -> None:
+    # Wide cells so the serialized payload blows past 130 KB well before any
+    # row cap could matter — size is the only thing enforced.
+    big = "x" * 200
+    rows = [{"c": f"{i}-{big}"} for i in range(4000)]
+    df = DataFrameComponent(rows=rows, columns=["c"])
+    _, is_error, payload = components_to_table([_ui(df)])
+    assert is_error is False
+    assert payload is not None
+    assert payload["truncated"] > 0
+    assert payload["row_count"] == len(payload["rows"])
+    assert payload["row_count"] + payload["truncated"] == 4000
+    assert _serialized_len(payload) <= _MAX_TABLE_PAYLOAD_BYTES
+
+
+def test_table_header_only_over_budget_returns_none() -> None:
+    # A single column whose name alone busts the budget: even the row-stripped
+    # payload can't fit, so there is nothing useful to hand the widget.
+    huge_col = "h" * (_MAX_TABLE_PAYLOAD_BYTES + 50)
+    df = DataFrameComponent(rows=[{huge_col: 1}], columns=[huge_col])
+    _, is_error, payload = components_to_table([_ui(df)])
+    assert is_error is False
+    assert payload is None
+
+
+def test_table_present_but_empty_dataframe_returns_none() -> None:
+    stream = [_ui(DataFrameComponent(rows=[], columns=[]))]
+    markdown, is_error, payload = components_to_table(stream)
+    assert (markdown, is_error) == ("(no answer)", False)
+    assert payload is None

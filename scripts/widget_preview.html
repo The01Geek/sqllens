@@ -1,0 +1,59 @@
+<!doctype html>
+<!--
+  Dev-only preview for src/sqllens/ui/query_results.html. Undocumented, delete-friendly.
+  Usage: 1) base64-encode a {"_meta":{"sqllens/table":{...}}} JSON tool result;
+         2) open  scripts/widget_preview.html?payload=<base64>  (or no param for a built-in demo);
+         3) it stubs the MCP Apps host so the real widget renders inside the iframe below.
+-->
+<html lang="en">
+<head><meta charset="utf-8" /><title>widget preview</title>
+<style>body{margin:0;font:13px system-ui}header{padding:6px 10px;background:#eee}iframe{border:0;width:100%;height:92vh}</style>
+</head>
+<body>
+<header>widget_preview — dev shim. <button id="dark">toggle theme</button></header>
+<iframe id="f" src="../src/sqllens/ui/query_results.html"></iframe>
+<script>
+const demo = {
+  _meta: { "sqllens/table": {
+    columns: ["id", "name", "amount", "created"],
+    rows: Array.from({ length: 137 }, (_, i) => [
+      String(i + 1), "row-" + (i + 1), String((i * 7.5).toFixed(2)),
+      "2026-01-" + String((i % 28) + 1).padStart(2, "0")]),
+    column_types: { id: "number", amount: "number" },
+    row_count: 137, truncated: 0 } } };
+
+function payload() {
+  const p = new URLSearchParams(location.search).get("payload");
+  if (!p) return demo;
+  try { return JSON.parse(atob(p)); } catch (e) { return demo; }
+}
+
+let theme = "light";
+const frame = document.getElementById("f");
+
+frame.addEventListener("load", () => {
+  const win = frame.contentWindow;
+  // Minimal fake host: answer ui/initialize, then push the tool result.
+  win.addEventListener("message", (ev) => {
+    const m = ev.data;
+    if (!m || m.jsonrpc !== "2.0") return;
+    if (m.method === "ui/initialize") {
+      win.postMessage({ jsonrpc: "2.0", id: m.id,
+        result: { protocolVersion: "2026-01-26", capabilities: {},
+          hostContext: { theme, styles: {} } } }, "*");
+      win.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result",
+        params: payload() }, "*");
+    } else if (m.id !== undefined && m.method) {
+      win.postMessage({ jsonrpc: "2.0", id: m.id, result: {} }, "*");
+    }
+  });
+});
+
+document.getElementById("dark").addEventListener("click", () => {
+  theme = theme === "light" ? "dark" : "light";
+  frame.contentWindow.postMessage({ jsonrpc: "2.0",
+    method: "ui/notifications/host-context-changed", params: { theme } }, "*");
+});
+</script>
+</body>
+</html>

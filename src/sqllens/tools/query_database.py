@@ -22,7 +22,7 @@ from sqllens.agent import Agent, RequestContext
 from sqllens.agent.factory import build_agent
 from sqllens.config import Config
 from sqllens.safety import UnsafeSqlError
-from sqllens.tools._format import components_to_markdown
+from sqllens.tools._format import components_to_table
 
 logger = logging.getLogger("sqllens.tools.query_database")
 
@@ -86,7 +86,28 @@ async def _agent_for(cfg: Config) -> Agent:
 
 
 async def query_database_impl(cfg: Config, question: str) -> str:
-    """Translate ``question`` to SQL, execute, and return a Markdown answer."""
+    """Translate ``question`` to SQL, execute, and return a Markdown answer.
+
+    Backwards-compatible wrapper over :func:`query_database_impl_with_table`
+    that drops the structured table. The error taxonomy, sanitization, and
+    exact raised messages are identical — they live in the sibling below.
+    """
+    markdown, _ = await query_database_impl_with_table(cfg, question)
+    return markdown
+
+
+async def query_database_impl_with_table(
+    cfg: Config, question: str
+) -> tuple[str, dict | None]:
+    """Translate ``question`` to SQL, execute, and return ``(markdown, table)``.
+
+    Same agent path and same three error categories as the Markdown-only
+    contract: tool-internal failures raise ``_INTERNAL_ERROR_MESSAGE``,
+    agent-reported SQL failures raise ``_SQL_EXECUTION_ERROR_PREFIX + answer``,
+    and ``UnsafeSqlError`` is re-raised verbatim. ``table`` is ``None`` on the
+    error path or whenever no DataFrame is present (apps-aware callers attach
+    it to ``_meta``; everyone else ignores it).
+    """
     try:
         agent = await _agent_for(cfg)
     except Exception as e:
@@ -122,7 +143,7 @@ async def query_database_impl(cfg: Config, question: str) -> str:
         logger.exception("agent.send_message failed")
         raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
 
-    answer, is_error = components_to_markdown(components)
+    answer, is_error, table = components_to_table(components)
     if is_error:
         # Agent-reported query failure — SQL-execution error category. S-10's
         # structural leak (raw exception-string interpolation in the except
@@ -137,4 +158,4 @@ async def query_database_impl(cfg: Config, question: str) -> str:
         # the calling agent needs, so it is deliberately not attempted here.
         logger.warning("agent reported query failure: %s", answer)
         raise RuntimeError(f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}")
-    return answer
+    return answer, table
