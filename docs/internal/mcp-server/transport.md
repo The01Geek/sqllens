@@ -48,7 +48,8 @@ Tests pin the contract from both sides: the expected error substring lands on st
 ASGI host (uvicorn, FastAPI mount, Starlette, …)
   ↓
 _SessionManagerLifespan   — starts/stops FastMCP's session manager via ASGI
-                             lifespan; eagerly builds the agent at startup
+                             lifespan; also runs the best-effort eager-agent
+                             warmup hook (readiness latches after the attempt)
   ↓
 _PathNormalizer            — fixes "/" and "/mcp/" path mismatches; serves
                              /healthz and /readyz (pre-host-check, pre-auth)
@@ -67,7 +68,7 @@ mcp.streamable_http_app()  — FastMCP's Streamable HTTP handler
 
 ### `build_asgi_app` vs `_build_asgi_app_bare`
 
-- `build_asgi_app(cfg) -> ASGIApp` is the **only** supported public entry point. The returned app includes the lifespan adapter, so callers mounting it under FastAPI/Starlette/uvicorn get a working session manager without having to wire lifespan themselves.
+- `build_asgi_app(cfg) -> ASGIApp` is the **only** supported public entry point. The returned app includes the lifespan adapter, so callers mounting it under FastAPI/Starlette/uvicorn get a working session manager without having to wire lifespan themselves. It also wires the best-effort eager-agent warmup hook into the adapter (see *Eager agent warmup* below), so the agent cold-start is paid at server boot for any host that drives lifespan.
 - `_build_asgi_app_bare(cfg, readiness) -> tuple[ASGIApp, FastMCP]` is a private helper that returns the path-normalized + host-validated + authenticated app **without** the lifespan adapter, plus the underlying `FastMCP` instance. It takes the shared `_Readiness` holder so `_PathNormalizer` can answer `/readyz`. It exists for two reasons: (1) so `build_asgi_app` itself can wrap the bare app with the lifespan adapter at a single, guarded SDK-access site, and (2) so the unit suite can assert the inner stack composition without bringing up a session manager. Out-of-tree code should not depend on it.
 
 The integration test fixture (`tests/integration/conftest.py`) calls `build_asgi_app(cfg)` directly and hands the result to a real `uvicorn.Server` with `lifespan="on"` — there is no longer a hand-rolled `_AuthMiddleware` + `_PathNormalizer` + `_SessionManagerLifespan` stack in the fixture.
@@ -102,18 +103,18 @@ Two properties are deliberate and pinned by tests:
 
 ## Readiness probe: `GET /readyz`
 
-`READYZ_PATH = "/readyz"` (module constant in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py)) is an **unauthenticated** readiness endpoint, added in issue #107 (O-5). Where `/healthz` answers "is the process up", `/readyz` answers "has the agent finished its cold-start warmup". `_PathNormalizer.__call__` checks `path == READYZ_PATH` (immediately after the `/healthz` branch) and calls `_send_readiness(send, self._readiness.ready)`:
+`READYZ_PATH = "/readyz"` (module constant in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py)) is an **unauthenticated** readiness endpoint, added in issue #107 (O-5) and refined by issue #116. Where `/healthz` answers "is the process up", `/readyz` answers "has the startup sequence — session manager up plus the best-effort eager-warmup *attempt* — finished, so the server can serve". `_PathNormalizer.__call__` checks `path == READYZ_PATH` (immediately after the `/healthz` branch) and calls `_send_readiness(send, self._readiness.ready)`:
 
 - **Not ready** → HTTP `503` with body exactly `{"status":"not ready"}` (compact `json.dumps(..., separators=(",", ":"))`, no spaces).
 - **Ready** → HTTP `200` with body exactly `{"status":"ready"}`.
 
-The flag flips exactly once. A shared `_Readiness` holder object (a `__slots__` class wrapping a single `ready: bool`, **not** a bare bool — so writer and reader share it by reference) is created in `build_asgi_app`, threaded through `_build_asgi_app_bare` into `_PathNormalizer`, and also handed to `_SessionManagerLifespan`. At lifespan startup, after the FastMCP session-manager CM is entered, `_SessionManagerLifespan` calls `build_agent(self._cfg)` exactly once and then calls `readiness.mark_ready()` (the write-once latch; `ready` is a read-only property). This is single-threaded (one startup, pre-request) so no lock is used.
+The flag flips exactly once. A shared `_Readiness` holder object (a `__slots__` class wrapping a single `ready: bool`, **not** a bare bool — so writer and reader share it by reference) is created in `build_asgi_app`, threaded through `_build_asgi_app_bare` into `_PathNormalizer`, and also handed to `_SessionManagerLifespan`. At lifespan startup, after the FastMCP session-manager CM is entered **and** the best-effort eager-warmup hook has been attempted (whether it succeeded or failed — see "Eager agent warmup (`on_startup` hook, issue #116)" below), `_SessionManagerLifespan` calls `readiness.mark_ready()` (the write-once latch; `ready` is a read-only property) and then sends `lifespan.startup.complete`. This is single-threaded (one startup, pre-request) so no lock is used. A failed warmup does **not** keep `/readyz` at 503: the server can still serve (the request path rebuilds on the first query), so readiness reflects "startup finished", not "warmup succeeded".
 
 Deliberate, test-pinned properties:
 
 - **Pre-host-check, pre-auth.** Same outermost-layer short-circuit as `/healthz` — no `Authorization` header required even under `auth.mode = "bearer"`, and answers regardless of the request `Host`.
-- **Eager warmup happens inside the lifespan startup `try`.** If `build_agent` raises, the failure surfaces as `lifespan.startup.failed` through the existing startup-failure handling (it is **not** swallowed); the ASGI host then aborts the process. Note: at that point the session-manager CM has already been entered, and the failure path drops it without `__aexit__` — acceptable only because the host aborts on `startup.failed`.
-- **Known limitation.** The eager warmup builds a *throwaway* agent and does **not** seed the request-path agent cache, so the first real `query_database` still pays the ChromaDB / embedding-model cold start. Tracked in follow-up issue #116; do not document the warmup as eliminating first-query latency.
+- **Warmup is best-effort and runs *after* the startup `try`.** The eager warmup is the `on_startup` hook, awaited after `__aenter__` succeeds (`_started` is `True`). A warmup `Exception` is logged and startup still acks `lifespan.startup.complete`; readiness still latches. Only a *session-manager* `__aenter__` failure surfaces `lifespan.startup.failed` and keeps readiness at 503. See "Eager agent warmup (`on_startup` hook, issue #116)" below.
+- **First-query latency is eliminated (issue #116).** The warmup primes the *same* request-path `_AGENT_STATE` singleton via `prime_agent` (not a throwaway agent), so a successful warmup means the first real `query_database` reuses the already-built agent and pays no ChromaDB / embedding-model cold start.
 
 Regression coverage: `tests/integration/test_http_transport.py` exercises the live `/readyz` path; `tests/unit/test_transport_http.py` covers `_send_readiness` and the readiness wiring.
 
@@ -164,9 +165,9 @@ Lifespan and websocket scopes bypass both `_AuthMiddleware` and `_PathNormalizer
 
 FastMCP exposes a session manager that must be active while requests are served — it owns per-session state. The ASGI host (uvicorn, FastAPI mount, custom Starlette app) drives lifespan startup/shutdown events; `_SessionManagerLifespan` intercepts them to call `session_manager.run().__aenter__()` on startup and `__aexit__` on shutdown.
 
-### Eager agent warmup at startup (O-5)
+### Eager agent warmup at startup (O-5, superseded by issue #116)
 
-Immediately after entering the session-manager CM on `lifespan.startup`, the adapter calls `build_agent(self._cfg)` exactly once and then calls `readiness.mark_ready()` (the write-once latch; `_Readiness.ready` is a read-only property with no setter). This is single-threaded (one startup, before any request) so no lock is taken. The `build_agent` call is kept **inside the existing startup `try`** on purpose: a build failure must surface as `lifespan.startup.failed` (handled by the startup-failure branches below), never be swallowed. Because the session-manager CM is already entered when `build_agent` runs, a failure here drops an entered CM without `__aexit__` — acceptable only because the ASGI host aborts the process on `startup.failed`. The readiness flag is what `GET /readyz` reports; see "Readiness probe" above, including the issue #116 throwaway-agent limitation.
+The original O-5 design called `build_agent(self._cfg)` inline inside the startup `try`, making a warmup failure fatal (`lifespan.startup.failed`) and building a *throwaway* agent that did not seed the request-path cache. Issue #116 replaced this: the warmup now runs through the best-effort `on_startup` hook (next section), priming the *same* `_agent_for` singleton the request path serves, and a warmup failure no longer blocks boot. Readiness still latches once per startup — now after the warmup *attempt*, success or failure — and is what `GET /readyz` reports (see "Readiness probe" above). The O-5 issue number is retained for the readiness endpoint itself; the warmup mechanism is documented in the next section.
 
 If the lifespan adapter is missing, requests reach the routing layer but then fail inside FastMCP with an opaque SDK assertion (`"Task group is not initialized. Make sure to use run()."`) on the first call. Issue #39 was exactly this: `build_asgi_app` used to return a bare app without the lifespan wrapper, so any external mount silently skipped session-manager startup. The fix in PR #43 moved the wrapper inside `build_asgi_app`, and `tests/unit/test_transport_http.py::test_build_asgi_app_returns_lifespan_wrapped` pins the contract at construction time.
 
@@ -198,6 +199,20 @@ Regression coverage in `tests/unit/test_transport_http.py`:
 - `test_lifespan_shutdown_without_startup_surfaces_failed` — a `lifespan.shutdown` with no prior `lifespan.startup` is answered `lifespan.shutdown.failed` (message contains `"without prior startup"`), `run()`/`__aenter__`/`__aexit__` are never invoked, and the instance is finalized so a follow-up startup gets single-shot rejection.
 
 The `_FakeSessionManager` test fake counts `run_calls`, `aenter_calls`, and `aexit_calls` so these tests can pin **both** halves of the exactly-once contract (no double-exit AND no double-enter) rather than only the wire-message shape.
+
+### Eager agent warmup (`on_startup` hook, issue #116)
+
+`_SessionManagerLifespan.__init__(inner, session_manager, readiness, on_startup=None)` takes an optional fourth argument, `on_startup: Callable[[], Awaitable[None]] | None`, stored on `self.on_startup` (the third argument, `readiness`, is the shared `_Readiness` latch). When set, the adapter awaits it **once** during `lifespan.startup` — *after* `session_manager.run().__aenter__()` has succeeded (`self._started` is `True`) and *before* `readiness.mark_ready()` + `send({"type": "lifespan.startup.complete"})`. The agent is therefore primed before the host begins routing requests, and readiness latches whether or not the warmup succeeded.
+
+`build_asgi_app(cfg)` wires this hook to a `_warmup` closure that calls `prime_agent(cfg)` (in [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py); see [mcp-server/tools.md](./tools.md#eager-warmup-shares-the-request-path-singleton-issue-116)). `prime_agent` delegates to the same `_agent_for` double-checked-lock singleton the request path serves, so the agent object graph (DB connect, ChromaDB open, agent wiring, ~80 MB embedding-model download) is built **exactly once** and shared between boot and the first `query_database` call — the cold-start cost is paid at server boot, not on the first query. The `_warmup` closure binds `cfg` into the zero-arg `on_startup` signature; the closed-over `cfg` is the same `Config` object identity `_agent_for`'s mismatch warning expects, so warmup does not false-trigger that warning (pinned by `tests/unit/test_transport_http.py::test_build_asgi_app_warmup_primes_singleton_with_closed_over_cfg`).
+
+The hook is **best-effort and never blocks boot**:
+
+- A failed warmup raising an `Exception` (bad API key, DB unreachable, ChromaDB open error) is caught, logged in full via `logger.exception("eager agent warmup failed; the first query will rebuild and pay the cold-start cost")`, and startup still acks `lifespan.startup.complete` — **not** `startup.failed`. The request path rebuilds on the first query and surfaces a clean MCP error there. No CM finalization runs in this arm: the session manager is already fully entered (`_started` is `True`), so there is no partially-acquired resource to drop — only the propagation outcome mirrors the session-manager startup path. Covered by `tests/unit/test_transport_http.py::test_lifespan_startup_hook_failure_does_not_block_boot`.
+- A `BaseException` from the hook (`asyncio.CancelledError` on lifespan-task cancellation, `KeyboardInterrupt`, `SystemExit`) is deliberately **not** caught — the `except Exception` arm lets it propagate uncaught to unwind the host, never swallowed into a spurious `startup.complete`. Symmetric with the session-manager startup `Exception`/`BaseException` split. Covered by `tests/unit/test_transport_http.py::test_lifespan_startup_hook_baseexception_propagates_uncaught`.
+- The hook is gated behind `self._started = True`: if `session_manager.run().__aenter__()` itself fails, the adapter acks `lifespan.startup.failed` and the warmup **never runs** against a half-initialized host. Covered by `tests/unit/test_transport_http.py::test_lifespan_startup_hook_not_run_when_session_manager_fails`.
+
+`on_startup` defaults to `None`, so a `_SessionManagerLifespan` constructed directly (e.g. by older tests) is unchanged. `tests/unit/test_transport_http.py::test_build_asgi_app_wires_eager_warmup` pins that `build_asgi_app` always attaches a callable hook, and `::test_lifespan_startup_runs_on_startup_hook_then_acks_complete` pins the hook-then-ack ordering.
 
 ### Unknown lifespan messages
 

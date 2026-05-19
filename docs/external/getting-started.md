@@ -51,7 +51,11 @@ In a new conversation, try a natural-language question. For the Chinook demo:
 
 > Using sqllens, how many albums did AC/DC release?
 
-When prompted, approve the tool call. The first query takes 30 to 60 seconds because ChromaDB downloads roughly 80 MB of embedding model weights. Subsequent queries are fast.
+When prompted, approve the tool call.
+
+The first time SQL Lens runs, it downloads roughly 80 MB of embedding model weights and connects to your database, which takes 30 to 60 seconds. When you run SQL Lens over HTTP, this one-time cost is paid while `sqllens serve` is starting up, so your first question answers quickly. In stdio mode (the recommended setup for Claude Desktop on macOS) the same cost is paid on the first query instead, so that first answer takes 30 to 60 seconds. Either way, subsequent queries are fast.
+
+Note: A slow startup or first query never blocks the server from accepting requests. If the warm-up cannot finish (for example, the database is briefly unreachable), SQL Lens still starts and retries the next time you ask a question.
 
 Expected answer: 2 albums.
 
@@ -59,7 +63,7 @@ On Claude Desktop or claude.ai, a result that contains a table is also shown as 
 
 ## 5. Switch to your own database
 
-Edit `sqllens.toml` and replace the value of `database.url` with your own connection string. Quit and relaunch your assistant. SQL Lens reads the database schema on first start, so the first question against a new database also takes a few seconds.
+Edit `sqllens.toml` and replace the value of `database.url` with your own connection string. Quit and relaunch your assistant. SQL Lens connects to the new database during start-up (over HTTP) or on the first question (in stdio mode), so expect the same short one-time delay described in step 4 when you point it at a new database.
 
 Keep `read_only = true` unless you specifically need to allow writes.
 
