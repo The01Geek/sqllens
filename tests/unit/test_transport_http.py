@@ -346,8 +346,10 @@ def test_lifespan_startup_named_baseexception_propagates_uncaught(
     exc_type: type[BaseException], caplog: pytest.LogCaptureFixture
 ) -> None:
     """A BaseException-only subclass raised from ``__aenter__`` propagates
-    out of ``_handle_lifespan`` unchanged: no fabricated ``startup.failed``,
-    no ERROR log, and ``__aexit__`` is never called on the CM whose
+    out of ``_handle_lifespan`` unchanged: no fabricated ``startup.failed``;
+    the interruption is logged exactly once at ERROR via ``logger.exception``
+    (the #100 contract — a possible session-manager resource leak must be
+    visible to operators); and ``__aexit__`` is never called on the CM whose
     ``__aenter__`` was interrupted mid-entry.
     """
     sentinel = exc_type("issue-101-startup-sentinel")
@@ -364,10 +366,15 @@ def test_lifespan_startup_named_baseexception_propagates_uncaught(
     # The *injected* signal propagated unconverted (not a runner-synthesized
     # look-alike): pins the disproof to the exact instance raised.
     assert excinfo.value is sentinel
-    # No ack fabricated for the signal (the `except Exception` arm — which
-    # holds the only logger.exception call — was never entered).
+    # No ack fabricated for the signal: the `except BaseException` arm
+    # finalizes and re-raises without sending a protocol message.
     assert sent == []
-    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+    # Per the #100 contract the interruption is logged once at ERROR via
+    # logger.exception so a possible resource leak is visible to operators.
+    err = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(err) == 1
+    assert "startup interrupted by" in err[0].getMessage()
+    assert exc_type.__name__ in err[0].getMessage()
     # The raise traversed the awaited CM entry, pinning the startup
     # `except Exception` site specifically (not an upstream escape).
     assert sm.aenter_calls == 1
@@ -382,7 +389,9 @@ def test_lifespan_shutdown_named_baseexception_propagates_uncaught(
     exc_type: type[BaseException], caplog: pytest.LogCaptureFixture
 ) -> None:
     """Symmetric twin: a BaseException-only subclass raised from ``__aexit__``
-    propagates unchanged — no fabricated ``shutdown.failed``, no ERROR log.
+    propagates unchanged — no fabricated ``shutdown.failed``; the interruption
+    is logged exactly once at ERROR via ``logger.exception`` (the #100
+    contract).
     """
     sentinel = exc_type("issue-101-shutdown-sentinel")
     sm = _FakeSessionManager(shutdown_exc=sentinel)
@@ -401,7 +410,11 @@ def test_lifespan_shutdown_named_baseexception_propagates_uncaught(
     types = [m["type"] for m in sent]
     assert types == ["lifespan.startup.complete"]
     assert "lifespan.shutdown.failed" not in types
-    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+    # Per the #100 contract the interruption is logged once at ERROR.
+    err = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(err) == 1
+    assert "shutdown interrupted by" in err[0].getMessage()
+    assert exc_type.__name__ in err[0].getMessage()
     # __aenter__ completed (startup precondition) and the raise traversed
     # __aexit__ (not run()/__aenter__), pinning the shutdown `except
     # Exception` site specifically.
