@@ -486,6 +486,49 @@ PSR="$(echo '<!-- devflow:audit-report -->' > /tmp/devflow-test-report.md; bash 
 assert_eq "post-status dry-run echoes DRYRUN" "true" "$(echo "$PSR" | grep -q 'DRYRUN' && echo true || echo false)"
 
 # ────────────────────────────────────────────────────────────────────────────
+echo "dismiss-stale-rejections.sh"
+# ────────────────────────────────────────────────────────────────────────────
+DSR="$LIB/../scripts/dismiss-stale-rejections.sh"
+
+( bash "$DSR" >/dev/null 2>&1 ); DSR_RC=$?
+assert_eq "no args → exit 2" "2" "$DSR_RC"
+
+# Security-critical: the review-selection filter must dismiss ONLY open
+# Devflow-report reviews — never a human --request-changes (id 2), an
+# already-dismissed one (id 3), or a null-body row (id 4).
+DSR_SEL="$(printf '%s' '[
+ {"id":1,"state":"CHANGES_REQUESTED","body":"# Review Report\n## Verdict: REJECT"},
+ {"id":2,"state":"CHANGES_REQUESTED","body":"please fix the typo"},
+ {"id":3,"state":"DISMISSED","body":"# Review Report\n## Verdict: REJECT"},
+ {"id":4,"state":"CHANGES_REQUESTED","body":null}
+]' | jq -r '.[] | select(.state=="CHANGES_REQUESTED" and ((.body // "") | startswith("# Review Report"))) | .id' | tr '\n' ',')"
+assert_eq "filter selects only open Devflow-report rejects" "1," "$DSR_SEL"
+
+DSR_STUB="/tmp/devflow-gh-stub-dsr.$$.sh"
+cat > "$DSR_STUB" <<'EOS'
+#!/usr/bin/env bash
+# dismissals URLs also contain "/reviews" — match the more specific arm
+# first, and give every arm a deterministic exit status.
+case "$*" in
+  *"dismissals"*)         [ "${DSR_STUB_PUT_RC:-0}" = 0 ] || { echo "HTTP 422" >&2; exit 1; }; exit 0 ;;
+  *"repo view"*)          echo "o/r"; exit 0 ;;
+  *"pulls/"*"/reviews"*)  if [ -n "${DSR_STUB_IDS:-}" ]; then echo "$DSR_STUB_IDS"; fi; exit 0 ;;
+esac
+exit 0
+EOS
+chmod +x "$DSR_STUB"
+
+( DSR_STUB_IDS="" DEVFLOW_GH="$DSR_STUB" bash "$DSR" 123 o/r >/dev/null 2>&1 ); DSR_RC=$?
+assert_eq "empty selection → exit 0 no-op" "0" "$DSR_RC"
+
+( DSR_STUB_IDS="77" DSR_STUB_PUT_RC=0 DEVFLOW_GH="$DSR_STUB" bash "$DSR" 123 o/r >/dev/null 2>&1 ); DSR_RC=$?
+assert_eq "successful dismissal → exit 0" "0" "$DSR_RC"
+
+( DSR_STUB_IDS="77" DSR_STUB_PUT_RC=1 DEVFLOW_GH="$DSR_STUB" bash "$DSR" 123 o/r >/dev/null 2>&1 ); DSR_RC=$?
+assert_eq "dismissal failure → exit 1" "1" "$DSR_RC"
+rm -f "$DSR_STUB"
+
+# ────────────────────────────────────────────────────────────────────────────
 echo "python scripts (workpad._apply_mutations, parse_acs._is_post_merge)"
 # ────────────────────────────────────────────────────────────────────────────
 PY_OUT="$(python3 "$(dirname "$0")/test_python_scripts.py" 2>&1)"
