@@ -51,7 +51,7 @@ Scheme handling:
 |---|---|---|
 | `sqlite://`, `sqlite+...://` | `sqlite3.connect(path, timeout=5)` | `timeout` is lock-wait, **not** connect-timeout. The `open()` call is the only blocking step and is effectively instant for local files. |
 | `postgres://`, `postgresql://`, `postgresql+...://` | `psycopg2.connect(normalized, connect_timeout=5)` | psycopg2 only accepts the `postgresql://` spelling; the probe collapses the legacy and SQLAlchemy-style aliases before connecting. |
-| `mysql://`, `mysql+...://` | `pymysql.connect(connect_timeout=5)` | URL is parsed with `urllib.parse.urlparse` and decomposed into `host/port/user/password/database`. Missing user or host raises a `PreflightError` before connecting. |
+| `mysql://`, `mysql+...://` | `pymysql.connect(connect_timeout=5)` | URL is parsed with `urllib.parse.urlparse` and decomposed into `host/port/user/password/database`. Missing user or host raises a `PreflightError` before connecting. `urllib.parse.unquote` is applied to the username and password before they are passed to pymysql, matching the percent-decoding that SQLAlchemy's `make_url` performs — so a password containing `/` written as `%2F` in the DSN authenticates correctly. |
 
 A URL with no `://` separator, or with an unsupported scheme, fails fast with a clear message rather than reaching the driver.
 
