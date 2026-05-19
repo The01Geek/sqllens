@@ -10,6 +10,8 @@ Covers C-5 (BOM single-resolution), O-14 (config_version), C-7
 
 from __future__ import annotations
 
+import contextvars
+import os
 import textwrap
 from pathlib import Path
 
@@ -65,6 +67,10 @@ def _minimal_toml(tmp_path: Path, extra: str = "") -> Path:
         ("postgresql://u:p@h/db", "postgresql"),
         ("postgresql+psycopg://u:p@h/db", "postgresql"),
         ("mysql+pymysql://u:p@h/db", "mysql"),
+        # Pins current (case-sensitive, no normalization) behavior — a future
+        # consumer comparing dialect against lowercase literals must lowercase
+        # itself rather than expecting this property to normalize.
+        ("POSTGRESQL://u:p@h/db", "POSTGRESQL"),
     ],
 )
 def test_dialect_strips_driver_suffix(url: str, expected: str) -> None:
@@ -269,6 +275,12 @@ def test_failed_non_bom_load_resets_toml_path(tmp_path: Path) -> None:
     with pytest.raises(ValidationError):
         Config.load(bad)
 
+    # White-box: a behavioral assert via Config(database=...) can't detect a
+    # leak (init kwargs outrank the TOML source), so assert the ContextVar is
+    # genuinely unset — .get() with no default raises LookupError iff reset.
+    with pytest.raises(LookupError):
+        config_mod._LOAD_TOML_PATH.get()
+
     cfg = Config(database=DatabaseConfig(url="sqlite:///direct.db"))
     assert cfg.database.url == "sqlite:///direct.db"
 
@@ -282,8 +294,45 @@ def test_bom_error_path_resets_toml_path(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="UTF-8 BOM"):
         Config.load(bom_toml)
 
+    # White-box reset assert (see test_failed_non_bom_load_resets_toml_path).
+    with pytest.raises(LookupError):
+        config_mod._LOAD_TOML_PATH.get()
+
     cfg = Config(database=DatabaseConfig(url="sqlite:///direct.db"))
     assert cfg.database.url == "sqlite:///direct.db"
+
+
+def test_load_toml_path_is_context_isolated(tmp_path: Path) -> None:
+    # The reason _LOAD_TOML_PATH is a ContextVar (not a module global): a load
+    # running in one context must not leak its resolved path into another.
+    # Pin that property so a regression to a plain global is caught.
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        '[database]\nurl = "sqlite:///ctx.db"\n[llm]\napi_key = "sk-ant-test"\n'
+    )
+    ctx = contextvars.copy_context()
+    ctx.run(Config.load, cfg_path)
+    # The load mutated _LOAD_TOML_PATH only inside `ctx`; the parent context
+    # never saw it, so .get() here still raises LookupError.
+    with pytest.raises(LookupError):
+        config_mod._LOAD_TOML_PATH.get()
+
+
+def test_load_restores_prior_sqllens_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The finally-block else-branch: a caller who already had SQLLENS_CONFIG
+    # set and calls Config.load(explicit_path) must get SQLLENS_CONFIG restored
+    # to its prior value, not popped.
+    toml_a = tmp_path / "a.toml"
+    toml_a.write_text('[database]\nurl = "sqlite:///a.db"\n')
+    toml_b = tmp_path / "b.toml"
+    toml_b.write_text('[database]\nurl = "sqlite:///b.db"\n')
+
+    monkeypatch.setenv("SQLLENS_CONFIG", str(toml_a))
+    cfg = Config.load(toml_b)
+    assert cfg.database.url == "sqlite:///b.db"
+    assert os.environ["SQLLENS_CONFIG"] == str(toml_a)
 
 
 def test_direct_config_honors_sqllens_config_env_via_fallback(
