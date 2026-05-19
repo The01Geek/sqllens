@@ -169,7 +169,10 @@ def test_missing_api_key_loads(tmp_path: Path, toml_body: str) -> None:
     assert cfg.llm.model == "claude-sonnet-4-5-20250929"
 
 
-def test_cli_validate_exits_zero_without_api_key(tmp_path: Path) -> None:
+def test_cli_validate_exits_one_without_api_key(tmp_path: Path) -> None:
+    # O-8: validate must distinguish a would-fail-to-start config (api_key
+    # unset -> exit 1) from a clean one (exit 0) so deploy/CI scripts can gate
+    # on it. The schema still parses, so the summary is printed first.
     cfg_path = tmp_path / "sqllens.toml"
     cfg_path.write_text(
         textwrap.dedent(
@@ -183,9 +186,12 @@ def test_cli_validate_exits_zero_without_api_key(tmp_path: Path) -> None:
     )
     runner = CliRunner()
     result = runner.invoke(cli.app, ["validate", "-c", str(cfg_path)])
-    assert result.exit_code == 0, result.stdout
+    assert result.exit_code == 1, result.stdout
     assert "Config OK" in result.stdout
     assert "api_key NOT SET" in result.stdout
+    # The would-fail-to-start signal routes to stderr (keeps stdout clean for
+    # the stdio MCP JSON-RPC channel).
+    assert "llm.api_key" in result.stderr
 
 
 def test_cli_serve_fails_without_api_key(tmp_path: Path) -> None:
