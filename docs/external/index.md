@@ -13,6 +13,10 @@ SQL Lens exposes two tools to the assistant:
 
 One database is configured per running instance. Generated SQL is parsed and rejected if it is anything other than a `SELECT`, so the default deployment is safe against accidental writes.
 
+## Interactive results
+
+On assistants that support inline app widgets — currently Claude Desktop and claude.ai — a `query_database` answer is also shown as an interactive table you can sort by column, filter with a search box, page through, and export to CSV. The same plain-text answer appears in the conversation, so nothing is lost. On every other assistant you continue to receive the Markdown table exactly as before; no configuration or change is needed on your side. This first release covers tables only; charts are not yet included.
+
 ## Documentation map
 
 - **[Getting started](getting-started.md)** — Install SQL Lens, point it at the bundled demo database, and run your first question.

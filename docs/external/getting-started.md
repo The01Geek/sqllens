@@ -55,6 +55,8 @@ When prompted, approve the tool call. The first query takes 30 to 60 seconds bec
 
 Expected answer: 2 albums.
 
+On Claude Desktop or claude.ai, a result that contains a table is also shown as an interactive widget you can sort, filter, page through, and export to CSV, alongside the same plain-text answer. Other assistants display the Markdown table only. No setup is required either way.
+
 ## 5. Switch to your own database
 
 Edit `sqllens.toml` and replace the value of `database.url` with your own connection string. Quit and relaunch your assistant. SQL Lens reads the database schema on first start, so the first question against a new database also takes a few seconds.

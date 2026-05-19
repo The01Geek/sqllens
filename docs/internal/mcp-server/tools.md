@@ -4,16 +4,33 @@ The two tools that MCP clients see. Source-of-truth reference for [src/sqllens/s
 
 ## Registration
 
-`build_server` in [src/sqllens/server.py](../../../src/sqllens/server.py) registers exactly two tools on a fresh `FastMCP("sqllens")` instance per call:
+`build_server` in [src/sqllens/server.py](../../../src/sqllens/server.py) registers exactly two tools — plus one `ui://` resource backing the `query_database` widget — on a fresh `FastMCP("sqllens")` instance per call:
 
 ```python
 def build_server(cfg: Config) -> FastMCP:
     mcp = FastMCP("sqllens")
 
-    @mcp.tool()
-    async def query_database(question: str) -> str:
+    @mcp.resource(
+        "ui://sqllens/query-results.html",
+        mime_type="text/html;profile=mcp-app",
+        meta={"ui": {"prefersBorder": True}},
+    )
+    def query_results_widget() -> str:
+        return load_widget_html()
+
+    @mcp.tool(
+        meta={"ui": {"resourceUri": "ui://sqllens/query-results.html"}},
+        structured_output=False,
+    )
+    async def query_database(question: str) -> str | CallToolResult:
         """Ask a question in natural language. Returns a Markdown table or text answer."""
-        return await query_database_impl(cfg, question)
+        markdown, table = await query_database_impl_with_table(cfg, question)
+        if table is None:
+            return markdown
+        return CallToolResult(
+            content=[TextContent(type="text", text=markdown)],
+            _meta={"sqllens/table": table},
+        )
 
     @mcp.tool()
     async def list_data_sources() -> str:
@@ -23,7 +40,7 @@ def build_server(cfg: Config) -> FastMCP:
     return mcp
 ```
 
-The docstrings are the user-facing tool descriptions that the calling AI client sees, so they're load-bearing. CLAUDE.md "Upstream brand cleanliness" applies — no upstream-project references allowed in those strings.
+The docstrings are the user-facing tool descriptions that the calling AI client sees, so they're load-bearing. CLAUDE.md "Upstream brand cleanliness" applies — no upstream-project references allowed in those strings. The `query_database` registration carries the MCP App widget wiring; see "The MCP App interactive table widget" below for the full mechanism.
 
 ## `query_database` — the agent loop in a tool
 
@@ -34,9 +51,9 @@ The docstrings are the user-facing tool descriptions that the calling AI client 
 3. **Stream collapse.** The agent yields an async stream of `UiComponent` objects (text snippets, dataframes, status cards). MCP tools must return a single string, so we collect the stream into a list and pass it to `components_to_table` (the success path; `components_to_markdown` is now a thin wrapper over it — see "The MCP App interactive table widget").
 4. **Categorized, sanitized error surfacing.** Failures are re-raised as `RuntimeError`, which FastMCP (`mcp.server.fastmcp` — the official SDK, not the standalone `fastmcp` package) converts to a tool result with `isError: true`, formatting the client text as `Error executing tool query_database: <message>`. The *raised message* is therefore the contract, and it is split into three observable categories (see "The error/success contract" below) so the calling agent gets structured failure signal without leaking infrastructure detail. CLAUDE.md forbids letting the LLM apologize inside a successful tool result — the calling agent needs structured failure signal.
 
-## `_format.components_to_markdown` — the collapse rule
+## `_format.components_to_table` — the collapse rule
 
-`components_to_markdown` in [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) is the only place that knows the shape of the agent's output stream:
+`components_to_table` in [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) is the only place that knows the shape of the agent's output stream. It does the collapse in a single pass and returns `(markdown, is_error, table_payload)`; `components_to_markdown` is a thin wrapper that drops the third element for non-apps callers (see "The MCP App interactive table widget"). The Markdown collapse rule below is identical for both:
 
 | Component type | What we do with it |
 |---|---|

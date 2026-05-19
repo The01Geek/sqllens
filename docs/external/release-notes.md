@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 19, 2026
+
+- **[Feature] Interactive results widget for `query_database`** — On assistants that support inline app widgets — currently Claude Desktop and claude.ai — a `query_database` answer is now also displayed as an interactive table you can sort by column, filter with a search box, page through, and export to CSV, alongside the same plain-text answer. Every other assistant continues to receive the identical Markdown table as before, and no configuration or change is required on your side. This first release covers tables only; charts are not yet included. (#121)
+
 ## May 18, 2026
 
 - **[Fix] HTTP transport handles repeated lifespan events cleanly under unusual ASGI hosts** — When an ASGI host drives more than one lifespan scope against the same SQL Lens app (uncommon outside test harnesses), the HTTP transport now rejects a startup that arrives after the server has already shut down with the clear message `single-shot instance already shut down`, instead of the misleading `duplicate lifespan.startup` it returned previously. A repeated shutdown is acknowledged as `lifespan.shutdown.complete` without re-entering the session manager's exit handler, and startup failures now report the exception type in addition to the message (for example, `RuntimeError: boom`). Users running `sqllens serve` are not affected — uvicorn drives exactly one lifespan per process. (#70)
