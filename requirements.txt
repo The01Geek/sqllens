@@ -12,14 +12,19 @@
 #
 #   python -m venv /tmp/lockenv
 #   /tmp/lockenv/bin/pip install --upgrade pip
-#   /tmp/lockenv/bin/pip install .
-#   /tmp/lockenv/bin/pip freeze | grep -v '^sqllens==' > requirements.txt
+#   /tmp/lockenv/bin/pip install .          # relies on pip's default
+#                                           # build isolation (do NOT
+#                                           # pass --no-build-isolation,
+#                                           # or backend tools leak in)
+#   /tmp/lockenv/bin/pip freeze | grep -ivE '^sqllens([= @]|$)' > requirements.txt
 #   # then re-add this header
 #
 # (`pip install .` is non-editable, so `sqllens` itself appears in the
-# freeze output — the grep drops it. `build` / `pyproject-hooks` below
-# are NOT build-backend leakage: chromadb declares `build>=1.0.3` as a
-# real runtime dependency, so they belong in the resolved closure.)
+# freeze output — the grep drops it, matching `sqllens==` and any
+# `sqllens @ file://...`/`sqllens` form. `build` / `pyproject-hooks`
+# below are NOT build-backend leakage: chromadb declares `build>=1.0.3`
+# as a real runtime dependency, and `build` in turn requires
+# `pyproject-hooks` — both are legitimately in the runtime closure.)
 #
 # Equivalent via pip-tools (resolves the same [project.dependencies]
 # closure, including chromadb's `build`):
