@@ -13,10 +13,13 @@ DataFrame so an interactive widget can render it.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterable
 
 from sqllens.agent.core.components import UiComponent
 from sqllens.agent.core.rich_component import ComponentType
+
+logger = logging.getLogger("sqllens.tools._format")
 
 # DatabaseConfig.max_rows bounds DataFrame size before it reaches this renderer;
 # this cap only protects the MCP client from rendering a multi-thousand-row
@@ -110,16 +113,28 @@ def _columns_and_rows(rich) -> tuple[list[str], list[dict]]:  # type: ignore[no-
 
 
 def _build_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
+    # The widget is best-effort: if anything in payload construction raises
+    # (a pathological column object whose __str__ throws, a json.dumps edge),
+    # degrade to "no widget" and let the Markdown answer stand, rather than
+    # letting the exception escape *after* query_database_impl_with_table's
+    # except blocks and bypass the sanitized error taxonomy.
+    try:
+        return _compute_table_payload(rich)
+    except Exception:
+        logger.warning("table payload construction failed; serving Markdown only")
+        return None
+
+
+def _compute_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     columns, rows = _columns_and_rows(rich)
     if not columns and not rows:
         return None
 
-    # Stringify column labels and column_types too, not just cells: a non-str
-    # label or type value would make json.dumps raise inside _serialized_len,
-    # and that escapes *after* query_database_impl_with_table's except blocks,
-    # bypassing the sanitized error taxonomy. Coerce so the only failure modes
-    # are the three documented categories.
+    # Stringify column labels and column_types too, not just cells, so a non-str
+    # label or type value cannot make json.dumps raise inside _serialized_len.
     str_columns = [_coerce_cell(c) for c in columns]
+    # column_types must be keyed by the same strings as columns for the widget's
+    # typed sort to engage; a mismatch silently degrades to string sort, never errors.
     raw_types = getattr(rich, "column_types", {}) or {}
     column_types = {_coerce_cell(k): _coerce_cell(v) for k, v in dict(raw_types).items()}
     coerced_rows = [[_coerce_cell(row.get(c, "")) for c in columns] for row in rows]

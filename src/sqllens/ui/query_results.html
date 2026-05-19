@@ -133,18 +133,24 @@ function csvEscape(v) {
 }
 
 function exportCsv() {
-  const rows = sortedRows(filteredRows());
-  const lines = [state.columns.map(csvEscape).join(",")];
-  for (const r of rows) lines.push(r.map(csvEscape).join(","));
-  const blob = new Blob([lines.join("\r\n")], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "query_results.csv";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  // MCP App iframes are sandboxed; blob: URLs or downloads may be blocked.
+  // Without this the click is a silent no-op on an explicit user action.
+  try {
+    const rows = sortedRows(filteredRows());
+    const lines = [state.columns.map(csvEscape).join(",")];
+    for (const r of rows) lines.push(r.map(csvEscape).join(","));
+    const blob = new Blob([lines.join("\r\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "query_results.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    showNotice("CSV export blocked by host: " + (err && err.message ? err.message : err));
+  }
 }
 
 function render() {
@@ -280,13 +286,23 @@ app.ontoolresult = (params) => {
     showNotice("Could not render results: " + (err && err.message ? err.message : err));
   }
 };
-app.onhostcontextchanged = () => applyHostContext(app.getHostContext());
+// Theming is non-fatal and must never throw into the SDK dispatcher (which
+// would wedge the message loop) nor be misreported as a connection failure.
+function applyHostContextSafe() {
+  try {
+    applyHostContext(app.getHostContext());
+  } catch (err) {
+    console.warn("host theming failed (non-fatal):", err);
+  }
+}
 
-app.connect().then(() => {
-  applyHostContext(app.getHostContext());
-}).catch((err) => {
-  showNotice("Failed to connect to host: " + (err && err.message ? err.message : err));
-});
+app.onhostcontextchanged = applyHostContextSafe;
+
+app.connect()
+  .then(applyHostContextSafe)
+  .catch((err) => {
+    showNotice("Failed to connect to host: " + (err && err.message ? err.message : err));
+  });
 </script>
 </body>
 </html>
