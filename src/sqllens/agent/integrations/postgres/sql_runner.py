@@ -107,28 +107,27 @@ class PostgresRunner(SqlRunner):
         else:
             conn = self.psycopg2.connect(**self.connection_params)
 
+        if self._read_only:
+            # Force read-only regardless of the DB role — a guard miss still
+            # cannot mutate. ``set_session(readonly=True)`` must run before any
+            # statement opens a transaction (it does here — right after
+            # connect), so the implicit transaction the SELECT below runs in
+            # is read-only. NOTE: an in-transaction
+            # ``SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`` would
+            # NOT work — under psycopg2's default autocommit=False the
+            # transaction is already open by the time any cursor executes, and
+            # SESSION CHARACTERISTICS only governs *subsequent* transactions,
+            # leaving the current (single, never-committed) one read-write.
+            conn.set_session(readonly=True)
+
         try:
-            if self._read_only or self._statement_timeout_ms > 0:
+            if self._statement_timeout_ms > 0:
                 setup = conn.cursor()
                 try:
-                    if self._read_only:
-                        # Force read-only regardless of the DB role — a guard
-                        # miss still cannot mutate. Under psycopg2's default
-                        # autocommit=False this SET shares the same implicit
-                        # transaction as the SELECT below, so it is in force
-                        # for the query; the connection is single-use and
-                        # discarded on close, so no commit is needed. Do not
-                        # switch this connection to autocommit or move this SET
-                        # into its own transaction without re-checking that
-                        # read-only still covers the query.
-                        setup.execute(
-                            "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"
-                        )
-                    if self._statement_timeout_ms > 0:
-                        setup.execute(
-                            "SET statement_timeout = %s",
-                            (int(self._statement_timeout_ms),),
-                        )
+                    setup.execute(
+                        "SET statement_timeout = %s",
+                        (int(self._statement_timeout_ms),),
+                    )
                 finally:
                     setup.close()
 
