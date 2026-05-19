@@ -25,6 +25,7 @@ from sqllens.agent.integrations import (
 from sqllens.agent.integrations.local import LocalFileSystem
 from sqllens.agent.integrations.mysql import MySQLRunner
 from sqllens.agent.tools import (
+    EmitChartTool,
     RunSqlTool,
     SaveQuestionToolArgsTool,
     SaveTextMemoryTool,
@@ -88,6 +89,9 @@ def build_agent(cfg: Config) -> Agent:
         RunSqlTool(sql_runner=sql_runner, file_system=scratch_fs),
         access_groups=access,
     )
+    # EmitChartTool needs no SQL/FS — the agent runs run_sql first, then hands
+    # the aggregated rows to this tool, which only validates the chart DSL.
+    tools.register_local_tool(EmitChartTool(), access_groups=access)
     tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
     tools.register_local_tool(
         SearchSavedCorrectToolUsesTool(

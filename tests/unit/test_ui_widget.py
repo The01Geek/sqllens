@@ -32,17 +32,17 @@ def _clear_widget_cache():
 
 def test_missing_asset_raises_actionable_runtimeerror(monkeypatch) -> None:
     # Patch the resource read indirectly: simulate the wheel missing the asset.
-    def fake_read() -> str:
+    def fake_read(filename: str) -> str:
         try:
-            raise FileNotFoundError("query_results.html")
+            raise FileNotFoundError(filename)
         except FileNotFoundError as e:
             raise RuntimeError(
-                "query_database result widget asset is unavailable; "
+                f"result widget asset {filename!r} is unavailable; "
                 "reinstall sqllens or check the wheel packaging"
             ) from e
 
     monkeypatch.setattr(ui, "_read_widget_html", fake_read)
-    with pytest.raises(RuntimeError, match="widget asset is unavailable"):
+    with pytest.raises(RuntimeError, match="widget asset .* is unavailable"):
         ui.load_widget_html()
 
 
@@ -75,14 +75,14 @@ def test_empty_asset_raises_actionable_runtimeerror(monkeypatch) -> None:
             return "   \n\t  "
 
     monkeypatch.setattr(ui, "files", lambda _pkg: _Empty())
-    with pytest.raises(RuntimeError, match="asset is empty"):
+    with pytest.raises(RuntimeError, match="asset .* is empty"):
         ui.load_widget_html()
 
 
 def test_read_failure_is_not_poison_cached(monkeypatch) -> None:
     calls = {"n": 0}
 
-    def flaky() -> str:
+    def flaky(filename: str) -> str:
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("transient packaging fault")
@@ -100,7 +100,7 @@ def test_read_failure_is_not_poison_cached(monkeypatch) -> None:
 def test_successful_read_is_cached(monkeypatch) -> None:
     calls = {"n": 0}
 
-    def once() -> str:
+    def once(filename: str) -> str:
         calls["n"] += 1
         return "<html>cached</html>"
 

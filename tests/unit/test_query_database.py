@@ -20,7 +20,7 @@ import pytest
 
 from sqllens.config import Config
 from sqllens.safety import UnsafeSqlError
-from sqllens.tools import query_database as query_database_module
+from sqllens.tools import _agent as agent_module
 from sqllens.tools.query_database import (
     prime_agent,
     query_database_impl,
@@ -46,7 +46,7 @@ async def test_first_call_builds_agent(
         calls.append(c)
         return stub
 
-    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+    monkeypatch.setattr(agent_module, "build_agent", fake_build_agent)
 
     await query_database_impl(cfg, "question?")
 
@@ -67,7 +67,7 @@ async def test_second_call_reuses_singleton(
         builds.append(c)
         return agent_stub_factory([make_text_component("answer")])
 
-    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+    monkeypatch.setattr(agent_module, "build_agent", fake_build_agent)
 
     await query_database_impl(cfg, "q1")
     await query_database_impl(cfg, "q2")
@@ -98,7 +98,7 @@ async def test_changed_cfg_warns_and_does_not_rebuild(
         seen.append(c)
         return agent_stub_factory([make_text_component("ok")])
 
-    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+    monkeypatch.setattr(agent_module, "build_agent", fake_build_agent)
 
     await query_database_impl(cfg_a, "q")
     with caplog.at_level(logging.WARNING, logger="sqllens.tools.query_database"):
@@ -121,7 +121,7 @@ async def test_same_cfg_does_not_warn(
     """The mismatch warning fires only on an actual config mismatch."""
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     monkeypatch.setattr(
-        query_database_module,
+        agent_module,
         "build_agent",
         lambda _c: agent_stub_factory([make_text_component("ok")]),
     )
@@ -157,7 +157,7 @@ async def test_build_agent_raises_leaves_singleton_none(
             raise original
         return agent_stub_factory([make_text_component("recovered")])
 
-    monkeypatch.setattr(query_database_module, "build_agent", flaky_build_agent)
+    monkeypatch.setattr(agent_module, "build_agent", flaky_build_agent)
 
     with pytest.raises(RuntimeError) as excinfo:
         await query_database_impl(cfg, "q1")
@@ -165,7 +165,7 @@ async def test_build_agent_raises_leaves_singleton_none(
     assert "secret.db" not in str(excinfo.value)
     assert excinfo.value.__cause__ is original
 
-    assert query_database_module._AGENT_STATE is None
+    assert agent_module._AGENT_STATE is None
     result = await query_database_impl(cfg, "q2")
     assert "recovered" in result
     assert len(builds) == 2
@@ -185,7 +185,7 @@ async def test_send_message_raises_surfaces_sanitized_runtime_error(
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     original = ValueError("LLM exploded")
     stub = agent_stub_factory(raise_exc=original)
-    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
     with pytest.raises(RuntimeError) as excinfo:
         await query_database_impl(cfg, "q")
@@ -212,7 +212,7 @@ async def test_driver_exception_message_is_sanitized(
         "could not connect to host=db.internal port=5432 user=admin_role"
     )
     stub = agent_stub_factory(raise_exc=leaky)
-    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
     with caplog.at_level(logging.ERROR, logger="sqllens.tools.query_database"):
         with pytest.raises(RuntimeError) as excinfo:
@@ -252,7 +252,7 @@ async def test_unsafe_sql_error_surfaces_verbatim(
         "only SELECT statements are allowed (got DELETE)"
     )
     stub = agent_stub_factory(raise_exc=UnsafeSqlError(safety_msg))
-    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
     with pytest.raises(RuntimeError) as excinfo:
         await query_database_impl(cfg, "delete everything")
@@ -277,7 +277,7 @@ async def test_is_error_status_card_raises_runtime_error(
     stub = agent_stub_factory(
         [make_status_card(description="schema introspection failed")]
     )
-    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
     with pytest.raises(RuntimeError) as excinfo:
         await query_database_impl(cfg, "q")
@@ -301,7 +301,7 @@ async def test_happy_path_returns_markdown(
             make_dataframe([{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]),
         ]
     )
-    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
     result = await query_database_impl(cfg, "list users")
 
@@ -319,7 +319,7 @@ async def test_with_table_returns_payload_on_dataframe(
     """The sibling returns ``(markdown, dict)`` when the stream has a DataFrame."""
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     stub = agent_stub_factory([make_dataframe([{"name": "Alice", "age": 30}])])
-    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
     markdown, table = await query_database_impl_with_table(cfg, "list users")
 
@@ -338,7 +338,7 @@ async def test_with_table_returns_none_table_on_text_only(
     """No DataFrame in the stream → ``table`` is ``None`` (apps fallback)."""
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     stub = agent_stub_factory([make_text_component("text answer")])
-    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
     markdown, table = await query_database_impl_with_table(cfg, "q")
 
@@ -374,10 +374,10 @@ async def test_concurrent_first_calls_build_once(
 
     def fake_build_agent(c: Config):
         builds.append(c)
-        lock_held_during_build.append(query_database_module._AGENT_LOCK.locked())
+        lock_held_during_build.append(agent_module._AGENT_LOCK.locked())
         return agent_stub_factory([make_text_component("ok")])
 
-    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+    monkeypatch.setattr(agent_module, "build_agent", fake_build_agent)
 
     await asyncio.gather(
         query_database_impl(cfg, "q1"),
@@ -414,12 +414,12 @@ async def test_prime_agent_primes_request_path_singleton(
         builds.append(c)
         return agent_stub_factory([make_text_component("primed")])
 
-    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+    monkeypatch.setattr(agent_module, "build_agent", fake_build_agent)
 
     await prime_agent(cfg)
 
     assert len(builds) == 1
-    primed_agent, primed_cfg = query_database_module._AGENT_STATE
+    primed_agent, primed_cfg = agent_module._AGENT_STATE
     assert primed_cfg is cfg
     # (b): the warm step forced the lazy memory materialization at boot. A
     # regression that drops ``_warm_memory`` from ``prime_agent`` leaves this
@@ -430,11 +430,11 @@ async def test_prime_agent_primes_request_path_singleton(
     result = await query_database_impl(cfg, "q")
 
     assert len(builds) == 1  # request path reused the warmup's agent
-    assert query_database_module._AGENT_STATE[0] is primed_agent
+    assert agent_module._AGENT_STATE[0] is primed_agent
     # The memory the warm touch hit IS the one the request path serves — the
     # warmed embedding model is resident for the first real query, not
     # downloaded by it.
-    assert query_database_module._AGENT_STATE[0].agent_memory is (
+    assert agent_module._AGENT_STATE[0].agent_memory is (
         primed_agent.agent_memory
     )
     assert "primed" in result
@@ -455,12 +455,12 @@ async def test_prime_agent_propagates_build_failure(
     def boom_build_agent(_c: Config):
         raise RuntimeError("cold start failed")
 
-    monkeypatch.setattr(query_database_module, "build_agent", boom_build_agent)
+    monkeypatch.setattr(agent_module, "build_agent", boom_build_agent)
 
     with pytest.raises(RuntimeError, match="cold start failed"):
         await prime_agent(cfg)
 
-    assert query_database_module._AGENT_STATE is None
+    assert agent_module._AGENT_STATE is None
 
 
 @pytest.mark.asyncio
@@ -484,7 +484,7 @@ async def test_prime_agent_is_noop_when_request_path_already_built(
         builds.append(c)
         return agent_stub_factory([make_text_component("ok")])
 
-    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+    monkeypatch.setattr(agent_module, "build_agent", fake_build_agent)
 
     await query_database_impl(cfg, "q")
     await prime_agent(cfg)
@@ -519,10 +519,10 @@ async def test_prime_agent_concurrent_with_request_builds_once(
 
     def fake_build_agent(c: Config):
         builds.append(c)
-        lock_held_during_build.append(query_database_module._AGENT_LOCK.locked())
+        lock_held_during_build.append(agent_module._AGENT_LOCK.locked())
         return agent_stub_factory([make_text_component("ok")])
 
-    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+    monkeypatch.setattr(agent_module, "build_agent", fake_build_agent)
 
     await asyncio.gather(
         prime_agent(cfg),
@@ -556,14 +556,14 @@ async def test_prime_agent_propagates_warm_memory_failure(
             memory_raise_exc=RuntimeError("embedding model download failed"),
         )
 
-    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+    monkeypatch.setattr(agent_module, "build_agent", fake_build_agent)
 
     with pytest.raises(RuntimeError, match="embedding model download failed"):
         await prime_agent(cfg)
 
     # Agent built successfully; only the warm touch failed — singleton stays.
-    assert query_database_module._AGENT_STATE is not None
-    agent, _ = query_database_module._AGENT_STATE
+    assert agent_module._AGENT_STATE is not None
+    agent, _ = agent_module._AGENT_STATE
     assert len(agent.agent_memory.get_recent_memories_calls) == 1
 
 
@@ -586,7 +586,7 @@ async def test_send_message_generator_is_closed_on_exception(
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     stub = agent_stub_factory(raise_exc=ValueError("midstream failure"))
-    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
     with pytest.raises(RuntimeError):
         await query_database_impl(cfg, "q")

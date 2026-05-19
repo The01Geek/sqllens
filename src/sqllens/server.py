@@ -18,6 +18,7 @@ from mcp.types import CallToolResult, TextContent
 from sqllens.config import Config
 from sqllens.tools.list_data_sources import list_data_sources_impl
 from sqllens.tools.query_database import query_database_impl_with_table
+from sqllens.tools.visualize_data import visualize_data_impl_with_chart
 from sqllens.ui import load_widget_html
 
 logger = logging.getLogger("sqllens.server")
@@ -29,6 +30,8 @@ logger = logging.getLogger("sqllens.server")
 # Markdown text content keeps working byte-for-byte everywhere else.
 _WIDGET_URI = "ui://sqllens/query-results.html"
 _TABLE_META_KEY = "sqllens/table"
+_CHART_WIDGET_URI = "ui://sqllens/chart-results.html"
+_CHART_META_KEY = "sqllens/chart"
 
 
 def build_server(cfg: Config) -> FastMCP:
@@ -55,6 +58,29 @@ def build_server(cfg: Config) -> FastMCP:
         return CallToolResult(
             content=[TextContent(type="text", text=markdown)],
             _meta={_TABLE_META_KEY: table},
+        )
+
+    @mcp.resource(
+        _CHART_WIDGET_URI,
+        mime_type="text/html;profile=mcp-app",
+        meta={"ui": {"prefersBorder": True}},
+    )
+    def chart_results_widget() -> str:
+        return load_widget_html("chart_results.html")
+
+    # Same structured_output=False rationale as query_database: the success
+    # path may return a CallToolResult carrying _meta.
+    @mcp.tool(
+        meta={"ui": {"resourceUri": _CHART_WIDGET_URI}}, structured_output=False
+    )
+    async def visualize_data(question: str) -> str | CallToolResult:
+        """Ask a question; returns an interactive chart for chart-shaped results, else text."""
+        markdown, chart = await visualize_data_impl_with_chart(cfg, question)
+        if chart is None:
+            return markdown
+        return CallToolResult(
+            content=[TextContent(type="text", text=markdown)],
+            _meta={_CHART_META_KEY: chart},
         )
 
     @mcp.tool()

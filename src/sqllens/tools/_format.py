@@ -16,6 +16,7 @@ import json
 import logging
 import math
 from collections.abc import Iterable
+from decimal import Decimal
 
 from sqllens.agent.core.components import UiComponent
 from sqllens.agent.core.rich_component import ComponentType
@@ -32,6 +33,12 @@ _MAX_ROWS_RENDERED = 500
 # only thing that actually breaks rendering, so size — not row count — is the
 # cap. Measured against ``json.dumps(payload, separators=(",", ":"))``.
 _MAX_TABLE_PAYLOAD_BYTES = 130 * 1024
+
+# Same budget, same reason, for the chart widget's ``_meta["sqllens/chart"]``
+# blob. The chart DSL also caps rows at 200 in the agent tool, but a wide
+# ``SELECT *``-shaped row dict can still blow the size budget, so the same
+# binary-search prefix truncation applies here.
+_MAX_CHART_PAYLOAD_BYTES = 130 * 1024
 
 
 def components_to_table(
@@ -97,6 +104,59 @@ def components_to_markdown(components: Iterable[UiComponent]) -> tuple[str, bool
     """
     markdown, is_error, _ = components_to_table(components)
     return markdown, is_error
+
+
+def components_to_chart(
+    components: Iterable[UiComponent],
+) -> tuple[str, bool, dict | None]:
+    """Collapse a component stream into ``(markdown, is_error, chart_payload)``.
+
+    Parallel to :func:`components_to_table` but for ``visualize_data``: the
+    Markdown collapse is identical (DataFrame tables first, then the last
+    non-empty TEXT answer, with a STATUS_CARD error short-circuiting) so a
+    non-apps host still gets the data + answer. The structured payload is
+    built from the *last* ``CHART`` component in the stream (mirrors the
+    last-wins ``last_df`` convention; ``emit_chart`` runs once per request).
+
+    ``chart_payload`` is ``None`` on the error path, when no ChartComponent is
+    present, or when even the data-stripped serialized form exceeds the size
+    budget.
+    """
+    text_answer = ""
+    tables: list[str] = []
+    error_message = ""
+    last_chart = None
+
+    for comp in components:
+        rich = comp.rich_component
+        if rich is None:
+            continue
+        ctype = getattr(rich, "type", None)
+
+        if ctype == ComponentType.TEXT:
+            content = (getattr(rich, "content", "") or "").strip()
+            if content:
+                text_answer = content
+        elif ctype == ComponentType.DATAFRAME:
+            table_md = _render_dataframe(rich)
+            if table_md:
+                tables.append(table_md)
+        elif ctype == ComponentType.CHART:
+            last_chart = rich
+        elif ctype == ComponentType.STATUS_CARD:
+            if getattr(rich, "status", "") == "error":
+                error_message = getattr(rich, "description", "") or "Agent reported an error"
+
+    if error_message:
+        return error_message, True, None
+
+    parts = list(tables)
+    if text_answer:
+        parts.append(text_answer)
+    markdown = "\n\n".join(parts) if parts else "(no answer)"
+
+    payload = _build_chart_payload(last_chart) if last_chart is not None else None
+    return markdown, False, payload
 
 
 def _coerce_cell(value: object) -> str:
@@ -250,6 +310,96 @@ def _serialized_len(payload: dict) -> int:
     # len(str) == the serialized byte size the host actually receives — non-ASCII
     # cells escape to \uXXXX rather than inflating bytes past this measure.
     return len(json.dumps(payload, separators=(",", ":")))
+
+
+def _coerce_chart_value(value: object) -> object:
+    # Unlike the table payload (everything → str so the grid renders text),
+    # ECharts needs *real numbers* for axes/series, so numerics pass through
+    # un-stringified. bool is JSON-native and kept as-is. Decimal is numeric
+    # but not JSON-serializable, so it becomes float. Non-finite floats
+    # (inf/NaN) are not valid JSON and would render as broken points, so they
+    # degrade to None (ECharts skips null). Everything else (str, datetime,
+    # None, ...) collapses to the same naive str() the table path uses, except
+    # None which stays None so the widget can treat it as "no value".
+    if value is None or isinstance(value, bool) or isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, Decimal):
+        f = float(value)
+        return f if math.isfinite(f) else None
+    return str(value)
+
+
+def _build_chart_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
+    # Same best-effort contract as _build_table_payload: payload construction
+    # must never escape visualize_data's sanitized error taxonomy. On any
+    # failure, degrade to "no widget" (the Markdown answer still stands).
+    try:
+        return _compute_chart_payload(rich)
+    except Exception:
+        spec = getattr(rich, "data", None)
+        n_rows = len(spec.get("data", [])) if isinstance(spec, dict) else 0
+        logger.warning(
+            "chart payload construction failed; serving Markdown only "
+            "(rows=%d)",
+            n_rows,
+            exc_info=True,
+        )
+        return None
+
+
+def _compute_chart_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
+    spec = getattr(rich, "data", None)
+    if not isinstance(spec, dict):
+        return None
+
+    rows = spec.get("data", [])
+    if not isinstance(rows, list):
+        return None
+
+    coerced_rows = [
+        {_coerce_cell(k): _coerce_chart_value(v) for k, v in row.items()}
+        for row in rows
+        if isinstance(row, dict)
+    ]
+    total = len(coerced_rows)
+
+    payload: dict = {
+        "chart_type": spec.get("chart_type"),
+        "title": spec.get("title"),
+        "x": spec.get("x"),
+        "y": spec.get("y"),
+        "series": spec.get("series"),
+        "data": coerced_rows,
+        "row_count": total,
+        "truncated": 0,
+    }
+
+    if _serialized_len(payload) <= _MAX_CHART_PAYLOAD_BYTES:
+        return payload
+
+    # Over budget: keep the largest contiguous row prefix that fits, so the
+    # widget's row_count + truncated == total invariant holds (mirrors the
+    # table path's binary search exactly).
+    payload["data"] = []
+    if _serialized_len(payload) > _MAX_CHART_PAYLOAD_BYTES:
+        # Even the data-stripped spec busts the budget — nothing useful to send.
+        return None
+
+    lo, hi = 0, total
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        payload["data"] = coerced_rows[:mid]
+        if _serialized_len(payload) <= _MAX_CHART_PAYLOAD_BYTES:
+            lo = mid
+        else:
+            hi = mid - 1
+
+    payload["data"] = coerced_rows[:lo]
+    payload["row_count"] = lo
+    payload["truncated"] = total - lo
+    return payload
 
 
 def _render_dataframe(rich) -> str:  # type: ignore[no-untyped-def]

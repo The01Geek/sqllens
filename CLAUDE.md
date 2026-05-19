@@ -4,9 +4,10 @@ Guidance for Claude Code (and other AI assistants) working in this repo.
 
 ## Project overview
 
-**SQL Lens** is a standalone MCP server that exposes a natural-language SQL agent and a vector memory store. It connects MCP-aware AI assistants (Cursor, Claude Desktop, Windsurf, custom clients) to a single configured database. Two tools are exposed:
+**SQL Lens** is a standalone MCP server that exposes a natural-language SQL agent and a vector memory store. It connects MCP-aware AI assistants (Cursor, Claude Desktop, Windsurf, custom clients) to a single configured database. Three tools are exposed:
 
 - `query_database(question)` — NL → SQL → executed → Markdown table.
+- `visualize_data(question)` — NL → SQL → ECharts chart payload + text answer.
 - `list_data_sources()` — describes the configured database.
 
 One database per running instance. Read-only by default, enforced by a `sqlglot` parser guard. Anthropic-only LLM in v1; the LLM interface is pluggable for future providers.

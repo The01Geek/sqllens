@@ -194,18 +194,19 @@ def _stub_eager_build_agent(monkeypatch: pytest.MonkeyPatch) -> None:
     """Neutralize the eager warmup's ``build_agent`` for the lifespan tests.
 
     The eager warmup now runs through the ``on_startup`` hook, which delegates
-    to ``query_database.prime_agent`` → ``_agent_for`` → ``build_agent``.
-    Building a real agent (sqlite connect + object graph) on a clean-startup
-    path would be irrelevant work for tests that exercise the ASGI lifespan
-    state machine, so stub the build seam where it is actually called and
-    reset the process-wide ``_AGENT_STATE`` singleton so a primed agent never
-    leaks between tests. The integration suite (a different module, unaffected
-    by this fixture) pins the real warmup contract.
+    to ``prime_agent`` → ``_agent_for`` → ``build_agent``. The agent singleton
+    lives in ``sqllens.tools._agent`` (shared by ``query_database`` and
+    ``visualize_data``), so the build seam and the process-wide
+    ``_AGENT_STATE`` are patched there. Building a real agent (sqlite connect +
+    object graph) on a clean-startup path would be irrelevant work for tests
+    that exercise the ASGI lifespan state machine. The integration suite (a
+    different module, unaffected by this fixture) pins the real warmup
+    contract.
     """
-    import sqllens.tools.query_database as qd
+    import sqllens.tools._agent as agent_mod
 
-    monkeypatch.setattr(qd, "build_agent", lambda cfg: object())
-    monkeypatch.setattr(qd, "_AGENT_STATE", None)
+    monkeypatch.setattr(agent_mod, "build_agent", lambda cfg: object())
+    monkeypatch.setattr(agent_mod, "_AGENT_STATE", None)
 
 
 def _lifespan(sm: _FakeSessionManager) -> _SessionManagerLifespan:
@@ -1428,7 +1429,7 @@ def test_build_asgi_app_warmup_primes_singleton_with_closed_over_cfg(
     config-identity invariant that keeps ``_agent_for``'s mismatch warning
     from false-firing after warmup.
     """
-    from sqllens.tools import query_database as query_database_module
+    from sqllens.tools import _agent as agent_module
 
     cfg = _cfg(tmp_path)
     builds: list[Config] = []
@@ -1440,15 +1441,15 @@ def test_build_asgi_app_warmup_primes_singleton_with_closed_over_cfg(
         # boot-time cold start. StubAgent carries a StubAgentMemory.
         return StubAgent()
 
-    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+    monkeypatch.setattr(agent_module, "build_agent", fake_build_agent)
 
     app = build_asgi_app(cfg)
     assert isinstance(app, _SessionManagerLifespan)
     asyncio.run(app.on_startup())
 
     assert len(builds) == 1
-    assert query_database_module._AGENT_STATE is not None
-    assert query_database_module._AGENT_STATE[1] is cfg
+    assert agent_module._AGENT_STATE is not None
+    assert agent_module._AGENT_STATE[1] is cfg
     # The boot-time warm step ran against the primed singleton's memory.
-    primed_agent = query_database_module._AGENT_STATE[0]
+    primed_agent = agent_module._AGENT_STATE[0]
     assert len(primed_agent.agent_memory.get_recent_memories_calls) == 1

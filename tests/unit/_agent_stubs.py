@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
 from sqllens.agent.capabilities.agent_memory import AgentMemory
+from sqllens.agent.components.rich.data.chart import ChartComponent
 from sqllens.agent.components.rich.data.dataframe import DataFrameComponent
 from sqllens.agent.components.rich.feedback.status_card import StatusCardComponent
 from sqllens.agent.components.rich.text import RichTextComponent
@@ -52,6 +53,27 @@ def make_dataframe(
             raise ValueError("make_dataframe requires `columns` when `rows` is empty")
         columns = list(rows[0].keys())
     return UiComponent(rich_component=DataFrameComponent(rows=rows, columns=columns))
+
+
+def make_chart(
+    spec: dict[str, Any],
+    *,
+    chart_type: str | None = None,
+    title: str | None = None,
+) -> UiComponent:
+    """Build a UiComponent wrapping a ChartComponent.
+
+    ``spec`` is the renderer-agnostic DSL dict ``EmitChartTool`` puts in
+    ``ChartComponent.data`` (and the MCP layer writes to
+    ``_meta["sqllens/chart"]``). ``chart_type`` defaults to ``spec``'s.
+    """
+    return UiComponent(
+        rich_component=ChartComponent(
+            chart_type=chart_type or spec.get("chart_type", "bar"),
+            title=title if title is not None else spec.get("title"),
+            data=spec,
+        )
+    )
 
 
 class StubAgentMemory(AgentMemory):
