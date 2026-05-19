@@ -100,6 +100,7 @@ class MemoryStore:
 
         pairs: list[SqlPair] = []
         docs: list[SchemaDoc] = []
+        skipped = 0
         for metadata in metadatas:
             # Chroma can return a row with no metadata (None) — skip explicitly
             # rather than letting AttributeError abort the whole enumeration.
@@ -119,10 +120,17 @@ class MemoryStore:
             except (TypeError, ValueError, ValidationError) as exc:
                 # Corrupt/non-conforming stored row — skip rather than abort
                 # the whole enumeration (and the import that seeds off it).
-                # Logged (not silent) so a wholesale model-reconstruction
-                # regression is observable, not an empty-export mystery.
-                logger.warning("skipping unrepresentable memory row: %s", exc)
+                # A live-agent memory exceeding the bundle import limits is an
+                # expected, non-actionable skip (per the docstring) and would
+                # flood logs at WARNING on every export/import, so per-row
+                # detail is DEBUG; one aggregate WARNING below keeps a
+                # wholesale model-reconstruction regression observable.
+                skipped += 1
+                logger.debug("skipping unrepresentable memory row: %s", exc)
                 continue
+
+        if skipped:
+            logger.warning("iter_all skipped %d unrepresentable memory row(s)", skipped)
 
         return MemoryBundle(
             sql_pairs=SqlPairsBlock(pairs=pairs) if pairs else None,

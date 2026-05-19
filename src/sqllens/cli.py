@@ -436,21 +436,31 @@ def import_memory(
 
     try:
         store = MemoryStore(cfg)
+    except Exception as e:
+        err_console.print(
+            f"[red]Memory store error ({type(e).__name__}):[/red] {escape(str(e))}\n"
+            "If this is a first-use or storage issue: the embedding model "
+            "downloads on first use (~80 MB); check the configured persist_dir "
+            "is writable."
+        )
+        raise typer.Exit(code=1) from e
+    try:
         report = asyncio.run(
             import_bundle(
                 store, bundle, dry_run=dry_run, clear=clear, batch_size=batch_size
             )
         )
     except Exception as e:
-        wiped = clear and not dry_run
+        # Store constructed OK, so a wipe (if --clear) already ran before the
+        # failure — the collection may now be empty or partial.
         data_loss = (
             "The collection was wiped (--clear) and the import did not "
             "complete — memory may now be empty or partial.\n"
-            if wiped
+            if clear and not dry_run
             else ""
         )
         err_console.print(
-            f"[red]Memory store error ({type(e).__name__}):[/red] {escape(str(e))}\n"
+            f"[red]Memory import error ({type(e).__name__}):[/red] {escape(str(e))}\n"
             f"{data_loss}"
             "If this is a first-use or storage issue: the embedding model "
             "downloads on first use (~80 MB); check the configured persist_dir "
