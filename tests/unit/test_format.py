@@ -437,6 +437,25 @@ def test_query_info_extracted_from_run_sql_status_card() -> None:
     assert payload is not None and payload["row_count"] == 2
 
 
+def test_query_info_row_count_is_true_total_under_truncation() -> None:
+    # row_count must report the SQL's true result size, not the size-capped
+    # rendered subset: payload["row_count"] (kept prefix) + truncated (dropped
+    # tail). A regression to bare payload["row_count"] under-reports here.
+    big = "x" * 200
+    rows = [{"c": f"{i}-{big}"} for i in range(4000)]
+    stream = [
+        _sql_card("SELECT c FROM t", status="running"),
+        _ui(DataFrameComponent(rows=rows, columns=["c"])),
+        _sql_card("SELECT c FROM t", status="success"),
+    ]
+    _, is_error, payload, query_info = components_to_table(stream)
+    assert is_error is False
+    assert payload is not None and payload["truncated"] > 0
+    assert query_info is not None
+    assert query_info["row_count"] == 4000
+    assert query_info["row_count"] == payload["row_count"] + payload["truncated"]
+
+
 def test_query_info_deduped_across_running_then_completed() -> None:
     # The card streams twice with identical metadata; last-wins must yield a
     # single query_info, not two extractions.
@@ -460,24 +479,32 @@ def test_query_info_absent_when_no_sql_card() -> None:
 
 
 def test_query_info_none_on_error_path() -> None:
-    # A guard-rejected non-SELECT (default read-only deployment) surfaces as an
-    # error status card; query_info must be None, no error raised here.
-    stream = [
-        _sql_card("DELETE FROM users", status="running"),
-        _ui(
-            StatusCardComponent(
-                title="Executing run_sql",
-                status="error",
-                description="refusing to execute non-SELECT SQL",
-                metadata={"sql": "DELETE FROM users"},
-            )
-        ),
-    ]
-    markdown, is_error, payload, query_info = components_to_table(stream)
+    # Faithfully mirror the real guard-rejection stream: the agent emits ONE
+    # StatusCardComponent (metadata == tool_call.arguments == {"sql": ...}),
+    # yields it status="running", then re-yields it via set_status("error",
+    # "Tool failed: ...") on ToolResult(success=False). set_status preserves
+    # metadata, so the completed error card *still* carries the rejected SQL —
+    # the error short-circuit, not an absent card, is what nulls query_info.
+    card = StatusCardComponent(
+        title="Executing run_sql",
+        status="running",
+        description="ran",
+        metadata={"sql": "DELETE FROM users"},
+    )
+    running = _ui(card)
+    completed = _ui(
+        card.set_status("error", "Tool failed: refusing to execute non-SELECT SQL")
+    )
+    # The completed card must still carry the SQL (set_status preserves
+    # metadata) — this is the load-bearing seam the formatter relies on.
+    assert completed.rich_component.metadata == {"sql": "DELETE FROM users"}
+    markdown, is_error, payload, query_info = components_to_table([running, completed])
     assert is_error is True
     assert query_info is None
     assert payload is None
-    assert markdown == "refusing to execute non-SELECT SQL"
+    # The rejected write statement must NOT leak into the answer.
+    assert "DELETE FROM users" not in markdown
+    assert markdown == "Tool failed: refusing to execute non-SELECT SQL"
 
 
 def test_query_info_ignores_non_sql_status_cards() -> None:

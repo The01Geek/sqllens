@@ -393,16 +393,20 @@ async def test_with_table_surfaces_executed_sql(
 
 
 @pytest.mark.asyncio
-async def test_with_table_no_sql_block_when_show_details_off(
+async def test_with_table_no_sql_card_means_no_sql_block(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
 ) -> None:
-    """show_details off → agent emits no tool-args card → byte-for-byte old output.
+    """No run_sql STATUS_CARD in the stream → no query_info, no ```sql block.
 
-    The flag gates emission at the agent layer; with it off the stub stream
-    has no run_sql STATUS_CARD, so the formatter sees no SQL and the result is
-    identical to the pre-feature behavior (no query_info, no ```sql block).
+    This pins the *formatter/impl* half of the byte-for-byte guarantee: given a
+    stream with no SQL card (what show_details=off produces, since the agent
+    suppresses card emission), output is identical to pre-feature behavior. The
+    *config-gating* half — that show_details=off actually keeps the agent from
+    emitting the card — is pinned separately at the factory layer by
+    test_show_details_off_keeps_tool_arguments_admin_only in
+    tests/unit/test_factory_wiring.py.
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     assert cfg.agent.show_details is True  # default-on

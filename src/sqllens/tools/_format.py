@@ -56,16 +56,28 @@ def components_to_table(
       the last-wins convention; ``query_database`` emits one in practice).
     - Capture the executed SQL from the *last* ``run_sql`` STATUS_CARD's
       ``metadata["sql"]``. The card streams twice (running → completed) with
-      identical metadata, so last-wins de-dupes it idempotently. Absent
-      unless the agent emitted the card — which only happens when
-      ``agent.show_details`` unlocked the tool-arguments feature.
+      identical metadata, so last-wins de-dupes it idempotently. The card is
+      only emitted when ``agent.show_details`` unlocked the tool-arguments
+      feature; with it off, no SQL is ever seen here.
 
     ``table_payload`` is ``None`` on the error path, when no DataFrame is
     present, when the last DataFrame is empty, or when even the header-only
-    serialized form exceeds the size budget. ``query_info`` is ``None`` on the
-    error path and whenever no ``run_sql`` SQL card was seen (no-SQL / pure
-    text answers, and — in the default read-only deployment — guard-rejected
-    non-SELECT statements, which take the error path).
+    serialized form exceeds the size budget.
+
+    ``query_info`` is ``None`` whenever no executed SQL is surfaced. The
+    config-independent invariant: a guard-rejected non-SELECT (the default
+    read-only deployment) and a pure-text / no-SQL answer never yield
+    ``query_info``. The mechanism differs by config and is intentional:
+
+    - ``show_details`` on: the run_sql card *is* emitted and carries
+      ``metadata["sql"]``, so ``last_sql`` is set even for a rejected
+      non-SELECT — but a failed tool drives the completed card to
+      ``status="error"`` (``agent`` maps ``ToolResult(success=False)`` →
+      ``set_status("error", ...)``), so the ``error_message`` short-circuit
+      below returns before ``query_info`` is built.
+    - ``show_details`` off: neither the running nor the completed card is
+      emitted, so ``last_sql`` stays ``None`` and ``query_info`` is ``None``
+      because no SQL card was seen — not via the error short-circuit.
     """
     text_answer = ""
     tables: list[str] = []
@@ -110,9 +122,11 @@ def components_to_table(
     if last_sql is not None:
         # True result size, not the rendered subset: the payload may be
         # size-capped (row_count is the kept prefix, truncated the dropped
-        # tail), but the SQL ran against the whole set.
+        # tail), but the SQL ran against the whole set. ``.get`` keeps a
+        # partial future payload from raising an unsanitized KeyError past
+        # query_database_impl_with_table's except blocks (S-10).
         row_count = (
-            payload["row_count"] + payload["truncated"]
+            payload.get("row_count", 0) + payload.get("truncated", 0)
             if payload is not None
             else None
         )
