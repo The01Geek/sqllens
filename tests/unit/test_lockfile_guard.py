@@ -68,7 +68,8 @@ def _locked_versions(lockfile_text: str) -> dict[str, Version]:
         except InvalidRequirement:
             continue
         # A version that survived Requirement() parsing in an "==" specifier
-        # is already PEP 440-valid, so Version() cannot raise here.
+        # is already PEP 440-valid, so the Version() construction below cannot
+        # raise (the deliberate ValueError for conflicting pins is separate).
         exact = [s.version for s in req.specifier if s.operator == "=="]
         if exact:
             name = canonicalize_name(req.name)
@@ -132,19 +133,30 @@ def _force_include_target(pyproject_text: str) -> object:
 def _read_or_fail(path: Path) -> str:
     """Read ``path`` as UTF-8, failing the guard with an actionable message.
 
-    An unreadable or non-UTF-8 ``pyproject.toml`` / ``requirements.txt`` is
-    itself a drift signal the guard exists to catch; surfacing it as an
-    explicit guard-tripped failure (not a raw ``OSError``/``UnicodeDecodeError``
-    traceback) tells the reader *which* build-critical file is corrupt.
+    A missing, unreadable, or non-UTF-8 ``pyproject.toml`` /
+    ``requirements.txt`` is itself a drift signal the guard exists to catch.
+    The failure message names *which* file and *which* of the three distinct
+    fault classes occurred (missing / unreadable / not valid UTF-8), instead
+    of a raw ``OSError``/``UnicodeDecodeError`` traceback. The trailing
+    ``raise`` is unreachable (``pytest.fail`` is typed ``NoReturn``); it makes
+    the ``-> str`` contract locally enforced rather than incidentally
+    satisfied, so a future narrowing of the ``except`` clauses cannot silently
+    reintroduce an implicit ``None`` return.
     """
     try:
         return path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        pytest.fail(
-            f"lockfile guard could not read {path} as UTF-8 ({exc!r}); the "
-            "build-critical file is missing, unreadable, or not UTF-8 — fix "
-            "the file before the lockfile drift guard can validate it"
-        )
+    except FileNotFoundError as exc:
+        detail = f"is missing ({exc!r})"
+    except UnicodeDecodeError as exc:
+        detail = f"is not valid UTF-8 ({exc!r})"
+    except OSError as exc:
+        detail = f"is unreadable ({exc!r})"
+    pytest.fail(
+        f"lockfile guard could not read build-critical file {path}: it "
+        f"{detail} — fix the file before the lockfile drift guard can "
+        "validate it"
+    )
+    raise AssertionError("unreachable: pytest.fail did not raise")
 
 
 # --- Logic tests (run unconditionally against synthetic fixtures) -----------
@@ -261,34 +273,54 @@ def test_logic_force_include_scalar_intermediate_is_none() -> None:
     # Scalar at the level just above the leaf key is equally defended.
     scalar_leaf_parent = '[tool.hatch.build.targets.wheel]\nforce-include = 42\n'
     assert _force_include_target(scalar_leaf_parent) is None
+    # A scalar at the very first hop (`tool` itself non-table) exercises the
+    # guard on the first iteration, a distinct position from the deeper cases.
+    assert _force_include_target("tool = 42\n") is None
 
 
 def test_logic_duplicate_conflicting_pin_raises() -> None:
     # A contradictory hand-edited / merge-conflicted lock (same canonical
     # package pinned '==' to two different versions) must raise, not
-    # last-write-wins into validating only the surviving pin.
+    # last-write-wins into validating only the surviving pin. `Alpha` also
+    # proves the conflict is detected across canonical-name normalization.
     conflicting = _CLEAN_LOCK + "Alpha==1.5\n"  # alpha already ==1.4
-    with pytest.raises(ValueError, match="conflicting versions"):
+    with pytest.raises(ValueError, match=r"conflicting versions 1\.4 and 1\.5"):
         _locked_versions(conflicting)
+    # The realistic shape: a merge-conflicted `--generate-hashes` lock where
+    # the contradictory pin carries a folded `--hash` continuation. The fold
+    # must happen before the conflict check, else the dup is never seen.
+    folded = _CLEAN_LOCK + "alpha==1.5 \\\n    --hash=sha256:bad\n"
+    with pytest.raises(ValueError, match=r"conflicting versions 1\.4 and 1\.5"):
+        _locked_versions(folded)
 
 
 def test_logic_duplicate_identical_pin_is_idempotent() -> None:
     # An exact-duplicate pin (same version twice) is harmless redundancy and
     # must not raise — only contradictory pins are an error.
     redundant = _CLEAN_LOCK + "alpha==1.4\n"
+    assert _locked_versions(redundant)["alpha"] == Version("1.4")
     assert _missing_core_deps(_SYNTH_PYPROJECT, redundant) == []
     assert _bound_violations(_SYNTH_PYPROJECT, redundant) == []
 
 
+def test_logic_read_or_fail_returns_utf8_contents(tmp_path: Path) -> None:
+    # The success path is otherwise only exercised by the #112-gated
+    # test_real_* tests; pin it so a decoding regression (e.g. dropping
+    # encoding='utf-8') is caught now, not when an unrelated PR merges.
+    f = tmp_path / "requirements.txt"
+    f.write_text("alpha==1.4  # café\n", encoding="utf-8")
+    assert _read_or_fail(f) == "alpha==1.4  # café\n"
+
+
 def test_logic_read_or_fail_surfaces_actionable_message(tmp_path: Path) -> None:
-    # A non-UTF-8 build-critical file must trip the guard with a message
-    # naming the file, not raise an opaque UnicodeDecodeError traceback.
+    # Each fault class must trip the guard with a distinct, fault-specific
+    # message — not a single generic string that hides which failure occurred.
     bad = tmp_path / "requirements.txt"
     bad.write_bytes(b"\xff\xfe not valid utf-8 \x80")
-    with pytest.raises(pytest.fail.Exception, match=r"could not read .* as UTF-8"):
+    with pytest.raises(pytest.fail.Exception, match="is not valid UTF-8"):
         _read_or_fail(bad)
-    # A missing/unreadable file trips the same guarded failure.
-    with pytest.raises(pytest.fail.Exception, match="build-critical file is missing"):
+    # A missing file trips a distinct missing-specific message.
+    with pytest.raises(pytest.fail.Exception, match="it is missing"):
         _read_or_fail(tmp_path / "does-not-exist.txt")
 
 
