@@ -18,6 +18,9 @@ cfg.memory      →  ChromaAgentMemory                 →  persists under cfg.m
                    LocalFileSystem                   →  scratch root = tempfile.gettempdir() / "sqllens"
 ToolRegistry    →  RunSqlTool                          (executes generated SQL, writes a scratch CSV,
                                                         appends truncation hint when df.attrs['truncated'])
+                   EmitChartTool                       (agent-side seam for visualize_data; no SQL/FS;
+                                                        validates the renderer-agnostic chart DSL and
+                                                        emits a ChartComponent, capped at 200 rows)
                    SaveQuestionToolArgsTool            (memory write — tool-arg recordings)
                    SearchSavedCorrectToolUsesTool      (memory read; default_similarity_threshold
                                                         bound to cfg.memory.similarity_threshold)
@@ -26,6 +29,8 @@ ToolRegistry    →  RunSqlTool                          (executes generated SQL
                                                         Agent(llm, tool_registry, user_resolver,
                                                               agent_memory, AgentConfig(max_tool_iterations))
 ```
+
+`EmitChartTool` carries no SQL runner or file-system capability — the agent runs `run_sql` first to get aggregated rows, then hands them to `emit_chart`, which only validates the DSL (`bar | line | area | scatter | pie | heatmap`, ≤ 200 rows, pie/heatmap series-shape rules) and wraps the result in a `ChartComponent`. The MCP-layer `visualize_data` tool reads that component off the agent stream and forwards it to the chart widget. See [mcp-server/tools.md](../mcp-server/tools.md#visualize_data--chart-shaped-sibling-of-query_database) for the wider picture and [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py) for the DSL source.
 
 Call order on every query is the reverse of construction: **ReadOnlyGuardRunner → RowCapRunner → engine runner**. The parser rejects before any connection opens; the engine runner streams with `fetchmany(max_rows + 1)` and sets its native statement-timeout primitive; the decorator clamps the result a second time on the way back. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full timeout/cap story.
 
@@ -83,18 +88,28 @@ The agent framework expects a `UserResolver` because upstream supports multi-ten
 
 Side-effect that's worth knowing: `LocalFileSystem` derives a per-user subfolder via `sha256(user.id)[:16]`. With one user ID, that's *always* the same 16-hex folder — a single dead directory under `tempfile.gettempdir()/sqllens/`. See [agent/tool-scratch-storage.md](tool-scratch-storage.md) for why we kept the framework contract intact even though it's wasted indirection.
 
-## Calling pattern from `tools/query_database.py`
+## Calling pattern from `tools/_agent.py`
+
+The process-wide agent singleton lives in [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py), shared by `query_database` and `visualize_data` so both MCP tools reach the same `Agent` object graph. The double-checked-lock skeleton is:
 
 ```python
-_AGENT: Agent | None = None
+_AGENT_STATE: tuple[Agent, Config] | None = None
+_AGENT_LOCK = asyncio.Lock()
 
-def _agent_for(cfg: Config) -> Agent:
-    global _AGENT
-    if _AGENT is None:
-        _AGENT = build_agent(cfg)
-    return _AGENT
+async def get_agent(cfg: Config) -> Agent:
+    global _AGENT_STATE
+    if _AGENT_STATE is None:
+        async with _AGENT_LOCK:
+            if _AGENT_STATE is None:
+                _AGENT_STATE = (build_agent(cfg), cfg)
+    agent, built_cfg = _AGENT_STATE
+    if cfg is not built_cfg:
+        logger.warning(...)  # see _agent.py for full text
+    return agent
 ```
 
-Lazy singleton — first MCP call pays the construction cost (which on first ever run also pays the ~80 MB embedding-model download). Subsequent calls reuse it. The agent itself is reusable across requests; the `RequestContext` is built per-call inside `query_database_impl`.
+Lazy singleton — first MCP call pays the construction cost (which on first ever run also pays the ~80 MB embedding-model download, unless `prime_agent` ran at HTTP startup; see [mcp-server/tools.md](../mcp-server/tools.md#eager-warmup-shares-the-request-path-singleton-issue-116)). Subsequent calls reuse it. The agent itself is reusable across requests; the `RequestContext` is built per-call inside each tool's `_impl`.
+
+`prime_agent` and `get_agent` are also re-exported from `tools/query_database.py` (`__all__`) so the HTTP transport's `_warmup` closure and existing tests that imported them from there continue to work.
 
 There is **no** invalidation path. If config changes at runtime, restart the process — there's no hot-reload mechanism, and adding one would conflict with the lazy-singleton contract.
