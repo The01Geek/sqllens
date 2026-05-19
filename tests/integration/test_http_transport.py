@@ -323,7 +323,7 @@ class TestReadyz:
 
     async def test_readyz_200_after_startup_no_auth(self, make_server) -> None:
         """By the time ``make_server`` returns, lifespan startup (hence the
-        eager ``build_agent`` warmup) has completed, so ``/readyz`` is 200
+        eager ``prime_agent`` warmup) has completed, so ``/readyz`` is 200
         with the compact ready body and needs no ``Authorization``.
         """
         handle = make_server(AuthConfig(mode="none"))
@@ -344,22 +344,22 @@ class TestReadyz:
         assert r.status_code == 200
         assert r.json() == {"status": "ready"}
 
-    async def test_build_agent_invoked_once_at_startup(
+    async def test_prime_agent_invoked_once_at_startup(
         self, make_server, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The eager warmup calls ``build_agent`` exactly once, at lifespan
+        """The eager warmup calls ``prime_agent`` exactly once, at lifespan
         startup — before any request is served (assertable via a spy).
         """
         import sqllens.transport.http as http_module
 
-        real_build_agent = http_module.build_agent
+        real_prime_agent = http_module.prime_agent
         calls: list[int] = []
 
-        def _spy(cfg):  # type: ignore[no-untyped-def]
+        async def _spy(cfg):  # type: ignore[no-untyped-def]
             calls.append(1)
-            return real_build_agent(cfg)
+            return await real_prime_agent(cfg)
 
-        monkeypatch.setattr(http_module, "build_agent", _spy)
+        monkeypatch.setattr(http_module, "prime_agent", _spy)
 
         handle = make_server(AuthConfig(mode="none"))
         # Server is up (lifespan startup completed) and no request sent yet.
@@ -384,10 +384,10 @@ class TestAgentFailure:
         string the calling agent would mistake for a successful answer.
 
         The agent build is forced to fail deterministically (no network / no
-        embedding-model download) by patching the *request-path* builder in
+        embedding-model download) by patching the builder in
         ``sqllens.tools.query_database``. The transport-layer eager warmup
-        uses ``sqllens.transport.http.build_agent`` (a different reference),
-        so the server still starts cleanly.
+        is best-effort (it swallows exceptions and logs), so the server still
+        starts cleanly even though the same builder is on the warmup path.
         """
         monkeypatch.setattr(query_database_module, "_AGENT_STATE", None)
 
