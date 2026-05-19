@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
 
 from sqllens.config import Config
@@ -31,6 +31,32 @@ _WIDGET_URI = "ui://sqllens/query-results.html"
 _TABLE_META_KEY = "sqllens/table"
 
 
+def _request_metadata(ctx: Context) -> dict:
+    """Extract caller-supplied per-request metadata from the MCP request.
+
+    The calling application asserts per-request identity via the MCP request's
+    ``_meta`` object; the MCP SDK parses unknown ``_meta`` keys onto
+    ``RequestParams.Meta`` as model extras (``progressToken`` is the only
+    declared field and is excluded). This is the dynamic-value source the
+    row-level-security guard reads.
+
+    Fail-secure: any failure to read the request context yields ``{}`` — a
+    dynamic RLS rule then sees its key as missing and blocks the query (static
+    rules are unaffected), rather than the tool crashing or, worse, a request
+    influencing the query unfiltered. This is also why stdio (no per-request
+    ``_meta`` channel) only ever gets ``{}`` here, which is the documented
+    "dynamic rules are HTTP-only" behaviour.
+    """
+    try:
+        meta = ctx.request_context.meta
+    except (ValueError, AttributeError):
+        return {}
+    if meta is None:
+        return {}
+    extra = getattr(meta, "model_extra", None)
+    return dict(extra) if extra else {}
+
+
 def build_server(cfg: Config) -> FastMCP:
     """Create a FastMCP instance with tools registered against ``cfg``."""
     mcp = FastMCP("sqllens")
@@ -47,9 +73,14 @@ def build_server(cfg: Config) -> FastMCP:
     # carrying _meta; an auto-derived outputSchema would make FastMCP validate
     # a (deliberately absent) structuredContent and reject it.
     @mcp.tool(meta={"ui": {"resourceUri": _WIDGET_URI}}, structured_output=False)
-    async def query_database(question: str) -> str | CallToolResult:
+    async def query_database(
+        question: str, ctx: Context
+    ) -> str | CallToolResult:
         """Ask a question in natural language. Returns a Markdown table or text answer."""
-        markdown, table = await query_database_impl_with_table(cfg, question)
+        metadata = _request_metadata(ctx)
+        markdown, table = await query_database_impl_with_table(
+            cfg, question, metadata=metadata
+        )
         if table is None:
             return markdown
         return CallToolResult(

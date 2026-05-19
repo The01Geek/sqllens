@@ -537,7 +537,14 @@ class Agent:
             request_id=request_id,
             agent_memory=self.agent_memory,
             observability_provider=self.observability_provider,
-            metadata={"ui_features_available": ui_features_available},
+            # Per-request metadata supplied by the caller flows through to
+            # tools (e.g. the row-level-security guard) here. Framework-internal
+            # keys are spread last so a caller-supplied key can never shadow
+            # them.
+            metadata={
+                **request_context.metadata,
+                "ui_features_available": ui_features_available,
+            },
         )
 
         # Enrich context with additional data with observability

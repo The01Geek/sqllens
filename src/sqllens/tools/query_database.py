@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
+from typing import Any
 
 from sqllens.agent import Agent, RequestContext
 from sqllens.agent.factory import build_agent
 from sqllens.config import Config
-from sqllens.safety import UnsafeSqlError
+from sqllens.safety import RlsError, UnsafeSqlError
 from sqllens.tools._format import components_to_table
 
 logger = logging.getLogger("sqllens.tools.query_database")
@@ -85,19 +87,23 @@ async def _agent_for(cfg: Config) -> Agent:
     return agent
 
 
-async def query_database_impl(cfg: Config, question: str) -> str:
+async def query_database_impl(
+    cfg: Config, question: str, *, metadata: Mapping[str, Any] | None = None
+) -> str:
     """Translate ``question`` to SQL, execute, and return a Markdown answer.
 
     Backwards-compatible wrapper over :func:`query_database_impl_with_table`
     that drops the structured table. The error taxonomy, sanitization, and
     exact raised messages are identical — they live in the sibling below.
     """
-    markdown, _ = await query_database_impl_with_table(cfg, question)
+    markdown, _ = await query_database_impl_with_table(
+        cfg, question, metadata=metadata
+    )
     return markdown
 
 
 async def query_database_impl_with_table(
-    cfg: Config, question: str
+    cfg: Config, question: str, *, metadata: Mapping[str, Any] | None = None
 ) -> tuple[str, dict | None]:
     """Translate ``question`` to SQL, execute, and return ``(markdown, table)``.
 
@@ -117,7 +123,13 @@ async def query_database_impl_with_table(
         # stable internal message to the client.
         logger.exception("agent construction failed")
         raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
-    request_context = RequestContext(headers={}, cookies={}, metadata={})
+    # Per-request metadata (caller-supplied MCP metadata, used by the
+    # row-level-security guard) flows in here. dict() copies so a caller's
+    # mapping can't be mutated downstream, and an absent/empty mapping keeps
+    # the prior empty-context behaviour byte-for-byte.
+    request_context = RequestContext(
+        headers={}, cookies={}, metadata=dict(metadata or {})
+    )
 
     components = []
     try:
@@ -135,6 +147,17 @@ async def query_database_impl_with_table(
         # code path), it must reach the client verbatim, distinct from the
         # sanitized internal-error category below.
         logger.warning("query rejected by read-only guard: %s", e)
+        raise RuntimeError(str(e)) from e
+    except RlsError as e:
+        # Same defensive rationale as the UnsafeSqlError branch above: the
+        # vendored RunSqlTool's broad ``except Exception`` catches an
+        # RlsError inside the SQL tool and feeds it back as a tool result
+        # (surfacing via the is_error path below), so this branch is not
+        # exercised by that pipeline today. Kept because an RLS block is
+        # actionable safety feedback, not an infra leak: if it ever
+        # propagates out of send_message it must reach the client verbatim,
+        # distinct from the sanitized internal-error category below.
+        logger.warning("query rejected by row-level-security guard: %s", e)
         raise RuntimeError(str(e)) from e
     except Exception as e:
         # Tool-internal / infrastructure failure. The driver exception string
