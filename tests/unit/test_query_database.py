@@ -448,6 +448,65 @@ async def test_prime_agent_propagates_build_failure(
 
 
 @pytest.mark.asyncio
+async def test_prime_agent_is_noop_when_request_path_already_built(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """A late/duplicate warmup after the request path built is a cheap no-op.
+
+    Exercises the reverse ordering of
+    ``test_prime_agent_primes_request_path_singleton``: when a request
+    already populated ``_AGENT_STATE``, a subsequent ``prime_agent`` hits
+    ``_agent_for``'s ``_AGENT_STATE is None`` fast path and must NOT run a
+    second ``build_agent``.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    builds: list[Config] = []
+
+    def fake_build_agent(c: Config):
+        builds.append(c)
+        return agent_stub_factory([make_text_component("ok")])
+
+    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+
+    await query_database_impl(cfg, "q")
+    await prime_agent(cfg)
+
+    assert len(builds) == 1
+
+
+@pytest.mark.asyncio
+async def test_prime_agent_concurrent_with_request_builds_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """#116: warmup racing the first request still builds exactly once.
+
+    ``prime_agent`` delegates to the same ``_agent_for`` the request path
+    uses, so the existing ``_AGENT_LOCK`` serializes the cold start. Pins
+    the new concurrent entrant (warmup task vs. an early request) the issue
+    flagged.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    builds: list[Config] = []
+
+    def fake_build_agent(c: Config):
+        builds.append(c)
+        return agent_stub_factory([make_text_component("ok")])
+
+    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+
+    await asyncio.gather(
+        prime_agent(cfg),
+        query_database_impl(cfg, "q"),
+    )
+
+    assert len(builds) == 1
+
+
+@pytest.mark.asyncio
 async def test_send_message_generator_is_closed_on_exception(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

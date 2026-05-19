@@ -38,6 +38,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from sqllens.auth import Authenticator, AuthError, build_authenticator
 from sqllens.config import Config
 from sqllens.server import build_server
+from sqllens.tools.query_database import prime_agent
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -211,11 +212,9 @@ def build_asgi_app(cfg: Config) -> ASGIApp:
         ) from exc
 
     # Prime the request-path agent singleton at lifespan startup (best-effort,
-    # see _handle_lifespan). prime_agent owns the why; the import is lazy to
-    # keep this transport factory's import graph off the agent/tool tree.
+    # see _handle_lifespan). prime_agent owns the why; the closure binds cfg
+    # into the zero-arg on_startup hook.
     async def _warmup() -> None:
-        from sqllens.tools.query_database import prime_agent
-
         await prime_agent(cfg)
 
     return _SessionManagerLifespan(
@@ -524,8 +523,11 @@ class _SessionManagerLifespan:
                         # BaseException (asyncio.CancelledError on lifespan-task
                         # cancellation, KeyboardInterrupt, SystemExit) is
                         # deliberately *not* caught: it must propagate to
-                        # unwind the host, matching the session-manager
-                        # startup path above.
+                        # unwind the host. Only the propagation outcome mirrors
+                        # the session-manager startup path above — no CM
+                        # finalization is needed here because the session
+                        # manager is already fully entered (_started is True),
+                        # so there is no partially-acquired resource to drop.
                         logger.exception(
                             "eager agent warmup failed; the first query will "
                             "rebuild and pay the cold-start cost"

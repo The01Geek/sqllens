@@ -1385,3 +1385,62 @@ def test_warmup_failure_still_flips_readiness_and_boots(
         r.levelno >= logging.ERROR and "warmup" in r.getMessage()
         for r in caplog.records
     )
+
+
+def test_lifespan_startup_hook_not_run_when_session_manager_fails() -> None:
+    """The warmup hook must NOT run if session-manager startup failed.
+
+    The hook is gated behind ``self._started = True``, which is only
+    reached after ``__aenter__`` succeeds. A failed session-manager startup
+    must ack ``startup.failed`` and never prime an agent against a
+    half-initialized host. Pins the ordering so a refactor moving the hook
+    above the ``_started`` guard is caught.
+    """
+    sm = _FakeSessionManager(startup_exc=RuntimeError("sm down"))
+    hook_calls: list[str] = []
+
+    async def hook() -> None:
+        hook_calls.append("ran")
+
+    adapter = _SessionManagerLifespan(
+        _noop_inner, sm, _Readiness(), on_startup=hook
+    )
+    receive, send, sent = _make_io([{"type": "lifespan.startup"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    assert hook_calls == []
+    assert sent[-1]["type"] == "lifespan.startup.failed"
+    assert "lifespan.startup.complete" not in [m["type"] for m in sent]
+
+
+def test_build_asgi_app_warmup_primes_singleton_with_closed_over_cfg(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#116: invoking the wired hook primes the request-path singleton.
+
+    ``test_build_asgi_app_wires_eager_warmup`` only proves the hook is
+    non-None. This exercises it: awaiting ``app.on_startup()`` must build
+    the agent and populate ``_AGENT_STATE`` keyed by the SAME ``cfg``
+    object ``build_asgi_app`` closed over — the cross-call-site
+    config-identity invariant that keeps ``_agent_for``'s mismatch warning
+    from false-firing after warmup.
+    """
+    from sqllens.tools import query_database as query_database_module
+
+    cfg = _cfg(tmp_path)
+    builds: list[Config] = []
+
+    def fake_build_agent(c: Config):
+        builds.append(c)
+        return object()
+
+    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+
+    app = build_asgi_app(cfg)
+    assert isinstance(app, _SessionManagerLifespan)
+    asyncio.run(app.on_startup())
+
+    assert len(builds) == 1
+    assert query_database_module._AGENT_STATE is not None
+    assert query_database_module._AGENT_STATE[1] is cfg
