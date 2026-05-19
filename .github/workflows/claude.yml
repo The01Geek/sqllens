@@ -50,23 +50,23 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   # Dedupe a MANUAL `@claude run /devflow:review` against the AUTOMATED
-  # request-review-on-ready path. Both are independent triggers: a commit
-  # push fires request-review-on-ready's `synchronize` re-review, and the
+  # devflow-review path. Both are independent triggers: a commit
+  # push fires devflow-review's `synchronize` re-review, and the
   # human who pushed it typically also comments `@claude run /devflow:review`
   # within a second or two. Without this gate BOTH run a full (billable) LLM
   # review of the same HEAD and post their own status comment — the observed
   # "two comments" bug (PR #113, 15:06:55 synchronize + 15:06:56 comment).
   #
-  # Policy ("auto suppresses manual"): if request-review-on-ready is already
+  # Policy ("auto suppresses manual"): if devflow-review is already
   # in-flight for this PR's CURRENT head — either an in_progress `Devflow
   # Review` check on that exact SHA, or a queued/in_progress
-  # request-review-on-ready run on the PR's branch (covers the sub-second
+  # devflow-review run on the PR's branch (covers the sub-second
   # race before create_check POSTs the check) — skip the manual review and
   # leave a one-line pointer instead. Deliberately fail-OPEN (default
   # suppress=false): a missed suppression just reproduces today's recoverable
   # double-comment, whereas a wrong suppression would silently swallow a
   # review the user explicitly asked for. This is the opposite failure
-  # direction from request-review-on-ready's fail-closed gates, by design.
+  # direction from devflow-review's fail-closed gates, by design.
   #
   # Only `/devflow:review` is deduped — NOT `/devflow:review-and-fix` (that
   # auto-applies fixes and has no automated equivalent), and not any other
@@ -126,7 +126,7 @@ jobs:
                  2>/dev/null | grep -c . || true)
           [[ "$IC" =~ ^[0-9]+$ ]] || IC=0
 
-          # Signal 2: a queued/in_progress request-review-on-ready run on the
+          # Signal 2: a queued/in_progress devflow-review run on the
           # PR's branch. Covers the <1s synchronize-vs-comment race where the
           # auto run has started but create_check has not POSTed the check yet
           # (an in-flight auto run on the same branch is, by that workflow's
@@ -134,7 +134,7 @@ jobs:
           IR=0
           if [ -n "$BRANCH" ] && [ "$BRANCH" != "null" ]; then
             IR=$(gh run list --repo "$REPO" \
-                   --workflow request-review-on-ready.yml \
+                   --workflow devflow-review.yml \
                    --branch "$BRANCH" \
                    --json status \
                    --jq '[.[] | select(.status=="queued" or .status=="in_progress")] | length' \

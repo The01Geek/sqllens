@@ -1,6 +1,6 @@
-# Implementation Plan — Checks-native re-run for `/devflow:review`
+# Checks-native re-run for `/devflow:review`
 
-**Status:** Implemented in `request-review-on-ready.yml` (PR: feat/review-rerun-checks).
+**Status:** Implemented in `devflow-review.yml` (originally landed as `request-review-on-ready.yml` in PR feat/review-rerun-checks; renamed 2026-05-19).
 **Goal:** Make the `/devflow:review` run appear as a dedicated GitHub **Check Run**
 on the PR ("Devflow Review") whose **Re-run** button re-executes the review against
 the PR's *current* HEAD — solving the stale-SHA problem of GitHub's native
@@ -18,11 +18,24 @@ the PR's *current* HEAD — solving the stale-SHA problem of GitHub's native
 > guards (cost guard, draft skip, actor dedupe) preserve the original
 > intent — no *unbounded* per-push auto-review.
 
-The review must **auto-trigger exactly once per PR** on the *first*
-ready-for-review, and additionally **re-review a new HEAD on `synchronize`
-only when that HEAD lacks an already-passing `Devflow Review` check** (the
-cost guard) — never on repeated draft↔ready toggling, never on a push that
-already has a green review. Beyond those, the only way to re-review is a
+> **Policy amended (2026-05-19).** §0 originally scoped the first auto-review
+> to the first `ready_for_review` only. GitHub emits `ready_for_review`
+> *exclusively* on a draft→ready transition, so a PR opened directly as
+> non-draft (the documented `gh pr create --fill` flow, and most human PRs)
+> never triggered the first review — and because `Devflow Review` is a
+> REQUIRED status check, those PRs wedged "expected" forever with no
+> API-accessible trigger. The first-review trigger is now the first of
+> `{opened non-draft, reopened non-draft, ready_for_review}`; draft-opened
+> PRs are deferred (skipped) until their later `ready_for_review`. The
+> first-ready check-existence gate is unchanged and still enforces
+> exactly-once across whichever fires first.
+
+The review must **auto-trigger exactly once per PR** the *first* time it
+becomes reviewable (opened non-draft, reopened non-draft, or draft→ready),
+and additionally **re-review a new HEAD on `synchronize` only when that
+HEAD lacks an already-passing `Devflow Review` check** (the cost guard) —
+never on repeated draft↔ready toggling, never on a push that already has a
+green review. Beyond those, the only way to re-review is a
 **user-initiated manual action**: the `Devflow Review` check's **Re-run**
 button, or an `@claude run /devflow:review` comment.
 
@@ -31,8 +44,9 @@ How the design enforces this:
 | Event | Auto-review? | Why |
 |---|---|---|
 | PR push / new commit (`synchronize`) | ✅ guarded | Re-reviews the new HEAD **only** when it has no already-passing `Devflow Review` check (cost guard), the PR is not a draft, and the actor-dedupe canonical variant is running. Closes the required-check deadlock. |
-| 1st `ready_for_review` (draft→ready) | ✅ once | The intended single auto-trigger. |
-| 2nd+ `ready_for_review` (draft→ready→draft→ready…) | ❌ skipped | First-ready gate (§3.2): skip if a `Devflow Review` check already exists on the PR. |
+| 1st reviewable event — `opened`/`reopened` non-draft, or `ready_for_review` | ✅ once | The intended single auto-trigger, on whichever fires first. |
+| `opened`/`reopened` while **draft** | ❌ skipped | Draft guard (§3.2): a draft PR cannot merge; it is reviewed on its later `ready_for_review`. |
+| 2nd+ reviewable event (e.g. draft→ready after a non-draft open, or draft→ready→draft→ready…) | ❌ skipped | First-ready gate (§3.2): skip if a `Devflow Review` check already exists on the PR. |
 | `synchronize` on a HEAD already reviewed green | ❌ skipped | Cost guard: a push with a passing `Devflow Review` check is not re-run. |
 | Click **Re-run** on the `Devflow Review` check | ✅ (manual) | User-initiated; the whole point of the feature. |
 | `@claude run /devflow:review` comment | ✅ (manual) | Existing `claude.yml` path; user-initiated. |
@@ -49,7 +63,7 @@ removing it re-opens the public-repo budget-drain vector.
 
 | Approach | Retrigger UX | Runs at current HEAD? | Cost |
 |---|---|---|---|
-| `gh run rerun <id>` on `Request Review on Ready` run | Actions tab | ❌ replays original SHA + event payload | 0 code |
+| `gh run rerun <id>` on the `Devflow Review (auto-trigger)` run | Actions tab | ❌ replays original SHA + event payload | 0 code |
 | `workflow_dispatch` wrapper | Actions tab / `gh workflow run` | ✅ | low |
 | **Check Run + `check_run.rerequested` listener (chosen)** | **"Re-run" in the PR Checks tab** | ✅ | medium |
 
@@ -75,13 +89,13 @@ re-resolves the live PR diff on every re-run.
 
 ## 2. Files touched
 
-1. **`.github/workflows/request-review-on-ready.yml`** — extend, do **not**
+1. **`.github/workflows/devflow-review.yml`** (formerly `request-review-on-ready.yml`) — extend, do **not**
    duplicate. Add the `check_run` trigger, a check-lifecycle wrapper, and
    parameterize the existing review prompt by a resolved PR number. (Duplicating
    the ~110-line review prompt into a second file is explicitly disallowed by the
    sync ethos documented in `claude-runner.yml` lines 152–155.)
 2. **`.github/project-config.yml`** — add an enablement flag
-   `workflows."request-review-on-ready"` already exists; reuse it (the
+   `workflows."devflow-review"` already exists; reuse it (the
    `check_run` path is the same logical workflow). No new key required. (Optional:
    a `claude.review_check_name` if we want the check name configurable; default
    hard-coded `Devflow Review` is fine for v1 — do not speculate.)
@@ -93,19 +107,22 @@ reused verbatim via `workflow_call`; `ci.yml` is unrelated.
 
 ---
 
-## 3. Workflow restructure (`request-review-on-ready.yml`)
+## 3. Workflow restructure (`devflow-review.yml`)
 
 ### 3.1 Triggers
 
 ```yaml
 on:
   pull_request:
-    types: [ready_for_review]
+    types: [opened, reopened, ready_for_review, synchronize]
   pull_request_target:
-    types: [ready_for_review]
+    types: [opened, reopened, ready_for_review, synchronize]
   check_run:
     types: [rerequested]
 ```
+
+(`synchronize` was added with the PR #106 amendment; `opened`/`reopened`
+with the 2026-05-19 amendment — see §0.)
 
 ### 3.2 `precheck` job — route all three event sources to one PR number
 
@@ -113,11 +130,15 @@ Outputs: `enabled`, `should_run`, `pr_number`, `head_sha`.
 
 Logic:
 
-- `enabled` — unchanged: `fromJSON(config).workflows["request-review-on-ready"]`.
-- **ready_for_review path** (`pull_request` / `pull_request_target`): keep the
-  existing `dedupe-pr-events` gate; `pr_number = github.event.pull_request.number`,
-  `head_sha = github.event.pull_request.head.sha`. **Then apply the first-ready
-  gate (NEW, §0 requirement):** query existing check runs for the PR and set
+- `enabled` — unchanged: `fromJSON(config).workflows["devflow-review"]`.
+- **first-review path** (`opened` / `reopened` / `ready_for_review` on
+  `pull_request` / `pull_request_target`): keep the existing
+  `dedupe-pr-events` gate; `pr_number = github.event.pull_request.number`,
+  `head_sha = github.event.pull_request.head.sha`. **Apply the draft guard
+  (§0 amendment):** an `opened`/`reopened` event can carry `draft=true`
+  (`ready_for_review` never does) — `should_run=false` for a draft PR; it is
+  reviewed on its later `ready_for_review`. **Then apply the first-ready
+  gate (§0 requirement):** query existing check runs for the PR and set
   `should_run=false` if a `Devflow Review` check already exists for *any* of the
   PR's commits:
 
@@ -250,7 +271,7 @@ preventing `cancel-in-progress` from killing the canonical variant mid-review:
 
 ```yaml
 concurrency:
-  group: request-review-on-ready-${{ github.event.pull_request.number || github.event.check_run.pull_requests[0].number || github.run_id }}-${{ github.event_name }}
+  group: devflow-review-${{ github.event.pull_request.number || github.event.check_run.pull_requests[0].number || github.run_id }}-${{ github.event_name }}
   cancel-in-progress: true
 ```
 
@@ -317,7 +338,7 @@ Per `CLAUDE.md`, the `main-protected` ruleset (ID 15633058) requires exactly:
 
 ---
 
-## 7. Test plan
+## 7. Test coverage
 
 1. **Unit-ish (YAML):** `actionlint` (or `python -c "import yaml"`) on the edited
    workflow; confirm the three-trigger `on:` and job graph parse.
