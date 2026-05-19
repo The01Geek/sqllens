@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from sqllens.agent import Agent, RequestContext, ToolRegistry, User, UserResolver
 from sqllens.agent.capabilities.sql_runner import SqlRunner
@@ -159,8 +159,10 @@ def build_sql_runner(
             host=parsed.hostname,
             port=parsed.port or 3306,
             database=(parsed.path or "").lstrip("/"),
-            user=parsed.username,
-            password=parsed.password or "",
+            # urlparse does not percent-decode credentials (SQLAlchemy's make_url
+            # does); decode so e.g. a '%2F' in the password becomes '/'.
+            user=unquote(parsed.username),
+            password=unquote(parsed.password) if parsed.password else "",
             statement_timeout_ms=statement_timeout_ms,
             max_rows=max_rows,
             read_only=read_only,

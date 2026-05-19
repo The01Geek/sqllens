@@ -8,28 +8,40 @@ the PR's *current* HEAD — solving the stale-SHA problem of GitHub's native
 
 ## 0. Trigger policy (hard requirement)
 
-The review must be **auto-triggered exactly once per PR**: the *first* time the
-PR becomes ready for review. After that it must **never** auto-trigger — not on
-new commits, not on repeated draft↔ready toggling. The only way to re-review is
-a **user-initiated manual action**: the `Devflow Review` check's **Re-run**
+> **Policy amended (2026-05-19, PR #106).** §0 originally forbade a
+> `synchronize` trigger entirely ("do not add `synchronize`"). That predated
+> making `Devflow Review` a **REQUIRED** status check: the one-shot review
+> attaches the check to a single commit, so any follow-up push left the new
+> HEAD with no `Devflow Review` context and blocked the PR forever with no
+> API-accessible re-trigger. A **guarded** `synchronize` re-review was added
+> to close that deadlock. The text below reflects the amended policy; the
+> guards (cost guard, draft skip, actor dedupe) preserve the original
+> intent — no *unbounded* per-push auto-review.
+
+The review must **auto-trigger exactly once per PR** on the *first*
+ready-for-review, and additionally **re-review a new HEAD on `synchronize`
+only when that HEAD lacks an already-passing `Devflow Review` check** (the
+cost guard) — never on repeated draft↔ready toggling, never on a push that
+already has a green review. Beyond those, the only way to re-review is a
+**user-initiated manual action**: the `Devflow Review` check's **Re-run**
 button, or an `@claude run /devflow:review` comment.
 
 How the design enforces this:
 
 | Event | Auto-review? | Why |
 |---|---|---|
-| PR push / new commit (`synchronize`) | ❌ never | `request-review-on-ready.yml` does **not** listen on `synchronize` — only `ready_for_review`. Already true today; do not add `synchronize`. |
+| PR push / new commit (`synchronize`) | ✅ guarded | Re-reviews the new HEAD **only** when it has no already-passing `Devflow Review` check (cost guard), the PR is not a draft, and the actor-dedupe canonical variant is running. Closes the required-check deadlock. |
 | 1st `ready_for_review` (draft→ready) | ✅ once | The intended single auto-trigger. |
-| 2nd+ `ready_for_review` (draft→ready→draft→ready…) | ❌ skipped | New **first-ready gate** (§3.2): skip if a `Devflow Review` check already exists on the PR. |
+| 2nd+ `ready_for_review` (draft→ready→draft→ready…) | ❌ skipped | First-ready gate (§3.2): skip if a `Devflow Review` check already exists on the PR. |
+| `synchronize` on a HEAD already reviewed green | ❌ skipped | Cost guard: a push with a passing `Devflow Review` check is not re-run. |
 | Click **Re-run** on the `Devflow Review` check | ✅ (manual) | User-initiated; the whole point of the feature. |
 | `@claude run /devflow:review` comment | ✅ (manual) | Existing `claude.yml` path; user-initiated. |
 | Any CI check re-run | ❌ | precheck `name == 'Devflow Review'` guard (§3.2, §6.6). |
 
-The first-ready gate and the **`check_run` sender authorization gate** (§6.2,
-mandatory) are the two new behavioral guards this design adds. Everything else
-already complies because no `synchronize` trigger exists anywhere in the
-review path. The auth gate is not optional — removing it re-opens the
-public-repo budget-drain vector.
+The first-ready gate, the guarded `synchronize` cost guard, and the
+**`check_run` sender authorization gate** (§6.2, mandatory) are the
+behavioral guards this design relies on. The auth gate is not optional —
+removing it re-opens the public-repo budget-drain vector.
 
 ---
 
