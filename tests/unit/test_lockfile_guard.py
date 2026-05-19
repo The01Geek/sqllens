@@ -42,14 +42,18 @@ def _core_requirements(pyproject_text: str) -> list[Requirement]:
 def _locked_versions(lockfile_text: str) -> dict[str, Version]:
     """Map canonical package name -> pinned Version from lockfile text.
 
-    Only ``==``-pinned entries are recorded; comment text, option lines
-    (``-r``, ``--hash``, ``-e``), and non-exact specifiers are skipped — a
-    package present under a non-``==`` pin reads as *absent* to the
-    completeness check, which is the intended signal for a hand-edited lock.
+    Handles both the plain ``pip freeze`` dialect (``pkg==1.2.3``) and the
+    ``pip-compile --generate-hashes`` dialect, where a pin carries a trailing
+    ``\\`` and the hashes follow as indented ``--hash`` continuation lines.
+    Continuations are folded and inline ``--hash`` is stripped before
+    parsing. Comment text and option lines (``-r``, ``-e``) are skipped, and
+    only ``==`` pins are recorded — a package present under a non-``==`` pin
+    reads as *absent* (the intended signal for a hand-edited lock).
     """
     pinned: dict[str, Version] = {}
-    for raw in lockfile_text.splitlines():
-        line = raw.split("#", 1)[0].strip()
+    folded = lockfile_text.replace("\\\n", " ")
+    for raw in folded.splitlines():
+        line = raw.split("#", 1)[0].split("--hash", 1)[0].strip()
         if not line or line.startswith("-"):
             continue
         try:
@@ -79,7 +83,8 @@ def _bound_violations(pyproject_text: str, lockfile_text: str) -> list[str]:
     for req in _core_requirements(pyproject_text):
         version = locked.get(canonicalize_name(req.name))
         if version is None:
-            continue  # absence is asserted by the completeness check
+            violations.append(f"{req.name} is not '=='-pinned in the lockfile")
+            continue
         if not req.specifier.contains(version, prereleases=True):
             violations.append(f"{req.name}=={version} violates '{req.specifier}'")
     return violations
@@ -164,14 +169,32 @@ def test_logic_canonicalizes_extras_and_names() -> None:
 
 def test_logic_non_exact_pin_reads_as_absent() -> None:
     # A non-`==` pin is the documented signal for a hand-edited lock: the
-    # package is treated as absent so the completeness check fires.
+    # package is absent to the completeness check AND flagged by the bounds
+    # check directly (the bounds test must not silently delegate elsewhere).
     lock = _CLEAN_LOCK.replace("beta==2.9", "beta>=2.0")
     assert "beta" in _missing_core_deps(_SYNTH_PYPROJECT, lock)
+    assert any("beta" in v for v in _bound_violations(_SYNTH_PYPROJECT, lock))
+
+
+def test_logic_parses_pip_compile_generate_hashes_dialect() -> None:
+    # `pip-compile --generate-hashes` emits `pkg==X \` + indented --hash
+    # continuation lines. The parser must fold them, not drop every pin.
+    lock = (
+        "alpha==1.4 \\\n    --hash=sha256:aaaa \\\n    --hash=sha256:bbbb\n"
+        "beta==2.9 \\\n    --hash=sha256:cccc\n"
+        "gamma-pkg==0.7\nmodern==1.5\n"
+    )
+    assert _missing_core_deps(_SYNTH_PYPROJECT, lock) == []
+    assert _bound_violations(_SYNTH_PYPROJECT, lock) == []
 
 
 def test_logic_force_include_target_extracted() -> None:
     assert _force_include_target(_SYNTH_PYPROJECT) == "sqllens/requirements.txt"
+    # Fully absent, and a partial table (wheel present, force-include absent)
+    # both resolve to None rather than raising.
     assert _force_include_target("[project]\nname='x'\n") is None
+    partial = '[tool.hatch.build.targets.wheel]\npackages = ["src/x"]\n'
+    assert _force_include_target(partial) is None
 
 
 # --- Integration tests (skip until PR #112 lands the real lockfile) ---------
