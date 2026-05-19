@@ -18,6 +18,8 @@ End-to-end, one invocation:
 
 The command never returns half-applied state. If TOML validation fails the TOML write is reverted and the JSON is left untouched. If the JSON write fails the JSON backup is kept alongside the original file.
 
+`run_install` catches **any** exception from `validate_toml` (a broad `except Exception`, not the former narrow `(ValueError, OSError, ImportError)` tuple) before reverting. The generated TOML embeds the user's `--api-key` / `--db` secret, so a non-`(ValueError/OSError/ImportError)` failure escaping to `cli.py`'s generic backstop would (a) print raw `f"{exc}"` — an unscrubbed leak — and (b) skip the revert, leaving orphaned secret-bearing files. The broad catch reverts in all cases and routes the message through `cli._format_config_error` (lazily imported to keep the `cli → installers` direction acyclic), which fails closed for unknown types, so the `InstallError` cause line cannot echo the secret. The original exception is preserved via `__cause__` for debugging.
+
 ## Why it lives under `installers/`
 
 The CLI surface needed a place that wasn't `sqllens.tools` (reserved for MCP tool wrappers) and wasn't `sqllens.cli` (which should stay a thin Typer parse-and-dispatch layer per [CLAUDE.md](../../../CLAUDE.md) "Code style"). A new package `sqllens.installers` was added with a single module today; future client integrations (Cursor, Windsurf, …) belong there too.

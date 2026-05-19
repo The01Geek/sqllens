@@ -238,10 +238,13 @@ class Config(BaseSettings):
         If ``path`` is given it takes precedence over ``SQLLENS_CONFIG`` and the
         default ``./sqllens.toml`` location.
 
-        Raises ``ValueError`` (with the original ``tomllib.TOMLDecodeError``
-        chained via ``__cause__``) when the resolved TOML begins with a UTF-8
-        BOM — programmatic embedders that ``except TOMLDecodeError:`` need to
-        also catch ``ValueError``.
+        Raises ``ConfigBomError`` — a ``ValueError`` subclass, so ``except
+        ValueError:`` still catches it — when the resolved TOML begins with a
+        UTF-8 BOM. The original ``tomllib.TOMLDecodeError`` is chained via
+        ``__cause__`` at the raise site (an in-process guarantee; like all
+        Python exceptions the cause is not preserved across a pickle /
+        cross-process round-trip). Programmatic embedders that ``except
+        TOMLDecodeError:`` need to also catch ``ValueError``.
         """
         # Stash + restore so a failed load doesn't pollute SQLLENS_CONFIG for any
         # subsequent in-process ``Config.load()`` call (tests, programmatic embedders).
@@ -259,7 +262,7 @@ class Config(BaseSettings):
                 # it's a side effect, not the trigger.)
                 resolved = _resolved_toml_path()
                 if resolved is not None and _has_utf8_bom(resolved):
-                    raise ValueError(_bom_error_message(resolved)) from exc
+                    raise ConfigBomError(resolved) from exc
                 raise
         finally:
             if path is not None:
@@ -320,6 +323,51 @@ BEARER_TOKEN_TOO_SHORT_MESSAGE = (
 JWT_NOT_IMPLEMENTED_MESSAGE = (
     'auth.mode="jwt" is not implemented yet; use "bearer" or "none".'
 )
+
+
+class ConfigBomError(ValueError):
+    """Raised by ``Config.load`` when the resolved TOML begins with a UTF-8 BOM.
+
+    Subclasses ``ValueError`` so existing ``except ValueError`` /
+    ``except (ValueError, OSError, ...)`` callers in ``cli`` and ``installers``
+    keep catching it. It is deliberately **not** a ``tomllib.TOMLDecodeError``
+    subclass, so an embedder that narrowly catches only ``TOMLDecodeError``
+    continues to see the BOM case escape (the documented pre-existing
+    behaviour) — note ``except ValueError`` is a strict superset that also
+    catches every ``TOMLDecodeError``; the two are not disjoint. The dedicated
+    type lets ``cli._format_config_error`` recognise this message as
+    operator-safe without fragile message-string matching.
+
+    The constructor takes the offending ``Path`` and builds the message itself
+    via ``_bom_error_message``, so "an instance's ``str()`` is exactly the
+    BOM remediation text for some path — never a config value" is true by
+    construction for *every* instance, not by the convention that only
+    ``Config.load`` raises it. That is what justifies ``_format_config_error``
+    trusting this type unconditionally.
+    """
+
+    #: The offending TOML path. A stable, read-only public attribute:
+    #: ``__reduce__`` depends on it for pickle round-trips, so treat it as
+    #: part of this type's contract rather than mutating it after construction.
+    path: Path
+
+    def __init__(self, path: Path) -> None:
+        # Normalize so ``__reduce__``'s round-trip is exact even when callers
+        # pass a ``str``-ish path; ``Path(Path(...))`` is idempotent.
+        self.path = Path(path)
+        super().__init__(_bom_error_message(self.path))
+
+    # BaseException.__reduce__ defaults to (type, self.args); self.args is the
+    # built message string, so a default unpickle would call
+    # ConfigBomError(<message-str>) and re-run _bom_error_message on the
+    # message. Round-trip on the Path instead so an unpickled instance is
+    # identical to the original except for the cause chain:
+    # __cause__/__context__ are not pickled —
+    # a CPython-wide exception limitation, not introduced here — so the
+    # chained TOMLDecodeError documented above is an in-process guarantee
+    # only; it does not survive a cross-process (multiprocessing) round-trip.
+    def __reduce__(self) -> tuple[type[ConfigBomError], tuple[Path]]:
+        return (self.__class__, (self.path,))
 
 
 _UTF8_BOM = b"\xef\xbb\xbf"

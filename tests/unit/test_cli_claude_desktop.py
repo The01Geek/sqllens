@@ -691,6 +691,91 @@ class TestRunInstall:
             )
         assert cmd_path.read_text(encoding="utf-8") == original_cmd
 
+    def test_validation_failure_does_not_leak_secret_in_install_error(
+        self,
+        base_options: InstallOptions,
+        fake_config_json: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # #125 wiring test: stubs validate_toml to raise a real pydantic
+        # ValidationError whose input embeds a DSN secret (the shape
+        # Config.load would produce from the generated --db). Verifies
+        # run_install routes the failure through _format_config_error (secret
+        # scrubbed, msg preserved) and still reverts — not the full
+        # generator→Config.load→formatter integration.
+        from pydantic import BaseModel, ValidationError, model_validator
+
+        from sqllens.installers import claude_desktop as installer_mod
+
+        monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
+        secret = "p@ssw0rd-INSTALLER-CANARY"
+
+        class _M(BaseModel):
+            dsn: str
+
+            @model_validator(mode="after")
+            def _reject(self) -> _M:
+                raise ValueError("database.url is malformed")
+
+        def boom(*_: object, **__: object) -> None:
+            try:
+                _M(dsn=f"postgresql://u:{secret}@h/db")
+            except ValidationError as exc:
+                raise exc
+
+        monkeypatch.setattr(installer_mod, "validate_toml", boom)
+        with pytest.raises(InstallError) as excinfo:
+            run_install(
+                base_options,
+                dry_run=False,
+                force=False,
+                platform_name="linux",
+                which=lambda _: "/usr/local/bin/sqllens",
+                now=_fixed_now,
+            )
+        msg = str(excinfo.value)
+        assert "failed validation" in msg
+        assert "database.url is malformed" in msg
+        assert secret not in msg
+
+    def test_validation_failure_unknown_exception_is_suppressed(
+        self,
+        base_options: InstallOptions,
+        fake_config_json: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # An unforeseen NON-(ValueError/OSError/ImportError) exception — here a
+        # RuntimeError — must still be caught (the installer now `except
+        # Exception`s so the secret-bearing generated TOML is always reverted
+        # and the message always scrubbed, instead of escaping to cli.py's raw
+        # f"{exc}" backstop with no revert). Its message is withheld, the class
+        # name appears exactly once, and the generated TOML is reverted.
+        from sqllens.installers import claude_desktop as installer_mod
+
+        monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
+        secret = "sk-ant-INSTALLER-SUPPRESS-CANARY"
+        toml_path = base_options.working_dir / "sqllens.toml"
+
+        def boom(*_: object, **__: object) -> None:
+            raise RuntimeError(f'api_key = "{secret}"')
+
+        monkeypatch.setattr(installer_mod, "validate_toml", boom)
+        with pytest.raises(InstallError) as excinfo:
+            run_install(
+                base_options,
+                dry_run=False,
+                force=False,
+                platform_name="linux",
+                which=lambda _: "/usr/local/bin/sqllens",
+                now=_fixed_now,
+            )
+        msg = str(excinfo.value)
+        assert "failed validation" in msg
+        assert secret not in msg
+        assert msg.count("RuntimeError") == 1
+        # Broadened catch must still revert the secret-bearing generated TOML.
+        assert not toml_path.exists()
+
     def test_cmd_conflict_reverts_toml(
         self,
         base_options: InstallOptions,
