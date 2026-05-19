@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
+from sqllens.agent.capabilities.agent_memory import AgentMemory
 from sqllens.agent.components.rich.data.dataframe import DataFrameComponent
 from sqllens.agent.components.rich.feedback.status_card import StatusCardComponent
 from sqllens.agent.components.rich.text import RichTextComponent
@@ -53,12 +54,63 @@ def make_dataframe(
     return UiComponent(rich_component=DataFrameComponent(rows=rows, columns=columns))
 
 
+class StubAgentMemory(AgentMemory):
+    """Minimal ``AgentMemory`` recording the boot-time warm touch.
+
+    ``prime_agent`` builds a real ``ToolContext`` (pydantic-validated:
+    ``agent_memory`` must be an ``AgentMemory`` instance) and calls
+    ``agent.agent_memory.get_recent_memories(...)`` to force the otherwise-
+    lazy ChromaDB open + ~80 MB embedding-model download at server boot.
+    Subclassing the real ABC keeps that ``ToolContext`` construction valid
+    while substituting the Chroma backend (which would download the model).
+    Tests assert the touch happened (or made it raise) via
+    ``get_recent_memories_calls`` / ``raise_exc``. Every other abstract
+    method raises ``NotImplementedError`` — the warm path uses only
+    ``get_recent_memories``, so an unexpected call is a loud test bug.
+    """
+
+    def __init__(self, *, raise_exc: BaseException | None = None) -> None:
+        self._raise_exc = raise_exc
+        self.get_recent_memories_calls: list[tuple[Any, int]] = []
+
+    async def get_recent_memories(self, context: Any, limit: int = 10) -> list[Any]:
+        self.get_recent_memories_calls.append((context, limit))
+        if self._raise_exc is not None:
+            raise self._raise_exc
+        return []
+
+    async def save_tool_usage(self, *args: Any, **kwargs: Any) -> None:
+        raise NotImplementedError("StubAgentMemory: warm path only")
+
+    async def save_text_memory(self, *args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError("StubAgentMemory: warm path only")
+
+    async def search_similar_usage(self, *args: Any, **kwargs: Any) -> list[Any]:
+        raise NotImplementedError("StubAgentMemory: warm path only")
+
+    async def search_text_memories(self, *args: Any, **kwargs: Any) -> list[Any]:
+        raise NotImplementedError("StubAgentMemory: warm path only")
+
+    async def get_recent_text_memories(self, *args: Any, **kwargs: Any) -> list[Any]:
+        raise NotImplementedError("StubAgentMemory: warm path only")
+
+    async def delete_by_id(self, *args: Any, **kwargs: Any) -> bool:
+        raise NotImplementedError("StubAgentMemory: warm path only")
+
+    async def delete_text_memory(self, *args: Any, **kwargs: Any) -> bool:
+        raise NotImplementedError("StubAgentMemory: warm path only")
+
+    async def clear_memories(self, *args: Any, **kwargs: Any) -> int:
+        raise NotImplementedError("StubAgentMemory: warm path only")
+
+
 class StubAgent:
     """Agent-shaped stub whose ``send_message`` yields a configurable stream.
 
-    The implementation under test only touches ``agent.send_message(...)`` and
-    iterates the resulting async generator, so this stub mirrors that surface
-    without depending on any agent internals.
+    The implementation under test touches ``agent.send_message(...)`` (request
+    path) and ``agent.agent_memory.get_recent_memories(...)`` (the boot-time
+    warm step in ``prime_agent``), so this stub mirrors both surfaces without
+    depending on any agent internals.
 
     ``cleanup_ran`` flips True whenever the generator's frame unwinds — via
     natural exhaustion, an exception raised inside the body, or an explicit
@@ -76,11 +128,13 @@ class StubAgent:
         components: Iterable[UiComponent] | None = None,
         *,
         raise_exc: BaseException | None = None,
+        memory_raise_exc: BaseException | None = None,
     ) -> None:
         self._components = list(components or [])
         self._raise_exc = raise_exc
         self.send_message_calls: list[tuple[Any, str, str | None]] = []
         self.cleanup_ran: bool = False
+        self.agent_memory = StubAgentMemory(raise_exc=memory_raise_exc)
 
     # NOTE: regular `def`, not `async def`. Mirrors the real
     # ``Agent.send_message`` shape — an async-generator function callable

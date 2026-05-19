@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from sqllens.agent import Agent, RequestContext
+from sqllens.agent import Agent, RequestContext, ToolContext, User
 from sqllens.agent.factory import build_agent
 from sqllens.config import Config
 from sqllens.safety import UnsafeSqlError
@@ -46,8 +46,12 @@ _SQL_EXECUTION_ERROR_PREFIX = "SQL execution error: "
 # atomically: the cfg-mismatch warning's correctness depends on the two never
 # disagreeing, so they cannot be separate globals that a future edit (or a
 # half-completed assignment) could let drift apart. ``_AGENT_LOCK`` serializes
-# the cold start so ``build_agent`` (an ~80 MB embedding-model download) runs
-# exactly once under concurrent HTTP load.
+# the cold start so the agent object graph is wired exactly once under
+# concurrent HTTP load. Note ``build_agent`` itself only constructs objects:
+# ``ChromaAgentMemory.__init__`` does no I/O, so the ChromaDB open and the
+# ~80 MB embedding-model download are *not* triggered here — they fire lazily
+# the first time a memory method touches the collection (see ``_warm_memory``,
+# which forces that materialization eagerly at server boot).
 _AGENT_STATE: tuple[Agent, Config] | None = None
 _AGENT_LOCK = asyncio.Lock()
 
@@ -83,6 +87,56 @@ async def _agent_for(cfg: Config) -> Agent:
             "config. Run a separate server instance per database."
         )
     return agent
+
+
+# Constants for the boot-time memory warm touch. ``get_recent_memories`` is a
+# read-only call whose ChromaDB result is discarded; its sole purpose is to
+# force ``_get_collection()`` → ``_get_embedding_function()`` so the ChromaDB
+# open and the ~80 MB ``DefaultEmbeddingFunction`` model download happen at
+# server boot rather than on the first ``query_database`` call. The vendored
+# Chroma impl ignores ``context``, but a valid ``ToolContext`` is still built
+# so the public contract is honored and any future memory backend behaves.
+_WARMUP_USER_ID = "sqllens-warmup"
+
+
+async def _warm_memory(agent: Agent) -> None:
+    """Force the agent's vector memory to materialize (eager cold-start).
+
+    Calls one read-only memory method so ``ChromaAgentMemory`` opens its
+    persistent client and instantiates the default embedding function (the
+    ~80 MB model download). Without this, ``build_agent`` only wires objects
+    and the download still lands on the first query. The returned memories are
+    discarded — only the side effect (collection + embedding model resident)
+    matters. Propagates any failure to the caller.
+    """
+    warmup_user = User(id=_WARMUP_USER_ID, group_memberships=[])
+    context = ToolContext(
+        user=warmup_user,
+        conversation_id="warmup",
+        request_id="warmup",
+        agent_memory=agent.agent_memory,
+    )
+    await agent.agent_memory.get_recent_memories(context, limit=1)
+
+
+async def prime_agent(cfg: Config) -> None:
+    """Eagerly build, cache, and warm the process-wide agent.
+
+    Delegates to ``_agent_for`` so the agent built at server startup *is* the
+    same ``_AGENT_STATE`` singleton the request path serves — the object graph
+    is constructed once, not once per consumer. Then runs ``_warm_memory`` to
+    force the otherwise-lazy ChromaDB open and ~80 MB embedding-model download
+    so that cold-start cost is paid at boot instead of on the first
+    ``query_database`` call (the substantive goal of issue #116).
+
+    Propagates any build *or* warm failure to the caller (which decides
+    whether a failed warmup should block startup); ``_agent_for``'s own retry
+    contract is unchanged — a failed warm leaves ``_AGENT_STATE`` populated
+    (the agent built fine; only the memory touch failed), so the request path
+    still functions and simply re-attempts the lazy materialization itself.
+    """
+    agent = await _agent_for(cfg)
+    await _warm_memory(agent)
 
 
 async def query_database_impl(cfg: Config, question: str) -> str:
