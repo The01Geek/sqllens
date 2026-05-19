@@ -13,10 +13,16 @@ name: Request Review on Ready
 # *current* HEAD (not the possibly-stale SHA the old check was attached to).
 #
 # Trigger policy (see docs/internal/workflows/review-rerun-checks-plan.md §0):
-# the review auto-triggers EXACTLY ONCE per PR — the first ready_for_review.
-# There is no `synchronize` trigger, so new commits never auto-review. Repeat
-# draft→ready toggles are blocked by the first-ready gate in precheck. After
-# the first run the only re-review paths are the check's Re-run button or an
+# the FIRST review auto-triggers EXACTLY ONCE per PR — the first
+# ready_for_review (repeat draft→ready toggles are blocked by the
+# first-ready gate in precheck). Because `Devflow Review` is a REQUIRED
+# status check, a `synchronize` trigger also re-reviews a NEW HEAD — but
+# ONLY when that HEAD has no already-passing `Devflow Review` check (the
+# cost guard), the PR is not a draft, and the actor-dedupe canonical
+# variant is running. This closes the deadlock where a commit pushed
+# after the one-shot review left the new HEAD with no check and the
+# required context blocked the PR forever. The remaining manual
+# re-review paths are unchanged: the check's Re-run button or an
 # `@claude run /devflow:review` comment.
 
 on:
@@ -207,6 +213,11 @@ jobs:
           # `Devflow Review` check (cost guard) and the PR is not a draft.
           # Same actor dedupe as the ready path so the review runs exactly
           # once across the pull_request / pull_request_target pair.
+          # NOTE: $CR_ACTION is `github.event.action` (the env var is shared
+          # with the check_run path's `CR_`-prefixed naming, not check_run-
+          # specific); for the pull_request variants it equals
+          # "synchronize" / "ready_for_review". Do not "fix" it to a
+          # check_run-only reading.
           if [ "$CR_ACTION" = "synchronize" ]; then
             if [ "$DEDUPE_OK" != "true" ]; then
               echo "::notice::Non-canonical synchronize variant for actor; deferring to the other variant."
