@@ -14,7 +14,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from mcp.types import CallToolResult
 
+import sqllens.server as server_module
 from sqllens.server import build_server
 
 from ._config_builders import build_test_config
@@ -22,6 +24,16 @@ from ._config_builders import build_test_config
 pytestmark = pytest.mark.asyncio
 
 _WIDGET_URI = "ui://sqllens/query-results.html"
+
+
+def _query_database_fn(mcp):
+    """The raw async closure FastMCP registered, before result conversion.
+
+    Calling it directly is the only way to assert the str-vs-CallToolResult
+    branch and the exact ``_meta`` key — FastMCP.call_tool converts the return
+    into content blocks and drops the structured wrapper.
+    """
+    return mcp._tool_manager.get_tool("query_database").fn
 
 
 async def test_widget_resource_registered(tmp_path: Path) -> None:
@@ -59,3 +71,39 @@ async def test_widget_resource_serves_html(tmp_path: Path) -> None:
     body = "".join(c.content for c in contents)
     assert "<!doctype html>" in body.lower()
     assert "app-with-deps.js" in body
+
+
+async def test_query_database_returns_calltoolresult_with_meta_when_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+
+    payload = {"columns": ["a"], "rows": [["1"]], "column_types": {},
+               "row_count": 1, "truncated": 0}
+
+    async def fake_impl(_cfg, _q):
+        return "| a |\n|---|\n| 1 |", payload
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_table", fake_impl)
+
+    result = await _query_database_fn(mcp)("rows?")
+    assert isinstance(result, CallToolResult)
+    assert result.meta == {"sqllens/table": payload}
+    assert result.content[0].text == "| a |\n|---|\n| 1 |"
+
+
+async def test_query_database_returns_plain_str_when_no_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+
+    async def fake_impl(_cfg, _q):
+        return "just text", None
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_table", fake_impl)
+
+    result = await _query_database_fn(mcp)("question?")
+    assert result == "just text"
+    assert not isinstance(result, CallToolResult)

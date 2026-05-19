@@ -9,8 +9,8 @@
   served from the same MCP server origin. No fonts, no analytics, no CDN, no
   remote XHR/fetch. The host renders this in a sandboxed iframe and pushes the
   tool's CallToolResult via the MCP Apps postMessage channel; the structured
-  table lives under result._meta["sqllens/table"]. If that key is absent the
-  widget shows a short notice (non-apps data never reaches here).
+  table lives under result._meta["sqllens/table"]. If that key is absent or
+  malformed the widget renders an empty-state notice.
 -->
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Query results</title>
@@ -261,18 +261,31 @@ function ingest(result) {
   render();
 }
 
+function showNotice(text) {
+  root.textContent = "";
+  const d = document.createElement("div");
+  d.className = "empty";
+  d.textContent = text;
+  root.appendChild(d);
+}
+
 const app = new App({ name: "sqllens-query-results", version: "1.0.0" }, {});
-app.ontoolresult = (params) => ingest(params);
+app.ontoolresult = (params) => {
+  // Without this boundary a malformed payload throws into the SDK's message
+  // dispatcher and the widget freezes on "Waiting for results…" with no
+  // signal that data arrived but failed to render.
+  try {
+    ingest(params);
+  } catch (err) {
+    showNotice("Could not render results: " + (err && err.message ? err.message : err));
+  }
+};
 app.onhostcontextchanged = () => applyHostContext(app.getHostContext());
 
 app.connect().then(() => {
   applyHostContext(app.getHostContext());
 }).catch((err) => {
-  root.textContent = "";
-  const d = document.createElement("div");
-  d.className = "empty";
-  d.textContent = "Failed to connect to host: " + (err && err.message ? err.message : err);
-  root.appendChild(d);
+  showNotice("Failed to connect to host: " + (err && err.message ? err.message : err));
 });
 </script>
 </body>

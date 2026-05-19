@@ -302,6 +302,20 @@ def test_table_header_only_over_budget_returns_none() -> None:
     assert payload is None
 
 
+def test_table_header_fits_but_no_row_fits_returns_empty_payload() -> None:
+    # Distinct from header-only-over-budget: the header fits, but the single
+    # row alone busts the budget, so the binary search settles at zero rows.
+    # The payload is non-None (the widget can still show "0 of N, N truncated").
+    huge_cell = "x" * (_MAX_TABLE_PAYLOAD_BYTES + 50)
+    df = DataFrameComponent(rows=[{"c": huge_cell}], columns=["c"])
+    _, is_error, payload = components_to_table([_ui(df)])
+    assert is_error is False
+    assert payload is not None
+    assert payload["rows"] == []
+    assert payload["row_count"] == 0
+    assert payload["truncated"] == 1
+
+
 def test_table_present_but_empty_dataframe_returns_none() -> None:
     stream = [_ui(DataFrameComponent(rows=[], columns=[]))]
     markdown, is_error, payload = components_to_table(stream)

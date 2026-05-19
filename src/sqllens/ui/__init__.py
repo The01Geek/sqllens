@@ -11,8 +11,30 @@ apps-aware host renders in a sandboxed iframe.
 
 from __future__ import annotations
 
+import logging
 from functools import cache
 from importlib.resources import files
+
+logger = logging.getLogger("sqllens.ui")
+
+
+def _read_widget_html() -> str:
+    try:
+        return files("sqllens.ui").joinpath("query_results.html").read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError, UnicodeDecodeError, ModuleNotFoundError) as e:
+        # A missing asset means the wheel's hatch include globs dropped it (a
+        # documented packaging-regression class in CLAUDE.md). Surface an
+        # actionable message instead of FastMCP's generic resource error, and
+        # log server-side so "the widget never renders" is debuggable.
+        logger.error(
+            "query_database widget asset (query_results.html) could not be "
+            "loaded; the installed wheel is likely missing it — apps-aware "
+            "hosts will not render results."
+        )
+        raise RuntimeError(
+            "query_database result widget asset is unavailable; "
+            "reinstall sqllens or check the wheel packaging"
+        ) from e
 
 
 @cache
@@ -20,6 +42,9 @@ def load_widget_html() -> str:
     """Return the ``query_results.html`` widget source as text.
 
     Cached: the asset is immutable in an installed wheel, so a process reads it
-    from disk once instead of on every ``ui://`` resource fetch.
+    from disk once instead of on every ``ui://`` resource fetch. A read failure
+    raises (and is *not* memoized — ``@cache`` only stores the successful
+    return), so a transient/packaging fault re-attempts on the next fetch
+    rather than poison-caching the exception.
     """
-    return files("sqllens.ui").joinpath("query_results.html").read_text(encoding="utf-8")
+    return _read_widget_html()

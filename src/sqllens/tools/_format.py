@@ -87,16 +87,17 @@ def components_to_markdown(components: Iterable[UiComponent]) -> tuple[str, bool
     """Collapse a stream of components into ``(markdown, is_error)``.
 
     Thin wrapper over :func:`components_to_table` that drops the structured
-    table; preserved as the byte-identical contract every non-apps host sees.
+    table; returns the same ``(markdown, is_error)`` pair non-apps hosts
+    already depend on (the Markdown branch is unchanged — pinned by
+    ``tests/unit/test_format.py``).
     """
     markdown, is_error, _ = components_to_table(components)
     return markdown, is_error
 
 
 def _coerce_cell(value: object) -> str:
-    # Single source of cell coercion: both the widget payload and the Markdown
-    # table route through this so they cannot drift (None->"None",
-    # Decimal("1.50")->"1.50", datetime->"2026-01-02 03:04:05").
+    # Coercion contract shared by the widget payload and the Markdown table
+    # (None->"None", Decimal("1.50")->"1.50", datetime->"2026-01-02 03:04:05").
     return str(value)
 
 
@@ -113,11 +114,18 @@ def _build_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     if not columns and not rows:
         return None
 
-    column_types = dict(getattr(rich, "column_types", {}) or {})
+    # Stringify column labels and column_types too, not just cells: a non-str
+    # label or type value would make json.dumps raise inside _serialized_len,
+    # and that escapes *after* query_database_impl_with_table's except blocks,
+    # bypassing the sanitized error taxonomy. Coerce so the only failure modes
+    # are the three documented categories.
+    str_columns = [_coerce_cell(c) for c in columns]
+    raw_types = getattr(rich, "column_types", {}) or {}
+    column_types = {_coerce_cell(k): _coerce_cell(v) for k, v in dict(raw_types).items()}
     coerced_rows = [[_coerce_cell(row.get(c, "")) for c in columns] for row in rows]
 
     payload: dict = {
-        "columns": columns,
+        "columns": str_columns,
         "rows": coerced_rows,
         "column_types": column_types,
         "row_count": len(coerced_rows),
@@ -127,9 +135,9 @@ def _build_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     if _serialized_len(payload) <= _MAX_TABLE_PAYLOAD_BYTES:
         return payload
 
-    # Over budget: keep the largest prefix of rows that fits. Binary-search the
-    # row count so an oversized result costs O(log n) serializations rather
-    # than O(n). ``truncated`` reports how many tail rows were dropped.
+    # Over budget: keep the largest *contiguous prefix* of rows that fits, so
+    # the widget's row_count + truncated == total invariant holds. ``truncated``
+    # reports how many tail rows were dropped.
     total = len(coerced_rows)
     payload["rows"] = []
     if _serialized_len(payload) > _MAX_TABLE_PAYLOAD_BYTES:
@@ -152,6 +160,9 @@ def _build_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
 
 
 def _serialized_len(payload: dict) -> int:
+    # json.dumps defaults to ensure_ascii=True, so the result is pure ASCII and
+    # len(str) == the serialized byte size the host actually receives — non-ASCII
+    # cells escape to \uXXXX rather than inflating bytes past this measure.
     return len(json.dumps(payload, separators=(",", ":")))
 
 
