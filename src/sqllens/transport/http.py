@@ -122,6 +122,11 @@ def _allowed_hosts(cfg: Config) -> list[str]:
     ``Host``, so the allowlist becomes ``["*"]``. Otherwise the allowlist is
     the concrete configured host plus the loopback names, deduped (preserving
     order) so a host already equal to ``127.0.0.1`` doesn't appear twice.
+
+    Assumes ``cfg.server.host`` is a bare host with no embedded port:
+    ``TrustedHostMiddleware`` strips the port from the inbound ``Host``
+    header before matching but NOT from the allowlist entries, so an entry
+    like ``example.com:8443`` would never match a port-stripped header.
     """
     if cfg.server.host in ("0.0.0.0", "::"):
         return ["*"]
@@ -138,6 +143,11 @@ def _warn_if_plaintext_credentials(cfg: Config) -> None:
     This is advisory only — it does not refuse to start (the
     unauthenticated-non-loopback *refusal* lives in ``cli.py`` and is out of
     scope here). No warning for ``auth.mode == "none"`` or a loopback host.
+
+    ``jwt`` is included for forward-compatibility with the Phase-4 scaffold:
+    a validated ``Config`` cannot currently carry ``mode == "jwt"`` (the
+    ``AuthConfig`` validator rejects it at load), so in practice this warning
+    fires only for ``bearer`` today.
     """
     if cfg.auth.mode in ("bearer", "jwt") and not _is_loopback_host(cfg.server.host):
         logger.warning(
@@ -401,7 +411,11 @@ class _SessionManagerLifespan:
                     # pre-request) so no lock is needed. Kept inside the
                     # existing try on purpose: a build_agent failure must
                     # surface as lifespan.startup.failed via the handling
-                    # below, never be swallowed.
+                    # below, never be swallowed. NB: if this raises, the
+                    # session-manager CM has *already* been entered (line
+                    # above), so the except branches drop an entered CM
+                    # without __aexit__ — acceptable because the host aborts
+                    # the process on startup.failed, reclaiming it.
                     build_agent(self._cfg)
                     self._readiness.ready = True
                 except Exception as exc:

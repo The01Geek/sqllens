@@ -1142,3 +1142,79 @@ def test_healthz_not_gated_on_readiness() -> None:
     start = next(m for m in sent if m["type"] == "http.response.start")
     assert start["status"] == 200
     assert _body_of(sent) == b'{"status":"ok"}'
+
+
+# ───── O-5: eager build_agent through the REAL lifespan writer (not the
+# _PathNormalizer reader) — pins the warmup→readiness contract end-to-end ─────
+
+
+def test_eager_build_agent_success_flips_readiness_via_writer() -> None:
+    """A clean lifespan startup must flip the shared ``_Readiness`` to True
+    *through the real ``_SessionManagerLifespan`` writer* (not a hand-set
+    flag), after the eager ``build_agent`` returns, and ack
+    ``lifespan.startup.complete``.
+
+    The other ``/readyz`` tests drive ``_PathNormalizer`` with a hand-toggled
+    flag — they pin the reader. This pins the writer half of the contract:
+    a regression that set ``ready`` before ``build_agent`` (defeating the
+    warmup gate) or never set it would be caught here. ``build_agent`` is the
+    autouse-stubbed ``lambda cfg: object()`` — success path.
+    """
+    sm = _FakeSessionManager()
+    readiness = _Readiness()
+    adapter = _SessionManagerLifespan(_noop_inner, sm, object(), readiness)  # type: ignore[arg-type]
+    assert readiness.ready is False
+
+    receive, send, sent = _make_io(
+        [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
+    )
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    assert [m["type"] for m in sent] == [
+        "lifespan.startup.complete",
+        "lifespan.shutdown.complete",
+    ]
+    assert readiness.ready is True
+    assert adapter._started is True
+
+
+def test_eager_build_agent_failure_surfaces_startup_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the eager ``build_agent`` raises, the existing broad startup handler
+    must surface ``lifespan.startup.failed`` (not swallow it, not ack
+    ``complete``), and ``_Readiness`` must stay False so ``/readyz`` keeps
+    answering 503.
+
+    Distinct from ``test_lifespan_startup_failure_sends_failed_not_complete``:
+    that injects the failure at the session-manager ``__aenter__`` (before the
+    eager-warmup line). This injects it at the *new* ``build_agent`` call —
+    which sits AFTER a successful ``__aenter__`` — so it pins that the new
+    path is inside the existing ``try`` and routes through the same
+    ``except Exception`` finalization. Overrides the autouse stub with a
+    raiser.
+    """
+    monkeypatch.setattr(
+        "sqllens.transport.http.build_agent",
+        lambda cfg: (_ for _ in ()).throw(RuntimeError("warmup-boom")),
+    )
+    sm = _FakeSessionManager()
+    readiness = _Readiness()
+    adapter = _SessionManagerLifespan(_noop_inner, sm, object(), readiness)  # type: ignore[arg-type]
+
+    receive, send, sent = _make_io([{"type": "lifespan.startup"}])
+    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    assert "lifespan.startup.complete" not in [m["type"] for m in sent]
+    assert sent[-1]["type"] == "lifespan.startup.failed"
+    assert "RuntimeError" in sent[-1]["message"]
+    assert "warmup-boom" in sent[-1]["message"]
+    # Readiness never flipped — /readyz stays 503 on a failed warmup.
+    assert readiness.ready is False
+    # __aenter__ ran (warmup is after it); __aexit__ did not (entered CM is
+    # dropped, finalized; the host aborts on startup.failed).
+    assert sm.aenter_calls == 1
+    assert sm.aexit_calls == 0
+    assert adapter._cm is None
+    assert adapter._started is False
+    assert adapter._shutdown_done is True

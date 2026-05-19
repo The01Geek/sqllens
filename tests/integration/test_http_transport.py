@@ -246,9 +246,11 @@ class TestTrustedHost:
 
     async def test_non_loopback_host_header_rejected(self, make_server) -> None:
         """CLAUDE.md gotcha #4: a non-loopback ``Host`` is rejected. Post-S-8
-        the rejection is ``TrustedHostMiddleware``'s 400 (it now fronts
-        FastMCP, so FastMCP's own 421 ``Misdirected Request`` is no longer the
-        first gate). Asserting the documented *rejection*, accepting either.
+        the rejection is deterministically ``TrustedHostMiddleware``'s 400 —
+        it now fronts FastMCP, so FastMCP's own 421 ``Misdirected Request``
+        is no longer reachable for this input. Asserting the exact 400 makes
+        this test catch an S-8 regression (a reverted TrustedHost would let
+        FastMCP's 421 resurface and a loose ``in (400, 421)`` would miss it).
         """
         handle = make_server(AuthConfig(mode="none"))
         async with httpx.AsyncClient() as client:
@@ -260,7 +262,7 @@ class TestTrustedHost:
                     "Accept": "application/json, text/event-stream",
                 },
             )
-        assert r.status_code in (400, 421)
+        assert r.status_code == 400
 
     async def test_probe_with_allowed_host_still_200(self, make_server) -> None:
         """Regression for the S-8 ordering gotcha: an allowed-Host probe must
