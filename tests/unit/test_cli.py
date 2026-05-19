@@ -1040,6 +1040,40 @@ def test_configbomerror_type_contract() -> None:
     assert not issubclass(ConfigBomError, tomllib.TOMLDecodeError)
 
 
+def test_configbomerror_pickle_round_trip() -> None:
+    # ConfigBomError defines a custom __reduce__ specifically because the
+    # default BaseException.__reduce__ would feed the *built message string*
+    # back into the Path-expecting constructor on unpickle, corrupting
+    # `.path` and re-running _bom_error_message on the message. This pins
+    # that the (type, (path,)) reduction survives pickle/deepcopy: a
+    # regression that drops or reverts __reduce__ fails here instead of
+    # silently corrupting cross-process (multiprocessing) round-trips.
+    import copy
+    import pickle
+    from pathlib import Path
+
+    from sqllens.config import ConfigBomError
+
+    original = ConfigBomError(Path("/x/sqllens.toml"))
+
+    restored = pickle.loads(pickle.dumps(original))
+    assert isinstance(restored, ConfigBomError)
+    assert isinstance(restored, ValueError)
+    assert restored.path == original.path
+    assert isinstance(restored.path, Path)
+    assert str(restored) == str(original)
+
+    deep = copy.deepcopy(original)
+    assert isinstance(deep, ConfigBomError)
+    assert deep.path == original.path
+    assert str(deep) == str(original)
+
+    # str-ish path is normalized to Path so the round-trip stays exact.
+    from_str = ConfigBomError(Path("/y/sqllens.toml"))
+    assert isinstance(from_str.path, Path)
+    assert str(pickle.loads(pickle.dumps(from_str))) == str(from_str)
+
+
 def test_format_config_error_passes_through_bom_error() -> None:
     # ConfigBomError builds its own message from the Path via
     # _bom_error_message, so the operator-safe content (path + rewrite

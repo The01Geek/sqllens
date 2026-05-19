@@ -346,15 +346,23 @@ class ConfigBomError(ValueError):
     trusting this type unconditionally.
     """
 
+    #: The offending TOML path. A stable, read-only public attribute:
+    #: ``__reduce__`` depends on it for pickle round-trips, so treat it as
+    #: part of this type's contract rather than mutating it after construction.
+    path: Path
+
     def __init__(self, path: Path) -> None:
-        self.path = path
-        super().__init__(_bom_error_message(path))
+        # Normalize so ``__reduce__``'s round-trip is exact even when callers
+        # pass a ``str``-ish path; ``Path(Path(...))`` is idempotent.
+        self.path = Path(path)
+        super().__init__(_bom_error_message(self.path))
 
     # BaseException.__reduce__ defaults to (type, self.args); self.args is the
     # built message string, so a default unpickle would call
     # ConfigBomError(<message-str>) and re-run _bom_error_message on the
     # message. Round-trip on the Path instead so an unpickled instance is
-    # identical to the original. NB: __cause__/__context__ are not pickled —
+    # identical to the original except for the cause chain:
+    # __cause__/__context__ are not pickled —
     # a CPython-wide exception limitation, not introduced here — so the
     # chained TOMLDecodeError documented above is an in-process guarantee
     # only; it does not survive a cross-process (multiprocessing) round-trip.

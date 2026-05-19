@@ -44,16 +44,25 @@ err_console = Console(stderr=True)
 #                           construction: a file path + rewrite commands only.
 # - ``tomllib.TOMLDecodeError`` — CPython's parser emits a line/column
 #                           coordinate only; it never interpolates the
-#                           offending source line (verified on 3.11 to 3.13).
+#                           offending source line. This invariant is the
+#                           enforcement point of
+#                           ``test_real_tomldecodeerror_with_secret_scrubbed``
+#                           and must be re-checked on any supported-CPython
+#                           bump rather than assumed for an unbounded range.
 # - ``SettingsError``     — pydantic-settings' env/secrets/TOML parse failures
 #                           name the *field* and *source* only and chain the
 #                           underlying value-bearing error via ``__cause__``;
 #                           the ``SettingsError`` message itself omits the
-#                           value by design. It is also the type a future
-#                           pydantic-settings would wrap a ``TOMLDecodeError``
-#                           in, so allowlisting it covers that case without a
+#                           value by design. It would also be the wrapper type
+#                           if a future pydantic-settings re-raised a
+#                           ``TOMLDecodeError`` through it, so allowlisting it
+#                           is expected to cover that case without a
 #                           cause-chain walk (see _format_config_error's
-#                           docstring for why the chain is not trusted).
+#                           docstring for why the chain is not trusted) —
+#                           but this rests on observed behaviour pinned by
+#                           ``test_real_settingserror_with_secret_scrubbed``,
+#                           which gates any pydantic-settings bump, not on a
+#                           documented forward-compat contract.
 # - ``OSError`` / ``ImportError`` — filesystem errors from ``Config.load``
 #                           carry errno + path; import errors carry a module
 #                           name. Neither carries a config value.
