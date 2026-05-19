@@ -22,10 +22,11 @@ def _read_widget_html() -> str:
     try:
         return files("sqllens.ui").joinpath("query_results.html").read_text(encoding="utf-8")
     except (FileNotFoundError, OSError, UnicodeDecodeError, ModuleNotFoundError) as e:
-        # A missing asset means the wheel's hatch include globs dropped it (a
-        # documented packaging-regression class in CLAUDE.md). Surface an
-        # actionable message instead of FastMCP's generic resource error, and
-        # log server-side so "the widget never renders" is debuggable.
+        # A missing asset almost always means the wheel's hatch include globs
+        # (see pyproject.toml [tool.hatch.build.targets.wheel].include) dropped
+        # it. Surface an actionable message instead of FastMCP's generic
+        # resource error, and log server-side so "the widget never renders" is
+        # debuggable.
         logger.error(
             "query_database widget asset (query_results.html) could not be "
             "loaded; the installed wheel is likely missing it — apps-aware "

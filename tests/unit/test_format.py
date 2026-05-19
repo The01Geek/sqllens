@@ -79,8 +79,9 @@ def test_empty_stream_returns_no_answer() -> None:
 
 def test_error_status_card_with_empty_description_uses_fallback_message() -> None:
     # Pins the user-visible message when an upstream agent emits an error
-    # status_card without a description. _format.py line 53 falls back to
-    # "Agent reported an error" — a typo there would ship silently otherwise.
+    # status_card without a description. components_to_table's error branch
+    # falls back to "Agent reported an error" — a typo there would ship
+    # silently otherwise.
     stream = [
         _ui(StatusCardComponent(title="Query failed", status="error", description=None)),
     ]
@@ -90,10 +91,10 @@ def test_error_status_card_with_empty_description_uses_fallback_message() -> Non
 
 
 def test_whitespace_only_text_does_not_clobber_real_answer() -> None:
-    # Pins the .strip() guard in _format.py line 44-46: trailing empty/whitespace
-    # TEXT components must not overwrite an earlier non-empty answer. Dropping
-    # the strip+truthiness check here would silently surface whitespace as the
-    # user-visible MCP response.
+    # Pins the .strip() guard in components_to_table's TEXT branch: trailing
+    # empty/whitespace TEXT components must not overwrite an earlier non-empty
+    # answer. Dropping the strip+truthiness check here would silently surface
+    # whitespace as the user-visible MCP response.
     stream = [
         _ui(RichTextComponent(content="real answer")),
         _ui(RichTextComponent(content="   \n  ")),
@@ -106,7 +107,7 @@ def test_whitespace_only_text_does_not_clobber_real_answer() -> None:
 def test_dataframe_then_text_renders_table_before_summary() -> None:
     # Pins the happy-path shape of an MCP response that mixes a table with a
     # natural-language summary: tables come first, then the answer, separated
-    # by a blank line (_format.py line 58-63 joins parts with "\n\n").
+    # by a blank line (components_to_table joins parts with "\n\n").
     stream = [
         _ui(DataFrameComponent(rows=[{"id": 1, "name": "alpha"}])),
         _ui(RichTextComponent(content="one row returned")),
@@ -239,7 +240,7 @@ def test_table_small_dataframe_exact_payload() -> None:
     }
 
 
-def test_table_column_types_round_trip() -> None:
+def test_table_explicit_column_types_round_trip() -> None:
     df = DataFrameComponent(
         rows=[{"a": 1}],
         columns=["a"],
@@ -248,6 +249,67 @@ def test_table_column_types_round_trip() -> None:
     _, _, payload = components_to_table([_ui(df)])
     assert payload is not None
     assert payload["column_types"] == {"a": "number"}
+
+
+def test_table_column_types_inferred_from_production_from_records() -> None:
+    # Production reality: DataFrameComponent.from_records hard-codes
+    # column_types={} (agent/components/rich/data/dataframe.py). Without
+    # server-side inference in _compute_table_payload the widget would sort
+    # every column lexicographically. This pins that an all-numeric column is
+    # typed "number" while a mixed/string column is left untyped — exactly the
+    # shape the agent emits in practice (issue #120 typed-sort criterion).
+    df = DataFrameComponent.from_records(
+        [
+            {"id": 1, "name": "alpha", "score": "3.5"},
+            {"id": 10, "name": "beta", "score": "12"},
+            {"id": 2, "name": "gamma", "score": "1"},
+        ]
+    )
+    assert df.column_types == {}  # producer really emits no types
+    _, _, payload = components_to_table([_ui(df)])
+    assert payload is not None
+    assert payload["column_types"] == {"id": "number", "score": "number"}
+    assert "name" not in payload["column_types"]
+
+
+def test_table_inference_ignores_null_cells_and_rejects_non_finite() -> None:
+    # A column that is numeric on its real values but has SQL NULLs (coerced to
+    # "None") must still type "number". A column containing inf/NaN must NOT —
+    # the widget right-aligns and numerically sorts on the "number" flag.
+    df = DataFrameComponent.from_records(
+        [
+            {"qty": 5, "ratio": "1.0", "blank": None},
+            {"qty": None, "ratio": "inf", "blank": None},
+            {"qty": 7, "ratio": "2.0", "blank": None},
+        ]
+    )
+    _, _, payload = components_to_table([_ui(df)])
+    assert payload is not None
+    assert payload["column_types"] == {"qty": "number"}
+
+
+def test_table_explicit_column_type_overrides_inference() -> None:
+    # A numeric-looking column the producer explicitly typed "string" (e.g. a
+    # zero-padded ID) must keep the producer's type, not the inferred one.
+    df = DataFrameComponent(
+        rows=[{"zip": "01001"}, {"zip": "02134"}],
+        columns=["zip"],
+        column_types={"zip": "string"},
+    )
+    _, _, payload = components_to_table([_ui(df)])
+    assert payload is not None
+    assert payload["column_types"] == {"zip": "string"}
+
+
+def test_table_non_mapping_column_types_degrades_not_crashes() -> None:
+    # A producer handing back a non-mapping column_types must degrade to
+    # inferred-only types, never nuke the whole widget payload.
+    df = DataFrameComponent.from_records([{"n": 1}, {"n": 2}])
+    object.__setattr__(df, "column_types", ["not", "a", "mapping"])
+    _, is_error, payload = components_to_table([_ui(df)])
+    assert is_error is False
+    assert payload is not None
+    assert payload["column_types"] == {"n": "number"}
 
 
 def test_table_cell_coercion_mirrors_markdown_path() -> None:

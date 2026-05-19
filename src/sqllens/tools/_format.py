@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections.abc import Iterable
 
 from sqllens.agent.core.components import UiComponent
@@ -104,6 +105,64 @@ def _coerce_cell(value: object) -> str:
     return str(value)
 
 
+# Cell strings the widget treats as "no value" — excluded from numeric sniffing
+# so an all-NULL or partially-empty column still types correctly on its real
+# values. Mirrors how `_coerce_cell` stringifies SQL NULLs.
+_EMPTY_CELLS = frozenset({"", "None", "none", "null", "NULL", "NaN", "nan"})
+
+
+def _looks_numeric(text: str) -> bool:
+    # A cell counts as numeric only if it parses to a *finite* float. Bare
+    # "inf"/"nan" parse via float() but must not type a column "number" (the
+    # widget right-aligns and sorts numerically on that flag).
+    try:
+        return math.isfinite(float(text))
+    except (ValueError, OverflowError):
+        return False
+
+
+def _infer_column_types(
+    columns: list[str], coerced_rows: list[list[str]]
+) -> dict[str, str]:
+    # The vendored DataFrameComponent producers never populate `column_types`
+    # (`from_records` hard-codes `{}`), so without this every column would sort
+    # lexicographically in the widget. Sniff each column from its coerced cell
+    # values: a column whose every non-empty cell parses as a finite number is
+    # typed "number"; everything else is left untyped (widget → string sort).
+    inferred: dict[str, str] = {}
+    for ci, col in enumerate(columns):
+        seen_value = False
+        all_numeric = True
+        for row in coerced_rows:
+            cell = row[ci] if ci < len(row) else ""
+            if cell in _EMPTY_CELLS:
+                continue
+            seen_value = True
+            if not _looks_numeric(cell):
+                all_numeric = False
+                break
+        if seen_value and all_numeric:
+            inferred[col] = "number"
+    return inferred
+
+
+def _safe_column_types(rich) -> dict[str, str]:  # type: ignore[no-untyped-def]
+    # Explicit `column_types` is a non-essential hint. A producer handing back a
+    # non-mapping (or one whose items() raises) must degrade to "no explicit
+    # types" — never take down the whole widget payload via the broad handler
+    # in `_build_table_payload`.
+    try:
+        raw_types = getattr(rich, "column_types", {}) or {}
+        return {_coerce_cell(k): _coerce_cell(v) for k, v in dict(raw_types).items()}
+    except Exception:
+        logger.warning(
+            "column_types on DataFrame component was not a usable mapping; "
+            "falling back to inferred types only",
+            exc_info=True,
+        )
+        return {}
+
+
 def _columns_and_rows(rich) -> tuple[list[str], list[dict]]:  # type: ignore[no-untyped-def]
     columns: list[str] = list(getattr(rich, "columns", []) or [])
     rows: list[dict] = list(getattr(rich, "rows", []) or [])
@@ -121,7 +180,15 @@ def _build_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     try:
         return _compute_table_payload(rich)
     except Exception:
-        logger.warning("table payload construction failed; serving Markdown only")
+        n_cols = len(getattr(rich, "columns", []) or [])
+        n_rows = len(getattr(rich, "rows", []) or [])
+        logger.warning(
+            "table payload construction failed; serving Markdown only "
+            "(columns=%d, rows=%d)",
+            n_cols,
+            n_rows,
+            exc_info=True,
+        )
         return None
 
 
@@ -133,11 +200,15 @@ def _compute_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     # Stringify column labels and column_types too, not just cells, so a non-str
     # label or type value cannot make json.dumps raise inside _serialized_len.
     str_columns = [_coerce_cell(c) for c in columns]
-    # column_types must be keyed by the same strings as columns for the widget's
-    # typed sort to engage; a mismatch silently degrades to string sort, never errors.
-    raw_types = getattr(rich, "column_types", {}) or {}
-    column_types = {_coerce_cell(k): _coerce_cell(v) for k, v in dict(raw_types).items()}
     coerced_rows = [[_coerce_cell(row.get(c, "")) for c in columns] for row in rows]
+
+    # column_types must be keyed by the same strings as columns for the widget's
+    # typed sort to engage; a mismatch silently degrades to string sort, never
+    # errors. Production producers (`DataFrameComponent.from_records`) never set
+    # `column_types`, so infer "number" from the data first, then let any
+    # explicit producer-supplied type override the inferred value.
+    column_types = _infer_column_types(str_columns, coerced_rows)
+    column_types.update(_safe_column_types(rich))
 
     payload: dict = {
         "columns": str_columns,
