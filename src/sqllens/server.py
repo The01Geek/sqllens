@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
@@ -31,7 +32,7 @@ _WIDGET_URI = "ui://sqllens/query-results.html"
 _TABLE_META_KEY = "sqllens/table"
 
 
-def _request_metadata(ctx: Context) -> dict:
+def _request_metadata(ctx: Context) -> dict[str, Any]:
     """Extract caller-supplied per-request metadata from the MCP request.
 
     The calling application asserts per-request identity via the MCP request's

@@ -150,13 +150,11 @@ async def query_database_impl_with_table(
         raise RuntimeError(str(e)) from e
     except RlsError as e:
         # Same defensive rationale as the UnsafeSqlError branch above: the
-        # vendored RunSqlTool's broad ``except Exception`` catches an
-        # RlsError inside the SQL tool and feeds it back as a tool result
-        # (surfacing via the is_error path below), so this branch is not
-        # exercised by that pipeline today. Kept because an RLS block is
-        # actionable safety feedback, not an infra leak: if it ever
-        # propagates out of send_message it must reach the client verbatim,
-        # distinct from the sanitized internal-error category below.
+        # vendored RunSqlTool swallows this into a tool result today, so this
+        # branch is not exercised by that pipeline — but an RLS block is
+        # actionable safety feedback, not an infra leak, so if it ever
+        # propagates it must reach the client verbatim, not get collapsed
+        # into the sanitized internal-error category below.
         logger.warning("query rejected by row-level-security guard: %s", e)
         raise RuntimeError(str(e)) from e
     except Exception as e:

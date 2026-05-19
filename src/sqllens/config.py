@@ -423,9 +423,7 @@ class Config(BaseSettings):
     auth: AuthConfig = Field(default_factory=lambda: AuthConfig())
     server: ServerConfig = Field(default_factory=lambda: ServerConfig())
     agent: AgentRuntimeConfig = Field(default_factory=lambda: AgentRuntimeConfig())
-    # Row-level-security predicates injected into every generated query. Empty
-    # by default — RLS is opt-in. Declared as a [[rls]] array-of-tables in
-    # sqllens.toml; per-rule env override uses the SQLLENS_RLS spelling.
+    # Opt-in row-level-security predicates; empty disables the guard entirely.
     rls: list[RlsRule] = Field(default_factory=list)
 
     @classmethod

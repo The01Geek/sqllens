@@ -66,11 +66,11 @@ class RlsError(Exception):
 def _is_suspicious_scalar(value: object) -> bool:
     """True if a resolved dynamic scalar should block the query.
 
-    Only ``str``/``int``/``float``/``bool`` are acceptable scalars. ``bool`` is
-    checked before ``int`` is relevant here only conceptually — every accepted
-    type is fine numerically; the suspicion is entirely about strings carrying
-    control characters or being absurdly long (neither plausible for an
-    identity token, both classic injection-probe shapes).
+    Only ``str``/``int``/``float``/``bool`` are usable as a predicate value;
+    anything else (``None``, dict, bytes, nested list, …) blocks. A string
+    blocks if it is absurdly long or carries control characters — neither is
+    plausible for an identity token and both are classic injection-probe
+    shapes (fail-secure even though the value is built as a literal node).
     """
     if isinstance(value, bool):
         return False
@@ -79,12 +79,7 @@ def _is_suspicious_scalar(value: object) -> bool:
     if isinstance(value, str):
         if len(value) > _MAX_DYNAMIC_STR_LEN:
             return True
-        # Reject C0 control chars and DEL. A NUL or newline in a "tenant id"
-        # is never legitimate and is a canonical injection / log-spoofing
-        # probe; blocking is the fail-secure choice.
         return any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value)
-    # Any other type (None, dict, bytes, nested list, ...) is not a usable
-    # predicate value.
     return True
 
 
