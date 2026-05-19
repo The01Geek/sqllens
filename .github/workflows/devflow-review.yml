@@ -1,10 +1,21 @@
-name: Request Review on Ready
+name: Devflow Review (auto-trigger)
 
-# When a PR transitions from draft to "ready for review" (human or bot), run
-# the /devflow:review skill against it directly via the reusable
-# claude-runner workflow — one workflow run, no @claude run comment artifact.
-# Manual reviews via `@claude run /devflow:review` comments continue to work
-# unchanged through claude.yml.
+# When a PR first becomes reviewable — opened directly as non-draft,
+# reopened non-draft, OR transitioned from draft to "ready for review"
+# (human or bot) — run the /devflow:review skill against it directly via
+# the reusable claude-runner workflow — one workflow run, no @claude run
+# comment artifact. Manual reviews via `@claude run /devflow:review`
+# comments continue to work unchanged through claude.yml.
+#
+# Why `opened`/`reopened` and not just `ready_for_review`: GitHub emits
+# `ready_for_review` ONLY on a draft→ready transition. A PR opened
+# directly as non-draft (the documented `gh pr create --fill` contributor
+# flow in CLAUDE.md, and most human PRs) never emits it — so the FIRST
+# review never triggered, and because `Devflow Review` is a REQUIRED
+# status check with no run, the PR was wedged "expected" forever with no
+# API-accessible trigger (only a manual draft toggle / Re-run rescued it).
+# Listening to `opened`/`reopened` closes that hole; draft-opened PRs are
+# skipped here and still get their review on the later `ready_for_review`.
 #
 # The run also surfaces as a dedicated `Devflow Review` GitHub Check Run on
 # the PR. Clicking that check's per-check **Re-run** button emits a
@@ -12,27 +23,33 @@ name: Request Review on Ready
 # this workflow listens for it and re-executes the review against the PR's
 # *current* HEAD (not the possibly-stale SHA the old check was attached to).
 #
-# Trigger policy (see docs/internal/workflows/review-rerun-checks-plan.md §0):
-# the FIRST review auto-triggers EXACTLY ONCE per PR — the first
-# ready_for_review (repeat draft→ready toggles are blocked by the
-# first-ready gate in precheck). Because `Devflow Review` is a REQUIRED
-# status check, a `synchronize` trigger also re-reviews a NEW HEAD — but
-# ONLY when that HEAD has no already-passing `Devflow Review` check (the
-# cost guard), the PR is not a draft, and the actor-dedupe canonical
-# variant is running. This closes the deadlock where a commit pushed
-# after the one-shot review left the new HEAD with no check and the
-# required context blocked the PR forever. The remaining manual
-# re-review paths are unchanged: the check's Re-run button or an
-# `@claude run /devflow:review` comment.
+# Trigger policy (see docs/internal/workflows/review-rerun-checks.md §0):
+# the FIRST review auto-triggers EXACTLY ONCE per PR — on whichever of
+# {opened non-draft, reopened non-draft, ready_for_review} fires first.
+# Exactly-once is enforced by the first-ready gate in precheck (it skips
+# when a `Devflow Review` check already exists on the PR head or any
+# commit), so a non-draft open followed by a draft→ready toggle still
+# reviews only once. Because `Devflow Review` is a REQUIRED status check,
+# a `synchronize` trigger also re-reviews a NEW HEAD — but ONLY when that
+# HEAD has no already-passing `Devflow Review` check (the cost guard), the
+# PR is not a draft, and the actor-dedupe canonical variant is running.
+# This closes the deadlock where a commit pushed after the one-shot review
+# left the new HEAD with no check and the required context blocked the PR
+# forever. The remaining manual re-review paths are unchanged: the check's
+# Re-run button or an `@claude run /devflow:review` comment.
 
 on:
   pull_request:
-    types: [ready_for_review, synchronize]
-  # Both pull_request and pull_request_target fire for every ready_for_review
-  # event regardless of actor; the precheck job's dedupe step routes each
-  # actor to exactly one variant (bot actors → _target so secrets resolve,
-  # humans → pull_request) so the review job runs once. Actor allowlisting
-  # happens later via project-config.claude.allowed_bots inside the runner.
+    types: [opened, reopened, ready_for_review, synchronize]
+  # Both pull_request and pull_request_target fire for every event regardless
+  # of actor; the precheck job's dedupe step routes each actor to exactly one
+  # variant (bot actors → _target so secrets resolve, humans → pull_request)
+  # so the review job runs once. Actor allowlisting happens later via
+  # project-config.claude.allowed_bots inside the runner. The dedupe action
+  # is action-agnostic (routes purely by actor + event_name), so it needs no
+  # change to cover `opened`/`reopened`. The first-review route below
+  # skips draft-opened PRs (an `opened` event can carry draft=true; a
+  # `ready_for_review` never does — the shared draft guard handles both).
   #
   # `synchronize` (a new commit pushed to an open PR) closes a deadlock:
   # `Devflow Review` is a REQUIRED status check, but the first-ready gate
@@ -45,7 +62,7 @@ on:
   # HEAD has no already-passing `Devflow Review` check (cost guard: a push
   # that someone already reviewed-green is not re-run; drafts are skipped).
   pull_request_target:
-    types: [ready_for_review, synchronize]
+    types: [opened, reopened, ready_for_review, synchronize]
   # Per-check Re-run on the `Devflow Review` check. Delivered to the default
   # branch in a non-PR context (repo secrets resolve like `push`). The
   # precheck `name == 'Devflow Review'` guard is load-bearing: this event
@@ -67,7 +84,7 @@ concurrency:
   # (a second check_run Re-run collapses an in-flight earlier Re-run for the
   # same PR) while isolating the dedupe pair. github.run_id is the last-resort
   # key for events with no resolvable PR (the job no-ops anyway).
-  group: request-review-on-ready-${{ github.event.pull_request.number || github.event.check_run.pull_requests[0].number || github.run_id }}-${{ github.event_name }}
+  group: devflow-review-${{ github.event.pull_request.number || github.event.check_run.pull_requests[0].number || github.run_id }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -95,7 +112,7 @@ jobs:
           CONFIG_JSON: ${{ steps.cfg.outputs.json }}
         run: |
           set -euo pipefail
-          echo "enabled=$(echo "$CONFIG_JSON" | jq -r '.workflows["request-review-on-ready"] // false')" >> "$GITHUB_OUTPUT"
+          echo "enabled=$(echo "$CONFIG_JSON" | jq -r '.workflows["devflow-review"] // false')" >> "$GITHUB_OUTPUT"
           echo "allowed_bots=$(echo "$CONFIG_JSON" | jq -r '.claude.allowed_bots // ""')" >> "$GITHUB_OUTPUT"
       # Runs for all events; its should_run output is consulted on the
       # ready_for_review AND synchronize paths to keep the review exactly
@@ -110,7 +127,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           DEDUPE_OK: ${{ steps.dedupe.outputs.should_run }}
           ALLOWED_BOTS: ${{ steps.extract.outputs.allowed_bots }}
-          # ready_for_review / synchronize path inputs
+          # opened / reopened / ready_for_review / synchronize path inputs
           PR_READY: ${{ github.event.pull_request.number }}
           SHA_READY: ${{ github.event.pull_request.head.sha }}
           PR_DRAFT: ${{ github.event.pull_request.draft }}
@@ -265,9 +282,22 @@ jobs:
             exit 0
           fi
 
-          # --- ready_for_review (pull_request / pull_request_target) path ---
+          # --- first-review path: opened / reopened / ready_for_review ---
+          # (pull_request / pull_request_target). $CR_ACTION is
+          # github.event.action; for these it is "opened" | "reopened" |
+          # "ready_for_review" — all the FIRST-review trigger, gated to
+          # exactly-once by the first-ready check-existence query below.
           if [ "$DEDUPE_OK" != "true" ]; then
             echo "::notice::Non-canonical event variant for actor; deferring to the other variant."
+            exit 0
+          fi
+          # Draft guard: a `ready_for_review` event is never draft, but an
+          # `opened`/`reopened` event can carry draft=true (e.g. the devflow
+          # implement flow opens a draft, works, then marks it ready). Defer
+          # those — the later draft→ready `ready_for_review` reviews them,
+          # so exactly-once still holds. Harmless no-op for ready_for_review.
+          if [ "$PR_DRAFT" = "true" ]; then
+            echo "::notice::PR is draft ($CR_ACTION); deferring first review until it is marked ready."
             exit 0
           fi
           PR="$PR_READY"
@@ -332,7 +362,7 @@ jobs:
           emit should_run true
           emit pr_number "$PR"
           emit head_sha "$HEAD"
-          echo "::notice::First ready_for_review for PR #$PR; auto-triggering Devflow Review at $HEAD."
+          echo "::notice::First reviewable event ($CR_ACTION) for PR #$PR; auto-triggering Devflow Review at $HEAD."
 
   create_check:
     needs: precheck
@@ -389,7 +419,7 @@ jobs:
     uses: ./.github/workflows/claude-runner.yml
     with:
       prompt: |
-        You are running inside the `request-review-on-ready` GitHub
+        You are running inside the `devflow-review` GitHub
         workflow. The PR number is ${{ needs.precheck.outputs.pr_number }}.
 
         **Step 1 — Post the progress comment.** Body MUST start with the
@@ -405,7 +435,7 @@ jobs:
             | **Status** | ⚙️ Setup |
             | **Last updated** | `<UTC ISO-8601>` |
 
-            > 🤖 Posted by `request-review-on-ready`. The formal verdict
+            > 🤖 Posted by `devflow-review`. The formal verdict
             > review will appear separately when complete.
 
         Create with `gh pr comment ${{ needs.precheck.outputs.pr_number }}
@@ -439,7 +469,7 @@ jobs:
             | **Last updated** | `2026-05-15T14:32:08Z` |
             | **Details** | Diff classification: full engine |
 
-            > 🤖 Posted by `request-review-on-ready`. The formal verdict
+            > 🤖 Posted by `devflow-review`. The formal verdict
             > review will appear separately when complete.
 
         Re-discover the comment each phase by marker — do NOT carry the
