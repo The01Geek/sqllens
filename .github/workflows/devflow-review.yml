@@ -579,6 +579,29 @@ jobs:
     secrets: inherit
 
   finalize_check:
+    # `name: Devflow Review` is the load-bearing fix for required-check
+    # recognition. GitHub's required-status-check matcher resolves ruleset
+    # context names to workflow job names; without this `name:` key the
+    # workflow has no job called `Devflow Review`, so the only check-run
+    # carrying that name is the one `create_check` POSTs via `gh api
+    # /check-runs`. On the FIRST push to a new PR that API check-run lands
+    # in a freshly-created check suite that GitHub's matcher does not
+    # immediately link to the ruleset context — `isRequired` stays `false`
+    # even though the check-run exists, so `mergeStateStatus` is BLOCKED
+    # and auto-merge never fires. Pushing an empty commit "fixes" it because
+    # the SECOND encounter of the same context on a new SHA links correctly
+    # — but that's a workaround, not a fix. Naming this job `Devflow Review`
+    # makes the Actions runner emit a workflow-job check-run with that name,
+    # which the matcher recognizes from the moment the job is queued, with
+    # no first-encounter delay. The API check-run from `create_check` is
+    # kept (the PATCH-by-id flow stays the source of truth for the verdict;
+    # this job-name check-run is the recognition surface). Two check-runs
+    # share the name and conclude together — `failure` if the API PATCH
+    # concluded `failure` (the `exit 1` at the end of the run block keeps
+    # this job's exit code in lockstep), `success` otherwise — so the
+    # required-check evaluation is consistent regardless of which check-run
+    # the matcher picks.
+    name: Devflow Review
     needs: [precheck, create_check, review]
     # always() so a failed/cancelled review still closes the check —
     # otherwise it hangs `in_progress` forever and the Re-run button never
@@ -731,4 +754,18 @@ jobs:
             else
               echo "::warning::dismiss-stale-rejections.sh exited non-zero for PR #$PR_NUMBER; the PR may stay blocked at reviewDecision=CHANGES_REQUESTED — dismiss it manually."
             fi
+          fi
+
+          # Propagate REJECT through this job's own exit code so the workflow
+          # check-run named `Devflow Review` (created by GitHub from the job's
+          # `name:` above) carries the same blocking conclusion as the API
+          # check-run PATCHed above. The API PATCH stays the source of truth
+          # for the verdict (it sets the `output[summary]` body the user sees
+          # in the PR's checks tab); this exit code keeps the two check-runs
+          # in lockstep so whichever one the required-check matcher picks,
+          # the answer is the same. Only `failure` blocks: success exits 0,
+          # neutral (cancelled/skipped review) exits 0 too — a neutral
+          # required check does not block, matching the API PATCH's behaviour.
+          if [ "$CONCLUSION" = "failure" ]; then
+            exit 1
           fi
