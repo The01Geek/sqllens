@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 19, 2026
+
+- **[Improvement] Configuration errors fail closed so unrecognized error types cannot leak secrets** — Secret redaction in configuration error output now covers all configuration-load failures, not just field-validation errors. SQL Lens prints the error message only when its kind is known to be safe (such as a file-not-found, byte-order-mark, or syntax error); for any unrecognized error type that might quote a secret-bearing line from your file or environment, the message is withheld and a generic notice naming the fields to check (`api_key`, `bearer_token`, `database.url`) is shown instead. The same protection now also applies when `sqllens claude-desktop install` validates the configuration it generates, so an installer-time error cannot echo the API key you passed in. (#126)
+
 ## May 18, 2026
 
 - **[Fix] HTTP transport handles repeated lifespan events cleanly under unusual ASGI hosts** — When an ASGI host drives more than one lifespan scope against the same SQL Lens app (uncommon outside test harnesses), the HTTP transport now rejects a startup that arrives after the server has already shut down with the clear message `single-shot instance already shut down`, instead of the misleading `duplicate lifespan.startup` it returned previously. A repeated shutdown is acknowledged as `lifespan.shutdown.complete` without re-entering the session manager's exit handler, and startup failures now report the exception type in addition to the message (for example, `RuntimeError: boom`). Users running `sqllens serve` are not affected — uvicorn drives exactly one lifespan per process. (#70)
