@@ -48,6 +48,24 @@ if TYPE_CHECKING:
 RUN_SQL_TOOL_NAME = "run_sql"
 _IMPORT_SOURCE = "import"
 
+# Wholesale-failure guard for ``iter_all``. One bad row is a tolerated skip;
+# *every* row failing to reconstruct (e.g. a chromadb/schema version skew that
+# makes every ``args_json`` unparseable) is systemic corruption, not noise.
+# Skipping it silently would (a) report an empty/partial export as success and
+# (b) hand ``import_bundle`` an empty dedup baseline that re-saves duplicates.
+# Fail loud instead, but only once enough rows exist that a high skip ratio is
+# meaningful (a 1-row collection with 1 skip is not "wholesale corruption").
+_WHOLESALE_MIN_ROWS = 5
+_WHOLESALE_SKIP_RATIO = 0.9
+
+
+class MemoryCorruptionError(RuntimeError):
+    """Raised when ``iter_all`` cannot reconstruct (almost) any stored row.
+
+    Signals systemic corruption / version skew rather than a single bad row,
+    so callers fail loud instead of treating a near-empty result as success.
+    """
+
 
 class MemoryStore:
     """Construct ``ChromaAgentMemory`` exactly as the agent factory does."""
@@ -66,6 +84,9 @@ class MemoryStore:
             request_id="import",
             agent_memory=self._mem,
         )
+        # Number of rows the most recent ``iter_all`` skipped; lets export /
+        # import surface a non-fatal partial-loss warning.
+        self.last_skipped_rows = 0
 
     async def add_sql_pair(self, question: str, sql: str) -> None:
         await self._mem.save_tool_usage(
@@ -93,6 +114,16 @@ class MemoryStore:
         the import limits) is skipped, not fatal: ``iter_all`` is also the
         dedup baseline for ``import_bundle``, so one bad row must not abort
         every export and import.
+
+        Wholesale failure is *not* tolerated: if the collection has a
+        meaningful number of rows and (almost) none reconstruct, that is
+        systemic corruption / version skew, and a silent empty result would
+        report a destroyed backup as success and re-save duplicates on the
+        next import. In that case :class:`MemoryCorruptionError` is raised.
+
+        ``last_skipped_rows`` records how many rows the most recent call
+        skipped so callers (export / import) can surface a non-fatal
+        partial-loss warning.
         """
         collection = self._mem._get_collection()
         # Skip embedding vectors/documents (largest per-row payload, unused here).
@@ -101,11 +132,15 @@ class MemoryStore:
         pairs: list[SqlPair] = []
         docs: list[SchemaDoc] = []
         skipped = 0
+        total = 0
         for metadata in metadatas:
             # Chroma can return a row with no metadata (None) — skip explicitly
             # rather than letting AttributeError abort the whole enumeration.
             if not isinstance(metadata, dict):
+                skipped += 1
+                total += 1
                 continue
+            total += 1
             try:
                 if metadata.get("is_text_memory"):
                     docs.append(SchemaDoc(content=metadata.get("content", "")))
@@ -129,6 +164,22 @@ class MemoryStore:
                 logger.debug("skipping unrepresentable memory row: %s", exc)
                 continue
 
+        self.last_skipped_rows = skipped
+        if (
+            total >= _WHOLESALE_MIN_ROWS
+            and skipped >= total * _WHOLESALE_SKIP_RATIO
+        ):
+            logger.error(
+                "iter_all could not reconstruct %d of %d stored rows — "
+                "refusing to treat this as an empty/partial result",
+                skipped,
+                total,
+            )
+            raise MemoryCorruptionError(
+                f"{skipped} of {total} stored memory rows are unrepresentable; "
+                "the store looks corrupt or written by an incompatible "
+                "version. Refusing a wholesale-silent export/import baseline."
+            )
         if skipped:
             logger.warning("iter_all skipped %d unrepresentable memory row(s)", skipped)
 

@@ -9,6 +9,7 @@ HTTP transport + auth modes land in Phase 2.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from mcp.server.fastmcp import FastMCP
@@ -37,10 +38,15 @@ def build_server(cfg: Config) -> FastMCP:
     # Opt-in, default OFF: a client that can write memory can poison future
     # SQL generation. Only registered when an operator sets allow_import.
     if cfg.memory.allow_import:
-        from sqllens.memory import MemoryStore, import_bundle
+        from sqllens.memory import MemoryCorruptionError, MemoryStore, import_bundle
         from sqllens.memory.io import BundleFormatError, parse_json
 
         store = MemoryStore(cfg)
+        # Concurrent import_memory calls share this one closure-bound store.
+        # Without serialization both would snapshot the dedup baseline before
+        # either writes and double-save identical pairs, breaking the
+        # documented "re-import is safe" guarantee. Single-writer it is.
+        import_lock = asyncio.Lock()
 
         @mcp.tool()
         async def import_memory(bundle_json: str) -> str:
@@ -55,7 +61,17 @@ def build_server(cfg: Config) -> FastMCP:
             except BundleFormatError as exc:
                 raise RuntimeError(f"Invalid memory bundle: {exc}") from exc
             try:
-                report = await import_bundle(store, bundle)
+                async with import_lock:
+                    report = await import_bundle(store, bundle)
+            except MemoryCorruptionError as exc:
+                # The dedup baseline could not be reconstructed — importing
+                # would re-save duplicates. Distinct, actionable signal; not
+                # the generic "write failed" message.
+                logger.error("import_memory aborted: corrupt store baseline")
+                raise RuntimeError(
+                    f"Memory store looks corrupt: {exc} Import aborted; "
+                    "nothing was written. Check the server logs."
+                ) from exc
             except Exception as exc:
                 # Per the CLAUDE.md isError contract: a Chroma/embedding/disk
                 # failure must reach the client as a clear message, never a

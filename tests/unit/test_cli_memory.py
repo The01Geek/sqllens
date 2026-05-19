@@ -95,6 +95,38 @@ def test_dry_run_writes_nothing(tmp_path, monkeypatch) -> None:
     assert out.read_text().strip() == "{}"
 
 
+def test_clear_then_import_failure_warns_data_loss(tmp_path, monkeypatch) -> None:
+    """The most consequential message in the PR: --clear wiped, import died."""
+    patch_fake_embeddings(monkeypatch)
+    cfg = _config(tmp_path)
+    bundle = tmp_path / "in.json"
+    bundle.write_text('{"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]}}')
+    runner.invoke(app, ["import-memory", str(bundle), "-c", str(cfg)])
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("write exploded")
+
+    monkeypatch.setattr("sqllens.memory.import_bundle", boom)
+    monkeypatch.setattr("sqllens.cli.import_bundle", boom, raising=False)
+
+    r = runner.invoke(
+        app, ["import-memory", str(bundle), "--clear", "-c", str(cfg)], input="y\n"
+    )
+    assert r.exit_code == 1, r.output
+    assert "wiped" in r.output
+    assert "empty or partial" in r.output
+
+
+def test_export_empty_store_warns(tmp_path, monkeypatch) -> None:
+    patch_fake_embeddings(monkeypatch)
+    cfg = _config(tmp_path)
+    out = tmp_path / "out.json"
+    r = runner.invoke(app, ["export-memory", str(out), "-c", str(cfg)])
+    assert r.exit_code == 0, r.output
+    assert "empty" in r.output
+    assert out.exists()
+
+
 def test_clear_requires_confirmation(tmp_path, monkeypatch) -> None:
     patch_fake_embeddings(monkeypatch)
     cfg = _config(tmp_path)

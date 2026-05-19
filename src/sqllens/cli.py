@@ -492,7 +492,7 @@ def export_memory(
 ) -> None:
     """Export the configured memory store to a bundle file."""
     from sqllens.config import Config
-    from sqllens.memory import MemoryStore, export_bundle
+    from sqllens.memory import MemoryCorruptionError, MemoryStore, export_bundle
     from sqllens.memory.io import VALID_FORMATS
 
     if fmt not in VALID_FORMATS:
@@ -506,7 +506,17 @@ def export_memory(
 
     try:
         store = MemoryStore(cfg)
-        text = export_bundle(store, fmt)
+        result = export_bundle(store, fmt)
+    except MemoryCorruptionError as e:
+        # Refuse to write a destroyed/near-empty backup as if it succeeded —
+        # the documented "export before --clear" path makes a false success
+        # here a permanent data-loss trap.
+        err_console.print(
+            f"[red]Refusing to export:[/red] {escape(str(e))}\n"
+            "No file was written. Investigate the store before relying on a "
+            "backup."
+        )
+        raise typer.Exit(code=1) from e
     except Exception as e:
         err_console.print(
             f"[red]Memory store error ({type(e).__name__}):[/red] {escape(str(e))}\n"
@@ -516,10 +526,12 @@ def export_memory(
         )
         raise typer.Exit(code=1) from e
     try:
-        path.write_text(text, encoding="utf-8")
+        path.write_text(result.text, encoding="utf-8")
     except OSError as e:
         err_console.print(f"[red]Error:[/red] cannot write {escape(str(path))}: {escape(str(e))}")
         raise typer.Exit(code=1) from e
+    for warning in result.warnings:
+        err_console.print(f"[yellow]Warning:[/yellow] {escape(warning)}")
     console.print(f"[green]Wrote {escape(str(path))}[/green]")
 
 

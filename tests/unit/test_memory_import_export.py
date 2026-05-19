@@ -7,7 +7,12 @@ from __future__ import annotations
 
 import pytest
 
-from sqllens.memory import MemoryStore, export_bundle, import_bundle
+from sqllens.memory import (
+    MemoryCorruptionError,
+    MemoryStore,
+    export_bundle,
+    import_bundle,
+)
 from sqllens.memory.io import parse_json
 from sqllens.memory.schema import MemoryBundle
 from tests.unit._config_builders import build_test_config
@@ -64,7 +69,8 @@ async def test_intra_batch_duplicate_skipped(store: MemoryStore) -> None:
 async def test_round_trip_lossless(store: MemoryStore) -> None:
     await import_bundle(store, _BUNDLE)
     exported = export_bundle(store, "json")
-    reparsed = parse_json(exported)
+    assert exported.warnings == []
+    reparsed = parse_json(exported.text)
 
     fresh_store = store
     again = await import_bundle(fresh_store, reparsed)
@@ -97,10 +103,10 @@ async def test_imported_pair_stored_with_run_sql_shape(
 
 
 async def test_dry_run_writes_nothing(store: MemoryStore) -> None:
-    before = export_bundle(store, "json")
+    before = export_bundle(store, "json").text
     report = await import_bundle(store, _BUNDLE, dry_run=True)
     assert report.saved == 3
-    assert export_bundle(store, "json") == before
+    assert export_bundle(store, "json").text == before
     after = store.iter_all()
     assert after.sql_pairs is None
     assert after.schema_docs is None
@@ -108,12 +114,12 @@ async def test_dry_run_writes_nothing(store: MemoryStore) -> None:
 
 async def test_dry_run_with_clear_preserves_store(store: MemoryStore) -> None:
     await import_bundle(store, _BUNDLE)
-    before = export_bundle(store, "json")
+    before = export_bundle(store, "json").text
     report = await import_bundle(store, _BUNDLE, dry_run=True, clear=True)
     # clear is skipped on a dry-run, so existing memory is still the baseline
     assert report.saved == 0
     assert report.skipped_duplicate == 3
-    assert export_bundle(store, "json") == before
+    assert export_bundle(store, "json").text == before
 
 
 async def test_iter_all_skips_unrepresentable_and_corrupt_rows(
@@ -137,6 +143,84 @@ async def test_iter_all_skips_unrepresentable_and_corrupt_rows(
         "SELECT count(*) FROM users",
         "SELECT count(*) FROM u WHERE active",
     }
+
+
+async def test_iter_all_raises_on_wholesale_corruption(
+    store: MemoryStore,
+) -> None:
+    """Every row unparseable (e.g. version skew) must fail loud, not return {}."""
+    collection = store._mem._get_collection()
+    n = 8
+    collection.upsert(
+        ids=[f"corrupt-{i}" for i in range(n)],
+        documents=[f"q{i}" for i in range(n)],
+        metadatas=[
+            {"question": f"q{i}", "tool_name": "run_sql", "args_json": "{not json"}
+            for i in range(n)
+        ],
+    )
+    with pytest.raises(MemoryCorruptionError):
+        store.iter_all()
+    # The export path must refuse too, not write an empty "successful" backup.
+    with pytest.raises(MemoryCorruptionError):
+        export_bundle(store, "json")
+    # And the import dedup baseline must abort rather than re-save duplicates.
+    with pytest.raises(MemoryCorruptionError):
+        await import_bundle(store, _BUNDLE)
+
+
+async def test_partial_skip_surfaces_export_warning(store: MemoryStore) -> None:
+    """A few bad rows among many good ones: skipped, but warned (not silent)."""
+    await import_bundle(store, _BUNDLE)
+    collection = store._mem._get_collection()
+    collection.upsert(
+        ids=["corrupt-args"],
+        documents=["bad"],
+        metadatas=[{"question": "bad", "tool_name": "run_sql", "args_json": "{x"}],
+    )
+    result = export_bundle(store, "json")
+    assert store.last_skipped_rows == 1
+    assert any("unrepresentable" in w for w in result.warnings)
+
+
+def test_export_warns_on_empty_store(store: MemoryStore) -> None:
+    result = export_bundle(store, "json")
+    assert any("empty" in w for w in result.warnings)
+
+
+async def test_csv_export_warns_about_dropped_schema_docs(
+    store: MemoryStore,
+) -> None:
+    await import_bundle(store, _BUNDLE)
+    result = export_bundle(store, "csv")
+    assert any("schema doc" in w for w in result.warnings)
+
+
+async def test_schema_doc_per_item_failure_is_isolated(
+    store: MemoryStore, monkeypatch
+) -> None:
+    """The schema_doc section's failure isolation, not just sql_pair."""
+    real_add = store.add_schema_doc
+
+    async def flaky_doc(content: str) -> None:
+        if "fail" in content:
+            raise RuntimeError("doc-boom")
+        await real_add(content)
+
+    monkeypatch.setattr(store, "add_schema_doc", flaky_doc)
+    bundle = MemoryBundle.model_validate(
+        {
+            "schema_docs": [
+                {"content": "please fail this one"},
+                {"content": "this one is fine"},
+            ]
+        }
+    )
+    report = await import_bundle(store, bundle)
+    assert report.saved == 1
+    assert len(report.errors) == 1
+    assert report.errors[0].kind == "schema_doc"
+    assert "doc-boom" in report.errors[0].message
 
 
 async def test_per_item_save_failure_is_reported_not_fatal(
