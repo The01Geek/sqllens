@@ -51,11 +51,12 @@ def _locked_versions(lockfile_text: str) -> dict[str, Version]:
     only ``==`` pins are recorded — a package present under a non-``==`` pin
     reads as *absent* (the intended signal for a hand-edited lock).
 
-    A canonical package pinned ``==`` twice to *different* versions (a
-    hand-edit or unresolved merge conflict) raises ``ValueError`` rather than
-    silently last-write-wins, which would otherwise validate only the
-    surviving pin while the contradictory artifact ships. An exact-duplicate
-    pin (same version twice) is idempotent and accepted.
+    A canonical package pinned ``==`` twice to *different* versions raises
+    ``ValueError`` rather than silently last-write-wins, which would otherwise
+    validate only the surviving pin while the contradictory artifact ships. An
+    exact-duplicate pin (same version twice) is idempotent and accepted. (A
+    ``==`` pin *contradicted by a non-``==`` pin* is not detected here — non-
+    ``==`` pins are treated as absent by the rule above, by design.)
     """
     pinned: dict[str, Version] = {}
     folded = re.sub(r"\\[ \t]*\r?\n", " ", lockfile_text)
@@ -67,9 +68,12 @@ def _locked_versions(lockfile_text: str) -> dict[str, Version]:
             req = Requirement(line)
         except InvalidRequirement:
             continue
-        # A version that survived Requirement() parsing in an "==" specifier
-        # is already PEP 440-valid, so the Version() construction below cannot
-        # raise (the deliberate ValueError for conflicting pins is separate).
+        # A concrete version that survived Requirement() parsing in an "=="
+        # specifier is already PEP 440-valid, so the Version() construction
+        # below cannot raise for any pin pip freeze / pip-compile emits (they
+        # never emit prefix matches). The deliberate ValueError for conflicting
+        # pins is separate. A hand-edited "pkg==1.4.*" would let InvalidVersion
+        # propagate — out of scope: the real artifact format never produces it.
         exact = [s.version for s in req.specifier if s.operator == "=="]
         if exact:
             name = canonicalize_name(req.name)
@@ -112,7 +116,10 @@ def _force_include_target(pyproject_text: str) -> object:
     Walks the table path defensively: a missing key *or* an intermediate level
     hand-edited to a non-table scalar both resolve to ``None`` so the caller's
     assertion fails with a readable "got: None" message, rather than an opaque
-    ``AttributeError`` from calling ``.get`` on a ``str``/``int``.
+    ``AttributeError`` from calling ``.get`` on a ``str``/``int``. A non-string
+    *leaf* value (``"requirements.txt" = 42``) is returned verbatim, not
+    coerced — the caller's ``== "sqllens/requirements.txt"`` equality check
+    rejects it loudly with a readable ``got: 42``.
     """
     node: object = tomllib.loads(pyproject_text)
     for key in (
@@ -293,6 +300,13 @@ def test_logic_duplicate_conflicting_pin_raises() -> None:
     folded = _CLEAN_LOCK + "alpha==1.5 \\\n    --hash=sha256:bad\n"
     with pytest.raises(ValueError, match=r"conflicting versions 1\.4 and 1\.5"):
         _locked_versions(folded)
+    # Reverse order: the non-canonical surface name (`Alpha`) is seen FIRST,
+    # the canonical one second. This pins that the dict is keyed by
+    # canonicalize_name (not raw req.name) regardless of which form arrives
+    # first — the `<<<`-side of a merge conflict is often the upper-cased pin.
+    reverse = "Alpha==1.4\nalpha==1.5\n"
+    with pytest.raises(ValueError, match=r"conflicting versions 1\.4 and 1\.5"):
+        _locked_versions(reverse)
 
 
 def test_logic_duplicate_identical_pin_is_idempotent() -> None:
@@ -332,8 +346,9 @@ def test_logic_read_or_fail_surfaces_actionable_message(tmp_path: Path) -> None:
     # A missing file trips a distinct missing-specific message.
     with pytest.raises(pytest.fail.Exception, match="it is missing"):
         _read_or_fail(tmp_path / "does-not-exist.txt")
-    # A non-FileNotFound OSError (here: a directory → IsADirectoryError, an
-    # OSError subclass) trips the generic "unreadable" arm.
+    # A non-FileNotFound OSError trips the generic "unreadable" arm. Reading a
+    # directory raises an OSError subclass — IsADirectoryError on POSIX,
+    # PermissionError on Windows; either way it routes to the OSError arm.
     with pytest.raises(pytest.fail.Exception, match="is unreadable"):
         _read_or_fail(tmp_path)
 
