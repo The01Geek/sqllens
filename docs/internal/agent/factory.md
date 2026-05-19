@@ -57,6 +57,16 @@ See [agent/tool-scratch-storage.md](tool-scratch-storage.md) for the full story,
 
 The upstream `AgentConfig` defaults `max_tool_iterations=10`. That's enough for a trained DB but too low for untrained schemas where the agent needs separate iterations for catalog lookups, memory searches, and the final query. Surfacing the knob via `AgentRuntimeConfig.max_tool_iterations` in [config.py](../../../src/sqllens/config.py) (and `SQLLENS_AGENT__MAX_TOOL_ITERATIONS`) lets operators raise it without patching the lifted code.
 
+## `show_details` — UI-feature unlock
+
+The framework gates per-UI-feature visibility via `AgentConfig.ui_features` (a `UiFeatures` object whose `feature_group_access` maps each `UiFeature` enum value to the list of user-group names allowed to see it). The framework default, `DEFAULT_UI_FEATURES` from [src/sqllens/agent/core/agent/config.py](../../../src/sqllens/agent/core/agent/config.py), gates `UI_FEATURE_SHOW_TOOL_ARGUMENTS` to `["admin"]`. The static `UserResolver` above puts every request in `["default"]` (see [`DEFAULT_USER_GROUP`](../../../src/sqllens/agent/__init__.py)), so out of the box the `run_sql` tool-arguments STATUS_CARD — the only place the executed SQL appears in the component stream — never reaches the calling client.
+
+When `cfg.agent.show_details` is `true` (the default), `build_agent` constructs a *fresh* `UiFeatures()` for that agent (never mutating `DEFAULT_UI_FEATURES` in place — a single mutation would leak across all subsequently-built agents in the process) and appends `DEFAULT_USER_GROUP` to **only** the `UI_FEATURE_SHOW_TOOL_ARGUMENTS` access list. Every other admin-gated feature (`UI_FEATURE_SHOW_TOOL_ERROR`, `UI_FEATURE_SHOW_MEMORY_DETAILED_RESULTS`, etc.) stays `["admin"]`-only — the unlock is deliberately narrow. The resulting `UiFeatures` is threaded into the framework via `AgentConfig(ui_features=...)`.
+
+When `show_details` is `false`, the factory leaves `UiFeatures()` at the framework defaults and the tool-arguments card stays admin-gated; the static user fails `can_user_access_feature(UI_FEATURE_SHOW_TOOL_ARGUMENTS, user)` and the agent never emits the `run_sql` card. This is the invariant `tools/_format.py` relies on for the "no SQL card → no `query_info`" branch documented in [mcp-server/tools.md](../mcp-server/tools.md#executed-sql-channel--agentshow_details).
+
+Pinned end-to-end by `tests/unit/test_factory_wiring.py::test_show_details_on_unlocks_only_tool_arguments`, `::test_show_details_off_keeps_tool_arguments_admin_only`, and `::test_show_details_on_grants_static_user_access_to_tool_arguments` — the last two exercise the actual `can_user_access_feature` gate function the agent calls, not just the access-list state.
+
 ## `build_sql_runner` — URL → SqlRunner
 
 Dialect picked from the URL scheme prefix:

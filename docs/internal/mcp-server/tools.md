@@ -29,14 +29,19 @@ def build_server(cfg: Config) -> FastMCP:
     ) -> str | CallToolResult:
         """Ask a question in natural language. Returns a Markdown table or text answer."""
         metadata = _request_metadata(ctx)
-        markdown, table = await query_database_impl_with_table(
+        markdown, table, query_info = await query_database_impl_with_table(
             cfg, question, metadata=metadata
         )
-        if table is None:
+        meta: dict = {}
+        if table is not None:
+            meta["sqllens/table"] = table
+        if query_info:
+            meta["sqllens/query"] = query_info
+        if not meta:
             return markdown
         return CallToolResult(
             content=[TextContent(type="text", text=markdown)],
-            _meta={"sqllens/table": table},
+            _meta=meta,
         )
 
     @mcp.tool()
@@ -60,13 +65,14 @@ The docstrings are the user-facing tool descriptions that the calling AI client 
 
 ## `_format.components_to_table` — the collapse rule
 
-`components_to_table` in [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) is the only place that knows the shape of the agent's output stream. It does the collapse in a single pass and returns `(markdown, is_error, table_payload)`; `components_to_markdown` is a thin wrapper that drops the third element for non-apps callers (see "The MCP App interactive table widget"). The Markdown collapse rule below is identical for both:
+`components_to_table` in [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) is the only place that knows the shape of the agent's output stream. It does the collapse in a single pass and returns `(markdown, is_error, table_payload, query_info)`; `components_to_markdown` is a thin wrapper that drops the third and fourth elements for non-apps callers (see "The MCP App interactive table widget"). The Markdown collapse rule below is identical for both:
 
 | Component type | What we do with it |
 |---|---|
 | `TEXT` | Keep the **last** non-empty entry as the natural-language answer (earlier `TEXT` entries are intermediate reasoning the LLM emits while thinking). |
 | `DATAFRAME` | Render as a Markdown table. **Cap at 500 rows** (`_MAX_ROWS_RENDERED`) with a "Showing first N of M rows" footer. This sits *above* `DatabaseConfig.max_rows` (default 10 000) — the row cap stops the DataFrame from being materialised in the first place; this renderer cap only protects the MCP client from a multi-thousand-row Markdown blob when `max_rows` is raised. |
-| `STATUS_CARD` with `status == 'error'` | Treat as a tool error; return `(message, is_error=True)` and let the caller raise `RuntimeError`. |
+| `STATUS_CARD` with `status == 'error'` | Treat as a tool error; return `(message, is_error=True, None, None)` and let the caller raise `RuntimeError`. |
+| `STATUS_CARD` carrying `metadata["sql"]` | Capture the SQL into `last_sql` (last-wins; the `run_sql` card streams twice — running → completed — with identical metadata, so dedup is idempotent). Drives the `query_info` channel — see [Executed SQL channel](#executed-sql-channel--agentshow_details). Only emitted when `agent.show_details` unlocked `UI_FEATURE_SHOW_TOOL_ARGUMENTS` for the static user group. |
 | Everything else | Ignored. |
 
 Output ordering: tables first (in stream order), then the final text answer. If both are empty, return `"(no answer)"` rather than the empty string — MCP clients render empty results badly.
@@ -81,11 +87,32 @@ Mechanism:
 
 - `build_server` registers a resource at `ui://sqllens/query-results.html` with mime `text/html;profile=mcp-app` (and `_meta.ui.prefersBorder = true`). Its body is the self-contained widget loaded by [src/sqllens/ui/__init__.py](../../../src/sqllens/ui/__init__.py)'s `load_widget_html()` (cached; immutable packaged asset). The widget HTML and the vendored `@modelcontextprotocol/ext-apps` bundle ship inside the wheel via the `[tool.hatch.build.targets.wheel].include` globs in `pyproject.toml`.
 - The `query_database` tool is decorated with `meta={"ui": {"resourceUri": "ui://sqllens/query-results.html"}}`. `list_data_sources` is **not** — the widget is query-only.
-- `query_database_impl_with_table` is the new sibling of `query_database_impl`: same agent path, same three error categories (the legacy `query_database_impl` is now a thin wrapper that drops the table). On success it returns `(markdown, table)` where `table` is the structured payload `{columns, rows, column_types, row_count, truncated}` (or `None` when the stream has no DataFrame). `_format.components_to_table` builds it from the **last** DataFrame and enforces a **130 KB serialized-size budget** (`json.dumps(payload, separators=(",", ":"))`), dropping tail rows and reporting the count in `truncated`; if even the header-only form is over budget it returns `None`. Payload construction is best-effort: any exception degrades to `None` (Markdown still served) rather than escaping the sanitized error taxonomy.
+- `query_database_impl_with_table` is the new sibling of `query_database_impl`: same agent path, same three error categories (the legacy `query_database_impl` is now a thin wrapper that drops the table and the query-info). On success it returns `(markdown, table, query_info)` where `table` is the structured payload `{columns, rows, column_types, row_count, truncated}` (or `None` when the stream has no DataFrame) and `query_info` carries the executed SQL when `agent.show_details` is on (see [Executed SQL channel](#executed-sql-channel--agentshow_details) below). `_format.components_to_table` builds `table` from the **last** DataFrame and enforces a **130 KB serialized-size budget** (`json.dumps(payload, separators=(",", ":"))`), dropping tail rows and reporting the count in `truncated`; if even the header-only form is over budget it returns `None`. Payload construction is best-effort: any exception degrades to `None` (Markdown still served) rather than escaping the sanitized error taxonomy.
 - **Typed (numeric) client-side sort.** The widget right-aligns and numerically sorts a column only when `column_types[col] == "number"`. The vendored DataFrame producers never populate `column_types` (`DataFrameComponent.from_records` hard-codes `{}`), so `_format._compute_table_payload` **infers** the type server-side: a column is typed `"number"` when every non-empty coerced cell parses as a finite float (SQL `NULL`/empty cells are skipped; `inf`/`NaN` disqualify the column). Any explicit producer-supplied `column_types` overrides the inferred value (e.g. a zero-padded ID column the agent typed `"string"` stays string-sorted). A non-mapping `column_types` from a producer degrades to inference-only and never fails the payload. Without this inference, numeric columns would sort lexicographically (`1, 10, 100, 2`).
-- The tool body returns a `CallToolResult` carrying the Markdown as text content **and** `_meta={"sqllens/table": table}` when `table is not None`; when it is `None` it returns the plain Markdown string (today's behavior). The widget reads `result._meta["sqllens/table"]` via the apps `ontoolresult` channel and renders it client-side. `structured_output=False` is set on the tool so FastMCP does not derive an `outputSchema` that would reject the deliberately-absent `structuredContent`.
+- The tool body returns a `CallToolResult` carrying the Markdown as text content **and** a `_meta` dict assembled from up to two keys: `"sqllens/table"` when `table is not None`, and `"sqllens/query"` when `query_info` is truthy. When both are absent it returns the plain Markdown string (degrades cleanly for non-apps clients). The widget reads `result._meta["sqllens/table"]` and `result._meta["sqllens/query"]` via the apps `ontoolresult` channel and renders them client-side. `structured_output=False` is set on the tool so FastMCP does not derive an `outputSchema` that would reject the deliberately-absent `structuredContent`.
 
 This raised the `mcp` pin to `>=1.26.0,<2` (the lowest 1.x exposing `meta=` on both `FastMCP.tool` — since 1.19.0 — and `FastMCP.resource` — since 1.26.0).
+
+## Executed SQL channel — `agent.show_details`
+
+When `cfg.agent.show_details` is on (the default; env `SQLLENS_AGENT__SHOW_DETAILS`), every successful `query_database` answer carries the executed SQL alongside the natural-language result, on two parallel rails so that every flavour of MCP client sees it:
+
+- **Markdown rail (every client).** `_append_sql_block` in [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) appends `**Executed SQL:**\n\n```sql\n<sql>\n```` to the answer text whenever `query_info` is truthy. Plain-text MCP clients (`curl`, MCP Inspector, IDEs without app rendering) see the SQL inline in the answer.
+- **`_meta` rail (apps-aware hosts).** `server.py` sets `_meta["sqllens/query"] = query_info` on the `CallToolResult` — a sibling channel to `_meta["sqllens/table"]`. The widget at [src/sqllens/ui/query_results.html](../../../src/sqllens/ui/query_results.html) reads `result._meta["sqllens/query"].sql` and paints a collapsed `<details class="sql">` section above the grid (one-shot paint from `ingest()` into its own `sqlHost`; subsequent `render()` calls only touch `gridHost` so the user's expanded panel survives filter / sort / page redraws). When `_meta["sqllens/query"]` is absent or malformed the section is simply omitted — the widget has no error state for it.
+
+`query_info` is the dict `{"sql": str, "query_type": str, "row_count"?: int}` built by `_format._query_info_from_sql`:
+
+- `sql` — the executed SQL string, captured verbatim from the `run_sql` STATUS_CARD's `metadata["sql"]`. The card streams twice (running → completed) with identical metadata, so the last-wins capture in `components_to_table` de-dupes idempotently.
+- `query_type` — the leading SQL keyword, uppercased, computed by [`first_sql_keyword`](../../../src/sqllens/safety/readonly.py) (exported from `sqllens.safety` and shared with the read-only guard's `is_read_shaped`). Wrapped `(WITH ... SELECT ...)` / `(SELECT ...)` forms classify by their inner verb.
+- `row_count` — present only when `table` is also present. It is the **true** result size, not the rendered subset: `payload["row_count"] + payload["truncated"]`, so the figure reflects the full set the SQL produced even when the 130 KB serialized-payload budget dropped tail rows. `.get(..., 0)` on the payload keeps a partial future shape from raising past the sanitized error taxonomy.
+
+The "no SQL channel" branches are deliberately distinguishable:
+
+- `agent.show_details = False`: the factory leaves `UI_FEATURE_SHOW_TOOL_ARGUMENTS` admin-gated, so the static user never receives the `run_sql` STATUS_CARD; `last_sql` in `components_to_table` stays `None` and `query_info` is `None`. Output is byte-for-byte the pre-feature behavior (no Markdown block, no `_meta["sqllens/query"]`).
+- `agent.show_details = True` but the agent never ran SQL (pure-text answer): the `run_sql` card is never emitted, same result as above.
+- `agent.show_details = True` and the agent ran SQL but execution failed: the completed `run_sql` card carries `status="error"` (the upstream agent maps `ToolResult(success=False)` → `set_status("error", …)`), which fires the `error_message` short-circuit in `components_to_table` *before* `query_info` is built. The tool surfaces the sanitized error message through the [error contract](#the-errorsuccess-contract) below — `_meta` is never populated on the error path.
+
+Pinned by `tests/unit/test_format.py` (component-stream cases), `tests/unit/test_query_database.py` (impl-level wiring + `_append_sql_block`), `tests/unit/test_server.py` (`_meta` assembly), `tests/unit/test_factory_wiring.py` (UI-feature unlock), and `tests/unit/test_ui_widget.py` (widget assertions).
 
 ## `list_data_sources` — the cheap introspection tool
 

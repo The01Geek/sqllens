@@ -24,21 +24,27 @@ jobs:
         include:
           - os: ubuntu-latest
             platform_tag: linux-x86_64
-          - os: macos-13           # x86_64 runner
-            platform_tag: darwin-x86_64
+          # Intel-mac (darwin-x86_64) bundle dropped: GitHub retired the
+          # free macos-13 hosted runner image (only macos-14, 15, 26 are
+          # available, all arm64). The Intel mac variants (macos-15-intel,
+          # macos-15-large) are paid larger-runner SKUs. Intel-mac users
+          # install via `pip install sqllens` instead — the wheel resolves
+          # the correct platform-specific onnxruntime wheel from PyPI at
+          # install time, so MCPB pre-bundling buys nothing they can't get
+          # from pip. Re-add this leg if paid macOS runners are configured.
           - os: macos-latest       # arm64 runner
             platform_tag: darwin-arm64
           - os: windows-latest
             platform_tag: win32-x86_64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
 
@@ -57,7 +63,7 @@ jobs:
           ./mcpb/build.sh "${{ matrix.platform_tag }}"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mcpb-${{ matrix.platform_tag }}
           path: dist/*.mcpb
@@ -69,7 +75,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -78,6 +84,6 @@ jobs:
         run: ls -la dist/
 
       - name: Attach .mcpb files to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*.mcpb

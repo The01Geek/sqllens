@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlparse
 from sqllens.agent import Agent, RequestContext, ToolRegistry, User, UserResolver
 from sqllens.agent.capabilities.sql_runner import SqlRunner
 from sqllens.agent.core import AgentConfig
+from sqllens.agent.core.agent.config import UiFeature, UiFeatures
 from sqllens.agent.integrations import (
     AnthropicLlmService,
     ChromaAgentMemory,
@@ -108,6 +109,24 @@ def build_agent(cfg: Config) -> Agent:
     # default system prompt switches on its presence via has_text_memory.
     tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
 
+    # The framework default gates the tool-arguments card to admin-only and the
+    # static resolver puts every request in DEFAULT_USER_GROUP, so the
+    # executed-SQL card never reaches a client. show_details admits that group
+    # to *only* tool_arguments; other admin features stay locked. A fresh
+    # UiFeatures() keeps the module-level default unmutated across instances.
+    ui_features = UiFeatures()
+    if cfg.agent.show_details:
+        tool_args_groups = list(
+            ui_features.feature_group_access.get(
+                UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS, []
+            )
+        )
+        if DEFAULT_USER_GROUP not in tool_args_groups:
+            tool_args_groups.append(DEFAULT_USER_GROUP)
+        ui_features.register_feature(
+            UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS, tool_args_groups
+        )
+
     return Agent(
         llm_service=llm,
         tool_registry=tools,
@@ -116,7 +135,10 @@ def build_agent(cfg: Config) -> Agent:
         # Framework's AgentConfig defaults max_tool_iterations=10, which truncates
         # mid-exploration on untrained schemas. Surface the knob via config so
         # operators can raise it without patching code.
-        config=AgentConfig(max_tool_iterations=cfg.agent.max_tool_iterations),
+        config=AgentConfig(
+            max_tool_iterations=cfg.agent.max_tool_iterations,
+            ui_features=ui_features,
+        ),
     )
 
 

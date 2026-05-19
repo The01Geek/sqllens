@@ -32,6 +32,20 @@ _READ_SHAPED_KEYWORDS: frozenset[str] = frozenset(
 )
 
 
+def first_sql_keyword(sql: str) -> str:
+    """Return ``sql``'s leading keyword uppercased, or ``""`` if none.
+
+    Skips a leading ``(`` so wrapped ``(WITH ... SELECT ...)`` / ``(SELECT
+    ...)`` forms classify by their inner verb.
+    """
+    if not sql:
+        return ""
+    stripped = sql.strip()
+    while stripped.startswith("("):
+        stripped = stripped[1:].lstrip()
+    return stripped.split(None, 1)[0].upper() if stripped else ""
+
+
 def is_read_shaped(sql: str) -> bool:
     """Return True if ``sql``'s first keyword indicates a row-returning query.
 
@@ -40,17 +54,7 @@ def is_read_shaped(sql: str) -> bool:
     ``ReadOnlyGuardRunner`` (when enabled) has already enforced that the whole
     statement is read-only via sqlglot.
     """
-    if not sql:
-        return False
-    stripped = sql.strip()
-    if not stripped:
-        return False
-    # Skip a leading "(" so "(WITH ... SELECT ...)" and "(SELECT ...)" forms
-    # still classify as read-shaped.
-    while stripped.startswith("("):
-        stripped = stripped[1:].lstrip()
-    first = stripped.split(None, 1)[0].upper() if stripped else ""
-    return first in _READ_SHAPED_KEYWORDS
+    return first_sql_keyword(sql) in _READ_SHAPED_KEYWORDS
 
 
 _ALLOWED_ROOT_TYPES: tuple[type[exp.Expression], ...] = (
@@ -65,7 +69,7 @@ _ALLOWED_ROOT_TYPES: tuple[type[exp.Expression], ...] = (
 # DML/DDL node types refused anywhere in the tree. The ALTER node was renamed
 # ``exp.AlterTable`` → ``exp.Alter`` partway through sqlglot's 25.x line, so a
 # bare ``exp.Alter`` reference AttributeErrors on the low end of the pinned
-# ``>=25.0,<26`` range (25.0.x ships only ``AlterTable``) while a bare
+# ``>=25.0,<31`` range (25.0.x ships only ``AlterTable``) while a bare
 # ``exp.AlterTable`` AttributeErrors on 30.x. Resolve whichever the installed
 # version exposes so the guard works across the whole pinned range.
 _ALTER_TYPE: type[exp.Expression] | None = getattr(exp, "Alter", None) or getattr(
@@ -212,7 +216,7 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
     denied_funcs = _denied_funcs(dialect)
 
     # Reject DML/DDL nested anywhere in the tree (e.g. via CTEs). ``walk()``
-    # yields bare ``exp.Expression`` nodes (sqlglot is pinned ``>=25.0,<26``;
+    # yields bare ``exp.Expression`` nodes (sqlglot is pinned ``>=25.0,<31``;
     # the pre-v20 ``(node, parent, key)`` tuple form is out of range).
     for sub in stmt.walk():
         if isinstance(sub, _DML_DDL_TYPES):

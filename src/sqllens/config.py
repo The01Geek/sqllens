@@ -249,9 +249,14 @@ class AgentRuntimeConfig(BaseModel):
     # (catalog lookups + memory searches + final query) routinely needs more
     # than 10 tool calls on untrained databases. Upper bound caps runaway loops.
     max_tool_iterations: int = Field(default=20, ge=1, le=100)
-    # Future toggle: prefix query_database results with the generated SQL.
-    # Field only — rendering consumes it in a later issue.
-    show_sql: bool = True
+    # When true (default), query_database surfaces the executed SQL alongside
+    # the answer: as structured data in the result _meta and as a fenced
+    # ```sql block in the Markdown text. Set false to restore the pre-feature
+    # answer-only output. Env override: SQLLENS_AGENT__SHOW_DETAILS.
+    show_details: bool = Field(
+        default=True,
+        description="Append the executed SQL to query answers.",
+    )
     audit: AuditConfig = Field(default_factory=lambda: AuditConfig())
 
 

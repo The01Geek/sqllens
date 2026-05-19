@@ -29,7 +29,12 @@ from sqllens.safety.limits import (
     RowCapRunner,
     mark_truncation,
 )
-from sqllens.safety.readonly import UnsafeSqlError, assert_select_only, is_read_shaped
+from sqllens.safety.readonly import (
+    UnsafeSqlError,
+    assert_select_only,
+    first_sql_keyword,
+    is_read_shaped,
+)
 from sqllens.safety.rls import RlsError, apply_rls
 
 if TYPE_CHECKING:
@@ -48,6 +53,7 @@ __all__ = [
     "UnsafeSqlError",
     "apply_rls",
     "assert_select_only",
+    "first_sql_keyword",
     "is_read_shaped",
     "mark_truncation",
 ]

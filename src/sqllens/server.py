@@ -30,6 +30,12 @@ logger = logging.getLogger("sqllens.server")
 # Markdown text content keeps working byte-for-byte everywhere else.
 _WIDGET_URI = "ui://sqllens/query-results.html"
 _TABLE_META_KEY = "sqllens/table"
+# Sibling data channel to _TABLE_META_KEY: the executed SQL + lightweight
+# metadata ({"sql", "query_type", "row_count"?}). Present only when
+# ``agent.show_details`` is on and SQL ran. The widget renders a collapsible
+# section from it; plain-text clients get the same SQL as a fenced block in
+# the Markdown content.
+_QUERY_META_KEY = "sqllens/query"
 
 
 def _request_metadata(ctx: Context) -> dict[str, Any]:
@@ -88,16 +94,29 @@ def build_server(cfg: Config) -> FastMCP:
     async def query_database(
         question: str, ctx: Context
     ) -> str | CallToolResult:
-        """Ask a question in natural language. Returns a Markdown table or text answer."""
+        """Ask a question in natural language. Returns a Markdown table or text answer.
+
+        When ``agent.show_details`` is on (the default) and the agent
+        successfully executed a SQL query, the answer also includes the
+        executed SQL — as a fenced ``sql`` block in the text and, for
+        apps-aware hosts, as structured data the result widget renders.
+        Non-SELECT / no-SQL / error responses omit the SQL block; setting
+        ``agent.show_details = false`` suppresses it unconditionally.
+        """
         metadata = _request_metadata(ctx)
-        markdown, table = await query_database_impl_with_table(
+        markdown, table, query_info = await query_database_impl_with_table(
             cfg, question, metadata=metadata
         )
-        if table is None:
+        meta: dict = {}
+        if table is not None:
+            meta[_TABLE_META_KEY] = table
+        if query_info:
+            meta[_QUERY_META_KEY] = query_info
+        if not meta:
             return markdown
         return CallToolResult(
             content=[TextContent(type="text", text=markdown)],
-            _meta={_TABLE_META_KEY: table},
+            _meta=meta,
         )
 
     @mcp.tool()
