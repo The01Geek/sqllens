@@ -74,7 +74,7 @@ def components_to_table(
     if error_message:
         return error_message, True, None
 
-    parts = [t for t in tables]
+    parts = list(tables)
     if text_answer:
         parts.append(text_answer)
     markdown = "\n\n".join(parts) if parts else "(no answer)"
@@ -94,21 +94,22 @@ def components_to_markdown(components: Iterable[UiComponent]) -> tuple[str, bool
 
 
 def _coerce_cell(value: object) -> str:
-    """Mirror the Markdown path's naive ``str(value)`` cell coercion.
-
-    ``None`` -> ``"None"``, ``Decimal("1.50")`` -> ``"1.50"``,
-    ``datetime(...)`` -> ``"2026-01-02 03:04:05"`` — identical to what
-    :func:`_render_dataframe` emits, so the widget and the Markdown table show
-    the same values.
-    """
+    # Single source of cell coercion: both the widget payload and the Markdown
+    # table route through this so they cannot drift (None->"None",
+    # Decimal("1.50")->"1.50", datetime->"2026-01-02 03:04:05").
     return str(value)
 
 
-def _build_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
+def _columns_and_rows(rich) -> tuple[list[str], list[dict]]:  # type: ignore[no-untyped-def]
     columns: list[str] = list(getattr(rich, "columns", []) or [])
     rows: list[dict] = list(getattr(rich, "rows", []) or [])
     if not columns and rows:
         columns = list(rows[0].keys())
+    return columns, rows
+
+
+def _build_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
+    columns, rows = _columns_and_rows(rich)
     if not columns and not rows:
         return None
 
@@ -155,19 +156,15 @@ def _serialized_len(payload: dict) -> int:
 
 
 def _render_dataframe(rich) -> str:  # type: ignore[no-untyped-def]
-    columns: list[str] = list(getattr(rich, "columns", []) or [])
-    rows: list[dict] = list(getattr(rich, "rows", []) or [])
+    columns, rows = _columns_and_rows(rich)
     if not columns and not rows:
         return ""
-
-    if not columns and rows:
-        columns = list(rows[0].keys())
 
     header = "| " + " | ".join(columns) + " |"
     separator = "|" + "|".join(["---"] * len(columns)) + "|"
     body_rows = []
     for row in rows[:_MAX_ROWS_RENDERED]:
-        body_rows.append("| " + " | ".join(str(row.get(c, "")) for c in columns) + " |")
+        body_rows.append("| " + " | ".join(_coerce_cell(row.get(c, "")) for c in columns) + " |")
 
     note = ""
     if len(rows) > _MAX_ROWS_RENDERED:

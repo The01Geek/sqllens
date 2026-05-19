@@ -50,11 +50,7 @@ def build_server(cfg: Config) -> FastMCP:
         """Ask a question in natural language. Returns a Markdown table or text answer."""
         markdown, table = await query_database_impl_with_table(cfg, question)
         if table is None:
-            # No DataFrame in the stream — nothing for the widget to render.
-            # Return today's plain Markdown so non-apps and apps hosts match.
             return markdown
-        # Apps-aware hosts pick the table up from _meta; the text content is
-        # the same Markdown every other host already receives.
         return CallToolResult(
             content=[TextContent(type="text", text=markdown)],
             _meta={_TABLE_META_KEY: table},
