@@ -136,12 +136,13 @@ def _read_or_fail(path: Path) -> str:
     A missing, unreadable, or non-UTF-8 ``pyproject.toml`` /
     ``requirements.txt`` is itself a drift signal the guard exists to catch.
     The failure message names *which* file and *which* of the three distinct
-    fault classes occurred (missing / unreadable / not valid UTF-8), instead
-    of a raw ``OSError``/``UnicodeDecodeError`` traceback. The trailing
-    ``raise`` is unreachable (``pytest.fail`` is typed ``NoReturn``); it makes
-    the ``-> str`` contract locally enforced rather than incidentally
-    satisfied, so a future narrowing of the ``except`` clauses cannot silently
-    reintroduce an implicit ``None`` return.
+    fault classes occurred (missing / not valid UTF-8 / unreadable, the order
+    the ``except`` clauses below test them), instead of a raw
+    ``OSError``/``UnicodeDecodeError`` traceback. The trailing ``raise`` is
+    unreachable (``pytest.fail`` is typed ``NoReturn``); it makes the ``-> str``
+    contract locally enforced rather than incidentally satisfied, so the
+    function cannot silently fall through to an implicit ``None`` return if
+    the ``except``/``fail`` structure is later edited.
     """
     try:
         return path.read_text(encoding="utf-8")
@@ -156,7 +157,7 @@ def _read_or_fail(path: Path) -> str:
         f"{detail} — fix the file before the lockfile drift guard can "
         "validate it"
     )
-    raise AssertionError("unreachable: pytest.fail did not raise")
+    raise AssertionError("unreachable: pytest.fail did not raise")  # pragma: no cover
 
 
 # --- Logic tests (run unconditionally against synthetic fixtures) -----------
@@ -301,12 +302,17 @@ def test_logic_duplicate_identical_pin_is_idempotent() -> None:
     assert _locked_versions(redundant)["alpha"] == Version("1.4")
     assert _missing_core_deps(_SYNTH_PYPROJECT, redundant) == []
     assert _bound_violations(_SYNTH_PYPROJECT, redundant) == []
+    # Same version under a different surface name (Alpha vs alpha) must also
+    # be idempotent — proves canonicalize_name keys the dict, not just the
+    # conflict comparison; otherwise this would spuriously raise.
+    assert _locked_versions(_CLEAN_LOCK + "Alpha==1.4\n")["alpha"] == Version("1.4")
 
 
 def test_logic_read_or_fail_returns_utf8_contents(tmp_path: Path) -> None:
     # The success path is otherwise only exercised by the #112-gated
-    # test_real_* tests; pin it so a decoding regression (e.g. dropping
-    # encoding='utf-8') is caught now, not when an unrelated PR merges.
+    # test_real_* tests; pin it so the success path returns the decoded
+    # contents as a str (a smoke test against an accidental None/bytes return
+    # or a wrong-encoding regression that mangles non-ASCII content).
     f = tmp_path / "requirements.txt"
     f.write_text("alpha==1.4  # café\n", encoding="utf-8")
     assert _read_or_fail(f) == "alpha==1.4  # café\n"
@@ -315,6 +321,10 @@ def test_logic_read_or_fail_returns_utf8_contents(tmp_path: Path) -> None:
 def test_logic_read_or_fail_surfaces_actionable_message(tmp_path: Path) -> None:
     # Each fault class must trip the guard with a distinct, fault-specific
     # message — not a single generic string that hides which failure occurred.
+    # All three arms are pinned because the except-clause ordering is
+    # load-bearing (FileNotFoundError subclasses OSError): a reorder that
+    # moved `except OSError` first would misclassify a missing file as
+    # "unreadable", and only asserting all three arms catches that.
     bad = tmp_path / "requirements.txt"
     bad.write_bytes(b"\xff\xfe not valid utf-8 \x80")
     with pytest.raises(pytest.fail.Exception, match="is not valid UTF-8"):
@@ -322,6 +332,10 @@ def test_logic_read_or_fail_surfaces_actionable_message(tmp_path: Path) -> None:
     # A missing file trips a distinct missing-specific message.
     with pytest.raises(pytest.fail.Exception, match="it is missing"):
         _read_or_fail(tmp_path / "does-not-exist.txt")
+    # A non-FileNotFound OSError (here: a directory → IsADirectoryError, an
+    # OSError subclass) trips the generic "unreadable" arm.
+    with pytest.raises(pytest.fail.Exception, match="is unreadable"):
+        _read_or_fail(tmp_path)
 
 
 # --- Integration tests (skip until PR #112 lands the real lockfile) ---------
