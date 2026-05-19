@@ -265,7 +265,7 @@ jobs:
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          SUMMARY='/devflow:review is executing. The formal verdict is posted as a separate PR review; this check reflects whether the review *process* completed.'
+          SUMMARY='/devflow:review is executing. This is a required status check that encodes the verdict: it PASSES on APPROVE and FAILS on REJECT (a REJECT blocks merge). The full verdict is also posted as a formal PR review.'
           ID=$(gh api -X POST "repos/$REPO/check-runs" \
             -f name='Devflow Review' \
             -f head_sha="$HEAD_SHA" \
@@ -413,6 +413,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       checks: write
+      pull-requests: read
     steps:
       - id: finalize
         env:
@@ -420,24 +421,77 @@ jobs:
           REPO: ${{ github.repository }}
           CHECK_RUN_ID: ${{ needs.create_check.outputs.check_run_id }}
           REVIEW_RESULT: ${{ needs.review.result }}
+          PR_NUMBER: ${{ needs.precheck.outputs.pr_number }}
         run: |
           set -euo pipefail
-          # Map the review job result to a check conclusion. A
-          # concurrency-cancelled or skipped review is NOT a review failure —
-          # surfacing it as a red `failure` is misleading; use `cancelled`/
-          # `neutral` so a superseded Re-run doesn't look like a REJECT.
+          # The `Devflow Review` check conclusion encodes the review
+          # *verdict*, not merely whether the review *process* completed.
+          # This check is a REQUIRED status check (ruleset main-protected;
+          # see CLAUDE.md), so a REJECT must conclude `failure` to actually
+          # block auto-merge — historically a `--request-changes` review
+          # was advisory only (no required-review rule) and a rejected PR
+          # still auto-merged. Mapping:
+          #   review job failed            -> failure  (process broke; Re-run)
+          #   review job cancelled/skipped -> neutral  (superseded Re-run or
+          #         intentionally-not-run; a *neutral* required check does
+          #         NOT block, so a cancelled Re-run never looks like REJECT)
+          #   review job success + REJECT  -> failure  (blocks the merge)
+          #   review job success + APPROVE -> success
+          # REJECT is read from the formal artifact Phase 4.4 of the skill
+          # posts: a `--request-changes` review (state CHANGES_REQUESTED)
+          # or, on the documented gh-pr-review permission-failure fallback,
+          # a PR comment whose body carries the `## Verdict: REJECT` line.
+          SUMMARY='See the formal review verdict on the PR. Click Re-run on this check to re-review the current HEAD.'
           case "$REVIEW_RESULT" in
-            success)   CONCLUSION=success ;;
-            cancelled) CONCLUSION=cancelled ;;
-            skipped)   CONCLUSION=neutral ;;
-            *)         CONCLUSION=failure ;;
+            cancelled|skipped)
+              CONCLUSION=neutral
+              TITLE="Devflow review not run ($REVIEW_RESULT)"
+              ;;
+            success)
+              if [ -z "${PR_NUMBER:-}" ]; then
+                # should_run=true always emits pr_number; never fabricate a
+                # REJECT we cannot substantiate.
+                echo "::warning::finalize_check: empty PR_NUMBER on a successful review; defaulting to success."
+                CONCLUSION=success
+                TITLE='Devflow review: APPROVE'
+              else
+                VERDICT=approve
+                REVIEWS_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews?per_page=100" 2>/dev/null || echo '[]')
+                STATE=$(echo "$REVIEWS_JSON" | jq -r 'last.state // ""' 2>/dev/null || echo "")
+                RBODY=$(echo "$REVIEWS_JSON" | jq -r 'last.body // ""' 2>/dev/null || echo "")
+                if [ "$STATE" = "CHANGES_REQUESTED" ]; then
+                  VERDICT=reject
+                elif printf '%s\n' "$RBODY" | grep -qE '^##[[:space:]]+Verdict:[[:space:]]*REJECT'; then
+                  VERDICT=reject
+                elif [ -z "$STATE" ]; then
+                  # gh pr review unavailable (e.g. same-identity self-review):
+                  # the skill falls back to `gh pr comment` with the report.
+                  if gh api "repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" \
+                       --jq '.[].body' 2>/dev/null \
+                       | grep -qE '^##[[:space:]]+Verdict:[[:space:]]*REJECT'; then
+                    VERDICT=reject
+                  fi
+                fi
+                if [ "$VERDICT" = reject ]; then
+                  CONCLUSION=failure
+                  TITLE='Devflow review: REJECT — changes requested'
+                else
+                  CONCLUSION=success
+                  TITLE='Devflow review: APPROVE'
+                fi
+              fi
+              ;;
+            *)
+              CONCLUSION=failure
+              TITLE='Devflow review process failed'
+              ;;
           esac
           if ! gh api -X PATCH "repos/$REPO/check-runs/$CHECK_RUN_ID" \
             -f status='completed' \
             -f conclusion="$CONCLUSION" \
-            -f "output[title]=Devflow review $CONCLUSION" \
-            -f 'output[summary]=See the formal review verdict on the PR. Click Re-run on this check to re-review the current HEAD.'; then
+            -f "output[title]=$TITLE" \
+            -f "output[summary]=$SUMMARY"; then
             echo "::error::Failed to finalize check $CHECK_RUN_ID; it may hang in_progress. Re-run the check or PATCH it manually."
             exit 1
           fi
-          echo "::notice::Finalized check $CHECK_RUN_ID as $CONCLUSION (review job result: $REVIEW_RESULT)."
+          echo "::notice::Finalized check $CHECK_RUN_ID as $CONCLUSION ($TITLE; review job result: $REVIEW_RESULT)."

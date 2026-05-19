@@ -112,10 +112,10 @@ PyPI versions are immutable after publish — you can yank but not re-upload the
 
 ## Repo conventions
 
-- **`main` is protected.** Direct pushes are blocked. The ruleset (`main-protected`, ID 15633058) requires linear history, no force pushes, no deletions, and the three CI checks below must pass before merge:
-  - `Lint + unit + transport (py3.11)`
+- **`main` is protected.** Direct pushes are blocked. The ruleset (`main-protected`, ID 15633058) blocks force pushes and deletions, and these required status checks must pass before merge:
   - `Lint + unit + transport (py3.12)`
-  - `Connector tests (Postgres + MySQL)`
+  - `Devflow Review` — the `/devflow:review` verdict gate. `request-review-on-ready.yml`'s `finalize_check` concludes this check `failure` on a **REJECT** verdict (read from the formal `--request-changes` review, or the `## Verdict: REJECT` report line on the comment fallback), `success` on APPROVE, and `neutral` when the review was superseded/cancelled/intentionally not run (a neutral required check does not block). A REJECT therefore blocks auto-merge until the finding is addressed and the check's **Re-run** button is clicked (or `@claude run /devflow:review` re-reviews). Because it is required, **the review must remain enabled in `project-config.yml`** — disabling it while it is a required context would block every PR.
+  - `Lint + unit + transport (py3.11)` and `Connector tests (Postgres + MySQL)` run on every PR but are **not** currently in the ruleset's required set (only `py3.12` is). Treat them as must-pass by convention; promoting them to required is a separate ruleset change.
 - **No bypass actors** — even the owner cannot push directly. Use a feature branch + PR every time:
   ```bash
   git checkout -b fix/short-description
