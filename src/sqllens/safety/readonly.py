@@ -62,6 +62,71 @@ _ALLOWED_ROOT_TYPES: tuple[type[exp.Expression], ...] = (
 )
 
 
+# Per-dialect denylist of side-effecting / DoS / RCE functions. A syntactically
+# valid ``SELECT`` that *calls* one of these passes the root-type / DML-DDL
+# walk untouched, so without this the guard is RCE on the default SQLite
+# deployment (``load_extension``) and a write/DoS vector on Postgres/MySQL.
+# Names are matched case-insensitively against the parsed function node.
+# CWE-89 / CWE-284 / CWE-770 / CWE-94.
+_SIDE_EFFECT_FUNCS: dict[str, frozenset[str]] = {
+    "sqlite": frozenset({"load_extension"}),
+    "postgres": frozenset(
+        {
+            "dblink_exec",
+            "pg_sleep",
+            "pg_terminate_backend",
+            "pg_cancel_backend",
+            "pg_read_file",
+            "pg_read_binary_file",
+            "pg_ls_dir",
+            "lo_import",
+            "lo_export",
+        }
+    ),
+    "mysql": frozenset({"sleep", "load_file", "benchmark"}),
+}
+
+# ``generate_series`` can enumerate billions of rows — a resource-exhaustion
+# DoS independent of dialect (a row cap is a separate concern; *generating*
+# the rows is itself the attack). sqlglot parses it as a known function class
+# (``exp.GenerateSeries`` / ``exp.ExplodingGenerateSeries`` depending on
+# dialect) rather than an ``exp.Anonymous`` node, so it is matched via the
+# function class's ``sql_names()`` rather than a written name.
+_ALWAYS_DENIED_FUNCS: frozenset[str] = frozenset(
+    {"generate_series", "exploding_generate_series"}
+)
+
+
+def _denied_funcs(dialect: str | None) -> frozenset[str]:
+    """Return the set of refused function names for ``dialect``.
+
+    For an unknown/``None`` dialect we apply the **union** of every dialect's
+    denylist — fail-closed, matching the existing "parse failure is unsafe"
+    invariant.
+    """
+    if dialect in _SIDE_EFFECT_FUNCS:
+        return _SIDE_EFFECT_FUNCS[dialect] | _ALWAYS_DENIED_FUNCS
+    union: set[str] = set(_ALWAYS_DENIED_FUNCS)
+    for names in _SIDE_EFFECT_FUNCS.values():
+        union |= names
+    return frozenset(union)
+
+
+def _func_name_candidates(node: exp.Func) -> set[str]:
+    """Lower-cased name(s) a function node could be denied under.
+
+    Unknown functions parse as ``exp.Anonymous`` and carry their written name
+    on ``.name``. Known functions (e.g. ``generate_series``) parse as a typed
+    ``exp.Func`` subclass whose canonical name(s) come from ``sql_names()``.
+    """
+    if isinstance(node, exp.Anonymous):
+        return {node.name.lower()} if node.name else set()
+    names = {n.lower() for n in type(node).sql_names()}
+    if node.name:
+        names.add(node.name.lower())
+    return names
+
+
 def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
     """Raise ``UnsafeSqlError`` if ``sql`` contains anything other than reads.
 
@@ -89,11 +154,12 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
         kind = type(stmt).__name__.upper()
         raise UnsafeSqlError(f"only SELECT statements are allowed (got {kind})")
 
-    # Reject DML/DDL nested anywhere in the tree (e.g. via CTEs).
-    for node in stmt.walk():
-        # sqlglot's walk yields (node, parent, key) in older versions and
-        # bare nodes in newer ones. Normalize.
-        sub = node[0] if isinstance(node, tuple) else node
+    denied_funcs = _denied_funcs(dialect)
+
+    # Reject DML/DDL nested anywhere in the tree (e.g. via CTEs). ``walk()``
+    # yields bare ``exp.Expression`` nodes (sqlglot is pinned ``>=25.0,<26``;
+    # the pre-v20 ``(node, parent, key)`` tuple form is out of range).
+    for sub in stmt.walk():
         if isinstance(sub, (exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.Create, exp.Alter)):
             kind = type(sub).__name__.upper()
             raise UnsafeSqlError(f"only SELECT statements are allowed (found nested {kind})")
@@ -104,3 +170,14 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
         # ``INTO UNLOGGED`` variants are the same node shape.
         if isinstance(sub, exp.Select) and sub.args.get("into"):
             raise UnsafeSqlError("SELECT ... INTO is not allowed (creates a table)")
+        # Side-effecting / DoS / RCE function calls. A valid SELECT can still
+        # call e.g. ``load_extension`` (SQLite RCE) or ``pg_read_file`` (data
+        # exfiltration); the root-type/DML walk above does not see these.
+        if isinstance(sub, exp.Func):
+            offending = _func_name_candidates(sub) & denied_funcs
+            if offending:
+                name = sorted(offending)[0]
+                raise UnsafeSqlError(
+                    f"function {name!r} is not allowed: side-effecting / DoS / RCE "
+                    "function refused by the read-only guard"
+                )

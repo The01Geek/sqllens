@@ -29,6 +29,7 @@ class PostgresRunner(SqlRunner):
         password: Optional[str] = None,
         statement_timeout_ms: int = 0,
         max_rows: int = _DEFAULT_MAX_ROWS,
+        read_only: bool = True,
         **kwargs,
     ):
         """Initialize with PostgreSQL connection parameters.
@@ -45,6 +46,8 @@ class PostgresRunner(SqlRunner):
             password: Database password
             statement_timeout_ms: Per-query timeout in milliseconds (0 disables)
             max_rows: Hard ceiling on rows returned per SELECT
+            read_only: Force the session read-only regardless of the DB role
+                (defence-in-depth backstop for the parser guard).
             **kwargs: Additional psycopg2 connection parameters (sslmode, connect_timeout, etc.)
         """
         try:
@@ -82,6 +85,7 @@ class PostgresRunner(SqlRunner):
             )
         self._statement_timeout_ms = statement_timeout_ms
         self._max_rows = max_rows
+        self._read_only = read_only
 
     async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
         """Execute SQL query against PostgreSQL database and return results as DataFrame.
@@ -104,6 +108,18 @@ class PostgresRunner(SqlRunner):
             conn = self.psycopg2.connect(**self.connection_params)
 
         try:
+            if self._read_only:
+                # Force every transaction on this session read-only regardless
+                # of the DB role — a guard miss still cannot mutate. Not a
+                # transactional statement, so no commit needed.
+                ro = conn.cursor()
+                try:
+                    ro.execute(
+                        "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"
+                    )
+                finally:
+                    ro.close()
+
             if self._statement_timeout_ms > 0:
                 setup = conn.cursor()
                 try:
