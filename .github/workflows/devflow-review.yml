@@ -485,21 +485,51 @@ jobs:
               -F body=@/tmp/review-progress.md
 
         **Step 3 — Final update.** After Phase 4.4 posts the formal
-        `gh pr review`, PATCH the progress comment one last time. Change
-        the `## 🔍 Devflow Review In Progress` heading to either
-        `## ✅ Devflow Review Complete` or `## ❌ Devflow Review Failed`,
-        and update the **Status** row to `✅ Complete — see review below`
-        or `❌ Failed — <one-line reason>` accordingly. If the run aborts
-        before Phase 4.4 (empty diff, checklist-gen failure, any fatal
-        error), use the Failed variant.
+        `gh pr review` (verdict stub only), PATCH the progress comment
+        one last time. The progress comment is the single human-readable
+        artifact carrying the full Phase 4.1 report, so this final PATCH
+        must embed the entire report body verbatim. Use this exact
+        template:
+
+            <!-- devflow:review-progress -->
+            ## ✅ Devflow Review Complete
+
+            |   |   |
+            |---|---|
+            | **Status** | ✅ Complete |
+            | **Last updated** | `<UTC ISO-8601>` |
+            | **Verdict** | <one-line verdict summary, e.g. "APPROVE with notes (2 suggestions)"> |
+
+            ---
+
+            <full Phase 4.1 report body, verbatim — do NOT regenerate or summarize>
+
+        Re-use the report already in context — do not regenerate it.
+        Apply the GitHub-specific PASS-items `<details>` augmentation
+        (see the "Report formatting override" block below) exactly once,
+        before embedding, so the rendered audit trail includes passed
+        items.
+
+        On the failure variant (run aborts before Phase 4.4 — empty
+        diff, checklist-gen failure, any fatal error), use:
+
+            <!-- devflow:review-progress -->
+            ## ❌ Devflow Review Failed
+
+            |   |   |
+            |---|---|
+            | **Status** | ❌ Failed — <one-line reason> |
+            | **Last updated** | `<UTC ISO-8601>` |
+
+        with no report body (there is none to embed).
 
         **Report formatting override (GitHub-specific).** When the
         `/devflow:review` skill builds the report in Phase 4.1, the
         `## Verification Checklist Results` section lists only FAIL and
-        INCONCLUSIVE items plus the summary count. Before Phase 4.4
-        submits the report via `gh pr review`, augment that section by
-        appending the PASS items inside a collapsed `<details>` block
-        (omit the block entirely when zero items passed):
+        INCONCLUSIVE items plus the summary count. Before embedding the
+        report in Step 3, augment that section by appending the PASS
+        items inside a collapsed `<details>` block (omit the block
+        entirely when zero items passed):
 
             <details>
             <summary>✅ Passed items ({pass} of {total}) — click to expand</summary>
