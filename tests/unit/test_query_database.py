@@ -21,7 +21,10 @@ import pytest
 from sqllens.config import Config
 from sqllens.safety import UnsafeSqlError
 from sqllens.tools import query_database as query_database_module
-from sqllens.tools.query_database import query_database_impl
+from sqllens.tools.query_database import (
+    query_database_impl,
+    query_database_impl_with_table,
+)
 
 from ._agent_stubs import make_dataframe, make_status_card, make_text_component
 from ._config_builders import build_test_config
@@ -304,6 +307,42 @@ async def test_happy_path_returns_markdown(
     assert "Here are the results:" in result
     assert "Alice" in result
     assert "| name | age |" in result
+
+
+@pytest.mark.asyncio
+async def test_with_table_returns_payload_on_dataframe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """The sibling returns ``(markdown, dict)`` when the stream has a DataFrame."""
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    stub = agent_stub_factory([make_dataframe([{"name": "Alice", "age": 30}])])
+    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+
+    markdown, table = await query_database_impl_with_table(cfg, "list users")
+
+    assert "| name | age |" in markdown
+    assert table is not None
+    assert table["columns"] == ["name", "age"]
+    assert table["rows"] == [["Alice", "30"]]
+
+
+@pytest.mark.asyncio
+async def test_with_table_returns_none_table_on_text_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """No DataFrame in the stream → ``table`` is ``None`` (apps fallback)."""
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    stub = agent_stub_factory([make_text_component("text answer")])
+    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+
+    markdown, table = await query_database_impl_with_table(cfg, "q")
+
+    assert markdown == "text answer"
+    assert table is None
 
 
 @pytest.mark.asyncio

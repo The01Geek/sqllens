@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<!--
+  Self-contained MCP App widget for query_database results.
+
+  No external origins: every asset (this file + ./vendor/app-with-deps.js) is
+  served from the same MCP server origin. No fonts, no analytics, no CDN, no
+  remote XHR/fetch. The host renders this in a sandboxed iframe and pushes the
+  tool's CallToolResult via the MCP Apps postMessage channel; the structured
+  table lives under result._meta["sqllens/table"]. If that key is absent or
+  malformed the widget renders an empty-state notice.
+-->
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Query results</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: var(--color-background-primary, transparent);
+    --fg: var(--color-text-primary, #1a1a1a);
+    --muted: var(--color-text-secondary, #6b7280);
+    --line: var(--color-border-primary, #d1d5db);
+    --row-alt: var(--color-background-secondary, rgba(127, 127, 127, 0.06));
+    --accent: var(--color-background-info, #2563eb);
+    --control-bg: var(--color-background-tertiary, rgba(127, 127, 127, 0.10));
+  }
+  html, body { margin: 0; padding: 0; background: transparent; }
+  body {
+    color: var(--fg);
+    font: 13px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 8px;
+  }
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .bar input, .bar button {
+    font: inherit; color: var(--fg);
+    background: var(--control-bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px;
+  }
+  .bar input { flex: 1 1 160px; min-width: 120px; }
+  .bar button { cursor: pointer; }
+  .bar button:hover { border-color: var(--accent); }
+  .meta { color: var(--muted); font-size: 12px; }
+  .wrap { overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td {
+    text-align: left; padding: 5px 10px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  th { position: sticky; top: 0; background: var(--control-bg); cursor: pointer; user-select: none; }
+  th .ind { color: var(--muted); font-size: 11px; }
+  tbody tr:nth-child(even) { background: var(--row-alt); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pager { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .pager button[disabled] { opacity: 0.4; cursor: default; }
+  .empty { color: var(--muted); padding: 16px; }
+</style>
+</head>
+<body>
+<div id="root"><div class="empty">Waiting for results…</div></div>
+
+<script type="module">
+import { App } from "./vendor/app-with-deps.js";
+
+const PAGE_SIZE = 50;
+const META_KEY = "sqllens/table";
+
+const state = {
+  columns: [],
+  rows: [],
+  types: {},
+  rowCount: 0,
+  truncated: 0,
+  sortCol: -1,
+  sortDir: 1,
+  filter: "",
+  page: 0,
+};
+
+const root = document.getElementById("root");
+
+function isNumeric(colIndex) {
+  return state.types[state.columns[colIndex]] === "number";
+}
+
+function applyHostContext(ctx) {
+  if (!ctx) return;
+  const theme = ctx.theme === "dark" ? "dark" : "light";
+  document.documentElement.style.colorScheme = theme;
+  const vars = ctx.styles && ctx.styles.variables;
+  if (vars) {
+    for (const [k, v] of Object.entries(vars)) {
+      if (typeof v === "string") document.documentElement.style.setProperty(k, v);
+    }
+  }
+}
+
+function filteredRows() {
+  if (!state.filter) return state.rows;
+  const needle = state.filter.toLowerCase();
+  return state.rows.filter((r) =>
+    r.some((cell) => String(cell).toLowerCase().includes(needle))
+  );
+}
+
+function sortedRows(rows) {
+  if (state.sortCol < 0) return rows;
+  const c = state.sortCol;
+  const numeric = isNumeric(c);
+  const copy = rows.slice();
+  copy.sort((a, b) => {
+    const x = a[c], y = b[c];
+    let cmp;
+    if (numeric) {
+      const nx = parseFloat(x), ny = parseFloat(y);
+      const xn = Number.isNaN(nx), yn = Number.isNaN(ny);
+      if (xn && yn) cmp = 0;
+      else if (xn) cmp = 1;
+      else if (yn) cmp = -1;
+      else cmp = nx - ny;
+    } else {
+      cmp = String(x).localeCompare(String(y));
+    }
+    return cmp * state.sortDir;
+  });
+  return copy;
+}
+
+function csvEscape(v) {
+  const s = String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function exportCsv() {
+  // MCP App iframes are sandboxed; blob: URLs or downloads may be blocked.
+  // Without this the click is a silent no-op on an explicit user action.
+  let url;
+  try {
+    const rows = sortedRows(filteredRows());
+    const lines = [state.columns.map(csvEscape).join(",")];
+    for (const r of rows) lines.push(r.map(csvEscape).join(","));
+    const blob = new Blob([lines.join("\r\n")], { type: "text/csv" });
+    url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "query_results.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch (err) {
+    showNotice("CSV export blocked by host: " + (err && err.message ? err.message : err));
+  } finally {
+    if (url) URL.revokeObjectURL(url);
+  }
+}
+
+function render() {
+  const matched = filteredRows();
+  const sorted = sortedRows(matched);
+  const pages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  if (state.page >= pages) state.page = pages - 1;
+  if (state.page < 0) state.page = 0;
+  const start = state.page * PAGE_SIZE;
+  const pageRows = sorted.slice(start, start + PAGE_SIZE);
+
+  root.textContent = "";
+
+  if (!state.columns.length) {
+    const d = document.createElement("div");
+    d.className = "empty";
+    d.textContent = "No tabular result for this query.";
+    root.appendChild(d);
+    return;
+  }
+
+  const bar = document.createElement("div");
+  bar.className = "bar";
+  const search = document.createElement("input");
+  search.type = "search";
+  search.placeholder = "Filter rows…";
+  search.value = state.filter;
+  search.addEventListener("input", () => {
+    state.filter = search.value;
+    state.page = 0;
+    render();
+  });
+  const csvBtn = document.createElement("button");
+  csvBtn.textContent = "Export CSV";
+  csvBtn.addEventListener("click", exportCsv);
+  const meta = document.createElement("span");
+  meta.className = "meta";
+  let msg = `showing ${matched.length} of ${state.rowCount}`;
+  if (state.truncated > 0) msg += ` (${state.truncated} truncated)`;
+  meta.textContent = msg;
+  bar.append(search, csvBtn, meta);
+  root.appendChild(bar);
+
+  const wrap = document.createElement("div");
+  wrap.className = "wrap";
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const htr = document.createElement("tr");
+  state.columns.forEach((name, i) => {
+    const th = document.createElement("th");
+    th.textContent = name + " ";
+    const ind = document.createElement("span");
+    ind.className = "ind";
+    ind.textContent = state.sortCol === i ? (state.sortDir === 1 ? "▲" : "▼") : "";
+    th.appendChild(ind);
+    th.addEventListener("click", () => {
+      if (state.sortCol === i) state.sortDir = -state.sortDir;
+      else { state.sortCol = i; state.sortDir = 1; }
+      render();
+    });
+    htr.appendChild(th);
+  });
+  thead.appendChild(htr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  for (const r of pageRows) {
+    const tr = document.createElement("tr");
+    r.forEach((cell, i) => {
+      const td = document.createElement("td");
+      if (isNumeric(i)) td.className = "num";
+      td.textContent = String(cell);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  root.appendChild(wrap);
+
+  const pager = document.createElement("div");
+  pager.className = "pager";
+  const prev = document.createElement("button");
+  prev.textContent = "‹ Prev";
+  prev.disabled = state.page === 0;
+  prev.addEventListener("click", () => { state.page--; render(); });
+  const next = document.createElement("button");
+  next.textContent = "Next ›";
+  next.disabled = state.page >= pages - 1;
+  next.addEventListener("click", () => { state.page++; render(); });
+  const pos = document.createElement("span");
+  pos.className = "meta";
+  pos.textContent = `page ${state.page + 1} / ${pages}`;
+  pager.append(prev, next, pos);
+  root.appendChild(pager);
+}
+
+function ingest(result) {
+  const payload = result && result._meta && result._meta[META_KEY];
+  if (!payload || !Array.isArray(payload.columns)) {
+    state.columns = [];
+    render();
+    return;
+  }
+  state.columns = payload.columns;
+  state.rows = Array.isArray(payload.rows) ? payload.rows : [];
+  state.types = payload.column_types || {};
+  state.rowCount = typeof payload.row_count === "number" ? payload.row_count : state.rows.length;
+  state.truncated = typeof payload.truncated === "number" ? payload.truncated : 0;
+  state.sortCol = -1;
+  state.sortDir = 1;
+  state.filter = "";
+  state.page = 0;
+  render();
+}
+
+function showNotice(text) {
+  root.textContent = "";
+  const d = document.createElement("div");
+  d.className = "empty";
+  d.textContent = text;
+  root.appendChild(d);
+}
+
+const app = new App({ name: "sqllens-query-results", version: "1.0.0" }, {});
+app.ontoolresult = (params) => {
+  // Without this boundary a malformed payload throws into the SDK's message
+  // dispatcher and the widget freezes on "Waiting for results…" with no
+  // signal that data arrived but failed to render.
+  try {
+    ingest(params);
+  } catch (err) {
+    showNotice("Could not render results: " + (err && err.message ? err.message : err));
+  }
+};
+// Theming is non-fatal and must never throw into the SDK dispatcher (which
+// would wedge the message loop) nor be misreported as a connection failure.
+function applyHostContextSafe() {
+  try {
+    applyHostContext(app.getHostContext());
+  } catch (err) {
+    console.warn("host theming failed (non-fatal):", err);
+  }
+}
+
+app.onhostcontextchanged = applyHostContextSafe;
+
+app.connect()
+  .then(applyHostContextSafe)
+  .catch((err) => {
+    showNotice("Failed to connect to host: " + (err && err.message ? err.message : err));
+  });
+</script>
+</body>
+</html>
