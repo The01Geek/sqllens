@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlparse
 from sqllens.agent import Agent, RequestContext, ToolRegistry, User, UserResolver
 from sqllens.agent.capabilities.sql_runner import SqlRunner
 from sqllens.agent.core import AgentConfig
+from sqllens.agent.core.agent.config import UiFeature, UiFeatures
 from sqllens.agent.integrations import (
     AnthropicLlmService,
     ChromaAgentMemory,
@@ -100,6 +101,27 @@ def build_agent(cfg: Config) -> Agent:
     # default system prompt switches on its presence via has_text_memory.
     tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
 
+    # Per-instance UI-feature map. The framework default gates the
+    # tool-arguments card to the "admin" group only, and the static resolver
+    # puts every request in DEFAULT_USER_GROUP — so the executed-SQL card never
+    # reaches a client. When show_details is on, extend *only* the
+    # tool_arguments entry to also admit DEFAULT_USER_GROUP. A fresh list is
+    # built (never the shared DEFAULT_UI_FEATURES list) so the module-level
+    # default is not mutated; tool_error / memory_detailed_results stay
+    # admin-only.
+    ui_features = UiFeatures()
+    if cfg.agent.show_details:
+        tool_args_groups = list(
+            ui_features.feature_group_access.get(
+                UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS, []
+            )
+        )
+        if DEFAULT_USER_GROUP not in tool_args_groups:
+            tool_args_groups.append(DEFAULT_USER_GROUP)
+        ui_features.register_feature(
+            UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS, tool_args_groups
+        )
+
     return Agent(
         llm_service=llm,
         tool_registry=tools,
@@ -108,7 +130,10 @@ def build_agent(cfg: Config) -> Agent:
         # Framework's AgentConfig defaults max_tool_iterations=10, which truncates
         # mid-exploration on untrained schemas. Surface the knob via config so
         # operators can raise it without patching code.
-        config=AgentConfig(max_tool_iterations=cfg.agent.max_tool_iterations),
+        config=AgentConfig(
+            max_tool_iterations=cfg.agent.max_tool_iterations,
+            ui_features=ui_features,
+        ),
     )
 
 

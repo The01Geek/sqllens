@@ -5,7 +5,7 @@
 
 Covers C-5 (BOM single-resolution), O-14 (config_version), C-7
 (DatabaseConfig.dialect), O-1 (ServerConfig.log_level), P-10
-(AgentRuntimeConfig.show_sql), and O-3 (AgentRuntimeConfig.audit).
+(AgentRuntimeConfig.show_details), and O-3 (AgentRuntimeConfig.audit).
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ def _clean_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SQLLENS_LLM__API_KEY", raising=False)
     monkeypatch.delenv("SQLLENS_AUTH__BEARER_TOKEN", raising=False)
     monkeypatch.delenv("SQLLENS_CONFIG_VERSION", raising=False)
-    monkeypatch.delenv("SQLLENS_AGENT__SHOW_SQL", raising=False)
+    monkeypatch.delenv("SQLLENS_AGENT__SHOW_DETAILS", raising=False)
     monkeypatch.delenv("SQLLENS_AGENT__AUDIT__ENABLED", raising=False)
 
 
@@ -104,24 +104,24 @@ def test_server_log_level_rejects_invalid_level() -> None:
         ServerConfig(log_level="verbose")
 
 
-# --- P-10: AgentRuntimeConfig.show_sql -------------------------------------
+# --- P-10: AgentRuntimeConfig.show_details -------------------------------------
 
 
-def test_show_sql_defaults_true() -> None:
-    assert AgentRuntimeConfig().show_sql is True
+def test_show_details_defaults_true() -> None:
+    assert AgentRuntimeConfig().show_details is True
 
 
-def test_show_sql_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SQLLENS_AGENT__SHOW_SQL", "false")
+def test_show_details_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SQLLENS_AGENT__SHOW_DETAILS", "false")
     cfg = Config.load(_minimal_toml(tmp_path))
-    assert cfg.agent.show_sql is False
+    assert cfg.agent.show_details is False
 
 
-def test_show_sql_toml_override(tmp_path: Path) -> None:
+def test_show_details_toml_override(tmp_path: Path) -> None:
     cfg = Config.load(
-        _minimal_toml(tmp_path, "\n[agent]\nshow_sql = false\n")
+        _minimal_toml(tmp_path, "\n[agent]\nshow_details = false\n")
     )
-    assert cfg.agent.show_sql is False
+    assert cfg.agent.show_details is False
 
 
 # --- O-3: AgentRuntimeConfig.audit -----------------------------------------
@@ -392,7 +392,7 @@ def test_minimal_legacy_toml_still_loads_with_new_defaults(
     cfg = Config.load(_minimal_toml(tmp_path))
     assert cfg.config_version == 1
     assert cfg.server.log_level == "info"
-    assert cfg.agent.show_sql is True
+    assert cfg.agent.show_details is True
     assert cfg.agent.audit.enabled is False
 
 
@@ -403,9 +403,9 @@ def test_env_beats_toml_for_new_field(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Documented resolution order: env wins over TOML. Pin it for a new field.
-    monkeypatch.setenv("SQLLENS_AGENT__SHOW_SQL", "true")
-    cfg = Config.load(_minimal_toml(tmp_path, "\n[agent]\nshow_sql = false\n"))
-    assert cfg.agent.show_sql is True
+    monkeypatch.setenv("SQLLENS_AGENT__SHOW_DETAILS", "true")
+    cfg = Config.load(_minimal_toml(tmp_path, "\n[agent]\nshow_details = false\n"))
+    assert cfg.agent.show_details is True
 
 
 def test_invalid_config_version_env_rejected(

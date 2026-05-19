@@ -34,10 +34,26 @@ _MAX_ROWS_RENDERED = 500
 _MAX_TABLE_PAYLOAD_BYTES = 130 * 1024
 
 
+def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
+    # query_type mirrors RunSqlTool.execute's own derivation (first whitespace
+    # token, upper-cased) so the surfaced label matches what the SQL tool used
+    # internally. row_count is threaded from the table payload when a DataFrame
+    # was produced (the run_sql STATUS_CARD metadata only carries the SQL
+    # string — it is tool_call.arguments, i.e. RunSqlToolArgs.sql).
+    tokens = sql.strip().split()
+    info: dict = {
+        "sql": sql,
+        "query_type": tokens[0].upper() if tokens else "",
+    }
+    if row_count is not None:
+        info["row_count"] = row_count
+    return info
+
+
 def components_to_table(
     components: Iterable[UiComponent],
-) -> tuple[str, bool, dict | None]:
-    """Collapse a component stream into ``(markdown, is_error, table_payload)``.
+) -> tuple[str, bool, dict | None, dict | None]:
+    """Collapse a component stream into ``(markdown, is_error, table, query_info)``.
 
     Strategy (single pass):
     - Collect all DataFrame components as Markdown tables.
@@ -46,15 +62,24 @@ def components_to_table(
     - If any STATUS_CARD with status='error' appears, report it as an error.
     - Build ``table_payload`` from the *last* DataFrame in the stream (matches
       the last-wins convention; ``query_database`` emits one in practice).
+    - Capture the executed SQL from the *last* ``run_sql`` STATUS_CARD's
+      ``metadata["sql"]``. The card streams twice (running → completed) with
+      identical metadata, so last-wins de-dupes it idempotently. Absent
+      unless the agent emitted the card — which only happens when
+      ``agent.show_details`` unlocked the tool-arguments feature.
 
     ``table_payload`` is ``None`` on the error path, when no DataFrame is
     present, when the last DataFrame is empty, or when even the header-only
-    serialized form exceeds the size budget.
+    serialized form exceeds the size budget. ``query_info`` is ``None`` on the
+    error path and whenever no ``run_sql`` SQL card was seen (no-SQL / pure
+    text answers, and — in the default read-only deployment — guard-rejected
+    non-SELECT statements, which take the error path).
     """
     text_answer = ""
     tables: list[str] = []
     error_message = ""
     last_df = None
+    last_sql: str | None = None
 
     for comp in components:
         rich = comp.rich_component
@@ -74,9 +99,18 @@ def components_to_table(
         elif ctype == ComponentType.STATUS_CARD:
             if getattr(rich, "status", "") == "error":
                 error_message = getattr(rich, "description", "") or "Agent reported an error"
+            # The run_sql tool's STATUS_CARD carries tool_call.arguments as
+            # metadata; RunSqlToolArgs has exactly one field, `sql`. No other
+            # vendored tool exposes a `sql` argument, so a string under that
+            # key unambiguously identifies the executed-SQL card.
+            metadata = getattr(rich, "metadata", None)
+            if isinstance(metadata, dict):
+                sql = metadata.get("sql")
+                if isinstance(sql, str) and sql.strip():
+                    last_sql = sql
 
     if error_message:
-        return error_message, True, None
+        return error_message, True, None, None
 
     parts = list(tables)
     if text_answer:
@@ -84,18 +118,22 @@ def components_to_table(
     markdown = "\n\n".join(parts) if parts else "(no answer)"
 
     payload = _build_table_payload(last_df) if last_df is not None else None
-    return markdown, False, payload
+    query_info = None
+    if last_sql is not None:
+        row_count = payload["row_count"] if payload is not None else None
+        query_info = _query_info_from_sql(last_sql, row_count)
+    return markdown, False, payload, query_info
 
 
 def components_to_markdown(components: Iterable[UiComponent]) -> tuple[str, bool]:
     """Collapse a stream of components into ``(markdown, is_error)``.
 
     Thin wrapper over :func:`components_to_table` that drops the structured
-    table; returns the same ``(markdown, is_error)`` pair non-apps hosts
-    already depend on (the Markdown branch is unchanged — pinned by
-    ``tests/unit/test_format.py``).
+    table and query info; returns the same ``(markdown, is_error)`` pair
+    non-apps hosts already depend on (the Markdown branch is unchanged —
+    pinned by ``tests/unit/test_format.py``).
     """
-    markdown, is_error, _ = components_to_table(components)
+    markdown, is_error, _, _ = components_to_table(components)
     return markdown, is_error
 
 

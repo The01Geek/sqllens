@@ -83,6 +83,47 @@ def test_max_tool_iterations_flows_through_config(tmp_path: Path) -> None:
     assert agent.config.max_tool_iterations == 42
 
 
+def test_show_details_on_unlocks_only_tool_arguments(tmp_path: Path) -> None:
+    """show_details (default True) admits the static group to tool_arguments
+    *only* — every other admin-gated UI feature stays admin-only, and the
+    module-level DEFAULT_UI_FEATURES list is not mutated.
+    """
+    from sqllens.agent.core.agent.config import (
+        DEFAULT_UI_FEATURES,
+        UiFeature,
+    )
+
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    assert cfg.agent.show_details is True
+    agent = build_agent(cfg)
+
+    fga = agent.config.ui_features.feature_group_access
+    assert "default" in fga[UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS]
+    # Targeted: the other admin-only features are untouched.
+    assert fga[UiFeature.UI_FEATURE_SHOW_TOOL_ERROR] == ["admin"]
+    assert fga[UiFeature.UI_FEATURE_SHOW_MEMORY_DETAILED_RESULTS] == ["admin"]
+    # The shared module-level default must not have been mutated in place.
+    assert DEFAULT_UI_FEATURES[UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS] == [
+        "admin"
+    ]
+
+
+def test_show_details_off_keeps_tool_arguments_admin_only(tmp_path: Path) -> None:
+    """show_details=False → tool_arguments stays admin-gated, so the static
+    user never sees the executed-SQL card (pre-feature behavior).
+    """
+    from sqllens.agent.core.agent.config import UiFeature
+
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        agent=AgentRuntimeConfig(show_details=False),
+    )
+    agent = build_agent(cfg)
+
+    fga = agent.config.ui_features.feature_group_access
+    assert fga[UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS] == ["admin"]
+
+
 def test_save_text_memory_tool_is_registered(tmp_path: Path) -> None:
     """The default system prompt's text-memory instructions only fire when
     ``save_text_memory`` is registered (``has_text_memory`` in default.py).

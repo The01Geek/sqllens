@@ -315,17 +315,22 @@ async def test_with_table_returns_payload_on_dataframe(
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
 ) -> None:
-    """The sibling returns ``(markdown, dict)`` when the stream has a DataFrame."""
+    """The sibling returns ``(markdown, dict, query_info)`` with a DataFrame."""
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     stub = agent_stub_factory([make_dataframe([{"name": "Alice", "age": 30}])])
     monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
 
-    markdown, table = await query_database_impl_with_table(cfg, "list users")
+    markdown, table, query_info = await query_database_impl_with_table(
+        cfg, "list users"
+    )
 
     assert "| name | age |" in markdown
     assert table is not None
     assert table["columns"] == ["name", "age"]
     assert table["rows"] == [["Alice", "30"]]
+    # No run_sql STATUS_CARD in this stub stream → no query_info, no SQL block.
+    assert query_info is None
+    assert "```sql" not in markdown
 
 
 @pytest.mark.asyncio
@@ -339,10 +344,79 @@ async def test_with_table_returns_none_table_on_text_only(
     stub = agent_stub_factory([make_text_component("text answer")])
     monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
 
-    markdown, table = await query_database_impl_with_table(cfg, "q")
+    markdown, table, query_info = await query_database_impl_with_table(cfg, "q")
 
     assert markdown == "text answer"
     assert table is None
+    assert query_info is None
+
+
+@pytest.mark.asyncio
+async def test_with_table_surfaces_executed_sql(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """show_details path: run_sql STATUS_CARD → query_info + fenced sql block."""
+    from sqllens.agent.components.rich.feedback.status_card import (
+        StatusCardComponent,
+    )
+    from sqllens.agent.core.components import UiComponent
+
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    sql = "SELECT name, age FROM users"
+    stub = agent_stub_factory(
+        [
+            UiComponent(
+                rich_component=StatusCardComponent(
+                    title="Executing run_sql",
+                    status="success",
+                    description="ran",
+                    metadata={"sql": sql},
+                )
+            ),
+            make_dataframe([{"name": "Alice", "age": 30}]),
+            make_text_component("one user"),
+        ]
+    )
+    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+
+    markdown, table, query_info = await query_database_impl_with_table(
+        cfg, "list users"
+    )
+
+    assert query_info == {"sql": sql, "query_type": "SELECT", "row_count": 1}
+    assert table is not None
+    assert f"```sql\n{sql}\n```" in markdown
+    assert markdown.startswith("| name | age |")
+
+
+@pytest.mark.asyncio
+async def test_with_table_no_sql_block_when_show_details_off(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """show_details off → agent emits no tool-args card → byte-for-byte old output.
+
+    The flag gates emission at the agent layer; with it off the stub stream
+    has no run_sql STATUS_CARD, so the formatter sees no SQL and the result is
+    identical to the pre-feature behavior (no query_info, no ```sql block).
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    assert cfg.agent.show_details is True  # default-on
+    stub = agent_stub_factory(
+        [make_dataframe([{"name": "Alice"}]), make_text_component("one user")]
+    )
+    monkeypatch.setattr(query_database_module, "build_agent", lambda _c: stub)
+
+    markdown, table, query_info = await query_database_impl_with_table(
+        cfg, "list users"
+    )
+
+    assert query_info is None
+    assert "```sql" not in markdown
+    assert table is not None
 
 
 @pytest.mark.asyncio
