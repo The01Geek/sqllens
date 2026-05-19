@@ -32,6 +32,20 @@ _READ_SHAPED_KEYWORDS: frozenset[str] = frozenset(
 )
 
 
+def first_sql_keyword(sql: str) -> str:
+    """Return ``sql``'s leading keyword uppercased, or ``""`` if none.
+
+    Skips a leading ``(`` so wrapped ``(WITH ... SELECT ...)`` / ``(SELECT
+    ...)`` forms classify by their inner verb.
+    """
+    if not sql:
+        return ""
+    stripped = sql.strip()
+    while stripped.startswith("("):
+        stripped = stripped[1:].lstrip()
+    return stripped.split(None, 1)[0].upper() if stripped else ""
+
+
 def is_read_shaped(sql: str) -> bool:
     """Return True if ``sql``'s first keyword indicates a row-returning query.
 
@@ -40,17 +54,7 @@ def is_read_shaped(sql: str) -> bool:
     ``ReadOnlyGuardRunner`` (when enabled) has already enforced that the whole
     statement is read-only via sqlglot.
     """
-    if not sql:
-        return False
-    stripped = sql.strip()
-    if not stripped:
-        return False
-    # Skip a leading "(" so "(WITH ... SELECT ...)" and "(SELECT ...)" forms
-    # still classify as read-shaped.
-    while stripped.startswith("("):
-        stripped = stripped[1:].lstrip()
-    first = stripped.split(None, 1)[0].upper() if stripped else ""
-    return first in _READ_SHAPED_KEYWORDS
+    return first_sql_keyword(sql) in _READ_SHAPED_KEYWORDS
 
 
 _ALLOWED_ROOT_TYPES: tuple[type[exp.Expression], ...] = (

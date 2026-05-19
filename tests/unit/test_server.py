@@ -83,7 +83,7 @@ async def test_query_database_returns_calltoolresult_with_meta_when_table(
                "row_count": 1, "truncated": 0}
 
     async def fake_impl(_cfg, _q):
-        return "| a |\n|---|\n| 1 |", payload
+        return "| a |\n|---|\n| 1 |", payload, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_table", fake_impl)
 
@@ -93,6 +93,49 @@ async def test_query_database_returns_calltoolresult_with_meta_when_table(
     assert result.content[0].text == "| a |\n|---|\n| 1 |"
 
 
+async def test_query_database_meta_carries_query_info_when_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+
+    payload = {"columns": ["a"], "rows": [["1"]], "column_types": {},
+               "row_count": 1, "truncated": 0}
+    query_info = {"sql": "SELECT a FROM t", "query_type": "SELECT",
+                  "row_count": 1}
+
+    async def fake_impl(_cfg, _q):
+        return "md\n\n```sql\nSELECT a FROM t\n```", payload, query_info
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_table", fake_impl)
+
+    result = await _query_database_fn(mcp)("rows?")
+    assert isinstance(result, CallToolResult)
+    assert result.meta == {
+        "sqllens/table": payload,
+        "sqllens/query": query_info,
+    }
+
+
+async def test_query_database_meta_query_info_without_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # SELECT returning zero rows: empty DataFrame → no table payload, but the
+    # executed SQL is still surfaced via _meta and the text block.
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+    query_info = {"sql": "SELECT 1 WHERE 1=0", "query_type": "SELECT"}
+
+    async def fake_impl(_cfg, _q):
+        return "no rows\n\n```sql\nSELECT 1 WHERE 1=0\n```", None, query_info
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_table", fake_impl)
+
+    result = await _query_database_fn(mcp)("rows?")
+    assert isinstance(result, CallToolResult)
+    assert result.meta == {"sqllens/query": query_info}
+
+
 async def test_query_database_returns_plain_str_when_no_table(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -100,7 +143,7 @@ async def test_query_database_returns_plain_str_when_no_table(
     mcp = build_server(cfg)
 
     async def fake_impl(_cfg, _q):
-        return "just text", None
+        return "just text", None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_table", fake_impl)
 

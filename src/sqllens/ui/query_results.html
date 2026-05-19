@@ -9,8 +9,10 @@
   served from the same MCP server origin. No fonts, no analytics, no CDN, no
   remote XHR/fetch. The host renders this in a sandboxed iframe and pushes the
   tool's CallToolResult via the MCP Apps postMessage channel; the structured
-  table lives under result._meta["sqllens/table"]. If that key is absent or
-  malformed the widget renders an empty-state notice.
+  table lives under result._meta["sqllens/table"] and (when agent.show_details
+  is on) the executed SQL under result._meta["sqllens/query"].sql. If the
+  table key is absent or malformed the widget renders an empty-state notice;
+  the SQL section is independent and simply omitted when absent.
 -->
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Query results</title>
@@ -55,6 +57,18 @@
   .pager { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
   .pager button[disabled] { opacity: 0.4; cursor: default; }
   .empty { color: var(--muted); padding: 16px; }
+  details.sql { margin-bottom: 8px; }
+  details.sql summary {
+    cursor: pointer; color: var(--muted); font-size: 12px;
+    user-select: none; padding: 4px 0;
+  }
+  details.sql pre {
+    margin: 4px 0 0; padding: 8px;
+    background: var(--control-bg); border: 1px solid var(--line);
+    border-radius: 6px; overflow: auto;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
 </style>
 </head>
 <body>
@@ -65,6 +79,7 @@ import { App } from "./vendor/app-with-deps.js";
 
 const PAGE_SIZE = 50;
 const META_KEY = "sqllens/table";
+const QUERY_META_KEY = "sqllens/query";
 
 const state = {
   columns: [],
@@ -76,9 +91,22 @@ const state = {
   sortDir: 1,
   filter: "",
   page: 0,
+  sql: "",
 };
 
+// Two stable children: the SQL section is immutable for a result, so it is
+// painted once by ingest() into sqlHost and never touched by render().
+// render() owns gridHost only — clearing it on every filter/sort/page must
+// not destroy (and collapse) the user's expanded "Executed SQL" panel.
 const root = document.getElementById("root");
+root.textContent = "";
+const sqlHost = document.createElement("div");
+const gridHost = document.createElement("div");
+const _waiting = document.createElement("div");
+_waiting.className = "empty";
+_waiting.textContent = "Waiting for results…";
+gridHost.appendChild(_waiting);
+root.append(sqlHost, gridHost);
 
 function isNumeric(colIndex) {
   return state.types[state.columns[colIndex]] === "number";
@@ -155,6 +183,23 @@ function exportCsv() {
   }
 }
 
+function renderSqlSection() {
+  // Collapsed by default — executed SQL is QA detail, not the primary answer.
+  // Called once per result from ingest(), never from render().
+  sqlHost.textContent = "";
+  if (!state.sql) return;
+  const details = document.createElement("details");
+  details.className = "sql";
+  const summary = document.createElement("summary");
+  summary.textContent = "Executed SQL";
+  const pre = document.createElement("pre");
+  const code = document.createElement("code");
+  code.textContent = state.sql;
+  pre.appendChild(code);
+  details.append(summary, pre);
+  sqlHost.appendChild(details);
+}
+
 function render() {
   const matched = filteredRows();
   const sorted = sortedRows(matched);
@@ -164,13 +209,13 @@ function render() {
   const start = state.page * PAGE_SIZE;
   const pageRows = sorted.slice(start, start + PAGE_SIZE);
 
-  root.textContent = "";
+  gridHost.textContent = "";
 
   if (!state.columns.length) {
     const d = document.createElement("div");
     d.className = "empty";
     d.textContent = "No tabular result for this query.";
-    root.appendChild(d);
+    gridHost.appendChild(d);
     return;
   }
 
@@ -194,7 +239,7 @@ function render() {
   if (state.truncated > 0) msg += ` (${state.truncated} truncated)`;
   meta.textContent = msg;
   bar.append(search, csvBtn, meta);
-  root.appendChild(bar);
+  gridHost.appendChild(bar);
 
   const wrap = document.createElement("div");
   wrap.className = "wrap";
@@ -231,7 +276,7 @@ function render() {
   }
   table.appendChild(tbody);
   wrap.appendChild(table);
-  root.appendChild(wrap);
+  gridHost.appendChild(wrap);
 
   const pager = document.createElement("div");
   pager.className = "pager";
@@ -247,11 +292,17 @@ function render() {
   pos.className = "meta";
   pos.textContent = `page ${state.page + 1} / ${pages}`;
   pager.append(prev, next, pos);
-  root.appendChild(pager);
+  gridHost.appendChild(pager);
 }
 
 function ingest(result) {
-  const payload = result && result._meta && result._meta[META_KEY];
+  const meta = (result && result._meta) || {};
+  const queryInfo = meta[QUERY_META_KEY];
+  state.sql =
+    queryInfo && typeof queryInfo.sql === "string" ? queryInfo.sql : "";
+  renderSqlSection();
+
+  const payload = meta[META_KEY];
   if (!payload || !Array.isArray(payload.columns)) {
     state.columns = [];
     render();
@@ -270,11 +321,11 @@ function ingest(result) {
 }
 
 function showNotice(text) {
-  root.textContent = "";
+  gridHost.textContent = "";
   const d = document.createElement("div");
   d.className = "empty";
   d.textContent = text;
-  root.appendChild(d);
+  gridHost.appendChild(d);
 }
 
 const app = new App({ name: "sqllens-query-results", version: "1.0.0" }, {});
