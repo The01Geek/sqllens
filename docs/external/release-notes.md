@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 19, 2026
+
+- **[Improvement] Configuration errors fail closed so unrecognized error types cannot leak secrets** — Secret redaction in configuration error output now covers all configuration-load failures, not just field-validation errors. SQL Lens prints the error message only when its kind is known to be safe (such as a file-not-found, byte-order-mark, or syntax error); for any unrecognized error type that might quote a secret-bearing line from your file or environment, the message is withheld and a generic notice naming the fields to check (`api_key`, `bearer_token`, `database.url`) is shown instead. The same protection now also applies when `sqllens claude-desktop install` validates the configuration it generates, so an installer-time error cannot echo the API key you passed in. (#126)
+
 ## May 18, 2026
 
 - **[Improvement] New optional configuration keys (all backward-compatible, no behavior change yet)** — SQL Lens accepts several new optional settings that reserve surface for upcoming features. A top-level `config_version` (defaults to `1`) lets future releases recognize the schema version of your `sqllens.toml`; it is accepted and currently ignored. `[server]` gains `log_level` (one of `critical`, `error`, `warning`, `info`, `debug`, `trace`; defaults to `info`). `[agent]` gains `show_sql` (defaults to `true`) and a new `[agent.audit]` section (`enabled` defaulting to `false`, plus `log_level`, `include_response_text`, and `sanitize_parameters`). Every key has a safe default, so existing configuration files and deployments continue to work unchanged and behave exactly as before — these settings do not yet change runtime behavior; the features that consume them ship in later releases. (#109)

@@ -987,3 +987,226 @@ def test_format_config_error_redacts_plain_str_input() -> None:
         assert "dsn is malformed" in rendered
     else:  # pragma: no cover - validator always raises
         raise AssertionError("expected ValidationError")
+
+
+def test_format_config_error_suppresses_unknown_exception_message() -> None:
+    # Carried from #122 / #125: the old code returned str(exc) for *any*
+    # non-ValidationError, so an unrecognised exception whose message quoted a
+    # secret-bearing config line would leak it. Unknown types must now have
+    # their message withheld; only the class name and actionable guidance show.
+    from sqllens.cli import _format_config_error
+
+    secret = "sk-ant-LEAKED-CANARY"
+
+    class _WeirdConfigError(Exception):
+        pass
+
+    rendered = _format_config_error(
+        _WeirdConfigError(f'api_key = "{secret}"  # offending line')
+    )
+    assert secret not in rendered
+    assert "_WeirdConfigError" in rendered
+    # The withheld-message branch must stay actionable: it explains *why* the
+    # text was suppressed and which secret-bearing fields to inspect. A
+    # regression that trimmed it to a bare class name would make a config typo
+    # near a secret undiagnosable.
+    assert "withheld" in rendered
+    assert "database.url" in rendered
+
+
+def test_format_config_error_suppresses_bare_valueerror() -> None:
+    # A bare ValueError is not on the allowlist (only the ConfigBomError
+    # subclass is) — its message is untrusted and must be withheld.
+    from sqllens.cli import _format_config_error
+
+    secret = "p@ssw0rd-CANARY"
+    rendered = _format_config_error(ValueError(f"bad value: {secret}"))
+    assert secret not in rendered
+    assert "ValueError" in rendered
+
+
+def test_configbomerror_type_contract() -> None:
+    # The documented backward-compat contract: ConfigBomError IS-A ValueError
+    # (so `except ValueError` / `except (ValueError, OSError, ...)` callers
+    # still catch it) and IS-NOT-A tomllib.TOMLDecodeError (so embedders that
+    # `except TOMLDecodeError` still miss it). A future "tidy the hierarchy"
+    # change that made it subclass TOMLDecodeError would silently break the
+    # embedder contract while every inheritance-by-accident test stayed green.
+    import tomllib
+
+    from sqllens.config import ConfigBomError
+
+    assert issubclass(ConfigBomError, ValueError)
+    assert not issubclass(ConfigBomError, tomllib.TOMLDecodeError)
+
+
+def test_configbomerror_pickle_round_trip() -> None:
+    # ConfigBomError defines a custom __reduce__ specifically because the
+    # default BaseException.__reduce__ would feed the *built message string*
+    # back into the Path-expecting constructor on unpickle, corrupting
+    # `.path` and re-running _bom_error_message on the message. This pins
+    # that the (type, (path,)) reduction survives pickle/deepcopy: a
+    # regression that drops or reverts __reduce__ fails here instead of
+    # silently corrupting cross-process (multiprocessing) round-trips.
+    import copy
+    import pickle
+    from pathlib import Path
+
+    from sqllens.config import ConfigBomError
+
+    original = ConfigBomError(Path("/x/sqllens.toml"))
+
+    restored = pickle.loads(pickle.dumps(original))
+    assert isinstance(restored, ConfigBomError)
+    assert isinstance(restored, ValueError)
+    assert restored.path == original.path
+    assert isinstance(restored.path, Path)
+    assert str(restored) == str(original)
+
+    deep = copy.deepcopy(original)
+    assert isinstance(deep, ConfigBomError)
+    assert deep.path == original.path
+    assert str(deep) == str(original)
+
+    # str-ish path is normalized to Path so the round-trip stays exact.
+    from_str = ConfigBomError(Path("/y/sqllens.toml"))
+    assert isinstance(from_str.path, Path)
+    assert str(pickle.loads(pickle.dumps(from_str))) == str(from_str)
+
+
+def test_format_config_error_passes_through_bom_error() -> None:
+    # ConfigBomError builds its own message from the Path via
+    # _bom_error_message, so the operator-safe content (path + rewrite
+    # commands, no config values) is true by construction. It must pass
+    # through verbatim and name the offending path.
+    from pathlib import Path
+
+    from sqllens.cli import _format_config_error
+    from sqllens.config import ConfigBomError
+
+    exc = ConfigBomError(Path("/etc/sqllens.toml"))
+    rendered = _format_config_error(exc)
+    assert rendered == str(exc)
+    assert "/etc/sqllens.toml" in rendered
+    assert "UTF-8 BOM" in rendered
+
+
+def test_format_config_error_passes_through_tomldecode() -> None:
+    # tomllib.TOMLDecodeError carries only a line/column coordinate (no source
+    # line), so it is safe and actionable — and it is matched on its own type,
+    # NOT via a cause/context chain walk (a chain walk following __context__
+    # would echo an unrelated secret-bearing exception merely raised while a
+    # TOMLDecodeError was being handled).
+    import tomllib
+
+    from sqllens.cli import _format_config_error
+
+    try:
+        tomllib.loads('api_key = "secret" garbage')
+    except tomllib.TOMLDecodeError as raw:
+        assert _format_config_error(raw) == str(raw)
+        assert "secret" not in str(raw)
+        # A non-allowlisted wrapper whose __context__/__cause__ merely *contains*
+        # a TOMLDecodeError must NOT pass through — its own message is untrusted.
+        wrapped = RuntimeError("settings source failed: token=p@ss-CANARY")
+        wrapped.__cause__ = raw
+        rendered = _format_config_error(wrapped)
+        assert "p@ss-CANARY" not in rendered
+        assert "RuntimeError" in rendered
+    else:  # pragma: no cover - input is invalid TOML
+        raise AssertionError("expected TOMLDecodeError")
+
+
+def test_format_config_error_passes_through_settingserror() -> None:
+    # pydantic-settings raises SettingsError for a malformed nested env var;
+    # its message names the field + source only (the value is chained via
+    # __cause__, never interpolated), so it is allowlisted and actionable.
+    # This is also the type a future pydantic-settings would wrap a
+    # TOMLDecodeError in.
+    from pydantic_settings import SettingsError
+
+    from sqllens.cli import _format_config_error
+
+    exc = SettingsError(
+        'error parsing value for field "database" from source "EnvSettingsSource"'
+    )
+    rendered = _format_config_error(exc)
+    assert rendered == str(exc)
+    assert "EnvSettingsSource" in rendered
+
+
+def test_format_config_error_passes_through_importerror() -> None:
+    # ImportError messages are a module name only (missing optional DB driver
+    # extra) — allowlisted and actionable, no config value.
+    from sqllens.cli import _format_config_error
+
+    rendered = _format_config_error(ImportError("No module named 'psycopg'"))
+    assert rendered == "No module named 'psycopg'"
+
+
+def test_format_config_error_passes_through_oserror() -> None:
+    # FileNotFoundError/PermissionError messages are errno + path only.
+    from sqllens.cli import _format_config_error
+
+    rendered = _format_config_error(FileNotFoundError(2, "No such file", "/x/sqllens.toml"))
+    assert "/x/sqllens.toml" in rendered
+
+
+def test_bom_config_with_secret_scrubbed_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # End-to-end: a real BOM-prefixed TOML holding live secrets, through the
+    # actual Config.load path, then _format_config_error. Pins the whole
+    # contract (Config.load raises ConfigBomError(path) → allowlisted →
+    # str() is BOM remediation only) so a regression anywhere along it — a
+    # refactor of the raise site, or a pydantic-settings upgrade that wraps
+    # the BOM TOMLDecodeError before _has_utf8_bom is consulted — fails here
+    # instead of leaking the secret in serve/validate output.
+    from sqllens.cli import _format_config_error
+    from sqllens.config import Config
+
+    monkeypatch.delenv("SQLLENS_CONFIG", raising=False)
+    cfg = tmp_path / "sqllens.toml"
+    cfg.write_bytes(
+        b"\xef\xbb\xbf"
+        b'[database]\nurl = "postgresql://u:DSN-CANARY-PW@h/db"\n'
+        b'[llm]\napi_key = "sk-ant-API-CANARY"\n'
+    )
+    try:
+        Config.load(cfg)
+    except Exception as exc:
+        rendered = _format_config_error(exc)
+    else:  # pragma: no cover - BOM always raises
+        raise AssertionError("expected ConfigBomError")
+    assert "DSN-CANARY-PW" not in rendered
+    assert "sk-ant-API-CANARY" not in rendered
+    assert "UTF-8 BOM" in rendered
+    assert str(cfg) in rendered
+
+
+def test_real_settingserror_with_secret_scrubbed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Converts the _SAFE_CONFIG_ERROR_TYPES comment's load-bearing claim
+    # ("SettingsError names field+source only; the value is chained via
+    # __cause__, never interpolated") from a documented assumption into a
+    # version-pinned, enforced invariant. A malformed nested env var holding
+    # a canary secret must produce a real pydantic-settings SettingsError
+    # whose rendered form omits the canary — catching a future
+    # pydantic-settings upgrade that started interpolating the value.
+    from pydantic_settings import SettingsError
+
+    from sqllens.cli import _format_config_error
+    from sqllens.config import Config
+
+    monkeypatch.delenv("SQLLENS_CONFIG", raising=False)
+    monkeypatch.setenv("SQLLENS_DATABASE", '{"url": "postgresql://u:ENV-CANARY-PW@h')
+    try:
+        Config.load()
+    except Exception as exc:
+        assert isinstance(exc, SettingsError)
+        rendered = _format_config_error(exc)
+    else:  # pragma: no cover - malformed env always raises
+        raise AssertionError("expected SettingsError")
+    assert "ENV-CANARY-PW" not in rendered
+    assert "database" in rendered
