@@ -22,6 +22,7 @@ from sqllens.config import Config
 from sqllens.safety import UnsafeSqlError
 from sqllens.tools import query_database as query_database_module
 from sqllens.tools.query_database import (
+    prime_agent,
     query_database_impl,
     query_database_impl_with_table,
 )
@@ -386,6 +387,64 @@ async def test_concurrent_first_calls_build_once(
 
     assert len(builds) == 1
     assert lock_held_during_build == [True]
+
+
+@pytest.mark.asyncio
+async def test_prime_agent_primes_request_path_singleton(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """#116: the eager warmup primes the SAME singleton the request path serves.
+
+    The deferred finding was that an eager warmup constructed a *second*
+    agent that the request path discarded. ``prime_agent`` must populate the
+    process-wide ``_AGENT_STATE`` so a subsequent ``query_database_impl`` call
+    reuses it — ``build_agent`` runs exactly once across both, not twice.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    builds: list[Config] = []
+
+    def fake_build_agent(c: Config):
+        builds.append(c)
+        return agent_stub_factory([make_text_component("primed")])
+
+    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+
+    await prime_agent(cfg)
+
+    assert len(builds) == 1
+    primed_agent, primed_cfg = query_database_module._AGENT_STATE
+    assert primed_cfg is cfg
+
+    result = await query_database_impl(cfg, "q")
+
+    assert len(builds) == 1  # request path reused the warmup's agent
+    assert query_database_module._AGENT_STATE[0] is primed_agent
+    assert "primed" in result
+
+
+@pytest.mark.asyncio
+async def test_prime_agent_propagates_build_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed warmup propagates and leaves the singleton ``None``.
+
+    ``prime_agent`` is best-effort by contract: it raises so the HTTP
+    lifespan can log-and-continue, and the request path rebuilds cleanly.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+
+    def boom_build_agent(_c: Config):
+        raise RuntimeError("cold start failed")
+
+    monkeypatch.setattr(query_database_module, "build_agent", boom_build_agent)
+
+    with pytest.raises(RuntimeError, match="cold start failed"):
+        await prime_agent(cfg)
+
+    assert query_database_module._AGENT_STATE is None
 
 
 @pytest.mark.asyncio

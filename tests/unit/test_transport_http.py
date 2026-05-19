@@ -189,28 +189,33 @@ async def _noop_inner(scope, receive, send):  # type: ignore[no-untyped-def]
 
 @pytest.fixture(autouse=True)
 def _stub_eager_build_agent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Neutralize the O-5 eager ``build_agent`` for the lifespan-protocol tests.
+    """Neutralize the eager warmup's ``build_agent`` for the lifespan tests.
 
-    The ``_SessionManagerLifespan`` failure/idempotency tests exercise the
-    ASGI lifespan state machine, not agent wiring; building a real agent
-    (sqlite connect + object graph) on every clean-startup path would be
-    irrelevant work and couple these tests to ``factory.build_agent``. The
-    integration suite (a different module, unaffected by this fixture) pins
-    the real "build_agent invoked exactly once at startup" contract.
+    The eager warmup now runs through the ``on_startup`` hook, which delegates
+    to ``query_database.prime_agent`` → ``_agent_for`` → ``build_agent``.
+    Building a real agent (sqlite connect + object graph) on a clean-startup
+    path would be irrelevant work for tests that exercise the ASGI lifespan
+    state machine, so stub the build seam where it is actually called and
+    reset the process-wide ``_AGENT_STATE`` singleton so a primed agent never
+    leaks between tests. The integration suite (a different module, unaffected
+    by this fixture) pins the real warmup contract.
     """
-    monkeypatch.setattr(
-        "sqllens.transport.http.build_agent", lambda cfg: object()
-    )
+    import sqllens.tools.query_database as qd
+
+    monkeypatch.setattr(qd, "build_agent", lambda cfg: object())
+    monkeypatch.setattr(qd, "_AGENT_STATE", None)
 
 
 def _lifespan(sm: _FakeSessionManager) -> _SessionManagerLifespan:
-    """Build the lifespan adapter with throwaway cfg/readiness.
+    """Build the lifespan adapter with a throwaway readiness latch and no
+    warmup hook.
 
-    The cfg is only consumed by the eager ``build_agent`` (stubbed out by the
-    autouse fixture above), and readiness is asserted by the dedicated
-    ``_PathNormalizer`` ``/readyz`` tests, not these protocol tests.
+    These protocol tests exercise the ASGI lifespan state machine, not the
+    eager warmup (``on_startup`` defaults to ``None``); readiness is asserted
+    by the dedicated ``_PathNormalizer`` ``/readyz`` tests and the
+    warmup→readiness writer tests, not here.
     """
-    return _SessionManagerLifespan(_noop_inner, sm, object(), _Readiness())  # type: ignore[arg-type]
+    return _SessionManagerLifespan(_noop_inner, sm, _Readiness())
 
 
 def test_lifespan_shutdown_failure_sends_failed_not_complete() -> None:
@@ -1199,25 +1204,132 @@ def test_healthz_not_gated_on_readiness() -> None:
     assert _body_of(sent) == b'{"status":"ok"}'
 
 
-# ───── O-5: eager build_agent through the REAL lifespan writer (not the
+# ─────────────────── eager-warmup on_startup hook (#116) ─────────────────────
+
+
+def test_lifespan_startup_runs_on_startup_hook_then_acks_complete() -> None:
+    """#116: the eager-warmup hook runs once on startup, before the ack.
+
+    The hook must fire *after* the session manager is up and *before*
+    ``lifespan.startup.complete`` is sent, so the agent is primed before the
+    host starts routing requests.
+    """
+    sm = _FakeSessionManager()
+    order: list[str] = []
+
+    async def hook() -> None:
+        order.append("hook")
+
+    adapter = _SessionManagerLifespan(_noop_inner, sm, _Readiness(), on_startup=hook)
+    receive, _send, sent = _make_io(
+        [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
+    )
+
+    async def send_recording(msg: dict) -> None:
+        order.append(msg["type"])
+        sent.append(msg)
+
+    asyncio.run(adapter({"type": "lifespan"}, receive, send_recording))
+
+    assert order.index("hook") < order.index("lifespan.startup.complete")
+    assert sm.aenter_calls == 1
+    assert [m["type"] for m in sent] == [
+        "lifespan.startup.complete",
+        "lifespan.shutdown.complete",
+    ]
+
+
+def test_lifespan_startup_hook_failure_does_not_block_boot(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#116: a failed warmup is logged but startup still acks ``complete``.
+
+    The warmup is best-effort — a bad API key / unreachable DB must not stop
+    the server from booting; the request path rebuilds on first query. A
+    failed hook must therefore NOT downgrade the ack to ``startup.failed``.
+    """
+    sm = _FakeSessionManager()
+
+    async def boom_hook() -> None:
+        raise RuntimeError("warmup blew up")
+
+    adapter = _SessionManagerLifespan(_noop_inner, sm, _Readiness(), on_startup=boom_hook)
+    receive, send, sent = _make_io(
+        [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
+    )
+
+    with caplog.at_level(logging.ERROR, logger="sqllens.transport.http"):
+        asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    assert [m["type"] for m in sent] == [
+        "lifespan.startup.complete",
+        "lifespan.shutdown.complete",
+    ]
+    assert "lifespan.startup.failed" not in [m["type"] for m in sent]
+    assert any(
+        r.levelno >= logging.ERROR and "warmup" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_lifespan_startup_hook_baseexception_propagates_uncaught() -> None:
+    """A ``BaseException`` from the hook (e.g. task cancellation) propagates.
+
+    Symmetric with the session-manager startup path: ``except Exception``
+    must not swallow ``asyncio.CancelledError`` into a spurious
+    ``startup.complete``.
+    """
+    sm = _FakeSessionManager()
+
+    async def cancel_hook() -> None:
+        raise asyncio.CancelledError
+
+    adapter = _SessionManagerLifespan(_noop_inner, sm, _Readiness(), on_startup=cancel_hook)
+    receive, send, sent = _make_io([{"type": "lifespan.startup"}])
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    assert "lifespan.startup.complete" not in [m["type"] for m in sent]
+
+
+def test_build_asgi_app_wires_eager_warmup(tmp_path: Path) -> None:
+    """Regression: ``build_asgi_app`` must attach the warmup hook.
+
+    Without this, #116's fix would be inert — the lifespan adapter would be
+    built with ``on_startup=None`` and the agent would still cold-start on
+    the first query.
+    """
+    app = build_asgi_app(_cfg(tmp_path))
+    assert isinstance(app, _SessionManagerLifespan)
+    assert app.on_startup is not None
+    assert callable(app.on_startup)
+
+
+# ───── readiness latched through the REAL lifespan writer (not the
 # _PathNormalizer reader) — pins the warmup→readiness contract end-to-end ─────
 
 
-def test_eager_build_agent_success_flips_readiness_via_writer() -> None:
+def test_warmup_success_flips_readiness_via_writer() -> None:
     """A clean lifespan startup must flip the shared ``_Readiness`` to True
     *through the real ``_SessionManagerLifespan`` writer* (not a hand-set
-    flag), after the eager ``build_agent`` returns, and ack
+    flag), after the eager warmup hook returns, and ack
     ``lifespan.startup.complete``.
 
     The other ``/readyz`` tests drive ``_PathNormalizer`` with a hand-toggled
     flag — they pin the reader. This pins the writer half of the contract:
-    a regression that set ``ready`` before ``build_agent`` (defeating the
-    warmup gate) or never set it would be caught here. ``build_agent`` is the
-    autouse-stubbed ``lambda cfg: object()`` — success path.
+    a regression that never set ``ready`` (so ``/readyz`` stuck at 503) would
+    be caught here.
     """
     sm = _FakeSessionManager()
     readiness = _Readiness()
-    adapter = _SessionManagerLifespan(_noop_inner, sm, object(), readiness)  # type: ignore[arg-type]
+
+    async def ok_hook() -> None:
+        return None
+
+    adapter = _SessionManagerLifespan(
+        _noop_inner, sm, readiness, on_startup=ok_hook
+    )
     assert readiness.ready is False
 
     receive, send, sent = _make_io(
@@ -1233,59 +1345,43 @@ def test_eager_build_agent_success_flips_readiness_via_writer() -> None:
     assert adapter._started is True
 
 
-def test_eager_build_agent_failure_surfaces_startup_failed(
-    monkeypatch: pytest.MonkeyPatch,
+def test_warmup_failure_still_flips_readiness_and_boots(
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """If the eager ``build_agent`` raises, the existing broad startup handler
-    must surface ``lifespan.startup.failed`` (not swallow it, not ack
-    ``complete``), and ``_Readiness`` must stay False so ``/readyz`` keeps
-    answering 503.
+    """A *failed* best-effort warmup must still latch readiness and ack
+    ``startup.complete``.
 
-    Distinct from ``test_lifespan_startup_failure_sends_failed_not_complete``:
-    that injects the failure at the session-manager ``__aenter__`` (before the
-    eager-warmup line). This injects it at the *new* ``build_agent`` call —
-    which sits AFTER a successful ``__aenter__`` — so it pins that the new
-    path is inside the existing ``try`` and routes through the same
-    ``except Exception`` finalization. Overrides the autouse stub with a
-    raiser.
+    Integrated contract (#116 over the readiness gate): the warmup is
+    best-effort — the server can serve after a failed warmup because the
+    request path rebuilds on the first query — so ``/readyz`` must not stay
+    503 forever. Readiness is latched after the warmup *attempt* regardless
+    of outcome; only a *session-manager* ``__aenter__`` failure (covered
+    elsewhere) keeps readiness off and surfaces ``startup.failed``.
     """
-    monkeypatch.setattr(
-        "sqllens.transport.http.build_agent",
-        lambda cfg: (_ for _ in ()).throw(RuntimeError("warmup-boom")),
-    )
     sm = _FakeSessionManager()
     readiness = _Readiness()
-    adapter = _SessionManagerLifespan(_noop_inner, sm, object(), readiness)  # type: ignore[arg-type]
 
-    receive, send, sent = _make_io([{"type": "lifespan.startup"}])
-    asyncio.run(adapter({"type": "lifespan"}, receive, send))
+    async def boom_hook() -> None:
+        raise RuntimeError("warmup-boom")
 
-    assert "lifespan.startup.complete" not in [m["type"] for m in sent]
-    assert sent[-1]["type"] == "lifespan.startup.failed"
-    assert "RuntimeError" in sent[-1]["message"]
-    assert "warmup-boom" in sent[-1]["message"]
-    # Readiness never flipped — /readyz stays 503 on a failed warmup.
-    assert readiness.ready is False
-    # __aenter__ ran (warmup is after it); __aexit__ did not (entered CM is
-    # dropped, finalized; the host aborts on startup.failed).
-    assert sm.aenter_calls == 1
-    assert sm.aexit_calls == 0
-    assert adapter._cm is None
-    assert adapter._started is False
-    assert adapter._shutdown_done is True
+    adapter = _SessionManagerLifespan(
+        _noop_inner, sm, readiness, on_startup=boom_hook
+    )
 
-    # (c) The instance is finalized: a *subsequent* lifespan.startup must get
-    # the single-shot rejection rather than re-running run()/__aenter__ (which
-    # would leak a fresh session-manager context after a failed warmup). This
-    # pins the inline comment's promise that the warmup-failure path leaves
-    # the adapter in the same terminal state as an __aenter__ failure.
-    receive2, send2, sent2 = _make_io([{"type": "lifespan.startup"}])
-    asyncio.run(adapter({"type": "lifespan"}, receive2, send2))
-    assert sent2[-1]["type"] == "lifespan.startup.failed"
-    assert "single-shot" in sent2[-1]["message"]
-    # No re-entry: run()/__aenter__ counts unchanged from the first attempt.
-    assert sm.run_calls == 1
-    assert sm.aenter_calls == 1
-    assert sm.aexit_calls == 0
-    # Readiness stays latched-off across the rejected retry.
-    assert readiness.ready is False
+    receive, send, sent = _make_io(
+        [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
+    )
+    with caplog.at_level(logging.ERROR, logger="sqllens.transport.http"):
+        asyncio.run(adapter({"type": "lifespan"}, receive, send))
+
+    assert [m["type"] for m in sent] == [
+        "lifespan.startup.complete",
+        "lifespan.shutdown.complete",
+    ]
+    assert "lifespan.startup.failed" not in [m["type"] for m in sent]
+    assert readiness.ready is True
+    assert adapter._started is True
+    assert any(
+        r.levelno >= logging.ERROR and "warmup" in r.getMessage()
+        for r in caplog.records
+    )

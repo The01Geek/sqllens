@@ -85,6 +85,23 @@ async def _agent_for(cfg: Config) -> Agent:
     return agent
 
 
+async def prime_agent(cfg: Config) -> None:
+    """Eagerly build and cache the process-wide agent.
+
+    Delegates to ``_agent_for`` so the agent built at server startup *is* the
+    same ``_AGENT_STATE`` singleton the request path serves — the object graph
+    is constructed once, not once per consumer. Callers (the HTTP lifespan
+    warmup) use this to pay the cold-start cost (DB connect, ChromaDB open,
+    agent wiring) at boot instead of on the first ``query_database`` call.
+
+    Best-effort by contract: it propagates any build failure to the caller,
+    which decides whether a failed warmup should block startup. The request
+    path's own cold-start handling is unchanged — a failed warmup leaves
+    ``_AGENT_STATE`` ``None`` and the first query rebuilds as before.
+    """
+    await _agent_for(cfg)
+
+
 async def query_database_impl(cfg: Config, question: str) -> str:
     """Translate ``question`` to SQL, execute, and return a Markdown answer.
 
