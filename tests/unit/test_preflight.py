@@ -181,6 +181,22 @@ def test_probe_database_mysql_applies_port_password_db_defaults() -> None:
     assert kwargs["database"] == ""
 
 
+def test_probe_database_mysql_percent_decodes_credentials() -> None:
+    # urlparse does not percent-decode userinfo; SQLAlchemy's make_url does.
+    # A password containing '/' must be written as %2F in the URL (a raw '/'
+    # breaks host parsing) and must reach pymysql decoded, or auth fails with
+    # a misleading "Access denied (using password: YES)".
+    pymysql = pytest.importorskip("pymysql")
+    with patch.object(pymysql, "connect") as mock_connect:
+        probe_database(
+            _cfg(db_url="mysql://user%40corp:p%2Fw%3As@db.internal:3306/shop")
+        )
+
+    kwargs = mock_connect.call_args.kwargs
+    assert kwargs["user"] == "user@corp"
+    assert kwargs["password"] == "p/w:s"
+
+
 def test_probe_database_mysql_wraps_driver_error_with_cause() -> None:
     pymysql = pytest.importorskip("pymysql")
 
