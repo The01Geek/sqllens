@@ -22,11 +22,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from pydantic import SecretStr
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.types import ASGIApp, Scope
 
+from sqllens.auth import AuthContext, AuthError
 from sqllens.config import (
     AuthConfig,
     Config,
@@ -36,10 +40,16 @@ from sqllens.config import (
     ServerConfig,
 )
 from sqllens.transport.http import (
+    _allowed_hosts,
     _AuthMiddleware,
     _build_asgi_app_bare,
+    _decode_headers,
+    _is_loopback_host,
     _PathNormalizer,
+    _Readiness,
     _SessionManagerLifespan,
+    _try_decode,
+    _warn_if_plaintext_credentials,
     build_asgi_app,
 )
 
@@ -77,12 +87,20 @@ def test_build_asgi_app_returns_lifespan_wrapped(tmp_path: Path) -> None:
 
 
 def test_build_asgi_app_bare_returns_app_without_lifespan(tmp_path: Path) -> None:
-    """The bare seam yields the auth + path-normalized stack and the FastMCP handle."""
+    """The bare seam yields the path-normalized → host-guarded → auth stack.
+
+    Pins the composition order after S-8: ``_PathNormalizer`` stays the
+    outermost layer (so ``/healthz`` + ``/readyz`` short-circuit before host
+    validation and auth), then ``TrustedHostMiddleware`` (DNS-rebinding
+    defense), then ``_AuthMiddleware``, then FastMCP.
+    """
     from mcp.server.fastmcp import FastMCP
 
-    bare, mcp = _build_asgi_app_bare(_cfg(tmp_path))
+    bare, mcp = _build_asgi_app_bare(_cfg(tmp_path), _Readiness())
     assert isinstance(bare, _PathNormalizer)
-    assert isinstance(bare.inner, _AuthMiddleware)
+    assert isinstance(bare.inner, TrustedHostMiddleware)
+    # Starlette's TrustedHostMiddleware stores the wrapped app as ``.app``.
+    assert isinstance(bare.inner.app, _AuthMiddleware)
     assert isinstance(mcp, FastMCP)
 
 
@@ -169,6 +187,32 @@ async def _noop_inner(scope, receive, send):  # type: ignore[no-untyped-def]
     return
 
 
+@pytest.fixture(autouse=True)
+def _stub_eager_build_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Neutralize the O-5 eager ``build_agent`` for the lifespan-protocol tests.
+
+    The ``_SessionManagerLifespan`` failure/idempotency tests exercise the
+    ASGI lifespan state machine, not agent wiring; building a real agent
+    (sqlite connect + object graph) on every clean-startup path would be
+    irrelevant work and couple these tests to ``factory.build_agent``. The
+    integration suite (a different module, unaffected by this fixture) pins
+    the real "build_agent invoked exactly once at startup" contract.
+    """
+    monkeypatch.setattr(
+        "sqllens.transport.http.build_agent", lambda cfg: object()
+    )
+
+
+def _lifespan(sm: _FakeSessionManager) -> _SessionManagerLifespan:
+    """Build the lifespan adapter with throwaway cfg/readiness.
+
+    The cfg is only consumed by the eager ``build_agent`` (stubbed out by the
+    autouse fixture above), and readiness is asserted by the dedicated
+    ``_PathNormalizer`` ``/readyz`` tests, not these protocol tests.
+    """
+    return _SessionManagerLifespan(_noop_inner, sm, object(), _Readiness())  # type: ignore[arg-type]
+
+
 def test_lifespan_shutdown_failure_sends_failed_not_complete() -> None:
     """Regression: __aexit__ raising must surface as lifespan.shutdown.failed.
 
@@ -178,7 +222,7 @@ def test_lifespan_shutdown_failure_sends_failed_not_complete() -> None:
     failing to close.
     """
     sm = _FakeSessionManager(shutdown_exc=RuntimeError("boom"))
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
     receive, send, sent = _make_io(
         [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
     )
@@ -197,7 +241,7 @@ def test_lifespan_startup_failure_sends_failed_not_complete() -> None:
     exception message must reach the host.
     """
     sm = _FakeSessionManager(startup_exc=RuntimeError("startup-boom"))
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
     receive, send, sent = _make_io([{"type": "lifespan.startup"}])
     asyncio.run(adapter({"type": "lifespan"}, receive, send))
 
@@ -223,7 +267,7 @@ def test_lifespan_shutdown_after_failed_startup_is_clean_noop() -> None:
     original startup failure.
     """
     sm = _FakeSessionManager(startup_exc=RuntimeError("startup-boom"))
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
 
     receive1, send1, sent1 = _make_io([{"type": "lifespan.startup"}])
     asyncio.run(adapter({"type": "lifespan"}, receive1, send1))
@@ -246,7 +290,7 @@ def test_lifespan_shutdown_without_startup_surfaces_failed() -> None:
     not be invoked on a never-entered context manager.
     """
     sm = _FakeSessionManager()
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
     receive, send, sent = _make_io([{"type": "lifespan.shutdown"}])
     asyncio.run(adapter({"type": "lifespan"}, receive, send))
 
@@ -282,7 +326,7 @@ def test_lifespan_startup_baseexception_propagates_not_caught() -> None:
     cancellation of the lifespan task would be silently swallowed.
     """
     sm = _FakeSessionManager(startup_exc=KeyboardInterrupt("interrupt"))
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
     receive, send, sent = _make_io([{"type": "lifespan.startup"}])
 
     with pytest.raises(KeyboardInterrupt):
@@ -300,7 +344,7 @@ def test_lifespan_shutdown_baseexception_propagates_not_caught() -> None:
     must propagate, not be converted into ``lifespan.shutdown.failed``.
     """
     sm = _FakeSessionManager(shutdown_exc=KeyboardInterrupt("interrupt"))
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
     receive, send, sent = _make_io(
         [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
     )
@@ -354,7 +398,7 @@ def test_lifespan_startup_named_baseexception_propagates_uncaught(
     """
     sentinel = exc_type("issue-101-startup-sentinel")
     sm = _FakeSessionManager(startup_exc=sentinel)
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
     receive, send, sent = _make_io([{"type": "lifespan.startup"}])
 
     with (
@@ -395,7 +439,7 @@ def test_lifespan_shutdown_named_baseexception_propagates_uncaught(
     """
     sentinel = exc_type("issue-101-shutdown-sentinel")
     sm = _FakeSessionManager(shutdown_exc=sentinel)
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
     receive, send, sent = _make_io(
         [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
     )
@@ -436,7 +480,7 @@ def test_lifespan_startup_plain_exception_emits_error_log(
     THIS test fails, flagging that the absence assertions have gone vacuous.
     """
     sm = _FakeSessionManager(startup_exc=RuntimeError("plain-boom"))
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
     receive, send, sent = _make_io([{"type": "lifespan.startup"}])
 
     with caplog.at_level(logging.ERROR, logger="sqllens.transport.http"):
@@ -452,7 +496,7 @@ def test_lifespan_unknown_message_type_is_logged_and_loop_continues() -> None:
     would leave a subsequent valid startup/shutdown unhandled).
     """
     sm = _FakeSessionManager()
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
     receive, send, sent = _make_io(
         [
             {"type": "lifespan.bogus"},
@@ -471,7 +515,7 @@ def test_lifespan_missing_message_type_is_logged_and_loop_continues() -> None:
     (logged) and the loop continues to process the next valid message.
     """
     sm = _FakeSessionManager()
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
     receive, send, sent = _make_io(
         [
             {"foo": "bar"},
@@ -487,7 +531,7 @@ def test_lifespan_missing_message_type_is_logged_and_loop_continues() -> None:
 def test_lifespan_duplicate_startup_is_rejected() -> None:
     """A second lifespan.startup must not silently replace ``self._cm``."""
     sm = _FakeSessionManager()
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
     receive, send, sent = _make_io(
         [
             {"type": "lifespan.startup"},
@@ -513,7 +557,7 @@ def test_lifespan_post_shutdown_startup_is_rejected() -> None:
     shutdown on this second scope.
     """
     sm = _FakeSessionManager()
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
 
     # First scope: clean startup → shutdown.
     receive, send, sent = _make_io(
@@ -552,7 +596,7 @@ def test_lifespan_post_shutdown_shutdown_is_idempotent() -> None:
     cleanly.
     """
     sm = _FakeSessionManager()
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
 
     receive, send, _sent = _make_io(
         [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
@@ -579,7 +623,7 @@ def test_lifespan_shutdown_failure_still_finalizes_instance() -> None:
     out of the failure branch.
     """
     sm = _FakeSessionManager(shutdown_exc=RuntimeError("boom"))
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
 
     receive, send, sent = _make_io(
         [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
@@ -619,7 +663,7 @@ def test_lifespan_startup_base_exception_finalizes_and_propagates(
     it cannot be driven through ``asyncio.run`` here.
     """
     sm = _FakeSessionManager(startup_exc=base_exc)
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
 
     receive, send, sent = _make_io([{"type": "lifespan.startup"}])
     with pytest.raises(type(base_exc)) as excinfo:
@@ -679,7 +723,7 @@ def test_lifespan_shutdown_base_exception_finalizes_and_propagates(
     ``asyncio.run`` here).
     """
     sm = _FakeSessionManager(shutdown_exc=base_exc)
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
 
     receive, send, sent = _make_io(
         [{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}]
@@ -727,7 +771,7 @@ def test_lifespan_startup_failure_finalizes_instance() -> None:
     ``RuntimeError: boom`` from ``ValueError: boom``.
     """
     sm = _FakeSessionManager(startup_exc=RuntimeError("boom"))
-    adapter = _SessionManagerLifespan(_noop_inner, sm)
+    adapter = _lifespan(sm)
 
     receive, send, sent = _make_io([{"type": "lifespan.startup"}])
     asyncio.run(adapter({"type": "lifespan"}, receive, send))
@@ -747,3 +791,354 @@ def test_lifespan_startup_failure_finalizes_instance() -> None:
     assert "shut down" in sent3[0]["message"].lower()
     assert sm.run_calls == 1
     assert sm.aenter_calls == 1
+
+
+# ───────────────────── C-6: UTF-8-first header decode ───────────────────────
+
+
+class TestHeaderDecode:
+    """``_decode_headers`` must be UTF-8-first with a latin-1 fallback.
+
+    HTTP/2 HPACK can carry arbitrary octets; the prior hard-coded
+    ``.decode("latin-1")`` corrupted a non-ASCII bearer token. ASCII is a
+    subset of both encodings, so existing ASCII/latin-1 tokens are unaffected.
+    """
+
+    def test_ascii_token_unaffected(self) -> None:
+        raw = [(b"authorization", b"Bearer abc-123_XYZ")]
+        assert _decode_headers(raw) == {"authorization": "Bearer abc-123_XYZ"}
+
+    def test_utf8_non_ascii_roundtrips(self) -> None:
+        # "Bearer ☃é" — valid UTF-8, must decode to the same Unicode string,
+        # NOT the latin-1 mojibake the old code produced.
+        token = "Bearer ☃é"
+        raw = [(b"authorization", token.encode("utf-8"))]
+        assert _decode_headers(raw) == {"authorization": token}
+
+    def test_latin1_only_byte_falls_back_without_raising(self) -> None:
+        # 0xFF is a valid latin-1 byte but an invalid UTF-8 start byte; the
+        # fallback must decode it rather than raising UnicodeDecodeError.
+        raw = [(b"authorization", b"Bearer \xff")]
+        decoded = _decode_headers(raw)
+        assert decoded == {"authorization": "Bearer \xff"}
+
+    def test_try_decode_prefers_utf8(self) -> None:
+        assert _try_decode("ünî".encode()) == "ünî"
+
+    def test_try_decode_latin1_fallback(self) -> None:
+        assert _try_decode(b"\xff\xfe") == "\xff\xfe"
+
+
+# ───────────────── S-8: loopback predicate + allowed hosts ──────────────────
+
+
+@pytest.mark.parametrize(
+    "host,expected",
+    [
+        ("127.0.0.1", True),
+        ("127.5.6.7", True),  # entire 127.0.0.0/8
+        ("::1", True),
+        ("::ffff:127.0.0.1", True),  # IPv4-mapped IPv6 loopback
+        ("localhost", True),
+        ("LOCALHOST", True),  # case-insensitive
+        ("0.0.0.0", False),  # bind-all wildcard, not loopback
+        ("::", False),
+        ("example.com", False),
+        ("10.0.0.5", False),
+        ("", False),
+    ],
+)
+def test_is_loopback_host(host: str, expected: bool) -> None:
+    assert _is_loopback_host(host) is expected
+
+
+def test_is_loopback_host_non_string_fails_closed() -> None:
+    # A future refactor passing None/int must fail closed (False), not raise —
+    # this feeds a security warning; a traceback would read as "not applied".
+    assert _is_loopback_host(None) is False  # type: ignore[arg-type]
+    assert _is_loopback_host(123) is False  # type: ignore[arg-type]
+
+
+def _cfg_with(tmp_path: Path, *, auth: AuthConfig, host: str) -> Config:
+    return Config.model_construct(
+        database=DatabaseConfig(
+            url=f"sqlite:///{CHINOOK_DB}", name="chinook-unit", read_only=True
+        ),
+        llm=LLMConfig(api_key=SecretStr("sk-ant-test-not-used")),
+        memory=MemoryConfig(persist_dir=tmp_path / "chroma", collection="test"),
+        auth=auth,
+        server=ServerConfig(transport="http", host=host, port=0),
+    )
+
+
+def test_allowed_hosts_concrete_loopback_dedups(tmp_path: Path) -> None:
+    cfg = _cfg_with(tmp_path, auth=AuthConfig(mode="none"), host="127.0.0.1")
+    # 127.0.0.1 already a loopback name — must not appear twice.
+    assert _allowed_hosts(cfg) == ["127.0.0.1", "localhost", "::1"]
+
+
+def test_allowed_hosts_external_host_keeps_loopback_names(tmp_path: Path) -> None:
+    cfg = _cfg_with(tmp_path, auth=AuthConfig(mode="none"), host="sqllens.example.com")
+    assert _allowed_hosts(cfg) == [
+        "sqllens.example.com",
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    ]
+
+
+@pytest.mark.parametrize("wildcard", ["0.0.0.0", "::"])
+def test_allowed_hosts_bind_all_is_explicit_wildcard(
+    tmp_path: Path, wildcard: str
+) -> None:
+    cfg = _cfg_with(tmp_path, auth=AuthConfig(mode="none"), host=wildcard)
+    assert _allowed_hosts(cfg) == ["*"]
+
+
+# ───────────── S-9: plain-HTTP credential-exposure warning ──────────────────
+
+
+_WARN_LOGGER = "sqllens.transport.http"
+
+
+def _warn_records(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno >= logging.WARNING and r.name == _WARN_LOGGER
+    ]
+
+
+def test_warn_bearer_non_loopback_emits_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    cfg = _cfg_with(
+        tmp_path,
+        auth=AuthConfig(mode="bearer", bearer_token=SecretStr("a-real-token-0123456789")),
+        host="0.0.0.0",
+    )
+    with caplog.at_level(logging.WARNING, logger=_WARN_LOGGER):
+        _warn_if_plaintext_credentials(cfg)
+    msgs = _warn_records(caplog)
+    assert len(msgs) == 1
+    assert "plain HTTP" in msgs[0]
+    assert "0.0.0.0" in msgs[0]
+
+
+def test_warn_jwt_non_loopback_emits_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # AuthConfig rejects mode="jwt" in its validator; model_construct bypasses
+    # it — _warn_if_plaintext_credentials only reads .auth.mode / .server.host.
+    cfg = _cfg_with(
+        tmp_path,
+        auth=AuthConfig.model_construct(mode="jwt"),
+        host="sqllens.example.com",
+    )
+    with caplog.at_level(logging.WARNING, logger=_WARN_LOGGER):
+        _warn_if_plaintext_credentials(cfg)
+    assert len(_warn_records(caplog)) == 1
+
+
+def test_no_warn_when_loopback_host(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    cfg = _cfg_with(
+        tmp_path,
+        auth=AuthConfig(mode="bearer", bearer_token=SecretStr("a-real-token-0123456789")),
+        host="127.0.0.1",
+    )
+    with caplog.at_level(logging.WARNING, logger=_WARN_LOGGER):
+        _warn_if_plaintext_credentials(cfg)
+    assert _warn_records(caplog) == []
+
+
+def test_no_warn_when_auth_mode_none(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    cfg = _cfg_with(tmp_path, auth=AuthConfig(mode="none"), host="0.0.0.0")
+    with caplog.at_level(logging.WARNING, logger=_WARN_LOGGER):
+        _warn_if_plaintext_credentials(cfg)
+    assert _warn_records(caplog) == []
+
+
+# ─────────────── T-6: _AuthMiddleware direct unit coverage ──────────────────
+
+
+class _StubAuthenticator:
+    """Mock authenticator: returns ``ctx`` or raises ``error``; counts calls."""
+
+    def __init__(
+        self, ctx: AuthContext | None = None, error: AuthError | None = None
+    ) -> None:
+        self._ctx = ctx if ctx is not None else AuthContext()
+        self._error = error
+        self.calls = 0
+
+    async def authenticate(self, headers):  # type: ignore[no-untyped-def]
+        self.calls += 1
+        if self._error is not None:
+            raise self._error
+        return self._ctx
+
+
+class _SpyInner:
+    """Records that it was called and with which scope."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.scope: Scope | None = None
+
+    async def __call__(self, scope, receive, send):  # type: ignore[no-untyped-def]
+        self.calls += 1
+        self.scope = scope
+
+
+async def _empty_receive() -> dict:
+    return {"type": "http.request", "body": b"", "more_body": False}
+
+
+def _collect_send() -> tuple[Callable, list[dict]]:
+    sent: list[dict] = []
+
+    async def send(msg: dict) -> None:
+        sent.append(msg)
+
+    return send, sent
+
+
+def test_auth_middleware_lifespan_scope_passthrough() -> None:
+    """A ``lifespan`` scope must bypass the authenticator entirely."""
+    auth = _StubAuthenticator()
+    inner = _SpyInner()
+    mw = _AuthMiddleware(inner, auth)
+    send, _sent = _collect_send()
+    asyncio.run(mw({"type": "lifespan"}, _empty_receive, send))
+    assert inner.calls == 1
+    assert auth.calls == 0
+
+
+def test_auth_middleware_websocket_scope_passthrough() -> None:
+    """A ``websocket`` scope must bypass the authenticator entirely."""
+    auth = _StubAuthenticator()
+    inner = _SpyInner()
+    mw = _AuthMiddleware(inner, auth)
+    send, _sent = _collect_send()
+    asyncio.run(mw({"type": "websocket"}, _empty_receive, send))
+    assert inner.calls == 1
+    assert auth.calls == 0
+
+
+def test_auth_middleware_success_attaches_context_to_scope_state() -> None:
+    """The contract downstream tools rely on: the authenticator's returned
+    ``AuthContext`` is stashed at ``scope['state']['auth']``.
+    """
+    sentinel = AuthContext(subject="principal-42")
+    auth = _StubAuthenticator(ctx=sentinel)
+    inner = _SpyInner()
+    mw = _AuthMiddleware(inner, auth)
+    send, _sent = _collect_send()
+    scope = {"type": "http", "path": "/mcp", "headers": []}
+    asyncio.run(mw(scope, _empty_receive, send))
+    assert inner.calls == 1
+    assert inner.scope is not None
+    assert inner.scope["state"]["auth"] is sentinel
+
+
+def test_auth_middleware_autherror_returns_401_with_www_authenticate() -> None:
+    """An ``AuthError`` must produce a 401 carrying the
+    ``WWW-Authenticate: Bearer realm="sqllens"`` challenge header and the
+    reason in the JSON body, and must NOT reach the inner app.
+    """
+    auth = _StubAuthenticator(error=AuthError("bad creds"))
+    inner = _SpyInner()
+    mw = _AuthMiddleware(inner, auth)
+    send, sent = _collect_send()
+    scope = {"type": "http", "path": "/mcp", "headers": []}
+    asyncio.run(mw(scope, _empty_receive, send))
+
+    assert inner.calls == 0
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    assert start["status"] == 401
+    assert (b"www-authenticate", b'Bearer realm="sqllens"') in start["headers"]
+    body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    assert b"bad creds" in body
+
+
+def test_auth_middleware_whitespace_only_bearer_is_rejected_401() -> None:
+    """A ``Bearer`` header whose payload is only whitespace drives the real
+    bearer authenticator's reject path → 401 (no inner dispatch).
+    """
+    from sqllens.auth import build_authenticator
+
+    authenticator = build_authenticator(
+        AuthConfig(mode="bearer", bearer_token=SecretStr("a-real-token-0123456789"))
+    )
+    inner = _SpyInner()
+    mw = _AuthMiddleware(inner, authenticator)
+    send, sent = _collect_send()
+    scope = {
+        "type": "http",
+        "path": "/mcp",
+        "headers": [(b"authorization", b"Bearer    ")],
+    }
+    asyncio.run(mw(scope, _empty_receive, send))
+
+    assert inner.calls == 0
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    assert start["status"] == 401
+
+
+# ───────────── O-5: _PathNormalizer /readyz + /healthz gating ───────────────
+
+
+def _run_path(
+    path: str, readiness: _Readiness, inner: ASGIApp | None = None
+) -> list[dict]:
+    """Drive ``_PathNormalizer`` for one GET ``path`` and return sent messages."""
+    spy = inner if inner is not None else _SpyInner()
+    norm = _PathNormalizer(spy, readiness)
+    send, sent = _collect_send()
+    scope = {"type": "http", "path": path, "method": "GET", "headers": []}
+    asyncio.run(norm(scope, _empty_receive, send))
+    return sent
+
+
+def _body_of(sent: list[dict]) -> bytes:
+    return b"".join(
+        m.get("body", b"") for m in sent if m["type"] == "http.response.body"
+    )
+
+
+def test_readyz_returns_503_before_warmup() -> None:
+    sent = _run_path("/readyz", _Readiness())
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    assert start["status"] == 503
+    assert _body_of(sent) == b'{"status":"not ready"}'
+
+
+def test_readyz_returns_200_after_warmup() -> None:
+    readiness = _Readiness()
+    readiness.ready = True
+    sent = _run_path("/readyz", readiness)
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    assert start["status"] == 200
+    assert _body_of(sent) == b'{"status":"ready"}'
+
+
+def test_readyz_short_circuits_before_inner_no_auth_needed() -> None:
+    """``/readyz`` is answered by ``_PathNormalizer`` itself — the inner
+    stack (host check + auth) is never reached, so no ``Authorization`` and
+    no allowed ``Host`` are required.
+    """
+    inner = _SpyInner()
+    _run_path("/readyz", _Readiness(), inner=inner)
+    assert inner.calls == 0
+
+
+def test_healthz_not_gated_on_readiness() -> None:
+    """``/healthz`` stays liveness-only: 200 even when warmup hasn't finished."""
+    sent = _run_path("/healthz", _Readiness())  # ready is False
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    assert start["status"] == 200
+    assert _body_of(sent) == b'{"status":"ok"}'

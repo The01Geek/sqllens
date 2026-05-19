@@ -25,14 +25,17 @@ Public surface: ``build_asgi_app(cfg)`` returns the mount-ready app;
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import RedirectResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from sqllens.agent.factory import build_agent
 from sqllens.auth import Authenticator, AuthError, build_authenticator
 from sqllens.config import Config
 from sqllens.server import build_server
@@ -58,21 +61,114 @@ HEALTHZ_PATH = "/healthz"
 Asserts only that the ASGI process is up and the event loop is serving
 requests — it does **not** check DB, ChromaDB, or LLM reachability. Handled
 in ``_PathNormalizer``, ahead of ``_AuthMiddleware``, so orchestrator probes
-never need (and are never gated by) an ``Authorization`` header."""
+never need (and are never gated by) an ``Authorization`` header. Liveness
+only — never gated on agent-warmup readiness (use ``/readyz`` for that)."""
+
+READYZ_PATH = "/readyz"
+"""Unauthenticated readiness probe path.
+
+Returns ``503`` until the eager agent warmup (ChromaDB init + the ~80 MB
+embedding-model download) completes at lifespan startup, then ``200``.
+Short-circuited in ``_PathNormalizer`` next to ``HEALTHZ_PATH`` — ahead of
+both ``TrustedHostMiddleware`` and ``_AuthMiddleware`` — so orchestrators can
+gate traffic on warmup without an ``Authorization`` header and regardless of
+the request ``Host``."""
+
+
+class _Readiness:
+    """One-attribute shared holder for the agent-warmup readiness flag.
+
+    Constructed once in ``build_asgi_app`` and handed to BOTH
+    ``_SessionManagerLifespan`` (the single writer — flips ``ready`` to
+    ``True`` after the eager ``build_agent`` succeeds at lifespan startup)
+    and ``_PathNormalizer`` (the reader — answers ``GET /readyz`` from it).
+    No lock: the write happens exactly once, single-threaded, in the
+    lifespan-startup path before any request is served; reads are plain
+    attribute loads of a bool.
+    """
+
+    __slots__ = ("ready",)
+
+    def __init__(self) -> None:
+        self.ready = False
+
+
+def _is_loopback_host(host: str) -> bool:
+    """True iff ``host`` is a loopback name/address.
+
+    Semantics deliberately mirror ``sqllens.cli._is_loopback_host`` (which is
+    off-limits to import from here): the entire 127.0.0.0/8 IPv4 range, ``::1``,
+    IPv4-mapped IPv6 loopback (``::ffff:127.0.0.1`` — unwrapped explicitly
+    because ``IPv6Address.is_loopback`` returns False for these on Python
+    3.11.x and 3.12.0-3.12.3, gh-117566), and the single literal hostname
+    ``localhost`` matched case-insensitively (RFC 1035). No DNS resolution;
+    wildcards (``0.0.0.0``, ``::``) and arbitrary hostnames fail closed.
+    Non-string input fails closed rather than raising — this feeds a
+    security-relevant warning, and a traceback would be misread as "the
+    check didn't apply".
+    """
+    try:
+        if host.lower() == "localhost":
+            return True
+        addr = ipaddress.ip_address(host)
+    except (ValueError, AttributeError, TypeError):
+        return False
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        return addr.ipv4_mapped.is_loopback
+    return addr.is_loopback
+
+
+def _allowed_hosts(cfg: Config) -> list[str]:
+    """Derive the ``TrustedHostMiddleware`` allowlist from ``cfg.server.host``.
+
+    A bind-all wildcard (``0.0.0.0`` / ``::``) is NOT a host allowlist entry —
+    binding every interface is an operator's explicit choice to accept any
+    ``Host``, so the allowlist becomes ``["*"]``. Otherwise the allowlist is
+    the concrete configured host plus the loopback names, deduped (preserving
+    order) so a host already equal to ``127.0.0.1`` doesn't appear twice.
+    """
+    if cfg.server.host in ("0.0.0.0", "::"):
+        return ["*"]
+    hosts = [cfg.server.host, "127.0.0.1", "localhost", "::1"]
+    return list(dict.fromkeys(hosts))
+
+
+def _warn_if_plaintext_credentials(cfg: Config) -> None:
+    """Warn when bearer/JWT credentials would cross a plain-HTTP, non-loopback hop.
+
+    SQL Lens delegates TLS termination to a fronting proxy. If the operator
+    serves ``bearer``/``jwt`` auth while binding a non-loopback interface, the
+    credential travels in cleartext on the wire SQL Lens itself listens on.
+    This is advisory only — it does not refuse to start (the
+    unauthenticated-non-loopback *refusal* lives in ``cli.py`` and is out of
+    scope here). No warning for ``auth.mode == "none"`` or a loopback host.
+    """
+    if cfg.auth.mode in ("bearer", "jwt") and not _is_loopback_host(cfg.server.host):
+        logger.warning(
+            "auth.mode=%r is served over plain HTTP on non-loopback host %r: "
+            "SQL Lens delegates TLS to a fronting proxy, so bearer/JWT "
+            "credentials would be exposed in cleartext on this hop. Terminate "
+            "TLS in front of SQL Lens or bind a loopback interface.",
+            cfg.auth.mode,
+            cfg.server.host,
+        )
 
 
 def build_asgi_app(cfg: Config) -> ASGIApp:
     """Build the fully wrapped, mount-ready Streamable HTTP ASGI app for ``cfg``.
 
-    The returned app includes path normalization, authentication, AND the
-    session-manager lifespan adapter — it is safe to mount under any ASGI
-    host (uvicorn, FastAPI, Starlette) that drives lifespan events.
+    The returned app includes path normalization, host validation,
+    authentication, AND the session-manager lifespan adapter — it is safe to
+    mount under any ASGI host (uvicorn, FastAPI, Starlette) that drives
+    lifespan events.
 
     No Starlette ``Mount`` is used internally — that's deliberate: ``Mount``
     has surprising trailing-slash semantics, and a single-server transport
     doesn't need path-based dispatch.
     """
-    bare, mcp = _build_asgi_app_bare(cfg)
+    _warn_if_plaintext_credentials(cfg)
+    readiness = _Readiness()
+    bare, mcp = _build_asgi_app_bare(cfg, readiness)
     # Read via the documented public ``session_manager`` property rather than
     # ``_session_manager``: depending on documented surface is the only thing
     # that gives us a stable SDK contract. The AttributeError guard converts
@@ -87,24 +183,38 @@ def build_asgi_app(cfg: Config) -> ASGIApp:
             "SDK likely renamed or removed it. Pin a compatible mcp version "
             "or update sqllens.transport.http.build_asgi_app."
         ) from exc
-    return _SessionManagerLifespan(bare, session_manager)
+    return _SessionManagerLifespan(bare, session_manager, cfg, readiness)
 
 
-def _build_asgi_app_bare(cfg: Config) -> tuple[ASGIApp, FastMCP]:
-    """Build the path-normalized, authenticated ASGI app WITHOUT the lifespan adapter.
+def _build_asgi_app_bare(cfg: Config, readiness: _Readiness) -> tuple[ASGIApp, FastMCP]:
+    """Build the path-normalized, host-validated, authenticated ASGI app WITHOUT
+    the lifespan adapter.
 
-    "Bare" means lifespan-bare only: path normalization and authentication
-    middleware are still applied. Returns the app and the underlying
-    ``FastMCP`` instance so the caller can wire up the session-manager
-    lifespan itself. Production callers reach this only via
-    ``build_asgi_app``; the unit suite also calls it directly to assert
-    the inner stack composition. The split exists to keep the
-    SDK-attribute reach at a single guarded site.
+    "Bare" means lifespan-bare only: path normalization, host validation, and
+    authentication middleware are still applied. Returns the app and the
+    underlying ``FastMCP`` instance so the caller can wire up the
+    session-manager lifespan itself. Production callers reach this only via
+    ``build_asgi_app``; the unit suite also calls it directly to assert the
+    inner stack composition. The split exists to keep the SDK-attribute reach
+    at a single guarded site.
+
+    Composition (outermost → innermost):
+    ``_PathNormalizer`` → ``TrustedHostMiddleware`` → ``_AuthMiddleware`` →
+    FastMCP. ``_PathNormalizer`` is deliberately the outermost layer so its
+    pre-everything short-circuits for ``/healthz`` and ``/readyz`` answer
+    *before* host validation and auth — probes must always answer regardless
+    of ``Host`` or ``Authorization``. ``TrustedHostMiddleware`` then rejects a
+    disallowed ``Host`` with 400 before the request can reach auth or the MCP
+    handler (DNS-rebinding defense, S-8).
     """
     mcp = build_server(cfg)
     inner = mcp.streamable_http_app()
     authenticator = build_authenticator(cfg.auth)
-    return _PathNormalizer(_AuthMiddleware(inner, authenticator)), mcp
+    host_guarded = TrustedHostMiddleware(
+        _AuthMiddleware(inner, authenticator),
+        allowed_hosts=_allowed_hosts(cfg),
+    )
+    return _PathNormalizer(host_guarded, readiness), mcp
 
 
 def run(cfg: Config) -> None:
@@ -131,13 +241,20 @@ class _PathNormalizer:
     - ``/mcp/``  → rewrite scope.path to ``/mcp`` so FastMCP's Route matches.
                    No redirect, so POST clients that don't follow 307 work.
     - ``/mcp``   → pass through unchanged (matches FastMCP directly).
-    - ``/healthz`` → 200 liveness JSON, short-circuited here (pre-auth).
+    - ``/healthz`` → 200 liveness JSON, short-circuited here (pre-host-check,
+                     pre-auth). Liveness only — never gated on readiness.
+    - ``/readyz``  → 200/503 readiness JSON from the shared ``_Readiness``
+                     holder, short-circuited here (pre-host-check, pre-auth).
 
-    Everything else passes through.
+    Everything else passes through. The probe short-circuits sit ahead of
+    ``TrustedHostMiddleware`` and ``_AuthMiddleware`` (this is the outermost
+    layer of the bare stack) so they always answer regardless of ``Host`` or
+    ``Authorization``.
     """
 
-    def __init__(self, inner: ASGIApp) -> None:
+    def __init__(self, inner: ASGIApp, readiness: _Readiness) -> None:
         self.inner = inner
+        self._readiness = readiness
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -147,6 +264,9 @@ class _PathNormalizer:
         path = scope.get("path", "")
         if path == HEALTHZ_PATH:
             await _send_health(send)
+            return
+        if path == READYZ_PATH:
+            await _send_readiness(send, self._readiness.ready)
             return
         if path == "/":
             response = RedirectResponse(url=MCP_PATH, status_code=307)
@@ -230,9 +350,13 @@ class _SessionManagerLifespan:
     adapter via ``build_asgi_app`` for each.
     """
 
-    def __init__(self, inner: ASGIApp, session_manager) -> None:  # type: ignore[no-untyped-def]
+    def __init__(  # type: ignore[no-untyped-def]
+        self, inner: ASGIApp, session_manager, cfg: Config, readiness: _Readiness
+    ) -> None:
         self.inner = inner
         self.session_manager = session_manager
+        self._cfg = cfg
+        self._readiness = readiness
         self._cm = None
         self._started = False
         self._shutdown_done = False
@@ -276,6 +400,20 @@ class _SessionManagerLifespan:
                 try:
                     self._cm = self.session_manager.run()
                     await self._cm.__aenter__()
+                    # Eager agent warmup: build the agent once, here, so the
+                    # ChromaDB init + ~80 MB embedding-model download happen
+                    # at startup rather than blocking (and timing out) the
+                    # first real query. Single-threaded by construction — this
+                    # runs exactly once in the lifespan-startup path before
+                    # any request is served, so it needs NO lock (the
+                    # request-path build in tools/query_database.py is
+                    # already race-safe via its own double-checked locking;
+                    # C-3/#96). Inside the existing try on purpose: a
+                    # build_agent failure must surface as
+                    # lifespan.startup.failed via the broad/BaseException
+                    # handling below, never be swallowed.
+                    build_agent(self._cfg)
+                    self._readiness.ready = True
                 except Exception as exc:
                     # Broad by design: every startup failure must surface as
                     # lifespan.startup.failed so the ASGI host doesn't hang
@@ -429,8 +567,26 @@ class _SessionManagerLifespan:
 # ───────────────────────────── helpers ──────────────────────────────────────
 
 
+def _try_decode(b: bytes) -> str:
+    """Decode a raw header byte string UTF-8-first, latin-1 as fallback.
+
+    Mirrors Starlette's ``Headers`` behavior. The ASGI spec leaves header
+    byte encoding under-specified and HTTP/2 HPACK can carry arbitrary
+    octets, so a bearer token with non-ASCII bytes valid as UTF-8 must
+    round-trip. ASCII is a subset of both encodings, so existing
+    ASCII/latin-1 tokens are unaffected. latin-1 maps every one of the 256
+    byte values to a code point and so never raises — the fallback always
+    succeeds, decoding a latin-1-only (invalid-UTF-8) byte rather than
+    erroring.
+    """
+    try:
+        return b.decode("utf-8")
+    except UnicodeDecodeError:
+        return b.decode("latin-1")
+
+
 def _decode_headers(raw: list[tuple[bytes, bytes]]) -> dict[str, str]:
-    return {k.decode("latin-1"): v.decode("latin-1") for k, v in raw}
+    return {_try_decode(k): _try_decode(v) for k, v in raw}
 
 
 async def _send_json(
@@ -458,6 +614,16 @@ async def _send_health(send: Send) -> None:
     # Compact separators so the body is exactly {"status":"ok"} — orchestrator
     # probes and the integration test match on the literal bytes.
     await _send_json(send, 200, json.dumps({"status": "ok"}, separators=(",", ":")).encode())
+
+
+async def _send_readiness(send: Send, ready: bool) -> None:
+    # 200 {"status":"ready"} once agent warmup completed, else 503
+    # {"status":"not ready"}. Compact separators mirror _send_health so
+    # orchestrator probes can match on the literal body bytes.
+    status, payload = (200, "ready") if ready else (503, "not ready")
+    await _send_json(
+        send, status, json.dumps({"status": payload}, separators=(",", ":")).encode()
+    )
 
 
 async def _send_401(send: Send, reason: str) -> None:
