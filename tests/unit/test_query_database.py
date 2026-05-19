@@ -22,6 +22,7 @@ from sqllens.config import Config
 from sqllens.safety import UnsafeSqlError
 from sqllens.tools import query_database as query_database_module
 from sqllens.tools.query_database import (
+    prime_agent,
     query_database_impl,
     query_database_impl_with_table,
 )
@@ -386,6 +387,184 @@ async def test_concurrent_first_calls_build_once(
 
     assert len(builds) == 1
     assert lock_held_during_build == [True]
+
+
+@pytest.mark.asyncio
+async def test_prime_agent_primes_request_path_singleton(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """#116: the eager warmup primes the SAME singleton AND warms its memory.
+
+    The deferred finding had two halves. (a) An eager warmup constructed a
+    *second* agent that the request path discarded — ``prime_agent`` must
+    populate the process-wide ``_AGENT_STATE`` so a subsequent
+    ``query_database_impl`` reuses it (``build_agent`` runs exactly once
+    across both). (b) The substantive #116 goal: the ~80 MB embedding-model
+    download / ChromaDB open must be forced *at warmup*, not lazily on the
+    first query — ``build_agent`` alone only wires objects. This asserts the
+    boot-time memory touch landed on the *same* memory object the request
+    path serves, pinning the regression where the warm step is dropped.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    builds: list[Config] = []
+
+    def fake_build_agent(c: Config):
+        builds.append(c)
+        return agent_stub_factory([make_text_component("primed")])
+
+    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+
+    await prime_agent(cfg)
+
+    assert len(builds) == 1
+    primed_agent, primed_cfg = query_database_module._AGENT_STATE
+    assert primed_cfg is cfg
+    # (b): the warm step forced the lazy memory materialization at boot. A
+    # regression that drops ``_warm_memory`` from ``prime_agent`` leaves this
+    # empty (the embedding-model download would then relapse onto the first
+    # query — exactly the #116 defect).
+    assert len(primed_agent.agent_memory.get_recent_memories_calls) == 1
+
+    result = await query_database_impl(cfg, "q")
+
+    assert len(builds) == 1  # request path reused the warmup's agent
+    assert query_database_module._AGENT_STATE[0] is primed_agent
+    # The memory the warm touch hit IS the one the request path serves — the
+    # warmed embedding model is resident for the first real query, not
+    # downloaded by it.
+    assert query_database_module._AGENT_STATE[0].agent_memory is (
+        primed_agent.agent_memory
+    )
+    assert "primed" in result
+
+
+@pytest.mark.asyncio
+async def test_prime_agent_propagates_build_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed warmup propagates and leaves the singleton ``None``.
+
+    ``prime_agent`` is best-effort by contract: it raises so the HTTP
+    lifespan can log-and-continue, and the request path rebuilds cleanly.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+
+    def boom_build_agent(_c: Config):
+        raise RuntimeError("cold start failed")
+
+    monkeypatch.setattr(query_database_module, "build_agent", boom_build_agent)
+
+    with pytest.raises(RuntimeError, match="cold start failed"):
+        await prime_agent(cfg)
+
+    assert query_database_module._AGENT_STATE is None
+
+
+@pytest.mark.asyncio
+async def test_prime_agent_is_noop_when_request_path_already_built(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """A late/duplicate warmup after the request path built is a cheap no-op.
+
+    Exercises the reverse ordering of
+    ``test_prime_agent_primes_request_path_singleton``: when a request
+    already populated ``_AGENT_STATE``, a subsequent ``prime_agent`` hits
+    ``_agent_for``'s ``_AGENT_STATE is None`` fast path and must NOT run a
+    second ``build_agent``.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    builds: list[Config] = []
+
+    def fake_build_agent(c: Config):
+        builds.append(c)
+        return agent_stub_factory([make_text_component("ok")])
+
+    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+
+    await query_database_impl(cfg, "q")
+    await prime_agent(cfg)
+
+    assert len(builds) == 1
+
+
+@pytest.mark.asyncio
+async def test_prime_agent_concurrent_with_request_builds_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """#116: warmup racing the first request still builds exactly once.
+
+    ``prime_agent`` delegates to the same ``_agent_for`` the request path
+    uses, so the existing ``_AGENT_LOCK`` serializes the cold start. Two
+    regression signals, mirroring ``test_concurrent_first_calls_build_once``
+    so the test is structurally capable of catching a ``_AGENT_LOCK``
+    removal (a synchronous ``fake_build_agent`` never suspends, so a
+    build-count check *alone* would pass on a single-threaded event loop
+    even with the lock deleted — the in-fake ``locked()`` assertion is what
+    actually pins the lock's presence for the warmup-vs-request race):
+
+    1. ``build_agent`` runs exactly once across the gathered warmup +
+       request.
+    2. ``_AGENT_LOCK`` is *held* while ``build_agent`` runs.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    builds: list[Config] = []
+    lock_held_during_build: list[bool] = []
+
+    def fake_build_agent(c: Config):
+        builds.append(c)
+        lock_held_during_build.append(query_database_module._AGENT_LOCK.locked())
+        return agent_stub_factory([make_text_component("ok")])
+
+    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+
+    await asyncio.gather(
+        prime_agent(cfg),
+        query_database_impl(cfg, "q"),
+    )
+
+    assert len(builds) == 1
+    assert lock_held_during_build == [True]
+
+
+@pytest.mark.asyncio
+async def test_prime_agent_propagates_warm_memory_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """A failed boot-time memory warm propagates but leaves the agent cached.
+
+    ``prime_agent`` builds the agent (succeeds) then forces the lazy ChromaDB
+    open / embedding-model download via ``_warm_memory``. If that touch fails
+    (e.g. offline, can't download the model), the failure must propagate so
+    the HTTP lifespan can log-and-continue — but ``_AGENT_STATE`` stays
+    populated (the agent itself built fine), so the request path still serves
+    and simply re-attempts the lazy materialization itself.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+
+    def fake_build_agent(_c: Config):
+        return agent_stub_factory(
+            [make_text_component("ok")],
+            memory_raise_exc=RuntimeError("embedding model download failed"),
+        )
+
+    monkeypatch.setattr(query_database_module, "build_agent", fake_build_agent)
+
+    with pytest.raises(RuntimeError, match="embedding model download failed"):
+        await prime_agent(cfg)
+
+    # Agent built successfully; only the warm touch failed — singleton stays.
+    assert query_database_module._AGENT_STATE is not None
+    agent, _ = query_database_module._AGENT_STATE
+    assert len(agent.agent_memory.get_recent_memories_calls) == 1
 
 
 @pytest.mark.asyncio

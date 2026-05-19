@@ -28,17 +28,17 @@ from __future__ import annotations
 import ipaddress
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import RedirectResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from sqllens.agent.factory import build_agent
 from sqllens.auth import Authenticator, AuthError, build_authenticator
 from sqllens.config import Config
 from sqllens.server import build_server
+from sqllens.tools.query_database import prime_agent
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -67,16 +67,16 @@ only — never gated on agent-warmup readiness (use ``/readyz`` for that)."""
 READYZ_PATH = "/readyz"
 """Unauthenticated readiness probe path.
 
-Returns ``503`` until the eager warmup at lifespan startup completes, then
-``200``. The warmup constructs an agent via ``build_agent`` so the
-*process-level* cold-start cost is paid before the port opens — ChromaDB
-init plus the one-time ~80 MB embedding-model download, both of which are
-cached process-wide and so benefit any subsequent agent. It does **not**
-prime ``query_database``'s request-path agent singleton (that is built
-independently on the first query, by design — see
-``tools/query_database._agent_for``); ``/readyz=200`` therefore attests
-that the heavy shared caches are warm, not that the request-path agent has
-already been constructed. Short-circuited in ``_PathNormalizer`` next to
+Returns ``503`` until the lifespan startup sequence finishes, then ``200``.
+That sequence is: session manager up, then a best-effort eager warmup that
+calls ``tools.query_database.prime_agent`` to build *the* request-path
+agent singleton (DB connect, ChromaDB open, agent wiring, ~80 MB
+embedding-model download) so the first ``query_database`` call reuses it
+instead of paying cold start. Readiness latches after the warmup *attempt*
+regardless of outcome: a failed warmup is logged and the server still boots
+(the first query rebuilds), so ``/readyz=200`` attests "startup finished
+and the server can serve", not "warmup succeeded". Short-circuited in
+``_PathNormalizer`` next to
 ``HEALTHZ_PATH`` — ahead of both ``TrustedHostMiddleware`` and
 ``_AuthMiddleware`` — so orchestrators can gate traffic on warmup without
 an ``Authorization`` header and regardless of the request ``Host``."""
@@ -84,7 +84,8 @@ an ``Authorization`` header and regardless of the request ``Host``."""
 
 class _Readiness:
     """Shared readiness latch: flipped once by ``_SessionManagerLifespan`` at
-    lifespan startup (after eager agent warmup), read by ``_PathNormalizer``'s
+    lifespan startup (after the best-effort eager agent warmup *attempt*,
+    whether it succeeded or failed), read by ``_PathNormalizer``'s
     ``/readyz`` branch.
 
     A holder object (not a bare ``bool``) is required so the writer and reader
@@ -209,7 +210,16 @@ def build_asgi_app(cfg: Config) -> ASGIApp:
             "SDK likely renamed or removed it. Pin a compatible mcp version "
             "or update sqllens.transport.http.build_asgi_app."
         ) from exc
-    return _SessionManagerLifespan(bare, session_manager, cfg, readiness)
+
+    # Prime the request-path agent singleton at lifespan startup (best-effort,
+    # see _handle_lifespan). prime_agent owns the why; the closure binds cfg
+    # into the zero-arg on_startup hook.
+    async def _warmup() -> None:
+        await prime_agent(cfg)
+
+    return _SessionManagerLifespan(
+        bare, session_manager, readiness, on_startup=_warmup
+    )
 
 
 def _build_asgi_app_bare(cfg: Config, readiness: _Readiness) -> tuple[ASGIApp, FastMCP]:
@@ -356,19 +366,19 @@ class _SessionManagerLifespan:
       ``asyncio.CancelledError`` interrupting the close is re-raised after
       finalizing with *no* protocol message sent, so cancellation
       propagates cooperatively instead of being acked complete), or
-    - ``lifespan.startup`` raised in ``__aenter__`` *or in the subsequent
-      eager agent warmup* (``build_agent``, which runs after a successful
-      ``__aenter__`` but still inside the same startup ``try``) — the
-      acquired/partially-acquired context manager reference is dropped
-      *without* ``__aexit__``: calling ``__aexit__`` on a CM whose
-      ``__aenter__`` never completed is undefined per PEP 343, and on the
-      warmup-failure path the host aborts the process on
+    - ``lifespan.startup`` raised in the session-manager ``__aenter__`` — the
+      partially-acquired context manager reference is dropped *without*
+      ``__aexit__``: calling ``__aexit__`` on a CM whose ``__aenter__`` never
+      completed is undefined per PEP 343, and the host aborts the process on
       ``startup.failed`` so the entered CM is reclaimed by teardown — an
-      ``Exception`` is reported to the host
-      as ``lifespan.startup.failed``, while a ``BaseException`` such as
-      ``asyncio.CancelledError`` interrupting startup is re-raised after
-      finalizing with *no* protocol message sent, so cancellation
-      propagates cooperatively instead of being acked complete), or
+      ``Exception`` is reported to the host as ``lifespan.startup.failed``,
+      while a ``BaseException`` such as ``asyncio.CancelledError`` interrupting
+      startup is re-raised after finalizing with *no* protocol message sent,
+      so cancellation propagates cooperatively instead of being acked
+      complete. (The subsequent eager agent warmup is *not* covered by this:
+      it runs after a successful ``__aenter__``, outside that ``try``, and is
+      best-effort — an ``Exception`` from it is logged and startup still
+      completes; only a ``BaseException`` from it propagates.) Or
     - ``lifespan.shutdown`` arrived with no prior ``lifespan.startup`` (a
       misbehaving host) — the instance is finalized and the shutdown is
       answered ``shutdown.failed``, not ``shutdown.complete``.
@@ -384,12 +394,19 @@ class _SessionManagerLifespan:
     """
 
     def __init__(  # type: ignore[no-untyped-def]
-        self, inner: ASGIApp, session_manager, cfg: Config, readiness: _Readiness
+        self,
+        inner: ASGIApp,
+        session_manager,
+        readiness: _Readiness,
+        on_startup: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self.inner = inner
         self.session_manager = session_manager
-        self._cfg = cfg
         self._readiness = readiness
+        # Best-effort startup hook (the eager agent warmup). Run once, after
+        # the session manager is up and before lifespan.startup.complete; a
+        # failure is logged but never blocks boot — see _handle_lifespan.
+        self.on_startup = on_startup
         self._cm = None
         self._started = False
         self._shutdown_done = False
@@ -433,24 +450,14 @@ class _SessionManagerLifespan:
                 try:
                     self._cm = self.session_manager.run()
                     await self._cm.__aenter__()
-                    # Eager warmup: build (and discard) an agent so the
-                    # *process-level* cold-start cost — ChromaDB init plus the
-                    # one-time ~80 MB embedding-model download, both cached
-                    # process-wide — is paid before the port opens. This does
-                    # NOT populate query_database's request-path singleton
-                    # (built independently on first query, by design); it warms
-                    # the shared heavy caches that singleton will then reuse.
-                    # Single-threaded here (one startup,
-                    # pre-request) so no lock is needed. Kept inside the
-                    # existing try on purpose: a build_agent failure must
-                    # surface as lifespan.startup.failed via the handling
-                    # below, never be swallowed. NB: if this raises, the
-                    # session-manager CM has *already* been entered (line
-                    # above), so the except branches drop an entered CM
-                    # without __aexit__ — acceptable because the host aborts
-                    # the process on startup.failed, reclaiming it.
-                    build_agent(self._cfg)
-                    self._readiness.mark_ready()
+                    # The eager agent warmup is intentionally NOT here. It runs
+                    # via the best-effort ``on_startup`` hook below (after
+                    # ``_started = True``), so a warmup failure is logged and
+                    # the server still boots — the request path rebuilds on the
+                    # first query. Only a *session-manager* startup failure
+                    # must surface as lifespan.startup.failed, which is what
+                    # this try guards. Readiness is latched after the warmup
+                    # attempt completes (success or failure), not here.
                 except Exception as exc:
                     # Broad by design: every startup failure must surface as
                     # lifespan.startup.failed so the ASGI host doesn't hang
@@ -504,6 +511,45 @@ class _SessionManagerLifespan:
                     )
                     raise
                 self._started = True
+                if self.on_startup is not None:
+                    try:
+                        await self.on_startup()
+                    except Exception as exc:
+                        # Best-effort: a failed warmup (bad API key, DB
+                        # unreachable, ChromaDB open error, embedding-model
+                        # download failure) must not stop the server from
+                        # booting — the request path retries the build on the
+                        # first query and surfaces a clean MCP error there.
+                        # Log the full traceback for operators. BaseException
+                        # (asyncio.CancelledError on lifespan-task
+                        # cancellation, KeyboardInterrupt, SystemExit) is
+                        # deliberately *not* caught: it must propagate to
+                        # unwind the host. Only the propagation outcome mirrors
+                        # the session-manager startup path above — no CM
+                        # finalization is needed here because the session
+                        # manager is already fully entered (_started is True),
+                        # so there is no partially-acquired resource to drop.
+                        # The exception type/category is on the summary line
+                        # (not just the traceback) because this is the only
+                        # operator signal that the server booted *degraded* —
+                        # /healthz still returns 200 — and it must be greppable
+                        # without expanding the traceback, mirroring the
+                        # session-manager-startup log above.
+                        logger.exception(
+                            "eager agent warmup failed (%s: %s); the server "
+                            "started degraded — the first query will rebuild "
+                            "and pay the cold-start cost",
+                            type(exc).__name__,
+                            exc,
+                        )
+                # Latch readiness once the startup sequence — session manager
+                # up plus the best-effort warmup *attempt* — has finished,
+                # whether the warmup succeeded or failed. The server can serve
+                # either way (a failed warmup is rebuilt on the first query),
+                # so /readyz must not stay 503 indefinitely after a warmup
+                # error. /readyz=200 therefore attests "startup finished",
+                # not "warmup succeeded".
+                self._readiness.mark_ready()
                 await send({"type": "lifespan.startup.complete"})
             elif msg_type == "lifespan.shutdown":
                 if self._shutdown_done:
