@@ -17,6 +17,7 @@ Three orthogonal protections, composed at the factory:
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -32,6 +33,8 @@ from sqllens.safety.readonly import UnsafeSqlError, assert_select_only, is_read_
 
 if TYPE_CHECKING:
     from sqllens.agent.core.tool import ToolContext
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "MAX_ROWS_ATTR",
@@ -67,7 +70,15 @@ class ReadOnlyGuardRunner(SqlRunner):
             # Fail closed: any unexpected error from the parser layer (e.g. a
             # sqlglot AST shape change within the pinned version range) must
             # block the query, not escape as an unstructured crash. Same
-            # invariant as "parse failure is unsafe".
+            # invariant as "parse failure is unsafe". Log with a traceback so
+            # a genuine guard logic bug is diagnosable — without this it would
+            # be indistinguishable from a user typing bad SQL, visible only in
+            # the LLM transcript.
+            logger.warning(
+                "read-only guard raised an unexpected %s; failing closed",
+                type(e).__name__,
+                exc_info=True,
+            )
             raise UnsafeSqlError(
                 f"refusing to execute SQL: read-only guard errored "
                 f"({type(e).__name__}: {e})"

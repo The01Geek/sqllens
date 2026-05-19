@@ -71,17 +71,24 @@ _ALLOWED_ROOT_TYPES: tuple[type[exp.Expression], ...] = (
 _ALTER_TYPE: type[exp.Expression] | None = getattr(exp, "Alter", None) or getattr(
     exp, "AlterTable", None
 )
-_DML_DDL_TYPES: tuple[type[exp.Expression], ...] = tuple(
-    t
-    for t in (
-        exp.Insert,
-        exp.Update,
-        exp.Delete,
-        exp.Drop,
-        exp.Create,
-        _ALTER_TYPE,
+# Fail closed and loud: if a (future, post-pin-widening) sqlglot exposes
+# neither name, a nested ALTER would silently slip the deny-walk (every other
+# DML/DDL type is a bare attribute that AttributeErrors at import if missing —
+# ALTER is the only one resolved dynamically, so it needs an explicit guard).
+# Not an ``assert`` — that is stripped under ``python -O`` and this is a
+# security invariant.
+if _ALTER_TYPE is None:  # pragma: no cover - unreachable within the pinned range
+    raise RuntimeError(
+        "sqlglot exposes neither exp.Alter nor exp.AlterTable; "
+        "the read-only guard cannot reject nested ALTER (fail-closed)"
     )
-    if t is not None
+_DML_DDL_TYPES: tuple[type[exp.Expression], ...] = (
+    exp.Insert,
+    exp.Update,
+    exp.Delete,
+    exp.Drop,
+    exp.Create,
+    _ALTER_TYPE,
 )
 
 
@@ -133,10 +140,10 @@ _DENIED_UNION: frozenset[str] = frozenset(_ALWAYS_DENIED_FUNCS).union(
 # Matching lower-cases the parsed function name, so every denylist entry must
 # be lower-case or it is dead weight that silently fails open. Enforce at
 # import (negligible cost) so a mixed-case typo fails fast instead of opening
-# a hole.
-assert _DENIED_UNION == frozenset(n.lower() for n in _DENIED_UNION), (
-    "denylist entries must be lower-case"
-)
+# a hole. An explicit raise, not an ``assert`` — ``assert`` is stripped under
+# ``python -O`` and this is a security invariant, not a debug check.
+if _DENIED_UNION != frozenset(n.lower() for n in _DENIED_UNION):
+    raise RuntimeError("denylist entries must be lower-case (fail-closed)")
 
 
 def _denied_funcs(dialect: str | None) -> frozenset[str]:
@@ -165,7 +172,14 @@ def _func_name_candidates(node: exp.Func) -> set[str]:
     """
     if isinstance(node, exp.Anonymous):
         return {node.name.lower()} if node.name else set()
-    return {n.lower() for n in type(node).sql_names()}
+    # ``sql_names()`` is a sqlglot ``Func`` classmethod; guard defensively so a
+    # future Func-shaped node lacking it degrades to "no candidates" (the node
+    # simply isn't matched) rather than raising and turning every query into
+    # the guard's fail-closed path.
+    sql_names = getattr(type(node), "sql_names", None)
+    if not callable(sql_names):
+        return set()
+    return {n.lower() for n in sql_names()}
 
 
 def assert_select_only(sql: str, *, dialect: str | None = None) -> None:

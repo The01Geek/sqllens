@@ -86,14 +86,23 @@ class SqliteRunner(SqlRunner):
         else:
             conn = sqlite3.connect(self.database_path)
         conn.row_factory = sqlite3.Row
-        if self._read_only:
-            # Belt-and-suspenders backstop independent of URI parsing: even if
-            # the mode=ro URI is somehow not honoured (e.g. :memory:, or a URI
-            # edge case), query_only rejects any write on this connection.
-            conn.execute("PRAGMA query_only = ON")
         cursor = conn.cursor()
 
         try:
+            if self._read_only:
+                # Belt-and-suspenders backstop independent of URI parsing:
+                # even if the mode=ro URI is not honoured (e.g. :memory:, or a
+                # URI edge case), query_only rejects any write on this
+                # connection. Inside the try so a failure here still runs the
+                # finally cleanup. SQLite silently ignores unknown pragmas, so
+                # read back and fail closed if it did not actually take.
+                conn.execute("PRAGMA query_only = ON")
+                if conn.execute("PRAGMA query_only").fetchone()[0] != 1:
+                    raise sqlite3.OperationalError(
+                        "could not enforce read-only (PRAGMA query_only "
+                        "not honoured by this SQLite build)"
+                    )
+
             # Register inside the try so the ``finally`` block always runs the
             # ``set_progress_handler(None, 0)`` cleanup even if registration
             # itself raises.
