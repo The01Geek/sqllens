@@ -71,6 +71,48 @@ jobs:
         with:
           packages-dir: dist/
 
+  smoke:
+    name: Post-publish smoke test
+    # Gated on a successful publish: only runs once the wheel is on PyPI.
+    # ``build`` is also needed for its ``version`` output (single source of
+    # truth — same value the tag-match step derived).
+    needs: [build, pypi-publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the published wheel from PyPI (clean venv, with retry)
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python -m venv /tmp/smoke-venv
+          # Install the artifact that was ACTUALLY published (by exact
+          # version), not the local dist/. PyPI's CDN can lag a few seconds
+          # after publish, so retry a bounded number of times before failing.
+          for attempt in 1 2 3 4 5 6; do
+            if /tmp/smoke-venv/bin/pip install "sqllens==${VERSION}"; then
+              echo "Installed sqllens==${VERSION} on attempt ${attempt}"
+              break
+            fi
+            if [ "${attempt}" -eq 6 ]; then
+              echo "::error::sqllens==${VERSION} not installable from PyPI after ${attempt} attempts"
+              exit 1
+            fi
+            echo "Attempt ${attempt} failed; sleeping 15s for PyPI propagation"
+            sleep 15
+          done
+
+      - name: Exercise the published console script
+        run: |
+          # Any non-zero exit (broken __init__ import, dropped module,
+          # bad config parsing) fails the workflow.
+          /tmp/smoke-venv/bin/sqllens --version
+          /tmp/smoke-venv/bin/sqllens validate -c examples/sqlite-demo/sqllens.toml
+
   github-release:
     name: Attach artifacts to GitHub release
     needs: [build, pypi-publish]
