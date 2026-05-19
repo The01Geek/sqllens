@@ -125,7 +125,7 @@ class TestHealthz:
     async def test_healthz_bypasses_bearer_auth(self, make_server) -> None:
         """No ``Authorization`` header is required even under bearer auth."""
         handle = make_server(
-            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token"))
+            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789"))
         )
         async with httpx.AsyncClient() as client:
             r = await client.get(handle.base_url + "/healthz")
