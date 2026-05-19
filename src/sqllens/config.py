@@ -363,11 +363,7 @@ class RlsRule(BaseModel):
         has_static = self.value is not None
         has_dynamic = self.value_from_metadata is not None
         if has_static == has_dynamic:
-            got = (
-                "both"
-                if has_static and has_dynamic
-                else "neither"
-            )
+            got = "both" if has_static and has_dynamic else "neither"
             raise ValueError(
                 RLS_VALUE_SOURCE_MESSAGE.format(
                     table=self.table, column=self.column, got=got

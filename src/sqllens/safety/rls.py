@@ -72,9 +72,7 @@ def _is_suspicious_scalar(value: object) -> bool:
     plausible for an identity token and both are classic injection-probe
     shapes (fail-secure even though the value is built as a literal node).
     """
-    if isinstance(value, bool):
-        return False
-    if isinstance(value, (int, float)):
+    if isinstance(value, (bool, int, float)):
         return False
     if isinstance(value, str):
         if len(value) > _MAX_DYNAMIC_STR_LEN:
@@ -94,8 +92,7 @@ def _resolve_value(
     query is blocked rather than run unfiltered.
     """
     if rule.value_from_metadata is None:
-        # Static — config-validated at load. mypy: value is not None because
-        # RlsRule._validate enforces exactly-one-of.
+        # mypy: value is not None — RlsRule._validate enforces exactly-one-of.
         return rule.value  # type: ignore[return-value]
 
     key = rule.value_from_metadata
@@ -238,8 +235,7 @@ def apply_rls(
             qualifier = table.alias_or_name
             for rule in matched:
                 value = _resolve_value(rule, meta)
-                # append=True AND-combines with any existing WHERE and wraps
-                # the prior condition correctly when sqlglot regenerates SQL.
+                # append=True AND-combines with any existing WHERE.
                 select.where(_predicate(rule, qualifier, value), append=True, copy=False)
 
     return tree.sql(dialect=dialect)
