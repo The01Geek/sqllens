@@ -283,7 +283,7 @@ class TestCorpusStaysRejected:
     """Corpus-regression assertion.
 
     Re-asserts the full bypass corpus stays rejected. This is the explicit
-    guard against a future sqlglot bump (the ``>=25.0,<26`` pin can be widened
+    guard against a future sqlglot bump (the ``>=25.0,<31`` pin can be widened
     later) silently re-opening a parser-level bypass after the ``walk()``
     version shim was removed.
     """
@@ -302,7 +302,7 @@ class TestGuardDoesNotCrashOnPinnedSqlglot:
     Pins the ALTER-node version-tolerance fix: a bare ``exp.Alter`` reference
     AttributeErrors on sqlglot 25.0.x (it ships only ``exp.AlterTable``),
     which would crash the guard on *every* query — including ``SELECT 1`` —
-    on the low end of the pinned ``>=25.0,<26`` range.
+    on the low end of the pinned ``>=25.0,<31`` range.
     """
 
     @pytest.mark.parametrize("dialect", [None, "sqlite", "postgres", "mysql"])

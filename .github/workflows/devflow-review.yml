@@ -455,8 +455,13 @@ jobs:
         - 🔎 Phase 2/4 — Verifying N items
         - 🧪 Phase 3/4 — Running review agents
         - 📊 Phase 4/4 — Aggregating findings
-        - ✅ Complete — see review below
-        - ❌ Failed — <one-line reason>
+        - ✅ Approved — final state for APPROVE (see Step 3)
+        - ❌ Changes requested — final state for REJECT (see Step 3)
+        - ❌ Failed — <one-line reason> (run aborted; see Step 3 failure variant)
+
+        Do NOT use a ✅ Complete status on the final patch — the final
+        state must reflect the verdict, not just process completion. A
+        green check above a REJECT report misleads readers.
 
         Example mid-run body:
 
@@ -488,17 +493,39 @@ jobs:
         `gh pr review` (verdict stub only), PATCH the progress comment
         one last time. The progress comment is the single human-readable
         artifact carrying the full Phase 4.1 report, so this final PATCH
-        must embed the entire report body verbatim. Use this exact
-        template:
+        must embed the entire report body verbatim.
+
+        **The heading and Status row MUST reflect the actual verdict** —
+        do NOT default to a green ✅ on a REJECT. A reader scanning the
+        PR sees only the heading; a ✅ on top of a REJECT body misleads
+        them into thinking the PR was approved. Pick the variant by
+        verdict:
+
+        APPROVE (including "APPROVE with notes"):
 
             <!-- devflow:review-progress -->
-            ## ✅ Devflow Review Complete
+            ## ✅ Devflow Review: APPROVE
 
             |   |   |
             |---|---|
-            | **Status** | ✅ Complete |
+            | **Status** | ✅ Approved |
             | **Last updated** | `<UTC ISO-8601>` |
             | **Verdict** | <one-line verdict summary, e.g. "APPROVE with notes (2 suggestions)"> |
+
+            ---
+
+            <full Phase 4.1 report body, verbatim — do NOT regenerate or summarize>
+
+        REJECT:
+
+            <!-- devflow:review-progress -->
+            ## ❌ Devflow Review: REJECT — changes requested
+
+            |   |   |
+            |---|---|
+            | **Status** | ❌ Changes requested |
+            | **Last updated** | `<UTC ISO-8601>` |
+            | **Verdict** | <one-line verdict summary, e.g. "REJECT — 1 verification FAIL"> |
 
             ---
 
