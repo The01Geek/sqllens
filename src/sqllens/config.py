@@ -239,9 +239,11 @@ class Config(BaseSettings):
         default ``./sqllens.toml`` location.
 
         Raises ``ConfigBomError`` — a ``ValueError`` subclass, so ``except
-        ValueError:`` still catches it — (with the original
-        ``tomllib.TOMLDecodeError`` chained via ``__cause__``) when the resolved
-        TOML begins with a UTF-8 BOM. Programmatic embedders that ``except
+        ValueError:`` still catches it — when the resolved TOML begins with a
+        UTF-8 BOM. The original ``tomllib.TOMLDecodeError`` is chained via
+        ``__cause__`` at the raise site (an in-process guarantee; like all
+        Python exceptions the cause is not preserved across a pickle /
+        cross-process round-trip). Programmatic embedders that ``except
         TOMLDecodeError:`` need to also catch ``ValueError``.
         """
         # Stash + restore so a failed load doesn't pollute SQLLENS_CONFIG for any
@@ -352,7 +354,10 @@ class ConfigBomError(ValueError):
     # built message string, so a default unpickle would call
     # ConfigBomError(<message-str>) and re-run _bom_error_message on the
     # message. Round-trip on the Path instead so an unpickled instance is
-    # identical to the original.
+    # identical to the original. NB: __cause__/__context__ are not pickled —
+    # a CPython-wide exception limitation, not introduced here — so the
+    # chained TOMLDecodeError documented above is an in-process guarantee
+    # only; it does not survive a cross-process (multiprocessing) round-trip.
     def __reduce__(self) -> tuple[type[ConfigBomError], tuple[Path]]:
         return (self.__class__, (self.path,))
 
