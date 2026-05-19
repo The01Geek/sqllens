@@ -316,6 +316,25 @@ def test_table_header_fits_but_no_row_fits_returns_empty_payload() -> None:
     assert payload["truncated"] == 1
 
 
+def test_table_payload_construction_failure_degrades_to_markdown_only(
+    monkeypatch,
+) -> None:
+    # The iter-2 robustness wrapper: if payload construction raises, the widget
+    # degrades to None (Markdown answer still stands) rather than letting the
+    # exception escape the sanitized error taxonomy.
+    import sqllens.tools._format as fmt
+
+    def boom(_rich):
+        raise RuntimeError("pathological column object")
+
+    monkeypatch.setattr(fmt, "_compute_table_payload", boom)
+    stream = [_ui(DataFrameComponent(rows=[{"id": 1}], columns=["id"]))]
+    markdown, is_error, payload = components_to_table(stream)
+    assert is_error is False
+    assert markdown.startswith("| id |")
+    assert payload is None
+
+
 def test_table_present_but_empty_dataframe_returns_none() -> None:
     stream = [_ui(DataFrameComponent(rows=[], columns=[]))]
     markdown, is_error, payload = components_to_table(stream)

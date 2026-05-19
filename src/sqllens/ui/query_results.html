@@ -135,21 +135,23 @@ function csvEscape(v) {
 function exportCsv() {
   // MCP App iframes are sandboxed; blob: URLs or downloads may be blocked.
   // Without this the click is a silent no-op on an explicit user action.
+  let url;
   try {
     const rows = sortedRows(filteredRows());
     const lines = [state.columns.map(csvEscape).join(",")];
     for (const r of rows) lines.push(r.map(csvEscape).join(","));
     const blob = new Blob([lines.join("\r\n")], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
+    url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = "query_results.csv";
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
   } catch (err) {
     showNotice("CSV export blocked by host: " + (err && err.message ? err.message : err));
+  } finally {
+    if (url) URL.revokeObjectURL(url);
   }
 }
 
