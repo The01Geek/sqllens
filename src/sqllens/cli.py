@@ -391,6 +391,107 @@ def claude_desktop_install(
         console.print(line)
 
 
+@app.command(name="import-memory")
+def import_memory(
+    path: Path = typer.Argument(..., help="Bundle file to import (JSON or CSV)."),
+    config: Path | None = typer.Option(
+        None, "--config", "-c", help="Path to sqllens.toml. Falls back to env / ./sqllens.toml."
+    ),
+    fmt: str = typer.Option("json", "--format", help="Bundle format (json or csv)."),
+    clear: bool = typer.Option(
+        False, "--clear", help="Wipe the collection before importing (prompts to confirm)."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Validate and report without writing anything."
+    ),
+    batch_size: int = typer.Option(
+        100, "--batch-size", min=1, help="Writes issued before yielding."
+    ),
+) -> None:
+    """Bulk-load a curated memory bundle into the configured store."""
+    import asyncio
+
+    from sqllens.config import Config
+    from sqllens.memory import MemoryStore, import_bundle
+    from sqllens.memory.io import BundleFormatError, parse_csv, parse_json
+
+    if fmt not in ("json", "csv"):
+        err_console.print(f"[red]Error:[/red] --format must be 'json' or 'csv' (got {escape(fmt)})")
+        raise typer.Exit(code=1)
+    try:
+        cfg = Config.load(config)
+    except Exception as e:
+        err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
+        raise typer.Exit(code=2) from e
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        err_console.print(f"[red]Error:[/red] cannot read {escape(str(path))}: {escape(str(e))}")
+        raise typer.Exit(code=1) from e
+    try:
+        bundle = parse_csv(text) if fmt == "csv" else parse_json(text)
+    except BundleFormatError as e:
+        err_console.print(f"[red]Invalid bundle:[/red] {escape(str(e))}")
+        raise typer.Exit(code=1) from e
+
+    if clear and not dry_run:
+        typer.confirm(
+            f"This wipes every memory in collection '{cfg.memory.collection}'. Continue?",
+            abort=True,
+        )
+
+    store = MemoryStore(cfg)
+    report = asyncio.run(
+        import_bundle(
+            store, bundle, dry_run=dry_run, clear=clear, batch_size=batch_size
+        )
+    )
+
+    prefix = "[yellow](dry-run)[/yellow] " if dry_run else ""
+    console.print(
+        f"{prefix}saved={report.saved} "
+        f"skipped_duplicate={report.skipped_duplicate} "
+        f"errors={len(report.errors)}"
+    )
+    for err in report.errors:
+        err_console.print(
+            f"  [red]{escape(err.kind)}[{err.index}]:[/red] {escape(err.message)}"
+        )
+    if report.errors:
+        raise typer.Exit(code=1)
+
+
+@app.command(name="export-memory")
+def export_memory(
+    path: Path = typer.Argument(..., help="Destination file for the exported bundle."),
+    config: Path | None = typer.Option(
+        None, "--config", "-c", help="Path to sqllens.toml. Falls back to env / ./sqllens.toml."
+    ),
+    fmt: str = typer.Option("json", "--format", help="Bundle format."),
+) -> None:
+    """Export the configured memory store to a bundle file."""
+    from sqllens.config import Config
+    from sqllens.memory import MemoryStore, export_bundle
+
+    if fmt not in ("json", "csv"):
+        err_console.print(f"[red]Error:[/red] --format must be 'json' or 'csv' (got {escape(fmt)})")
+        raise typer.Exit(code=1)
+    try:
+        cfg = Config.load(config)
+    except Exception as e:
+        err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
+        raise typer.Exit(code=2) from e
+
+    store = MemoryStore(cfg)
+    text = export_bundle(store, fmt)
+    try:
+        path.write_text(text, encoding="utf-8")
+    except OSError as e:
+        err_console.print(f"[red]Error:[/red] cannot write {escape(str(path))}: {escape(str(e))}")
+        raise typer.Exit(code=1) from e
+    console.print(f"[green]Wrote {escape(str(path))}[/green]")
+
+
 _SAMPLE_CONFIG = """\
 # SQL Lens configuration. See https://github.com/The01Geek/sqllens for docs.
 
@@ -408,6 +509,10 @@ model = "claude-sonnet-4-5-20250929"
 persist_dir = "./chroma"
 collection = "sqllens"
 similarity_threshold = 0.7
+# allow_import = false   # set true to expose the import_memory MCP tool
+                         # (memory-poisoning risk — trusted operators only).
+                         # The import-memory / export-memory CLI commands work
+                         # regardless of this flag.
 
 [auth]
 mode = "none"            # one of: none, bearer (jwt is not implemented yet)

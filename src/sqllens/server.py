@@ -34,6 +34,29 @@ def build_server(cfg: Config) -> FastMCP:
         """Describe the configured database."""
         return list_data_sources_impl(cfg)
 
+    # Opt-in, default OFF: a client that can write memory can poison future
+    # SQL generation. Only registered when an operator sets allow_import.
+    if cfg.memory.allow_import:
+        from sqllens.memory import MemoryStore, import_bundle
+        from sqllens.memory.io import BundleFormatError, parse_json
+
+        store = MemoryStore(cfg)
+
+        @mcp.tool()
+        async def import_memory(bundle_json: str) -> str:
+            """Bulk-load a curated memory bundle (JSON) into the store.
+
+            The bundle has optional ``sql_pairs`` and ``schema_docs`` blocks.
+            Exact-match duplicates (already stored or repeated in the bundle)
+            are skipped. Returns a Markdown summary of saved / skipped / errors.
+            """
+            try:
+                bundle = parse_json(bundle_json)
+            except BundleFormatError as exc:
+                raise RuntimeError(f"Invalid memory bundle: {exc}") from exc
+            report = await import_bundle(store, bundle)
+            return report.to_markdown()
+
     return mcp
 
 
