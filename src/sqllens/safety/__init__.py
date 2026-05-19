@@ -63,4 +63,13 @@ class ReadOnlyGuardRunner(SqlRunner):
             # Surface as a normal exception — the agent's tool-result path will
             # convert it into a tool error visible to the LLM/client.
             raise UnsafeSqlError(f"refusing to execute non-SELECT SQL: {e}") from e
+        except Exception as e:
+            # Fail closed: any unexpected error from the parser layer (e.g. a
+            # sqlglot AST shape change within the pinned version range) must
+            # block the query, not escape as an unstructured crash. Same
+            # invariant as "parse failure is unsafe".
+            raise UnsafeSqlError(
+                f"refusing to execute SQL: read-only guard errored "
+                f"({type(e).__name__}: {e})"
+            ) from e
         return await self._inner.run_sql(args, context)

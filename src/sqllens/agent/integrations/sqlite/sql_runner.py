@@ -2,6 +2,8 @@
 
 import sqlite3
 import time
+from urllib.parse import quote
+
 import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
@@ -17,12 +19,17 @@ _PROGRESS_HANDLER_INSTRUCTIONS = 1000
 def _readonly_uri(database_path: str) -> str:
     """Build the SQLite read-only connection URI for ``database_path``.
 
-    SQLite has no DB role to fall back on, so the ``mode=ro`` URI is the only
-    connector-level backstop when the parser guard misses a write. Factored
-    out as a pure function so the URI construction is unit-testable without a
-    live database file.
+    SQLite has no DB role to fall back on, so the ``mode=ro`` URI is one of
+    the connector-level backstops when the parser guard misses a write.
+    Factored out as a pure function so the URI construction is unit-testable
+    without a live database file.
+
+    The path is percent-encoded (keeping ``/`` as the separator): an
+    unescaped ``?`` or ``#`` in the database path would otherwise terminate
+    the URI path component, drop the ``mode=ro`` query string, and silently
+    open a *writable* connection to a truncated/wrong file.
     """
-    return f"file:{database_path}?mode=ro"
+    return f"file:{quote(database_path, safe='/')}?mode=ro"
 
 
 class SqliteRunner(SqlRunner):
@@ -41,10 +48,12 @@ class SqliteRunner(SqlRunner):
             database_path: Path to the SQLite database file
             statement_timeout_ms: Per-query timeout in milliseconds (0 disables)
             max_rows: Hard ceiling on rows returned per SELECT
-            read_only: Open the connection via the ``mode=ro`` URI so a write
-                that reaches the driver fails (defence-in-depth backstop for
-                the parser guard). No-op for ``:memory:`` (ephemeral, nothing
-                to protect, and an empty read-only memory DB is unusable).
+            read_only: Open the connection via the ``mode=ro`` URI and set
+                ``PRAGMA query_only=ON`` so a write that reaches the driver
+                fails (defence-in-depth backstop for the parser guard). The
+                ``mode=ro`` URI is skipped for ``:memory:`` (it would open a
+                *separate* empty database, breaking every query); the
+                ``query_only`` pragma still applies there.
         """
         if statement_timeout_ms < 0:
             raise ValueError(
@@ -77,6 +86,11 @@ class SqliteRunner(SqlRunner):
         else:
             conn = sqlite3.connect(self.database_path)
         conn.row_factory = sqlite3.Row
+        if self._read_only:
+            # Belt-and-suspenders backstop independent of URI parsing: even if
+            # the mode=ro URI is somehow not honoured (e.g. :memory:, or a URI
+            # edge case), query_only rejects any write on this connection.
+            conn.execute("PRAGMA query_only = ON")
         cursor = conn.cursor()
 
         try:

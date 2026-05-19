@@ -112,9 +112,15 @@ class PostgresRunner(SqlRunner):
                 setup = conn.cursor()
                 try:
                     if self._read_only:
-                        # Force every transaction on this session read-only
-                        # regardless of the DB role — a guard miss still
-                        # cannot mutate. Not transactional; no commit needed.
+                        # Force read-only regardless of the DB role — a guard
+                        # miss still cannot mutate. Under psycopg2's default
+                        # autocommit=False this SET shares the same implicit
+                        # transaction as the SELECT below, so it is in force
+                        # for the query; the connection is single-use and
+                        # discarded on close, so no commit is needed. Do not
+                        # switch this connection to autocommit or move this SET
+                        # into its own transaction without re-checking that
+                        # read-only still covers the query.
                         setup.execute(
                             "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"
                         )

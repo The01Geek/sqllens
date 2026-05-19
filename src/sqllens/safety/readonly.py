@@ -62,6 +62,29 @@ _ALLOWED_ROOT_TYPES: tuple[type[exp.Expression], ...] = (
 )
 
 
+# DML/DDL node types refused anywhere in the tree. The ALTER node was renamed
+# ``exp.AlterTable`` → ``exp.Alter`` partway through sqlglot's 25.x line, so a
+# bare ``exp.Alter`` reference AttributeErrors on the low end of the pinned
+# ``>=25.0,<26`` range (25.0.x ships only ``AlterTable``) while a bare
+# ``exp.AlterTable`` AttributeErrors on 30.x. Resolve whichever the installed
+# version exposes so the guard works across the whole pinned range.
+_ALTER_TYPE: type[exp.Expression] | None = getattr(exp, "Alter", None) or getattr(
+    exp, "AlterTable", None
+)
+_DML_DDL_TYPES: tuple[type[exp.Expression], ...] = tuple(
+    t
+    for t in (
+        exp.Insert,
+        exp.Update,
+        exp.Delete,
+        exp.Drop,
+        exp.Create,
+        _ALTER_TYPE,
+    )
+    if t is not None
+)
+
+
 # Per-dialect denylist of side-effecting / DoS / RCE functions. A syntactically
 # valid ``SELECT`` that *calls* one of these passes the root-type / DML-DDL
 # walk untouched, so without this the guard is RCE on the default SQLite
@@ -107,6 +130,14 @@ _DENIED_UNION: frozenset[str] = frozenset(_ALWAYS_DENIED_FUNCS).union(
     *_SIDE_EFFECT_FUNCS.values()
 )
 
+# Matching lower-cases the parsed function name, so every denylist entry must
+# be lower-case or it is dead weight that silently fails open. Enforce at
+# import (negligible cost) so a mixed-case typo fails fast instead of opening
+# a hole.
+assert _DENIED_UNION == frozenset(n.lower() for n in _DENIED_UNION), (
+    "denylist entries must be lower-case"
+)
+
 
 def _denied_funcs(dialect: str | None) -> frozenset[str]:
     """Return the set of refused function names for ``dialect``.
@@ -124,13 +155,17 @@ def _func_name_candidates(node: exp.Func) -> set[str]:
     Unknown functions parse as ``exp.Anonymous`` and carry their written name
     on ``.name``. Known functions (e.g. ``generate_series``) parse as a typed
     ``exp.Func`` subclass whose canonical name(s) come from ``sql_names()``.
+
+    For a typed node we deliberately do NOT consult ``node.name``: on a typed
+    ``exp.Func`` ``.name`` is the value of the node's first argument, not the
+    function name (e.g. ``md5('pg_sleep')`` → ``.name == 'pg_sleep'``). Mixing
+    that into the candidate set would reject benign reads whose string literal
+    happens to equal a denied function name. ``sql_names()`` already yields the
+    canonical name for every typed function we deny (e.g. ``GENERATE_SERIES``).
     """
     if isinstance(node, exp.Anonymous):
         return {node.name.lower()} if node.name else set()
-    names = {n.lower() for n in type(node).sql_names()}
-    if node.name:
-        names.add(node.name.lower())
-    return names
+    return {n.lower() for n in type(node).sql_names()}
 
 
 def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
@@ -166,7 +201,7 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
     # yields bare ``exp.Expression`` nodes (sqlglot is pinned ``>=25.0,<26``;
     # the pre-v20 ``(node, parent, key)`` tuple form is out of range).
     for sub in stmt.walk():
-        if isinstance(sub, (exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.Create, exp.Alter)):
+        if isinstance(sub, _DML_DDL_TYPES):
             kind = type(sub).__name__.upper()
             raise UnsafeSqlError(f"only SELECT statements are allowed (found nested {kind})")
         # ``SELECT ... INTO new_tbl`` is a write on both Postgres and T-SQL —
