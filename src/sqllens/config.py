@@ -205,10 +205,11 @@ class AuditConfig(BaseModel):
     Mirrors what the future factory needs to construct/configure a
     ``LoggingAuditLogger``: ``log_level`` is a friendly string the factory will
     translate to a Python ``logging`` level int for
-    ``LoggingAuditLogger(log_level=...)``. ``include_response_text`` and
-    ``sanitize_parameters`` correspond to the ``include_full_text`` and
-    ``sanitize_parameters`` arguments of ``AuditLogger``'s ``log_ai_response``
-    / ``log_tool_invocation`` methods (per-call arguments, not constructor
+    ``LoggingAuditLogger(log_level=...)``. ``include_response_text`` maps to
+    the ``include_full_text`` per-call argument of
+    ``AuditLogger.log_ai_response``; ``sanitize_parameters`` maps to the
+    ``sanitize_parameters`` per-call argument of
+    ``AuditLogger.log_tool_invocation`` (per-call arguments, not constructor
     parameters). ``enabled`` is the master gate: when False (the default) the
     factory builds no audit logger and the other three fields are inert. No
     factory wiring lands here — this issue defines the surface only.
