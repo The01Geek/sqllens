@@ -42,7 +42,7 @@ def test_missing_asset_raises_actionable_runtimeerror(monkeypatch) -> None:
             ) from e
 
     monkeypatch.setattr(ui, "_read_widget_html", fake_read)
-    with pytest.raises(RuntimeError, match="widget asset .* is unavailable"):
+    with pytest.raises(RuntimeError, match=r"widget asset .* is unavailable"):
         ui.load_widget_html()
 
 
@@ -75,7 +75,7 @@ def test_empty_asset_raises_actionable_runtimeerror(monkeypatch) -> None:
             return "   \n\t  "
 
     monkeypatch.setattr(ui, "files", lambda _pkg: _Empty())
-    with pytest.raises(RuntimeError, match="asset .* is empty"):
+    with pytest.raises(RuntimeError, match=r"asset .* is empty"):
         ui.load_widget_html()
 
 

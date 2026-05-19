@@ -11,7 +11,7 @@ The same DSL dict is both the ``ChartComponent.data`` payload and the JSON the
 MCP layer writes to ``_meta["sqllens/chart"]``.
 """
 
-from typing import Any, Dict, List, Literal, Optional, Type
+from typing import Any, Dict, List, Literal, Optional, Type, get_args
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -24,14 +24,13 @@ from sqllens.agent.components import (
 )
 from sqllens.agent.core.tool import Tool, ToolContext, ToolResult
 
-# The agent must aggregate in SQL; a chart is not a data dump. 200 rows is
-# generous for any human-readable chart (24 months × a few series, a 14×14
-# heatmap, etc.) while keeping the LLM tool-call payload small. Enforced by a
-# Pydantic validator so an over-cap call is rejected before execute() runs and
-# surfaces to the LLM as ToolResult(success=False) via the registry.
+# 200 rows is generous for any human-readable chart while keeping the LLM
+# tool-call payload small. Enforced by a Pydantic validator so an over-cap
+# call is rejected by the registry as ToolResult(success=False) before
+# execute() runs.
 _MAX_CHART_ROWS = 200
 
-_CHART_TYPES = ("bar", "line", "area", "scatter", "pie", "heatmap")
+ChartTypeLiteral = Literal["bar", "line", "area", "scatter", "pie", "heatmap"]
 
 
 class FieldSpec(BaseModel):
@@ -49,9 +48,7 @@ class FieldSpec(BaseModel):
 class EmitChartParams(BaseModel):
     """Renderer-agnostic chart DSL the widget translates to ECharts options."""
 
-    chart_type: Literal["bar", "line", "area", "scatter", "pie", "heatmap"] = Field(
-        description="Which chart shape to render"
-    )
+    chart_type: ChartTypeLiteral = Field(description="Which chart shape to render")
     title: Optional[str] = Field(default=None, description="Chart title")
     x: FieldSpec = Field(description="X axis (category for pie, x-cat for heatmap)")
     y: FieldSpec = Field(description="Y axis (value for pie, y-cat for heatmap)")
@@ -100,12 +97,12 @@ class EmitChartTool(Tool[EmitChartParams]):
 
     @property
     def description(self) -> str:
+        types = ", ".join(get_args(ChartTypeLiteral))
         return (
             "Render an interactive chart from already-aggregated rows. Call "
             "AFTER run_sql, once per request, when the user asked for a chart "
-            "and the result is aggregated/temporal and obviously chartable. "
-            "chart_type is one of: " + ", ".join(_CHART_TYPES) + ". At most "
-            f"{_MAX_CHART_ROWS} rows — aggregate in SQL first."
+            f"and the result is aggregated/temporal. chart_type is one of: "
+            f"{types}. At most {_MAX_CHART_ROWS} rows — aggregate in SQL first."
         )
 
     def get_args_schema(self) -> Type[EmitChartParams]:
@@ -123,6 +120,9 @@ class EmitChartTool(Tool[EmitChartParams]):
         reaches the LLM as a structured error, never an unhandled exception.
         """
         try:
+            # row_count / truncated belong to the MCP-layer payload, not the
+            # agent-side spec — _compute_chart_payload is their sole producer
+            # (it derives them after applying the size-budget binary search).
             spec: Dict[str, Any] = {
                 "chart_type": args.chart_type,
                 "title": args.title,
@@ -130,8 +130,6 @@ class EmitChartTool(Tool[EmitChartParams]):
                 "y": args.y.model_dump(),
                 "series": args.series,
                 "data": args.data,
-                "row_count": len(args.data),
-                "truncated": 0,
             }
 
             chart_component = ChartComponent(

@@ -65,8 +65,10 @@ async def test_execute_happy_path_each_chart_type(chart_type: str) -> None:
     assert rich.data["chart_type"] == chart_type
     assert rich.data["x"]["field"] == "month"
     assert rich.data["y"]["field"] == "sales"
-    assert rich.data["row_count"] == 1
-    assert rich.data["truncated"] == 0
+    # row_count / truncated are computed by _compute_chart_payload (MCP layer),
+    # not stamped at emit time — keep them off the agent-side spec.
+    assert "row_count" not in rich.data
+    assert "truncated" not in rich.data
     assert result.metadata["chart_spec"] == rich.data
 
 

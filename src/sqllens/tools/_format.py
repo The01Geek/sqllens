@@ -35,10 +35,9 @@ _MAX_ROWS_RENDERED = 500
 _MAX_TABLE_PAYLOAD_BYTES = 130 * 1024
 
 # Same budget, same reason, for the chart widget's ``_meta["sqllens/chart"]``
-# blob. The chart DSL also caps rows at 200 in the agent tool, but a wide
-# ``SELECT *``-shaped row dict can still blow the size budget, so the same
-# binary-search prefix truncation applies here.
-_MAX_CHART_PAYLOAD_BYTES = 130 * 1024
+# blob. Aliased to the table budget so the two cannot drift apart — both blobs
+# share one sandboxed-iframe rendering ceiling.
+_MAX_CHART_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES
 
 
 def components_to_table(

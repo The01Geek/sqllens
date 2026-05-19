@@ -20,13 +20,12 @@ import logging
 from sqllens.agent import RequestContext
 from sqllens.config import Config
 from sqllens.safety import UnsafeSqlError
-from sqllens.tools._agent import _agent_for, prime_agent
+from sqllens.tools._agent import get_agent, prime_agent
 from sqllens.tools._format import components_to_table
 
-# Re-exported so existing callers/tests that reach ``query_database.prime_agent``
-# keep working after the singleton moved to ``tools/_agent.py`` (the agent is
-# now shared with ``visualize_data``). ``_agent_for`` is the request-path seam;
-# ``prime_agent`` is the boot-time warm. Both live in ``_agent`` now.
+# ``prime_agent`` lives in ``tools/_agent.py`` but the transport-layer warmup
+# (``transport/http.py``) and several tests import it from here — keep it in
+# ``__all__`` so it is a stable re-export, not an implementation detail.
 __all__ = [
     "prime_agent",
     "query_database_impl",
@@ -75,7 +74,7 @@ async def query_database_impl_with_table(
     it to ``_meta``; everyone else ignores it).
     """
     try:
-        agent = await _agent_for(cfg)
+        agent = await get_agent(cfg)
     except Exception as e:
         # Cold-start failures (DB driver connect, ChromaDB, embedding-model
         # download, bad API key) carry the same host/port/role strings S-10

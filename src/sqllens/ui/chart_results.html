@@ -173,67 +173,39 @@ function buildEchartsOption(spec) {
   const xType = spec.x && spec.x.type;
   const continuous = xType === "time" || xType === "value";
 
+  // Continuous x (time/value): emit [x, y] tuples. Categorical x: align each
+  // series's points to the shared category list, filling gaps with null.
+  const pointsFor = (rs, cats) =>
+    continuous
+      ? rs.map((r) => [r[xf], r[yf]])
+      : (() => {
+          const byCat = new Map(rs.map((r) => [String(r[xf]), r[yf]]));
+          return cats.map((c) => (byCat.has(c) ? byCat.get(c) : null));
+        })();
+
+  const makeSeries = (name, rs, cats) => ({
+    name,
+    type: baseType,
+    smooth: baseType === "line",
+    areaStyle: isArea ? {} : undefined,
+    data: pointsFor(rs, cats),
+  });
+
+  const cats = continuous ? null : distinct(rows, xf).map(String);
+  const xAxis = continuous
+    ? { type: xType, name: xLabel }
+    : { type: "category", data: cats, name: xLabel };
+
   let series;
   let legend;
-  let xAxis;
-
-  if (continuous) {
-    // Continuous x (time/value): series data is [x, y] tuples, no shared
-    // category list.
-    xAxis = { type: xType, name: xLabel };
-    if (spec.series) {
-      const groups = distinct(rows, spec.series).map(String);
-      legend = { type: "scroll", bottom: 0, data: groups };
-      series = groups.map((g) => ({
-        name: g,
-        type: baseType,
-        smooth: baseType === "line",
-        areaStyle: isArea ? {} : undefined,
-        data: rows
-          .filter((r) => String(r[spec.series]) === g)
-          .map((r) => [r[xf], r[yf]]),
-      }));
-    } else {
-      series = [
-        {
-          type: baseType,
-          smooth: baseType === "line",
-          areaStyle: isArea ? {} : undefined,
-          data: rows.map((r) => [r[xf], r[yf]]),
-        },
-      ];
-    }
+  if (spec.series) {
+    const groups = distinct(rows, spec.series).map(String);
+    legend = { type: "scroll", bottom: 0, data: groups };
+    series = groups.map((g) =>
+      makeSeries(g, rows.filter((r) => String(r[spec.series]) === g), cats)
+    );
   } else {
-    const cats = distinct(rows, xf).map(String);
-    xAxis = { type: "category", data: cats, name: xLabel };
-    if (spec.series) {
-      const groups = distinct(rows, spec.series).map(String);
-      legend = { type: "scroll", bottom: 0, data: groups };
-      series = groups.map((g) => {
-        const byCat = new Map(
-          rows
-            .filter((r) => String(r[spec.series]) === g)
-            .map((r) => [String(r[xf]), r[yf]])
-        );
-        return {
-          name: g,
-          type: baseType,
-          smooth: baseType === "line",
-          areaStyle: isArea ? {} : undefined,
-          data: cats.map((c) => (byCat.has(c) ? byCat.get(c) : null)),
-        };
-      });
-    } else {
-      const byCat = new Map(rows.map((r) => [String(r[xf]), r[yf]]));
-      series = [
-        {
-          type: baseType,
-          smooth: baseType === "line",
-          areaStyle: isArea ? {} : undefined,
-          data: cats.map((c) => (byCat.has(c) ? byCat.get(c) : null)),
-        },
-      ];
-    }
+    series = [makeSeries(undefined, rows, cats)];
   }
 
   return {

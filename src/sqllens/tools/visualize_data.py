@@ -22,7 +22,7 @@ import logging
 from sqllens.agent import RequestContext
 from sqllens.config import Config
 from sqllens.safety import UnsafeSqlError
-from sqllens.tools._agent import _agent_for
+from sqllens.tools._agent import get_agent
 from sqllens.tools._format import components_to_chart
 from sqllens.tools.query_database import (
     _INTERNAL_ERROR_MESSAGE,
@@ -45,7 +45,7 @@ async def visualize_data_impl_with_chart(
     attach it to ``_meta``; everyone else ignores it and reads the Markdown).
     """
     try:
-        agent = await _agent_for(cfg)
+        agent = await get_agent(cfg)
     except Exception as e:
         # Cold-start failures (DB driver connect, ChromaDB, embedding-model
         # download, bad API key) carry host/port/role strings. Sanitize them

@@ -41,7 +41,7 @@ _AGENT_STATE: tuple[Agent, Config] | None = None
 _AGENT_LOCK = asyncio.Lock()
 
 
-async def _agent_for(cfg: Config) -> Agent:
+async def get_agent(cfg: Config) -> Agent:
     """Return the process-wide agent, building it exactly once.
 
     Double-checked locking: the outer ``_AGENT_STATE is None`` test is a
@@ -107,7 +107,7 @@ async def _warm_memory(agent: Agent) -> None:
 async def prime_agent(cfg: Config) -> None:
     """Eagerly build, cache, and warm the process-wide agent.
 
-    Delegates to ``_agent_for`` so the agent built at server startup *is* the
+    Delegates to ``get_agent`` so the agent built at server startup *is* the
     same ``_AGENT_STATE`` singleton the request path serves — the object graph
     is constructed once, not once per consumer. Then runs ``_warm_memory`` to
     force the otherwise-lazy ChromaDB open and ~80 MB embedding-model download
@@ -115,10 +115,10 @@ async def prime_agent(cfg: Config) -> None:
     (the substantive goal of issue #116).
 
     Propagates any build *or* warm failure to the caller (which decides
-    whether a failed warmup should block startup); ``_agent_for``'s own retry
+    whether a failed warmup should block startup); ``get_agent``'s own retry
     contract is unchanged — a failed warm leaves ``_AGENT_STATE`` populated
     (the agent built fine; only the memory touch failed), so the request path
     still functions and simply re-attempts the lazy materialization itself.
     """
-    agent = await _agent_for(cfg)
+    agent = await get_agent(cfg)
     await _warm_memory(agent)
