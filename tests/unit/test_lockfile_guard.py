@@ -77,9 +77,7 @@ def _locked_versions(lockfile_text: str) -> dict[str, Version]:
             if prior is not None and prior != version:
                 raise ValueError(
                     f"lockfile pins {name!r} '==' twice with conflicting "
-                    f"versions {prior} and {version} — a contradictory "
-                    "hand-edited or merge-conflicted lockfile must be resolved "
-                    "to a single pin before it can be validated"
+                    f"versions {prior} and {version}"
                 )
             pinned[name] = version
     return pinned
