@@ -251,13 +251,26 @@ def apply_rls(
             injected_ids.add(id(table))
 
     for table in tree.find_all(exp.Table):
-        if table.name.lower() not in rules_by_table:
+        # Check both the .name and .alias slots. A protected name appearing as
+        # the alias of a phantom keyword-as-identifier table (Postgres
+        # ``SELECT * FROM (TABLE orders) sub`` parses to a Table named
+        # ``TABLE`` with alias ``orders``) would be invisible to a .name-only
+        # check; the protected reference is then neither scoped by the walk
+        # above nor caught here unless we look at both slots.
+        name = table.name.lower()
+        alias = (table.alias or "").lower()
+        match = (
+            name if name in rules_by_table
+            else alias if alias in rules_by_table
+            else None
+        )
+        if match is None:
             continue
         if id(table) in injected_ids or id(table) in reference_ids:
             continue
         raise RlsError(
             f"could not prove row-level-security scoping for a reference to "
-            f"protected table {table.name!r} (unsupported SQL shape); "
+            f"protected table {match!r} (unsupported SQL shape); "
             "blocking the query"
         )
 

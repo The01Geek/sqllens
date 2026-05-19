@@ -302,9 +302,24 @@ class TestApplyRlsScopeCoverage:
         # Postgres `TABLE orders` is semantically `SELECT * FROM orders` but
         # parses to a non-Query root with no exp.Table node — the scope walk
         # and backstop would never see the protected read. Fail-secure: block.
-        for stmt in ("TABLE orders", "TABLE orders"):
+        # Case folding of the keyword and the alternate orientation behave the
+        # same way through this gate.
+        for stmt in ("TABLE orders", "table orders"):
             with pytest.raises(RlsError, match="SELECT-shaped"):
                 apply_rls(stmt, [_rule(value="acme")], dialect="postgres")
+
+    @pytest.mark.parametrize("dialect", ["postgres", "sqlite", "mysql"])
+    def test_table_subquery_misparse_blocks_fail_secure(self, dialect: str) -> None:
+        # `(TABLE orders) sub` is misparsed by sqlglot for every supported
+        # dialect: the keyword ``TABLE`` becomes the table name and the
+        # protected name ``orders`` lands in the .alias slot. A .name-only
+        # backstop misses it; the alias check must catch it and block.
+        for stmt in (
+            "SELECT * FROM (TABLE orders) sub",
+            "SELECT * FROM LATERAL (TABLE orders) sub",
+        ):
+            with pytest.raises(RlsError, match="could not prove"):
+                apply_rls(stmt, [_rule(value="acme")], dialect=dialect)
 
     def test_recursive_cte_named_like_table_does_not_read_base_table(
         self,
