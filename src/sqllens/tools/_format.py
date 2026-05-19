@@ -19,6 +19,7 @@ from collections.abc import Iterable
 
 from sqllens.agent.core.components import UiComponent
 from sqllens.agent.core.rich_component import ComponentType
+from sqllens.safety import first_sql_keyword
 
 logger = logging.getLogger("sqllens.tools._format")
 
@@ -35,15 +36,7 @@ _MAX_TABLE_PAYLOAD_BYTES = 130 * 1024
 
 
 def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
-    # query_type mirrors RunSqlTool.execute's derivation (first token, upper)
-    # so the label matches the SQL tool's internal classification. row_count
-    # is threaded from the table payload because the run_sql STATUS_CARD
-    # metadata carries only the SQL string (tool_call.arguments == RunSqlToolArgs).
-    tokens = sql.strip().split()
-    info: dict = {
-        "sql": sql,
-        "query_type": tokens[0].upper() if tokens else "",
-    }
+    info: dict = {"sql": sql, "query_type": first_sql_keyword(sql)}
     if row_count is not None:
         info["row_count"] = row_count
     return info
@@ -98,10 +91,6 @@ def components_to_table(
         elif ctype == ComponentType.STATUS_CARD:
             if getattr(rich, "status", "") == "error":
                 error_message = getattr(rich, "description", "") or "Agent reported an error"
-            # The run_sql tool's STATUS_CARD carries tool_call.arguments as
-            # metadata; RunSqlToolArgs has exactly one field, `sql`. No other
-            # vendored tool exposes a `sql` argument, so a string under that
-            # key unambiguously identifies the executed-SQL card.
             metadata = getattr(rich, "metadata", None)
             if isinstance(metadata, dict):
                 sql = metadata.get("sql")
@@ -119,7 +108,14 @@ def components_to_table(
     payload = _build_table_payload(last_df) if last_df is not None else None
     query_info = None
     if last_sql is not None:
-        row_count = payload["row_count"] if payload is not None else None
+        # True result size, not the rendered subset: the payload may be
+        # size-capped (row_count is the kept prefix, truncated the dropped
+        # tail), but the SQL ran against the whole set.
+        row_count = (
+            payload["row_count"] + payload["truncated"]
+            if payload is not None
+            else None
+        )
         query_info = _query_info_from_sql(last_sql, row_count)
     return markdown, False, payload, query_info
 

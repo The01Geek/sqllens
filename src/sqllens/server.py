@@ -33,7 +33,7 @@ _TABLE_META_KEY = "sqllens/table"
 # metadata ({"sql", "query_type", "row_count"?}). Present only when
 # ``agent.show_details`` is on and SQL ran. The widget renders a collapsible
 # section from it; plain-text clients get the same SQL as a fenced block in
-# the Markdown content (added upstream in query_database_impl_with_table).
+# the Markdown content.
 _QUERY_META_KEY = "sqllens/query"
 
 

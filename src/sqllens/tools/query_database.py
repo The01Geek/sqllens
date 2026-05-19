@@ -142,10 +142,9 @@ async def prime_agent(cfg: Config) -> None:
 def _append_sql_block(markdown: str, query_info: dict | None) -> str:
     """Append the executed SQL as a fenced ``sql`` block (text fallback).
 
-    Structured ``query_info`` in ``_meta`` is the source of truth; this block
-    is the plain-text rendering for dumb / non-apps MCP clients. ``query_info``
-    is ``None`` (so markdown is returned unchanged, byte-for-byte) whenever
-    ``agent.show_details`` is off or no SQL was executed.
+    Structured ``query_info`` in ``_meta`` is the source of truth; this is the
+    plain-text rendering for non-apps clients. Falsy ``query_info`` returns
+    markdown unchanged byte-for-byte (show_details off / no SQL ran).
     """
     if not query_info:
         return markdown
