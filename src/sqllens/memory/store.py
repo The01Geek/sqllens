@@ -22,8 +22,7 @@ vendored agent memory engine, so the rest of the package never reaches into
 Enumeration and ``clear`` use the synchronous private ``_get_collection()``
 seam directly: the vendored class has no public "give me every memory"
 enumerator (only ``get_recent_*`` with a limit) and no public clear. This is
-the documented fallback isolated here on purpose (issue #122 verification
-item 2).
+the documented fallback, deliberately isolated to this module.
 """
 
 from __future__ import annotations
@@ -83,7 +82,8 @@ class MemoryStore:
         is not representable in the bundle format and is skipped.
         """
         collection = self._mem._get_collection()
-        metadatas = collection.get().get("metadatas") or []
+        # Skip embedding vectors/documents (largest per-row payload, unused here).
+        metadatas = collection.get(include=["metadatas"]).get("metadatas") or []
 
         pairs: list[SqlPair] = []
         docs: list[SchemaDoc] = []
@@ -107,6 +107,6 @@ class MemoryStore:
     def clear(self) -> None:
         """Wipe every entry in the configured collection."""
         collection = self._mem._get_collection()
-        ids = collection.get().get("ids") or []
+        ids = collection.get(include=[]).get("ids") or []
         if ids:
             collection.delete(ids=ids)

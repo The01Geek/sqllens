@@ -15,9 +15,11 @@ import json
 
 from pydantic import ValidationError
 
+from sqllens._errors import validation_error_lines
 from sqllens.memory.schema import MemoryBundle, SqlPair, SqlPairsBlock
 
 CSV_HEADER = ["question", "sql"]
+VALID_FORMATS = ("json", "csv")
 
 
 class BundleFormatError(ValueError):
@@ -34,7 +36,7 @@ def parse_json(text: str) -> MemoryBundle:
     try:
         return MemoryBundle.model_validate(raw)
     except ValidationError as exc:
-        raise BundleFormatError(_format_validation_error(exc)) from exc
+        raise BundleFormatError(_fmt_err(exc)) from exc
 
 
 def parse_csv(text: str) -> MemoryBundle:
@@ -59,7 +61,7 @@ def parse_csv(text: str) -> MemoryBundle:
             pairs.append(SqlPair(question=row[0], sql=row[1]))
         except ValidationError as exc:
             raise BundleFormatError(
-                f"CSV line {lineno}: {_format_validation_error(exc)}"
+                f"CSV line {lineno}: {_fmt_err(exc)}"
             ) from exc
     return MemoryBundle(sql_pairs=SqlPairsBlock(pairs=pairs) if pairs else None)
 
@@ -80,9 +82,5 @@ def serialize_csv(bundle: MemoryBundle) -> str:
     return buf.getvalue()
 
 
-def _format_validation_error(exc: ValidationError) -> str:
-    parts = []
-    for err in exc.errors(include_url=False):
-        loc = ".".join(str(p) for p in err.get("loc", ()))
-        parts.append(f"{loc}: {err.get('msg', '')}" if loc else err.get("msg", ""))
-    return "; ".join(parts)
+def _fmt_err(exc: ValidationError) -> str:
+    return "; ".join(validation_error_lines(exc, with_type=False))

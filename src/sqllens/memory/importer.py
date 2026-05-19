@@ -12,6 +12,7 @@ within the incoming batch.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 from sqllens.memory.schema import ImportItemError, ImportReport, MemoryBundle
 from sqllens.memory.store import MemoryStore
@@ -53,53 +54,43 @@ async def import_bundle(
     if existing.schema_docs:
         seen_docs = {_norm(d.content) for d in existing.schema_docs}
 
+    sections: list[tuple[str, list, set, Callable, Callable]] = [
+        (
+            "sql_pair",
+            bundle.sql_pairs.pairs if bundle.sql_pairs else [],
+            seen_pairs,
+            lambda p: (_norm(p.question), _norm(p.sql)),
+            lambda p: store.add_sql_pair(p.question, p.sql),
+        ),
+        (
+            "schema_doc",
+            bundle.schema_docs or [],
+            seen_docs,
+            lambda d: _norm(d.content),
+            lambda d: store.add_schema_doc(d.content),
+        ),
+    ]
+
     pending = 0
-
-    async def _maybe_yield() -> None:
-        nonlocal pending
-        pending += 1
-        if pending >= batch_size:
-            pending = 0
-            await asyncio.sleep(0)
-
-    if bundle.sql_pairs:
-        for index, pair in enumerate(bundle.sql_pairs.pairs):
-            key = (_norm(pair.question), _norm(pair.sql))
-            if key in seen_pairs:
+    for kind, items, seen, key_fn, save in sections:
+        for index, item in enumerate(items):
+            dedup_key = key_fn(item)
+            if dedup_key in seen:
                 report.skipped_duplicate += 1
                 continue
-            seen_pairs.add(key)
+            seen.add(dedup_key)
             if not dry_run:
                 try:
-                    await store.add_sql_pair(pair.question, pair.sql)
-                except Exception as exc:  # surfaced in the report, not swallowed
+                    await save(item)
+                except Exception as exc:
                     report.errors.append(
-                        ImportItemError(
-                            kind="sql_pair", index=index, message=str(exc)
-                        )
+                        ImportItemError(kind=kind, index=index, message=str(exc))
                     )
                     continue
             report.saved += 1
-            await _maybe_yield()
-
-    if bundle.schema_docs:
-        for index, doc in enumerate(bundle.schema_docs):
-            key = _norm(doc.content)
-            if key in seen_docs:
-                report.skipped_duplicate += 1
-                continue
-            seen_docs.add(key)
-            if not dry_run:
-                try:
-                    await store.add_schema_doc(doc.content)
-                except Exception as exc:  # surfaced in the report, not swallowed
-                    report.errors.append(
-                        ImportItemError(
-                            kind="schema_doc", index=index, message=str(exc)
-                        )
-                    )
-                    continue
-            report.saved += 1
-            await _maybe_yield()
+            pending += 1
+            if pending >= batch_size:
+                pending = 0
+                await asyncio.sleep(0)  # keep large imports cooperative
 
     return report

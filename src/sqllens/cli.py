@@ -18,6 +18,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from sqllens import __version__
+from sqllens._errors import validation_error_lines
 from sqllens.config import API_KEY_MISSING_MESSAGE
 
 if TYPE_CHECKING:
@@ -50,14 +51,7 @@ def _format_config_error(exc: Exception) -> str:
     """
     if not isinstance(exc, ValidationError):
         return str(exc)
-    lines: list[str] = []
-    for err in exc.errors(include_url=False):
-        loc = ".".join(str(part) for part in err.get("loc", ()))
-        msg = err.get("msg", "")
-        etype = err.get("type", "")
-        prefix = f"{loc}: " if loc else ""
-        lines.append(f"{prefix}{msg} [{etype}]")
-    return "\n".join(lines)
+    return "\n".join(validation_error_lines(exc, with_type=True))
 
 
 def _is_loopback_host(host: str) -> bool:
@@ -413,9 +407,9 @@ def import_memory(
 
     from sqllens.config import Config
     from sqllens.memory import MemoryStore, import_bundle
-    from sqllens.memory.io import BundleFormatError, parse_csv, parse_json
+    from sqllens.memory.io import VALID_FORMATS, BundleFormatError, parse_csv, parse_json
 
-    if fmt not in ("json", "csv"):
+    if fmt not in VALID_FORMATS:
         err_console.print(f"[red]Error:[/red] --format must be 'json' or 'csv' (got {escape(fmt)})")
         raise typer.Exit(code=1)
     try:
@@ -472,8 +466,9 @@ def export_memory(
     """Export the configured memory store to a bundle file."""
     from sqllens.config import Config
     from sqllens.memory import MemoryStore, export_bundle
+    from sqllens.memory.io import VALID_FORMATS
 
-    if fmt not in ("json", "csv"):
+    if fmt not in VALID_FORMATS:
         err_console.print(f"[red]Error:[/red] --format must be 'json' or 'csv' (got {escape(fmt)})")
         raise typer.Exit(code=1)
     try:

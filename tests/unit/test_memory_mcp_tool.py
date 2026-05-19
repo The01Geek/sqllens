@@ -6,26 +6,15 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import SecretStr
 
-from sqllens.config import (
-    AuthConfig,
-    Config,
-    DatabaseConfig,
-    LLMConfig,
-    MemoryConfig,
-)
+from sqllens.config import Config
 from sqllens.server import build_server
+from tests.unit._config_builders import build_test_config
 from tests.unit._memory_helpers import patch_fake_embeddings
 
 
 def _cfg(tmp_path, *, allow_import: bool) -> Config:
-    return Config(
-        database=DatabaseConfig(url="sqlite:///:memory:"),
-        llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
-        memory=MemoryConfig(persist_dir=tmp_path / "chroma", allow_import=allow_import),
-        auth=AuthConfig(mode="none"),
-    )
+    return build_test_config(tmp_path / "chroma", allow_import=allow_import)
 
 
 async def _tool_names(mcp) -> set[str]:
