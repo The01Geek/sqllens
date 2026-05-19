@@ -68,8 +68,11 @@ Both kinds of entries live in the same ChromaDB collection on disk.
 | `persist_dir` | String | Directory where ChromaDB writes its database files. |
 | `collection` | String | The collection name within the vector store. Use a different name per database if you run several SQL Lens instances on the same machine. |
 | `similarity_threshold` | Number | Minimum cosine similarity, between `0.0` and `1.0`, for a saved entry to be returned when SQL Lens searches its memory. Defaults to `0.7`. Lower the value if useful past answers are being missed; raise it if irrelevant past answers are surfacing. This value is the server-side default and can be overridden per call by the assistant when warranted. |
+| `allow_import` | Boolean | Defaults to `false`. When set to `true`, SQL Lens exposes an extra `import_memory` tool to the connected assistant so it can bulk-load curated knowledge over the connection. Leave this off unless you trust every client that can reach the server: a client able to write memory can influence future SQL generation. The `sqllens import-memory` and `sqllens export-memory` commands work regardless of this setting. See [Managing memory](managing-memory.md). |
 
 The first time SQL Lens runs, ChromaDB downloads roughly 80 MB of embedding model weights into `persist_dir`. Allow time and network access for this initial step.
+
+You can also bulk-load curated question-and-answer pairs and free-form notes from a file, or export what SQL Lens has learned, with the `sqllens import-memory` and `sqllens export-memory` commands. See [Managing memory](managing-memory.md).
 
 ## Section: `[auth]`
 

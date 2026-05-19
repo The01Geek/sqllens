@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 19, 2026
+
+- **[Feature] Memory import and export** — You can now seed SQL Lens with curated knowledge and back up what it has learned. The new `sqllens import-memory` and `sqllens export-memory` commands move question-and-answer pairs and free-form schema notes to and from a portable bundle file in JSON (lossless) or CSV (`question,sql` pairs only) format, with options for a dry run, clearing the store first, and batching large imports. Duplicate entries are skipped automatically. A new `[memory].allow_import` setting (default off) optionally exposes an `import_memory` tool to the connected assistant; leave it off unless every client is trusted, since a client that can write memory can influence future SQL generation. See [Managing memory](managing-memory.md). (#123)
+
 ## May 18, 2026
 
 - **[Fix] HTTP transport handles repeated lifespan events cleanly under unusual ASGI hosts** — When an ASGI host drives more than one lifespan scope against the same SQL Lens app (uncommon outside test harnesses), the HTTP transport now rejects a startup that arrives after the server has already shut down with the clear message `single-shot instance already shut down`, instead of the misleading `duplicate lifespan.startup` it returned previously. A repeated shutdown is acknowledged as `lifespan.shutdown.complete` without re-entering the session manager's exit handler, and startup failures now report the exception type in addition to the message (for example, `RuntimeError: boom`). Users running `sqllens serve` are not affected — uvicorn drives exactly one lifespan per process. (#70)
