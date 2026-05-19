@@ -203,7 +203,9 @@ review body, progress-comment protocol, and report override are untouched.
 
 ### 3.5 `finalize_check` job (needs: [precheck, create_check, review], if: always())
 
-Permissions: `checks: write`, `pull-requests: write` (write required for stale-REJECT dismissal — see below).
+Permissions: `checks: write`, `contents: read` (re-declared — see §4), `pull-requests: write` (write required for stale-REJECT dismissal — see below).
+
+**Trusted checkout** in this job is pinned to `github.event.repository.default_branch` with `fetch-depth: 1` and `persist-credentials: false`. This is a security requirement: the workflow fires on both `pull_request` and `pull_request_target`. Under the `pull_request` trigger, `actions/checkout` without an explicit `ref` defaults to the PR merge ref — i.e. PR-author-controlled code — which would then execute with this job's `pull-requests: write` token (script-injection / privilege-escalation). Pinning to the default branch ensures the write-token job always runs the trusted in-repo copy regardless of trigger.
 
 ```bash
 CONCLUSION=$([ "${{ needs.review.result }}" = "success" ] && echo success || echo failure)
@@ -217,11 +219,19 @@ gh api -X PATCH repos/$REPO/check-runs/$CHECK_RUN_ID \
 `if: always()` so a failed/cancelled review still closes the check (otherwise it
 hangs `in_progress` forever and the Re-run button never appears).
 
-**Stale-REJECT dismissal (auto-path safety net).** After finalizing the check, when `CONCLUSION=success` (APPROVE verdict) and `PR_NUMBER` is set, `finalize_check` calls `.claude/plugins/devflow/scripts/dismiss-stale-rejections.sh "$PR_NUMBER" "$REPO"` to dismiss any outstanding `CHANGES_REQUESTED` review left by an earlier REJECT. This is necessary because:
+**Stale-REJECT dismissal (auto-path safety net).** After finalizing the check, `finalize_check` calls `.claude/plugins/devflow/scripts/dismiss-stale-rejections.sh "$PR_NUMBER" "$REPO"` when **all three** of the following hold:
+
+- `CONCLUSION=success` (APPROVE verdict, not the empty-PR fallback which also yields success).
+- `PR_NUMBER` is set.
+- `VERDICT_DETERMINED=true` — the verdict came from a successful API lookup, not from a default under a swallowed query failure. This guard prevents a correlated GitHub degradation from silently dismissing a still-valid REJECT.
+
+This dismissal is necessary because:
 
 - A `--request-changes` review (posted by the REJECT path) makes the PR's `reviewDecision: CHANGES_REQUESTED` sticky — it is not superseded by a later `--comment` or `--approve` review.
 - The REJECT and the subsequent APPROVE may be posted by different bot identities (`github-actions[bot]` for the auto path; another identity for the manual `@claude` path), so no single actor can dismiss the other's review automatically.
 - Without dismissal, the PR stays wedged at `reviewDecision: CHANGES_REQUESTED` even with a green required check and an APPROVE verdict — merge is blocked despite the approval.
+
+**`dismiss-stale-rejections.sh` scope restriction.** The script only dismisses reviews whose body starts with `# Review Report` — the marker emitted by the skill's Phase 4.1. Human reviewers' `--request-changes` reviews do not carry this marker and are left untouched; an automated APPROVE must never silently clear a human's block.
 
 The call is best-effort: a non-zero exit is logged as a `::warning::` but never fails the job (the required check is already finalized and the verdict stands). The same script is also called from the review skill's Phase 4.4 final step, which covers the manual `@claude run /devflow:review` path.
 
@@ -233,7 +243,7 @@ The call is best-effort: a non-zero exit is logged as a `::warning::` but never 
 |---|---|---|
 | precheck | all three | `contents: read`, `pull-requests: read`, plus `gh` via `GITHUB_TOKEN` |
 | create_check | any | `checks: write`, `contents: read` |
-| finalize_check | any | `checks: write`, `pull-requests: write` (dismissals API), `contents: read` (trusted checkout of `dismiss-stale-rejections.sh` on `pull_request_target`) |
+| finalize_check | any | `checks: write`, `pull-requests: write` (dismissals API), `contents: read` — must be re-declared explicitly because job-level permissions replace (not merge with) workflow-level ones; omitting it would prevent `actions/checkout` from cloning |
 | review (reusable) | inherits caller | `contents: read`, `pull-requests: write`, `id-token: write` (already declared in the existing `review` job) |
 
 `check_run` is **not** `pull_request_target`, so the `id-token`/app-token 401
@@ -307,6 +317,8 @@ Per `CLAUDE.md`, the `main-protected` ruleset (ID 15633058) requires exactly:
    first ready transition has zero `Devflow Review` checks so the query returns
    0 cleanly; only repeat-toggle correctness depends on this, and erring toward
    "don't auto-run" is the safe direction.
+9. **`claude.yml` in-flight-review suppression signals (Signal 1 / Signal 2) failing silently.** Before queuing a manual `@claude run /devflow:review`, `claude.yml` checks whether a review is already in-flight (Signal 1: a `Devflow Review` check-run in `queued`/`in_progress`; Signal 2: a `request-review-on-ready` workflow run in `queued`/`in_progress`). Both signals are fail-open: a query failure does NOT suppress the manual review. Previously these failures were silent; they now emit `::warning::` annotations so a permanently-broken signal (e.g. a misconfigured token) is distinguishable from "no in-flight run existed". Operators seeing repeated warnings for these signals should investigate GitHub API permissions on the `GITHUB_TOKEN` used by `claude.yml`.
+
 8. **Pre-existing already-ready PRs (e.g. #85).** They never had a first
    `ready_for_review` under the new code, so they have no check and no Re-run
    button. They are also past their (one) auto-trigger window by policy. The
