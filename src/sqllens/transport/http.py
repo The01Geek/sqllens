@@ -76,15 +76,11 @@ the request ``Host``."""
 
 
 class _Readiness:
-    """One-attribute shared holder for the agent-warmup readiness flag.
+    """Shared mutable readiness flag: written once by ``_SessionManagerLifespan``
+    at lifespan startup, read by ``_PathNormalizer``'s ``/readyz`` branch.
 
-    Constructed once in ``build_asgi_app`` and handed to BOTH
-    ``_SessionManagerLifespan`` (the single writer — flips ``ready`` to
-    ``True`` after the eager ``build_agent`` succeeds at lifespan startup)
-    and ``_PathNormalizer`` (the reader — answers ``GET /readyz`` from it).
-    No lock: the write happens exactly once, single-threaded, in the
-    lifespan-startup path before any request is served; reads are plain
-    attribute loads of a bool.
+    A holder object (not a bare ``bool``) is required so the writer and reader
+    share the flag by reference.
     """
 
     __slots__ = ("ready",)
@@ -400,18 +396,12 @@ class _SessionManagerLifespan:
                 try:
                     self._cm = self.session_manager.run()
                     await self._cm.__aenter__()
-                    # Eager agent warmup: build the agent once, here, so the
-                    # ChromaDB init + ~80 MB embedding-model download happen
-                    # at startup rather than blocking (and timing out) the
-                    # first real query. Single-threaded by construction — this
-                    # runs exactly once in the lifespan-startup path before
-                    # any request is served, so it needs NO lock (the
-                    # request-path build in tools/query_database.py is
-                    # already race-safe via its own double-checked locking;
-                    # C-3/#96). Inside the existing try on purpose: a
-                    # build_agent failure must surface as
-                    # lifespan.startup.failed via the broad/BaseException
-                    # handling below, never be swallowed.
+                    # Eager agent warmup so the first real query doesn't pay
+                    # cold-start latency. Single-threaded here (one startup,
+                    # pre-request) so no lock is needed. Kept inside the
+                    # existing try on purpose: a build_agent failure must
+                    # surface as lifespan.startup.failed via the handling
+                    # below, never be swallowed.
                     build_agent(self._cfg)
                     self._readiness.ready = True
                 except Exception as exc:
@@ -570,14 +560,13 @@ class _SessionManagerLifespan:
 def _try_decode(b: bytes) -> str:
     """Decode a raw header byte string UTF-8-first, latin-1 as fallback.
 
-    Mirrors Starlette's ``Headers`` behavior. The ASGI spec leaves header
-    byte encoding under-specified and HTTP/2 HPACK can carry arbitrary
-    octets, so a bearer token with non-ASCII bytes valid as UTF-8 must
-    round-trip. ASCII is a subset of both encodings, so existing
-    ASCII/latin-1 tokens are unaffected. latin-1 maps every one of the 256
-    byte values to a code point and so never raises — the fallback always
-    succeeds, decoding a latin-1-only (invalid-UTF-8) byte rather than
-    erroring.
+    The ASGI spec leaves header byte encoding under-specified and HTTP/2
+    HPACK can carry arbitrary octets, so a bearer token with non-ASCII bytes
+    valid as UTF-8 must round-trip (the prior hard latin-1 decode mojibake'd
+    it). ASCII is a subset of both encodings, so existing ASCII/latin-1
+    tokens are unaffected. latin-1 maps every one of the 256 byte values to a
+    code point and so never raises — the fallback always succeeds, decoding a
+    latin-1-only (invalid-UTF-8) byte rather than erroring.
     """
     try:
         return b.decode("utf-8")
