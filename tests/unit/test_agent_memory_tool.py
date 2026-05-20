@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from sqllens.agent import User
 from sqllens.agent.core.tool import ToolContext
@@ -48,12 +49,22 @@ def _ctx(memory: StubAgentMemory) -> ToolContext:
 
 
 def test_args_defaults_to_empty_dict_when_omitted() -> None:
-    # The exact registry validation the chart flow hit: emit_chart's
-    # save_question_tool_args call carries no ``args``. Must not raise.
+    # Same Pydantic model_validate the registry runs (registry.py:189) on the
+    # chart flow's call: emit_chart's save_question_tool_args carries no
+    # ``args``. Must not raise.
     params = SaveQuestionToolArgsParams.model_validate(
         {"question": "draw chart of last 10 orders", "tool_name": "emit_chart"}
     )
     assert params.args == {}
+
+
+def test_question_and_tool_name_remain_required() -> None:
+    # Guards the invariant adjacent to the fix: only ``args`` was relaxed.
+    # Over-defaulting question/tool_name in a future edit must fail loudly.
+    with pytest.raises(ValidationError):
+        SaveQuestionToolArgsParams.model_validate({"question": "q"})
+    with pytest.raises(ValidationError):
+        SaveQuestionToolArgsParams.model_validate({"tool_name": "emit_chart"})
 
 
 def test_explicit_args_are_preserved() -> None:
@@ -73,4 +84,8 @@ async def test_execute_forwards_defaulted_empty_args() -> None:
 
     assert result.success is True
     assert len(memory.save_tool_usage_calls) == 1
-    assert memory.save_tool_usage_calls[0]["args"] == {}
+    call = memory.save_tool_usage_calls[0]
+    assert call["args"] == {}
+    assert call["question"] == "draw chart of last 10 orders"
+    assert call["tool_name"] == "emit_chart"
+    assert call["success"] is True
