@@ -56,7 +56,19 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
     """
     try:
         meta = ctx.request_context.meta
-    except (ValueError, AttributeError):
+    except Exception:
+        # The MCP SDK currently raises ``ValueError`` from
+        # ``request_context`` when no request is active (stdio, tests). Any
+        # other exception type — a future SDK swapping to ``LookupError`` /
+        # ``RequestContextNotAvailableError``, a ``contextvars`` change, an
+        # attribute lookup blowing up — must also fail-secure to ``{}`` so the
+        # docstring's "any failure" promise holds and the tool never crashes
+        # with a raw traceback. Logged with traceback at warning so a real
+        # SDK drift is diagnosable, not silent.
+        logger.warning(
+            "failed to read request_context.meta; returning empty metadata",
+            exc_info=True,
+        )
         return {}
     if meta is None:
         return {}

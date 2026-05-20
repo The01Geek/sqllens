@@ -276,6 +276,17 @@ _RLS_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # fail-secure runner blocks the query).
 _RLS_OPERATORS: frozenset[str] = frozenset({"=", "!=", "<", "<=", ">", ">=", "in"})
 
+# Internal agent-control metadata keys that are stripped at the request
+# boundary (tools/query_database.py) before being forwarded to the agent —
+# untrusted caller metadata must not be able to steer internal agent control
+# flow. The same set is also forbidden as ``value_from_metadata`` here so a
+# typo cannot create a rule that resolves to a key that will always be
+# stripped (which would silently block every query against the protected
+# table). Single source of truth — imported from tools/query_database.py.
+RESERVED_METADATA_KEYS: frozenset[str] = frozenset(
+    {"starter_ui_request", "ui_features_available"}
+)
+
 
 RLS_BAD_IDENTIFIER_MESSAGE = (
     "rls rule {field}={value!r} is not a bare SQL identifier. Use only ASCII "
@@ -308,6 +319,14 @@ RLS_METADATA_KEY_MESSAGE = (
     "rls rule for {table}.{column}: value_from_metadata={value!r} is not a "
     "valid metadata key. Use only ASCII letters, digits, and underscores "
     "(must not start with a digit)."
+)
+
+
+RLS_RESERVED_METADATA_KEY_MESSAGE = (
+    "rls rule for {table}.{column}: value_from_metadata={value!r} is a "
+    "reserved internal agent-control key and cannot be used. Reserved keys: "
+    + ", ".join(sorted(RESERVED_METADATA_KEYS))
+    + "."
 )
 
 
@@ -385,6 +404,14 @@ class RlsRule(BaseModel):
         ):
             raise ValueError(
                 RLS_METADATA_KEY_MESSAGE.format(
+                    table=self.table,
+                    column=self.column,
+                    value=self.value_from_metadata,
+                )
+            )
+        if has_dynamic and self.value_from_metadata in RESERVED_METADATA_KEYS:
+            raise ValueError(
+                RLS_RESERVED_METADATA_KEY_MESSAGE.format(
                     table=self.table,
                     column=self.column,
                     value=self.value_from_metadata,

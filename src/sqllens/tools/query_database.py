@@ -22,7 +22,7 @@ from typing import Any
 
 from sqllens.agent import Agent, RequestContext, ToolContext, User
 from sqllens.agent.factory import build_agent
-from sqllens.config import Config
+from sqllens.config import RESERVED_METADATA_KEYS, Config
 from sqllens.safety import RlsError, UnsafeSqlError
 from sqllens.tools._format import components_to_table
 
@@ -49,8 +49,11 @@ _SQL_EXECUTION_ERROR_PREFIX = "SQL execution error: "
 # context). Caller-supplied MCP ``_meta`` now flows into that same mapping for
 # row-level-security dynamic values, so these keys are stripped at the boundary
 # — untrusted request metadata must not be able to steer internal agent
-# control flow, only supply RLS predicate values.
-_RESERVED_METADATA_KEYS = frozenset({"starter_ui_request", "ui_features_available"})
+# control flow, only supply RLS predicate values. The same set is also forbidden
+# at config load for ``value_from_metadata`` (see sqllens.config) so a typo
+# cannot create a rule that always resolves to a key that will always be
+# stripped here. Single source of truth lives in sqllens.config.
+_RESERVED_METADATA_KEYS = RESERVED_METADATA_KEYS
 
 # Lazy-built singleton — first call wires the agent, subsequent calls reuse it.
 # The agent and the ``Config`` that built it are stored as one tuple assigned

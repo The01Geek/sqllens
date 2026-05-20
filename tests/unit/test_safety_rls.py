@@ -102,6 +102,16 @@ class TestRlsRuleValidation:
         with pytest.raises(ValidationError, match="valid metadata key"):
             _rule(value_from_metadata="bad key")
 
+    @pytest.mark.parametrize(
+        "reserved", ["starter_ui_request", "ui_features_available"]
+    )
+    def test_reserved_metadata_key_rejected_at_load(self, reserved: str) -> None:
+        # Internal agent-control keys are stripped at the request boundary —
+        # a rule that references one would silently block every query against
+        # the protected table. Reject the typo at config load instead.
+        with pytest.raises(ValidationError, match="reserved internal agent-control"):
+            _rule(value_from_metadata=reserved)
+
     def test_unknown_key_in_rule_rejected(self) -> None:
         with pytest.raises(ValidationError):
             RlsRule(table="orders", column="t", value="x", colmn="typo")  # type: ignore[call-arg]
@@ -407,7 +417,7 @@ class TestApplyRlsDynamicFailSecure:
 
     @pytest.mark.parametrize(
         "bad",
-        ["tab\tnull", "x\x00y", "newline\ninjection", "a" * 5000],
+        ["", "tab\tnull", "x\x00y", "newline\ninjection", "a" * 5000],
     )
     def test_suspicious_string_value_blocks(self, bad: str) -> None:
         with pytest.raises(RlsError, match="suspicious"):

@@ -83,6 +83,12 @@ def _is_suspicious_scalar(value: object) -> bool:
     if isinstance(value, (bool, int, float)):
         return False
     if isinstance(value, str):
+        # Empty string is suspicious: a dynamic predicate of ``= ''`` would
+        # silently expose any row whose protected column is empty/uninitialized
+        # to a blank-token probe. An identity token is never the empty string —
+        # a missing/empty value is a misconfiguration, fail-secure.
+        if not value:
+            return True
         if len(value) > _MAX_DYNAMIC_STR_LEN:
             return True
         return any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value)

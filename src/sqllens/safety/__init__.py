@@ -3,10 +3,15 @@
 
 """SQL safety guards.
 
-Three orthogonal protections, composed at the factory:
+Four orthogonal protections, composed at the factory:
 
 * ``assert_select_only`` / ``ReadOnlyGuardRunner`` — sqlglot parse rejects
   anything that isn't a single ``SELECT``/``WITH``.
+* ``apply_rls`` / ``RlsGuardRunner`` — per-request row-level-security
+  predicate injection via sqlglot AST rewrite; the rewritten SQL is what
+  flows on to the read-only guard. Fail-secure: any rewrite failure
+  (parse error, scope-analysis error, missing/suspicious dynamic value,
+  unprovable protected-table reference) blocks the query.
 * Per-runner statement timeouts (``SET statement_timeout`` on Postgres,
   ``SET SESSION MAX_EXECUTION_TIME`` on MySQL, ``set_progress_handler``
   deadline on SQLite) — server- or driver-side time bound.

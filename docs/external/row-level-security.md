@@ -123,7 +123,7 @@ The same predicate is added in every place the protected table is read — joins
 SQL Lens blocks a query and surfaces an actionable error to the assistant when:
 
 - A dynamic rule's metadata key is missing from the request.
-- A dynamic value is the wrong type (for example, a list when a single value is expected, or a number when a string is expected) or contains control characters or is unusually long.
+- A dynamic value is the wrong shape (for example, a list when a single value is expected, or a non-scalar like `null`, a dict, or bytes), is empty, contains control characters, or is unusually long. SQL Lens does not enforce a per-rule scalar type — any scalar (string, number, boolean) is accepted as long as it passes these sanity checks.
 - The generated SQL is not a `SELECT`-shaped read.
 - The generated SQL references a protected table in a shape that cannot be safely scoped.
 - The generated SQL fails to parse against the configured database dialect.
