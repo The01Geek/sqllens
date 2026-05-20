@@ -264,8 +264,12 @@ class AgentRuntimeConfig(BaseModel):
     # ```sql block in the Markdown text. Set false to restore the pre-feature
     # answer-only output. Env override: SQLLENS_AGENT__SHOW_DETAILS.
     show_details: bool = Field(
-        default=True,
-        description="Append the executed SQL to query answers.",
+        default=False,
+        description=(
+            "Append the executed SQL to query answers. OFF by default: exposing "
+            "the generated SQL to MCP clients can leak schema details and query "
+            "logic. Enable only for trusted, debugging-oriented deployments."
+        ),
     )
     audit: AuditConfig = Field(default_factory=lambda: AuditConfig())
 

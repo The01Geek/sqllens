@@ -101,7 +101,7 @@ def test_emit_chart_tool_is_registered(tmp_path: Path) -> None:
 
 
 def test_show_details_on_unlocks_only_tool_arguments(tmp_path: Path) -> None:
-    """show_details (default True) admits the static group to tool_arguments
+    """show_details=True admits the static group to tool_arguments
     *only* — every other admin-gated UI feature stays admin-only, and the
     module-level DEFAULT_UI_FEATURES list is not mutated.
     """
@@ -110,7 +110,10 @@ def test_show_details_on_unlocks_only_tool_arguments(tmp_path: Path) -> None:
         UiFeature,
     )
 
-    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        agent=AgentRuntimeConfig(show_details=True),
+    )
     assert cfg.agent.show_details is True
     agent = build_agent(cfg)
 
@@ -168,7 +171,10 @@ def test_show_details_on_grants_static_user_access_to_tool_arguments(
     from sqllens.agent import User
     from sqllens.agent.core.agent.config import UiFeature
 
-    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        agent=AgentRuntimeConfig(show_details=True),
+    )
     assert cfg.agent.show_details is True
     agent = build_agent(cfg)
 

@@ -613,6 +613,11 @@ similarity_threshold = 0.7
                          # The import-memory / export-memory CLI commands work
                          # regardless of this flag.
 
+[agent]
+# show_details = false   # set true to append the generated SQL to query
+                         # answers. OFF by default: exposing the SQL to MCP
+                         # clients can leak schema details and query logic.
+
 [auth]
 mode = "none"            # one of: none, bearer (jwt is not implemented yet)
 # For mode = "bearer", set a strong random token (>= 32 random bytes), e.g.
