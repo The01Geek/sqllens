@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 20, 2026
+
+- **[Fix] Chart generation with `visualize_data` no longer fails** — Asking SQL Lens for a chart could fail with an internal error instead of returning the chart, because the agent's attempt to remember the successful chart request was rejected during validation. The save step now accepts a request that carries no extra arguments, so `visualize_data` produces the chart and its summary as expected. No configuration change is required. (#147)
+
 ## May 19, 2026
 
 - **[Feature] Row-Level Security for the SQL agent** — SQL Lens can now narrow every answer to the rows a particular request is allowed to see. Declare one or more `[[rls]]` blocks in `sqllens.toml` naming a `table`, `column`, `operator`, and either a static `value` or a per-request `value_from_metadata` key resolved from MCP `_meta`, and SQL Lens injects the predicate into every reference to the protected table — including inside subqueries, common table expressions, and joins — combined with whatever filter the assistant already produced using `AND`. Queries that cannot be safely scoped are blocked rather than run unfiltered. Static rules work on every transport; dynamic rules require the HTTP transport, where your embedding application asserts the requesting identity through `_meta`. The feature is opt-in: with no `[[rls]]` blocks, behavior is unchanged. See [Row-Level Security](row-level-security.md). (#136)
