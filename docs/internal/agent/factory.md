@@ -19,6 +19,8 @@ cfg.database    →  build_sql_runner(url,
                                                           predicate injection + fail-secure proof)
 cfg.memory      →  ChromaAgentMemory                 →  persists under cfg.memory.persist_dir
                    LocalFileSystem                   →  scratch root = tempfile.gettempdir() / "sqllens"
+cfg.agent       →  BoundedConversationStore          →  in-process LRU, capped at
+                   .max_conversations                   cfg.agent.max_conversations (ephemeral)
 ToolRegistry    →  RunSqlTool                          (executes generated SQL, writes a scratch CSV,
                                                         appends truncation hint when df.attrs['truncated'])
                    EmitChartTool                       (agent-side seam for visualize_data; no SQL/FS;
@@ -30,7 +32,8 @@ ToolRegistry    →  RunSqlTool                          (executes generated SQL
                    SaveTextMemoryTool                  (memory write — free-form text notes)
                                                           ↓
                                                         Agent(llm, tool_registry, user_resolver,
-                                                              agent_memory, AgentConfig(max_tool_iterations))
+                                                              agent_memory, conversation_store,
+                                                              AgentConfig(max_tool_iterations))
 ```
 
 `EmitChartTool` carries no SQL runner or file-system capability — the agent runs `run_sql` first to get aggregated rows, then hands them to `emit_chart`, which only validates the DSL (`bar | line | area | scatter | pie | heatmap`, ≤ 200 rows, pie/heatmap series-shape rules) and wraps the result in a `ChartComponent`. The MCP-layer `visualize_data` tool reads that component off the agent stream and forwards it to the chart widget. See [mcp-server/tools.md](../mcp-server/tools.md#visualize_data--chart-shaped-sibling-of-query_database) for the wider picture and [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py) for the DSL source.
@@ -61,6 +64,21 @@ See [agent/tool-scratch-storage.md](tool-scratch-storage.md) for the full story,
 ## Why `max_tool_iterations` is a config knob
 
 The upstream `AgentConfig` defaults `max_tool_iterations=10`. That's enough for a trained DB but too low for untrained schemas where the agent needs separate iterations for catalog lookups, memory searches, and the final query. Surfacing the knob via `AgentRuntimeConfig.max_tool_iterations` in [config.py](../../../src/sqllens/config.py) (and `SQLLENS_AGENT__MAX_TOOL_ITERATIONS`) lets operators raise it without patching the lifted code.
+
+## `max_conversations` — the bounded conversation store
+
+`build_agent` passes a `conversation_store=BoundedConversationStore(max_conversations=cfg.agent.max_conversations)` into the `Agent`. This overrides the framework's default `MemoryConversationStore` (selected by `Agent.__init__` when `conversation_store` is `None`), which keeps every conversation forever — a long-running server's memory would grow without bound as the multi-turn `conversation_id` feature (see [mcp-server/tools.md](../mcp-server/tools.md#multi-turn-conversations--conversation_id)) accumulates conversations.
+
+`BoundedConversationStore` ([src/sqllens/conversation_store.py](../../../src/sqllens/conversation_store.py)) is a first-party `ConversationStore` implementation — **not** lifted from upstream — backed by an `OrderedDict` used as an LRU cache:
+
+- It implements the full `ConversationStore` protocol (`create_conversation`, `get_conversation`, `update_conversation`, `delete_conversation`, `list_conversations`).
+- Both writes (`_remember`, via create/update) and reads (`get_conversation`) `move_to_end` the touched conversation, so an actively-threaded conversation is not evicted out from under an in-progress multi-turn exchange.
+- When `len > max_conversations`, `_remember` evicts the least-recently-used entries (`popitem(last=False)`).
+- `get_conversation` / `delete_conversation` enforce a `user.id` ownership check before returning or deleting — though SQL Lens is single-user (see "The user resolver is intentionally static"), so in practice every conversation belongs to the same static `sqllens-user`.
+
+It is **ephemeral by design**: in-process only, no server-side database, no cross-restart persistence (CLAUDE.md non-goal — no schema migrations / server-side DB). Restarting the server drops all conversations, which is acceptable for the clarifying-question flow it backs. It is **not** thread-safe: it assumes a single asyncio event loop where each method's `OrderedDict` mutations run without an intervening `await` (atomic under cooperative scheduling). The cap is surfaced as `AgentRuntimeConfig.max_conversations` (default `1000`, range `1`–`1_000_000`, env `SQLLENS_AGENT__MAX_CONVERSATIONS`).
+
+Pinned by `tests/unit/test_conversation_store.py` (LRU eviction, recency-on-read, ownership checks) and `tests/unit/test_factory_wiring.py` (the agent is wired with a `BoundedConversationStore` sized from config).
 
 ## `show_details` — UI-feature unlock
 

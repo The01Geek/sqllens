@@ -69,6 +69,16 @@ To get an interactive chart, phrase the question so the result is aggregated or 
 
 The assistant will call the `visualize_data` tool, run the underlying SQL, and emit a chart. Plain lookups (for example, "What was Mary's last order?") are answered as text, not forced into a chart.
 
+### Multi-turn Conversations
+
+SQL Lens can carry context across several turns of a conversation, so a question can build on what came before.
+
+When a question is ambiguous, the agent may ask a clarifying question instead of guessing. For example, if you ask "Show me sales by region" and the database has more than one date column, the agent might reply with something like "Which time period should I use?" Earlier versions of SQL Lens could leave that follow-up empty; now the clarifying question, along with any suggested choices, is returned to your assistant as plain text so it can answer or relay it back to you.
+
+To keep context across turns, each answer includes a conversation ID, both as structured data for assistants that support it and as a short note at the end of the text answer. Your assistant passes that ID back on the next question so the agent remembers the earlier turn, for instance to answer its own clarifying question. Both `query_database` and `visualize_data` work this way. You do not need to manage the ID yourself; assistants that support multi-turn conversations handle it automatically.
+
+Note: Conversations are kept in memory only and are cleared when the server restarts. The number held at once is capped by the `max_conversations` setting (see the [Configuration reference](configuration.md#section-agent)); the default of 1000 is generous for a single database.
+
 ## 5. Switch to your own database
 
 Edit `sqllens.toml` and replace the value of `database.url` with your own connection string. Quit and relaunch your assistant. SQL Lens connects to the new database during start-up (over HTTP) or on the first question (in stdio mode), so expect the same short one-time delay described in step 4 when you point it at a new database.
