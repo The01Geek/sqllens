@@ -55,6 +55,29 @@ _CHART_META_KEY = "sqllens/chart"
 _CONVERSATION_META_KEY = "sqllens/conversation"
 
 
+def _conversation_result(
+    markdown: str, conversation_id: str, extra_meta: dict[str, Any]
+) -> CallToolResult:
+    """Build the success CallToolResult shared by both conversational tools.
+
+    Seeds ``_meta`` with the resolved conversation id, merges the tool-specific
+    ``extra_meta`` (table/query/chart payloads), and appends the conversation-id
+    footer to the text content. Keeping it in one place stops ``query_database``
+    and ``visualize_data`` from drifting on the footer or ``_meta`` shape.
+    """
+    meta: dict = {_CONVERSATION_META_KEY: {"conversation_id": conversation_id}}
+    meta.update(extra_meta)
+    return CallToolResult(
+        content=[
+            TextContent(
+                type="text",
+                text=append_conversation_footer(markdown, conversation_id),
+            )
+        ],
+        _meta=meta,
+    )
+
+
 def _request_metadata(ctx: Context) -> dict[str, Any]:
     """Extract caller-supplied per-request metadata from the MCP request.
 
@@ -152,20 +175,12 @@ def build_server(cfg: Config) -> FastMCP:
         markdown, table, query_info = await query_database_impl_with_table(
             cfg, question, metadata=metadata, conversation_id=conversation_id
         )
-        meta: dict = {_CONVERSATION_META_KEY: {"conversation_id": conversation_id}}
+        extra_meta: dict = {}
         if table is not None:
-            meta[_TABLE_META_KEY] = table
+            extra_meta[_TABLE_META_KEY] = table
         if query_info:
-            meta[_QUERY_META_KEY] = query_info
-        return CallToolResult(
-            content=[
-                TextContent(
-                    type="text",
-                    text=append_conversation_footer(markdown, conversation_id),
-                )
-            ],
-            _meta=meta,
-        )
+            extra_meta[_QUERY_META_KEY] = query_info
+        return _conversation_result(markdown, conversation_id, extra_meta)
 
     @mcp.resource(
         _CHART_WIDGET_URI,
@@ -194,18 +209,8 @@ def build_server(cfg: Config) -> FastMCP:
         markdown, chart = await visualize_data_impl_with_chart(
             cfg, question, metadata=metadata, conversation_id=conversation_id
         )
-        meta: dict = {_CONVERSATION_META_KEY: {"conversation_id": conversation_id}}
-        if chart is not None:
-            meta[_CHART_META_KEY] = chart
-        return CallToolResult(
-            content=[
-                TextContent(
-                    type="text",
-                    text=append_conversation_footer(markdown, conversation_id),
-                )
-            ],
-            _meta=meta,
-        )
+        extra_meta: dict = {_CHART_META_KEY: chart} if chart is not None else {}
+        return _conversation_result(markdown, conversation_id, extra_meta)
 
     @mcp.tool()
     async def list_data_sources() -> str:

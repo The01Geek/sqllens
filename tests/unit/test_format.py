@@ -16,6 +16,8 @@ from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from sqllens.agent.components.rich.data.dataframe import DataFrameComponent
 from sqllens.agent.components.rich.feedback.notification import NotificationComponent
 from sqllens.agent.components.rich.feedback.status_card import StatusCardComponent
@@ -577,11 +579,20 @@ def test_notification_message_surfaced() -> None:
     assert "Connection is slow" in msg
 
 
-def test_generic_finalization_placeholder_not_surfaced() -> None:
-    # The agent always emits a finalization CHAT_INPUT_UPDATE with the generic
-    # "Ask a question..." placeholder; it is not a clarifying question, so an
-    # otherwise-empty turn must still fall back to "(no answer)".
-    stream = [_ui(ChatInputUpdateComponent(placeholder="Ask a question...", disabled=False))]
+@pytest.mark.parametrize(
+    "placeholder",
+    [
+        "Ask a question...",
+        "Ask a follow-up question...",
+        "Continue the task or ask me something else...",
+        "Try again...",
+    ],
+)
+def test_generic_finalization_placeholder_not_surfaced(placeholder: str) -> None:
+    # The agent emits these finalization CHAT_INPUT_UPDATE placeholders on a
+    # normal/error turn; none is a clarifying question, so an otherwise-empty
+    # turn must still fall back to "(no answer)" rather than echo the placeholder.
+    stream = [_ui(ChatInputUpdateComponent(placeholder=placeholder, disabled=False))]
     msg, _ = components_to_markdown(stream)
     assert msg == "(no answer)"
 

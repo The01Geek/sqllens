@@ -48,12 +48,21 @@ def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
     return info
 
 
-# The agent emits this placeholder on every normal turn's finalization
-# ChatInputUpdateComponent (agent/core/agent/agent.py). It is not a clarifying
-# question, so it must never be surfaced as the answer when a turn produces no
-# TEXT/DATAFRAME — otherwise an empty result would render "Ask a question..."
-# instead of the "(no answer)" fallback.
-_GENERIC_INPUT_PLACEHOLDERS = frozenset({"ask a question..."})
+# The agent emits one of these placeholders on a normal turn's finalization
+# ChatInputUpdateComponent (agent/core/agent/agent.py emits "Ask a question...",
+# "Ask a follow-up question...", "Continue the task or ask me something else...",
+# and "Try again..." on the error path). None is a clarifying question, so they
+# must never be surfaced as the answer when a turn produces no TEXT/DATAFRAME —
+# otherwise an empty result would render the generic placeholder instead of the
+# "(no answer)" fallback. Compared case-insensitively.
+_GENERIC_INPUT_PLACEHOLDERS = frozenset(
+    {
+        "ask a question...",
+        "ask a follow-up question...",
+        "continue the task or ask me something else...",
+        "try again...",
+    }
+)
 
 
 def _button_label(data: object) -> str:
