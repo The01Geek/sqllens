@@ -71,6 +71,62 @@ jobs:
         with:
           packages-dir: dist/
 
+  smoke:
+    name: Post-publish smoke test
+    # Gated on a successful publish: only runs once the wheel is on PyPI.
+    # ``build`` is also needed for its ``version`` output (single source of
+    # truth — same value the tag-match step derived).
+    needs: [build, pypi-publish]
+    runs-on: ubuntu-latest
+    # The retry loop is bounded (~75s), but a hung pip install would otherwise
+    # ride the 6h default job timeout — fail fast instead.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install the published wheel from PyPI (clean venv, with retry)
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python -m venv /tmp/smoke-venv
+          # Install the artifact that was ACTUALLY published (by exact
+          # version), not the local dist/. PyPI's CDN can lag a few seconds
+          # after publish, so retry a bounded number of times before failing.
+          for attempt in 1 2 3 4 5 6; do
+            if /tmp/smoke-venv/bin/pip install "sqllens==${VERSION}"; then
+              echo "Installed sqllens==${VERSION} on attempt ${attempt}"
+              break
+            fi
+            if [ "${attempt}" -eq 6 ]; then
+              # Don't assume CDN lag: a 404 / "No matching distribution" in the
+              # pip output above is propagation lag, but an unsatisfiable pin,
+              # yanked release, or broken wheel fails identically here. Read the
+              # pip log above — this line is not the root cause.
+              echo "::error::sqllens==${VERSION} not installable after ${attempt} attempts; inspect the pip output above for the real cause (CDN lag vs. a genuine packaging failure)"
+              exit 1
+            fi
+            echo "Attempt ${attempt} failed; sleeping 15s for PyPI propagation"
+            sleep 15
+          done
+
+      - name: Exercise the published console script
+        # A placeholder key is required because ``validate`` exits 1 when
+        # llm.api_key is unset (the demo config intentionally omits it) — that
+        # is the "would fail to start" gate, not an import/parse failure. With
+        # no ``--check-llm`` flag, validate makes no network call, so the
+        # placeholder is never used to reach Anthropic; it only satisfies the
+        # api-key-present check so a genuine non-zero exit (broken __init__
+        # import, dropped module, bad config parsing) is what fails the job.
+        env:
+          SQLLENS_LLM__API_KEY: sk-ant-smoke-test-placeholder
+        run: |
+          /tmp/smoke-venv/bin/sqllens --version
+          /tmp/smoke-venv/bin/sqllens validate -c examples/sqlite-demo/sqllens.toml
+
   github-release:
     name: Attach artifacts to GitHub release
     needs: [build, pypi-publish]

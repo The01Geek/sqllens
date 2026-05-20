@@ -263,9 +263,10 @@ kills the `max_tool_iterations` burn) → **P-5** `_render_cell` helper →
 landed in Wave-1 Track A; this is the lockfile half).
 **O-15 and the S-12 lockfile half landed in #112 (issue #108).** The
 two `.github/workflows/` halves (**O-9**, **O-10**) were split out —
-the project's GitHub App token cannot push workflow files — and are
-tracked in follow-up issue #111. A CI lockfile-drift / wheel-content
-guard is tracked separately in issue #114.
+the project's GitHub App token cannot push workflow files — and tracked
+in follow-up issue #111; **both landed in #145**, pushed from a human
+checkout that carries the `workflows` scope the App lacks. A CI
+lockfile-drift / wheel-content guard is tracked separately in issue #114.
 
 ### Wave 3 — v0.1.x (onboarding + product polish)
 
@@ -657,8 +658,8 @@ file on POSIX.
 | O-6 | `agent/integrations/postgres/sql_runner.py` | Per-query `psycopg2.connect`; no pool; SIGTERM mid-query leaves dangling DB-side connections. | `psycopg2.pool.ThreadedConnectionPool`; expose `database.pool_max_connections`. |
 | O-7 | [`cli.py:221-246`](../../src/sqllens/cli.py#L221) | `_SAMPLE_CONFIG` has no `[agent]` section, so `sqllens init` users never see `max_tool_iterations` (just added in #32). | Add `[agent]\nmax_tool_iterations = 20  # raise if agent truncates on complex schemas`. |
 | O-8 | [`cli.py:106`](../../src/sqllens/cli.py#L106) | `validate` exits 0 when `api_key NOT SET` (prints warning only). Scripts can't distinguish "would fail to start" from "config unreadable". | Exit code 1 for warnings; reserve exit 2 for parse errors. |
-| O-9 | `.github/workflows/release.yml` | No post-publish smoke test. A broken `__init__.py` import would ship silently. | Add a `smoke` job that `pip install sqllens==<version>` then runs `sqllens validate -c examples/sqlite-demo/sqllens.toml`. |
-| O-10 | `.github/workflows/docker.yml:99` | `cosign` downloaded from GitHub at runtime with no checksum verification. | Replace with `sigstore/cosign-installer` action (pinned by version, verifies checksums). |
+| O-9 | [`.github/workflows/release.yml`](../../.github/workflows/release.yml) | ~~No post-publish smoke test. A broken `__init__.py` import would ship silently.~~ **Fixed by #145 (issue #111):** added a `smoke` job (`needs: [build, pypi-publish]`, `timeout-minutes: 10`) that installs `sqllens==<needs.build.outputs.version>` from PyPI in a clean venv (bounded retry for CDN lag) and runs `sqllens --version` + `sqllens validate -c examples/sqlite-demo/sqllens.toml`. The exercise step sets a placeholder `SQLLENS_LLM__API_KEY` because `validate` exits 1 when the key is unset (the demo config omits it) and makes no network call without `--check-llm` — so a genuine import/parse regression still fails the job. | Add a `smoke` job that `pip install sqllens==<version>` then runs `sqllens validate -c examples/sqlite-demo/sqllens.toml`. |
+| O-10 | [`.github/workflows/docker.yml`](../../.github/workflows/docker.yml) | ~~`cosign` downloaded from GitHub at runtime with no checksum verification.~~ **Fixed by #145 (issue #111):** replaced the `curl\|chmod` install with `sigstore/cosign-installer` pinned to commit `d58896d6a1865668819e1d91763c7751a165e159` (verified == tag `v3.9.2`). The keyless signing loop is unchanged and now echoes each tag before signing. | Replace with `sigstore/cosign-installer` action (pinned by version, verifies checksums). |
 | O-11 | CLAUDE.md / repo conventions | No documented emergency hotfix path for the protected `main` branch. | Document the temporary-bypass-actor procedure in CLAUDE.md or a `RUNBOOK.md`. |
 | O-12 | [`README.md:75`](../../README.md#L75) | Links to `docs/internal/claude-desktop-windows-install.md` which moved to `docs/internal/installation/...` — broken on GitHub. | Fix the link; add a CI check for broken internal links. |
 | O-13 | [`README.md:136`](../../README.md#L136) | ~~Phase 4 line names the extracted-from parent product, violating CLAUDE.md's brand-cleanliness rule.~~ Fixed by #93 (issue #89): Phase 4 rewritten with no parent-product reference; remaining brand-name occurrences scrubbed from CLAUDE.md, this doc, and a test. | Rewrite Phase 4 as "JWT verifier (JWKS + shared-secret) and permission scopes" with no parent-product reference. |

@@ -92,17 +92,26 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: true
 
+      # Replaces the unverified curl|chmod install of the cosign binary.
+      # Pinning to a commit SHA (not a floating tag) makes the action *source*
+      # immutable; the installer action then fetches and integrity-verifies the
+      # cosign *binary* itself. Both wins close the curl|chmod gap.
+      - name: Install cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159  # v3.9.2
+
       - name: Sign image with cosign (keyless)
         if: github.event_name != 'pull_request'
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
-          curl -sL "https://github.com/sigstore/cosign/releases/download/v2.4.1/cosign-linux-amd64" -o /usr/local/bin/cosign
-          chmod +x /usr/local/bin/cosign
           # Sign each tag's manifest. ``--yes`` skips the confirmation prompt;
-          # signing keys come from the GH Actions OIDC token.
+          # signing keys come from the GH Actions OIDC token. Echo each tag
+          # first so that a mid-loop failure (the step fails closed under
+          # -eo pipefail) names which tag was left unsigned.
           for tag in $TAGS; do
+            echo "Signing ${tag}@${DIGEST}"
             cosign sign --yes "${tag}@${DIGEST}"
           done
 
