@@ -4,11 +4,12 @@ A reading map for SQL Lens. Start here if you are new to the codebase.
 
 ## What SQL Lens is
 
-A standalone MCP server that exposes a single configured database to MCP-aware AI clients (Cursor, Claude Desktop, Windsurf, custom). It ships three tools:
+A standalone MCP server that exposes a single configured database to MCP-aware AI clients (Cursor, Claude Desktop, Windsurf, custom). It ships two tools:
 
-- `query_database(question)` — natural-language → SQL → executed → Markdown (with an interactive table widget on apps-aware hosts).
-- `visualize_data(question)` — natural-language → SQL → executed → Markdown + an interactive ECharts chart widget on apps-aware hosts; for chart-shaped (aggregated/temporal) questions.
+- `query_database(question)` — natural-language → SQL → executed → Markdown, backed on apps-aware hosts by a single interactive widget that renders an ECharts chart, a sortable data grid, or plain text depending on what the agent produced (the agent decides chart-vs-table internally for chart-shaped, aggregated/temporal questions).
 - `list_data_sources()` — describes the configured database.
+
+An opt-in third tool, `import_memory`, is registered only when `cfg.memory.allow_import` is set.
 
 One database per running instance. Read-only by default. Anthropic-only LLM in v1, with a pluggable seam for later providers.
 
@@ -41,11 +42,10 @@ Cross-cutting modules can be imported from anywhere:
 | [src/sqllens/cli.py](../../../src/sqllens/cli.py) | `sqllens version \| init \| validate \| serve \| claude-desktop install`. |
 | [src/sqllens/config.py](../../../src/sqllens/config.py) | pydantic-settings: TOML + `SQLLENS_*` env. See [setup/config-loading.md](../setup/config-loading.md). |
 | [src/sqllens/server.py](../../../src/sqllens/server.py) | `build_server(cfg)` registers tools; `run(cfg)` dispatches stdio vs HTTP. |
-| [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py) | Process-wide singleton `Agent` shared by `query_database` and `visualize_data` (`get_agent`, `prime_agent`, `_warm_memory`). |
-| [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) | Markdown + table-payload tool implementation; defines the error taxonomy constants reused by `visualize_data`. |
-| [src/sqllens/tools/visualize_data.py](../../../src/sqllens/tools/visualize_data.py) | Markdown + chart-payload sibling of `query_database`. |
+| [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py) | Process-wide singleton `Agent` behind `query_database`, also primed by the transport warmup (`get_agent`, `prime_agent`, `_warm_memory`). |
+| [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) | Markdown + table/chart-payload tool implementation (`query_database_impl_with_widgets`); defines the error taxonomy constants. |
 | [src/sqllens/tools/list_data_sources.py](../../../src/sqllens/tools/list_data_sources.py) | Describes the configured DSN. |
-| [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) | Collapses the agent's `UiComponent` stream into Markdown and the structured table/chart payloads. |
+| [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) | `components_to_widgets` collapses the agent's `UiComponent` stream into Markdown and the structured table/chart payloads in one pass. |
 | [src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py) | `build_agent` / `build_sql_runner` — see [agent/factory.md](../agent/factory.md). |
 | [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py) | Streamable HTTP transport + auth + path fix. See [mcp-server/transport.md](../mcp-server/transport.md). |
 | [src/sqllens/safety/readonly.py](../../../src/sqllens/safety/readonly.py) | sqlglot-based read-only enforcement. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md). |
@@ -65,13 +65,13 @@ _AuthMiddleware        — runs the configured Authenticator; 401 on AuthError
   ↓
 FastMCP                — dispatches to the registered tool
   ↓
-query_database(...)    — tools/query_database.py  (or visualize_data — tools/visualize_data.py)
-                          both fetch the shared singleton via tools/_agent.py::get_agent
+query_database(...)    — tools/query_database.py
+                          fetches the shared singleton via tools/_agent.py::get_agent
   ↓
 agent.send_message     — emits an async stream of UiComponent
   ↓
-components_to_table /   — collapses the stream to a single Markdown string (+ an optional
-components_to_chart        structured table or chart payload for apps-aware hosts)
+components_to_widgets   — collapses the stream to a single Markdown string (+ an optional
+                          structured table and/or chart payload for apps-aware hosts)
   ↓
 client receives the tool result
 ```
@@ -88,11 +88,11 @@ What was kept:
 - `agent/core/` — `Agent`, `RequestContext`, `ToolRegistry`, `UiComponent`, etc.
 - `agent/capabilities/` — `SqlRunner`, `FileSystem`, `AgentMemory` abstractions.
 - `agent/integrations/` — `anthropic`, `chromadb`, `local`, `sqlite`, `postgres`, `mysql`.
-- `agent/tools/` — `RunSqlTool`, `EmitChartTool` (the agent-side seam for `visualize_data` — first-party, not lifted; see [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py)), and the three `agent_memory` tools (`SaveQuestionToolArgsTool`, `SearchSavedCorrectToolUsesTool`, `SaveTextMemoryTool`).
+- `agent/tools/` — `RunSqlTool`, `EmitChartTool` (the agent-side seam for `query_database`'s chart mode — first-party, not lifted; see [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py)), and the three `agent_memory` tools (`SaveQuestionToolArgsTool`, `SearchSavedCorrectToolUsesTool`, `SaveTextMemoryTool`).
 - `agent/components/` — Rich-component rendering (we only ever use the markdown conversion).
 
 What was dropped, and why we might regret it:
-- The upstream `visualize_data` tool was pruned during the lift. SQL Lens v0.2 reintroduces its own, first-party `EmitChartTool` (Apache ECharts + a renderer-agnostic DSL) under [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py); see [mcp-server/tools.md](../mcp-server/tools.md#visualize_data--chart-shaped-sibling-of-query_database). `RunSqlTool` still writes scratch CSVs; see [agent/tool-scratch-storage.md](../agent/tool-scratch-storage.md).
+- The upstream `visualize_data` tool was pruned during the lift. SQL Lens reintroduces charting as its own, first-party `EmitChartTool` (Apache ECharts + a renderer-agnostic DSL) under [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py); the chart it emits is now surfaced through `query_database`'s unified result widget (chart mode), not a separate MCP tool — see [mcp-server/tools.md](../mcp-server/tools.md#chart-mode-the-emitcharttool-seam). `RunSqlTool` still writes scratch CSVs; see [agent/tool-scratch-storage.md](../agent/tool-scratch-storage.md).
 - `python` and `file_system` tools — pruned (out of scope for SQL-only).
 - Other LLM integrations (OpenAI, Gemini, Bedrock, …) — pruned. The `AnthropicLlmService` import in `agent/factory.py` is the only blessed entry; adding a provider means re-lifting the relevant integration package and exposing it through the factory.
 

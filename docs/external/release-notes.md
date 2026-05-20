@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 20, 2026
+
+- **[Improvement] Charts and tables are now unified into the `query_database` tool** — The separate `visualize_data` tool has been folded into `query_database`, so SQL Lens now exposes two tools: `query_database` and `list_data_sources`. You no longer ask for a chart with a different tool — every `query_database` answer adapts to its result. On assistants that support inline app widgets (currently Claude Desktop and claude.ai), a single widget renders an interactive chart when the result is chart-shaped (aggregated or temporal) and an interactive, sortable table otherwise, with the same plain-text answer alongside. The assistant decides whether a chart fits; plain lookups are returned as a table or text. Supported chart types are unchanged (bar, line, area, scatter, pie, and heatmap, rendered with Apache ECharts), and no configuration change is required. (#150)
+
 ## May 19, 2026
 
 - **[Feature] Row-Level Security for the SQL agent** — SQL Lens can now narrow every answer to the rows a particular request is allowed to see. Declare one or more `[[rls]]` blocks in `sqllens.toml` naming a `table`, `column`, `operator`, and either a static `value` or a per-request `value_from_metadata` key resolved from MCP `_meta`, and SQL Lens injects the predicate into every reference to the protected table — including inside subqueries, common table expressions, and joins — combined with whatever filter the assistant already produced using `AND`. Queries that cannot be safely scoped are blocked rather than run unfiltered. Static rules work on every transport; dynamic rules require the HTTP transport, where your embedding application asserts the requesting identity through `_meta`. The feature is opt-in: with no `[[rls]]` blocks, behavior is unchanged. See [Row-Level Security](row-level-security.md). (#136)

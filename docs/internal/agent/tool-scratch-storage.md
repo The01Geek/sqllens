@@ -9,7 +9,7 @@ How `RunSqlTool` persists per-query CSVs to disk, how the `LocalFileSystem` capa
 1. Runs the SQL via the injected `SqlRunner` and gets a `pd.DataFrame`.
 2. Generates a short random file id (`uuid4().hex[:8]`).
 3. Serializes the DataFrame as CSV and writes it to `query_results_<file_id>.csv` via `self.file_system.write_file(...)`.
-4. Returns a `result_for_llm` string that **includes the absolute filename** so the model can refer to it from a downstream tool (`visualize_data` in the upstream design — currently pruned but slated to return).
+4. Returns a `result_for_llm` string that **includes the absolute filename** so the model can refer to it from a downstream tool (the upstream `visualize_data` tool consumed it; that tool was pruned, and SQL Lens's first-party `EmitChartTool` takes already-aggregated rows directly instead of reading the CSV — so nothing reads it today).
 
 Non-`SELECT` queries don't write anything; they return a row-count summary only.
 
@@ -112,7 +112,7 @@ When `write_file` raises (or any other `RunSqlTool` internal step fails), the LL
 
 ### 3. No cleanup
 
-Scratch CSVs accumulate forever. The intended consumer (`visualize_data`) was pruned during the lift, so currently nothing reads them after they're written. The scratch root now lives under `tempfile.gettempdir()`, which on most platforms is reclaimed by the OS on reboot or by periodic cleaners (`systemd-tmpfiles`, macOS's launchd `cleanup` task, Disk Cleanup on Windows) — so the absolute floor on accumulation is "one reboot's worth of queries". A proper consumer-driven cleanup pass is still the right long-term fix once `visualize_data` returns.
+Scratch CSVs accumulate forever. The upstream consumer (`visualize_data`) was pruned during the lift, and SQL Lens's charting path (`EmitChartTool`, surfaced through `query_database`'s chart mode) takes already-aggregated rows rather than reading the CSV — so currently nothing reads them after they're written. The scratch root now lives under `tempfile.gettempdir()`, which on most platforms is reclaimed by the OS on reboot or by periodic cleaners (`systemd-tmpfiles`, macOS's launchd `cleanup` task, Disk Cleanup on Windows) — so the absolute floor on accumulation is "one reboot's worth of queries". A proper consumer-driven cleanup pass is still the right long-term fix.
 
 ### 4. No configurable scratch directory
 

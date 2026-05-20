@@ -1,12 +1,12 @@
 # MCP tools (the public surface)
 
-The tools that MCP clients see. Source-of-truth reference for [src/sqllens/server.py](../../../src/sqllens/server.py), [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py), [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py), [src/sqllens/tools/visualize_data.py](../../../src/sqllens/tools/visualize_data.py), [src/sqllens/tools/list_data_sources.py](../../../src/sqllens/tools/list_data_sources.py), and [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py).
+The tools that MCP clients see. Source-of-truth reference for [src/sqllens/server.py](../../../src/sqllens/server.py), [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py), [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py), [src/sqllens/tools/list_data_sources.py](../../../src/sqllens/tools/list_data_sources.py), and [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py).
 
-Three tools are **always** registered (`query_database`, `visualize_data`, `list_data_sources`). A fourth, `import_memory`, is registered **only when `cfg.memory.allow_import` is true** — see [`import_memory` — opt-in fourth tool](#import_memory--opt-in-fourth-tool) below.
+Two tools are **always** registered (`query_database`, `list_data_sources`). A third, `import_memory`, is registered **only when `cfg.memory.allow_import` is true** — see [`import_memory` — opt-in tool](#import_memory--opt-in-tool) below.
 
 ## Registration
 
-`build_server` in [src/sqllens/server.py](../../../src/sqllens/server.py) always registers the three core tools — plus two `ui://` resources, one backing the `query_database` table widget and one backing the `visualize_data` chart widget — on a fresh `FastMCP("sqllens")` instance per call, and conditionally a fourth:
+`build_server` in [src/sqllens/server.py](../../../src/sqllens/server.py) always registers the two core tools — plus a single `ui://` resource backing the `query_database` widget (which renders a chart, a data grid, or plain text from one payload) — on a fresh `FastMCP("sqllens")` instance per call, and conditionally a third:
 
 ```python
 def build_server(cfg: Config) -> FastMCP:
@@ -27,12 +27,14 @@ def build_server(cfg: Config) -> FastMCP:
     async def query_database(
         question: str, ctx: Context
     ) -> str | CallToolResult:
-        """Ask a question in natural language. Returns a Markdown table or text answer."""
+        """Ask a question in natural language. Returns a chart, table, or text answer."""
         metadata = _request_metadata(ctx)
-        markdown, table, query_info = await query_database_impl_with_table(
+        markdown, table, query_info, chart = await query_database_impl_with_widgets(
             cfg, question, metadata=metadata
         )
         meta: dict = {}
+        if chart is not None:
+            meta["sqllens/chart"] = chart
         if table is not None:
             meta["sqllens/table"] = table
         if query_info:
@@ -44,28 +46,6 @@ def build_server(cfg: Config) -> FastMCP:
             _meta=meta,
         )
 
-    @mcp.resource(
-        "ui://sqllens/chart-results.html",
-        mime_type="text/html;profile=mcp-app",
-        meta={"ui": {"prefersBorder": True}},
-    )
-    def chart_results_widget() -> str:
-        return load_widget_html("chart_results.html")
-
-    @mcp.tool(
-        meta={"ui": {"resourceUri": "ui://sqllens/chart-results.html"}},
-        structured_output=False,
-    )
-    async def visualize_data(question: str) -> str | CallToolResult:
-        """Ask a question; returns an interactive chart for chart-shaped results, else text."""
-        markdown, chart = await visualize_data_impl_with_chart(cfg, question)
-        if chart is None:
-            return markdown
-        return CallToolResult(
-            content=[TextContent(type="text", text=markdown)],
-            _meta={"sqllens/chart": chart},
-        )
-
     @mcp.tool()
     async def list_data_sources() -> str:
         """Describe the configured database."""
@@ -74,34 +54,35 @@ def build_server(cfg: Config) -> FastMCP:
     return mcp
 ```
 
-The docstrings are the user-facing tool descriptions that the calling AI client sees, so they're load-bearing. CLAUDE.md "Upstream brand cleanliness" applies — no upstream-project references allowed in those strings. The `query_database` and `visualize_data` registrations each carry an MCP App widget wiring; see "The MCP App interactive table widget" and "The MCP App interactive chart widget" below for the full mechanisms. Both tools share **one** process-wide agent singleton — see "Shared agent singleton (`tools/_agent.py`)" below.
+The docstrings are the user-facing tool descriptions that the calling AI client sees, so they're load-bearing. CLAUDE.md "Upstream brand cleanliness" applies — no upstream-project references allowed in those strings. The `query_database` registration carries the MCP App widget wiring; see "The MCP App interactive result widget" below for the full mechanism — one widget that picks chart vs. data grid vs. text from the present `_meta` channel. `query_database` and `list_data_sources` share **one** process-wide agent singleton — see "Shared agent singleton (`tools/_agent.py`)" below.
 
 ## Shared agent singleton (`tools/_agent.py`)
 
-[src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py) owns the process-wide agent that both `query_database` and `visualize_data` use. Extracting the singleton into its own module is structural, not cosmetic: the two MCP tools must reach the *same* `Agent` object graph (memory state, tool registrations, cold-start cost) so a second tool wrapper cannot accidentally build a competing agent, and the cfg-mismatch warning has exactly one definition site.
+[src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py) owns the process-wide agent that `query_database` uses (and the transport-layer warmup primes). Extracting the singleton into its own module is structural, not cosmetic: a tool wrapper and the boot-time warmup must reach the *same* `Agent` object graph (memory state, tool registrations, cold-start cost) so neither can accidentally build a competing agent, and the cfg-mismatch warning has exactly one definition site.
 
 - **Lazy, race-safe singleton agent.** The agent and the `Config` that built it are stored together as one atomically-assigned tuple, `_AGENT_STATE: tuple[Agent, Config] | None`, and built on the first call via `build_agent(cfg)` (see [agent/factory.md](../agent/factory.md)). `get_agent` is `async` and guards the cold start with an `asyncio.Lock` (`_AGENT_LOCK`) using **double-checked locking**: the outer `_AGENT_STATE is None` test is a fast path that skips the lock once the agent exists; correctness comes from the inner re-check after awaiting the lock, so two concurrent first calls cannot both run `build_agent`. Note `build_agent` itself only *wires* objects — `ChromaAgentMemory.__init__` does no I/O, so the ChromaDB open and the ~80 MB embedding-model download are **not** triggered by `build_agent`; they fire lazily the first time a memory method touches the collection (or eagerly at boot via `_warm_memory`, below). A later call whose `cfg` is a *different object* (identity check, not `==` — see "Why all core tools take `cfg` from the closure") is still served by the original agent, but logs an explicit warning instead of silently honoring a config it is not using. The agent itself is safe for concurrent in-flight async requests because each request gets its own `RequestContext`.
-- **Error taxonomy lives in `query_database`, not here.** The sanitized-internal / SQL-execution-prefix / verbatim-`UnsafeSqlError` split is defined once in `tools/query_database.py` (`_INTERNAL_ERROR_MESSAGE`, `_SQL_EXECUTION_ERROR_PREFIX`); `tools/visualize_data.py` *re-imports* those constants. `_agent.py` only constructs and caches the agent.
+- **Error taxonomy lives in `query_database`, not here.** The sanitized-internal / SQL-execution-prefix / verbatim-`UnsafeSqlError` split is defined once in `tools/query_database.py` (`_INTERNAL_ERROR_MESSAGE`, `_SQL_EXECUTION_ERROR_PREFIX`). `_agent.py` only constructs and caches the agent.
 - **Stable re-exports.** `prime_agent` and `get_agent` are also re-exported from `tools/query_database.py` (in `__all__`) so existing call sites (`transport/http.py`, several tests) that import from there still work without churn.
 
 ## `query_database` — the agent loop in a tool
 
 [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) does the actual work, calling the shared singleton above:
 
-1. **Fetch the shared singleton.** `query_database_impl_with_table` awaits `get_agent(cfg)` from [`tools/_agent.py`](../../../src/sqllens/tools/_agent.py); see "Shared agent singleton" above.
+1. **Fetch the shared singleton.** `query_database_impl_with_widgets` awaits `get_agent(cfg)` from [`tools/_agent.py`](../../../src/sqllens/tools/_agent.py); see "Shared agent singleton" above.
 2. **`RequestContext` with caller-supplied metadata.** SQL Lens does not forward HTTP headers/cookies into the agent (auth is enforced at the transport layer, and the agent is single-user — see [agent/factory.md](../agent/factory.md) "user resolver"), so the context is always `RequestContext(headers={}, cookies={}, metadata=<safe_metadata>)`. The `metadata` mapping is populated from MCP `_meta` extracted by `_request_metadata(ctx)` in [src/sqllens/server.py](../../../src/sqllens/server.py) and stripped of `_RESERVED_METADATA_KEYS` (`{"starter_ui_request", "ui_features_available"}`) so untrusted request metadata cannot steer agent-internal control flow — only supply values to the opt-in row-level-security guard. An absent / empty MCP `_meta` keeps the prior empty-context behaviour byte-for-byte. See [database-connectors/row-level-security.md](../database-connectors/row-level-security.md) for the full request → metadata → guard path.
-3. **Stream collapse.** The agent yields an async stream of `UiComponent` objects (text snippets, dataframes, status cards). MCP tools must return a single string, so we collect the stream into a list and pass it to `components_to_table` (the success path; `components_to_markdown` is now a thin wrapper over it — see "The MCP App interactive table widget").
+3. **Stream collapse.** The agent yields an async stream of `UiComponent` objects (text snippets, dataframes, chart components, status cards). MCP tools must return a single string, so we collect the stream into a list and pass it to `components_to_widgets` (the success path; `components_to_table`, `components_to_chart`, and `components_to_markdown` are now thin views over it — see "The `_format.components_to_widgets` collapse rule").
 4. **Categorized, sanitized error surfacing.** Failures are re-raised as `RuntimeError`, which FastMCP (`mcp.server.fastmcp` — the official SDK, not the standalone `fastmcp` package) converts to a tool result with `isError: true`, formatting the client text as `Error executing tool query_database: <message>`. The *raised message* is therefore the contract, and it is split into three observable categories (see "The error/success contract" below) so the calling agent gets structured failure signal without leaking infrastructure detail. CLAUDE.md forbids letting the LLM apologize inside a successful tool result — the calling agent needs structured failure signal.
 
-## `_format.components_to_table` — the collapse rule
+## `_format.components_to_widgets` — the collapse rule
 
-`components_to_table` in [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) is the only place that knows the shape of the agent's output stream. It does the collapse in a single pass and returns `(markdown, is_error, table_payload, query_info)`; `components_to_markdown` is a thin wrapper that drops the third and fourth elements for non-apps callers (see "The MCP App interactive table widget"). The Markdown collapse rule below is identical for both:
+`components_to_widgets` in [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) is the only place that knows the shape of the agent's output stream. It does the collapse in a single pass and returns `(markdown, is_error, table_payload, query_info, chart_payload)`. The narrower views are thin wrappers over it: `components_to_table` drops the chart, `components_to_chart` keeps only the chart, and `components_to_markdown` drops every structured payload for non-apps callers (see "The MCP App interactive result widget"). The Markdown collapse rule below is identical for all of them:
 
 | Component type | What we do with it |
 |---|---|
 | `TEXT` | Keep the **last** non-empty entry as the natural-language answer (earlier `TEXT` entries are intermediate reasoning the LLM emits while thinking). |
-| `DATAFRAME` | Render as a Markdown table. **Cap at 500 rows** (`_MAX_ROWS_RENDERED`) with a "Showing first N of M rows" footer. This sits *above* `DatabaseConfig.max_rows` (default 10 000) — the row cap stops the DataFrame from being materialised in the first place; this renderer cap only protects the MCP client from a multi-thousand-row Markdown blob when `max_rows` is raised. |
-| `STATUS_CARD` with `status == 'error'` | Treat as a tool error; return `(message, is_error=True, None, None)` and let the caller raise `RuntimeError`. |
+| `DATAFRAME` | Render as a Markdown table. **Cap at 500 rows** (`_MAX_ROWS_RENDERED`) with a "Showing first N of M rows" footer. This sits *above* `DatabaseConfig.max_rows` (default 10 000) — the row cap stops the DataFrame from being materialised in the first place; this renderer cap only protects the MCP client from a multi-thousand-row Markdown blob when `max_rows` is raised. The structured `table` payload is built from the **last** DataFrame (last-wins). |
+| `CHART` | Keep the **last** `CHART` component as the structured `chart` payload (last-wins; `emit_chart` runs at most once per request). Not rendered into Markdown — apps-aware hosts get the interactive chart, everyone else still sees the underlying DataFrame table + answer. |
+| `STATUS_CARD` with `status == 'error'` | Treat as a tool error; return `(message, is_error=True, None, None, None)` and let the caller raise `RuntimeError`. |
 | `STATUS_CARD` carrying `metadata["sql"]` | Capture the SQL into `last_sql` (last-wins; the `run_sql` card streams twice — running → completed — with identical metadata, so dedup is idempotent). Drives the `query_info` channel — see [Executed SQL channel](#executed-sql-channel--agentshow_details). Only emitted when `agent.show_details` unlocked `UI_FEATURE_SHOW_TOOL_ARGUMENTS` for the static user group. |
 | Everything else | Ignored. |
 
@@ -109,19 +90,37 @@ Output ordering: tables first (in stream order), then the final text answer. If 
 
 The 500-row cap is intentional: it keeps tool results inside typical MCP message size limits and protects the calling LLM from drowning in token-expensive table dumps. The agent itself sees the (already row-capped) DataFrame; this renderer cap only affects what travels back over MCP. Truncation from the underlying `DatabaseConfig.max_rows` (e.g. "Result truncated at 10 000 rows") is surfaced separately by `RunSqlTool` inside `result_for_llm` — see [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md#row-cap-and-truncation-surface).
 
-## The MCP App interactive table widget
+## The MCP App interactive result widget
 
-On **apps-aware hosts** (Claude Desktop, claude.ai), `query_database` additionally carries an interactive, sortable/filterable/paginated/CSV-exportable table. Every other host keeps receiving the byte-identical Markdown above — the [MCP Apps spec](https://modelcontextprotocol.io) (`2026-01-26`) makes this degradation transparent.
+On **apps-aware hosts** (Claude Desktop, claude.ai), `query_database` additionally carries an interactive widget that renders — in precedence order — an ECharts chart, a sortable/filterable/paginated/CSV-exportable data grid, or plain text, depending on which structured `_meta` channel the agent produced. Every other host keeps receiving the byte-identical Markdown above — the [MCP Apps spec](https://modelcontextprotocol.io) (`2026-01-26`) makes this degradation transparent.
+
+One tool, one widget, one resource. The agent still decides chart-vs-table internally (it runs `run_sql`, then calls `emit_chart` once when the result is chart-shaped — see "Chart mode: the `EmitChartTool` seam" below); the tool surfaces whichever payloads the agent emitted and the widget applies the precedence client-side.
 
 Mechanism:
 
-- `build_server` registers a resource at `ui://sqllens/query-results.html` with mime `text/html;profile=mcp-app` (and `_meta.ui.prefersBorder = true`). Its body is the self-contained widget loaded by [src/sqllens/ui/__init__.py](../../../src/sqllens/ui/__init__.py)'s `load_widget_html()` (cached; immutable packaged asset). The widget HTML and the vendored `@modelcontextprotocol/ext-apps` bundle ship inside the wheel via the `[tool.hatch.build.targets.wheel].include` globs in `pyproject.toml`.
+- `build_server` registers a single resource at `ui://sqllens/query-results.html` with mime `text/html;profile=mcp-app` (and `_meta.ui.prefersBorder = true`). Its body is the self-contained widget loaded by [src/sqllens/ui/__init__.py](../../../src/sqllens/ui/__init__.py)'s `load_widget_html()` (cached; immutable packaged asset). The widget HTML and the vendored `@modelcontextprotocol/ext-apps` SDK **and** Apache ECharts bundle are inlined into the one HTML asset and ship inside the wheel via the `[tool.hatch.build.targets.wheel].include` globs in `pyproject.toml`.
 - The `query_database` tool is decorated with `meta={"ui": {"resourceUri": "ui://sqllens/query-results.html"}}`. `list_data_sources` is **not** — the widget is query-only.
-- `query_database_impl_with_table` is the new sibling of `query_database_impl`: same agent path, same three error categories (the legacy `query_database_impl` is now a thin wrapper that drops the table and the query-info). On success it returns `(markdown, table, query_info)` where `table` is the structured payload `{columns, rows, column_types, row_count, truncated}` (or `None` when the stream has no DataFrame) and `query_info` carries the executed SQL when `agent.show_details` is on (see [Executed SQL channel](#executed-sql-channel--agentshow_details) below). `_format.components_to_table` builds `table` from the **last** DataFrame and enforces a **130 KB serialized-size budget** (`json.dumps(payload, separators=(",", ":"))`), dropping tail rows and reporting the count in `truncated`; if even the header-only form is over budget it returns `None`. Payload construction is best-effort: any exception degrades to `None` (Markdown still served) rather than escaping the sanitized error taxonomy.
-- **Typed (numeric) client-side sort.** The widget right-aligns and numerically sorts a column only when `column_types[col] == "number"`. The vendored DataFrame producers never populate `column_types` (`DataFrameComponent.from_records` hard-codes `{}`), so `_format._compute_table_payload` **infers** the type server-side: a column is typed `"number"` when every non-empty coerced cell parses as a finite float (SQL `NULL`/empty cells are skipped; `inf`/`NaN` disqualify the column). Any explicit producer-supplied `column_types` overrides the inferred value (e.g. a zero-padded ID column the agent typed `"string"` stays string-sorted). A non-mapping `column_types` from a producer degrades to inference-only and never fails the payload. Without this inference, numeric columns would sort lexicographically (`1, 10, 100, 2`).
-- The tool body returns a `CallToolResult` carrying the Markdown as text content **and** a `_meta` dict assembled from up to two keys: `"sqllens/table"` when `table is not None`, and `"sqllens/query"` when `query_info` is truthy. When both are absent it returns the plain Markdown string (degrades cleanly for non-apps clients). The widget reads `result._meta["sqllens/table"]` and `result._meta["sqllens/query"]` via the apps `ontoolresult` channel and renders them client-side. `structured_output=False` is set on the tool so FastMCP does not derive an `outputSchema` that would reject the deliberately-absent `structuredContent`.
+- `query_database_impl_with_widgets` is the single agent path; `query_database_impl_with_table` (drops the chart) and the legacy `query_database_impl` (drops every structured payload) are now thin wrappers over it. Same agent path, same three error categories. On success it returns `(markdown, table, query_info, chart)` where `table` is `{columns, rows, column_types, row_count, truncated}` (or `None` when the stream has no DataFrame), `chart` is the renderer-agnostic chart spec enriched with `row_count`/`truncated` (or `None` when the agent emitted no `ChartComponent`), and `query_info` carries the executed SQL when `agent.show_details` is on (see [Executed SQL channel](#executed-sql-channel--agentshow_details) below). `_format.components_to_widgets` builds `table` from the **last** DataFrame and `chart` from the **last** `CHART` component, each enforcing a **130 KB serialized-size budget** (`json.dumps(payload, separators=(",", ":"))`), dropping tail rows and reporting the count in `truncated`; if even the header-only / data-stripped form is over budget that payload is `None`. Payload construction is best-effort: any exception degrades to `None` (Markdown still served) rather than escaping the sanitized error taxonomy.
+- **Typed (numeric) client-side sort.** In data-grid mode the widget right-aligns and numerically sorts a column only when `column_types[col] == "number"`. The vendored DataFrame producers never populate `column_types` (`DataFrameComponent.from_records` hard-codes `{}`), so `_format._compute_table_payload` **infers** the type server-side: a column is typed `"number"` when every non-empty coerced cell parses as a finite float (SQL `NULL`/empty cells are skipped; `inf`/`NaN` disqualify the column). Any explicit producer-supplied `column_types` overrides the inferred value (e.g. a zero-padded ID column the agent typed `"string"` stays string-sorted). A non-mapping `column_types` from a producer degrades to inference-only and never fails the payload. Without this inference, numeric columns would sort lexicographically (`1, 10, 100, 2`).
+- The tool body returns a `CallToolResult` carrying the Markdown as text content **and** a `_meta` dict assembled from up to three keys: `"sqllens/chart"` when `chart is not None`, `"sqllens/table"` when `table is not None`, and `"sqllens/query"` when `query_info` is truthy. When all are absent it returns the plain Markdown string (degrades cleanly for non-apps clients). The widget reads these channels via the apps `ontoolresult` channel and **renders in precedence order: chart > data grid (+ collapsible SQL from `sqllens/query`) > plain text**. When both a chart and a table are present (the agent ran SQL *and* emitted a chart) both channels are attached and the widget deterministically renders the chart — no double-render. `structured_output=False` is set on the tool so FastMCP does not derive an `outputSchema` that would reject the deliberately-absent `structuredContent`.
 
 This raised the `mcp` pin to `>=1.26.0,<2` (the lowest 1.x exposing `meta=` on both `FastMCP.tool` — since 1.19.0 — and `FastMCP.resource` — since 1.26.0).
+
+### Chart mode: the `EmitChartTool` seam
+
+The chart is produced by the agent, not by a second tool. The `EmitChartTool` agent-side seam (first-party, not lifted — see [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py)) is registered alongside `RunSqlTool` by `build_agent` (see [agent/factory.md](../agent/factory.md)). The agent runs `run_sql` first to get the aggregated rows, then calls `emit_chart` exactly once with those rows when the result is chart-shaped; `EmitChartTool` does **not** touch SQL — it only validates the renderer-agnostic DSL and emits a `ChartComponent`. The system prompt's `EMIT_CHART USAGE` block (added when `emit_chart` is registered) pins this workflow.
+
+- **The DSL.** `EmitChartParams` (`src/sqllens/agent/tools/emit_chart.py`):
+  - `chart_type: Literal["bar","line","area","scatter","pie","heatmap"]`.
+  - `x`, `y`: `FieldSpec` (a row key, optional human label, optional axis-scale hint `category | time | value | log`).
+  - `series`: optional split key for multi-series; **must be absent for `pie`**, and is the value/z field name for `heatmap` (where it is required). Empty-string is rejected on both sides — see the `_validate_chart_shape` model validator.
+  - `data`: list of already-aggregated row dicts; capped at **200 rows** (`_MAX_CHART_ROWS`) by a Pydantic `_cap_rows` field validator, so an over-cap call is rejected by the registry as `ToolResult(success=False)` before `execute()` runs (the agent must aggregate in SQL first).
+  - `title`: optional.
+- **Chart payload size budget (`_compute_chart_payload`).** Same 130 KB serialized-size budget as the table payload (`_MAX_CHART_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES`, aliased so the two cannot drift apart — both blobs share one sandboxed-iframe rendering ceiling). Same binary-search row-prefix algorithm: drop tail rows until the payload fits, report the count in `truncated`, and if even the data-stripped form is over budget return `None`. Wrapped in a best-effort `_build_chart_payload` so any construction failure degrades to "no widget" (Markdown still served), exactly like `_build_table_payload`.
+- **Numeric values stay numeric.** Unlike the table payload (everything → `str` so the grid renders text), ECharts needs real numbers for axes. `_coerce_chart_value`: `int`/`float`/`Decimal` pass through (Decimal → `float`), non-finite floats (`inf`, `NaN`) degrade to `None` (ECharts skips null), `bool` stays JSON-native, and everything else (str, datetime, …) collapses to `str(value)`. `None` stays `None`. Cell *keys* still go through `_coerce_cell` so non-string column names cannot break `json.dumps`.
+- **Vendored renderer: Apache ECharts 5.5.1.** `src/sqllens/ui/vendor/echarts.min.js` is inlined into the one widget HTML and served from the same MCP origin — no CDN, no remote fetch. The widget uses ECharts' **SVG** renderer (`echarts.init(el, theme, {renderer:'svg'})`): the SVG renderer needs no `eval`/`Function` and emits plain DOM, so the widget runs inside a sandboxed iframe with a strict CSP (no `unsafe-eval` required). Choice was deliberate for issue #138's CSP acceptance criterion. Provenance and sha256 are recorded in [src/sqllens/ui/vendor/README](../../../src/sqllens/ui/vendor/README).
+- **Spec → ECharts option.** The widget reads `result._meta["sqllens/chart"]` and runs `buildEchartsOption(spec)` to translate the renderer-agnostic DSL into ECharts' option object. The agent emits the same DSL dict as `ChartComponent.data`; the MCP layer's `_compute_chart_payload` only enriches it with `row_count` + `truncated` (those belong to the payload, not the agent-side spec — `EmitChartTool` does not produce them).
+- **Theming and resize.** The widget reads the host's apps context (`ctx.theme` `light`/`dark` and any `ctx.styles.variables`) and applies them via CSS custom properties. Theme changes force a `dispose()` + re-`init()` cycle on the ECharts instance (it cannot swap theme on a live instance). A `ResizeObserver` on the chart container resizes the ECharts instance on layout changes for responsive rendering.
 
 ## Executed SQL channel — `agent.show_details`
 
@@ -132,15 +131,15 @@ When `cfg.agent.show_details` is on (the default; env `SQLLENS_AGENT__SHOW_DETAI
 
 `query_info` is the dict `{"sql": str, "query_type": str, "row_count"?: int}` built by `_format._query_info_from_sql`:
 
-- `sql` — the executed SQL string, captured verbatim from the `run_sql` STATUS_CARD's `metadata["sql"]`. The card streams twice (running → completed) with identical metadata, so the last-wins capture in `components_to_table` de-dupes idempotently.
+- `sql` — the executed SQL string, captured verbatim from the `run_sql` STATUS_CARD's `metadata["sql"]`. The card streams twice (running → completed) with identical metadata, so the last-wins capture in `components_to_widgets` de-dupes idempotently.
 - `query_type` — the leading SQL keyword, uppercased, computed by [`first_sql_keyword`](../../../src/sqllens/safety/readonly.py) (exported from `sqllens.safety` and shared with the read-only guard's `is_read_shaped`). Wrapped `(WITH ... SELECT ...)` / `(SELECT ...)` forms classify by their inner verb.
 - `row_count` — present only when `table` is also present. It is the **true** result size, not the rendered subset: `payload["row_count"] + payload["truncated"]`, so the figure reflects the full set the SQL produced even when the 130 KB serialized-payload budget dropped tail rows. `.get(..., 0)` on the payload keeps a partial future shape from raising past the sanitized error taxonomy.
 
 The "no SQL channel" branches are deliberately distinguishable:
 
-- `agent.show_details = False`: the factory leaves `UI_FEATURE_SHOW_TOOL_ARGUMENTS` admin-gated, so the static user never receives the `run_sql` STATUS_CARD; `last_sql` in `components_to_table` stays `None` and `query_info` is `None`. Output is byte-for-byte the pre-feature behavior (no Markdown block, no `_meta["sqllens/query"]`).
+- `agent.show_details = False`: the factory leaves `UI_FEATURE_SHOW_TOOL_ARGUMENTS` admin-gated, so the static user never receives the `run_sql` STATUS_CARD; `last_sql` in `components_to_widgets` stays `None` and `query_info` is `None`. Output is byte-for-byte the pre-feature behavior (no Markdown block, no `_meta["sqllens/query"]`).
 - `agent.show_details = True` but the agent never ran SQL (pure-text answer): the `run_sql` card is never emitted, same result as above.
-- `agent.show_details = True` and the agent ran SQL but execution failed: the completed `run_sql` card carries `status="error"` (the upstream agent maps `ToolResult(success=False)` → `set_status("error", …)`), which fires the `error_message` short-circuit in `components_to_table` *before* `query_info` is built. The tool surfaces the sanitized error message through the [error contract](#the-errorsuccess-contract) below — `_meta` is never populated on the error path.
+- `agent.show_details = True` and the agent ran SQL but execution failed: the completed `run_sql` card carries `status="error"` (the upstream agent maps `ToolResult(success=False)` → `set_status("error", …)`), which fires the `error_message` short-circuit in `components_to_widgets` *before* `query_info` is built. The tool surfaces the sanitized error message through the [error contract](#the-errorsuccess-contract) below — `_meta` is never populated on the error path.
 
 Pinned by `tests/unit/test_format.py` (component-stream cases), `tests/unit/test_query_database.py` (impl-level wiring + `_append_sql_block`), `tests/unit/test_server.py` (`_meta` assembly), `tests/unit/test_factory_wiring.py` (UI-feature unlock), and `tests/unit/test_ui_widget.py` (widget assertions).
 
@@ -153,9 +152,9 @@ Pinned by `tests/unit/test_format.py` (component-stream cases), `tests/unit/test
 
 If we ever want richer introspection (table list, row counts), it should be a *separate* tool — `list_data_sources` is meant to stay fast and offline.
 
-## `import_memory` — opt-in fourth tool
+## `import_memory` — opt-in tool
 
-`build_server` registers a fourth tool, `import_memory(bundle_json: str)`, **only when `cfg.memory.allow_import` is true** (`MemoryConfig.allow_import`, default `False`, env `SQLLENS_MEMORY__ALLOW_IMPORT`):
+`build_server` registers a third tool, `import_memory(bundle_json: str)`, **only when `cfg.memory.allow_import` is true** (`MemoryConfig.allow_import`, default `False`, env `SQLLENS_MEMORY__ALLOW_IMPORT`):
 
 ```python
 if cfg.memory.allow_import:
@@ -178,45 +177,16 @@ Behaviour and contract:
 - **Error contract.** Per CLAUDE.md's `isError` rule: a parse failure raises `RuntimeError("Invalid memory bundle: <detail>")` (the detail is the secret-safe `validation_error_lines` rendering — never the offending input). A store/write failure (Chroma, embedding download, disk) raises a sanitized `RuntimeError("Memory import failed while writing to the store; ... Check the server logs.")` with the full traceback logged via `logger.exception` so the persist path is not leaked to the client.
 - **Closure-bound store.** The `MemoryStore` is constructed once at registration time and closed over by the tool, mirroring how the two core tools close over `cfg` (next section). The bundle file format, dedup rules, and storage shape are documented in [agent/memory.md](../agent/memory.md#first-party-importexport-srcsqllensmemory).
 
-## `visualize_data` — chart-shaped sibling of `query_database`
-
-[src/sqllens/tools/visualize_data.py](../../../src/sqllens/tools/visualize_data.py) is structurally parallel to `query_database`: same shared singleton, same `agent.send_message` path, same client-facing error taxonomy. The only difference is the UI surface — `visualize_data_impl_with_chart` collects a `ChartComponent` from the stream via [`components_to_chart`](../../../src/sqllens/tools/_format.py) instead of a DataFrame.
-
-- **Agent-side seam: `EmitChartTool`.** Registered alongside `RunSqlTool` by `build_agent` (see [agent/factory.md](../agent/factory.md)). The agent runs `run_sql` first to get the aggregated rows and then calls `emit_chart` exactly once with those rows; `EmitChartTool` does **not** touch SQL — it only validates the renderer-agnostic DSL and emits a `ChartComponent`. The system prompt's `EMIT_CHART USAGE` block (added when `emit_chart` is registered) pins this workflow.
-- **The DSL.** `EmitChartParams` (`src/sqllens/agent/tools/emit_chart.py`):
-  - `chart_type: Literal["bar","line","area","scatter","pie","heatmap"]`.
-  - `x`, `y`: `FieldSpec` (a row key, optional human label, optional axis-scale hint `category | time | value | log`).
-  - `series`: optional split key for multi-series; **must be absent for `pie`**, and is the value/z field name for `heatmap` (where it is required). Empty-string is rejected on both sides — see the `_validate_chart_shape` model validator.
-  - `data`: list of already-aggregated row dicts; capped at **200 rows** (`_MAX_CHART_ROWS`) by a Pydantic `_cap_rows` field validator, so an over-cap call is rejected by the registry as `ToolResult(success=False)` before `execute()` runs (the agent must aggregate in SQL first).
-  - `title`: optional.
-- **`components_to_chart` (in [tools/_format.py](../../../src/sqllens/tools/_format.py)).** Single-pass collapse, mirroring `components_to_table`: collect DataFrame components as Markdown tables, keep the last non-empty TEXT as the answer, and pick the **last** `CHART` component as `chart_payload`. A `STATUS_CARD` with `status='error'` short-circuits to `(error_message, True, None)`. Non-apps hosts still get the Markdown tables + answer.
-- **Chart payload size budget (`_compute_chart_payload`).** Same 130 KB serialized-size budget as the table payload (`_MAX_CHART_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES`, aliased so the two cannot drift apart — both blobs share one sandboxed-iframe rendering ceiling). Same binary-search row-prefix algorithm: drop tail rows until the payload fits, report the count in `truncated`, and if even the data-stripped form is over budget return `None`. Wrapped in a best-effort `_build_chart_payload` so any construction failure degrades to "no widget" (Markdown still served), exactly like `_build_table_payload`.
-- **Numeric values stay numeric.** Unlike the table payload (everything → `str` so the grid renders text), ECharts needs real numbers for axes. `_coerce_chart_value`: `int`/`float`/`Decimal` pass through (Decimal → `float`), non-finite floats (`inf`, `NaN`) degrade to `None` (ECharts skips null), `bool` stays JSON-native, and everything else (str, datetime, …) collapses to `str(value)`. `None` stays `None`. Cell *keys* still go through `_coerce_cell` so non-string column names cannot break `json.dumps`.
-- **Error taxonomy is identical.** `visualize_data_impl_with_chart` re-imports `_INTERNAL_ERROR_MESSAGE` and `_SQL_EXECUTION_ERROR_PREFIX` from `tools/query_database.py` (no duplicate definitions), so all three categories — sanitized internal failure, prefixed SQL-execution failure, verbatim `UnsafeSqlError` — apply byte-for-byte. The error/success contract table below covers `visualize_data` as well (`chart` is `None` on error paths, never returned).
-
-## The MCP App interactive chart widget
-
-On **apps-aware hosts**, `visualize_data` additionally carries an interactive chart. Every other host keeps receiving the byte-identical Markdown — same transparent degradation as the table widget.
-
-Mechanism:
-
-- `build_server` registers a resource at `ui://sqllens/chart-results.html` with mime `text/html;profile=mcp-app` (and `_meta.ui.prefersBorder = true`). Its body is the self-contained widget loaded by `load_widget_html("chart_results.html")` (cached; immutable packaged asset). `load_widget_html` is now a single `(filename: str = "query_results.html")` accessor in [src/sqllens/ui/__init__.py](../../../src/sqllens/ui/__init__.py) — one cached loader, two widgets.
-- The `visualize_data` tool is decorated with `meta={"ui": {"resourceUri": "ui://sqllens/chart-results.html"}}`. `query_database` keeps its own table widget URI; the two widgets do not share a resource.
-- **Vendored renderer: Apache ECharts 5.5.1.** `src/sqllens/ui/vendor/echarts.min.js` is served from the same MCP origin as the widget HTML — no CDN, no remote fetch. The widget uses ECharts' **SVG** renderer (`echarts.init(el, theme, {renderer:'svg'})`): the SVG renderer needs no `eval`/`Function` and emits plain DOM, so the widget runs inside a sandboxed iframe with a strict CSP (no `unsafe-eval` required). Choice was deliberate for issue #138's CSP acceptance criterion. Provenance and sha256 are recorded in [src/sqllens/ui/vendor/README](../../../src/sqllens/ui/vendor/README).
-- **Spec → ECharts option.** The widget reads `result._meta["sqllens/chart"]` via the apps `ontoolresult` channel and runs `buildEchartsOption(spec)` to translate the renderer-agnostic DSL into ECharts' option object. The agent emits the same DSL dict as `ChartComponent.data`; the MCP layer's `_compute_chart_payload` only enriches it with `row_count` + `truncated` (those belong to the payload, not the agent-side spec — `EmitChartTool` does not produce them).
-- **Theming and resize.** The widget reads the host's apps context (`ctx.theme` `light`/`dark` and any `ctx.styles.variables`) and applies them via CSS custom properties. Theme changes force a `dispose()` + re-`init()` cycle on the ECharts instance (it cannot swap theme on a live instance — without this, the previous theme's ghost chart would linger). A `ResizeObserver` on the chart container resizes the ECharts instance on layout changes for responsive rendering.
-- `structured_output=False` is set on the tool, same rationale as `query_database`: the success path returns a `CallToolResult` carrying `_meta`; an auto-derived `outputSchema` would reject the deliberately-absent `structuredContent`.
-
 ## Eager warmup shares the request-path singleton (issue #116)
 
-`prime_agent(cfg)` in [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py) (also re-exported from [tools/query_database.py](../../../src/sqllens/tools/query_database.py) for backward compatibility) `await`s `get_agent(cfg)` to build and cache the singleton, then `await`s `_warm_memory(agent)` to **force the otherwise-lazy cold start**. It exists so the HTTP transport can pay that cost at server boot instead of on the first `query_database` *or* `visualize_data` call:
+`prime_agent(cfg)` in [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py) (also re-exported from [tools/query_database.py](../../../src/sqllens/tools/query_database.py) for backward compatibility) `await`s `get_agent(cfg)` to build and cache the singleton, then `await`s `_warm_memory(agent)` to **force the otherwise-lazy cold start**. It exists so the HTTP transport can pay that cost at server boot instead of on the first `query_database` call:
 
-- **One object graph, not two.** Because `prime_agent` delegates to the *same* `get_agent` double-checked-lock singleton the request path uses, the agent built at startup **is** the cached `_AGENT_STATE` agent the first query serves — not a second agent the request path discards. Both `query_database` and `visualize_data` share that one singleton, so a single warmup primes both tools. Pinned by `tests/unit/test_query_database.py::test_prime_agent_primes_request_path_singleton` (warmup then a request → exactly one `build_agent`) and `::test_prime_agent_concurrent_with_request_builds_once` (warmup racing the first request still builds once, with the in-fake `_AGENT_LOCK.locked()` assertion proving the lock is held).
+- **One object graph, not two.** Because `prime_agent` delegates to the *same* `get_agent` double-checked-lock singleton the request path uses, the agent built at startup **is** the cached `_AGENT_STATE` agent the first query serves — not a second agent the request path discards. Pinned by `tests/unit/test_query_database.py::test_prime_agent_primes_request_path_singleton` (warmup then a request → exactly one `build_agent`) and `::test_prime_agent_concurrent_with_request_builds_once` (warmup racing the first request still builds once, with the in-fake `_AGENT_LOCK.locked()` assertion proving the lock is held).
 - **The warm step actually moves the cold start.** `build_agent` alone only wires objects (see "Shared agent singleton" above) — the ~80 MB embedding-model download / ChromaDB open are still lazy after it. `_warm_memory` issues one read-only `agent.agent_memory.get_recent_memories(...)` call, whose result is discarded, *solely* to force `ChromaAgentMemory._get_collection()` → `_get_embedding_function()` so the model download and Chroma open happen at boot. This is the second half of issue #116. Pinned by `::test_prime_agent_primes_request_path_singleton` (asserts the warm touch landed on the *same* memory object the request path serves).
 - **Best-effort by contract, but it raises.** `prime_agent` propagates any failure to its caller — it does **not** swallow errors itself. A *build* failure leaves `_AGENT_STATE` `None` (clean rebuild on first query). A *warm* failure (e.g. offline, model download blocked) leaves `_AGENT_STATE` **populated** — the agent built fine; only the boot-time memory touch failed — so the request path still serves and simply re-attempts the lazy materialization itself. The HTTP lifespan hook (see [mcp-server/transport.md](./transport.md#eager-agent-warmup-on_startup-hook-issue-116)) decides a failed warmup must not block boot. Pinned by `::test_prime_agent_propagates_build_failure` and `::test_prime_agent_propagates_warm_memory_failure`.
 - **A late/duplicate warmup is a cheap no-op for the build.** If a request already populated `_AGENT_STATE`, a subsequent `prime_agent` hits the double-checked-lock fast path and returns without rebuilding (`::test_prime_agent_is_noop_when_request_path_already_built`).
 
-The HTTP transport is the only caller today (via the `_warmup` closure in `build_asgi_app`); stdio mode does not warm up — FastMCP owns its own lifecycle there and the first request pays the cold start as before.
+The HTTP transport is the only caller today (via the `_warmup` closure in `build_asgi_app`); stdio mode does not warm up — FastMCP owns its own lifecycle there and the first `query_database` call pays the cold start as before.
 
 ## Why all core tools take `cfg` from the closure, not a parameter
 
@@ -228,17 +198,15 @@ This means **config changes require a process restart**. There is no hot-reload,
 
 ## The error/success contract
 
-FastMCP collapses every failure into one `isError: true` result and formats the client text as `Error executing tool <name>: <message>`, so the *raised message* is the only category signal the caller gets. `query_database.py` keeps three deliberately distinguishable forms (named in module-level constants), and `visualize_data.py` *re-imports* those same constants — the split is defined exactly once and the two tools cannot drift apart:
+FastMCP collapses every failure into one `isError: true` result and formats the client text as `Error executing tool <name>: <message>`, so the *raised message* is the only category signal the caller gets. `query_database.py` keeps three deliberately distinguishable forms (named in module-level constants) — the split is defined exactly once:
 
 - `_INTERNAL_ERROR_MESSAGE = "internal error; see server logs"` — the stable, sanitized message for tool-internal / infrastructure failures. Driver and agent exception strings (host, port, database, role) are **never** interpolated into the client message; the full traceback is logged server-side via `logger.exception` instead. This covers both agent cold-start/build failures (`get_agent` raised — DB connect, ChromaDB, embedding-model download, bad API key) and `agent.send_message` failures.
 - `_SQL_EXECUTION_ERROR_PREFIX = "SQL execution error: "` — prepended to the agent's *own* structured error report when the component stream is flagged `is_error`. This is agent-authored, actionable detail the calling agent needs (#14's category split), so it is passed through with a recognizable prefix rather than sanitized.
 - **Verbatim safety message** — an `UnsafeSqlError` or `RlsError` propagating out of `send_message` is re-raised with its message unaltered (no prefix, no sanitization), because the guard text *is* actionable safety feedback, not an infra leak. Each stays distinguishable by its own recognizable wording (e.g. `"only SELECT statements are allowed (got ...)"` for the read-only guard; `"refusing to execute query: row-level security could not be applied: ..."` for the RLS guard), not by a constant prefix. See [database-connectors/row-level-security.md](../database-connectors/row-level-security.md).
 
-The same table applies to both `query_database` and `visualize_data`; substitute "chart" for "dataframe" / "table" on the success rows for the latter:
-
 | Situation | What the tool returns |
 |---|---|
-| Successful query, dataframe / chart result | Markdown table(s) + final text answer, `isError: false`. `_meta["sqllens/table"]` (query_database) or `_meta["sqllens/chart"]` (visualize_data) is attached when a structured payload fits the size budget. |
+| Successful query, dataframe / chart result | Markdown table(s) + final text answer, `isError: false`. `_meta["sqllens/chart"]` and/or `_meta["sqllens/table"]` is attached when a structured payload fits the size budget; the widget renders chart > table > text. |
 | Successful query, no data | `"(no answer)"`, `isError: false`. |
 | Agent cold-start/build failed (`get_agent` raised) | `RuntimeError("internal error; see server logs")` → `isError: true`. Full traceback logged server-side; host/port/db/role never echoed to the client. |
 | `agent.send_message` raised an exception | `RuntimeError("internal error; see server logs")` → `isError: true`. Same sanitization as above. |
