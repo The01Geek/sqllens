@@ -48,27 +48,32 @@ def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
     return info
 
 
-def components_to_table(
+def components_to_widgets(
     components: Iterable[UiComponent],
-) -> tuple[str, bool, dict | None, dict | None]:
-    """Collapse a component stream into ``(markdown, is_error, table, query_info)``.
+) -> tuple[str, bool, dict | None, dict | None, dict | None]:
+    """Collapse a component stream into ``(markdown, is_error, table, query_info, chart)``.
 
-    Strategy (single pass):
+    The single source of truth behind the consolidated ``query_database`` tool
+    and the narrower :func:`components_to_table` / :func:`components_to_chart` /
+    :func:`components_to_markdown` views. One pass over the stream:
+
     - Collect all DataFrame components as Markdown tables.
     - Take the *last* TEXT component as the natural-language answer (earlier
       TEXT entries are intermediate agent reasoning).
     - If any STATUS_CARD with status='error' appears, report it as an error.
-    - Build ``table_payload`` from the *last* DataFrame in the stream (matches
-      the last-wins convention; ``query_database`` emits one in practice).
+    - Build ``table`` from the *last* DataFrame and ``chart`` from the *last*
+      ``CHART`` component (last-wins; ``query_database`` emits at most one of
+      each per request, and chart > table precedence is applied by the caller
+      / widget, not here — both payloads are returned when both are present).
     - Capture the executed SQL from the *last* ``run_sql`` STATUS_CARD's
       ``metadata["sql"]``. The card streams twice (running → completed) with
       identical metadata, so last-wins de-dupes it idempotently. The card is
       only emitted when ``agent.show_details`` unlocked the tool-arguments
       feature; with it off, no SQL is ever seen here.
 
-    ``table_payload`` is ``None`` on the error path, when no DataFrame is
-    present, when the last DataFrame is empty, or when even the header-only
-    serialized form exceeds the size budget.
+    ``table`` / ``chart`` are ``None`` on the error path, when the
+    corresponding component is absent, when its data is empty, or when even the
+    header-only / data-stripped serialized form exceeds the size budget.
 
     ``query_info`` is ``None`` whenever no executed SQL is surfaced. The
     config-independent invariant: a guard-rejected non-SELECT (the default
@@ -89,6 +94,7 @@ def components_to_table(
     tables: list[str] = []
     error_message = ""
     last_df = None
+    last_chart = None
     last_sql: str | None = None
 
     for comp in components:
@@ -106,6 +112,8 @@ def components_to_table(
             if table_md:
                 tables.append(table_md)
             last_df = rich
+        elif ctype == ComponentType.CHART:
+            last_chart = rich
         elif ctype == ComponentType.STATUS_CARD:
             if getattr(rich, "status", "") == "error":
                 error_message = getattr(rich, "description", "") or "Agent reported an error"
@@ -116,40 +124,52 @@ def components_to_table(
                     last_sql = sql
 
     if error_message:
-        return error_message, True, None, None
+        return error_message, True, None, None, None
 
     parts = list(tables)
     if text_answer:
         parts.append(text_answer)
     markdown = "\n\n".join(parts) if parts else "(no answer)"
 
-    payload = _build_table_payload(last_df) if last_df is not None else None
+    table = _build_table_payload(last_df) if last_df is not None else None
+    chart = _build_chart_payload(last_chart) if last_chart is not None else None
     query_info = None
     if last_sql is not None:
         # True result size, not the rendered subset: the payload may be
         # size-capped (row_count is the kept prefix, truncated the dropped
         # tail), but the SQL ran against the whole set. ``.get`` keeps a
         # partial future payload from raising an unsanitized KeyError past
-        # query_database_impl_with_table's except blocks (which sanitize
-        # driver-exception strings into a stable internal-error message).
+        # query_database's except blocks (which sanitize driver-exception
+        # strings into a stable internal-error message).
         row_count = (
-            payload.get("row_count", 0) + payload.get("truncated", 0)
-            if payload is not None
+            table.get("row_count", 0) + table.get("truncated", 0)
+            if table is not None
             else None
         )
         query_info = _query_info_from_sql(last_sql, row_count)
-    return markdown, False, payload, query_info
+    return markdown, False, table, query_info, chart
+
+
+def components_to_table(
+    components: Iterable[UiComponent],
+) -> tuple[str, bool, dict | None, dict | None]:
+    """Collapse a component stream into ``(markdown, is_error, table, query_info)``.
+
+    Thin view over :func:`components_to_widgets` that drops the chart payload.
+    """
+    markdown, is_error, table, query_info, _ = components_to_widgets(components)
+    return markdown, is_error, table, query_info
 
 
 def components_to_markdown(components: Iterable[UiComponent]) -> tuple[str, bool]:
     """Collapse a stream of components into ``(markdown, is_error)``.
 
-    Thin wrapper over :func:`components_to_table` that drops the structured
-    table and query info; returns the same ``(markdown, is_error)`` pair
-    non-apps hosts already depend on (the Markdown branch is unchanged —
-    pinned by ``tests/unit/test_format.py``).
+    Thin view over :func:`components_to_widgets` that drops the structured
+    payloads; returns the same ``(markdown, is_error)`` pair non-apps hosts
+    already depend on (the Markdown branch is unchanged — pinned by
+    ``tests/unit/test_format.py``).
     """
-    markdown, is_error, _, _ = components_to_table(components)
+    markdown, is_error, _, _, _ = components_to_widgets(components)
     return markdown, is_error
 
 
@@ -158,52 +178,12 @@ def components_to_chart(
 ) -> tuple[str, bool, dict | None]:
     """Collapse a component stream into ``(markdown, is_error, chart_payload)``.
 
-    Parallel to :func:`components_to_table` but for the chart payload: the
-    Markdown collapse is identical (DataFrame tables first, then the last
-    non-empty TEXT answer, with a STATUS_CARD error short-circuiting) so a
-    non-apps host still gets the data + answer. The structured payload is
-    built from the *last* ``CHART`` component in the stream (mirrors the
-    last-wins ``last_df`` convention; ``emit_chart`` runs once per request).
-
-    ``chart_payload`` is ``None`` on the error path, when no ChartComponent is
-    present, or when even the data-stripped serialized form exceeds the size
-    budget.
+    Thin view over :func:`components_to_widgets` that keeps only the chart
+    payload. The structured payload is built from the *last* ``CHART``
+    component in the stream (``emit_chart`` runs once per request).
     """
-    text_answer = ""
-    tables: list[str] = []
-    error_message = ""
-    last_chart = None
-
-    for comp in components:
-        rich = comp.rich_component
-        if rich is None:
-            continue
-        ctype = getattr(rich, "type", None)
-
-        if ctype == ComponentType.TEXT:
-            content = (getattr(rich, "content", "") or "").strip()
-            if content:
-                text_answer = content
-        elif ctype == ComponentType.DATAFRAME:
-            table_md = _render_dataframe(rich)
-            if table_md:
-                tables.append(table_md)
-        elif ctype == ComponentType.CHART:
-            last_chart = rich
-        elif ctype == ComponentType.STATUS_CARD:
-            if getattr(rich, "status", "") == "error":
-                error_message = getattr(rich, "description", "") or "Agent reported an error"
-
-    if error_message:
-        return error_message, True, None
-
-    parts = list(tables)
-    if text_answer:
-        parts.append(text_answer)
-    markdown = "\n\n".join(parts) if parts else "(no answer)"
-
-    payload = _build_chart_payload(last_chart) if last_chart is not None else None
-    return markdown, False, payload
+    markdown, is_error, _, _, chart = components_to_widgets(components)
+    return markdown, is_error, chart
 
 
 def _coerce_cell(value: object) -> str:
