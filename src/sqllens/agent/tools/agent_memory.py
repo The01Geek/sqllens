@@ -30,7 +30,8 @@ class SaveQuestionToolArgsParams(BaseModel):
         description="The name of the tool that was used successfully"
     )
     args: Dict[str, Any] = Field(
-        description="The arguments that were passed to the tool"
+        default_factory=dict,
+        description="The arguments that were passed to the tool",
     )
 
 

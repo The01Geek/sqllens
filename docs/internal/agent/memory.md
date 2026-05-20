@@ -6,10 +6,12 @@ How the agent recalls prior successful tool uses, and what tunables affect retri
 
 There are two persistence modes, both backed by the same Chroma collection:
 
-**Tool-use memory (structured).** When the agent successfully answers a question, it can call `SaveQuestionToolArgsTool` to record three things:
-- the original natural-language question
-- the name of the tool used (typically `RunSqlTool`)
-- the args passed to that tool (the generated SQL, table names, filters)
+**Tool-use memory (structured).** When the agent successfully answers a question, it can call `SaveQuestionToolArgsTool` to record:
+- the original natural-language question (required)
+- the name of the tool used (required; typically `RunSqlTool`)
+- the args passed to that tool (optional — the generated SQL, table names, filters)
+
+`args` is **optional** on `SaveQuestionToolArgsParams` (`default_factory=dict` in [src/sqllens/agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py)): an LLM-generated call that omits it validates and saves with `{}` instead of being rejected. This matters because not every tool the agent remembers carries meaningful args — the chart flow's `emit_chart` case sends only `{question, tool_name}`. If `args` were still required, that call would fail Pydantic validation at the tool registry's `model_validate` step (before `execute()` runs), surface as an error status card, and short-circuit `components_to_chart` — which is exactly how `visualize_data` was broken before issue #146. `question` and `tool_name` remain required.
 
 The question is the embedded text; the tool name and args ride along as Chroma metadata. The next time a similar question comes in, the agent calls `SearchSavedCorrectToolUsesTool` with the new question — Chroma returns the nearest neighbours by cosine similarity, and the agent uses the previous SQL as a starting point instead of re-deriving it from scratch.
 
