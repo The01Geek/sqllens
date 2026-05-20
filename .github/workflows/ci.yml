@@ -4,6 +4,21 @@ on:
   push:
     branches: [main]
   pull_request:
+    # Default types (opened, synchronize, reopened) are NOT enough for our
+    # bot PRs. Automation (claude-implement / devflow-review-and-fix /
+    # WikiWizard) opens a PR as a draft, pushes its fix + docs commits using
+    # the default GITHUB_TOKEN — which GitHub's recursion guard suppresses, so
+    # NO `synchronize` event fires for those commits — then toggles the PR to
+    # ready-for-review. Listening only to the default types meant CI never ran
+    # on the bot's HEAD commit; because `Lint + unit + transport (py3.12)` is a
+    # REQUIRED status check, the PR wedged at "Expected — waiting for status"
+    # forever. Adding `ready_for_review` makes CI fire on that toggle and pick
+    # up the current HEAD — the same event the Devflow Review / Sync PR Status
+    # / WikiWizard workflows already key off to catch these bot PRs. We do NOT
+    # add `pull_request_target` here (unlike devflow-review.yml): this job runs
+    # arbitrary PR code (`pip install -e .`, pytest), and doing that under
+    # pull_request_target would expose repo secrets/token to untrusted code.
+    types: [opened, synchronize, reopened, ready_for_review]
   # GitHub Merge Queue dispatches a `merge_group` event for each queued PR
   # against a synthesized post-merge tree (gh-readonly-queue/main/...). Without
   # this trigger the required checks never fire on the queue's merge-group refs
