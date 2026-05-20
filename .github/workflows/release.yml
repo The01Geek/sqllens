@@ -78,6 +78,9 @@ jobs:
     # truth — same value the tag-match step derived).
     needs: [build, pypi-publish]
     runs-on: ubuntu-latest
+    # The retry loop is bounded (~75s), but a hung pip install would otherwise
+    # ride the 6h default job timeout — fail fast instead.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
@@ -99,7 +102,11 @@ jobs:
               break
             fi
             if [ "${attempt}" -eq 6 ]; then
-              echo "::error::sqllens==${VERSION} not installable from PyPI after ${attempt} attempts"
+              # Don't assume CDN lag: a 404 / "No matching distribution" in the
+              # pip output above is propagation lag, but an unsatisfiable pin,
+              # yanked release, or broken wheel fails identically here. Read the
+              # pip log above — this line is not the root cause.
+              echo "::error::sqllens==${VERSION} not installable after ${attempt} attempts; inspect the pip output above for the real cause (CDN lag vs. a genuine packaging failure)"
               exit 1
             fi
             echo "Attempt ${attempt} failed; sleeping 15s for PyPI propagation"
