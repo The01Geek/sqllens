@@ -552,9 +552,15 @@ Construct the report in this format:
 PASS items are summarized in the count line above; do not list them individually. Callers that render the report in environments supporting collapsible Markdown (e.g. GitHub PR comments) MAY wrap a per-item PASS list in a `<details>` block, but the skill itself does not emit one.
 
 ## Code Review Findings
-{for each finding: "- [agent-name] severity: description (raised by N/{total Phase 3 agents that returned results} agents)"}
+{One line per finding, formatted for fast scanning in a GitHub PR comment:
+"- {emoji} {file}:L{line} — {problem}. {fix}. [agent-name] (raised by N/{total Phase 3 agents that returned results} agents)"
+Severity emoji: 🔴 Critical · 🟡 Important/Major · 🔵 Suggestion/Minor · ⚪ Informational · ❓ Question.
+Rules: drop preamble and hedging ("I noticed that…", restating what the diff already shows). Keep exact line numbers and symbol names in backticks; state a concrete fix, not a vague suggestion. Omit `{file}:L{line}` only when the finding is not location-specific. Keep the `[agent-name]` and corroboration count — they carry confidence signal.
+Expand to a short paragraph (then resume one-line format) only for: CVE-class security findings, or architectural disagreements where the author needs the rationale.}
 {for findings whose index appears in the matcher's honored[] list, append " [Deferred → #{follow_up_issue}]" to the line and render the finding under a separate sub-heading "### Informational — Deferred" rather than under its original severity bucket.}
 {group Critical findings first, then Important/Major, then Suggestion/Minor, then Informational — Deferred. Within each severity, list corroborated findings (N≥2) before single-source ones (N=1) so the highest-confidence items lead.}
+
+Severity legend: 🔴 Critical · 🟡 Important/Major · 🔵 Suggestion/Minor · ⚪ Informational · ❓ Question
 
 ## Deferrals
 {Omit this section entirely when 4.0 was skipped (current-branch mode) or block_present was false. Otherwise render:}
