@@ -83,6 +83,32 @@ async def test_text_only_returns_none_chart(
 
 
 @pytest.mark.asyncio
+async def test_conversation_id_and_metadata_are_threaded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """visualize_data now threads conversation_id and (reserved-stripped)
+    metadata into send_message, at parity with query_database."""
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    stub = agent_stub_factory([make_text_component("ok")])
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    await visualize_data_impl_with_chart(
+        cfg,
+        "chart it",
+        metadata={"tenant_id": "acme", "starter_ui_request": True},
+        conversation_id="conv-7",
+    )
+
+    request_context, message, conversation_id = stub.send_message_calls[0]
+    assert message == "chart it"
+    assert conversation_id == "conv-7"
+    # Reserved control key stripped; RLS value forwarded.
+    assert request_context.metadata == {"tenant_id": "acme"}
+
+
+@pytest.mark.asyncio
 async def test_shares_singleton_with_query_database(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -33,6 +33,7 @@ from sqllens.agent.tools import (
     SearchSavedCorrectToolUsesTool,
 )
 from sqllens.config import API_KEY_MISSING_MESSAGE, Config
+from sqllens.conversation_store import BoundedConversationStore
 from sqllens.safety import ReadOnlyGuardRunner, RlsGuardRunner, RowCapRunner
 
 DEFAULT_USER_ID = "sqllens-user"
@@ -136,6 +137,13 @@ def build_agent(cfg: Config) -> Agent:
         tool_registry=tools,
         user_resolver=_StaticUserResolver(),
         agent_memory=memory,
+        # Bounded LRU store backing multi-turn conversations. The framework
+        # default (MemoryConversationStore) is unbounded; this caps in-process
+        # memory so a long-running server does not leak conversations. Ephemeral
+        # by design — dropped on restart, never persisted (CLAUDE.md non-goal).
+        conversation_store=BoundedConversationStore(
+            max_conversations=cfg.agent.max_conversations,
+        ),
         # Framework's AgentConfig defaults max_tool_iterations=10, which truncates
         # mid-exploration on untrained schemas. Surface the knob via config so
         # operators can raise it without patching code.

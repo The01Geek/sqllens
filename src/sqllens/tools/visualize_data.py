@@ -18,6 +18,8 @@ exactly one place and the two tools cannot drift apart.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import Any
 
 from sqllens.agent import RequestContext
 from sqllens.config import Config
@@ -27,13 +29,18 @@ from sqllens.tools._format import components_to_chart
 from sqllens.tools.query_database import (
     _INTERNAL_ERROR_MESSAGE,
     _SQL_EXECUTION_ERROR_PREFIX,
+    strip_reserved_metadata,
 )
 
 logger = logging.getLogger("sqllens.tools.visualize_data")
 
 
 async def visualize_data_impl_with_chart(
-    cfg: Config, question: str
+    cfg: Config,
+    question: str,
+    *,
+    metadata: Mapping[str, Any] | None = None,
+    conversation_id: str | None = None,
 ) -> tuple[str, dict | None]:
     """Translate ``question`` to SQL, execute, and return ``(markdown, chart)``.
 
@@ -44,6 +51,10 @@ async def visualize_data_impl_with_chart(
     return ``(markdown, None)``. On a successful result, ``chart`` is ``None``
     whenever no ChartComponent is present (apps-aware callers attach it to
     ``_meta``; everyone else ignores it and reads the Markdown).
+
+    ``metadata`` (caller-supplied MCP ``_meta``, reserved keys stripped) and
+    ``conversation_id`` are threaded through identically to ``query_database``
+    so this tool reads RLS values and supports multi-turn conversations too.
     """
     try:
         agent = await get_agent(cfg)
@@ -54,11 +65,15 @@ async def visualize_data_impl_with_chart(
         # internal message to the client.
         logger.exception("agent construction failed")
         raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
-    request_context = RequestContext(headers={}, cookies={}, metadata={})
+    request_context = RequestContext(
+        headers={}, cookies={}, metadata=strip_reserved_metadata(metadata)
+    )
 
     components = []
     try:
-        async for comp in agent.send_message(request_context, question):
+        async for comp in agent.send_message(
+            request_context, question, conversation_id=conversation_id
+        ):
             components.append(comp)
     except UnsafeSqlError as e:
         # Defensive path, identical contract to query_database: the vendored

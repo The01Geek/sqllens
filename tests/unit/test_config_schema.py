@@ -38,6 +38,7 @@ def _clean_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SQLLENS_CONFIG_VERSION", raising=False)
     monkeypatch.delenv("SQLLENS_AGENT__SHOW_DETAILS", raising=False)
     monkeypatch.delenv("SQLLENS_AGENT__AUDIT__ENABLED", raising=False)
+    monkeypatch.delenv("SQLLENS_AGENT__MAX_CONVERSATIONS", raising=False)
 
 
 def _minimal_toml(tmp_path: Path, extra: str = "") -> Path:
@@ -122,6 +123,26 @@ def test_show_details_toml_override(tmp_path: Path) -> None:
         _minimal_toml(tmp_path, "\n[agent]\nshow_details = false\n")
     )
     assert cfg.agent.show_details is False
+
+
+# --- #149: AgentRuntimeConfig.max_conversations --------------------------------
+
+
+def test_max_conversations_defaults_to_1000() -> None:
+    assert AgentRuntimeConfig().max_conversations == 1000
+
+
+def test_max_conversations_env_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SQLLENS_AGENT__MAX_CONVERSATIONS", "42")
+    cfg = Config.load(_minimal_toml(tmp_path))
+    assert cfg.agent.max_conversations == 42
+
+
+def test_max_conversations_rejects_below_one() -> None:
+    with pytest.raises(ValueError):
+        AgentRuntimeConfig(max_conversations=0)
 
 
 # --- O-3: AgentRuntimeConfig.audit -----------------------------------------

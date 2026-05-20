@@ -48,6 +48,86 @@ def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
     return info
 
 
+# The agent emits this placeholder on every normal turn's finalization
+# ChatInputUpdateComponent (agent/core/agent/agent.py). It is not a clarifying
+# question, so it must never be surfaced as the answer when a turn produces no
+# TEXT/DATAFRAME — otherwise an empty result would render "Ask a question..."
+# instead of the "(no answer)" fallback.
+_GENERIC_INPUT_PLACEHOLDERS = frozenset({"ask a question..."})
+
+
+def _button_label(data: object) -> str:
+    if isinstance(data, dict):
+        label = data.get("label")
+        if isinstance(label, str):
+            return label.strip()
+    return ""
+
+
+def _alert_text(rich) -> str:  # type: ignore[no-untyped-def]
+    # ALERT has no first-party component class in this pruned tree, so read the
+    # common text-bearing fields defensively; NOTIFICATION carries message/title.
+    message = ""
+    for attr in ("message", "content", "description"):
+        val = getattr(rich, attr, None)
+        if isinstance(val, str) and val.strip():
+            message = val.strip()
+            break
+    title = getattr(rich, "title", None)
+    if isinstance(title, str) and title.strip() and title.strip() != message:
+        return f"**{title.strip()}**: {message}" if message else title.strip()
+    return message
+
+
+def render_interactive(components: Iterable[UiComponent]) -> str:
+    """Render the agent's interactive/follow-up affordances as plain Markdown.
+
+    Surfaces a clarifying question the agent expressed *only* as an interactive
+    component — a ``CHAT_INPUT_UPDATE`` prompt, ``BUTTON``/``BUTTON_GROUP``
+    choices, or an ``ALERT``/``NOTIFICATION`` message — so the calling model
+    receives the question instead of a useless ``"(no answer)"``. The output is
+    plain Markdown, independent of the MCP Apps widget channel, so non-apps
+    clients get the question too.
+
+    Returns ``""`` when no renderable interactive affordance is present, which
+    the callers treat as "fall back to ``(no answer)``". Used only when a turn
+    produced no ``TEXT``/``DATAFRAME`` answer, so a normal answer's trailing
+    finalization components are never surfaced.
+    """
+    pieces: list[str] = []
+    choices: list[str] = []
+    for comp in components:
+        rich = comp.rich_component
+        if rich is None:
+            continue
+        ctype = getattr(rich, "type", None)
+        if ctype == ComponentType.CHAT_INPUT_UPDATE:
+            prompt = (getattr(rich, "placeholder", "") or "").strip()
+            if prompt and prompt.lower() not in _GENERIC_INPUT_PLACEHOLDERS:
+                pieces.append(prompt)
+        elif ctype == ComponentType.BUTTON:
+            label = _button_label(getattr(rich, "data", None))
+            if label:
+                choices.append(label)
+        elif ctype == ComponentType.BUTTON_GROUP:
+            data = getattr(rich, "data", None)
+            buttons = data.get("buttons", []) if isinstance(data, dict) else []
+            if isinstance(buttons, list):
+                for button in buttons:
+                    label = _button_label(button)
+                    if label:
+                        choices.append(label)
+        elif ctype in (ComponentType.ALERT, ComponentType.NOTIFICATION):
+            text = _alert_text(rich)
+            if text:
+                pieces.append(text)
+
+    if choices:
+        enumerated = "\n".join(f"- {choice}" for choice in choices)
+        pieces.append(f"Please choose one of the following:\n\n{enumerated}")
+    return "\n\n".join(pieces)
+
+
 def components_to_table(
     components: Iterable[UiComponent],
 ) -> tuple[str, bool, dict | None, dict | None]:
@@ -85,6 +165,9 @@ def components_to_table(
       emitted, so ``last_sql`` stays ``None`` and ``query_info`` is ``None``
       because no SQL card was seen — not via the error short-circuit.
     """
+    # Materialize once: render_interactive (the no-answer fallback below) needs a
+    # second pass, and the public signature accepts any Iterable (incl. generators).
+    components = list(components)
     text_answer = ""
     tables: list[str] = []
     error_message = ""
@@ -121,7 +204,7 @@ def components_to_table(
     parts = list(tables)
     if text_answer:
         parts.append(text_answer)
-    markdown = "\n\n".join(parts) if parts else "(no answer)"
+    markdown = "\n\n".join(parts) if parts else (render_interactive(components) or "(no answer)")
 
     payload = _build_table_payload(last_df) if last_df is not None else None
     query_info = None
@@ -169,6 +252,7 @@ def components_to_chart(
     present, or when even the data-stripped serialized form exceeds the size
     budget.
     """
+    components = list(components)
     text_answer = ""
     tables: list[str] = []
     error_message = ""
@@ -200,10 +284,26 @@ def components_to_chart(
     parts = list(tables)
     if text_answer:
         parts.append(text_answer)
-    markdown = "\n\n".join(parts) if parts else "(no answer)"
+    markdown = "\n\n".join(parts) if parts else (render_interactive(components) or "(no answer)")
 
     payload = _build_chart_payload(last_chart) if last_chart is not None else None
     return markdown, False, payload
+
+
+def append_conversation_footer(markdown: str, conversation_id: str | None) -> str:
+    """Append the conversation id as a plain-Markdown footer (text fallback).
+
+    The structured ``_meta`` channel is the source of truth for apps-aware
+    hosts; this footer is how a non-apps client learns the id it must pass back
+    as the ``conversation_id`` argument to continue the conversation. A falsy
+    ``conversation_id`` returns ``markdown`` unchanged.
+    """
+    if not conversation_id:
+        return markdown
+    return (
+        f"{markdown}\n\n_Conversation ID: `{conversation_id}` — pass it back as the "
+        f"`conversation_id` argument to continue this conversation._"
+    )
 
 
 def _coerce_cell(value: object) -> str:

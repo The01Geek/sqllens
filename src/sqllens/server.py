@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
 
 from sqllens.config import Config
+from sqllens.tools._format import append_conversation_footer
 from sqllens.tools.list_data_sources import list_data_sources_impl
 from sqllens.tools.query_database import query_database_impl_with_table
 from sqllens.tools.visualize_data import visualize_data_impl_with_chart
@@ -44,6 +46,13 @@ _TABLE_META_KEY = "sqllens/table"
 _QUERY_META_KEY = "sqllens/query"
 _CHART_WIDGET_URI = "ui://sqllens/chart-results.html"
 _CHART_META_KEY = "sqllens/chart"
+# Conversation continuity channel. The resolved conversation id is returned on
+# every successful answer turn — structured here for apps-aware hosts, and as a
+# plain-Markdown footer in the text content for non-apps clients. The calling
+# model passes it back as the ``conversation_id`` tool argument on the next turn
+# so the agent loads the prior turn's history (e.g. to answer its own clarifying
+# question).
+_CONVERSATION_META_KEY = "sqllens/conversation"
 
 
 def _request_metadata(ctx: Context) -> dict[str, Any]:
@@ -118,9 +127,15 @@ def build_server(cfg: Config) -> FastMCP:
     # a (deliberately absent) structuredContent and reject it.
     @mcp.tool(meta={"ui": {"resourceUri": _WIDGET_URI}}, structured_output=False)
     async def query_database(
-        question: str, ctx: Context
+        question: str, ctx: Context, conversation_id: str | None = None
     ) -> str | CallToolResult:
         """Ask a question in natural language. Returns a Markdown table or text answer.
+
+        For multi-turn conversations (e.g. the agent asks a clarifying
+        question), pass the ``conversation_id`` returned by the previous turn
+        back in as the ``conversation_id`` argument so the agent retains
+        context. Omit it to start a fresh conversation; the response always
+        reports the conversation id (as ``_meta`` and a plain-text footer).
 
         When ``agent.show_details`` is on (the default) and the agent
         successfully executed a SQL query, the answer also includes the
@@ -130,18 +145,25 @@ def build_server(cfg: Config) -> FastMCP:
         ``agent.show_details = false`` suppresses it unconditionally.
         """
         metadata = _request_metadata(ctx)
+        # Mint a stable id when the caller did not supply one, so the resolved
+        # id can be returned for the caller to thread on the next turn (passing
+        # None down would let the agent mint one we never see).
+        conversation_id = conversation_id or str(uuid.uuid4())
         markdown, table, query_info = await query_database_impl_with_table(
-            cfg, question, metadata=metadata
+            cfg, question, metadata=metadata, conversation_id=conversation_id
         )
-        meta: dict = {}
+        meta: dict = {_CONVERSATION_META_KEY: {"conversation_id": conversation_id}}
         if table is not None:
             meta[_TABLE_META_KEY] = table
         if query_info:
             meta[_QUERY_META_KEY] = query_info
-        if not meta:
-            return markdown
         return CallToolResult(
-            content=[TextContent(type="text", text=markdown)],
+            content=[
+                TextContent(
+                    type="text",
+                    text=append_conversation_footer(markdown, conversation_id),
+                )
+            ],
             _meta=meta,
         )
 
@@ -158,14 +180,31 @@ def build_server(cfg: Config) -> FastMCP:
     @mcp.tool(
         meta={"ui": {"resourceUri": _CHART_WIDGET_URI}}, structured_output=False
     )
-    async def visualize_data(question: str) -> str | CallToolResult:
-        """Ask a question; returns an interactive chart for chart-shaped results, else text."""
-        markdown, chart = await visualize_data_impl_with_chart(cfg, question)
-        if chart is None:
-            return markdown
+    async def visualize_data(
+        question: str, ctx: Context, conversation_id: str | None = None
+    ) -> str | CallToolResult:
+        """Ask a question; returns an interactive chart for chart-shaped results, else text.
+
+        Multi-turn conversations work identically to ``query_database``: pass
+        the ``conversation_id`` from the previous turn back in to retain
+        context; the response always reports the conversation id.
+        """
+        metadata = _request_metadata(ctx)
+        conversation_id = conversation_id or str(uuid.uuid4())
+        markdown, chart = await visualize_data_impl_with_chart(
+            cfg, question, metadata=metadata, conversation_id=conversation_id
+        )
+        meta: dict = {_CONVERSATION_META_KEY: {"conversation_id": conversation_id}}
+        if chart is not None:
+            meta[_CHART_META_KEY] = chart
         return CallToolResult(
-            content=[TextContent(type="text", text=markdown)],
-            _meta={_CHART_META_KEY: chart},
+            content=[
+                TextContent(
+                    type="text",
+                    text=append_conversation_footer(markdown, conversation_id),
+                )
+            ],
+            _meta=meta,
         )
 
     @mcp.tool()
