@@ -5,12 +5,18 @@
 <!--
   Self-contained MCP App widget for visualize_data results.
 
-  No external origins: every asset (this file + ./vendor/app-with-deps.js +
-  ./vendor/echarts.min.js) is served from the same MCP server origin. No
-  fonts, no analytics, no CDN, no remote XHR/fetch. The host renders this in a
-  sandboxed iframe and pushes the tool's CallToolResult via the MCP Apps
-  postMessage channel; the chart spec lives under result._meta["sqllens/chart"].
-  If that key is absent or malformed the widget renders an empty-state notice.
+  No external origins: this file plus its two vendored bundles
+  (./vendor/echarts.min.js, ./vendor/app-with-deps.js) form the entire widget.
+  Both bundles are *inlined* into this HTML at serve time by
+  sqllens.ui.load_widget_html() — MCP App hosts ``document.write`` the HTML
+  into an about:blank-base iframe with no access to sibling files on the
+  MCP server, so any relative <script src=…> or `import "./vendor/…"` would
+  404 and the widget would silently hang on "Waiting for results…".
+
+  The host renders the inlined HTML in a sandboxed iframe and pushes the
+  tool's CallToolResult via the MCP Apps postMessage channel; the chart spec
+  lives under result._meta["sqllens/chart"]. If that key is absent or
+  malformed the widget renders an empty-state notice.
 
   Renderer: ECharts SVG renderer (echarts.init(el, theme, {renderer:'svg'})).
   The SVG renderer needs no eval/Function and emits plain DOM, so it cannot
@@ -27,6 +33,24 @@
     --fg: var(--color-text-primary, #1a1a1a);
     --muted: var(--color-text-secondary, #6b7280);
     --line: var(--color-border-primary, #d1d5db);
+  }
+  /* Dark-mode fallbacks for hosts (MCP Inspector) that don't push `--color-*`
+     design tokens through getHostContext(). Without these the light-default
+     #1a1a1a text renders black on a dark background. Precedence: an explicit
+     `data-theme="light"` from the host must win even if the OS prefers dark,
+     so the media query excludes that case. data-theme="dark" stays a
+     separate rule so an explicit dark theme wins on a light OS too. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --fg: var(--color-text-primary, #e6e6e6);
+      --muted: var(--color-text-secondary, #a1a1aa);
+      --line: var(--color-border-primary, #3a3a40);
+    }
+  }
+  :root[data-theme="dark"] {
+    --fg: var(--color-text-primary, #e6e6e6);
+    --muted: var(--color-text-secondary, #a1a1aa);
+    --line: var(--color-border-primary, #3a3a40);
   }
   html, body { margin: 0; padding: 0; background: transparent; height: 100%; }
   body {
@@ -62,6 +86,11 @@ const root = document.getElementById("root");
 function applyHostContext(ctx) {
   if (!ctx) return;
   const theme = ctx.theme === "dark" ? "dark" : "light";
+  // data-theme drives the :root[data-theme="dark"] / :not([data-theme="light"])
+  // CSS rules. Setting it explicitly (rather than relying solely on
+  // prefers-color-scheme) lets the host's declared theme win over the OS
+  // preference — e.g. a dark host on a light-mode OS still renders dark.
+  document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
   const vars = ctx.styles && ctx.styles.variables;
   if (vars) {
