@@ -34,6 +34,8 @@ Defines the database SQL Lens connects to.
 
 Both `statement_timeout_ms` and `max_rows` are safety bounds that protect SQL Lens (and your database) from runaway queries. The defaults are chosen to handle the vast majority of interactive analytical work without intervention.
 
+**Note:** SQL Lens instructs the assistant not to expose your database structure — it will decline requests to list tables, dump column names, or describe the schema, and it will not run schema-listing queries on a user's behalf. This is a best-effort guardrail, not a hard boundary. To enforce what is reachable, connect SQL Lens with a database user whose grants are limited to the specific tables or views you want queried, with no access to system catalogs.
+
 ### Database URL formats
 
 | Dialect | URL format |
@@ -58,7 +60,7 @@ Defines the language model SQL Lens uses to translate questions into SQL.
 
 Configures the local vector store SQL Lens uses to remember helpful context across questions. Two kinds of entries are stored in this vector store:
 
-- **Successful question-and-answer patterns**: when SQL Lens answers a question well, it can save the question, the tool it used, and the arguments it passed, so a similar future question can reuse that approach instead of re-deriving it.
+- **Successful question-and-answer patterns**: when SQL Lens answers a question well, it can save the question, the tool it used, and the arguments it passed, so a similar future question can reuse that approach instead of re-deriving it. Saving these patterns is off by default and is enabled with the `save_queries` setting below.
 - **Free-form notes**: SQL Lens can also save short text notes (for example, "in this schema, `cust_seg` means customer segment") so future questions can land on the right tables and columns.
 
 Both kinds of entries live in the same ChromaDB collection on disk.
@@ -68,6 +70,7 @@ Both kinds of entries live in the same ChromaDB collection on disk.
 | `persist_dir` | String | Directory where ChromaDB writes its database files. |
 | `collection` | String | The collection name within the vector store. Use a different name per database if you run several SQL Lens instances on the same machine. |
 | `similarity_threshold` | Number | Minimum cosine similarity, between `0.0` and `1.0`, for a saved entry to be returned when SQL Lens searches its memory. Defaults to `0.7`. Lower the value if useful past answers are being missed; raise it if irrelevant past answers are surfacing. This value is the server-side default and can be overridden per call by the assistant when warranted. |
+| `save_queries` | Boolean | Defaults to `false`. When set to `true`, SQL Lens can save successful question-and-answer patterns to memory so similar future questions reuse the same approach. When off, no question-and-answer patterns are written, and SQL Lens still reads any patterns already in memory and still saves free-form notes. The environment override is `SQLLENS_MEMORY__SAVE_QUERIES`. See [Managing memory](managing-memory.md). |
 | `allow_import` | Boolean | Defaults to `false`. When set to `true`, SQL Lens exposes an extra `import_memory` tool to the connected assistant so it can bulk-load curated knowledge over the connection. Leave this off unless you trust every client that can reach the server: a client able to write memory can influence future SQL generation. The `sqllens import-memory` and `sqllens export-memory` commands work regardless of this setting. See [Managing memory](managing-memory.md). |
 
 The first time SQL Lens runs, ChromaDB downloads roughly 80 MB of embedding model weights into `persist_dir`. Allow time and network access for this initial step.
@@ -133,7 +136,7 @@ Tunes how the natural-language agent behaves.
 | Field | Type | Description |
 |---|---|---|
 | `max_tool_iterations` | Integer | Maximum number of internal tool calls (schema lookups, memory searches, and the final query) the agent may make while answering one question. Defaults to `20`; valid range is `1` to `100`. Raise it if questions against an unfamiliar database fail because the agent runs out of steps while exploring the schema. |
-| `show_details` | Boolean | Defaults to `true`. When on, every `query_database` answer also surfaces the SQL the agent executed: as a fenced ` ```sql ` block appended to the Markdown answer, and (on hosts that render interactive widgets, such as Claude Desktop) as a collapsible "Executed SQL" section above the result grid. Set to `false` to restore the pre-feature answer-only output. The environment override is `SQLLENS_AGENT__SHOW_DETAILS`. Questions that the agent answers from prior context (no SQL executed) and non-SELECT queries that the safety guard rejects produce no SQL block, with or without this setting. |
+| `show_details` | Boolean | Defaults to `false`. By default a `query_database` answer does not include the SQL the agent executed, because exposing that SQL to connected clients can reveal details about your database structure and query logic. Set to `true` to surface the executed SQL alongside each answer: as a fenced ` ```sql ` block appended to the Markdown answer, and (on hosts that render interactive widgets, such as Claude Desktop) as a collapsible "Executed SQL" section above the result grid. Enable it only for trusted, debugging-oriented deployments. The environment override is `SQLLENS_AGENT__SHOW_DETAILS`. |
 | `max_conversations` | Integer | Maximum number of in-progress conversations SQL Lens keeps in memory at once, to support multi-turn questions (see [Multi-turn conversations](getting-started.md#multi-turn-conversations) in Getting Started). Defaults to `1000`; valid range is `1` to `1000000`. When the limit is reached, the conversation that has been idle the longest is dropped. Conversations are held in memory only and are never written to disk, so all of them are cleared when the server restarts. The environment override is `SQLLENS_AGENT__MAX_CONVERSATIONS`. Most deployments never need to change this. |
 
 ### Section: `[agent.audit]`

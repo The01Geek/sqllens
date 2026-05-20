@@ -108,21 +108,23 @@ def test_server_log_level_rejects_invalid_level() -> None:
 # --- P-10: AgentRuntimeConfig.show_details -------------------------------------
 
 
-def test_show_details_defaults_true() -> None:
-    assert AgentRuntimeConfig().show_details is True
+def test_show_details_defaults_false() -> None:
+    # OFF by default so MCP clients don't see the generated SQL unless an
+    # operator opts in.
+    assert AgentRuntimeConfig().show_details is False
 
 
 def test_show_details_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SQLLENS_AGENT__SHOW_DETAILS", "false")
+    monkeypatch.setenv("SQLLENS_AGENT__SHOW_DETAILS", "true")
     cfg = Config.load(_minimal_toml(tmp_path))
-    assert cfg.agent.show_details is False
+    assert cfg.agent.show_details is True
 
 
 def test_show_details_toml_override(tmp_path: Path) -> None:
     cfg = Config.load(
-        _minimal_toml(tmp_path, "\n[agent]\nshow_details = false\n")
+        _minimal_toml(tmp_path, "\n[agent]\nshow_details = true\n")
     )
-    assert cfg.agent.show_details is False
+    assert cfg.agent.show_details is True
 
 
 # --- #149: AgentRuntimeConfig.max_conversations --------------------------------
@@ -413,7 +415,7 @@ def test_minimal_legacy_toml_still_loads_with_new_defaults(
     cfg = Config.load(_minimal_toml(tmp_path))
     assert cfg.config_version == 1
     assert cfg.server.log_level == "info"
-    assert cfg.agent.show_details is True
+    assert cfg.agent.show_details is False
     assert cfg.agent.audit.enabled is False
 
 
