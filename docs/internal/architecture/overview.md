@@ -29,7 +29,7 @@ agent/*           →  Vendored NL-to-SQL framework (see "Lifted code" below)
 Cross-cutting modules can be imported from anywhere:
 
 - [src/sqllens/auth/](../../../src/sqllens/auth/) — `Authenticator` protocol + `none`/`bearer`/`jwt` strategies.
-- [src/sqllens/safety/](../../../src/sqllens/safety/) — `assert_select_only` sqlglot parser + `ReadOnlyGuardRunner` decorator (parse-time gate); `RowCapRunner` + `rows_to_capped_df` helpers (row-cap belt-and-suspenders alongside the per-runner `fetchmany` stream + native statement-timeout primitives). See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md).
+- [src/sqllens/safety/](../../../src/sqllens/safety/) — `assert_select_only` sqlglot parser + `ReadOnlyGuardRunner` decorator (parse-time gate); `RowCapRunner` + `rows_to_capped_df` helpers (row-cap belt-and-suspenders alongside the per-runner `fetchmany` stream + native statement-timeout primitives); `apply_rls` sqlglot AST rewrite + `RlsGuardRunner` decorator (opt-in row-level scoping that fails secure if it cannot prove a query is fully scoped). See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) and [database-connectors/row-level-security.md](../database-connectors/row-level-security.md).
 - [src/sqllens/transport/](../../../src/sqllens/transport/) — ASGI wrapper around FastMCP's HTTP app (auth middleware + path normalizer).
 
 ## Key source files
@@ -108,5 +108,5 @@ What was dropped, and why we might regret it:
 - New here? Read [setup/config-loading.md](../setup/config-loading.md), then [agent/factory.md](../agent/factory.md).
 - Debugging the agent? Read [agent/memory.md](../agent/memory.md) and [agent/tool-scratch-storage.md](../agent/tool-scratch-storage.md), then diff against upstream.
 - Working on transport / clients? Read [mcp-server/transport.md](../mcp-server/transport.md) and [authentication/overview.md](../authentication/overview.md).
-- Working on safety / SQL execution? Read [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md).
+- Working on safety / SQL execution? Read [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md), and [database-connectors/row-level-security.md](../database-connectors/row-level-security.md) for the opt-in per-request row scoping.
 - Setting up a fresh install? See [installation/claude-desktop-installer.md](../installation/claude-desktop-installer.md) or [installation/claude-desktop-windows-install.md](../installation/claude-desktop-windows-install.md).

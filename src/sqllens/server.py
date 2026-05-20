@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
 
 from sqllens.config import Config
@@ -45,6 +46,61 @@ _CHART_WIDGET_URI = "ui://sqllens/chart-results.html"
 _CHART_META_KEY = "sqllens/chart"
 
 
+def _request_metadata(ctx: Context) -> dict[str, Any]:
+    """Extract caller-supplied per-request metadata from the MCP request.
+
+    The calling application asserts per-request identity via the MCP request's
+    ``_meta`` object; the MCP SDK parses unknown ``_meta`` keys onto
+    ``RequestParams.Meta`` as model extras (``progressToken`` is the only
+    declared field and is excluded). This is the dynamic-value source the
+    row-level-security guard reads.
+
+    Fail-secure: any failure to read the request context yields ``{}`` — a
+    dynamic RLS rule then sees its key as missing and blocks the query (static
+    rules are unaffected), rather than the tool crashing or, worse, a request
+    influencing the query unfiltered. This is also why stdio (no per-request
+    ``_meta`` channel) only ever gets ``{}`` here, which is the documented
+    "dynamic rules are HTTP-only" behaviour.
+    """
+    try:
+        meta = ctx.request_context.meta
+    except ValueError:
+        # Documented, expected case: the MCP SDK raises ``ValueError`` from
+        # ``request_context`` when no request is active (stdio — the primary
+        # transport — and tests). This is the common path, not a fault, so it
+        # is logged at debug without a traceback; warning+traceback here would
+        # fire on every stdio query and drown out a genuine SDK drift.
+        logger.debug("no active request context; returning empty metadata")
+        return {}
+    except Exception:
+        # Genuinely unexpected: a future SDK swapping to ``LookupError`` /
+        # ``RequestContextNotAvailableError``, a ``contextvars`` change, an
+        # attribute lookup blowing up. Must still fail-secure to ``{}`` so the
+        # docstring's "any failure" promise holds and the tool never crashes
+        # with a raw traceback — but this one is real signal, so log it at
+        # warning with a traceback to make the drift diagnosable.
+        logger.warning(
+            "failed to read request_context.meta; returning empty metadata",
+            exc_info=True,
+        )
+        return {}
+    if meta is None:
+        return {}
+    extra = getattr(meta, "model_extra", None)
+    if extra is None:
+        # meta present but no extras attribute — either the caller sent only
+        # declared fields, or the MCP SDK changed how _meta extras surface.
+        # Logged at debug so a "every dynamic RLS query suddenly blocks"
+        # incident is traceable to this seam rather than looking like the
+        # caller never sent metadata.
+        logger.debug(
+            "request _meta present but exposes no model_extra; "
+            "dynamic RLS rules will see no metadata"
+        )
+        return {}
+    return dict(extra) if extra else {}
+
+
 def build_server(cfg: Config) -> FastMCP:
     """Create a FastMCP instance with tools registered against ``cfg``."""
     mcp = FastMCP("sqllens")
@@ -61,7 +117,9 @@ def build_server(cfg: Config) -> FastMCP:
     # carrying _meta; an auto-derived outputSchema would make FastMCP validate
     # a (deliberately absent) structuredContent and reject it.
     @mcp.tool(meta={"ui": {"resourceUri": _WIDGET_URI}}, structured_output=False)
-    async def query_database(question: str) -> str | CallToolResult:
+    async def query_database(
+        question: str, ctx: Context
+    ) -> str | CallToolResult:
         """Ask a question in natural language. Returns a Markdown table or text answer.
 
         When ``agent.show_details`` is on (the default) and the agent
@@ -71,8 +129,9 @@ def build_server(cfg: Config) -> FastMCP:
         Non-SELECT / no-SQL / error responses omit the SQL block; setting
         ``agent.show_details = false`` suppresses it unconditionally.
         """
+        metadata = _request_metadata(ctx)
         markdown, table, query_info = await query_database_impl_with_table(
-            cfg, question
+            cfg, question, metadata=metadata
         )
         meta: dict = {}
         if table is not None:

@@ -12,7 +12,7 @@ SQL Lens exposes three tools to the assistant:
 | `visualize_data(question)` | Translates a chart-shaped natural-language question into SQL, executes it, and returns an interactive chart (with a Markdown summary as fallback). |
 | `list_data_sources()` | Reports the configured database name, dialect, and read-only state. |
 
-One database is configured per running instance. Generated SQL is parsed and rejected if it is anything other than a `SELECT`, so the default deployment is safe against accidental writes.
+One database is configured per running instance. Generated SQL is parsed and rejected if it is anything other than a `SELECT`, so the default deployment is safe against accidental writes. You can also opt into [Row-Level Security](row-level-security.md) to narrow every answer to the rows a particular request is allowed to see.
 
 ## Interactive results
 
@@ -27,6 +27,7 @@ The same plain-text answer appears in the conversation alongside each widget, so
 
 - **[Getting started](getting-started.md)** — Install SQL Lens, point it at the bundled demo database, and run your first question.
 - **[Configuration](configuration.md)** — All configurable fields in `sqllens.toml`, environment variables, and database URL formats.
+- **[Row-Level Security](row-level-security.md)** — Narrow every answer to the rows a particular request is allowed to see using static or per-request dynamic rules.
 - **[Managing memory](managing-memory.md)** — Bulk-load curated question-and-answer pairs and notes, or export what SQL Lens has learned.
 - **[Install on Claude Desktop (Windows)](install-claude-desktop-windows.md)** — One-command installer and full manual fallback for connecting SQL Lens to Claude Desktop on a fresh Windows machine.
 - **[Release notes](release-notes.md)** — User-visible changes in each released version.

@@ -33,7 +33,7 @@ from sqllens.agent.tools import (
     SearchSavedCorrectToolUsesTool,
 )
 from sqllens.config import API_KEY_MISSING_MESSAGE, Config
-from sqllens.safety import ReadOnlyGuardRunner, RowCapRunner
+from sqllens.safety import ReadOnlyGuardRunner, RlsGuardRunner, RowCapRunner
 
 DEFAULT_USER_ID = "sqllens-user"
 DEFAULT_USER_GROUP = "default"
@@ -71,8 +71,16 @@ def build_agent(cfg: Config) -> Agent:
         read_only=cfg.database.read_only,
     )
     sql_runner = RowCapRunner(sql_runner, max_rows=cfg.database.max_rows)
+    dialect = _sqlglot_dialect(cfg.database.url)
     if cfg.database.read_only:
-        sql_runner = ReadOnlyGuardRunner(sql_runner, dialect=_sqlglot_dialect(cfg.database.url))
+        sql_runner = ReadOnlyGuardRunner(sql_runner, dialect=dialect)
+    # RLS is composed *outermost* (ahead of the read-only guard) so it rewrites
+    # the SQL first and the read-only guard then validates the *rewritten*
+    # statement — its full-tree walk rejects nested DML/DDL and denied
+    # functions on the injected predicates too. Only wrapped when rules exist
+    # so the no-RLS path stays a zero-overhead passthrough.
+    if cfg.rls:
+        sql_runner = RlsGuardRunner(sql_runner, cfg.rls, dialect=dialect)
     memory = ChromaAgentMemory(
         persist_directory=str(cfg.memory.persist_dir),
         collection_name=cfg.memory.collection,

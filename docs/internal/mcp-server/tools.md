@@ -24,10 +24,13 @@ def build_server(cfg: Config) -> FastMCP:
         meta={"ui": {"resourceUri": "ui://sqllens/query-results.html"}},
         structured_output=False,
     )
-    async def query_database(question: str) -> str | CallToolResult:
+    async def query_database(
+        question: str, ctx: Context
+    ) -> str | CallToolResult:
         """Ask a question in natural language. Returns a Markdown table or text answer."""
+        metadata = _request_metadata(ctx)
         markdown, table, query_info = await query_database_impl_with_table(
-            cfg, question
+            cfg, question, metadata=metadata
         )
         meta: dict = {}
         if table is not None:
@@ -86,7 +89,7 @@ The docstrings are the user-facing tool descriptions that the calling AI client 
 [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) does the actual work, calling the shared singleton above:
 
 1. **Fetch the shared singleton.** `query_database_impl_with_table` awaits `get_agent(cfg)` from [`tools/_agent.py`](../../../src/sqllens/tools/_agent.py); see "Shared agent singleton" above.
-2. **Empty `RequestContext`.** SQL Lens has no per-request headers/cookies/metadata to forward — auth is enforced at the transport layer, and the agent is single-user (see [agent/factory.md](../agent/factory.md) "user resolver"). So the context is always `RequestContext(headers={}, cookies={}, metadata={})`.
+2. **`RequestContext` with caller-supplied metadata.** SQL Lens does not forward HTTP headers/cookies into the agent (auth is enforced at the transport layer, and the agent is single-user — see [agent/factory.md](../agent/factory.md) "user resolver"), so the context is always `RequestContext(headers={}, cookies={}, metadata=<safe_metadata>)`. The `metadata` mapping is populated from MCP `_meta` extracted by `_request_metadata(ctx)` in [src/sqllens/server.py](../../../src/sqllens/server.py) and stripped of `_RESERVED_METADATA_KEYS` (`{"starter_ui_request", "ui_features_available"}`) so untrusted request metadata cannot steer agent-internal control flow — only supply values to the opt-in row-level-security guard. An absent / empty MCP `_meta` keeps the prior empty-context behaviour byte-for-byte. See [database-connectors/row-level-security.md](../database-connectors/row-level-security.md) for the full request → metadata → guard path.
 3. **Stream collapse.** The agent yields an async stream of `UiComponent` objects (text snippets, dataframes, status cards). MCP tools must return a single string, so we collect the stream into a list and pass it to `components_to_table` (the success path; `components_to_markdown` is now a thin wrapper over it — see "The MCP App interactive table widget").
 4. **Categorized, sanitized error surfacing.** Failures are re-raised as `RuntimeError`, which FastMCP (`mcp.server.fastmcp` — the official SDK, not the standalone `fastmcp` package) converts to a tool result with `isError: true`, formatting the client text as `Error executing tool query_database: <message>`. The *raised message* is therefore the contract, and it is split into three observable categories (see "The error/success contract" below) so the calling agent gets structured failure signal without leaking infrastructure detail. CLAUDE.md forbids letting the LLM apologize inside a successful tool result — the calling agent needs structured failure signal.
 
@@ -229,7 +232,7 @@ FastMCP collapses every failure into one `isError: true` result and formats the 
 
 - `_INTERNAL_ERROR_MESSAGE = "internal error; see server logs"` — the stable, sanitized message for tool-internal / infrastructure failures. Driver and agent exception strings (host, port, database, role) are **never** interpolated into the client message; the full traceback is logged server-side via `logger.exception` instead. This covers both agent cold-start/build failures (`get_agent` raised — DB connect, ChromaDB, embedding-model download, bad API key) and `agent.send_message` failures.
 - `_SQL_EXECUTION_ERROR_PREFIX = "SQL execution error: "` — prepended to the agent's *own* structured error report when the component stream is flagged `is_error`. This is agent-authored, actionable detail the calling agent needs (#14's category split), so it is passed through with a recognizable prefix rather than sanitized.
-- **Verbatim safety message** — an `UnsafeSqlError` propagating out of `send_message` is re-raised with its message unaltered (no prefix, no sanitization), because the read-only-guard text *is* actionable safety feedback, not an infra leak. It stays distinguishable by its own recognizable wording (e.g. "only SELECT statements are allowed (got ...)"), not by a constant prefix.
+- **Verbatim safety message** — an `UnsafeSqlError` or `RlsError` propagating out of `send_message` is re-raised with its message unaltered (no prefix, no sanitization), because the guard text *is* actionable safety feedback, not an infra leak. Each stays distinguishable by its own recognizable wording (e.g. `"only SELECT statements are allowed (got ...)"` for the read-only guard; `"refusing to execute query: row-level security could not be applied: ..."` for the RLS guard), not by a constant prefix. See [database-connectors/row-level-security.md](../database-connectors/row-level-security.md).
 
 The same table applies to both `query_database` and `visualize_data`; substitute "chart" for "dataframe" / "table" on the success rows for the latter:
 
@@ -240,5 +243,6 @@ The same table applies to both `query_database` and `visualize_data`; substitute
 | Agent cold-start/build failed (`get_agent` raised) | `RuntimeError("internal error; see server logs")` → `isError: true`. Full traceback logged server-side; host/port/db/role never echoed to the client. |
 | `agent.send_message` raised an exception | `RuntimeError("internal error; see server logs")` → `isError: true`. Same sanitization as above. |
 | Agent emitted an error status card | `RuntimeError("SQL execution error: " + <card description>)` → `isError: true`. Agent-authored detail passed through (categorized, not sanitized); logged server-side too. |
-| `UnsafeSqlError` propagated out of `send_message` | `RuntimeError(str(e))` → `isError: true`, message **verbatim**. Defensive path: the vendored agent's `RunSqlTool.execute` broad `except Exception` currently catches guard violations and feeds them back as a tool result, so in practice a real guard violation arrives via the *error status card* row above; this branch is kept for any future path that lets `UnsafeSqlError` escape. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md). |
+| `UnsafeSqlError` propagated out of `send_message` | `RuntimeError(str(e))` → `isError: true`, message **verbatim**. Defensive path: the vendored agent's `RunSqlTool.execute` broad `except Exception` in `agent/tools/run_sql.py` currently catches guard violations and feeds them back as a tool result, so in practice a real guard violation arrives via the *error status card* row above; this branch is kept for any future path that lets `UnsafeSqlError` escape. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md). |
+| `RlsError` propagated out of `send_message` | `RuntimeError(str(e))` → `isError: true`, message **verbatim**. Same defensive rationale as the `UnsafeSqlError` row above (`RunSqlTool.execute` currently swallows it into a tool result), kept for any future path that lets `RlsError` escape. See [database-connectors/row-level-security.md](../database-connectors/row-level-security.md). |
 | Config missing API key at startup | Never reaches here — `sqllens serve` exits 2 before `build_server` runs. |

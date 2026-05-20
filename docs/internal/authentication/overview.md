@@ -99,6 +99,18 @@ Things to check off:
 
 ## What auth is **not** doing
 
-- **Authorization decisions** — the two MCP tools are unconditionally available to any authenticated principal. There is no scope gating, no per-tool access list, no row-level filtering. The single-database single-user design (see [agent/factory.md](../agent/factory.md)) makes this fine for v1; if/when SQL Lens grows multi-principal use cases, this is where to wire it in.
+- **Authorization decisions at the tool boundary** — the two MCP tools are unconditionally available to any authenticated principal. There is no scope gating and no per-tool access list. *Row-level filtering does exist* as a separate, opt-in facility (`[[rls]]` rules + `RlsGuardRunner`) that scopes the rows a SELECT may see, but the rules sit in `sqllens.toml` and read per-request values out of caller-supplied MCP `_meta` — they are **not** derived from the authenticated principal's claims (because `auth.mode = "bearer"` has no principal information beyond the literal string `"bearer"`, and `jwt` is unimplemented). The embedding application is the source of truth for identity; SQL Lens trusts it. See [database-connectors/row-level-security.md](../database-connectors/row-level-security.md).
 - **User management** — there is no user model, no signup, no session storage. CLAUDE.md "What not to add" explicitly forbids these. The bearer mode is for one operator with one token; JWT mode (once implemented) delegates principal identity entirely to the upstream IdP.
 - **TLS** — terminate it externally.
+
+## How the request flows to the row-level-security guard
+
+When `[[rls]]` rules are configured, dynamic rule values (`value_from_metadata`) are resolved per request from caller-supplied MCP `_meta`. The full path lives in [database-connectors/row-level-security.md](../database-connectors/row-level-security.md), but the part that touches authentication is:
+
+- `_AuthMiddleware` runs first (or `NoOpAuthenticator` accepts every request) and stashes the resulting `AuthContext` on `scope["state"]["auth"]`. Today nothing reads it — see "Authorization decisions" above.
+- FastMCP parses the JSON-RPC `_meta` onto `RequestParams.Meta` model-extras (`progressToken` is the only declared field and is excluded).
+- `_request_metadata(ctx)` in [src/sqllens/server.py](../../../src/sqllens/server.py) extracts the model-extras into a plain `dict`. Any failure to read the request context yields `{}` (fail-secure: a dynamic RLS rule then sees its key as missing and blocks the query, rather than the tool crashing or, worse, a request influencing the query unfiltered).
+- [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) strips reserved internal-control keys (`_RESERVED_METADATA_KEYS` = `{"starter_ui_request", "ui_features_available"}`) before passing the metadata into the `RequestContext`, so untrusted MCP metadata cannot steer agent-internal control flow — only supply RLS predicate values.
+- `RlsGuardRunner` (composed outermost in the `SqlRunner` stack — see [agent/factory.md](../agent/factory.md) and [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md)) rewrites the agent-generated SQL using `context.metadata`; the read-only guard then validates the rewritten SQL.
+
+Dynamic RLS rules therefore work **only on the HTTP transport** (stdio has no per-request `_meta` channel, so `_request_metadata` always returns `{}` and any dynamic rule would block). Static rules (`value = ...`) need no metadata and work on every transport.

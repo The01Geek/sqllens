@@ -16,10 +16,12 @@ because the forms here remain mutually distinguishable under it.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import Any
 
 from sqllens.agent import RequestContext
-from sqllens.config import Config
-from sqllens.safety import UnsafeSqlError
+from sqllens.config import RESERVED_METADATA_KEYS, Config
+from sqllens.safety import RlsError, UnsafeSqlError
 from sqllens.tools._agent import get_agent, prime_agent
 from sqllens.tools._format import components_to_table
 
@@ -49,6 +51,17 @@ logger = logging.getLogger("sqllens.tools.query_database")
 _INTERNAL_ERROR_MESSAGE = "internal error; see server logs"
 _SQL_EXECUTION_ERROR_PREFIX = "SQL execution error: "
 
+# Internal agent-control keys that the agent reads off
+# ``request_context.metadata`` (e.g. ``starter_ui_request`` at
+# agent/core/agent/agent.py, ``ui_features_available`` injected into the tool
+# context). Caller-supplied MCP ``_meta`` now flows into that same mapping for
+# row-level-security dynamic values, so these keys are stripped at the boundary
+# — untrusted request metadata must not be able to steer internal agent
+# control flow, only supply RLS predicate values. The same set is also forbidden
+# at config load for ``value_from_metadata`` (see sqllens.config) so a typo
+# cannot create a rule that always resolves to a key that will always be
+# stripped here. Single source of truth lives in sqllens.config.
+_RESERVED_METADATA_KEYS = RESERVED_METADATA_KEYS
 
 def _append_sql_block(markdown: str, query_info: dict | None) -> str:
     """Append the executed SQL as a fenced ``sql`` block (text fallback).
@@ -65,19 +78,23 @@ def _append_sql_block(markdown: str, query_info: dict | None) -> str:
     return f"{markdown}\n\n**Executed SQL:**\n\n```sql\n{sql}\n```"
 
 
-async def query_database_impl(cfg: Config, question: str) -> str:
+async def query_database_impl(
+    cfg: Config, question: str, *, metadata: Mapping[str, Any] | None = None
+) -> str:
     """Translate ``question`` to SQL, execute, and return a Markdown answer.
 
     Backwards-compatible wrapper over :func:`query_database_impl_with_table`
     that drops the structured table. The error taxonomy, sanitization, and
     exact raised messages are identical — they live in the sibling below.
     """
-    markdown, _, _ = await query_database_impl_with_table(cfg, question)
+    markdown, _, _ = await query_database_impl_with_table(
+        cfg, question, metadata=metadata
+    )
     return markdown
 
 
 async def query_database_impl_with_table(
-    cfg: Config, question: str
+    cfg: Config, question: str, *, metadata: Mapping[str, Any] | None = None
 ) -> tuple[str, dict | None, dict | None]:
     """Translate ``question`` to SQL, execute, return ``(markdown, table, query_info)``.
 
@@ -101,7 +118,20 @@ async def query_database_impl_with_table(
         # stable internal message to the client.
         logger.exception("agent construction failed")
         raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
-    request_context = RequestContext(headers={}, cookies={}, metadata={})
+    # Per-request metadata (caller-supplied MCP metadata, used by the
+    # row-level-security guard) flows in here. Reserved internal-control keys
+    # are stripped so untrusted request metadata cannot steer agent control
+    # flow; the dict comprehension also copies so a caller's mapping can't be
+    # mutated downstream, and an absent/empty mapping keeps the prior
+    # empty-context behaviour byte-for-byte.
+    safe_metadata = {
+        k: v
+        for k, v in (metadata or {}).items()
+        if k not in _RESERVED_METADATA_KEYS
+    }
+    request_context = RequestContext(
+        headers={}, cookies={}, metadata=safe_metadata
+    )
 
     components = []
     try:
@@ -119,6 +149,15 @@ async def query_database_impl_with_table(
         # code path), it must reach the client verbatim, distinct from the
         # sanitized internal-error category below.
         logger.warning("query rejected by read-only guard: %s", e)
+        raise RuntimeError(str(e)) from e
+    except RlsError as e:
+        # Same defensive rationale as the UnsafeSqlError branch above: the
+        # vendored RunSqlTool swallows this into a tool result today, so this
+        # branch is not exercised by that pipeline — but an RLS block is
+        # actionable safety feedback, not an infra leak, so if it ever
+        # propagates it must reach the client verbatim, not get collapsed
+        # into the sanitized internal-error category below.
+        logger.warning("query rejected by row-level-security guard: %s", e)
         raise RuntimeError(str(e)) from e
     except Exception as e:
         # Tool-internal / infrastructure failure. The driver exception string

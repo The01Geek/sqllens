@@ -37,6 +37,19 @@ def _query_database_fn(mcp):
     return mcp._tool_manager.get_tool("query_database").fn
 
 
+class _StubCtx:
+    """Minimal FastMCP ``Context`` stand-in with no per-request metadata.
+
+    ``_request_metadata`` reads ``ctx.request_context.meta``; a ``None`` meta
+    is the no-extras case and yields ``{}`` (the stdio / no-_meta behaviour).
+    """
+
+    class _RC:
+        meta = None
+
+    request_context = _RC()
+
+
 def _visualize_data_fn(mcp):
     return mcp._tool_manager.get_tool("visualize_data").fn
 
@@ -87,12 +100,12 @@ async def test_query_database_returns_calltoolresult_with_meta_when_table(
     payload = {"columns": ["a"], "rows": [["1"]], "column_types": {},
                "row_count": 1, "truncated": 0}
 
-    async def fake_impl(_cfg, _q):
+    async def fake_impl(_cfg, _q, *, metadata=None):
         return "| a |\n|---|\n| 1 |", payload, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_table", fake_impl)
 
-    result = await _query_database_fn(mcp)("rows?")
+    result = await _query_database_fn(mcp)("rows?", _StubCtx())
     assert isinstance(result, CallToolResult)
     assert result.meta == {"sqllens/table": payload}
     assert result.content[0].text == "| a |\n|---|\n| 1 |"
@@ -109,12 +122,12 @@ async def test_query_database_meta_carries_query_info_when_present(
     query_info = {"sql": "SELECT a FROM t", "query_type": "SELECT",
                   "row_count": 1}
 
-    async def fake_impl(_cfg, _q):
+    async def fake_impl(_cfg, _q, *, metadata=None):
         return "md\n\n```sql\nSELECT a FROM t\n```", payload, query_info
 
     monkeypatch.setattr(server_module, "query_database_impl_with_table", fake_impl)
 
-    result = await _query_database_fn(mcp)("rows?")
+    result = await _query_database_fn(mcp)("rows?", _StubCtx())
     assert isinstance(result, CallToolResult)
     assert result.meta == {
         "sqllens/table": payload,
@@ -131,12 +144,12 @@ async def test_query_database_meta_query_info_without_table(
     mcp = build_server(cfg)
     query_info = {"sql": "SELECT 1 WHERE 1=0", "query_type": "SELECT"}
 
-    async def fake_impl(_cfg, _q):
+    async def fake_impl(_cfg, _q, *, metadata=None):
         return "no rows\n\n```sql\nSELECT 1 WHERE 1=0\n```", None, query_info
 
     monkeypatch.setattr(server_module, "query_database_impl_with_table", fake_impl)
 
-    result = await _query_database_fn(mcp)("rows?")
+    result = await _query_database_fn(mcp)("rows?", _StubCtx())
     assert isinstance(result, CallToolResult)
     assert result.meta == {"sqllens/query": query_info}
 
@@ -147,12 +160,12 @@ async def test_query_database_returns_plain_str_when_no_table(
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
 
-    async def fake_impl(_cfg, _q):
+    async def fake_impl(_cfg, _q, *, metadata=None):
         return "just text", None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_table", fake_impl)
 
-    result = await _query_database_fn(mcp)("question?")
+    result = await _query_database_fn(mcp)("question?", _StubCtx())
     assert result == "just text"
     assert not isinstance(result, CallToolResult)
 

@@ -14,6 +14,9 @@ cfg.database    →  build_sql_runner(url,
                                                         RowCapRunner (max_rows belt-and-suspenders)
                                                           ↓ (if cfg.database.read_only)
                                                         ReadOnlyGuardRunner (sqlglot dialect-aware)
+                                                          ↓ (if cfg.rls non-empty)
+                                                        RlsGuardRunner (sqlglot AST rewrite —
+                                                          predicate injection + fail-secure proof)
 cfg.memory      →  ChromaAgentMemory                 →  persists under cfg.memory.persist_dir
                    LocalFileSystem                   →  scratch root = tempfile.gettempdir() / "sqllens"
 ToolRegistry    →  RunSqlTool                          (executes generated SQL, writes a scratch CSV,
@@ -32,7 +35,7 @@ ToolRegistry    →  RunSqlTool                          (executes generated SQL
 
 `EmitChartTool` carries no SQL runner or file-system capability — the agent runs `run_sql` first to get aggregated rows, then hands them to `emit_chart`, which only validates the DSL (`bar | line | area | scatter | pie | heatmap`, ≤ 200 rows, pie/heatmap series-shape rules) and wraps the result in a `ChartComponent`. The MCP-layer `visualize_data` tool reads that component off the agent stream and forwards it to the chart widget. See [mcp-server/tools.md](../mcp-server/tools.md#visualize_data--chart-shaped-sibling-of-query_database) for the wider picture and [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py) for the DSL source.
 
-Call order on every query is the reverse of construction: **ReadOnlyGuardRunner → RowCapRunner → engine runner**. The parser rejects before any connection opens; the engine runner streams with `fetchmany(max_rows + 1)` and sets its native statement-timeout primitive; the decorator clamps the result a second time on the way back. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full timeout/cap story.
+Call order on every query is the reverse of construction. With RLS unconfigured: **ReadOnlyGuardRunner → RowCapRunner → engine runner**. With RLS configured (`cfg.rls` non-empty): **RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner** — the RLS rewrite runs *first* so the read-only guard validates the *rewritten* SQL. The parser rejects before any connection opens; the engine runner streams with `fetchmany(max_rows + 1)` and sets its native statement-timeout primitive; the decorator clamps the result a second time on the way back. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full timeout/cap story and [database-connectors/row-level-security.md](../database-connectors/row-level-security.md) for the RLS rewrite.
 
 ## API-key check is here, not in config
 

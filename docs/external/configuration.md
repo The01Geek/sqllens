@@ -148,6 +148,44 @@ Defines the audit-logging surface. These fields are accepted and validated today
 
 **Note:** Unlike other sections, an unrecognized key inside `[agent.audit]` is rejected at config load rather than silently ignored. Because this is a privacy-sensitive surface, a misspelled key (for example, `sanitize_paramters`) fails loudly instead of quietly reverting to the safe default.
 
+## Section: `[[rls]]`
+
+Defines Row-Level Security rules. Each `[[rls]]` block declares one predicate that SQL Lens injects into every query the assistant generates against the named table. This is opt-in: with no `[[rls]]` blocks configured, no rewriting takes place and there is no overhead.
+
+The predicate is combined with whatever filter the assistant already produced using `AND`, and is added to every reference to the table — including references inside subqueries, common table expressions, and joins. A query that cannot be safely scoped is blocked and the assistant is told that Row-Level Security could not be applied.
+
+| Field | Type | Description |
+|---|---|---|
+| `table` | String | The table the predicate applies to. Must be a bare identifier (ASCII letters, digits, and underscores; must not start with a digit). Schema-qualified names like `public.orders` are not supported. |
+| `column` | String | The column on `table` the predicate compares. Same identifier rules as `table`. |
+| `operator` | String | One of `=`, `!=`, `<`, `<=`, `>`, `>=`, or `in`. Matched case-insensitively. |
+| `value` | Scalar or list | Static predicate value. Mutually exclusive with `value_from_metadata`. For `operator = "in"`, this must be a non-empty list. |
+| `value_from_metadata` | String | Metadata key resolved per request from caller-supplied MCP `_meta`. Mutually exclusive with `value`. Must be a bare identifier with the same rules as `table` and `column`. Only meaningful on the HTTP transport; the stdio transport has no per-request metadata channel. |
+
+A static rule with the same value for every request:
+
+```toml
+[[rls]]
+table = "orders"
+column = "region"
+operator = "="
+value = "us-east"
+```
+
+A dynamic rule whose value is resolved per request from caller-supplied metadata:
+
+```toml
+[[rls]]
+table = "orders"
+column = "tenant_id"
+operator = "="
+value_from_metadata = "tenant_id"
+```
+
+**Note:** Unlike other sections, an unrecognized key inside a `[[rls]]` block is rejected at config load rather than silently ignored. A dropped Row-Level Security predicate is an unfiltered query, which is exactly what Row-Level Security exists to prevent, so a misspelled key fails loudly at startup. The reserved metadata keys `starter_ui_request` and `ui_features_available` cannot be used as `value_from_metadata` values.
+
+See [Row-Level Security](row-level-security.md) for the full guide, including how to supply request metadata from your client application and the list of cases that cause a query to be blocked.
+
 ## Top-level field: `config_version`
 
 A single top-level integer, `config_version`, defaults to `1`. It is accepted and validated but currently has no effect. It is reserved so future releases can detect and migrate older configuration files. You do not need to set it.

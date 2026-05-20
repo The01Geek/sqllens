@@ -623,6 +623,29 @@ mode = "none"            # one of: none, bearer (jwt is not implemented yet)
 transport = "stdio"      # one of: stdio, http
 host = "127.0.0.1"
 port = 8765
+
+# Row-Level Security (optional). Each [[rls]] block injects a WHERE predicate
+# into every query that references `table`, including occurrences inside
+# subqueries, CTEs, and joins. The predicate is AND-combined with whatever
+# SQL the agent generated; a query that cannot be safely rewritten is blocked,
+# never run unfiltered. Operators: = != < <= > >= in.
+#
+# Static value — same filter for every request (works on stdio and http):
+# [[rls]]
+# table = "orders"
+# column = "region"
+# operator = "="
+# value = "us-east"
+#
+# Dynamic value — resolved per request from caller-supplied MCP metadata.
+# Only meaningful on the http transport (stdio has no per-request channel);
+# a missing or suspicious value blocks the query. The embedding application
+# is the source of truth for identity — SQL Lens does not authenticate it.
+# [[rls]]
+# table = "orders"
+# column = "tenant_id"
+# operator = "="
+# value_from_metadata = "tenant_id"
 """
 
 
