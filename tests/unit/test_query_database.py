@@ -415,7 +415,7 @@ async def test_with_table_no_sql_card_means_no_sql_block(
     tests/unit/test_factory_wiring.py.
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
-    assert cfg.agent.show_details is True  # default-on
+    assert cfg.agent.show_details is False  # default-off
     stub = agent_stub_factory(
         [make_dataframe([{"name": "Alice"}]), make_text_component("one user")]
     )

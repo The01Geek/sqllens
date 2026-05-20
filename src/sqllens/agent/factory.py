@@ -101,7 +101,12 @@ def build_agent(cfg: Config) -> Agent:
     # EmitChartTool needs no SQL/FS — the agent runs run_sql first, then hands
     # the aggregated rows to this tool, which only validates the chart DSL.
     tools.register_local_tool(EmitChartTool(), access_groups=access)
-    tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
+    # save_question_tool_args lets the agent write question -> SQL pairs into
+    # memory. Gated by memory.save_queries (OFF by default); the default system
+    # prompt switches its save instructions on the tool's presence, so dropping
+    # the registration cleanly drops the prompt guidance too.
+    if cfg.memory.save_queries:
+        tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
     tools.register_local_tool(
         SearchSavedCorrectToolUsesTool(
             default_similarity_threshold=cfg.memory.similarity_threshold,

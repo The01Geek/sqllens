@@ -111,6 +111,16 @@ class MemoryConfig(BaseModel):
     similarity_threshold: float = Field(
         default=0.7, ge=0.0, le=1.0, description="Minimum cosine similarity for memory hits"
     )
+    save_queries: bool = Field(
+        default=False,
+        description=(
+            "Expose the save_question_tool_args agent tool, which lets the agent "
+            "persist successful question -> SQL pairs into vector memory. OFF by "
+            "default: when disabled the tool is not registered and the system "
+            "prompt drops its save instructions automatically. Reading saved "
+            "memory (search_saved_correct_tool_uses) is unaffected."
+        ),
+    )
     allow_import: bool = Field(
         default=False,
         description=(
@@ -254,8 +264,12 @@ class AgentRuntimeConfig(BaseModel):
     # ```sql block in the Markdown text. Set false to restore the pre-feature
     # answer-only output. Env override: SQLLENS_AGENT__SHOW_DETAILS.
     show_details: bool = Field(
-        default=True,
-        description="Append the executed SQL to query answers.",
+        default=False,
+        description=(
+            "Append the executed SQL to query answers. OFF by default: exposing "
+            "the generated SQL to MCP clients can leak schema details and query "
+            "logic. Enable only for trusted, debugging-oriented deployments."
+        ),
     )
     audit: AuditConfig = Field(default_factory=lambda: AuditConfig())
 

@@ -13,6 +13,8 @@ There are two persistence modes, both backed by the same Chroma collection:
 
 The question is the embedded text; the tool name and args ride along as Chroma metadata. The next time a similar question comes in, the agent calls `SearchSavedCorrectToolUsesTool` with the new question — Chroma returns the nearest neighbours by cosine similarity, and the agent uses the previous SQL as a starting point instead of re-deriving it from scratch.
 
+`SaveQuestionToolArgsTool` is registered **only when `cfg.memory.save_queries` is true** (it defaults to `false`). When the flag is off the tool is never wired into the agent, so the agent cannot write tool-use memory — reading existing tool-use memory via `SearchSavedCorrectToolUsesTool` is unaffected.
+
 **Text memory (free-form).** The agent can also call `SaveTextMemoryTool` to record free-form notes — domain vocabulary, semantic hints, "column X actually means Y in this schema", etc. These are stored in the same Chroma collection but as text-memory entries rather than tool-arg recordings. The default system prompt (`src/sqllens/agent/core/system_prompt/default.py`) gates its text-memory instructions on `has_text_memory = "save_text_memory" in tool_names`, so the tool must be registered for the LLM to be told about it.
 
 `cfg.memory.similarity_threshold` controls both: results with a similarity score below the threshold are filtered out before the agent sees them.
@@ -28,10 +30,11 @@ memory = ChromaAgentMemory(
 )
 ```
 
-The three memory tools are then registered alongside `RunSqlTool` inside `build_agent` ([factory.py](../../../src/sqllens/agent/factory.py)):
+The memory tools are then registered alongside `RunSqlTool` inside `build_agent` ([factory.py](../../../src/sqllens/agent/factory.py)). The structured-save tool is gated on `cfg.memory.save_queries`; the search and text-memory tools are always registered:
 
 ```python
-tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
+if cfg.memory.save_queries:
+    tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
 tools.register_local_tool(
     SearchSavedCorrectToolUsesTool(
         default_similarity_threshold=cfg.memory.similarity_threshold,
@@ -41,22 +44,24 @@ tools.register_local_tool(
 tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
 ```
 
-Two things to note about this wiring:
+Three things to note about this wiring:
 
 - `cfg.memory.similarity_threshold` is threaded into `SearchSavedCorrectToolUsesTool` as a constructor argument. The LLM can still override it per call via the tool's `similarity_threshold` parameter, but when the LLM omits it the operator-facing config knob takes effect. (Before this wiring landed, the configured value was dead — the runtime fallback was a hardcoded `0.7` inside the tool's `execute()`. See issue #76.)
+- `SaveQuestionToolArgsTool` is registered only when `cfg.memory.save_queries` is true. The default system prompt switches its "save successful queries" instructions on `has_save = "save_question_tool_args" in tool_names` (in [src/sqllens/agent/core/system_prompt/default.py](../../../src/sqllens/agent/core/system_prompt/default.py)), so leaving the flag off drops both the tool and the prompt guidance cleanly — no orphaned instructions.
 - `SaveTextMemoryTool` must be registered for the default system prompt to enable its text-memory branch (`has_text_memory` check in [src/sqllens/agent/core/system_prompt/default.py](../../../src/sqllens/agent/core/system_prompt/default.py)). Drop the registration and the LLM never sees the tool — free-form domain knowledge can't be persisted.
 
 The memory itself is handed to the `Agent` constructor as `agent_memory=memory` so the framework can reference it from internal code paths.
 
 ## Config knobs
 
-All three live under `[memory]` in `sqllens.toml` (or `SQLLENS_MEMORY__*` env vars). See [setup/config-loading.md](../setup/config-loading.md) for resolution rules.
+These live under `[memory]` in `sqllens.toml` (or `SQLLENS_MEMORY__*` env vars). See [setup/config-loading.md](../setup/config-loading.md) for resolution rules.
 
 | Field | Default | Env var | Effect |
 |---|---|---|---|
 | `persist_dir` | `./chroma` (relative to CWD) | `SQLLENS_MEMORY__PERSIST_DIR` | Directory on disk for the Chroma collection. Created on first use. |
 | `collection` | `sqllens` | `SQLLENS_MEMORY__COLLECTION` | Logical collection name inside the persisted store. Letting two processes share a `persist_dir` with different collections is supported but rarely useful. |
 | `similarity_threshold` | `0.7` | `SQLLENS_MEMORY__SIMILARITY_THRESHOLD` | Cosine similarity floor in `[0.0, 1.0]`. Hits below this are dropped. Used as the *server-configured default*: the LLM may override it per call via the `similarity_threshold` parameter on `search_saved_correct_tool_uses`, including the legitimate value `0.0` (return everything) which is preserved exactly — not coerced. |
+| `save_queries` | `false` | `SQLLENS_MEMORY__SAVE_QUERIES` | Registers `SaveQuestionToolArgsTool` so the agent can persist successful question → SQL pairs into tool-use memory. Off by default; when off the tool is not registered and the system prompt drops its save instructions. Reading saved memory is unaffected. |
 
 Schema definition: `MemoryConfig` in [src/sqllens/config.py](../../../src/sqllens/config.py).
 

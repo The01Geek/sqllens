@@ -32,6 +32,27 @@ async def test_tool_error_directive_present() -> None:
     assert "speculate" in lowered
 
 
+async def test_data_confidentiality_directive_present() -> None:
+    """The preamble must instruct the model to keep the schema confidential.
+
+    SQL Lens is reached only through natural-language tool calls from a
+    third-party MCP client; the directive is the (soft) guardrail against an
+    end user prompting the agent into enumerating tables/columns. It is part
+    of the always-on preamble, so it must survive with no tools registered.
+    """
+    builder = DefaultSystemPromptBuilder()
+    user = User(id="test-user")
+
+    prompt = await builder.build_system_prompt(user, tools=[])
+
+    assert prompt is not None
+    assert "Data Confidentiality:" in prompt
+    lowered = prompt.lower()
+    assert "schema" in lowered
+    assert "information_schema" in lowered
+    assert "decline" in lowered
+
+
 class _ToolSchemaStub:
     def __init__(self, name: str) -> None:
         self.name = name
