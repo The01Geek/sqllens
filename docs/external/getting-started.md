@@ -43,7 +43,7 @@ Pick the configuration snippet that matches your tool. Each example points your 
 - **Claude Desktop** (macOS and Windows only): `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows. For a one-command setup on any platform, use `sqllens claude-desktop install --db <url>`, which generates the configuration file and merges the SQL Lens entry into Claude Desktop's settings while preserving any existing servers. To configure by hand instead: on macOS, stdio is recommended (simpler than HTTP, no port management) — see `examples/mcp-clients/claude_desktop_stdio.json`; HTTP variant: `examples/mcp-clients/claude_desktop_http.json`. On Windows, follow the dedicated [Claude Desktop Windows install guide](install-claude-desktop-windows.md) rather than copying the stdio example verbatim — it wraps `sqllens` in a `.cmd` launcher to work around a non-writable working-directory issue.
 - **Windsurf**: See `examples/mcp-clients/windsurf.json`.
 
-Restart your assistant after editing its configuration file. The SQL Lens entry should now appear in the assistant's MCP indicator with two tools: `query_database` and `list_data_sources`.
+Restart your assistant after editing its configuration file. The SQL Lens entry should now appear in the assistant's MCP indicator with three tools: `query_database`, `visualize_data`, and `list_data_sources`.
 
 ## 4. Ask your first question
 
@@ -59,7 +59,15 @@ Note: A slow startup or first query never blocks the server from accepting reque
 
 Expected answer: 2 albums.
 
-On Claude Desktop or claude.ai, a result that contains a table is also shown as an interactive widget you can sort, filter, page through, and export to CSV, alongside the same plain-text answer. Other assistants display the Markdown table only. No setup is required either way.
+On Claude Desktop or claude.ai, a result that contains a table is also shown as an interactive widget you can sort, filter, page through, and export to CSV, alongside the same plain-text answer. Chart-shaped results from the `visualize_data` tool are rendered as an interactive Apache ECharts widget (bar, line, area, scatter, pie, or heatmap) that follows the assistant's theme and resizes responsively. Other assistants display the Markdown text answer only. No setup is required either way.
+
+### Asking for a chart
+
+To get an interactive chart, phrase the question so the result is aggregated or temporal. For example, against the bundled Chinook demo:
+
+> Using sqllens, chart total invoice revenue per billing country.
+
+The assistant will call the `visualize_data` tool, run the underlying SQL, and emit a chart. Plain lookups (for example, "What was Mary's last order?") are answered as text, not forced into a chart.
 
 ## 5. Switch to your own database
 

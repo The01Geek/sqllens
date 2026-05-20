@@ -18,7 +18,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from pydantic import SecretStr
 
 from sqllens.config import AuthConfig
-from sqllens.tools import query_database as query_database_module
+from sqllens.tools import _agent as agent_module
 
 pytestmark = pytest.mark.asyncio
 
@@ -27,14 +27,18 @@ pytestmark = pytest.mark.asyncio
 
 
 class TestNoAuth:
-    async def test_tools_list_returns_two_tools(self, make_server) -> None:
+    async def test_tools_list_returns_core_tools(self, make_server) -> None:
         handle = make_server(AuthConfig(mode="none"))
         async with streamablehttp_client(handle.mcp_url) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.list_tools()
                 names = sorted(t.name for t in result.tools)
-                assert names == ["list_data_sources", "query_database"]
+                assert names == [
+                    "list_data_sources",
+                    "query_database",
+                    "visualize_data",
+                ]
 
     async def test_list_data_sources_returns_chinook(self, make_server) -> None:
         handle = make_server(AuthConfig(mode="none"))
@@ -88,7 +92,7 @@ class TestBearerAuth:
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await session.list_tools()
-                assert len(tools.tools) == 2
+                assert len(tools.tools) == 3
 
     async def test_wrong_token_returns_401(self, make_server) -> None:
         handle = make_server(
@@ -384,17 +388,18 @@ class TestAgentFailure:
         string the calling agent would mistake for a successful answer.
 
         The agent build is forced to fail deterministically (no network / no
-        embedding-model download) by patching the builder in
-        ``sqllens.tools.query_database``. The transport-layer eager warmup
-        is best-effort (it swallows exceptions and logs), so the server still
-        starts cleanly even though the same builder is on the warmup path.
+        embedding-model download) by patching the builder in the shared
+        ``sqllens.tools._agent`` singleton (used by both ``query_database`` and
+        ``visualize_data``). The transport-layer eager warmup is best-effort
+        (it swallows exceptions and logs), so the server still starts cleanly
+        even though the same builder is on the warmup path.
         """
-        monkeypatch.setattr(query_database_module, "_AGENT_STATE", None)
+        monkeypatch.setattr(agent_module, "_AGENT_STATE", None)
 
         def _boom(cfg):  # type: ignore[no-untyped-def]
             raise RuntimeError("forced agent build failure")
 
-        monkeypatch.setattr(query_database_module, "build_agent", _boom)
+        monkeypatch.setattr(agent_module, "build_agent", _boom)
 
         handle = make_server(AuthConfig(mode="none"))
         async with streamablehttp_client(handle.mcp_url) as (read, write, _):

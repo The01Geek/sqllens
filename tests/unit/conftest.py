@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from sqllens.tools import query_database as query_database_module
+from sqllens.tools import _agent as agent_module
 
 from ._agent_stubs import StubAgent
 
@@ -27,15 +27,16 @@ from ._agent_stubs import StubAgent
 def _reset_query_database_singleton():
     """Guarantee the agent singleton state is reset entering each test.
 
-    The module-level singleton in ``sqllens.tools.query_database`` is process-
-    wide. Without this fixture, a test that builds the agent leaks state
-    into the next, masking isolation bugs and making ordering matter.
-    ``_AGENT_STATE`` is a single ``(agent, cfg)`` tuple, so one reset clears
-    both the agent and the config that built it — they cannot drift apart.
+    The module-level singleton lives in ``sqllens.tools._agent`` (shared by
+    ``query_database`` and ``visualize_data``) and is process-wide. Without
+    this fixture, a test that builds the agent leaks state into the next,
+    masking isolation bugs and making ordering matter. ``_AGENT_STATE`` is a
+    single ``(agent, cfg)`` tuple, so one reset clears both the agent and the
+    config that built it — they cannot drift apart.
     """
-    query_database_module._AGENT_STATE = None
+    agent_module._AGENT_STATE = None
     yield
-    query_database_module._AGENT_STATE = None
+    agent_module._AGENT_STATE = None
 
 
 @pytest.fixture

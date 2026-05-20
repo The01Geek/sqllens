@@ -3,8 +3,13 @@
 
 """FastMCP server wiring.
 
-Phase 1 spike: minimal stdio server with two tools, no auth, single DB.
-HTTP transport + auth modes land in Phase 2.
+Builds the FastMCP instance and registers the three always-on tools
+(``query_database``, ``visualize_data``, ``list_data_sources``) plus their
+two ``ui://`` widget resources (table + chart). An opt-in fourth tool
+(``import_memory``) is registered only when ``cfg.memory.allow_import`` is
+set. ``run()`` dispatches to stdio or HTTP based on ``cfg.server.transport``;
+the HTTP transport (``sqllens.transport.http``) wraps this server with the
+configured auth middleware (none / bearer / jwt) and path normalization.
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ from mcp.types import CallToolResult, TextContent
 from sqllens.config import Config
 from sqllens.tools.list_data_sources import list_data_sources_impl
 from sqllens.tools.query_database import query_database_impl_with_table
+from sqllens.tools.visualize_data import visualize_data_impl_with_chart
 from sqllens.ui import load_widget_html
 
 logger = logging.getLogger("sqllens.server")
@@ -35,6 +41,8 @@ _TABLE_META_KEY = "sqllens/table"
 # section from it; plain-text clients get the same SQL as a fenced block in
 # the Markdown content.
 _QUERY_META_KEY = "sqllens/query"
+_CHART_WIDGET_URI = "ui://sqllens/chart-results.html"
+_CHART_META_KEY = "sqllens/chart"
 
 
 def build_server(cfg: Config) -> FastMCP:
@@ -76,6 +84,29 @@ def build_server(cfg: Config) -> FastMCP:
         return CallToolResult(
             content=[TextContent(type="text", text=markdown)],
             _meta=meta,
+        )
+
+    @mcp.resource(
+        _CHART_WIDGET_URI,
+        mime_type="text/html;profile=mcp-app",
+        meta={"ui": {"prefersBorder": True}},
+    )
+    def chart_results_widget() -> str:
+        return load_widget_html("chart_results.html")
+
+    # Same structured_output=False rationale as query_database: the success
+    # path may return a CallToolResult carrying _meta.
+    @mcp.tool(
+        meta={"ui": {"resourceUri": _CHART_WIDGET_URI}}, structured_output=False
+    )
+    async def visualize_data(question: str) -> str | CallToolResult:
+        """Ask a question; returns an interactive chart for chart-shaped results, else text."""
+        markdown, chart = await visualize_data_impl_with_chart(cfg, question)
+        if chart is None:
+            return markdown
+        return CallToolResult(
+            content=[TextContent(type="text", text=markdown)],
+            _meta={_CHART_META_KEY: chart},
         )
 
     @mcp.tool()
