@@ -23,6 +23,7 @@ from sqllens.agent.factory import build_agent
 from sqllens.agent.tools import (
     EmitChartTool,
     RunSqlTool,
+    SaveQuestionToolArgsTool,
     SaveTextMemoryTool,
     SearchSavedCorrectToolUsesTool,
 )
@@ -199,6 +200,27 @@ def test_save_text_memory_tool_is_registered(tmp_path: Path) -> None:
     assert "save_text_memory" in agent.tool_registry._tools
     save_text_memory_tool = _unwrap(agent.tool_registry._tools["save_text_memory"])
     assert isinstance(save_text_memory_tool, SaveTextMemoryTool)
+
+
+def test_save_question_tool_omitted_by_default(tmp_path: Path) -> None:
+    """``memory.save_queries`` is OFF by default, so the agent must not get the
+    ``save_question_tool_args`` tool. The default system prompt switches its save
+    instructions on the tool's presence, so omitting it also drops the guidance.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    agent = build_agent(cfg)
+
+    assert "save_question_tool_args" not in agent.tool_registry._tools
+
+
+def test_save_question_tool_registered_when_enabled(tmp_path: Path) -> None:
+    """Setting ``memory.save_queries=True`` registers ``save_question_tool_args``."""
+    cfg = build_test_config(persist_dir=tmp_path / "chroma", save_queries=True)
+    agent = build_agent(cfg)
+
+    assert "save_question_tool_args" in agent.tool_registry._tools
+    tool = _unwrap(agent.tool_registry._tools["save_question_tool_args"])
+    assert isinstance(tool, SaveQuestionToolArgsTool)
 
 
 def test_memory_similarity_threshold_flows_into_search_tool(tmp_path: Path) -> None:

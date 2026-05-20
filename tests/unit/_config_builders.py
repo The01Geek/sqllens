@@ -28,6 +28,7 @@ def build_test_config(
     agent: AgentRuntimeConfig | None = None,
     *,
     allow_import: bool = False,
+    save_queries: bool = False,
 ) -> Config:
     """Build a ``Config`` from kwargs, bypassing env-var resolution.
 
@@ -38,7 +39,9 @@ def build_test_config(
     return Config(
         database=DatabaseConfig(url="sqlite:///:memory:"),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
-        memory=MemoryConfig(persist_dir=persist_dir, allow_import=allow_import),
+        memory=MemoryConfig(
+            persist_dir=persist_dir, allow_import=allow_import, save_queries=save_queries
+        ),
         auth=AuthConfig(mode="none"),
         agent=agent or AgentRuntimeConfig(),
     )

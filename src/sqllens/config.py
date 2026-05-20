@@ -111,6 +111,16 @@ class MemoryConfig(BaseModel):
     similarity_threshold: float = Field(
         default=0.7, ge=0.0, le=1.0, description="Minimum cosine similarity for memory hits"
     )
+    save_queries: bool = Field(
+        default=False,
+        description=(
+            "Expose the save_question_tool_args agent tool, which lets the agent "
+            "persist successful question -> SQL pairs into vector memory. OFF by "
+            "default: when disabled the tool is not registered and the system "
+            "prompt drops its save instructions automatically. Reading saved "
+            "memory (search_saved_correct_tool_uses) is unaffected."
+        ),
+    )
     allow_import: bool = Field(
         default=False,
         description=(
