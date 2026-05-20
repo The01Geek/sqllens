@@ -23,7 +23,7 @@ from sqllens.agent import RequestContext
 from sqllens.config import RESERVED_METADATA_KEYS, Config
 from sqllens.safety import RlsError, UnsafeSqlError
 from sqllens.tools._agent import get_agent, prime_agent
-from sqllens.tools._format import components_to_table
+from sqllens.tools._format import components_to_widgets
 
 # ``prime_agent`` lives in ``tools/_agent.py`` but the transport-layer warmup
 # (``transport/http.py``) and several tests import it from here — keep it in
@@ -32,6 +32,7 @@ __all__ = [
     "prime_agent",
     "query_database_impl",
     "query_database_impl_with_table",
+    "query_database_impl_with_widgets",
 ]
 
 logger = logging.getLogger("sqllens.tools.query_database")
@@ -83,11 +84,11 @@ async def query_database_impl(
 ) -> str:
     """Translate ``question`` to SQL, execute, and return a Markdown answer.
 
-    Backwards-compatible wrapper over :func:`query_database_impl_with_table`
-    that drops the structured table. The error taxonomy, sanitization, and
+    Backwards-compatible wrapper over :func:`query_database_impl_with_widgets`
+    that drops the structured payloads. The error taxonomy, sanitization, and
     exact raised messages are identical — they live in the sibling below.
     """
-    markdown, _, _ = await query_database_impl_with_table(
+    markdown, _, _, _ = await query_database_impl_with_widgets(
         cfg, question, metadata=metadata
     )
     return markdown
@@ -98,14 +99,37 @@ async def query_database_impl_with_table(
 ) -> tuple[str, dict | None, dict | None]:
     """Translate ``question`` to SQL, execute, return ``(markdown, table, query_info)``.
 
-    Same agent path and same three error categories as the Markdown-only
-    contract: tool-internal failures raise ``_INTERNAL_ERROR_MESSAGE``,
-    agent-reported SQL failures raise ``_SQL_EXECUTION_ERROR_PREFIX + answer``,
-    and ``UnsafeSqlError`` is re-raised verbatim. ``table`` is ``None`` on the
-    error path or whenever no DataFrame is present (apps-aware callers attach
-    it to ``_meta``; everyone else ignores it). ``query_info`` carries the
-    executed SQL (``{"sql", "query_type", "row_count"?}``) when
-    ``agent.show_details`` is on; ``None`` otherwise — and when present, the
+    Thin wrapper over :func:`query_database_impl_with_widgets` that drops the
+    chart payload. The agent path, error taxonomy, and exact raised messages
+    are identical — they live in the sibling below.
+    """
+    markdown, table, query_info, _ = await query_database_impl_with_widgets(
+        cfg, question, metadata=metadata
+    )
+    return markdown, table, query_info
+
+
+async def query_database_impl_with_widgets(
+    cfg: Config, question: str, *, metadata: Mapping[str, Any] | None = None
+) -> tuple[str, dict | None, dict | None, dict | None]:
+    """Translate ``question`` to SQL, execute, return ``(markdown, table, query_info, chart)``.
+
+    The single agent path behind the consolidated ``query_database`` MCP tool.
+    One ``agent.send_message`` run is buffered and collapsed in a single pass by
+    :func:`~sqllens.tools._format.components_to_widgets`, which yields the
+    Markdown answer (DataFrame tables + answer text, plus the fenced SQL block
+    when ``agent.show_details`` is on), the structured table payload, the
+    executed-SQL ``query_info``, and the structured chart payload when the
+    agent emitted a ``ChartComponent``.
+
+    Three error categories, unchanged: tool-internal failures raise
+    ``_INTERNAL_ERROR_MESSAGE``, agent-reported SQL failures raise
+    ``_SQL_EXECUTION_ERROR_PREFIX + answer``, and ``UnsafeSqlError`` is
+    re-raised verbatim. ``table`` and ``chart`` are ``None`` on the error path
+    or whenever the corresponding component is absent (apps-aware callers attach
+    whichever is present to ``_meta``; everyone else ignores them and reads the
+    Markdown). ``query_info`` carries the executed SQL when
+    ``agent.show_details`` is on, ``None`` otherwise — and when present, the
     same SQL is also appended to ``markdown`` as a fenced ``sql`` block so
     plain-text clients see it too.
     """
@@ -166,7 +190,7 @@ async def query_database_impl_with_table(
         logger.exception("agent.send_message failed")
         raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
 
-    answer, is_error, table, query_info = components_to_table(components)
+    answer, is_error, table, query_info, chart = components_to_widgets(components)
     if is_error:
         # Agent-reported query failure — SQL-execution error category. S-10's
         # structural leak (raw exception-string interpolation in the except
@@ -181,4 +205,4 @@ async def query_database_impl_with_table(
         # the calling agent needs, so it is deliberately not attempted here.
         logger.warning("agent reported query failure: %s", answer)
         raise RuntimeError(f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}")
-    return _append_sql_block(answer, query_info), table, query_info
+    return _append_sql_block(answer, query_info), table, query_info, chart

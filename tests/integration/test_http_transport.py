@@ -37,7 +37,6 @@ class TestNoAuth:
                 assert names == [
                     "list_data_sources",
                     "query_database",
-                    "visualize_data",
                 ]
 
     async def test_list_data_sources_returns_chinook(self, make_server) -> None:
@@ -92,7 +91,7 @@ class TestBearerAuth:
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await session.list_tools()
-                assert len(tools.tools) == 3
+                assert len(tools.tools) == 2
 
     async def test_wrong_token_returns_401(self, make_server) -> None:
         handle = make_server(
@@ -389,8 +388,8 @@ class TestAgentFailure:
 
         The agent build is forced to fail deterministically (no network / no
         embedding-model download) by patching the builder in the shared
-        ``sqllens.tools._agent`` singleton (used by both ``query_database`` and
-        ``visualize_data``). The transport-layer eager warmup is best-effort
+        ``sqllens.tools._agent`` singleton (used by ``query_database``). The
+        transport-layer eager warmup is best-effort
         (it swallows exceptions and logs), so the server still starts cleanly
         even though the same builder is on the warmup path.
         """

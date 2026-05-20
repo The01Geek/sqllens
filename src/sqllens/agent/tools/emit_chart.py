@@ -1,7 +1,8 @@
 """Chart-emitting tool: turns aggregated rows into a renderer-agnostic spec.
 
-``EmitChartTool`` is the agent-side seam for the ``visualize_data`` MCP tool.
-It does not run SQL itself — the agent runs ``run_sql`` first, then hands the
+``EmitChartTool`` is the agent-side seam for the chart mode of the
+``query_database`` MCP tool. It does not run SQL itself — the agent runs
+``run_sql`` first, then hands the
 (already aggregated) rows to this tool, which validates a small DSL and emits
 a ``ChartComponent``. The widget owns all rendering decisions (palette,
 tooltips, legend, axis formatting, theming); this tool only describes *what*

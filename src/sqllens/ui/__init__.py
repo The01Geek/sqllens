@@ -3,12 +3,13 @@
 
 """Packaged MCP App widget assets.
 
-The HTML widgets and their vendored JS bundles ship inside the wheel (see the
+The HTML widget and its vendored JS bundles ship inside the wheel (see the
 ``[tool.hatch.build.targets.wheel].include`` globs in ``pyproject.toml``).
-``server.py`` serves :func:`load_widget_html` results as the ``ui://``
-resources an apps-aware host renders in sandboxed iframes — one for
-``query_database`` (``query_results.html``) and one for ``visualize_data``
-(``chart_results.html``).
+``server.py`` serves :func:`load_widget_html` results as the single ``ui://``
+resource an apps-aware host renders in a sandboxed iframe for the consolidated
+``query_database`` tool (``query_results.html``). That one widget renders a
+chart, a data grid, or plain text depending on which structured ``_meta``
+payload the tool produced.
 
 The vendored JS bundles are *inlined* into the HTML at load time. MCP App
 hosts only fetch the single ``ui://`` resource — they then ``document.write``
@@ -31,8 +32,8 @@ from importlib.resources import files
 
 logger = logging.getLogger("sqllens.ui")
 
-# query_results.html only uses the ext-apps SDK (ESM module import).
-# chart_results.html uses BOTH the ext-apps SDK and echarts (classic UMD).
+# query_results.html uses BOTH the ext-apps SDK (ESM module import) and
+# echarts (classic UMD) — it renders a chart or a data grid from one payload.
 _APP_SDK_IMPORT = 'import { App } from "./vendor/app-with-deps.js";'
 _ECHARTS_SCRIPT_TAG = '<script src="./vendor/echarts.min.js"></script>'
 
@@ -95,8 +96,7 @@ def _inline_echarts(html: str, bundle: str) -> str:
 # (bundle_filename, splice_fn) pair in its recipe is applied. If a widget
 # ever needs no inlining, register it with an empty list.
 _RECIPES: dict[str, list[tuple[str, Callable[[str, str], str]]]] = {
-    "query_results.html": [("app-with-deps.js", _inline_app_sdk)],
-    "chart_results.html": [
+    "query_results.html": [
         ("echarts.min.js", _inline_echarts),
         ("app-with-deps.js", _inline_app_sdk),
     ],
