@@ -171,6 +171,34 @@ class TestReadShapedDetection:
         assert is_read_shaped(sql) is False
 
 
+class TestFirstSqlKeyword:
+    """`first_sql_keyword` is now a public, exported helper (extracted from
+    `is_read_shaped`) that also feeds `query_info["query_type"]` surfaced to
+    MCP clients. Pin its paren-stripping and empty-input contract directly so a
+    regression in the loop produces a test failure, not a silently-wrong
+    client-visible `query_type`.
+    """
+
+    @pytest.mark.parametrize(
+        ("sql", "expected"),
+        [
+            ("SELECT 1", "SELECT"),
+            ("select name from t", "SELECT"),
+            ("  \n\tWITH x AS (SELECT 1) SELECT * FROM x", "WITH"),
+            ("(SELECT 1)", "SELECT"),
+            ("(((SELECT 1)))", "SELECT"),
+            ("( WITH t AS (SELECT 1) SELECT * FROM t )", "WITH"),
+            ("DELETE FROM users", "DELETE"),
+            ("", ""),
+            ("   ", ""),
+        ],
+    )
+    def test_first_keyword(self, sql: str, expected: str) -> None:
+        from sqllens.safety import first_sql_keyword
+
+        assert first_sql_keyword(sql) == expected
+
+
 class TestSqliteRunnerCteRowCap:
     """Regression: CTE queries (`WITH ... SELECT`) must honor max_rows.
 

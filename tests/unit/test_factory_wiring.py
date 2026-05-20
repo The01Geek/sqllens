@@ -99,6 +99,94 @@ def test_emit_chart_tool_is_registered(tmp_path: Path) -> None:
     assert isinstance(emit_chart_tool, EmitChartTool)
 
 
+def test_show_details_on_unlocks_only_tool_arguments(tmp_path: Path) -> None:
+    """show_details (default True) admits the static group to tool_arguments
+    *only* — every other admin-gated UI feature stays admin-only, and the
+    module-level DEFAULT_UI_FEATURES list is not mutated.
+    """
+    from sqllens.agent.core.agent.config import (
+        DEFAULT_UI_FEATURES,
+        UiFeature,
+    )
+
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    assert cfg.agent.show_details is True
+    agent = build_agent(cfg)
+
+    fga = agent.config.ui_features.feature_group_access
+    assert "default" in fga[UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS]
+    # Targeted: the other admin-only features are untouched.
+    assert fga[UiFeature.UI_FEATURE_SHOW_TOOL_ERROR] == ["admin"]
+    assert fga[UiFeature.UI_FEATURE_SHOW_MEMORY_DETAILED_RESULTS] == ["admin"]
+    # The shared module-level default must not have been mutated in place.
+    assert DEFAULT_UI_FEATURES[UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS] == [
+        "admin"
+    ]
+
+
+def test_show_details_off_keeps_tool_arguments_admin_only(tmp_path: Path) -> None:
+    """show_details=False → tool_arguments stays admin-gated, so the static
+    user never sees the executed-SQL card (pre-feature behavior).
+
+    Also exercises the actual gate function the agent calls
+    (can_user_access_feature) with the resolved static user, end-to-end:
+    config → factory → AgentConfig.ui_features → gate verdict. This pins
+    the chain the _format.py docstring's "show_details off → no SQL card
+    is ever emitted" invariant depends on.
+    """
+    from sqllens.agent import User
+    from sqllens.agent.core.agent.config import UiFeature
+
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        agent=AgentRuntimeConfig(show_details=False),
+    )
+    agent = build_agent(cfg)
+
+    fga = agent.config.ui_features.feature_group_access
+    assert fga[UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS] == ["admin"]
+
+    static_user = User(id="anyone", group_memberships=["default"])
+    assert (
+        agent.config.ui_features.can_user_access_feature(
+            UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS, static_user
+        )
+        is False
+    )
+
+
+def test_show_details_on_grants_static_user_access_to_tool_arguments(
+    tmp_path: Path,
+) -> None:
+    """End-to-end gate check for the show_details=True chain: config → factory
+    → AgentConfig.ui_features.can_user_access_feature returns True for the
+    static DEFAULT_USER_GROUP user, which is what the agent calls before
+    yielding the run_sql STATUS_CARD. This is the missing integration link
+    between the access-list state (already pinned) and the framework gate
+    function (previously trusted by inspection)."""
+    from sqllens.agent import User
+    from sqllens.agent.core.agent.config import UiFeature
+
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    assert cfg.agent.show_details is True
+    agent = build_agent(cfg)
+
+    static_user = User(id="anyone", group_memberships=["default"])
+    assert (
+        agent.config.ui_features.can_user_access_feature(
+            UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS, static_user
+        )
+        is True
+    )
+    # And the other admin features are still locked for the static user.
+    assert (
+        agent.config.ui_features.can_user_access_feature(
+            UiFeature.UI_FEATURE_SHOW_TOOL_ERROR, static_user
+        )
+        is False
+    )
+
+
 def test_save_text_memory_tool_is_registered(tmp_path: Path) -> None:
     """The default system prompt's text-memory instructions only fire when
     ``save_text_memory`` is registered (``has_text_memory`` in default.py).

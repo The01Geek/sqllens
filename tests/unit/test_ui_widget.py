@@ -100,6 +100,19 @@ def test_read_failure_is_not_poison_cached(monkeypatch) -> None:
     assert calls["n"] == 2
 
 
+def test_widget_asset_wires_executed_sql_section() -> None:
+    # No JS test harness exists in the repo, so AC #4 (the widget renders a
+    # collapsible "Executed SQL" section from _meta["sqllens/query"] and
+    # degrades when absent) cannot be exercised behaviorally here. This
+    # structural guard at least fails loudly if a future re-lift or edit drops
+    # the SQL-section wiring: the meta key constant and the two-host split
+    # (sqlHost painted once by ingest(), gridHost re-cleared by render()).
+    html = ui.load_widget_html()
+    assert 'QUERY_META_KEY = "sqllens/query"' in html
+    assert "sqlHost" in html
+    assert "gridHost" in html
+
+
 def test_successful_read_is_cached(monkeypatch) -> None:
     calls = {"n": 0}
 

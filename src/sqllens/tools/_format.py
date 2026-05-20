@@ -20,6 +20,7 @@ from decimal import Decimal
 
 from sqllens.agent.core.components import UiComponent
 from sqllens.agent.core.rich_component import ComponentType
+from sqllens.safety import first_sql_keyword
 
 logger = logging.getLogger("sqllens.tools._format")
 
@@ -40,10 +41,17 @@ _MAX_TABLE_PAYLOAD_BYTES = 130 * 1024
 _MAX_CHART_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES
 
 
+def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
+    info: dict = {"sql": sql, "query_type": first_sql_keyword(sql)}
+    if row_count is not None:
+        info["row_count"] = row_count
+    return info
+
+
 def components_to_table(
     components: Iterable[UiComponent],
-) -> tuple[str, bool, dict | None]:
-    """Collapse a component stream into ``(markdown, is_error, table_payload)``.
+) -> tuple[str, bool, dict | None, dict | None]:
+    """Collapse a component stream into ``(markdown, is_error, table, query_info)``.
 
     Strategy (single pass):
     - Collect all DataFrame components as Markdown tables.
@@ -52,15 +60,36 @@ def components_to_table(
     - If any STATUS_CARD with status='error' appears, report it as an error.
     - Build ``table_payload`` from the *last* DataFrame in the stream (matches
       the last-wins convention; ``query_database`` emits one in practice).
+    - Capture the executed SQL from the *last* ``run_sql`` STATUS_CARD's
+      ``metadata["sql"]``. The card streams twice (running → completed) with
+      identical metadata, so last-wins de-dupes it idempotently. The card is
+      only emitted when ``agent.show_details`` unlocked the tool-arguments
+      feature; with it off, no SQL is ever seen here.
 
     ``table_payload`` is ``None`` on the error path, when no DataFrame is
     present, when the last DataFrame is empty, or when even the header-only
     serialized form exceeds the size budget.
+
+    ``query_info`` is ``None`` whenever no executed SQL is surfaced. The
+    config-independent invariant: a guard-rejected non-SELECT (the default
+    read-only deployment) and a pure-text / no-SQL answer never yield
+    ``query_info``. The mechanism differs by config and is intentional:
+
+    - ``show_details`` on: the run_sql card *is* emitted and carries
+      ``metadata["sql"]``, so ``last_sql`` is set even for a rejected
+      non-SELECT — but a failed tool drives the completed card to
+      ``status="error"`` (``agent`` maps ``ToolResult(success=False)`` →
+      ``set_status("error", ...)``), so the ``error_message`` short-circuit
+      below returns before ``query_info`` is built.
+    - ``show_details`` off: neither the running nor the completed card is
+      emitted, so ``last_sql`` stays ``None`` and ``query_info`` is ``None``
+      because no SQL card was seen — not via the error short-circuit.
     """
     text_answer = ""
     tables: list[str] = []
     error_message = ""
     last_df = None
+    last_sql: str | None = None
 
     for comp in components:
         rich = comp.rich_component
@@ -80,9 +109,14 @@ def components_to_table(
         elif ctype == ComponentType.STATUS_CARD:
             if getattr(rich, "status", "") == "error":
                 error_message = getattr(rich, "description", "") or "Agent reported an error"
+            metadata = getattr(rich, "metadata", None)
+            if isinstance(metadata, dict):
+                sql = metadata.get("sql")
+                if isinstance(sql, str) and sql.strip():
+                    last_sql = sql
 
     if error_message:
-        return error_message, True, None
+        return error_message, True, None, None
 
     parts = list(tables)
     if text_answer:
@@ -90,18 +124,32 @@ def components_to_table(
     markdown = "\n\n".join(parts) if parts else "(no answer)"
 
     payload = _build_table_payload(last_df) if last_df is not None else None
-    return markdown, False, payload
+    query_info = None
+    if last_sql is not None:
+        # True result size, not the rendered subset: the payload may be
+        # size-capped (row_count is the kept prefix, truncated the dropped
+        # tail), but the SQL ran against the whole set. ``.get`` keeps a
+        # partial future payload from raising an unsanitized KeyError past
+        # query_database_impl_with_table's except blocks (which sanitize
+        # driver-exception strings into a stable internal-error message).
+        row_count = (
+            payload.get("row_count", 0) + payload.get("truncated", 0)
+            if payload is not None
+            else None
+        )
+        query_info = _query_info_from_sql(last_sql, row_count)
+    return markdown, False, payload, query_info
 
 
 def components_to_markdown(components: Iterable[UiComponent]) -> tuple[str, bool]:
     """Collapse a stream of components into ``(markdown, is_error)``.
 
     Thin wrapper over :func:`components_to_table` that drops the structured
-    table; returns the same ``(markdown, is_error)`` pair non-apps hosts
-    already depend on (the Markdown branch is unchanged — pinned by
-    ``tests/unit/test_format.py``).
+    table and query info; returns the same ``(markdown, is_error)`` pair
+    non-apps hosts already depend on (the Markdown branch is unchanged —
+    pinned by ``tests/unit/test_format.py``).
     """
-    markdown, is_error, _ = components_to_table(components)
+    markdown, is_error, _, _ = components_to_table(components)
     return markdown, is_error
 
 

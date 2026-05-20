@@ -50,6 +50,21 @@ _INTERNAL_ERROR_MESSAGE = "internal error; see server logs"
 _SQL_EXECUTION_ERROR_PREFIX = "SQL execution error: "
 
 
+def _append_sql_block(markdown: str, query_info: dict | None) -> str:
+    """Append the executed SQL as a fenced ``sql`` block (text fallback).
+
+    Structured ``query_info`` in ``_meta`` is the source of truth; this is the
+    plain-text rendering for non-apps clients. Falsy ``query_info`` returns
+    markdown unchanged byte-for-byte (show_details off / no SQL ran).
+    """
+    if not query_info:
+        return markdown
+    sql = query_info.get("sql")
+    if not sql:
+        return markdown
+    return f"{markdown}\n\n**Executed SQL:**\n\n```sql\n{sql}\n```"
+
+
 async def query_database_impl(cfg: Config, question: str) -> str:
     """Translate ``question`` to SQL, execute, and return a Markdown answer.
 
@@ -57,21 +72,25 @@ async def query_database_impl(cfg: Config, question: str) -> str:
     that drops the structured table. The error taxonomy, sanitization, and
     exact raised messages are identical — they live in the sibling below.
     """
-    markdown, _ = await query_database_impl_with_table(cfg, question)
+    markdown, _, _ = await query_database_impl_with_table(cfg, question)
     return markdown
 
 
 async def query_database_impl_with_table(
     cfg: Config, question: str
-) -> tuple[str, dict | None]:
-    """Translate ``question`` to SQL, execute, and return ``(markdown, table)``.
+) -> tuple[str, dict | None, dict | None]:
+    """Translate ``question`` to SQL, execute, return ``(markdown, table, query_info)``.
 
     Same agent path and same three error categories as the Markdown-only
     contract: tool-internal failures raise ``_INTERNAL_ERROR_MESSAGE``,
     agent-reported SQL failures raise ``_SQL_EXECUTION_ERROR_PREFIX + answer``,
     and ``UnsafeSqlError`` is re-raised verbatim. ``table`` is ``None`` on the
     error path or whenever no DataFrame is present (apps-aware callers attach
-    it to ``_meta``; everyone else ignores it).
+    it to ``_meta``; everyone else ignores it). ``query_info`` carries the
+    executed SQL (``{"sql", "query_type", "row_count"?}``) when
+    ``agent.show_details`` is on; ``None`` otherwise — and when present, the
+    same SQL is also appended to ``markdown`` as a fenced ``sql`` block so
+    plain-text clients see it too.
     """
     try:
         agent = await get_agent(cfg)
@@ -108,7 +127,7 @@ async def query_database_impl_with_table(
         logger.exception("agent.send_message failed")
         raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
 
-    answer, is_error, table = components_to_table(components)
+    answer, is_error, table, query_info = components_to_table(components)
     if is_error:
         # Agent-reported query failure — SQL-execution error category. S-10's
         # structural leak (raw exception-string interpolation in the except
@@ -123,4 +142,4 @@ async def query_database_impl_with_table(
         # the calling agent needs, so it is deliberately not attempted here.
         logger.warning("agent reported query failure: %s", answer)
         raise RuntimeError(f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}")
-    return answer, table
+    return _append_sql_block(answer, query_info), table, query_info
