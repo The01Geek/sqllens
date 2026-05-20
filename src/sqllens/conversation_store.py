@@ -15,6 +15,11 @@ Per CLAUDE.md, conversation continuity is **in-process and ephemeral by
 design** — no server-side database, no cross-restart persistence. Restarting
 the server drops all conversations, which is acceptable for the
 clarifying-question flow this store backs.
+
+Concurrency: assumes a single asyncio event loop. Each method's OrderedDict
+mutations run without an intervening ``await``, so they are atomic under
+cooperative scheduling; the store is **not** thread-safe and would need a lock
+if ever driven from multiple OS threads.
 """
 
 from __future__ import annotations

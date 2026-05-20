@@ -73,16 +73,35 @@ def _button_label(data: object) -> str:
     return ""
 
 
+def _component_field(rich, name: str) -> object:  # type: ignore[no-untyped-def]
+    # Read a field whether the component declared it as a top-level attribute
+    # (NotificationComponent.message/title/level) or only carries it in the
+    # generic RichComponent.data dict. ALERT has no first-party component class
+    # in this pruned tree, so an emitted ALERT is a bare RichComponent whose
+    # text lives in `data` (pydantic drops unknown top-level kwargs); reading
+    # only attributes would silently render it empty.
+    val = getattr(rich, name, None)
+    if val is not None:
+        return val
+    data = getattr(rich, "data", None)
+    return data.get(name) if isinstance(data, dict) else None
+
+
 def _alert_text(rich) -> str:  # type: ignore[no-untyped-def]
-    # ALERT has no first-party component class in this pruned tree, so read the
-    # common text-bearing fields defensively; NOTIFICATION carries message/title.
+    # An error-level notification carries the raw, unsanitized driver exception
+    # (agent run_sql failure path). Surfacing it here would leak it as a normal
+    # is_error=False answer, bypassing the sanitized error taxonomy — so an
+    # error-level affordance is treated as "not an answer".
+    level = _component_field(rich, "level")
+    if isinstance(level, str) and level.strip().lower() == "error":
+        return ""
     message = ""
     for attr in ("message", "content", "description"):
-        val = getattr(rich, attr, None)
+        val = _component_field(rich, attr)
         if isinstance(val, str) and val.strip():
             message = val.strip()
             break
-    title = getattr(rich, "title", None)
+    title = _component_field(rich, "title")
     if isinstance(title, str) and title.strip() and title.strip() != message:
         return f"**{title.strip()}**: {message}" if message else title.strip()
     return message
@@ -261,6 +280,8 @@ def components_to_chart(
     present, or when even the data-stripped serialized form exceeds the size
     budget.
     """
+    # Materialize once: render_interactive (the no-answer fallback below) needs a
+    # second pass, and the public signature accepts any Iterable (incl. generators).
     components = list(components)
     text_answer = ""
     tables: list[str] = []

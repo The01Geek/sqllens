@@ -579,6 +579,38 @@ def test_notification_message_surfaced() -> None:
     assert "Connection is slow" in msg
 
 
+def test_alert_text_read_from_data_dict() -> None:
+    # ALERT has no first-party component class; an emitted ALERT is a bare
+    # RichComponent whose text lives in `data` (pydantic drops unknown top-level
+    # kwargs). The renderer must read `data`, else the ALERT surfaces as empty.
+    from sqllens.agent.core.rich_component import ComponentType, RichComponent
+
+    alert = RichComponent(
+        type=ComponentType.ALERT, data={"title": "Warning", "message": "Disk almost full"}
+    )
+    msg, is_error = components_to_markdown([_ui(alert)])
+    assert is_error is False
+    assert "Warning" in msg
+    assert "Disk almost full" in msg
+
+
+def test_error_level_notification_not_surfaced_as_answer() -> None:
+    # An error-level notification carries the raw driver exception; surfacing it
+    # as a normal answer would bypass the sanitized error taxonomy. It must NOT
+    # become the answer — the turn falls back to "(no answer)".
+    stream = [
+        _ui(
+            NotificationComponent(
+                message="Error executing query: connect host=db.internal", level="error"
+            )
+        )
+    ]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is False
+    assert msg == "(no answer)"
+    assert "db.internal" not in msg
+
+
 @pytest.mark.parametrize(
     "placeholder",
     [
