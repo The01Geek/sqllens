@@ -13,9 +13,9 @@ fail loudly, not silently render a blank iframe):
   cached and rendered as a blank iframe,
 - ``@cache`` must not poison-cache a read failure — a transient/packaging
   fault must re-attempt (and succeed) on the next fetch,
-- both widgets inline their vendored JS bundles so MCP App hosts (which
-  ``document.write`` the HTML into an about:blank-base iframe) can run the
-  scripts without a 404 on relative paths.
+- the unified widget inlines BOTH vendored JS bundles (ext-apps SDK + echarts)
+  so MCP App hosts (which ``document.write`` the HTML into an about:blank-base
+  iframe) can run the scripts without a 404 on relative paths.
 """
 
 from __future__ import annotations
@@ -137,25 +137,16 @@ def test_successful_read_is_cached(monkeypatch) -> None:
 # suite instead of only failing at MCP-host render time.
 
 
-def test_query_widget_inlines_app_sdk_bundle() -> None:
+def test_widget_inlines_app_sdk_and_echarts() -> None:
+    # The unified widget renders either a chart or a grid, so it inlines BOTH
+    # vendored bundles. No relative references should survive — either would
+    # 404 in an MCP App sandbox iframe.
     html = ui.load_widget_html("query_results.html")
-    # Relative module import must be gone after inlining.
-    assert 'import { App } from "./vendor/app-with-deps.js"' not in html
-    # The local binding the widget script consumes must be present.
-    assert "var App = " in html
-    # Sentinel that only the inlined ext-apps SDK carries.
-    assert "ui/notifications/tool-result" in html
-
-
-def test_chart_widget_inlines_app_sdk_and_echarts() -> None:
-    html = ui.load_widget_html("chart_results.html")
-    # No relative references should survive — both would 404 in an MCP App
-    # sandbox iframe.
     assert 'import { App } from "./vendor/app-with-deps.js"' not in html
     assert '<script src="./vendor/echarts.min.js">' not in html
     # Sentinels for both inlined bundles.
     assert "var App = " in html
-    assert "ui/notifications/tool-result" in html
+    assert "ui/notifications/tool-result" in html  # ext-apps SDK
     assert "Apache Software Foundation" in html  # echarts license header
     assert "echarts.init" in html  # widget call into the inlined global
 
@@ -172,7 +163,16 @@ def test_app_sdk_bundle_missing_export_raises(monkeypatch) -> None:
         def read_text(self, *_a, **_k):
             return self.html if self._target == "html" else self.bundle
 
-    html = '<html><script type="module">' + ui._APP_SDK_IMPORT + "</script></html>"
+    # The unified widget's recipe inlines echarts first, then the app SDK, so
+    # the minimal HTML must carry both relative refs for the loader to reach
+    # the app-SDK splice that these tests exercise.
+    html = (
+        "<html>"
+        + ui._ECHARTS_SCRIPT_TAG
+        + '<script type="module">'
+        + ui._APP_SDK_IMPORT
+        + "</script></html>"
+    )
     # A bundle without the trailing `export { ... };` clause must fail loudly.
     monkeypatch.setattr(ui, "files", lambda _pkg: _Stub(html, "var nope = 1;\n"))
     with pytest.raises(RuntimeError, match="trailing"):
@@ -191,7 +191,16 @@ def test_app_sdk_bundle_without_app_export_raises(monkeypatch) -> None:
         def read_text(self, *_a, **_k):
             return self.html if self._target == "html" else self.bundle
 
-    html = '<html><script type="module">' + ui._APP_SDK_IMPORT + "</script></html>"
+    # The unified widget's recipe inlines echarts first, then the app SDK, so
+    # the minimal HTML must carry both relative refs for the loader to reach
+    # the app-SDK splice that these tests exercise.
+    html = (
+        "<html>"
+        + ui._ECHARTS_SCRIPT_TAG
+        + '<script type="module">'
+        + ui._APP_SDK_IMPORT
+        + "</script></html>"
+    )
     monkeypatch.setattr(
         ui, "files", lambda _pkg: _Stub(html, "var x=1;\nexport { x as NotApp };")
     )

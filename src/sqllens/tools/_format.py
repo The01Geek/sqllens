@@ -158,7 +158,7 @@ def components_to_chart(
 ) -> tuple[str, bool, dict | None]:
     """Collapse a component stream into ``(markdown, is_error, chart_payload)``.
 
-    Parallel to :func:`components_to_table` but for ``visualize_data``: the
+    Parallel to :func:`components_to_table` but for the chart payload: the
     Markdown collapse is identical (DataFrame tables first, then the last
     non-empty TEXT answer, with a STATUS_CARD error short-circuiting) so a
     non-apps host still gets the data + answer. The structured payload is
@@ -380,7 +380,7 @@ def _coerce_chart_value(value: object) -> object:
 
 def _build_chart_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     # Same best-effort contract as _build_table_payload: payload construction
-    # must never escape visualize_data's sanitized error taxonomy. On any
+    # must never escape query_database's sanitized error taxonomy. On any
     # failure, degrade to "no widget" (the Markdown answer still stands).
     try:
         return _compute_chart_payload(rich)

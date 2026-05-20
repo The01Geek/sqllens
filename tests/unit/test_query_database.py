@@ -25,9 +25,15 @@ from sqllens.tools.query_database import (
     prime_agent,
     query_database_impl,
     query_database_impl_with_table,
+    query_database_impl_with_widgets,
 )
 
-from ._agent_stubs import make_dataframe, make_status_card, make_text_component
+from ._agent_stubs import (
+    make_chart,
+    make_dataframe,
+    make_status_card,
+    make_text_component,
+)
 from ._config_builders import build_test_config
 
 
@@ -422,6 +428,109 @@ async def test_with_table_no_sql_card_means_no_sql_block(
     assert query_info is None
     assert "```sql" not in markdown
     assert table is not None
+
+
+def _chart_spec(rows, **over):
+    base = {
+        "chart_type": "bar",
+        "title": "Revenue by genre",
+        "x": {"field": "genre", "label": "Genre", "type": "category"},
+        "y": {"field": "revenue", "label": "Revenue", "type": "value"},
+        "series": None,
+        "data": rows,
+        "row_count": len(rows),
+        "truncated": 0,
+    }
+    base.update(over)
+    return base
+
+
+@pytest.mark.asyncio
+async def test_with_widgets_returns_chart_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """A ChartComponent in the stream → a structured chart payload.
+
+    This is the path the consolidated ``query_database`` tool uses to render a
+    chart; it was previously the ``visualize_data`` tool's job.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    rows = [{"genre": "Rock", "revenue": 1200}, {"genre": "Jazz", "revenue": 800}]
+    stub = agent_stub_factory(
+        [
+            make_text_component("Here is the chart:"),
+            make_chart(_chart_spec(rows)),
+        ]
+    )
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    markdown, table, _query_info, chart = await query_database_impl_with_widgets(
+        cfg, "revenue per genre"
+    )
+
+    assert "Here is the chart:" in markdown
+    assert table is None
+    assert chart is not None
+    assert chart["chart_type"] == "bar"
+    assert chart["data"] == rows
+
+
+@pytest.mark.asyncio
+async def test_with_widgets_chart_and_dataframe_both_present(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """Both a DataFrame and a ChartComponent in one stream → both payloads.
+
+    The server attaches both _meta channels and the widget applies chart-wins
+    precedence; the impl simply returns both, deterministically, without error.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    df_rows = [{"genre": "Rock", "revenue": 1200}]
+    chart_rows = [{"genre": "Rock", "revenue": 1200}]
+    stub = agent_stub_factory(
+        [
+            make_dataframe(df_rows),
+            make_chart(_chart_spec(chart_rows)),
+            make_text_component("revenue by genre"),
+        ]
+    )
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    markdown, table, _query_info, chart = await query_database_impl_with_widgets(
+        cfg, "revenue per genre"
+    )
+
+    # Markdown (the non-apps fallback) still carries the data table + answer.
+    assert "| genre | revenue |" in markdown
+    assert "revenue by genre" in markdown
+    assert table is not None
+    assert table["columns"] == ["genre", "revenue"]
+    assert chart is not None
+    assert chart["chart_type"] == "bar"
+
+
+@pytest.mark.asyncio
+async def test_with_widgets_text_only_returns_none_payloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    stub = agent_stub_factory([make_text_component("no widget for this one")])
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    markdown, table, query_info, chart = await query_database_impl_with_widgets(
+        cfg, "q"
+    )
+
+    assert markdown == "no widget for this one"
+    assert table is None
+    assert query_info is None
+    assert chart is None
 
 
 def test_append_sql_block_emits_executed_sql_heading() -> None:

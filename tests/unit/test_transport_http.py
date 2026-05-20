@@ -195,8 +195,8 @@ def _stub_eager_build_agent(monkeypatch: pytest.MonkeyPatch) -> None:
 
     The eager warmup now runs through the ``on_startup`` hook, which delegates
     to ``prime_agent`` → ``get_agent`` → ``build_agent``. The agent singleton
-    lives in ``sqllens.tools._agent`` (shared by ``query_database`` and
-    ``visualize_data``), so the build seam and the process-wide
+    lives in ``sqllens.tools._agent`` (used by ``query_database``), so the
+    build seam and the process-wide
     ``_AGENT_STATE`` are patched there. Building a real agent (sqlite connect +
     object graph) on a clean-startup path would be irrelevant work for tests
     that exercise the ASGI lifespan state machine. The integration suite (a

@@ -86,10 +86,11 @@ def test_max_tool_iterations_flows_through_config(tmp_path: Path) -> None:
 
 def test_emit_chart_tool_is_registered(tmp_path: Path) -> None:
     """Without ``emit_chart`` in the ToolRegistry the LLM never sees it and
-    ``visualize_data`` silently degrades to text-only — exactly the silent
-    failure the precedent ``test_save_text_memory_tool_is_registered`` exists
-    to catch. Pins that a future re-lift or factory refactor cannot drop the
-    registration without test signal.
+    ``query_database`` silently degrades to table/text-only (never a chart) —
+    exactly the silent failure the precedent
+    ``test_save_text_memory_tool_is_registered`` exists to catch. Pins that a
+    future re-lift or factory refactor cannot drop the registration without
+    test signal.
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     agent = build_agent(cfg)
