@@ -77,3 +77,41 @@ async def test_explicit_base_prompt_empty_string_bypasses_builder() -> None:
     prompt = await builder.build_system_prompt(user, tools=[])
 
     assert prompt == ""
+
+
+async def test_emit_chart_usage_block_present_when_tool_registered() -> None:
+    """When ``emit_chart`` is in the tool list, the EMIT_CHART USAGE rubric
+    is injected — without this block the LLM has no instructions on when
+    or how to call ``emit_chart`` and ``visualize_data`` breaks end-to-end.
+    """
+    builder = DefaultSystemPromptBuilder()
+    user = User(id="test-user")
+    prompt = await builder.build_system_prompt(
+        user, tools=[_ToolSchemaStub("run_sql"), _ToolSchemaStub("emit_chart")]
+    )
+
+    assert prompt is not None
+    assert "EMIT_CHART USAGE" in prompt
+    # Pin the load-bearing rules: chart-type allow-list, the once-per-request
+    # rule, the row cap, and the pie/heatmap series semantics.
+    assert "bar, line, area, scatter, pie, heatmap" in prompt
+    assert "EXACTLY ONCE" in prompt
+    assert "200 rows" in prompt
+    assert "MUST be absent for pie" in prompt
+    assert "REQUIRED" in prompt  # heatmap requires series
+
+
+async def test_emit_chart_usage_block_absent_without_tool() -> None:
+    """No EMIT_CHART block when ``emit_chart`` isn't registered — the table-
+    only ``query_database`` path must not see chart-specific instructions
+    that would confuse it into calling a tool that does not exist.
+    """
+    builder = DefaultSystemPromptBuilder()
+    user = User(id="test-user")
+    prompt = await builder.build_system_prompt(
+        user, tools=[_ToolSchemaStub("run_sql")]
+    )
+
+    assert prompt is not None
+    assert "EMIT_CHART USAGE" not in prompt
+    assert "emit_chart" not in prompt

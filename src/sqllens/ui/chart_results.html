@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<!--
+  Self-contained MCP App widget for visualize_data results.
+
+  No external origins: this file plus its two vendored bundles
+  (./vendor/echarts.min.js, ./vendor/app-with-deps.js) form the entire widget.
+  Both bundles are *inlined* into this HTML at serve time by
+  sqllens.ui.load_widget_html() — MCP App hosts ``document.write`` the HTML
+  into an about:blank-base iframe with no access to sibling files on the
+  MCP server, so any relative <script src=…> or `import "./vendor/…"` would
+  404 and the widget would silently hang on "Waiting for results…".
+
+  The host renders the inlined HTML in a sandboxed iframe and pushes the
+  tool's CallToolResult via the MCP Apps postMessage channel; the chart spec
+  lives under result._meta["sqllens/chart"]. If that key is absent or
+  malformed the widget renders an empty-state notice.
+
+  Renderer: ECharts SVG renderer (echarts.init(el, theme, {renderer:'svg'})).
+  The SVG renderer needs no eval/Function and emits plain DOM, so it cannot
+  trip a strict iframe CSP — chosen deliberately over the canvas renderer so
+  no 'unsafe-eval' is ever required (see issue #138 CSP acceptance criterion).
+-->
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Chart results</title>
+<script src="./vendor/echarts.min.js"></script>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: var(--color-background-primary, transparent);
+    --fg: var(--color-text-primary, #1a1a1a);
+    --muted: var(--color-text-secondary, #6b7280);
+    --line: var(--color-border-primary, #d1d5db);
+  }
+  /* Dark-mode fallbacks for hosts (MCP Inspector) that don't push `--color-*`
+     design tokens through getHostContext(). Without these the light-default
+     #1a1a1a text renders black on a dark background. Precedence: an explicit
+     `data-theme="light"` from the host must win even if the OS prefers dark,
+     so the media query excludes that case. data-theme="dark" stays a
+     separate rule so an explicit dark theme wins on a light OS too. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --fg: var(--color-text-primary, #e6e6e6);
+      --muted: var(--color-text-secondary, #a1a1aa);
+      --line: var(--color-border-primary, #3a3a40);
+    }
+  }
+  :root[data-theme="dark"] {
+    --fg: var(--color-text-primary, #e6e6e6);
+    --muted: var(--color-text-secondary, #a1a1aa);
+    --line: var(--color-border-primary, #3a3a40);
+  }
+  html, body { margin: 0; padding: 0; background: transparent; height: 100%; }
+  body {
+    color: var(--fg);
+    font: 13px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 8px;
+    box-sizing: border-box;
+  }
+  #root { display: flex; flex-direction: column; height: calc(100vh - 16px); }
+  #chart { flex: 1 1 auto; min-height: 220px; width: 100%; }
+  .note { color: var(--muted); font-size: 12px; padding: 4px 2px 0; }
+  .empty { color: var(--muted); padding: 16px; }
+</style>
+</head>
+<body>
+<div id="root"><div class="empty">Waiting for results…</div></div>
+
+<script type="module">
+import { App } from "./vendor/app-with-deps.js";
+
+const META_KEY = "sqllens/chart";
+
+const state = {
+  spec: null,
+  theme: "light",
+};
+
+let chart = null;
+let resizeObserver = null;
+
+const root = document.getElementById("root");
+
+function applyHostContext(ctx) {
+  if (!ctx) return;
+  const theme = ctx.theme === "dark" ? "dark" : "light";
+  // data-theme drives the :root[data-theme="dark"] / :not([data-theme="light"])
+  // CSS rules. Setting it explicitly (rather than relying solely on
+  // prefers-color-scheme) lets the host's declared theme win over the OS
+  // preference — e.g. a dark host on a light-mode OS still renders dark.
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  const vars = ctx.styles && ctx.styles.variables;
+  if (vars) {
+    for (const [k, v] of Object.entries(vars)) {
+      if (typeof v === "string") document.documentElement.style.setProperty(k, v);
+    }
+  }
+  if (theme !== state.theme) {
+    state.theme = theme;
+    // ECharts cannot swap theme on a live instance — dispose and re-init so
+    // there is no ghost chart from the previous theme.
+    rebuildChart();
+  }
+}
+
+function distinct(rows, key) {
+  const seen = new Set();
+  const out = [];
+  for (const r of rows) {
+    const v = r[key];
+    const tag = String(v);
+    if (!seen.has(tag)) {
+      seen.add(tag);
+      out.push(v);
+    }
+  }
+  return out;
+}
+
+function buildEchartsOption(spec) {
+  const rows = Array.isArray(spec.data) ? spec.data : [];
+  const xf = spec.x && spec.x.field;
+  const yf = spec.y && spec.y.field;
+  const xLabel = (spec.x && spec.x.label) || xf;
+  const yLabel = (spec.y && spec.y.label) || yf;
+  const yAxisType = spec.y && spec.y.type === "log" ? "log" : "value";
+  const title = spec.title ? { text: spec.title, left: "center" } : undefined;
+
+  if (spec.chart_type === "pie") {
+    return {
+      title,
+      tooltip: { trigger: "item" },
+      legend: { type: "scroll", bottom: 0 },
+      series: [
+        {
+          type: "pie",
+          radius: "60%",
+          data: rows.map((r) => ({ name: String(r[xf]), value: r[yf] })),
+        },
+      ],
+    };
+  }
+
+  if (spec.chart_type === "heatmap") {
+    const valueField = spec.series; // the z dimension (DSL: series == value field)
+    const xCats = distinct(rows, xf).map(String);
+    const yCats = distinct(rows, yf).map(String);
+    let min = Infinity;
+    let max = -Infinity;
+    const data = rows.map((r) => {
+      const v = Number(r[valueField]);
+      if (Number.isFinite(v)) {
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      return [xCats.indexOf(String(r[xf])), yCats.indexOf(String(r[yf])), r[valueField]];
+    });
+    if (!Number.isFinite(min)) { min = 0; max = 1; }
+    return {
+      title,
+      tooltip: { position: "top" },
+      grid: { containLabel: true },
+      xAxis: { type: "category", data: xCats, name: xLabel },
+      yAxis: { type: "category", data: yCats, name: yLabel },
+      visualMap: { min, max, calculable: true, orient: "horizontal", left: "center", bottom: 0 },
+      series: [{ type: "heatmap", data, label: { show: false } }],
+    };
+  }
+
+  if (spec.chart_type === "scatter") {
+    const mk = (rs) => rs.map((r) => [r[xf], r[yf]]);
+    let series;
+    let legend;
+    if (spec.series) {
+      const groups = distinct(rows, spec.series).map(String);
+      legend = { type: "scroll", bottom: 0, data: groups };
+      series = groups.map((g) => ({
+        name: g,
+        type: "scatter",
+        data: mk(rows.filter((r) => String(r[spec.series]) === g)),
+      }));
+    } else {
+      series = [{ type: "scatter", data: mk(rows) }];
+    }
+    return {
+      title,
+      tooltip: { trigger: "item" },
+      legend,
+      grid: { containLabel: true },
+      xAxis: { type: "value", name: xLabel },
+      yAxis: { type: yAxisType, name: yLabel },
+      series,
+    };
+  }
+
+  // bar | line | area
+  const isArea = spec.chart_type === "area";
+  const baseType = spec.chart_type === "bar" ? "bar" : "line";
+  const xType = spec.x && spec.x.type;
+  const continuous = xType === "time" || xType === "value";
+
+  // Continuous x (time/value): emit [x, y] tuples. Categorical x: align each
+  // series's points to the shared category list, filling gaps with null.
+  const pointsFor = (rs, cats) =>
+    continuous
+      ? rs.map((r) => [r[xf], r[yf]])
+      : (() => {
+          const byCat = new Map(rs.map((r) => [String(r[xf]), r[yf]]));
+          return cats.map((c) => (byCat.has(c) ? byCat.get(c) : null));
+        })();
+
+  const makeSeries = (name, rs, cats) => ({
+    name,
+    type: baseType,
+    smooth: baseType === "line",
+    areaStyle: isArea ? {} : undefined,
+    data: pointsFor(rs, cats),
+  });
+
+  const cats = continuous ? null : distinct(rows, xf).map(String);
+  const xAxis = continuous
+    ? { type: xType, name: xLabel }
+    : { type: "category", data: cats, name: xLabel };
+
+  let series;
+  let legend;
+  if (spec.series) {
+    const groups = distinct(rows, spec.series).map(String);
+    legend = { type: "scroll", bottom: 0, data: groups };
+    series = groups.map((g) =>
+      makeSeries(g, rows.filter((r) => String(r[spec.series]) === g), cats)
+    );
+  } else {
+    series = [makeSeries(undefined, rows, cats)];
+  }
+
+  return {
+    title,
+    tooltip: { trigger: "axis" },
+    legend,
+    grid: { containLabel: true },
+    xAxis,
+    yAxis: { type: yAxisType, name: yLabel },
+    series,
+  };
+}
+
+function disposeChart() {
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
+  if (chart) {
+    chart.dispose();
+    chart = null;
+  }
+}
+
+function rebuildChart() {
+  // Re-render from state.spec under the current theme. Used on first ingest
+  // and on every theme change (ECharts has no live theme swap).
+  disposeChart();
+  root.textContent = "";
+
+  if (!state.spec || !Array.isArray(state.spec.data) || state.spec.data.length === 0) {
+    showNotice("No chartable result for this query.");
+    return;
+  }
+
+  const chartEl = document.createElement("div");
+  chartEl.id = "chart";
+  root.appendChild(chartEl);
+
+  let note = null;
+  const truncated = typeof state.spec.truncated === "number" ? state.spec.truncated : 0;
+  if (truncated > 0) {
+    note = document.createElement("div");
+    note.className = "note";
+    const shown = state.spec.row_count != null ? state.spec.row_count : state.spec.data.length;
+    note.textContent = `Rendering first ${shown} of ${shown + truncated} rows.`;
+    root.appendChild(note);
+  }
+
+  try {
+    chart = echarts.init(
+      chartEl,
+      state.theme === "dark" ? "dark" : null,
+      { renderer: "svg" }
+    );
+    chart.setOption(buildEchartsOption(state.spec));
+  } catch (err) {
+    showNotice("Could not render chart: " + (err && err.message ? err.message : err));
+    return;
+  }
+
+  resizeObserver = new ResizeObserver(() => {
+    if (chart) chart.resize();
+  });
+  resizeObserver.observe(chartEl);
+}
+
+function ingest(result) {
+  const payload = result && result._meta && result._meta[META_KEY];
+  if (!payload || !Array.isArray(payload.data)) {
+    state.spec = null;
+    rebuildChart();
+    return;
+  }
+  state.spec = payload;
+  rebuildChart();
+}
+
+function showNotice(text) {
+  disposeChart();
+  root.textContent = "";
+  const d = document.createElement("div");
+  d.className = "empty";
+  d.textContent = text;
+  root.appendChild(d);
+}
+
+const app = new App({ name: "sqllens-chart-results", version: "1.0.0" }, {});
+app.ontoolresult = (params) => {
+  // Without this boundary a malformed payload throws into the SDK's message
+  // dispatcher and the widget freezes on "Waiting for results…" with no
+  // signal that data arrived but failed to render.
+  try {
+    ingest(params);
+  } catch (err) {
+    showNotice("Could not render chart: " + (err && err.message ? err.message : err));
+  }
+};
+
+// Theming is non-fatal and must never throw into the SDK dispatcher (which
+// would wedge the message loop) nor be misreported as a connection failure.
+function applyHostContextSafe() {
+  try {
+    applyHostContext(app.getHostContext());
+    if (chart) chart.resize();
+  } catch (err) {
+    console.warn("host theming failed (non-fatal):", err);
+  }
+}
+
+app.onhostcontextchanged = applyHostContextSafe;
+
+app.connect()
+  .then(applyHostContextSafe)
+  .catch((err) => {
+    showNotice("Failed to connect to host: " + (err && err.message ? err.message : err));
+  });
+</script>
+</body>
+</html>

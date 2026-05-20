@@ -21,6 +21,7 @@ from pydantic import SecretStr
 
 from sqllens.agent.factory import build_agent
 from sqllens.agent.tools import (
+    EmitChartTool,
     RunSqlTool,
     SaveTextMemoryTool,
     SearchSavedCorrectToolUsesTool,
@@ -81,6 +82,21 @@ def test_max_tool_iterations_flows_through_config(tmp_path: Path) -> None:
     )
     agent = build_agent(cfg)
     assert agent.config.max_tool_iterations == 42
+
+
+def test_emit_chart_tool_is_registered(tmp_path: Path) -> None:
+    """Without ``emit_chart`` in the ToolRegistry the LLM never sees it and
+    ``visualize_data`` silently degrades to text-only — exactly the silent
+    failure the precedent ``test_save_text_memory_tool_is_registered`` exists
+    to catch. Pins that a future re-lift or factory refactor cannot drop the
+    registration without test signal.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    agent = build_agent(cfg)
+
+    assert "emit_chart" in agent.tool_registry._tools
+    emit_chart_tool = _unwrap(agent.tool_registry._tools["emit_chart"])
+    assert isinstance(emit_chart_tool, EmitChartTool)
 
 
 def test_show_details_on_unlocks_only_tool_arguments(tmp_path: Path) -> None:

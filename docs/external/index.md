@@ -4,18 +4,24 @@ SQL Lens is a Model Context Protocol (MCP) server that lets MCP-aware AI assista
 
 ## What it does
 
-SQL Lens exposes two tools to the assistant:
+SQL Lens exposes three tools to the assistant:
 
 | Tool | Purpose |
 |---|---|
 | `query_database(question)` | Translates a natural-language question into SQL, executes it, and returns the result as a Markdown table. |
+| `visualize_data(question)` | Translates a chart-shaped natural-language question into SQL, executes it, and returns an interactive chart (with a Markdown summary as fallback). |
 | `list_data_sources()` | Reports the configured database name, dialect, and read-only state. |
 
 One database is configured per running instance. Generated SQL is parsed and rejected if it is anything other than a `SELECT`, so the default deployment is safe against accidental writes. You can also opt into [Row-Level Security](row-level-security.md) to narrow every answer to the rows a particular request is allowed to see.
 
 ## Interactive results
 
-On assistants that support inline app widgets — currently Claude Desktop and claude.ai — a `query_database` answer is also shown as an interactive table you can sort by column, filter with a search box, page through, and export to CSV. The same plain-text answer appears in the conversation, so nothing is lost. On every other assistant you continue to receive the Markdown table exactly as before; no configuration or change is needed on your side. This first release covers tables only; charts are not yet included.
+On assistants that support inline app widgets — currently Claude Desktop and claude.ai — `query_database` and `visualize_data` answers are also shown as inline widgets in the conversation:
+
+- **`query_database`** displays an interactive table you can sort by column, filter with a search box, page through, and export to CSV.
+- **`visualize_data`** displays an interactive chart (bar, line, area, scatter, pie, or heatmap) rendered with Apache ECharts. It honors the assistant's light or dark theme and resizes responsively.
+
+The same plain-text answer appears in the conversation alongside each widget, so nothing is lost. On every other assistant you continue to receive the Markdown table exactly as before; no configuration or change is needed on your side. Charts are emitted only when the assistant judges the result to be aggregated or temporal and obviously chartable — plain lookups are returned as text.
 
 ## Documentation map
 

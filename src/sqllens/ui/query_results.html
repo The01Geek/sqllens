@@ -13,6 +13,11 @@
   is on) the executed SQL under result._meta["sqllens/query"].sql. If the
   table key is absent or malformed the widget renders an empty-state notice;
   the SQL section is independent and simply omitted when absent.
+
+  The relative ext-apps SDK import below is replaced at serve time by
+  sqllens.ui.load_widget_html() — MCP App hosts ``document.write`` the HTML
+  into an about:blank-base iframe with no access to sibling files on the
+  MCP server, so the import has to be inlined or the script never runs.
 -->
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Query results</title>
@@ -26,6 +31,31 @@
     --row-alt: var(--color-background-secondary, rgba(127, 127, 127, 0.06));
     --accent: var(--color-background-info, #2563eb);
     --control-bg: var(--color-background-tertiary, rgba(127, 127, 127, 0.10));
+  }
+  /* Dark-mode fallbacks: only the `--color-*` design tokens the host pushes
+     through getHostContext() can override these. Hosts that don't push tokens
+     (MCP Inspector sends only `{theme}` with no styles object) leave the
+     var() defaults in play — without these rules the light-mode #1a1a1a text
+     renders black on a dark background. Precedence: explicit host theme
+     wins over the OS preference, so the prefers-color-scheme rule excludes
+     [data-theme="light"] (a host in light mode on a dark OS still renders
+     light). data-theme="dark" stays as a separate rule so an explicit dark
+     theme also wins on a light OS. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --fg: var(--color-text-primary, #e6e6e6);
+      --muted: var(--color-text-secondary, #a1a1aa);
+      --line: var(--color-border-primary, #3a3a40);
+      --row-alt: var(--color-background-secondary, rgba(255, 255, 255, 0.04));
+      --control-bg: var(--color-background-tertiary, rgba(255, 255, 255, 0.08));
+    }
+  }
+  :root[data-theme="dark"] {
+    --fg: var(--color-text-primary, #e6e6e6);
+    --muted: var(--color-text-secondary, #a1a1aa);
+    --line: var(--color-border-primary, #3a3a40);
+    --row-alt: var(--color-background-secondary, rgba(255, 255, 255, 0.04));
+    --control-bg: var(--color-background-tertiary, rgba(255, 255, 255, 0.08));
   }
   html, body { margin: 0; padding: 0; background: transparent; }
   body {
@@ -94,19 +124,28 @@ const state = {
   sql: "",
 };
 
-// Two stable children: the SQL section is immutable for a result, so it is
-// painted once by ingest() into sqlHost and never touched by render().
-// render() owns gridHost only — clearing it on every filter/sort/page must
-// not destroy (and collapse) the user's expanded "Executed SQL" panel.
+// Three stable children, painted once per result by ingest() and never
+// destroyed by render(): the SQL section (sqlHost), the filter bar (barHost
+// — input + CSV button + "showing N of M" span), and the grid (gridHost —
+// table + pager). render() owns gridHost only — clearing it on every
+// filter/sort/page keystroke must not (a) destroy and collapse the user's
+// expanded "Executed SQL" panel, NOR (b) replace the filter <input>
+// mid-typing (which would steal focus on every keystroke).
 const root = document.getElementById("root");
 root.textContent = "";
 const sqlHost = document.createElement("div");
+const barHost = document.createElement("div");
 const gridHost = document.createElement("div");
 const _waiting = document.createElement("div");
 _waiting.className = "empty";
 _waiting.textContent = "Waiting for results…";
 gridHost.appendChild(_waiting);
-root.append(sqlHost, gridHost);
+root.append(sqlHost, barHost, gridHost);
+
+// Persistent reference the bar exposes to render(): the meta span's text
+// ("showing N of M") changes as the user filters/sorts/pages, but the
+// containing input + CSV button DOM is stable so focus survives.
+let _metaSpan = null;
 
 function isNumeric(colIndex) {
   return state.types[state.columns[colIndex]] === "number";
@@ -115,6 +154,11 @@ function isNumeric(colIndex) {
 function applyHostContext(ctx) {
   if (!ctx) return;
   const theme = ctx.theme === "dark" ? "dark" : "light";
+  // data-theme drives the :root[data-theme="dark"] CSS rule. We set it
+  // explicitly (rather than relying on prefers-color-scheme) so the host's
+  // declared theme wins over the OS preference — e.g. a dark host on a
+  // light-mode OS still renders dark.
+  document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
   const vars = ctx.styles && ctx.styles.variables;
   if (vars) {
@@ -160,27 +204,127 @@ function csvEscape(v) {
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
-function exportCsv() {
-  // MCP App iframes are sandboxed; blob: URLs or downloads may be blocked.
-  // Without this the click is a silent no-op on an explicit user action.
-  let url;
+function buildCsvText() {
+  const rows = sortedRows(filteredRows());
+  const lines = [state.columns.map(csvEscape).join(",")];
+  for (const r of rows) lines.push(r.map(csvEscape).join(","));
+  return lines.join("\r\n");
+}
+
+// Show a transient message in the meta span ("showing N of M") and restore
+// the count after a couple of seconds. Used to give CSV-export feedback
+// without destroying the table (showNotice() would clear gridHost).
+function flashMeta(text) {
+  if (!_metaSpan) return;
+  _metaSpan.textContent = text;
+  setTimeout(() => { if (_metaSpan) render(); }, 2500);
+}
+
+// Last-resort fallback: render the CSV inline in a textarea so the user can
+// always read/copy it manually. Works in any sandbox because it requires no
+// permissions and no host capability. The "Back to table" button restores
+// the grid.
+function showCsvOverlay(csvText) {
+  gridHost.textContent = "";
+  const wrap = document.createElement("div");
+  wrap.className = "wrap";
+  wrap.style.padding = "8px";
+  const hint = document.createElement("div");
+  hint.className = "meta";
+  hint.style.marginBottom = "6px";
+  hint.textContent =
+    "Host blocked the file download and clipboard. Select all and copy:";
+  const ta = document.createElement("textarea");
+  ta.readOnly = true;
+  ta.value = csvText;
+  ta.style.width = "100%";
+  ta.style.minHeight = "240px";
+  ta.style.font = "12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+  ta.style.background = "var(--control-bg)";
+  ta.style.color = "var(--fg)";
+  ta.style.border = "1px solid var(--line)";
+  ta.style.borderRadius = "6px";
+  ta.style.padding = "6px";
+  const done = document.createElement("button");
+  done.textContent = "Back to table";
+  done.style.marginTop = "8px";
+  done.addEventListener("click", render);
+  wrap.append(hint, ta, done);
+  gridHost.appendChild(wrap);
+  ta.focus();
+  ta.select();
+}
+
+// Synchronous clipboard copy via a temporary <textarea>. The async
+// navigator.clipboard.writeText needs `clipboard-write` permissions-policy
+// that MCP Inspector's sandbox doesn't grant; document.execCommand("copy")
+// is deprecated but doesn't need that grant and works inside sandboxed
+// iframes that have `allow-same-origin`. Returns true on success.
+function copyViaExecCommand(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  ta.style.top = "0";
+  ta.setAttribute("readonly", "");
+  document.body.appendChild(ta);
+  let ok = false;
   try {
-    const rows = sortedRows(filteredRows());
-    const lines = [state.columns.map(csvEscape).join(",")];
-    for (const r of rows) lines.push(r.map(csvEscape).join(","));
-    const blob = new Blob([lines.join("\r\n")], { type: "text/csv" });
-    url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "query_results.csv";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    ok = document.execCommand("copy");
   } catch (err) {
-    showNotice("CSV export blocked by host: " + (err && err.message ? err.message : err));
+    console.warn("execCommand('copy') failed:", err);
+    ok = false;
   } finally {
-    if (url) URL.revokeObjectURL(url);
+    ta.remove();
   }
+  return ok;
+}
+
+async function exportCsv() {
+  // Tiered export. MCP App iframes are sandboxed without `allow-downloads`
+  // and Inspector doesn't grant `clipboard-write` permissions-policy, so
+  // both the obvious <a download> and the async clipboard API silently
+  // no-op there. Cascade:
+  //   1) ui/download-file — spec-compliant hosts (Claude Desktop).
+  //   2) navigator.clipboard.writeText — modern, needs clipboard-write.
+  //   3) document.execCommand("copy") — legacy, works without that grant.
+  //   4) Inline textarea overlay — always works; user copies manually.
+  const csvText = buildCsvText();
+  const caps = (app.getHostCapabilities && app.getHostCapabilities()) || {};
+  if (caps.downloadFile) {
+    try {
+      await app.downloadFile({
+        contents: [
+          {
+            type: "resource",
+            resource: {
+              uri: "query_results.csv",
+              mimeType: "text/csv",
+              text: csvText,
+            },
+          },
+        ],
+      });
+      flashMeta("downloaded ✓");
+      return;
+    } catch (err) {
+      console.warn("ui/download-file failed:", err);
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(csvText);
+    flashMeta("copied to clipboard ✓");
+    return;
+  } catch (err) {
+    console.warn("clipboard.writeText failed:", err);
+  }
+  if (copyViaExecCommand(csvText)) {
+    flashMeta("copied to clipboard ✓");
+    return;
+  }
+  showCsvOverlay(csvText);
 }
 
 function renderSqlSection() {
@@ -200,25 +344,14 @@ function renderSqlSection() {
   sqlHost.appendChild(details);
 }
 
-function render() {
-  const matched = filteredRows();
-  const sorted = sortedRows(matched);
-  const pages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  if (state.page >= pages) state.page = pages - 1;
-  if (state.page < 0) state.page = 0;
-  const start = state.page * PAGE_SIZE;
-  const pageRows = sorted.slice(start, start + PAGE_SIZE);
-
-  gridHost.textContent = "";
-
-  if (!state.columns.length) {
-    const d = document.createElement("div");
-    d.className = "empty";
-    d.textContent = "No tabular result for this query.";
-    gridHost.appendChild(d);
-    return;
-  }
-
+function renderBar() {
+  // Painted once per result from ingest(); render() never touches barHost,
+  // so the filter input keeps focus across keystrokes. The "showing N of M"
+  // span is exposed to render() via _metaSpan so its text can update
+  // without rebuilding the input.
+  barHost.textContent = "";
+  _metaSpan = null;
+  if (!state.columns.length) return;
   const bar = document.createElement("div");
   bar.className = "bar";
   const search = document.createElement("input");
@@ -235,11 +368,35 @@ function render() {
   csvBtn.addEventListener("click", exportCsv);
   const meta = document.createElement("span");
   meta.className = "meta";
-  let msg = `showing ${matched.length} of ${state.rowCount}`;
-  if (state.truncated > 0) msg += ` (${state.truncated} truncated)`;
-  meta.textContent = msg;
   bar.append(search, csvBtn, meta);
-  gridHost.appendChild(bar);
+  barHost.appendChild(bar);
+  _metaSpan = meta;
+}
+
+function render() {
+  const matched = filteredRows();
+  const sorted = sortedRows(matched);
+  const pages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  if (state.page >= pages) state.page = pages - 1;
+  if (state.page < 0) state.page = 0;
+  const start = state.page * PAGE_SIZE;
+  const pageRows = sorted.slice(start, start + PAGE_SIZE);
+
+  if (_metaSpan) {
+    let msg = `showing ${matched.length} of ${state.rowCount}`;
+    if (state.truncated > 0) msg += ` (${state.truncated} truncated)`;
+    _metaSpan.textContent = msg;
+  }
+
+  gridHost.textContent = "";
+
+  if (!state.columns.length) {
+    const d = document.createElement("div");
+    d.className = "empty";
+    d.textContent = "No tabular result for this query.";
+    gridHost.appendChild(d);
+    return;
+  }
 
   const wrap = document.createElement("div");
   wrap.className = "wrap";
@@ -305,6 +462,7 @@ function ingest(result) {
   const payload = meta[META_KEY];
   if (!payload || !Array.isArray(payload.columns)) {
     state.columns = [];
+    renderBar();
     render();
     return;
   }
@@ -317,6 +475,7 @@ function ingest(result) {
   state.sortDir = 1;
   state.filter = "";
   state.page = 0;
+  renderBar();
   render();
 }
 

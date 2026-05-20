@@ -637,7 +637,7 @@ class TestMetadataPlumbing:
         async def _fake_agent_for(_cfg: Config):
             return _RecordingAgent()
 
-        monkeypatch.setattr(qd, "_agent_for", _fake_agent_for)
+        monkeypatch.setattr(qd, "get_agent", _fake_agent_for)
         cfg = _cfg(tmp_path, [])
         await qd.query_database_impl(cfg, "q", metadata={"tenant_id": "acme"})
         assert seen["metadata"] == {"tenant_id": "acme"}
@@ -666,7 +666,7 @@ class TestMetadataPlumbing:
         async def _fake_agent_for(_cfg: Config):
             return _RecordingAgent()
 
-        monkeypatch.setattr(qd, "_agent_for", _fake_agent_for)
+        monkeypatch.setattr(qd, "get_agent", _fake_agent_for)
         cfg = _cfg(tmp_path, [])
         await qd.query_database_impl(
             cfg,

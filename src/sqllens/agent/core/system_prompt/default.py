@@ -74,6 +74,35 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
                 f"\nYou have access to the following tools: {', '.join(tool_names)}"
             )
 
+        if "emit_chart" in tool_names:
+            prompt_parts.extend(
+                [
+                    "\n" + "=" * 60,
+                    "EMIT_CHART USAGE:",
+                    "=" * 60,
+                    "",
+                    "Call emit_chart ONLY when the user asked for a chart/plot/graph AND the result is aggregated or temporal and obviously chartable. For plain lookups, return run_sql's result as text — do NOT force a chart.",
+                    "",
+                    "Workflow: run_sql first to get the aggregated rows, then call emit_chart EXACTLY ONCE with those rows. Never call emit_chart before run_sql, and never more than once per request.",
+                    "",
+                    "DSL (emit_chart arguments):",
+                    "  • chart_type: one of bar, line, area, scatter, pie, heatmap",
+                    "  • title: optional chart title",
+                    "  • x: { field, label?, type? } — type is category | time | value",
+                    "  • y: { field, label?, type? } — type is value | log",
+                    "  • series: optional row key to split into one line/bar per distinct value. MUST be absent for pie. For heatmap it is the VALUE (z) field name, and is REQUIRED.",
+                    "  • data: list of row objects, e.g. [{\"month\":\"2025-01\",\"sales\":1200,\"region\":\"NA\"}]. At most 200 rows — aggregate in SQL first (GROUP BY / LIMIT), never pass raw row dumps.",
+                    "",
+                    "Pick chart_type by data shape:",
+                    "  • time series / trend over dates → line (set x.type=time)",
+                    "  • categorical breakdown / comparison → bar",
+                    "  • part-of-whole / share → pie (no series)",
+                    "  • correlation between two numerics → scatter (x.type=value)",
+                    "  • value over two categorical dimensions → heatmap (series = value field)",
+                    "  • cumulative / filled trend → area",
+                ]
+            )
+
         # Add memory workflow instructions based on available tools
         if has_search or has_save or has_text_memory:
             prompt_parts.append("\n" + "=" * 60)
@@ -88,7 +117,7 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
             prompt_parts.extend(
                 [
                     "",
-                    "• BEFORE executing any tool (run_sql, visualize_data, or calculator), you MUST first call search_saved_correct_tool_uses with the user's question to check if there are existing successful patterns for similar questions.",
+                    "• BEFORE executing any tool (run_sql or emit_chart), you MUST first call search_saved_correct_tool_uses with the user's question to check if there are existing successful patterns for similar questions.",
                     "",
                     "• Review the search results (if any) to inform your approach before proceeding with other tool calls.",
                 ]

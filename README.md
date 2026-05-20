@@ -6,11 +6,12 @@ Natural-language SQL analytics over [MCP](https://modelcontextprotocol.io/). Con
 
 ## What it does
 
-A standalone MCP server that wraps a natural-language SQL agent + a vector memory store. It exposes two tools:
+A standalone MCP server that wraps a natural-language SQL agent + a vector memory store. It exposes three tools:
 
 | Tool | What it does |
 |---|---|
 | `query_database(question)` | Translates the question to SQL, runs it, returns a Markdown table. |
+| `visualize_data(question)` | Translates the question to SQL, runs it, returns an interactive Apache-ECharts chart (plus a text answer). |
 | `list_data_sources()` | Describes the configured database (name, dialect, read-only state). |
 
 One database per running instance. Read-only by default — generated SQL is parsed with [sqlglot](https://github.com/tobymao/sqlglot) and rejected if it isn't a `SELECT`. ChromaDB stores per-question memory locally so the agent learns from corrections.
