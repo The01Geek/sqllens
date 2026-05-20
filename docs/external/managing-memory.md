@@ -1,12 +1,12 @@
 # Managing Memory
 
-SQL Lens keeps a local memory of helpful context so it answers similar questions better over time. Memory normally grows on its own as you use SQL Lens. You can also seed it with curated knowledge up front, and export what it has accumulated, using two command-line commands.
+SQL Lens keeps a local memory of helpful context so it answers similar questions better over time. You can seed it with curated knowledge up front, and export what it has accumulated, using two command-line commands.
 
 ## What Is Stored
 
 SQL Lens remembers two kinds of entries:
 
-- **Question-and-answer pairs**: a natural-language question paired with the SQL that answered it well. A similar future question can reuse that approach instead of working it out from scratch.
+- **Question-and-answer pairs**: a natural-language question paired with the SQL that answered it well. A similar future question can reuse that approach instead of working it out from scratch. SQL Lens only saves these automatically when you enable the `save_queries` setting (off by default); you can also seed them from a file at any time with the command-line import.
 - **Free-form notes**: short text notes about your schema, for example "in this database, `cust_seg` means customer segment", so future questions land on the right tables and columns.
 
 Both kinds live in the local vector store configured by the `[memory]` section. See the [Configuration reference](configuration.md#section-memory).
