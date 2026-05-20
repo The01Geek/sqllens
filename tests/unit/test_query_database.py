@@ -489,7 +489,10 @@ async def test_with_widgets_chart_and_dataframe_both_present(
     precedence; the impl simply returns both, deterministically, without error.
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
-    df_rows = [{"genre": "Rock", "revenue": 1200}]
+    # Distinct data per channel so a regression that cross-wires last_df and
+    # last_chart in components_to_widgets (feeding the DataFrame into the chart
+    # payload or vice versa) is caught — identical rows would mask it.
+    df_rows = [{"city": "Oslo", "sales": 42}]
     chart_rows = [{"genre": "Rock", "revenue": 1200}]
     stub = agent_stub_factory(
         [
@@ -505,12 +508,15 @@ async def test_with_widgets_chart_and_dataframe_both_present(
     )
 
     # Markdown (the non-apps fallback) still carries the data table + answer.
-    assert "| genre | revenue |" in markdown
+    assert "| city | sales |" in markdown
     assert "revenue by genre" in markdown
     assert table is not None
-    assert table["columns"] == ["genre", "revenue"]
+    assert table["columns"] == ["city", "sales"]
+    assert table["rows"] == [["Oslo", "42"]]
     assert chart is not None
     assert chart["chart_type"] == "bar"
+    # The chart payload carries the chart rows, NOT the DataFrame rows.
+    assert chart["data"] == chart_rows
 
 
 @pytest.mark.asyncio

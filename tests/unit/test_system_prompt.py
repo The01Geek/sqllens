@@ -82,7 +82,8 @@ async def test_explicit_base_prompt_empty_string_bypasses_builder() -> None:
 async def test_emit_chart_usage_block_present_when_tool_registered() -> None:
     """When ``emit_chart`` is in the tool list, the EMIT_CHART USAGE rubric
     is injected — without this block the LLM has no instructions on when
-    or how to call ``emit_chart`` and ``visualize_data`` breaks end-to-end.
+    or how to call ``emit_chart`` and the chart mode of ``query_database``
+    breaks end-to-end.
     """
     builder = DefaultSystemPromptBuilder()
     user = User(id="test-user")

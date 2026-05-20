@@ -113,6 +113,24 @@ def test_widget_asset_wires_executed_sql_section() -> None:
     assert "gridHost" in html
 
 
+def test_widget_dispatch_pins_chart_wins_precedence() -> None:
+    # The repo has no JS test harness, so the widget's chart > table > text
+    # render-mode dispatch (the one genuinely-new behavior of the consolidation)
+    # cannot be exercised behaviorally here. This structural guard fails loudly
+    # if a refactor drops the load-bearing predicate: (a) the chart channel is
+    # consulted, (b) chart mode is entered only when chart data is non-empty —
+    # so an empty/malformed chart payload falls through to the table rather than
+    # hiding a present grid behind a blank chart, and (c) both render-mode
+    # entrypoints exist.
+    html = ui.load_widget_html()
+    assert 'const CHART_META_KEY = "sqllens/chart";' in html
+    assert 'const TABLE_META_KEY = "sqllens/table";' in html
+    # chart-wins guard: chart mode requires a non-empty data array.
+    assert "chartPayload.data.length > 0" in html
+    assert "ingestChart(chartPayload)" in html
+    assert "ingestTable(meta)" in html
+
+
 def test_successful_read_is_cached(monkeypatch) -> None:
     calls = {"n": 0}
 
