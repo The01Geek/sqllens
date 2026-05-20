@@ -56,15 +56,21 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
     """
     try:
         meta = ctx.request_context.meta
+    except ValueError:
+        # Documented, expected case: the MCP SDK raises ``ValueError`` from
+        # ``request_context`` when no request is active (stdio — the primary
+        # transport — and tests). This is the common path, not a fault, so it
+        # is logged at debug without a traceback; warning+traceback here would
+        # fire on every stdio query and drown out a genuine SDK drift.
+        logger.debug("no active request context; returning empty metadata")
+        return {}
     except Exception:
-        # The MCP SDK currently raises ``ValueError`` from
-        # ``request_context`` when no request is active (stdio, tests). Any
-        # other exception type — a future SDK swapping to ``LookupError`` /
+        # Genuinely unexpected: a future SDK swapping to ``LookupError`` /
         # ``RequestContextNotAvailableError``, a ``contextvars`` change, an
-        # attribute lookup blowing up — must also fail-secure to ``{}`` so the
+        # attribute lookup blowing up. Must still fail-secure to ``{}`` so the
         # docstring's "any failure" promise holds and the tool never crashes
-        # with a raw traceback. Logged with traceback at warning so a real
-        # SDK drift is diagnosable, not silent.
+        # with a raw traceback — but this one is real signal, so log it at
+        # warning with a traceback to make the drift diagnosable.
         logger.warning(
             "failed to read request_context.meta; returning empty metadata",
             exc_info=True,

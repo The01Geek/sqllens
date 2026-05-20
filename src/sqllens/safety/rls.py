@@ -106,7 +106,11 @@ def _resolve_value(
     query is blocked rather than run unfiltered.
     """
     if rule.value_from_metadata is None:
-        # mypy: value is not None — RlsRule._validate enforces exactly-one-of.
+        # Static values intentionally skip _is_suspicious_scalar: they are
+        # operator-authored config, type-validated at load, never
+        # request-influenced — the sanitization net is for caller-supplied
+        # dynamic values only. mypy: value is not None — RlsRule._validate
+        # enforces exactly-one-of.
         return rule.value  # type: ignore[return-value]
 
     key = rule.value_from_metadata

@@ -23,6 +23,7 @@ from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
 from sqllens.agent.factory import build_agent
 from sqllens.config import (
+    RESERVED_METADATA_KEYS,
     AgentRuntimeConfig,
     AuthConfig,
     Config,
@@ -102,15 +103,24 @@ class TestRlsRuleValidation:
         with pytest.raises(ValidationError, match="valid metadata key"):
             _rule(value_from_metadata="bad key")
 
-    @pytest.mark.parametrize(
-        "reserved", ["starter_ui_request", "ui_features_available"]
-    )
+    @pytest.mark.parametrize("reserved", sorted(RESERVED_METADATA_KEYS))
     def test_reserved_metadata_key_rejected_at_load(self, reserved: str) -> None:
         # Internal agent-control keys are stripped at the request boundary —
         # a rule that references one would silently block every query against
         # the protected table. Reject the typo at config load instead.
+        # Parametrized over RESERVED_METADATA_KEYS itself so a new reserved key
+        # is automatically covered, not silently left unrejected.
         with pytest.raises(ValidationError, match="reserved internal agent-control"):
             _rule(value_from_metadata=reserved)
+
+    def test_load_reject_set_matches_boundary_strip_set(self) -> None:
+        # The load-time rejection (config) and the request-boundary strip
+        # (tools/query_database) MUST enforce the same set, or a key could be
+        # load-accepted yet always stripped — the silent-block failure the
+        # rejection exists to prevent. Pin them to one source of truth.
+        from sqllens.tools.query_database import _RESERVED_METADATA_KEYS
+
+        assert _RESERVED_METADATA_KEYS == RESERVED_METADATA_KEYS
 
     def test_unknown_key_in_rule_rejected(self) -> None:
         with pytest.raises(ValidationError):
@@ -426,6 +436,19 @@ class TestApplyRlsDynamicFailSecure:
                 [_rule(value_from_metadata="tenant_id")],
                 dialect="sqlite",
                 metadata={"tenant_id": bad},
+            )
+
+    @pytest.mark.parametrize("bad", ["", "tab\tnull", "x\x00y"])
+    def test_suspicious_item_in_dynamic_in_list_blocks(self, bad: str) -> None:
+        # The per-item suspicious-scalar check on the 'in' path is a distinct
+        # call site from the scalar path; an empty/control-char value smuggled
+        # into a metadata list must block just the same.
+        with pytest.raises(RlsError, match="suspicious"):
+            apply_rls(
+                "SELECT id FROM orders",
+                [_rule(value_from_metadata="tids", operator="in")],
+                dialect="sqlite",
+                metadata={"tids": ["acme", bad]},
             )
 
     @pytest.mark.parametrize("bad", [None, {"a": 1}, b"bytes", ["nested"]])

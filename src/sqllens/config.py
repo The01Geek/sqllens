@@ -282,7 +282,8 @@ _RLS_OPERATORS: frozenset[str] = frozenset({"=", "!=", "<", "<=", ">", ">=", "in
 # flow. The same set is also forbidden as ``value_from_metadata`` here so a
 # typo cannot create a rule that resolves to a key that will always be
 # stripped (which would silently block every query against the protected
-# table). Single source of truth — imported from tools/query_database.py.
+# table). This constant is the canonical definition; tools/query_database.py
+# imports it.
 RESERVED_METADATA_KEYS: frozenset[str] = frozenset(
     {"starter_ui_request", "ui_features_available"}
 )
