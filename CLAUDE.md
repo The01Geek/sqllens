@@ -87,7 +87,13 @@ Python 3.11+ required. Config can come from `./sqllens.toml`, `--config <path>`,
 - Type hints on every public signature.
 - No new top-level dependencies without discussion.
 - Tools (in `tools/`) are thin: parse args → call agent → format result. Business logic belongs in `agent/`.
-- Errors visible to MCP clients must be returned as `isError: true` with a clear message. Do **not** let the LLM apologize inside a tool result; the calling agent needs structured signal.
+- **Failures must surface as structured signal — never as a silent success or an unguarded crash.** Errors visible to MCP clients must be returned as `isError: true` with a clear message. Do **not** let the LLM apologize inside a tool result; the calling agent needs structured signal. This is the single most-violated rule in this repo — it has recurred across config, transport, and memory work. It covers four cases the terse "return errors as isError" wording kept missing:
+  - **Partial failure is failure.** An operation that completed some work and failed the rest (e.g. `import_memory` with `saved == 0` and `errors > 0`, or any `errors > 0`) must be `isError: true`, not a success object that merely *reports* the error count. If the operation did not fully achieve what its name promises, it errored.
+  - **Lossy / empty success needs a loud warning, not green output.** Bulk read/write operations (export-memory, import-memory) on an empty, corrupt, or version-skewed store must emit an explicit `Warning:` and never print unqualified success — a clean "Done" on a destroyed store is a data-loss trap.
+  - **No unguarded dereference of optional/secret config on a non-CLI path.** Values like `cfg.llm.api_key` are `None` for HTTP-transport and programmatic callers; dereferencing (`.get_secret_value()`) without a guard raises a bare `AttributeError` that reaches the MCP client as an unstructured crash. Guard with a clear message (the `API_KEY_MISSING_MESSAGE` pattern) before dereferencing.
+  - **No blanket `except` that swallows rows or steps.** A broad `except (TypeError, ValueError, ...): continue` over an iterator (e.g. `iter_all`) silently drops every record on schema/version skew and reports the result as a successful empty export. Catch narrowly, count what you skip, and surface a non-success if anything was skipped.
+
+  Before returning success from any tool or CLI command, ask: *did every item this operation promised actually complete, and would a `None`/empty/corrupt input reach this return as a green result?* If the answer is uncertain, it is an error.
 - New first-party `.py` files get SPDX headers:
   ```
   # SPDX-FileCopyrightText: 2026 Daniel Radman
