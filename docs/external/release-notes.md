@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 21, 2026
+
+- **[Feature] Surface a memory hit-or-miss summary with each answer** — SQL Lens now reports the result of its memory lookup for a question, so you can see when the assistant reused something it had learned before. A new `agent.show_memory_details` setting (default `false`, environment variable `SQLLENS_AGENT__SHOW_MEMORY_DETAILS`) adds a one-line footer to each answer such as `Memory: 2 hits (top similarity 0.83)` on a match or `Memory: no matches` when nothing relevant was found; only counts and similarity scores are shown, never the content of remembered questions or answers. On hosts that support structured tool metadata, the same summary is always available to the host regardless of this setting. See [Configuration reference](configuration.md#section-agent). (#169)
+
 ## May 20, 2026
 
 - **[Improvement] Executed SQL is now hidden from answers by default** — The `agent.show_details` setting now defaults to `false`, so a `query_database` answer no longer includes the SQL the agent ran. Exposing that SQL to connected clients can reveal details about your database structure and query logic, so it is now off unless you opt in. To restore the previous behavior and surface the executed SQL alongside each answer, set `show_details = true` in `sqllens.toml` or `SQLLENS_AGENT__SHOW_DETAILS=1`. **Action required if you relied on seeing the executed SQL:** set `show_details = true` after upgrading; otherwise answers are returned without the SQL block. (#152)
