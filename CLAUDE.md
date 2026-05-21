@@ -100,6 +100,20 @@ Python 3.11+ required. Config can come from `./sqllens.toml`, `--config <path>`,
   # SPDX-License-Identifier: Apache-2.0
   ```
 
+## Claims must match the code (no fabricated behavior)
+
+Every sentence that **describes runtime behavior** — in a docstring, an internal doc (`docs/internal/`), an external doc (`docs/external/`), a release note, a PR body, or a code comment — must describe what the code on this branch **actually does**, not what the issue asked for or what you intend to do next. Writing the doc first and the code second is how SQL Lens has shipped false claims twice (#117, #136).
+
+Before you write or keep any behavioral claim, **trace it to the line that implements it**:
+
+- **Boot vs. lazy / first-call.** If a doc says work happens "at startup" / "at `serve` boot," confirm the constructor (or warmup hook) actually performs that I/O — not just wires objects whose `__init__` is lazy. `build_agent` constructing a `ChromaAgentMemory` does *not* trigger the embedding-model download; only a real query/`get_recent_memories` touch does (#117).
+- **Guard / validation scope.** If a doc claims an input is "blocked," "rejected," or "validated," find the branch that rejects it. Match the doc to the *actual* predicate: don't claim type-mismatch blocking, empty-string blocking, or load-time rejection unless the code does exactly that (#136 claimed RLS type-mismatch and load-time-reject behavior the guard never implemented; empty-string slipped through `_is_suspicious_scalar`).
+- **Exception breadth.** A docstring promising "fail-secure to `{}`" must catch the exceptions that can actually be raised, not a narrower subset (#136 caught only `(ValueError, AttributeError)`).
+- **Counting claims.** "Three orthogonal protections" / "two halves" / "N tools" must equal what the file now contains after your change. Adding a fourth guard means the count updates (#136 left "Three orthogonal protections" after adding `RlsGuardRunner`).
+- **Sibling surfaces.** If two tools share a wrapped runner (`query_database` + `visualize_data`), a claim about "every query" must hold for both, or scope the claim and record the gap as an explicit follow-up — do not let the doc imply coverage the sibling lacks.
+
+When a claim cannot yet be backed by code, either cut it or write it as an explicit "not yet / follow-up," and call that out in the PR body. A claim you can't trace to a line is a defect, not a placeholder.
+
 ## Release & distribution
 
 Three artifact types, all driven by tag pushes (`vX.Y.Z`):
