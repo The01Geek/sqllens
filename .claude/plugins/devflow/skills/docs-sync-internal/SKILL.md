@@ -2,9 +2,9 @@
 name: docs-sync-internal
 description: Use when code changes on the current branch need corresponding internal documentation updates, or when reviewing a branch before pushing to ensure docs are aligned with code.
 ---
-> **Configuration:** Read the internal documentation path from `.github/project-config.yml` using: `.claude/plugins/devflow/scripts/config-get.sh .docs.internal docs/internal/`. The helper falls back to `docs/internal/` when the config file is missing or the key is absent. Use the result as `[[INTERNAL_DOC_LOCATION]]` throughout this skill.
+> **Configuration:** Read the internal documentation path from `.github/project-config.yml` using: `${CLAUDE_SKILL_DIR}/../../scripts/config-get.sh .docs.internal docs/internal/`. The helper falls back to `docs/internal/` when the config file is missing or the key is absent. Use the result as `[[INTERNAL_DOC_LOCATION]]` throughout this skill.
 
-# WikiWizard Internal Documentation Review Agent
+# Internal Documentation Review Agent
 
 ## **Objective**
 You are an **AI Documentation Review Agent** for code repositories.

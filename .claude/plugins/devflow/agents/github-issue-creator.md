@@ -94,4 +94,4 @@ Provide the complete GitHub issue in markdown format that can be directly copied
 
 **IMPORTANT: Do NOT add any labels to the GitHub issues you create.** When using `gh issue create`, do NOT use the `--label` flag. Issues must be created without labels — labeling is handled separately by the project maintainers.
 
-Save the issue to a file in the root directory with the following format: `requirements.md`
+Save the issue to `.devflow/tmp/requirements.md` (DevFlow's ephemeral scratch directory — create it with `mkdir -p .devflow/tmp` if needed). Do not write scratch files to the repository root.

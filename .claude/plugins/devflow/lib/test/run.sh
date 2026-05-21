@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 # Tests for the lib/ jq filters and bash helpers. Run from repo root:
-#   bash .claude/plugins/devflow/lib/test/run.sh
+#   bash lib/test/run.sh
 #
 # Each test asserts a specific load-bearing invariant. A failure here means a
 # downstream regression in the /devflow-weekly orchestrator or the
@@ -10,16 +12,23 @@
 set -u
 
 LIB="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Results are recorded to a file (one PASS/FAIL line each) rather than to shell
+# variables, so assertions that run inside ( … ) subshells — the conf.sh and
+# render-report.sh blocks, sourced in subshells to contain their `set -e` — are
+# counted in the final tally too. Counting in-memory would silently drop them.
+RESULTS_FILE="$(mktemp)"
+trap 'rm -f "$RESULTS_FILE"' EXIT
 PASS=0
 FAIL=0
 
 assert_eq() {
   local name="$1" expected="$2" actual="$3"
   if [ "$expected" = "$actual" ]; then
-    PASS=$((PASS + 1))
+    echo PASS >> "$RESULTS_FILE"
     printf '  PASS  %s\n' "$name"
   else
-    FAIL=$((FAIL + 1))
+    echo FAIL >> "$RESULTS_FILE"
     printf '  FAIL  %s\n         expected: %s\n         actual:   %s\n' \
       "$name" "$expected" "$actual"
   fi
@@ -30,7 +39,7 @@ echo "classify-pr-kind.jq"
 # ────────────────────────────────────────────────────────────────────────────
 
 classify() {
-  jq -nr --arg branch "$1" --argjson watched "$2" \
+  jq -nr --arg branch "$1" --argjson watched "$2" --arg impl_prefix "${3:-claude/}" \
     -f "$LIB/classify-pr-kind.jq"
 }
 
@@ -153,8 +162,9 @@ assert_eq "missing merged_at does not poison first_seen" \
 # ────────────────────────────────────────────────────────────────────────────
 echo "conf.sh"
 # ────────────────────────────────────────────────────────────────────────────
-( . "$LIB/conf.sh"
-  assert_eq "watched authors from config" "claude,radman-ai" "$(devflow_watched_authors)"
+( export DEVFLOW_CONFIG_FILE="$LIB/test/fixtures/project-config.yml"
+  . "$LIB/conf.sh"
+  assert_eq "watched authors from config" "claude,example-bot" "$(devflow_watched_authors)"
   assert_eq "min_occurrences from config" "2" "$(devflow_conf '.devflow_retrospective.min_occurrences' 99)"
   assert_eq "missing key → default" "fallback" "$(devflow_conf '.devflow_retrospective.nonexistent_key_xyz' fallback)"
 )
@@ -166,20 +176,20 @@ SCAN_TMP="$(mktemp -d)"
 cat > "$SCAN_TMP/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
-  *"repo view"*) echo "The01Geek/devflow-autopilot" ;;
+  *"repo view"*) echo "acme/example-repo" ;;
   *"pr list"*"author:claude"*)
     echo '[{"number":1,"headRefName":"claude/issue-1-a","author":{"login":"claude"},"mergedAt":"2026-05-01T00:00:00Z"},
            {"number":3,"headRefName":"claude/issue-3-c","author":{"login":"claude"},"mergedAt":"2026-05-03T00:00:00Z"},
-           {"number":9,"headRefName":"devflow/learnings-2026-W18","author":{"login":"radman-ai"},"mergedAt":"2026-05-02T00:00:00Z"}]' ;;
+           {"number":9,"headRefName":"devflow/learnings-2026-W18","author":{"login":"example-bot"},"mergedAt":"2026-05-02T00:00:00Z"}]' ;;
   *"pr list"*) echo '[]' ;;
   *"api"*"retrospectives.jsonl?ref=main"*)
-    BODY="$(printf '{"pr":1}\n{"pr":2}\n' | base64 -w0)"
+    BODY="$(printf '{"pr":1}\n{"pr":2}\n' | base64 | tr -d "\n")"
     printf 'HTTP/2.0 200 OK\r\n\r\n{"content":"%s"}\n' "$BODY" ;;
   *) echo '[]' ;;
 esac
 STUB
 chmod +x "$SCAN_TMP/gh"
-SCAN_OUT="$(DEVFLOW_GH="$SCAN_TMP/gh" bash "$LIB/scan.sh" 2>/dev/null)"
+SCAN_OUT="$(DEVFLOW_CONFIG_FILE="$LIB/test/fixtures/project-config.yml" DEVFLOW_GH="$SCAN_TMP/gh" bash "$LIB/scan.sh" 2>/dev/null)"
 assert_eq "scan includes unprocessed PR 3"        "true"  "$(echo "$SCAN_OUT" | jq 'any(.[]; .number==3)')"
 assert_eq "scan excludes already-recorded PR 1"   "false" "$(echo "$SCAN_OUT" | jq 'any(.[]; .number==1)')"
 assert_eq "scan excludes devflow/learnings branch" "false" "$(echo "$SCAN_OUT" | jq 'any(.[]; .number==9)')"
@@ -189,7 +199,7 @@ assert_eq "scan excludes devflow/learnings branch" "false" "$(echo "$SCAN_OUT" |
 cat > "$SCAN_TMP/gh2" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
-  *"repo view"*) echo "The01Geek/devflow-autopilot" ;;
+  *"repo view"*) echo "acme/example-repo" ;;
   *"pr view 1 --repo"*) echo '{"number":1,"headRefName":"claude/issue-1-a","mergedAt":"2026-05-01T00:00:00Z","state":"MERGED"}' ;;
   *"pr view 2 --repo"*) echo '{"number":2,"headRefName":"feature/hand-written","mergedAt":"2026-05-02T00:00:00Z","state":"MERGED"}' ;;
   *"pr view 3 --repo"*) echo '{"number":3,"headRefName":"claude/issue-3-c","mergedAt":"2026-05-03T00:00:00Z","state":"OPEN"}' ;;
@@ -371,7 +381,7 @@ assert_eq "incomplete-edit cooldown_active=true after recent audit PR" "true" "$
 # Missing overrides.json → should still emit the actionable array, not error
 AP_NOOV="$(DEVFLOW_GH="$AP_TMP/gh" bash "$LIB/actionable-patterns.sh" "$AP_TMP/r.jsonl" "/tmp/devflow-nonexistent-overrides-$$-$RANDOM.json")" \
   && assert_eq "actionable: missing overrides → incomplete-edit still present" "true" "$(echo "$AP_NOOV" | jq 'any(.[]; .tag=="incomplete-edit")')" \
-  || { FAIL=$((FAIL + 1)); printf '  FAIL  actionable: missing overrides → script errored\n'; }
+  || { echo FAIL >> "$RESULTS_FILE"; printf '  FAIL  actionable: missing overrides → script errored\n'; }
 rm -rf "$AP_TMP"
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -407,14 +417,21 @@ rm -rf "$M_TMP"
 echo "check-excluded-path.sh"
 # ────────────────────────────────────────────────────────────────────────────
 ex() { bash "$LIB/check-excluded-path.sh" "$@" >/dev/null 2>&1; echo $?; }
-assert_eq "skill file allowed"            "1" "$(ex ".claude/skills/example/SKILL.md")"
+assert_eq "adopter .claude/skills file allowed" "1" "$(ex ".claude/skills/example/SKILL.md")"
 assert_eq "CLAUDE.md allowed"             "1" "$(ex "CLAUDE.md")"
 assert_eq "docs allowed"                  "1" "$(ex "docs/internal/foo.md")"
-assert_eq "plugin path excluded"          "0" "$(ex ".claude/plugins/devflow/skills/retrospective/SKILL.md")"
+assert_eq "app source allowed"            "1" "$(ex "src/app.py")"
+assert_eq "engine skill path excluded"    "0" "$(ex "skills/retrospective/SKILL.md")"
+assert_eq "engine lib path excluded"      "0" "$(ex "lib/scan.sh")"
+assert_eq "engine agents path excluded"   "0" "$(ex "agents/checklist-generator.md")"
+assert_eq "engine scripts path excluded"  "0" "$(ex "scripts/workpad.py")"
+assert_eq "plugin manifest excluded"      "0" "$(ex ".claude-plugin/plugin.json")"
 assert_eq "devflow workflow excluded"     "0" "$(ex ".github/workflows/devflow-doc-audit.yml")"
 assert_eq "claude.yml excluded"           "0" "$(ex ".github/workflows/claude.yml")"
-assert_eq "other workflow allowed"        "1" "$(ex ".github/workflows/WikiWizard.yml")"
+assert_eq "claude-runner.yml excluded"    "0" "$(ex ".github/workflows/claude-runner.yml")"
+assert_eq "non-engine workflow allowed"   "1" "$(ex ".github/workflows/release.yml")"
 assert_eq "project-config excluded"       "0" "$(ex ".github/project-config.yml")"
+assert_eq "project-config.example excluded" "0" "$(ex ".github/project-config.example.yml")"
 assert_eq "learnings data excluded"       "0" "$(ex ".devflow/learnings/overrides.json")"
 assert_eq "get-app-token excluded"        "0" "$(ex ".github/actions/get-app-token/action.yml")"
 assert_eq "stdin mode works"              "0" "$(printf '%s\n' 'CLAUDE.md' '.devflow/learnings/x.json' | bash "$LIB/check-excluded-path.sh" >/dev/null 2>&1; echo $?)"
@@ -427,33 +444,39 @@ echo "meta-issue.sh"
 MI_TMP="$(mktemp -d)"
 echo '{"schema_version":1,"dismissed":{}}' > "$MI_TMP/ov.json"
 echo 'Proposed: strengthen the cheap gate.' > "$MI_TMP/body.md"
-cat > "$MI_TMP/gh" <<'STUB'
+cat > "$MI_TMP/gh" <<STUB
 #!/usr/bin/env bash
-case "$*" in
+case "\$*" in
   *"issue list"*) echo '' ;;                                # no existing issue
-  *"issue create"*) echo 'https://github.com/The01Geek/devflow-autopilot/issues/4242' ;;
+  *"issue create"*) printf '%s' "\$*" > "$MI_TMP/create-args"; echo 'https://github.com/acme/example-repo/issues/4242' ;;
   *"issue comment"*) echo 'commented' ;;
   *) echo '' ;;
 esac
 STUB
 chmod +x "$MI_TMP/gh"
 URL="$(DEVFLOW_GH="$MI_TMP/gh" bash "$LIB/meta-issue.sh" --tag review-reject-bypassed --slug review-reject-bypassed --title "audit(devflow): x" --body-file "$MI_TMP/body.md" --overrides "$MI_TMP/ov.json" 2>/dev/null)"
-assert_eq "meta-issue returns the new URL" "https://github.com/The01Geek/devflow-autopilot/issues/4242" "$URL"
-assert_eq "override recorded with url"     "https://github.com/The01Geek/devflow-autopilot/issues/4242" "$(jq -r '.dismissed["review-reject-bypassed"].meta_issue' "$MI_TMP/ov.json")"
+assert_eq "meta-issue returns the new URL" "https://github.com/acme/example-repo/issues/4242" "$URL"
+# Created title must keep the de-dup key prefix (Step-1 search matches it) AND
+# carry the caller's --title (regression: --title was previously discarded).
+assert_eq "create title keeps the de-dup key" "true" \
+  "$(grep -qF -- '--title [devflow-retrospective] meta: review-reject-bypassed' "$MI_TMP/create-args" && echo true || echo false)"
+assert_eq "create title carries the caller --title" "true" \
+  "$(grep -qF -- 'audit(devflow): x' "$MI_TMP/create-args" && echo true || echo false)"
+assert_eq "override recorded with url"     "https://github.com/acme/example-repo/issues/4242" "$(jq -r '.dismissed["review-reject-bypassed"].meta_issue' "$MI_TMP/ov.json")"
 assert_eq "override reason"                "meta-plugin-issue" "$(jq -r '.dismissed["review-reject-bypassed"].reason' "$MI_TMP/ov.json")"
 assert_eq "override dismissed_by"          "devflow-weekly"    "$(jq -r '.dismissed["review-reject-bypassed"].dismissed_by' "$MI_TMP/ov.json")"
 # existing-issue path
 cat > "$MI_TMP/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
-  *"issue list"*) echo '{"number":99,"url":"https://github.com/The01Geek/devflow-autopilot/issues/99"}' ;;
+  *"issue list"*) echo '{"number":99,"url":"https://github.com/acme/example-repo/issues/99"}' ;;
   *"issue comment"*) echo 'commented' ;;
   *) echo '' ;;
 esac
 STUB
 chmod +x "$MI_TMP/gh"
 URL2="$(DEVFLOW_GH="$MI_TMP/gh" bash "$LIB/meta-issue.sh" --tag t-existing --slug t-existing --title "x" --body-file "$MI_TMP/body.md" --overrides "$MI_TMP/ov.json" 2>/dev/null)"
-assert_eq "meta-issue reuses existing URL" "https://github.com/The01Geek/devflow-autopilot/issues/99" "$URL2"
+assert_eq "meta-issue reuses existing URL" "https://github.com/acme/example-repo/issues/99" "$URL2"
 rm -rf "$MI_TMP"
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -527,6 +550,11 @@ assert_eq "successful dismissal → exit 0" "0" "$DSR_RC"
 ( DSR_STUB_IDS="77" DSR_STUB_PUT_RC=1 DEVFLOW_GH="$DSR_STUB" bash "$DSR" 123 o/r >/dev/null 2>&1 ); DSR_RC=$?
 assert_eq "dismissal failure → exit 1" "1" "$DSR_RC"
 rm -f "$DSR_STUB"
+
+# Tally the shell assertions from the results file (authoritative — includes the
+# subshell blocks). The python section below adds its own counts on top.
+PASS=$(grep -c '^PASS$' "$RESULTS_FILE" || true)
+FAIL=$(grep -c '^FAIL$' "$RESULTS_FILE" || true)
 
 # ────────────────────────────────────────────────────────────────────────────
 echo "python scripts (workpad._apply_mutations, parse_acs._is_post_merge)"

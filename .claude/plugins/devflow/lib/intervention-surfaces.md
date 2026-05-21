@@ -9,8 +9,8 @@ When the failure pattern recurs, the highest-leverage fix could live on any of t
 
 ### Process / workflow surfaces
 
-- **`/implement` skill** (`.claude/plugins/devflow/skills/implement/SKILL.md`) — the orchestrator that drives the four-phase lifecycle. Strengthen a phase, add a check, tighten a gate.
-- **`/create-issue` skill** (`.claude/plugins/devflow/skills/create-issue/SKILL.md`) — the issue-quality entry point. If issues themselves are the bottleneck (vague acceptance criteria, missing repro steps, ambiguous scope), this is where to fix it.
+- **`/implement` skill** (`skills/implement/SKILL.md`) — the orchestrator that drives the four-phase lifecycle. Strengthen a phase, add a check, tighten a gate.
+- **`/create-issue` skill** (`skills/create-issue/SKILL.md`) — the issue-quality entry point. If issues themselves are the bottleneck (vague acceptance criteria, missing repro steps, ambiguous scope), this is where to fix it.
 - **`/review` and `/review-and-fix` skills** — code-review discipline. If review caught a regression too late, the gap belongs here.
 - **Phase sub-skills** (`pr-description`, `docs-sync-internal`, `docs-sync-external`, `docs-release-notes`, `docs-verify`) — narrower behaviors invoked by `/implement`.
 - **Issue templates** (`.github/ISSUE_TEMPLATE/`) — when the failure is structural (humans omit the same field every time), the template itself can encode the requirement.
@@ -29,15 +29,15 @@ When the failure pattern recurs, the highest-leverage fix could live on any of t
 
 ### Sub-agent surfaces
 
-- **Agents** (`.claude/plugins/devflow/agents/<agent-name>.md`) — specialized contexts called via the Agent tool. If a failure pattern spans the work an agent does (research, design, review), the agent's instructions may be the leverage point.
+- **Agents** (`agents/<agent-name>.md`) — specialized contexts called via the Agent tool. If a failure pattern spans the work an agent does (research, design, review), the agent's instructions may be the leverage point.
 
 ### Out-of-scope surfaces (these route to a meta GitHub issue for human design review)
 
 The limit is **design-review**, not writability — locally all paths are writable. If the analysis points at one of these as the root cause, the orchestrator routes to a meta GitHub issue (`[devflow-retrospective] meta: <pattern-tag>`) and appends a `dismissed: meta-plugin-issue` override for the pattern. The subagent returns an `excluded: true` JSON object and makes no working-tree edits.
 
-- `.claude/plugins/devflow/**` — the plugin must not edit itself without human review
+- The engine's own files (`skills/**`, `agents/**`, `lib/**`, `scripts/**`, `.claude-plugin/**`) — the plugin must not edit itself without human review
 - `.devflow/learnings/**` — data files
-- `.github/workflows/claude.yml`, `.github/workflows/devflow-*.yml` — breaking these cripples the loop; human design review required
+- `.github/workflows/claude*.yml`, `.github/workflows/devflow-*.yml` — breaking these cripples the loop; human design review required
 - `.github/actions/read-project-config/**`, `.github/actions/dedupe-pr-events/**`, `.github/actions/get-app-token/**` — the three composite actions consumed by the devflow workflows; modifying them risks breaking the self-improvement loop
 - `.github/project-config.yml` — config changes touch every other workflow
 

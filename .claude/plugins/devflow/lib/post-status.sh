@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 # post-status.sh — post or patch the audit-report comment on the state PR.
 #
 # Usage:
