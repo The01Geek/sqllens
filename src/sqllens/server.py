@@ -17,12 +17,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
 
 from sqllens.config import Config
+from sqllens.tools._format import append_conversation_footer
 from sqllens.tools.list_data_sources import list_data_sources_impl
 from sqllens.tools.query_database import query_database_impl_with_widgets
 from sqllens.ui import load_widget_html
@@ -48,6 +50,35 @@ _QUERY_META_KEY = "sqllens/query"
 # Chart data channel. Present when the agent emitted a ChartComponent; the
 # widget renders it with ECharts and it takes precedence over the table grid.
 _CHART_META_KEY = "sqllens/chart"
+# Conversation continuity channel. The resolved conversation id is returned on
+# every successful answer turn — structured here for apps-aware hosts, and as a
+# plain-Markdown footer in the text content for non-apps clients. The calling
+# model passes it back as the ``conversation_id`` tool argument on the next turn
+# so the agent loads the prior turn's history (e.g. to answer its own clarifying
+# question).
+_CONVERSATION_META_KEY = "sqllens/conversation"
+
+
+def _conversation_result(
+    markdown: str, conversation_id: str, extra_meta: dict[str, Any]
+) -> CallToolResult:
+    """Build the success CallToolResult for the conversational ``query_database`` tool.
+
+    Seeds ``_meta`` with the resolved conversation id, merges the tool-specific
+    ``extra_meta`` (table/query/chart payloads), and appends the conversation-id
+    footer to the text content.
+    """
+    meta: dict = {_CONVERSATION_META_KEY: {"conversation_id": conversation_id}}
+    meta.update(extra_meta)
+    return CallToolResult(
+        content=[
+            TextContent(
+                type="text",
+                text=append_conversation_footer(markdown, conversation_id),
+            )
+        ],
+        _meta=meta,
+    )
 
 
 def _request_metadata(ctx: Context) -> dict[str, Any]:
@@ -122,40 +153,47 @@ def build_server(cfg: Config) -> FastMCP:
     # a (deliberately absent) structuredContent and reject it.
     @mcp.tool(meta={"ui": {"resourceUri": _WIDGET_URI}}, structured_output=False)
     async def query_database(
-        question: str, ctx: Context
+        question: str, ctx: Context, conversation_id: str | None = None
     ) -> str | CallToolResult:
         """Ask a question in natural language. Returns a chart, table, or text answer.
 
         The agent decides the response shape: chart-shaped results render as an
         interactive chart, tabular results as a data grid, everything else as
-        plain text. When ``agent.show_details`` is on (the default) and the
-        agent successfully executed a SQL query, the answer also includes the
+        plain text.
+
+        For multi-turn conversations (e.g. the agent asks a clarifying
+        question), pass the ``conversation_id`` returned by the previous turn
+        back in as the ``conversation_id`` argument so the agent retains
+        context. Omit it to start a fresh conversation; the response always
+        reports the conversation id (as ``_meta`` and a plain-text footer).
+
+        When ``agent.show_details`` is on (the default) and the agent
+        successfully executed a SQL query, the answer also includes the
         executed SQL — as a fenced ``sql`` block in the text and, for
         apps-aware hosts, as structured data the result widget renders.
         Non-SELECT / no-SQL / error responses omit the SQL block; setting
         ``agent.show_details = false`` suppresses it unconditionally.
         """
         metadata = _request_metadata(ctx)
+        # Mint a stable id when the caller did not supply one, so the resolved
+        # id can be returned for the caller to thread on the next turn (passing
+        # None down would let the agent mint one we never see).
+        conversation_id = conversation_id or str(uuid.uuid4())
         markdown, table, query_info, chart = await query_database_impl_with_widgets(
-            cfg, question, metadata=metadata
+            cfg, question, metadata=metadata, conversation_id=conversation_id
         )
         # Attach every structured payload the agent produced; the widget applies
         # the chart > table > text precedence. When a request yields both a
         # chart and a table, both channels are present and the widget renders
         # the chart — deterministic, no double-render.
-        meta: dict = {}
+        extra_meta: dict = {}
         if chart is not None:
-            meta[_CHART_META_KEY] = chart
+            extra_meta[_CHART_META_KEY] = chart
         if table is not None:
-            meta[_TABLE_META_KEY] = table
+            extra_meta[_TABLE_META_KEY] = table
         if query_info:
-            meta[_QUERY_META_KEY] = query_info
-        if not meta:
-            return markdown
-        return CallToolResult(
-            content=[TextContent(type="text", text=markdown)],
-            _meta=meta,
-        )
+            extra_meta[_QUERY_META_KEY] = query_info
+        return _conversation_result(markdown, conversation_id, extra_meta)
 
     @mcp.tool()
     async def list_data_sources() -> str:

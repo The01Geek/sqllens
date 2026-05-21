@@ -539,6 +539,60 @@ async def test_with_widgets_text_only_returns_none_payloads(
     assert chart is None
 
 
+@pytest.mark.asyncio
+async def test_conversation_id_is_threaded_into_send_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """A caller-supplied conversation_id reaches Agent.send_message verbatim.
+
+    This is the multi-turn seam: the agent loads the prior Conversation for
+    that id (history retention is the agent's job, exercised here by asserting
+    the id arrives) so a follow-up turn can answer its own clarifying question.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    stub = agent_stub_factory([make_text_component("answer")])
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    await query_database_impl(cfg, "follow-up", conversation_id="conv-42")
+
+    assert len(stub.send_message_calls) == 1
+    _ctx, message, conversation_id = stub.send_message_calls[0]
+    assert message == "follow-up"
+    assert conversation_id == "conv-42"
+
+
+@pytest.mark.asyncio
+async def test_conversation_id_defaults_to_none_at_impl_layer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """Omitting conversation_id passes None down (the server mints; the impl
+    lets the agent mint when called directly)."""
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    stub = agent_stub_factory([make_text_component("answer")])
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    await query_database_impl(cfg, "q")
+
+    assert stub.send_message_calls[0][2] is None
+
+
+def test_strip_reserved_metadata_removes_control_keys_and_copies() -> None:
+    # The reserved internal-control keys must never reach the agent; RLS values
+    # (any other key) flow through. The result must be a copy.
+    from sqllens.config import RESERVED_METADATA_KEYS
+    from sqllens.tools.query_database import strip_reserved_metadata
+
+    src = {"tenant_id": "acme", **{k: "x" for k in RESERVED_METADATA_KEYS}}
+    out = strip_reserved_metadata(src)
+    assert out == {"tenant_id": "acme"}
+    assert out is not src
+    assert strip_reserved_metadata(None) == {}
+
+
 def test_append_sql_block_emits_executed_sql_heading() -> None:
     # Pins the client-visible heading literal — a regression that drops or
     # mangles "**Executed SQL:**" would silently change the text-fallback

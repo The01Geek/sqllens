@@ -119,15 +119,19 @@ async def test_query_database_returns_calltoolresult_with_meta_when_table(
     payload = {"columns": ["a"], "rows": [["1"]], "column_types": {},
                "row_count": 1, "truncated": 0}
 
-    async def fake_impl(_cfg, _q, *, metadata=None):
+    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
         return "| a |\n|---|\n| 1 |", payload, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
-    result = await _query_database_fn(mcp)("rows?", _StubCtx())
+    result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
     assert isinstance(result, CallToolResult)
-    assert result.meta == {"sqllens/table": payload}
-    assert result.content[0].text == "| a |\n|---|\n| 1 |"
+    assert result.meta == {
+        "sqllens/table": payload,
+        "sqllens/conversation": {"conversation_id": "c-1"},
+    }
+    assert result.content[0].text.startswith("| a |\n|---|\n| 1 |")
+    assert "Conversation ID: `c-1`" in result.content[0].text
 
 
 async def test_query_database_meta_carries_query_info_when_present(
@@ -141,16 +145,17 @@ async def test_query_database_meta_carries_query_info_when_present(
     query_info = {"sql": "SELECT a FROM t", "query_type": "SELECT",
                   "row_count": 1}
 
-    async def fake_impl(_cfg, _q, *, metadata=None):
+    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
         return "md\n\n```sql\nSELECT a FROM t\n```", payload, query_info, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
-    result = await _query_database_fn(mcp)("rows?", _StubCtx())
+    result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
     assert isinstance(result, CallToolResult)
     assert result.meta == {
         "sqllens/table": payload,
         "sqllens/query": query_info,
+        "sqllens/conversation": {"conversation_id": "c-1"},
     }
 
 
@@ -163,30 +168,62 @@ async def test_query_database_meta_query_info_without_table(
     mcp = build_server(cfg)
     query_info = {"sql": "SELECT 1 WHERE 1=0", "query_type": "SELECT"}
 
-    async def fake_impl(_cfg, _q, *, metadata=None):
+    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
         return "no rows\n\n```sql\nSELECT 1 WHERE 1=0\n```", None, query_info, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
-    result = await _query_database_fn(mcp)("rows?", _StubCtx())
+    result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
     assert isinstance(result, CallToolResult)
-    assert result.meta == {"sqllens/query": query_info}
+    assert result.meta == {
+        "sqllens/query": query_info,
+        "sqllens/conversation": {"conversation_id": "c-1"},
+    }
 
 
-async def test_query_database_returns_plain_str_when_no_payload(
+async def test_query_database_returns_conversation_meta_when_no_table(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Even a plain text answer (no table, no query_info) carries the
+    # conversation id now — in _meta and as a plain-text footer — so the caller
+    # can thread the next turn.
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
 
-    async def fake_impl(_cfg, _q, *, metadata=None):
+    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
         return "just text", None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
+    result = await _query_database_fn(mcp)("question?", _StubCtx(), conversation_id="c-1")
+    assert isinstance(result, CallToolResult)
+    assert result.meta == {"sqllens/conversation": {"conversation_id": "c-1"}}
+    assert result.content[0].text.startswith("just text")
+    assert "Conversation ID: `c-1`" in result.content[0].text
+
+
+async def test_query_database_mints_and_threads_conversation_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No conversation_id supplied → the server mints one, passes it to the impl,
+    # and returns the same id to the caller (both _meta and footer).
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+    seen: dict = {}
+
+    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+        seen["conversation_id"] = conversation_id
+        return "answer", None, None, None
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
+
     result = await _query_database_fn(mcp)("question?", _StubCtx())
-    assert result == "just text"
-    assert not isinstance(result, CallToolResult)
+    assert isinstance(result, CallToolResult)
+    minted = result.meta["sqllens/conversation"]["conversation_id"]
+    assert minted  # a non-empty id was minted
+    # The same minted id was threaded into the impl and surfaced in the footer.
+    assert seen["conversation_id"] == minted
+    assert f"Conversation ID: `{minted}`" in result.content[0].text
 
 
 # ───────────────────────── chart payload (unified tool) ─────────────────────
@@ -210,15 +247,19 @@ async def test_query_database_returns_chart_meta_when_chart(
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
 
-    async def fake_impl(_cfg, _q, *, metadata=None):
+    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
         return "rendered chart", None, None, _CHART_PAYLOAD
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
-    result = await _query_database_fn(mcp)("chart it", _StubCtx())
+    result = await _query_database_fn(mcp)("chart it", _StubCtx(), conversation_id="c-1")
     assert isinstance(result, CallToolResult)
-    assert result.meta == {"sqllens/chart": _CHART_PAYLOAD}
-    assert result.content[0].text == "rendered chart"
+    assert result.meta == {
+        "sqllens/chart": _CHART_PAYLOAD,
+        "sqllens/conversation": {"conversation_id": "c-1"},
+    }
+    assert result.content[0].text.startswith("rendered chart")
+    assert "Conversation ID: `c-1`" in result.content[0].text
 
 
 async def test_query_database_attaches_both_chart_and_table(
@@ -236,15 +277,16 @@ async def test_query_database_attaches_both_chart_and_table(
     query_info = {"sql": "SELECT x, y FROM t", "query_type": "SELECT",
                   "row_count": 1}
 
-    async def fake_impl(_cfg, _q, *, metadata=None):
+    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
         return "answer", table, query_info, _CHART_PAYLOAD
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
-    result = await _query_database_fn(mcp)("chart and table", _StubCtx())
+    result = await _query_database_fn(mcp)("chart and table", _StubCtx(), conversation_id="c-1")
     assert isinstance(result, CallToolResult)
     assert result.meta == {
         "sqllens/chart": _CHART_PAYLOAD,
         "sqllens/table": table,
         "sqllens/query": query_info,
+        "sqllens/conversation": {"conversation_id": "c-1"},
     }

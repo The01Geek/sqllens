@@ -16,8 +16,16 @@ from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from sqllens.agent.components.rich.data.dataframe import DataFrameComponent
+from sqllens.agent.components.rich.feedback.notification import NotificationComponent
 from sqllens.agent.components.rich.feedback.status_card import StatusCardComponent
+from sqllens.agent.components.rich.interactive.button import (
+    ButtonComponent,
+    ButtonGroupComponent,
+)
+from sqllens.agent.components.rich.interactive.ui_state import ChatInputUpdateComponent
 from sqllens.agent.components.rich.text import RichTextComponent
 from sqllens.agent.core.components import UiComponent
 from sqllens.tools._format import (
@@ -25,8 +33,11 @@ from sqllens.tools._format import (
     _MAX_TABLE_PAYLOAD_BYTES,
     _render_dataframe,
     _serialized_len,
+    append_conversation_footer,
+    components_to_chart,
     components_to_markdown,
     components_to_table,
+    render_interactive,
 )
 
 
@@ -522,6 +533,157 @@ def test_query_info_none_on_error_path() -> None:
     # The rejected write statement must NOT leak into the answer.
     assert "DELETE FROM users" not in markdown
     assert markdown == "Tool failed: refusing to execute non-SELECT SQL"
+
+
+# ───────────────────── interactive / follow-up rendering ────────────────────
+
+
+def test_chat_input_prompt_surfaced_when_only_interactive() -> None:
+    # The agent's clarifying question expressed only as a CHAT_INPUT_UPDATE
+    # placeholder must surface as the answer, not "(no answer)".
+    stream = [_ui(ChatInputUpdateComponent(placeholder="Which region: EU or US?"))]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is False
+    assert msg == "Which region: EU or US?"
+
+
+def test_button_group_choices_enumerated() -> None:
+    stream = [
+        _ui(
+            ButtonGroupComponent(
+                buttons=[
+                    {"label": "Last 7 days", "action": "/range 7d"},
+                    {"label": "Last 30 days", "action": "/range 30d"},
+                ]
+            )
+        )
+    ]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is False
+    assert "Please choose one of the following:" in msg
+    assert "- Last 7 days" in msg
+    assert "- Last 30 days" in msg
+
+
+def test_single_button_surfaced_as_choice() -> None:
+    stream = [_ui(ButtonComponent(label="Retry", action="/retry"))]
+    msg, _ = components_to_markdown(stream)
+    assert "- Retry" in msg
+
+
+def test_notification_message_surfaced() -> None:
+    stream = [_ui(NotificationComponent(message="Connection is slow", title="Heads up"))]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is False
+    assert "Heads up" in msg
+    assert "Connection is slow" in msg
+
+
+def test_alert_text_read_from_data_dict() -> None:
+    # ALERT has no first-party component class; an emitted ALERT is a bare
+    # RichComponent whose text lives in `data` (pydantic drops unknown top-level
+    # kwargs). The renderer must read `data`, else the ALERT surfaces as empty.
+    from sqllens.agent.core.rich_component import ComponentType, RichComponent
+
+    alert = RichComponent(
+        type=ComponentType.ALERT, data={"title": "Warning", "message": "Disk almost full"}
+    )
+    msg, is_error = components_to_markdown([_ui(alert)])
+    assert is_error is False
+    assert "Warning" in msg
+    assert "Disk almost full" in msg
+
+
+def test_error_level_notification_not_surfaced_as_answer() -> None:
+    # An error-level notification carries the raw driver exception; surfacing it
+    # as a normal answer would bypass the sanitized error taxonomy. It must NOT
+    # become the answer — the turn falls back to "(no answer)".
+    stream = [
+        _ui(
+            NotificationComponent(
+                message="Error executing query: connect host=db.internal", level="error"
+            )
+        )
+    ]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is False
+    assert msg == "(no answer)"
+    assert "db.internal" not in msg
+
+
+@pytest.mark.parametrize(
+    "placeholder",
+    [
+        "Ask a question...",
+        "Ask a follow-up question...",
+        "Continue the task or ask me something else...",
+        "Try again...",
+    ],
+)
+def test_generic_finalization_placeholder_not_surfaced(placeholder: str) -> None:
+    # The agent emits these finalization CHAT_INPUT_UPDATE placeholders on a
+    # normal/error turn; none is a clarifying question, so an otherwise-empty
+    # turn must still fall back to "(no answer)" rather than echo the placeholder.
+    stream = [_ui(ChatInputUpdateComponent(placeholder=placeholder, disabled=False))]
+    msg, _ = components_to_markdown(stream)
+    assert msg == "(no answer)"
+
+
+def test_text_answer_wins_over_interactive_no_regression() -> None:
+    # A clarification emitted as TEXT keeps the last-TEXT-wins path; interactive
+    # affordances alongside it are not appended.
+    stream = [
+        _ui(RichTextComponent(content="Here is your answer")),
+        _ui(ButtonGroupComponent(buttons=[{"label": "More", "action": "/more"}])),
+    ]
+    msg, _ = components_to_markdown(stream)
+    assert msg == "Here is your answer"
+    assert "More" not in msg
+
+
+def test_interactive_fallback_applies_to_chart_path() -> None:
+    # Symmetry: visualize_data's collapse also surfaces the question.
+    stream = [_ui(ChatInputUpdateComponent(placeholder="Pick a metric"))]
+    markdown, is_error, chart = components_to_chart(stream)
+    assert is_error is False
+    assert markdown == "Pick a metric"
+    assert chart is None
+
+
+def test_render_interactive_empty_when_nothing_interactive() -> None:
+    assert render_interactive([_ui(RichTextComponent(content="x"))]) == ""
+    assert render_interactive([]) == ""
+
+
+def test_render_interactive_combines_prompt_and_choices() -> None:
+    stream = [
+        _ui(ChatInputUpdateComponent(placeholder="Filter by status?")),
+        _ui(
+            ButtonGroupComponent(
+                buttons=[{"label": "Open", "action": "/s open"},
+                         {"label": "Closed", "action": "/s closed"}]
+            )
+        ),
+    ]
+    rendered = render_interactive(stream)
+    assert rendered.startswith("Filter by status?")
+    assert "- Open" in rendered
+    assert "- Closed" in rendered
+
+
+# ───────────────────────── conversation footer ──────────────────────────────
+
+
+def test_append_conversation_footer_appends_id() -> None:
+    out = append_conversation_footer("answer", "abc-123")
+    assert out.startswith("answer\n\n")
+    assert "Conversation ID: `abc-123`" in out
+    assert "conversation_id" in out
+
+
+def test_append_conversation_footer_noop_on_empty_id() -> None:
+    assert append_conversation_footer("answer", None) == "answer"
+    assert append_conversation_footer("answer", "") == "answer"
 
 
 def test_query_info_ignores_non_sql_status_cards() -> None:

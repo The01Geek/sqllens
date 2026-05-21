@@ -25,26 +25,24 @@ def build_server(cfg: Config) -> FastMCP:
         structured_output=False,
     )
     async def query_database(
-        question: str, ctx: Context
+        question: str, ctx: Context, conversation_id: str | None = None
     ) -> str | CallToolResult:
         """Ask a question in natural language. Returns a chart, table, or text answer."""
         metadata = _request_metadata(ctx)
+        # Mint a stable id when the caller omits one, so the resolved id can be
+        # returned for the caller to thread on the next turn.
+        conversation_id = conversation_id or str(uuid.uuid4())
         markdown, table, query_info, chart = await query_database_impl_with_widgets(
-            cfg, question, metadata=metadata
+            cfg, question, metadata=metadata, conversation_id=conversation_id
         )
-        meta: dict = {}
+        extra_meta: dict = {}
         if chart is not None:
-            meta["sqllens/chart"] = chart
+            extra_meta["sqllens/chart"] = chart
         if table is not None:
-            meta["sqllens/table"] = table
+            extra_meta["sqllens/table"] = table
         if query_info:
-            meta["sqllens/query"] = query_info
-        if not meta:
-            return markdown
-        return CallToolResult(
-            content=[TextContent(type="text", text=markdown)],
-            _meta=meta,
-        )
+            extra_meta["sqllens/query"] = query_info
+        return _conversation_result(markdown, conversation_id, extra_meta)
 
     @mcp.tool()
     async def list_data_sources() -> str:
@@ -55,6 +53,8 @@ def build_server(cfg: Config) -> FastMCP:
 ```
 
 The docstrings are the user-facing tool descriptions that the calling AI client sees, so they're load-bearing. CLAUDE.md "Upstream brand cleanliness" applies — no upstream-project references allowed in those strings. The `query_database` registration carries the MCP App widget wiring; see "The MCP App interactive result widget" below for the full mechanism — one widget that picks chart vs. data grid vs. text from the present `_meta` channel. `query_database` and `list_data_sources` share **one** process-wide agent singleton — see "Shared agent singleton (`tools/_agent.py`)" below.
+
+`query_database` takes a `ctx: Context` and an optional `conversation_id` and returns through the shared `_conversation_result` helper — see "Multi-turn conversations (`conversation_id`)" below.
 
 ## Shared agent singleton (`tools/_agent.py`)
 
@@ -69,8 +69,8 @@ The docstrings are the user-facing tool descriptions that the calling AI client 
 [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) does the actual work, calling the shared singleton above:
 
 1. **Fetch the shared singleton.** `query_database_impl_with_widgets` awaits `get_agent(cfg)` from [`tools/_agent.py`](../../../src/sqllens/tools/_agent.py); see "Shared agent singleton" above.
-2. **`RequestContext` with caller-supplied metadata.** SQL Lens does not forward HTTP headers/cookies into the agent (auth is enforced at the transport layer, and the agent is single-user — see [agent/factory.md](../agent/factory.md) "user resolver"), so the context is always `RequestContext(headers={}, cookies={}, metadata=<safe_metadata>)`. The `metadata` mapping is populated from MCP `_meta` extracted by `_request_metadata(ctx)` in [src/sqllens/server.py](../../../src/sqllens/server.py) and stripped of `_RESERVED_METADATA_KEYS` (`{"starter_ui_request", "ui_features_available"}`) so untrusted request metadata cannot steer agent-internal control flow — only supply values to the opt-in row-level-security guard. An absent / empty MCP `_meta` keeps the prior empty-context behaviour byte-for-byte. See [database-connectors/row-level-security.md](../database-connectors/row-level-security.md) for the full request → metadata → guard path.
-3. **Stream collapse.** The agent yields an async stream of `UiComponent` objects (text snippets, dataframes, chart components, status cards). MCP tools must return a single string, so we collect the stream into a list and pass it to `components_to_widgets` (the success path; `components_to_table`, `components_to_chart`, and `components_to_markdown` are now thin views over it — see "The `_format.components_to_widgets` collapse rule").
+2. **`RequestContext` with caller-supplied metadata.** SQL Lens does not forward HTTP headers/cookies into the agent (auth is enforced at the transport layer, and the agent is single-user — see [agent/factory.md](../agent/factory.md) "user resolver"), so the context is always `RequestContext(headers={}, cookies={}, metadata=<safe_metadata>)`. The `metadata` mapping is populated from MCP `_meta` extracted by `_request_metadata(ctx)` in [src/sqllens/server.py](../../../src/sqllens/server.py) and stripped of `_RESERVED_METADATA_KEYS` (`{"starter_ui_request", "ui_features_available"}`) by the shared `strip_reserved_metadata` helper so untrusted request metadata cannot steer agent-internal control flow — only supply values to the opt-in row-level-security guard. An absent / empty MCP `_meta` keeps the prior empty-context behaviour byte-for-byte. See [database-connectors/row-level-security.md](../database-connectors/row-level-security.md) for the full request → metadata → guard path.
+3. **Stream collapse, threading `conversation_id`.** The agent yields an async stream of `UiComponent` objects (text snippets, dataframes, chart components, status cards). MCP tools must return a single string, so we collect the stream into a list and pass it to `components_to_widgets` (the success path; `components_to_table`, `components_to_chart`, and `components_to_markdown` are now thin views over it — see "The `_format.components_to_widgets` collapse rule"). The `conversation_id` argument is forwarded into `agent.send_message(..., conversation_id=...)` so a follow-up turn loads the prior `Conversation`'s message history and the agent can answer its own clarifying question (see "Multi-turn conversations (`conversation_id`)" below).
 4. **Categorized, sanitized error surfacing.** Failures are re-raised as `RuntimeError`, which FastMCP (`mcp.server.fastmcp` — the official SDK, not the standalone `fastmcp` package) converts to a tool result with `isError: true`, formatting the client text as `Error executing tool query_database: <message>`. The *raised message* is therefore the contract, and it is split into three observable categories (see "The error/success contract" below) so the calling agent gets structured failure signal without leaking infrastructure detail. CLAUDE.md forbids letting the LLM apologize inside a successful tool result — the calling agent needs structured failure signal.
 
 ## `_format.components_to_widgets` — the collapse rule
@@ -86,9 +86,36 @@ The docstrings are the user-facing tool descriptions that the calling AI client 
 | `STATUS_CARD` carrying `metadata["sql"]` | Capture the SQL into `last_sql` (last-wins; the `run_sql` card streams twice — running → completed — with identical metadata, so dedup is idempotent). Drives the `query_info` channel — see [Executed SQL channel](#executed-sql-channel--agentshow_details). Only emitted when `agent.show_details` unlocked `UI_FEATURE_SHOW_TOOL_ARGUMENTS` for the static user group. |
 | Everything else | Ignored. |
 
-Output ordering: tables first (in stream order), then the final text answer. If both are empty, return `"(no answer)"` rather than the empty string — MCP clients render empty results badly.
+Output ordering: tables first (in stream order), then the final text answer. If both are empty, fall back to `render_interactive(components)` — the agent's interactive/follow-up affordances rendered as plain Markdown (see "Surfacing interactive affordances" below) — and only when *that* is also empty return `"(no answer)"` rather than the empty string (MCP clients render empty results badly). To enable this second pass over the stream, `components_to_table` / `components_to_chart` now `list()`-materialize their `components` argument up front (the public signature still accepts any `Iterable`, including generators).
+
+## Surfacing interactive affordances (`render_interactive`)
+
+When a turn produces **no** `TEXT`/`DATAFRAME` answer, the agent's only output may be an *interactive* affordance — a clarifying question it expressed as a UI component rather than as text. Without handling, the tool would return the useless `"(no answer)"`. `render_interactive` in [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) renders those affordances as plain Markdown so the calling model receives the question and can answer it on the next turn. The output is independent of the MCP Apps widget channel, so non-apps clients get the question too. It is invoked **only** on the no-answer fallback path (above), so a normal answer's trailing finalization components are never surfaced.
+
+| Component type | What `render_interactive` does |
+|---|---|
+| `CHAT_INPUT_UPDATE` | Surface the `placeholder` as a prompt — **unless** it is one of the generic finalization placeholders the agent emits on every normal turn (`_GENERIC_INPUT_PLACEHOLDERS`: `"ask a question..."`, `"ask a follow-up question..."`, `"continue the task or ask me something else..."`, `"try again..."`, compared case-insensitively). Those are not clarifying questions, so they must never render as the answer. |
+| `BUTTON` / `BUTTON_GROUP` | Collect each button's `label`; rendered as a `Please choose one of the following:` bulleted list. |
+| `ALERT` / `NOTIFICATION` | Surface the message (`message` / `content` / `description`, then a bolded `title:` prefix), reading from a first-party component attribute *or* the generic `RichComponent.data` dict — `ALERT` has no first-party component class in this pruned tree, so an emitted `ALERT` is a bare `RichComponent` whose text lives in `data`. An **error-level** notification is treated as "not an answer" (returns `""`) so the raw, unsanitized driver exception it may carry does not leak as a normal `is_error=False` answer, bypassing the sanitized error taxonomy. |
+
+Returns `""` when no renderable affordance is present, which the callers treat as "fall back to `(no answer)`". Pinned by `tests/unit/test_format.py`.
 
 The 500-row cap is intentional: it keeps tool results inside typical MCP message size limits and protects the calling LLM from drowning in token-expensive table dumps. The agent itself sees the (already row-capped) DataFrame; this renderer cap only affects what travels back over MCP. Truncation from the underlying `DatabaseConfig.max_rows` (e.g. "Result truncated at 10 000 rows") is surfaced separately by `RunSqlTool` inside `result_for_llm` — see [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md#row-cap-and-truncation-surface).
+
+## Multi-turn conversations (`conversation_id`)
+
+`query_database` accepts an optional `conversation_id: str | None = None` argument so a calling model can thread context across turns — most importantly, so the agent can ask a clarifying question (surfaced by `render_interactive` above) and see the prior turn when the model answers it. This is **per-conversation context continuity**, not multi-tenant session management; SQL Lens remains one database per instance, single static user (see [agent/factory.md](../agent/factory.md) "user resolver").
+
+End-to-end flow:
+
+1. **Mint-if-absent at the MCP boundary.** The tool body does `conversation_id = conversation_id or str(uuid.uuid4())` so a *stable* id always exists and can be returned to the caller. Passing `None` further down would let the agent mint one internally that the server never sees, so the server mints it instead.
+2. **Threaded into the agent.** The id flows through `query_database_impl_with_widgets` into `agent.send_message(request_context, question, conversation_id=...)`. The vendored agent loads the matching `Conversation` (its message history) from its `ConversationStore` — the bounded LRU store wired by the factory (see [agent/factory.md](../agent/factory.md#max_conversations--the-bounded-conversation-store)) — so a follow-up turn carries the prior turn's history.
+3. **Returned on every successful turn, on two rails.** The tool builds its result through the shared `_conversation_result(markdown, conversation_id, extra_meta)` helper in [src/sqllens/server.py](../../../src/sqllens/server.py). It always returns a `CallToolResult` (never the bare-string degrade path the tool used pre-feature — there is always a conversation id to report) and seeds `_meta` with `"sqllens/conversation": {"conversation_id": <id>}` before merging the tool-specific `extra_meta` (`"sqllens/table"` / `"sqllens/query"` / `"sqllens/chart"`).
+   - **`_meta` rail (apps-aware hosts).** `_meta["sqllens/conversation"]["conversation_id"]` is the structured source of truth.
+   - **Markdown footer rail (every client).** `append_conversation_footer(markdown, conversation_id)` in [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) appends a `_Conversation ID: ... — pass it back as the `conversation_id` argument to continue this conversation._` footer to the text content, so a non-apps client learns the id it must pass back. A falsy id returns the markdown unchanged.
+4. **The model passes it back** as the `conversation_id` tool argument on the next call, closing the loop.
+
+The conversation store is **in-process and ephemeral** — dropped on restart, never persisted to a server-side database (CLAUDE.md non-goal). Pinned by `tests/unit/test_server.py` (`_meta` + footer assembly), `tests/unit/test_query_database.py` (id threaded into `send_message`), and `tests/unit/test_format.py` (`append_conversation_footer`).
 
 ## The MCP App interactive result widget
 
@@ -207,7 +234,7 @@ FastMCP collapses every failure into one `isError: true` result and formats the 
 | Situation | What the tool returns |
 |---|---|
 | Successful query, dataframe / chart result | Markdown table(s) + final text answer, `isError: false`. `_meta["sqllens/chart"]` and/or `_meta["sqllens/table"]` is attached when a structured payload fits the size budget; the widget renders chart > table > text. |
-| Successful query, no data | `"(no answer)"`, `isError: false`. |
+| Successful query, no `TEXT`/`DATAFRAME` answer | `render_interactive(components)` if the agent emitted an interactive affordance (clarifying-question prompt, button choices, alert/notification text — see "Surfacing interactive affordances"); otherwise `"(no answer)"`. `isError: false`. |
 | Agent cold-start/build failed (`get_agent` raised) | `RuntimeError("internal error; see server logs")` → `isError: true`. Full traceback logged server-side; host/port/db/role never echoed to the client. |
 | `agent.send_message` raised an exception | `RuntimeError("internal error; see server logs")` → `isError: true`. Same sanitization as above. |
 | Agent emitted an error status card | `RuntimeError("SQL execution error: " + <card description>)` → `isError: true`. Agent-authored detail passed through (categorized, not sanitized); logged server-side too. |

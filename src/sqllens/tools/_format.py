@@ -48,6 +48,114 @@ def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
     return info
 
 
+# The agent emits one of these placeholders on a normal turn's finalization
+# ChatInputUpdateComponent (agent/core/agent/agent.py emits "Ask a question...",
+# "Ask a follow-up question...", "Continue the task or ask me something else...",
+# and "Try again..." on the error path). None is a clarifying question, so they
+# must never be surfaced as the answer when a turn produces no TEXT/DATAFRAME —
+# otherwise an empty result would render the generic placeholder instead of the
+# "(no answer)" fallback. Compared case-insensitively.
+_GENERIC_INPUT_PLACEHOLDERS = frozenset(
+    {
+        "ask a question...",
+        "ask a follow-up question...",
+        "continue the task or ask me something else...",
+        "try again...",
+    }
+)
+
+
+def _button_label(data: object) -> str:
+    if isinstance(data, dict):
+        label = data.get("label")
+        if isinstance(label, str):
+            return label.strip()
+    return ""
+
+
+def _component_field(rich, name: str) -> object:  # type: ignore[no-untyped-def]
+    # Read a field whether the component declared it as a top-level attribute
+    # (NotificationComponent.message/title/level) or only carries it in the
+    # generic RichComponent.data dict. ALERT has no first-party component class
+    # in this pruned tree, so an emitted ALERT is a bare RichComponent whose
+    # text lives in `data` (pydantic drops unknown top-level kwargs); reading
+    # only attributes would silently render it empty.
+    val = getattr(rich, name, None)
+    if val is not None:
+        return val
+    data = getattr(rich, "data", None)
+    return data.get(name) if isinstance(data, dict) else None
+
+
+def _alert_text(rich) -> str:  # type: ignore[no-untyped-def]
+    # An error-level notification carries the raw, unsanitized driver exception
+    # (agent run_sql failure path). Surfacing it here would leak it as a normal
+    # is_error=False answer, bypassing the sanitized error taxonomy — so an
+    # error-level affordance is treated as "not an answer".
+    level = _component_field(rich, "level")
+    if isinstance(level, str) and level.strip().lower() == "error":
+        return ""
+    message = ""
+    for attr in ("message", "content", "description"):
+        val = _component_field(rich, attr)
+        if isinstance(val, str) and val.strip():
+            message = val.strip()
+            break
+    title = _component_field(rich, "title")
+    if isinstance(title, str) and title.strip() and title.strip() != message:
+        return f"**{title.strip()}**: {message}" if message else title.strip()
+    return message
+
+
+def render_interactive(components: Iterable[UiComponent]) -> str:
+    """Render the agent's interactive/follow-up affordances as plain Markdown.
+
+    Surfaces a clarifying question the agent expressed *only* as an interactive
+    component — a ``CHAT_INPUT_UPDATE`` prompt, ``BUTTON``/``BUTTON_GROUP``
+    choices, or an ``ALERT``/``NOTIFICATION`` message — so the calling model
+    receives the question instead of a useless ``"(no answer)"``. The output is
+    plain Markdown, independent of the MCP Apps widget channel, so non-apps
+    clients get the question too.
+
+    Returns ``""`` when no renderable interactive affordance is present, which
+    the callers treat as "fall back to ``(no answer)``". Used only when a turn
+    produced no ``TEXT``/``DATAFRAME`` answer, so a normal answer's trailing
+    finalization components are never surfaced.
+    """
+    pieces: list[str] = []
+    choices: list[str] = []
+    for comp in components:
+        rich = comp.rich_component
+        if rich is None:
+            continue
+        ctype = getattr(rich, "type", None)
+        if ctype == ComponentType.CHAT_INPUT_UPDATE:
+            prompt = (getattr(rich, "placeholder", "") or "").strip()
+            if prompt and prompt.lower() not in _GENERIC_INPUT_PLACEHOLDERS:
+                pieces.append(prompt)
+        elif ctype == ComponentType.BUTTON:
+            label = _button_label(getattr(rich, "data", None))
+            if label:
+                choices.append(label)
+        elif ctype == ComponentType.BUTTON_GROUP:
+            data = getattr(rich, "data", None)
+            buttons = data.get("buttons", []) if isinstance(data, dict) else []
+            if isinstance(buttons, list):
+                for button in buttons:
+                    label = _button_label(button)
+                    if label:
+                        choices.append(label)
+        elif ctype in (ComponentType.ALERT, ComponentType.NOTIFICATION):
+            text = _alert_text(rich)
+            if text:
+                pieces.append(text)
+
+    if choices:
+        enumerated = "\n".join(f"- {choice}" for choice in choices)
+        pieces.append(f"Please choose one of the following:\n\n{enumerated}")
+    return "\n\n".join(pieces)
+
+
 def components_to_widgets(
     components: Iterable[UiComponent],
 ) -> tuple[str, bool, dict | None, dict | None, dict | None]:
@@ -90,6 +198,9 @@ def components_to_widgets(
       emitted, so ``last_sql`` stays ``None`` and ``query_info`` is ``None``
       because no SQL card was seen — not via the error short-circuit.
     """
+    # Materialize once: render_interactive (the no-answer fallback below) needs a
+    # second pass, and the public signature accepts any Iterable (incl. generators).
+    components = list(components)
     text_answer = ""
     tables: list[str] = []
     error_message = ""
@@ -129,7 +240,7 @@ def components_to_widgets(
     parts = list(tables)
     if text_answer:
         parts.append(text_answer)
-    markdown = "\n\n".join(parts) if parts else "(no answer)"
+    markdown = "\n\n".join(parts) if parts else (render_interactive(components) or "(no answer)")
 
     table = _build_table_payload(last_df) if last_df is not None else None
     chart = _build_chart_payload(last_chart) if last_chart is not None else None
@@ -184,6 +295,22 @@ def components_to_chart(
     """
     markdown, is_error, _, _, chart = components_to_widgets(components)
     return markdown, is_error, chart
+
+
+def append_conversation_footer(markdown: str, conversation_id: str | None) -> str:
+    """Append the conversation id as a plain-Markdown footer (text fallback).
+
+    The structured ``_meta`` channel is the source of truth for apps-aware
+    hosts; this footer is how a non-apps client learns the id it must pass back
+    as the ``conversation_id`` argument to continue the conversation. A falsy
+    ``conversation_id`` returns ``markdown`` unchanged.
+    """
+    if not conversation_id:
+        return markdown
+    return (
+        f"{markdown}\n\n_Conversation ID: `{conversation_id}` — pass it back as the "
+        f"`conversation_id` argument to continue this conversation._"
+    )
 
 
 def _coerce_cell(value: object) -> str:

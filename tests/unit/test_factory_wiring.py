@@ -85,6 +85,21 @@ def test_max_tool_iterations_flows_through_config(tmp_path: Path) -> None:
     assert agent.config.max_tool_iterations == 42
 
 
+def test_bounded_conversation_store_is_wired(tmp_path: Path) -> None:
+    """build_agent wires the bounded LRU store (not the framework's unbounded
+    default) with the configured cap, so multi-turn conversations persist but a
+    long-running server cannot leak conversations."""
+    from sqllens.conversation_store import BoundedConversationStore
+
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        agent=AgentRuntimeConfig(max_conversations=5),
+    )
+    agent = build_agent(cfg)
+    assert isinstance(agent.conversation_store, BoundedConversationStore)
+    assert agent.conversation_store._max == 5
+
+
 def test_emit_chart_tool_is_registered(tmp_path: Path) -> None:
     """Without ``emit_chart`` in the ToolRegistry the LLM never sees it and
     ``query_database`` silently degrades to table/text-only (never a chart) —

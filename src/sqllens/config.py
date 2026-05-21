@@ -271,6 +271,12 @@ class AgentRuntimeConfig(BaseModel):
             "logic. Enable only for trusted, debugging-oriented deployments."
         ),
     )
+    # Hard cap on the in-process LRU conversation store that backs multi-turn
+    # conversations (see sqllens.conversation_store). Once exceeded, the
+    # least-recently-used conversation is evicted so a long-running server does
+    # not leak conversations. Conversations are ephemeral and never persisted to
+    # disk — they are dropped on restart. Env override: SQLLENS_AGENT__MAX_CONVERSATIONS.
+    max_conversations: int = Field(default=1000, ge=1, le=1_000_000)
     audit: AuditConfig = Field(default_factory=lambda: AuditConfig())
 
 

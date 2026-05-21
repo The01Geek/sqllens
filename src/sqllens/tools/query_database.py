@@ -64,6 +64,24 @@ _SQL_EXECUTION_ERROR_PREFIX = "SQL execution error: "
 # stripped here. Single source of truth lives in sqllens.config.
 _RESERVED_METADATA_KEYS = RESERVED_METADATA_KEYS
 
+
+def strip_reserved_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Drop reserved internal-control keys from caller-supplied MCP metadata.
+
+    Untrusted request metadata must not be able to steer internal agent control
+    flow (only supply RLS predicate values), so the reserved keys are stripped
+    at the boundary. The comprehension also copies, so a caller's mapping can't
+    be mutated downstream, and an absent/empty mapping yields ``{}`` —
+    preserving the prior empty-context behaviour byte-for-byte. Shared by both
+    tool wrappers so the strip is defined once.
+    """
+    return {
+        k: v
+        for k, v in (metadata or {}).items()
+        if k not in _RESERVED_METADATA_KEYS
+    }
+
+
 def _append_sql_block(markdown: str, query_info: dict | None) -> str:
     """Append the executed SQL as a fenced ``sql`` block (text fallback).
 
@@ -80,7 +98,11 @@ def _append_sql_block(markdown: str, query_info: dict | None) -> str:
 
 
 async def query_database_impl(
-    cfg: Config, question: str, *, metadata: Mapping[str, Any] | None = None
+    cfg: Config,
+    question: str,
+    *,
+    metadata: Mapping[str, Any] | None = None,
+    conversation_id: str | None = None,
 ) -> str:
     """Translate ``question`` to SQL, execute, and return a Markdown answer.
 
@@ -89,13 +111,17 @@ async def query_database_impl(
     exact raised messages are identical — they live in the sibling below.
     """
     markdown, _, _, _ = await query_database_impl_with_widgets(
-        cfg, question, metadata=metadata
+        cfg, question, metadata=metadata, conversation_id=conversation_id
     )
     return markdown
 
 
 async def query_database_impl_with_table(
-    cfg: Config, question: str, *, metadata: Mapping[str, Any] | None = None
+    cfg: Config,
+    question: str,
+    *,
+    metadata: Mapping[str, Any] | None = None,
+    conversation_id: str | None = None,
 ) -> tuple[str, dict | None, dict | None]:
     """Translate ``question`` to SQL, execute, return ``(markdown, table, query_info)``.
 
@@ -104,13 +130,17 @@ async def query_database_impl_with_table(
     are identical — they live in the sibling below.
     """
     markdown, table, query_info, _ = await query_database_impl_with_widgets(
-        cfg, question, metadata=metadata
+        cfg, question, metadata=metadata, conversation_id=conversation_id
     )
     return markdown, table, query_info
 
 
 async def query_database_impl_with_widgets(
-    cfg: Config, question: str, *, metadata: Mapping[str, Any] | None = None
+    cfg: Config,
+    question: str,
+    *,
+    metadata: Mapping[str, Any] | None = None,
+    conversation_id: str | None = None,
 ) -> tuple[str, dict | None, dict | None, dict | None]:
     """Translate ``question`` to SQL, execute, return ``(markdown, table, query_info, chart)``.
 
@@ -132,6 +162,11 @@ async def query_database_impl_with_widgets(
     ``agent.show_details`` is on, ``None`` otherwise — and when present, the
     same SQL is also appended to ``markdown`` as a fenced ``sql`` block so
     plain-text clients see it too.
+
+    ``conversation_id`` is threaded into ``send_message`` so a follow-up turn
+    loads the prior ``Conversation`` (its message history) and the agent can
+    answer its own clarifying question. ``None`` lets the agent mint a fresh id
+    internally; the MCP server layer mints and returns a stable id to the caller.
     """
     try:
         agent = await get_agent(cfg)
@@ -143,23 +178,17 @@ async def query_database_impl_with_widgets(
         logger.exception("agent construction failed")
         raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
     # Per-request metadata (caller-supplied MCP metadata, used by the
-    # row-level-security guard) flows in here. Reserved internal-control keys
-    # are stripped so untrusted request metadata cannot steer agent control
-    # flow; the dict comprehension also copies so a caller's mapping can't be
-    # mutated downstream, and an absent/empty mapping keeps the prior
-    # empty-context behaviour byte-for-byte.
-    safe_metadata = {
-        k: v
-        for k, v in (metadata or {}).items()
-        if k not in _RESERVED_METADATA_KEYS
-    }
+    # row-level-security guard) flows in here, with reserved internal-control
+    # keys stripped at the boundary (see strip_reserved_metadata).
     request_context = RequestContext(
-        headers={}, cookies={}, metadata=safe_metadata
+        headers={}, cookies={}, metadata=strip_reserved_metadata(metadata)
     )
 
     components = []
     try:
-        async for comp in agent.send_message(request_context, question):
+        async for comp in agent.send_message(
+            request_context, question, conversation_id=conversation_id
+        ):
             components.append(comp)
     except UnsafeSqlError as e:
         # Defensive path: the current vendored agent catches a read-only-guard
