@@ -338,6 +338,26 @@ After implementing, before running tests, do this sweep:
 
 Treat a known convention violation in touched code as a defect in **this** PR, not a pre-existing-style excuse — if the diff touched it, it leaves `CLAUDE.md`-compliant.
 
+#### 2.3.4 Boundary-assumption verification sweep (mandatory)
+
+2.3.1/2.3.2/2.3.3 keep the diff internally clean (no dead lines, no stranded dependents, no convention drift). This sweep targets a different defect class: a claim your diff *depends on* about something **outside the lines you wrote** that you asserted from memory instead of verifying against the source of truth. These ship clean — the code reads fine in `git diff` review, and they pass your own tests (because the tests encode the same wrong assumption) — so they only surface as a `/devflow:review` REJECT or a human post-merge patch. The cheapest place to catch them is here, before you commit.
+
+A **boundary assumption** is any factual claim the diff relies on about something the diff does not own. The recurring kinds, each from a real shipped defect:
+
+- **Dependency-version behavior** — a symbol, export, signature, or runtime behavior of a third-party package. Verify it against the **pinned range's** actual installed source/changelog, not the latest docs. (E.g. `from pydantic_settings import SettingsError` at module scope, but that export is only public since 2.4.0 while the pin is `>=2.2,<3` — every CLI entry point broke on an in-constraint install. E.g. an optional-driver import that escaped the error type the fail-fast contract promised to raise.)
+- **Supported-runtime behavior** — a behavior of the language/stdlib/interpreter. Verify it holds across the project's **entire** documented supported-runtime range, not just the version in your hands. (E.g. assuming `ipaddress.is_loopback` treats `::ffff:127.0.0.1` as loopback — CPython returns `False` for that on Python 3.11.x and 3.12.0–3.12.3, inside the project's own supported range.)
+- **Sibling-producer output** — the shape or content of data produced by another module your code consumes. Verify it by reading the **production producer**, not by assuming the field is populated. (E.g. assuming `DataFrameComponent.column_types` is filled when the production producer hard-codes `column_types={}`, so a client-side numeric sort silently ordered lexicographically.)
+- **Real host/runtime environment** — a path, base URL, network namespace, or sandbox constraint of where the code actually runs. Verify against the **real host**, not the local dev shell. (E.g. relative `./vendor/` asset references that 404 silently in the sandboxed `about:blank`-base MCP host iframe; a "fast-to-first-row" join premise never exercised because the connector suite was skipped for lack of a real DB.)
+
+After implementing, before running tests, do this sweep:
+
+1. From `git diff --staged -U0` (or `git diff -U0`), list every claim the diff depends on that falls into one of the four kinds above. Purely-internal claims (a local you just wrote, a function defined in the same diff) are **out of scope** by definition — this sweep is only about boundaries you don't own.
+2. For each claim, verify it against the **actual source of truth** — the pinned version's installed source/changelog, the producer module, the documented supported-runtime range across *all* of it, the real host path — never from memory.
+3. **A test assertion about a boundary is itself an unverified claim.** A test that asserts the wrong boundary value passes while encoding the bug. Verify the asserted value against the same source of truth before trusting the green test.
+4. If the code is wrong, fix it. If a boundary genuinely **cannot** be verified in-environment (no real connector DB, no live host iframe), do **not** assert it as true: mark the relevant acceptance criterion `(post-merge)` (per Phase 1.4) and add a `workpad.py update $ISSUE_NUMBER --reflection "unverified boundary: {claim} — needs {live env} to confirm"` note so the gap is visible to review and the merger. `(post-merge)` is only for genuine in-environment impossibility — never a shortcut to dodge a verification you could have run.
+
+Treat an unverified boundary assumption as a defect in **this** PR, not a review-engine problem to be caught downstream — if the diff depends on it, verify it here or route it to `(post-merge)` with a reflection note.
+
 ### 2.4 Test
 
 Run the project's test and lint commands (check `CLAUDE.md` or `README`). Issue both Bash calls in a single assistant turn so they run in parallel.
@@ -574,7 +594,7 @@ Then output the PR URL and a one- or two-line summary of what was accomplished.
 Before reporting completion, verify ALL phases executed:
 
 - Phase 1: Issue fetched, branch exists, workpad initialized with Acceptance Criteria mirrored
-- Phase 2: For `bug`-labelled issues, reproduction signal recorded; if the issue spans multiple PRs, the 2.2.5 scope-adjustment rule was applied and the workpad's Acceptance Criteria section now contains only in-scope items; code committed and pushed
+- Phase 2: For `bug`-labelled issues, reproduction signal recorded; if the issue spans multiple PRs, the 2.2.5 scope-adjustment rule was applied and the workpad's Acceptance Criteria section now contains only in-scope items; code committed and pushed; the 2.3.4 boundary-assumption verification sweep ran over the diff (each cross-boundary claim verified against its source of truth, or routed to `(post-merge)` with a reflection note)
 - Phase 3: Draft PR created, `/simplify` ran (fixes committed if any), `/review-and-fix` ran, acceptance criteria gate passed (PR still draft)
 - Phase 4: If any criteria were deferred in 2.2.5, follow-up issue(s) filed in 4.0; if /devflow:review-and-fix emitted a deferrals manifest, follow-up issue(s) filed in 4.0.5 and the manifest hydrated; docs updated and "Documented" label applied; PR description generated via `/pr-description`; PR marked ready; workpad finalized with `Status: Complete`
 
