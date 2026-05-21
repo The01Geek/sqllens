@@ -164,3 +164,83 @@ async def test_explicit_threshold_overrides_server_default() -> None:
 
     assert result.success is True
     assert memory.last_call["similarity_threshold"] == 0.9
+
+
+class _HitAgentMemory(_RecordingAgentMemory):
+    """Returns a fixed list of search results so the tool's hit path runs."""
+
+    def __init__(self, results: list[ToolMemorySearchResult]) -> None:
+        super().__init__()
+        self._results = results
+
+    async def search_similar_usage(
+        self,
+        question: str,
+        context: ToolContext,
+        *,
+        limit: int = 10,
+        similarity_threshold: float = 0.7,
+        tool_name_filter: str | None = None,
+    ) -> list[ToolMemorySearchResult]:
+        return list(self._results)
+
+
+@pytest.mark.asyncio
+async def test_hit_emits_memory_search_card_with_aggregate_metadata() -> None:
+    """The real tool's HIT path emits a STATUS_CARD whose metadata['memory_search']
+    is the exact aggregate shape components_to_widgets reads.
+
+    Pins the producer side of the cross-file contract (the consumer tests use
+    hand-built cards) and the float(max(...)) coercion that keeps a numpy score
+    JSON-serializable in _meta.
+    """
+    results = [
+        ToolMemorySearchResult(
+            memory=ToolMemory(question="q1", tool_name="run_sql", args={}),
+            similarity_score=0.6,
+            rank=1,
+        ),
+        ToolMemorySearchResult(
+            memory=ToolMemory(question="q2", tool_name="run_sql", args={}),
+            similarity_score=0.83,
+            rank=2,
+        ),
+    ]
+    tool = SearchSavedCorrectToolUsesTool(default_similarity_threshold=0.7)
+
+    result = await tool.execute(
+        _context(_HitAgentMemory(results)),
+        SearchSavedCorrectToolUsesParams(question="q", similarity_threshold=None),
+    )
+
+    assert result.success is True
+    payload = result.ui_component.rich_component.metadata["memory_search"]
+    assert payload == {
+        "searched": True,
+        "hit_count": 2,
+        "top_similarity": 0.83,
+        "threshold": 0.7,
+    }
+    # The coercion must hand a builtin float (not numpy) to the _meta channel.
+    assert type(payload["top_similarity"]) is float
+
+
+@pytest.mark.asyncio
+async def test_miss_emits_memory_search_card_with_zero_hits() -> None:
+    """The real tool's MISS path emits a STATUS_CARD with hit_count 0 and a
+    None top_similarity — the aggregate shape components_to_widgets reads."""
+    tool = SearchSavedCorrectToolUsesTool(default_similarity_threshold=0.7)
+
+    result = await tool.execute(
+        _context(_RecordingAgentMemory()),  # search_similar_usage returns []
+        SearchSavedCorrectToolUsesParams(question="q", similarity_threshold=None),
+    )
+
+    assert result.success is True
+    payload = result.ui_component.rich_component.metadata["memory_search"]
+    assert payload == {
+        "searched": True,
+        "hit_count": 0,
+        "top_similarity": None,
+        "threshold": 0.7,
+    }

@@ -187,11 +187,12 @@ async def query_database_impl_with_widgets(
     plain-text clients see it too.
 
     ``memory_info`` carries the aggregate memory hit/miss signal whenever a
-    memory search *completes* (a hit or a miss) this turn (``None`` otherwise —
-    including a search that errored, and on the agent error path). It is
-    surfaced regardless of ``agent.show_details``; when
-    ``agent.show_memory_details`` is on, a one-line memory footer is also
-    appended to ``markdown`` for plain-text clients.
+    memory search *completes* (a hit or a miss) this turn. It is ``None`` when
+    only a search error occurred (no card emitted); on the agent error path the
+    function raises before returning anything at all. It is surfaced regardless
+    of ``agent.show_details``; when ``agent.show_memory_details`` is on, a
+    one-line memory footer is also appended to ``markdown`` for plain-text
+    clients.
 
     ``conversation_id`` is threaded into ``send_message`` so a follow-up turn
     loads the prior ``Conversation`` (its message history) and the agent can

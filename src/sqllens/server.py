@@ -51,11 +51,12 @@ _QUERY_META_KEY = "sqllens/query"
 # widget renders it with ECharts and it takes precedence over the table grid.
 _CHART_META_KEY = "sqllens/chart"
 # Memory hit/miss channel. Present whenever a memory search completed (a hit or
-# a miss) this turn (independent of ``agent.show_details``; a search that
-# errored emits no signal). Aggregate signal only — {"searched", "hit_count",
-# "top_similarity", "threshold"} — never the matched memory contents.
-# Plain-text clients get the same signal as a one-line footer when
-# ``agent.show_memory_details`` is on.
+# a miss) this turn (a search that errored emits no signal). This channel is
+# independent of both ``agent.show_details`` and ``agent.show_memory_details``;
+# the latter gates only the plain-text footer (below), never this _meta blob.
+# Aggregate signal only — {"searched", "hit_count", "top_similarity",
+# "threshold"} — never the matched memory contents. Plain-text clients get the
+# same signal as a one-line footer when ``agent.show_memory_details`` is on.
 _MEMORY_META_KEY = "sqllens/memory_info"
 # Conversation continuity channel. The resolved conversation id is returned on
 # every successful answer turn — structured here for apps-aware hosts, and as a
