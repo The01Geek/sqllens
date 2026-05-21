@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 # Dismiss Devflow Review's own still-outstanding CHANGES_REQUESTED reviews.
 #
 # Called after a Devflow Review APPROVE verdict to clear a prior REJECT's

@@ -159,12 +159,12 @@ code-change | template-update | other`. `confidence` ∈ `low | medium | high`.
 
 **Plugin self-audit first.** Before picking a surface, ask whether this pattern
 reveals a flaw in the devflow plugin itself
-(`.claude/plugins/devflow/**`) — if so, set `categories` to
+(the engine's own files — `skills/**`, `agents/**`, `lib/**`, `scripts/**`) — if so, set `categories` to
 include `tooling-gap` and point `suggested_interventions` at the plugin file:
 
 - **Workpad blind spot?** Did `workpad_body` contain clear root-cause evidence
   that your classification missed? → `change_type: "skill-update"`,
-  `candidate_targets: [".claude/plugins/devflow/skills/retrospective/SKILL.md"]`.
+  `candidate_targets: ["skills/retrospective/SKILL.md"]`.
 - **Clean-gate false negative?** Did the PR nearly qualify as clean but the
   workpad shows a major abandoned design? → points at `lib/cheap-gate.jq`.
 - **Mis-categorized?** Was the failure forced into `other` or into a category

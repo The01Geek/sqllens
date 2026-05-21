@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 # scan.sh — emit JSON array of unprocessed watched-author PRs.
 #
 # Usage:
@@ -32,10 +34,13 @@ done
 
 REPO="$("$DEVFLOW_GH" repo view --json nameWithOwner -q .nameWithOwner)"
 MAX_PRS="$(devflow_conf '.devflow_retrospective.max_prs_per_run' 500)"
+# Adopter's implementation-bot branch prefix (default "claude/"). devflow/audit-
+# is DevFlow's own internal convention and is intentionally fixed.
+IMPL_PREFIX="$(devflow_conf '.devflow_retrospective.implementation_branch_prefix' 'claude/')"
 
 # ── Retrospected-branch predicate (shared by both modes) ─────────────────────
 _is_retrospected_branch() {  # $1 = headRefName
-    case "$1" in claude/*|devflow/audit-*) return 0 ;; *) return 1 ;; esac
+    case "$1" in ${IMPL_PREFIX}*|devflow/audit-*) return 0 ;; *) return 1 ;; esac
 }
 
 # ── Ad-hoc mode: explicit PR list, no search, no processed-filter ─────────────
@@ -63,7 +68,9 @@ if [ -n "$EXPLICIT_PRS" ]; then
 fi
 
 # ── Weekly mode ──────────────────────────────────────────────────────────────
-SINCE="$(date -u -d '7 days ago' +%Y-%m-%d)"
+# Portable "7 days ago" (GNU `date -d` is not available on macOS/BSD; python3 is
+# a hard dependency, so use it for date math).
+SINCE="$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(days=7)).strftime("%Y-%m-%d"))')"
 WATCHED="$(devflow_watched_authors)"
 
 if [ -z "$WATCHED" ]; then
@@ -80,9 +87,9 @@ for _w in "${_watched[@]}"; do
         if BATCH="$("$DEVFLOW_GH" pr list --repo "$REPO" --state merged \
                 --search "merged:>=${SINCE} author:${_form}" \
                 --json number,headRefName,author,mergedAt --limit 100 \
-                --jq '[.[] | select((.headRefName|startswith("claude/")) or (.headRefName|startswith("devflow/audit-")))]' 2>/dev/null)"; then
+                --jq "[.[] | select((.headRefName|startswith(\"${IMPL_PREFIX}\")) or (.headRefName|startswith(\"devflow/audit-\")))]" 2>/dev/null)"; then
             # Also filter locally in case the --jq flag was not applied by the caller (e.g. in tests)
-            BATCH="$(echo "$BATCH" | jq '[.[] | select((.headRefName|startswith("claude/")) or (.headRefName|startswith("devflow/audit-")))]')"
+            BATCH="$(echo "$BATCH" | jq --arg impl "$IMPL_PREFIX" '[.[] | select((.headRefName|startswith($impl)) or (.headRefName|startswith("devflow/audit-")))]')"
         else
             echo "::warning::gh pr list failed for author:${_form}" >&2; BATCH='[]'
         fi

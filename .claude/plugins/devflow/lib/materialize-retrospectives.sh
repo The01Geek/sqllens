@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 # materialize-retrospectives.sh <new-entries-file> <jsonl-path>
 #
 # Merges new JSONL entries into the retrospectives file idempotently.

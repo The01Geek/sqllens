@@ -86,12 +86,12 @@ Attempt to find the related issue number using these methods in order:
 
 If a PR number was provided:
 ```bash
-ISSUE_NUM=$(gh pr view $ARGUMENTS --json body --jq '.body' | grep -oiP '(?:resolves|fixes|closes)\s+#\K\d+' | head -1)
+ISSUE_NUM=$(gh pr view $ARGUMENTS --json body --jq '.body' | grep -oiE '(resolves|fixes|closes)[[:space:]]+#[0-9]+' | grep -oE '[0-9]+' | head -1)
 ```
 
 If no PR number:
 ```bash
-ISSUE_NUM=$(gh pr view HEAD --json body --jq '.body' 2>/dev/null | grep -oiP '(?:resolves|fixes|closes)\s+#\K\d+' | head -1)
+ISSUE_NUM=$(gh pr view HEAD --json body --jq '.body' 2>/dev/null | grep -oiE '(resolves|fixes|closes)[[:space:]]+#[0-9]+' | grep -oE '[0-9]+' | head -1)
 ```
 
 **From branch name** (fallback — matches `issue-{number}` pattern set by `/implement`):
@@ -100,7 +100,7 @@ if [ -z "$ISSUE_NUM" ]; then
   # If reviewing a PR, use the stored head branch name from Phase 0.2
   # If reviewing current branch, use git branch --show-current
   BRANCH_NAME="${STORED_HEAD_BRANCH:-$(git branch --show-current)}"
-  ISSUE_NUM=$(echo "$BRANCH_NAME" | grep -oP 'issue-\K\d+')
+  ISSUE_NUM=$(echo "$BRANCH_NAME" | grep -oE 'issue-[0-9]+' | grep -oE '[0-9]+')
 fi
 ```
 
@@ -122,7 +122,7 @@ Compute four flags:
 - `small_diff` = (total changed lines < 100) **AND** (changed-file count ≤ 3)
 - `config_only` = every changed file has an extension in `{.yml, .yaml, .json, .md, .toml, .ini, .lock, .txt}`
 - `has_new_types` = the added-lines slice of the diff (lines starting with `+` but not `+++`) contains, in a code file (file extension NOT in the `config_only` set above), a line that matches `^\+\s*(?:(?:final|abstract|readonly|export(?:\s+default)?|public|pub)\s+)*(class|interface|type|enum|struct|trait)\s+\w+`. The optional leading modifiers catch language-specific qualifiers (e.g. `final class`, `abstract class`, `readonly class`, `export class`, `export default class`, `public class`) — without them, the regex would silently miss genuinely-new-type diffs in languages whose declarations begin with a visibility / modality keyword.
-- `engine_self_modifying` = any changed file's path matches `.claude/plugins/devflow/skills/**` OR `.claude/plugins/devflow/agents/**` OR `.claude/plugins/devflow/lib/**`. These are the SKILL.md / agent-definition / helper-script files that *are* the review engine — a typo here silently breaks every future review. `lib/**` is included because helper scripts and test fixtures under `.claude/plugins/devflow/lib/` are part of the engine surface.
+- `engine_self_modifying` = any changed file's path matches `skills/**` OR `agents/**` OR `lib/**` (the DevFlow engine's own files, which live at the repo root in the devflow-autopilot repo). These are the SKILL.md / agent-definition / helper-script files that *are* the review engine — a typo here silently breaks every future review. `lib/**` is included because helper scripts and test fixtures under `lib/` are part of the engine surface. (This gate only fires when reviewing a PR against the DevFlow repo itself; on an adopter's repo these paths normally won't match the engine.)
 
 Compute counts from the diff already fetched in 0.2/0.3 — no extra `gh` calls.
 
@@ -445,6 +445,13 @@ Analyze test coverage for the changes. Read the cached diff at `{DIFF_PATH}`. Ch
 {paste the defect_signature paragraph above}
 ```
 
+**pr-review-toolkit:type-design-analyzer** — *launched only when the `has_new_types` gate is true (see Phase 3.1 gates below), and always when `engine_self_modifying` is set; skipped otherwise* — prompt:
+```
+Analyze the type design in the code changes. Read the cached diff at `{DIFF_PATH}`. Evaluate the types actually introduced or modified in this diff for encapsulation, invariant expression, usefulness, and enforcement. Do not report on pre-existing types the diff does not touch.
+
+{paste the defect_signature paragraph above}
+```
+
 **General-purpose final-pass reviewer** — dispatch a `Task` with `subagent_type: general-purpose` and instruct it to invoke the `/superpowers:requesting-code-review` skill (that skill renders its own reviewer prompt; we do not inline it). This dispatch assumes the `superpowers` plugin is installed in the executing environment; if `/superpowers:requesting-code-review` is not available, the subagent will surface that and the orchestrator should fall back to relying on the other Phase-3 reviewer agents above.
 
 Prompt:
@@ -497,7 +504,7 @@ Output: `Phase 4/4: Aggregating findings...`
 
 **Skip this step entirely in current-branch mode** (no PR → no body to read). On standalone branch reviews, there is no Scope-Acknowledged Findings block; jump straight to 4.1.
 
-When `$ARGUMENTS` is a PR number, the engine consults the **Scope-Acknowledged Findings** block in the PR body (delimited by `<!-- DEVFLOW_DEFERRED_FINDINGS_START -->` / `<!-- DEVFLOW_DEFERRED_FINDINGS_END -->`) and demotes any current finding that matches a validated deferral entry to **Informational**. This is the consumer side of the contract /implement Phase 4.0.5 produces; without it, /devflow:review re-raises findings that /implement already filed follow-up issues for, creating the policy mismatch the contract is meant to prevent. (See `.claude/plugins/devflow/scripts/match-deferrals.py` for the matcher's exact guard order and matching rule.)
+When `$ARGUMENTS` is a PR number, the engine consults the **Scope-Acknowledged Findings** block in the PR body (delimited by `<!-- DEVFLOW_DEFERRED_FINDINGS_START -->` / `<!-- DEVFLOW_DEFERRED_FINDINGS_END -->`) and demotes any current finding that matches a validated deferral entry to **Informational**. This is the consumer side of the contract /implement Phase 4.0.5 produces; without it, /devflow:review re-raises findings that /implement already filed follow-up issues for, creating the policy mismatch the contract is meant to prevent. (See `${CLAUDE_SKILL_DIR}/../../scripts/match-deferrals.py` for the matcher's exact guard order and matching rule.)
 
 Serialize the Phase 3 findings collected in 3.2 to a JSON array with one object per finding:
 
@@ -513,7 +520,7 @@ The order matters — index N in this array becomes the matcher's `finding_index
 Pipe the JSON to the matcher via stdin (the `review` allowed-tools profile in `claude-runner.yml` is read-only and does not grant the Write tool, so the orchestrator cannot write a `findings.json` file; stdin is the load-bearing alternative):
 
 ```bash
-printf '%s' "$FINDINGS_JSON" | .claude/plugins/devflow/scripts/match-deferrals.py \
+printf '%s' "$FINDINGS_JSON" | ${CLAUDE_SKILL_DIR}/../../scripts/match-deferrals.py \
     --pr $ARGUMENTS \
     --diff ".devflow/review/<slug>/diff.patch" \
     --findings -
@@ -617,7 +624,7 @@ If `gh pr review` fails (e.g. you cannot review your own PR as the same GitHub i
 **Then, on any APPROVE form only (APPROVE / APPROVE with notes / APPROVE WITH CAVEAT), clear a stale REJECT.** A prior REJECT's `--request-changes` review stays the PR's effective `reviewDecision` until *dismissed*; the APPROVE-with-notes `--comment` review never supersedes it, and the REJECT may be a different bot identity (auto path posts as `github-actions[bot]`, manual `@claude` as another), so no later review clears it either. Without this the PR is wedged at `reviewDecision: CHANGES_REQUESTED` forever, contradicting the green check and this APPROVE. The script dismisses **only Devflow Review's own reports** (body marker), never a human reviewer's `--request-changes`. On REJECT, **skip this** — the changes-request must stand. Run (re-run safe):
 
 ```bash
-.claude/plugins/devflow/scripts/dismiss-stale-rejections.sh "$ARGUMENTS"
+${CLAUDE_SKILL_DIR}/../../scripts/dismiss-stale-rejections.sh "$ARGUMENTS"
 ```
 
 If it exits non-zero (token scope), say so in chat output and that the PR stays blocked until dismissed manually. **A dismissal failure never downgrades the verdict** — the verdict stands; only merge-gate housekeeping failed.

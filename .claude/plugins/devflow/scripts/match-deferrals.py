@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 """DevFlow deferred-findings matcher for /devflow:review's Phase 4.0.
 
 Reads the Scope-Acknowledged Findings block from a PR body (between the

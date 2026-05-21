@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 # render-report.sh — sourceable; defines devflow_render_report <summary-json>
 # Prints a markdown run-report to stdout. Pure function — no gh/git calls.
 set -euo pipefail

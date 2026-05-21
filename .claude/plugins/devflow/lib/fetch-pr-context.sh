@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 # fetch-pr-context.sh <pr-number>
 # Fetches all primary GitHub sources for one PR and writes a context bundle.
 # Output path is echoed to stdout; everything else goes to stderr.
@@ -35,7 +37,8 @@ DELETIONS="$(echo "$PR_JSON" | jq -r .deletions)"
 CHANGED_FILES="$(echo "$PR_JSON" | jq '[.files[].path]')"
 
 # ── 2. Classify branch kind ──────────────────────────────────────────────────
-KIND="$(jq -rn --arg branch "$BRANCH" --argjson watched true -f "$HERE/classify-pr-kind.jq")"
+IMPL_PREFIX="$(devflow_conf '.devflow_retrospective.implementation_branch_prefix' 'claude/')"
+KIND="$(jq -rn --arg branch "$BRANCH" --argjson watched true --arg impl_prefix "$IMPL_PREFIX" -f "$HERE/classify-pr-kind.jq")"
 if [ "$KIND" = "skip" ]; then
     echo "fetch-pr-context: branch $BRANCH is not a retrospected branch" >&2
     exit 2
@@ -45,7 +48,7 @@ fi
 PATTERN_TAG="null"
 if [ "$KIND" = "audit-intervention" ]; then
     # Try "Fixes pattern: <tag>" from body
-    TAG_FROM_BODY="$(echo "$BODY" | grep -oiP '(?<=Fixes pattern:\s)[\w-]+' | head -1 || true)"
+    TAG_FROM_BODY="$(echo "$BODY" | sed -nE 's/.*[Ff]ixes pattern:[[:space:]]*([A-Za-z0-9_-]+).*/\1/p' | head -1 || true)"
     if [ -n "$TAG_FROM_BODY" ]; then
         PATTERN_TAG="\"$TAG_FROM_BODY\""
     else
@@ -65,7 +68,7 @@ if [ -n "$ISSUE_FROM_BRANCH" ]; then
     ISSUE_NUMBER="$ISSUE_FROM_BRANCH"
 else
     # Fallback: grep body for Closes/Fixes/Resolves #<N>
-    ISSUE_FROM_BODY="$(echo "$BODY" | grep -oiP '(?:Closes|Fixes|Resolves)\s+#\K[0-9]+' | head -1 || true)"
+    ISSUE_FROM_BODY="$(echo "$BODY" | grep -oiE '(Closes|Fixes|Resolves)[[:space:]]+#[0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
     if [ -n "$ISSUE_FROM_BODY" ]; then
         ISSUE_NUMBER="$ISSUE_FROM_BODY"
     fi
@@ -226,7 +229,7 @@ WORKPAD_BODY="$(echo "$PR_COMMENTS_RAW" | jq -r '[.[] | select(.body | test("<!-
 WORKPAD_FINAL_STATUS=""
 if [ -n "$WORKPAD_BODY" ]; then
     # Extract value after a line like "**Status:** Complete" or "Status: Complete"
-    WORKPAD_FINAL_STATUS="$(echo "$WORKPAD_BODY" | grep -ioP '^\*{0,2}\s*Status\s*:?\*{0,2}\s*\K.+' | head -1 | sed 's/[[:space:]]*$//' || true)"
+    WORKPAD_FINAL_STATUS="$(echo "$WORKPAD_BODY" | sed -nE 's/^\*{0,2}[[:space:]]*[Ss]tatus[[:space:]]*:?\*{0,2}[[:space:]]*(.+)/\1/p' | head -1 | sed 's/[[:space:]]*$//' || true)"
 fi
 
 # ttm_hours: (merged_at - created_at) in decimal hours

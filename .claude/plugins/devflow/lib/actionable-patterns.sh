@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 # actionable-patterns.sh — emit the list of patterns that currently warrant
 # an audit intervention, honouring min_occurrences and cooldown_days config.
 #
@@ -98,7 +100,8 @@ OPEN_AUDIT_PR_MAP="$(
 )"
 
 # ── Cooldown boundary (epoch seconds for COOLDOWN days ago) ─────────────────
-COOLDOWN_EPOCH="$(date -u -d "${COOLDOWN} days ago" +%s)"
+# Portable date math via python3 (GNU `date -d` is unavailable on macOS/BSD).
+COOLDOWN_EPOCH="$(python3 -c "import datetime as d; print(int((d.datetime.now(d.timezone.utc)-d.timedelta(days=${COOLDOWN})).timestamp()))")"
 
 # ── Build output array ───────────────────────────────────────────────────────
 # For each tag in the pattern view where status is "open" or "regressed"

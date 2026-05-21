@@ -3,15 +3,21 @@ name: docs-sync-external
 description: Use when internal documentation has been updated and external customer-facing docs need to be aligned, or when checking for outdated, missing, or confidential content in external docs.
 ---
 > **Configuration:** Read documentation paths from `.github/project-config.yml`:
-> - Internal: `.claude/plugins/devflow/scripts/config-get.sh .docs.internal docs/internal/`
-> - External: `.claude/plugins/devflow/scripts/config-get.sh .docs.external docs/external/`
+> - Internal: `${CLAUDE_SKILL_DIR}/../../scripts/config-get.sh .docs.internal docs/internal/`
+> - External: `${CLAUDE_SKILL_DIR}/../../scripts/config-get.sh .docs.external docs/external/`
 >
 > The helper falls back to the default value when the config file is missing or the key is absent. Use the results as `[[INTERNAL_DOC_LOCATION]]` and `[[EXTERNAL_DOC_LOCATION]]` throughout this skill.
 
-# WikiWizard External Documentation Alignment Agent
+# External Documentation Alignment Agent
 
 ## Objective
 You are an **AI Documentation Alignment Agent**. Review **internal technical documentation** (`[[INTERNAL_DOC_LOCATION]]`), compare it with **external customer-facing documentation** (`[[EXTERNAL_DOC_LOCATION]]`), and update external docs to be accurate, customer-friendly, and free of confidential content.
+
+## Preflight
+
+Check the documentation trees before doing anything:
+- If `[[INTERNAL_DOC_LOCATION]]` is empty or absent, there is no source of truth to align from — **stop** and report that internal docs should be created first (run `/docs-bootstrap-internal` or `/docs-sync-internal`).
+- If `[[EXTERNAL_DOC_LOCATION]]` is empty or absent, this is a first-time bootstrap, not an alignment — **defer to `/docs-bootstrap-external`** rather than aligning against nothing.
 
 ## Execution Model
 

@@ -19,7 +19,7 @@ signal computation, gating, pattern math, and git/PR mechanics — is done by
 plain scripts with no LLM tokens.
 
 ```
-LIB="${CLAUDE_PLUGIN_ROOT:-.claude/plugins/devflow}/lib"
+LIB="${CLAUDE_SKILL_DIR}/../../lib"
 ```
 
 All scratch files live under `.devflow/tmp/` (gitignored). Learnings files
@@ -59,7 +59,7 @@ If not on `main`, run `git checkout main`.
 Set the library path and prepare the scratch directory:
 
 ```bash
-LIB="${CLAUDE_PLUGIN_ROOT:-.claude/plugins/devflow}/lib"
+LIB="${CLAUDE_SKILL_DIR}/../../lib"
 mkdir -p .devflow/tmp
 rm -f .devflow/tmp/new-entries.jsonl
 ```
@@ -162,7 +162,7 @@ For each bundle path in `needs_analysis`, dispatch a subagent. Issue up to
 **3–4 subagents concurrently** in a single message (use the Agent tool for
 each). Each subagent prompt:
 
-> Read and follow `.claude/plugins/devflow/skills/retrospective/SKILL.md`
+> Read and follow `${CLAUDE_SKILL_DIR}/../retrospective/SKILL.md`
 > exactly.
 >
 > Your context bundle path is: `<path>`
@@ -176,14 +176,17 @@ each). Each subagent prompt:
 Wait for all dispatched subagents to finish before continuing.
 
 **Collecting results:** Each subagent's final message is its JSON object.
-For each result:
+Subagent output can contain quotes, backticks, newlines, and `$` — never
+interpolate it inline into a shell command. **Write each subagent's raw result
+to a temp file with the Write tool** (e.g. `.devflow/tmp/result-<n>.json`), then
+operate on the file. For each result:
 
-1. Attempt to parse it: `echo "<result>" | jq -c .`
+1. Attempt to parse it: `jq -c . < .devflow/tmp/result-<n>.json`
 2. If parsing fails or the object has an `"error"` key, **retry the
    subagent once** with the same prompt.
 3. If still malformed after one retry, record a blocker:
    `"PR #<n>: retrospective analysis failed"` and skip that PR.
-4. If valid, append: `echo '<json>' | jq -c . >> .devflow/tmp/new-entries.jsonl`
+4. If valid, append: `jq -c . < .devflow/tmp/result-<n>.json >> .devflow/tmp/new-entries.jsonl`
 
 ---
 
@@ -334,7 +337,7 @@ Issue **one Agent call per pattern, all in a single message** so they run in
 parallel. Each subagent's prompt:
 
 > Read and follow
-> `.claude/plugins/devflow/skills/audit-implementations/SKILL.md`
+> `${CLAUDE_SKILL_DIR}/../audit-implementations/SKILL.md`
 > exactly.
 >
 > **Your worktree is `<absolute WT path>`** — branch `<BRANCH>` is already
@@ -374,8 +377,9 @@ worktree, continue.
 
 **If `result.excluded == true`** (the fix targets an exclusion-list path):
 
+Write the subagent's `result.proposed_change` to `.devflow/tmp/meta-body-${SLUG}.md` with the **Write tool** (it may contain quotes, backticks, or newlines — never inline it into the shell), then:
+
 ```bash
-printf '%s\n' '<result.proposed_change>' > .devflow/tmp/meta-body-${SLUG}.md
 ISSUE_URL=$(bash $LIB/meta-issue.sh \
   --tag "<pattern.tag>" \
   --slug "$SLUG" \
@@ -419,8 +423,18 @@ tear down the worktree, continue.
 Commit, push (force-with-lease when the remote branch already exists), and open
 or update the PR — all against the worktree's checkout:
 
+First write the subagent's `result.title` and `result.body` to temp files with
+the **Write tool** — `.devflow/tmp/pr-title-${SLUG}.txt` and
+`.devflow/tmp/pr-body-${SLUG}.md` — so titles/bodies containing quotes,
+backticks, newlines, or `$` never traverse shell quoting. Then:
+
 ```bash
-git -C "$WT" commit -m "<result.title>"$'\n\n'"Fixes pattern: $SLUG"
+TITLE=$(cat .devflow/tmp/pr-title-${SLUG}.txt)
+git -C "$WT" commit -F - <<EOF
+$TITLE
+
+Fixes pattern: $SLUG
+EOF
 
 if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null 2>&1; then
     git -C "$WT" push --force-with-lease origin "$BRANCH"
@@ -430,10 +444,10 @@ fi
 
 EXISTING_PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
 if [ -n "$EXISTING_PR" ]; then
-    gh pr edit "$EXISTING_PR" --title "<result.title>" --body "<result.body>"
+    gh pr edit "$EXISTING_PR" --title "$TITLE" --body-file .devflow/tmp/pr-body-${SLUG}.md
     PR_NUMBER="$EXISTING_PR"
 else
-    gh pr create --base main --head "$BRANCH" --title "<result.title>" --body "<result.body>"
+    gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file .devflow/tmp/pr-body-${SLUG}.md
     PR_NUMBER=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
 fi
 ```
