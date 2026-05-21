@@ -49,9 +49,9 @@ If an issue number is available (from `$ARGUMENTS` or extracted from the existin
 
 ```bash
 ISSUE_NUMBER=$ARGUMENTS  # or the extracted number
-WORKPAD_ID=$(.claude/plugins/devflow/scripts/workpad.py id "$ISSUE_NUMBER" 2>/dev/null || true)
+WORKPAD_ID=$(${CLAUDE_SKILL_DIR}/../../scripts/workpad.py id "$ISSUE_NUMBER" 2>/dev/null || true)
 if [ -n "$WORKPAD_ID" ]; then
-    WORKPAD_BODY=$(.claude/plugins/devflow/scripts/workpad.py body "$WORKPAD_ID" 2>/dev/null || true)
+    WORKPAD_BODY=$(${CLAUDE_SKILL_DIR}/../../scripts/workpad.py body "$WORKPAD_ID" 2>/dev/null || true)
 fi
 ```
 

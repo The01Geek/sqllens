@@ -59,7 +59,7 @@ The workpad comment body MUST start with the marker line on its own line, follow
 
 ### Workpad helper CLI
 
-Every workpad operation goes through the bundled `workpad.py` helper at `.claude/plugins/devflow/scripts/workpad.py`. The helper is stateless — each subcommand re-derives `REPO_FULL` and the marker on every invocation, so it works across Claude Code's per-call fresh-shell model without any env var or shell function needing to survive between Bash tool calls.
+Every workpad operation goes through the bundled `workpad.py` helper at `${CLAUDE_SKILL_DIR}/../../scripts/workpad.py`. The helper is stateless — each subcommand re-derives `REPO_FULL` and the marker on every invocation, so it works across Claude Code's per-call fresh-shell model without any env var or shell function needing to survive between Bash tool calls.
 
 Subcommand reference:
 
@@ -96,7 +96,7 @@ Helper invariants baked into the script (orchestrator doesn't need to enforce th
 - `--rewrite-ac` preserves the original checkbox state (don't tick during a 2.2.6 rewrite — the gate ticks later via `--tick-ac`).
 - Heredoc / shell-interpolation hazards are eliminated — body content never traverses bash quoting; everything goes through files.
 
-The helper fails fast (exit 1 with a clear stderr message) when `claude.workpad_marker` is missing in `.github/project-config.yml`, when `gh` can't resolve the repo, when the underlying API call fails, or when a `--tick-*` / `--rewrite-ac` flag's substring matches zero or multiple checkboxes. `--tick-plan` / `--tick-ac` only consider unticked (`[ ]`) rows, so a duplicate tick in a single batched call surfaces as "no unticked checkbox matched" rather than silently no-op'ing.
+The helper reads `claude.workpad_marker` from `.github/project-config.yml`, falling back to the built-in default `<!-- devflow:workpad -->` when the config file or key is absent (so it works with no config). It fails fast (exit 1 with a clear stderr message) when `gh` can't resolve the repo, when the underlying API call fails, or when a `--tick-*` / `--rewrite-ac` flag's substring matches zero or multiple checkboxes. `--tick-plan` / `--tick-ac` only consider unticked (`[ ]`) rows, so a duplicate tick in a single batched call surfaces as "no unticked checkbox matched" rather than silently no-op'ing.
 
 **Never create a second workpad on the same issue.** Phase 1.5 creates exactly one; every subsequent mutation goes through `update`. If you lose `$ISSUE_NUMBER` mid-run (context compaction), recover from `git log`, `git branch --show-current`, and `gh pr list --head $(git branch --show-current)` — then resume with `workpad.py update $ISSUE_NUMBER ...`.
 
@@ -132,9 +132,11 @@ If the current branch matches `claude/issue-*` or `issue-*`, use it — skip bra
 
 Otherwise, create a new branch. The canonical branch name is computed by the helper (handles slugification, unicode, length truncation, and collision suffixing deterministically):
 
+Write the issue title (from the `gh issue view` above) to a temp file with the **Write tool** — `/tmp/devflow-issue-$ARGUMENTS-title.txt` — then derive the branch from it. Using `--title-file` instead of passing the title as a positional shell argument avoids breakage when the title contains quotes, backticks, or `$`.
+
 ```bash
 git fetch origin main
-BRANCH=$(.claude/plugins/devflow/scripts/branch-for-issue.py $ARGUMENTS "{issue title}")
+BRANCH=$(${CLAUDE_SKILL_DIR}/../../scripts/branch-for-issue.py $ARGUMENTS --title-file /tmp/devflow-issue-$ARGUMENTS-title.txt)
 git checkout -b "$BRANCH" origin/main
 ```
 
@@ -149,7 +151,7 @@ git push -u origin HEAD
 Run the bundled parser to extract `## Acceptance Criteria` and (optional) `## Test Plan` sections from the issue, pre-classifying each criterion as either code-verifiable or *post-merge*:
 
 ```bash
-.claude/plugins/devflow/scripts/parse-acs.py --issue $ARGUMENTS > /tmp/acs-${ARGUMENTS}.md
+${CLAUDE_SKILL_DIR}/../../scripts/parse-acs.py --issue $ARGUMENTS > /tmp/acs-${ARGUMENTS}.md
 ```
 
 The output is checkbox lines ready to splice into the workpad's `## Acceptance Criteria` section, with ` (post-merge)` appended to any criterion whose text matches the bundled trigger phrases (see `parse-acs.py`'s `POST_MERGE_TRIGGERS` list for what's matched). When no AC section exists, the helper prints `_(none provided in issue body)_` and Phase 3.4 passes trivially.
@@ -170,7 +172,7 @@ Set `ISSUE_NUMBER=$ARGUMENTS` and check whether a workpad already exists for thi
 
 ```bash
 ISSUE_NUMBER=$ARGUMENTS
-WORKPAD_ID=$(.claude/plugins/devflow/scripts/workpad.py id "$ISSUE_NUMBER" || true)
+WORKPAD_ID=$(${CLAUDE_SKILL_DIR}/../../scripts/workpad.py id "$ISSUE_NUMBER" || true)
 ```
 
 - **`WORKPAD_ID` empty (fresh issue)** → Build the initial body to a temp file: `Status: Setup`, `Branch:` `$(git branch --show-current)`, a placeholder `Last updated:`, empty `## Plan` (filled in during 2.2), the AC contents from `/tmp/acs-${ARGUMENTS}.md` (produced by 1.4), no `## Reproduction` section yet (added in 2.1.5 if applicable), `## Decisions / Notes` seeded with one bullet like `- {now} — /implement run started`, and an empty `## Devflow Reflection`. Then `workpad.py create $ISSUE_NUMBER <tmp-file>`.
@@ -194,7 +196,7 @@ Use the **Agent tool** with `subagent_type: feature-dev:code-explorer` to explor
 
 Pass the following prompt:
 - The GitHub issue title, body, and labels
-- **Explicit instruction:** "Start by reading {PRIMARY_PATHS if non-empty, otherwise the internal documentation path from `.github/project-config.yml` via `.claude/plugins/devflow/scripts/config-get.sh .docs.internal docs/internal/`} and read relevant files under that path to understand the system architecture and identify which modules and files are relevant to this issue. Use the documentation as a map to guide your code exploration. Then explore the actual code guided by those findings. Return a distilled summary of: relevant files, current behavior, patterns used, dependencies, and anything the implementer needs to know."
+- **Explicit instruction:** "Start by reading {PRIMARY_PATHS if non-empty, otherwise the internal documentation path from `.github/project-config.yml` via `${CLAUDE_SKILL_DIR}/../../scripts/config-get.sh .docs.internal docs/internal/`} and read relevant files under that path to understand the system architecture and identify which modules and files are relevant to this issue. Use the documentation as a map to guide your code exploration. Then explore the actual code guided by those findings. Return a distilled summary of: relevant files, current behavior, patterns used, dependencies, and anything the implementer needs to know."
 
 Documentation updates are handled in Phase 4 by the `devflow:docs` subagent — it has the full picture (the shipped code, not just the plan) and the right mandate. Do not edit `.docs.internal` here; if the explorer surfaced outdated or missing docs, that signal carries forward in your context to Phase 4.1 where the subagent will act on it.
 
@@ -319,7 +321,7 @@ After deleting any public method, class, file, page, route, endpoint, asset, or 
 
 Treat any stranded dependent as a defect in **this** PR. A deletion PR is not done until grepping for the deleted symbols/paths returns nothing but the deletion itself.
 
-**Scope boundary with Phase 4.1 (*Update Documentation*).** This sweep covers references in *code, config, and routing tables* — i.e. things that break behavior at runtime if left dangling. Prose references to the deleted symbols/paths inside `docs/internal/` (descriptions, walkthroughs, "to install X, do Y") are **not** in scope here; they are handled by the Phase 4.1 documentation pass (`devflow:docs` subagent). If your grep turns up only docs hits, note them and move on — do not edit `docs/internal/` from this phase. Internal-docs counterpart: [`docs/internal/workflows/implement-skill.md`](../../../../../docs/internal/workflows/implement-skill.md) ("Scope boundary between Phase 2.3.2 and Phase 4.1").
+**Scope boundary with Phase 4.1 (*Update Documentation*).** This sweep covers references in *code, config, and routing tables* — i.e. things that break behavior at runtime if left dangling. Prose references to the deleted symbols/paths inside `docs/internal/` (descriptions, walkthroughs, "to install X, do Y") are **not** in scope here; they are handled by the Phase 4.1 documentation pass (`devflow:docs` subagent). If your grep turns up only docs hits, note them and move on — do not edit `docs/internal/` from this phase.
 
 #### 2.3.3 Convention-compliance sweep on touched code (mandatory)
 
@@ -487,7 +489,7 @@ Skip this step if the manifest does not exist or is empty.
 PR_NUMBER=$(gh pr view --json number --jq '.number')
 DEFERRALS_FILE=".devflow/review/pr-${PR_NUMBER}/deferrals.json"
 if [ -s "$DEFERRALS_FILE" ]; then
-    FILED_NUMBERS=$(.claude/plugins/devflow/scripts/file-deferrals.py \
+    FILED_NUMBERS=$(${CLAUDE_SKILL_DIR}/../../scripts/file-deferrals.py \
         --source-issue $ARGUMENTS \
         --pr "$PR_NUMBER" \
         --manifest "$DEFERRALS_FILE")
@@ -518,8 +520,8 @@ Spawn a **subagent** (using the Agent tool) and instruct it to invoke the `devfl
 After the subagent completes, commit any documentation changes. Read the docs paths from `.github/project-config.yml`:
 
 ```bash
-DOCS_INTERNAL=$(.claude/plugins/devflow/scripts/config-get.sh .docs.internal docs/internal/)
-DOCS_EXTERNAL=$(.claude/plugins/devflow/scripts/config-get.sh .docs.external docs/external/)
+DOCS_INTERNAL=$(${CLAUDE_SKILL_DIR}/../../scripts/config-get.sh .docs.internal docs/internal/)
+DOCS_EXTERNAL=$(${CLAUDE_SKILL_DIR}/../../scripts/config-get.sh .docs.external docs/external/)
 git status -- "$DOCS_INTERNAL" "$DOCS_EXTERNAL"
 ```
 
@@ -530,10 +532,10 @@ git commit -m "docs: update documentation for issue #$ARGUMENTS"
 git push
 ```
 
-Then add the "Documented" label so WikiWizard skips its own docs pass when the PR becomes ready. The label signals "the docs pass ran and was reviewed", so apply it when the docs subagent actually ran — either it produced changes (and you committed them above), or it returned cleanly with no changes needed. Skip the label and add a `--reflection` note to the workpad instead when the docs subagent failed, returned no useful output, or was unable to run — otherwise WikiWizard would be skipped and the PR would ship without docs.
+Then add the "Documented" label to mark that the docs pass ran. The label signals "the docs pass ran and was reviewed", so apply it when the docs subagent actually ran — either it produced changes (and you committed them above), or it returned cleanly with no changes needed. Skip the label and add a `--reflection` note to the workpad instead when the docs subagent failed, returned no useful output, or was unable to run. (Downstream docs automation, if the adopter runs any, can key off this label to avoid double-processing the PR.)
 
 ```bash
-DOCUMENTED_LABEL=$(.claude/plugins/devflow/scripts/config-get.sh .wikiwizard.documented_label Documented)
+DOCUMENTED_LABEL=$(${CLAUDE_SKILL_DIR}/../../scripts/config-get.sh .docs.documented_label Documented)
 gh pr edit --add-label "$DOCUMENTED_LABEL"
 ```
 
@@ -592,5 +594,5 @@ Verify each `Status` PATCH actually landed at the time it was issued (see the Up
 - **Subagent failures**: If a subagent fails or produces no useful output, note the failure in the workpad's `Devflow Reflection` and continue to the next step. Do not retry the same subagent more than once.
 - **Permission denials**: If a Bash command is denied, note it in the workpad and continue to the next step. Never skip an entire phase because of a single denied command.
 - **Commit prefixes**: Use `docs:` for documentation, `feat:` for implementation, `fix:` for review fixes and test fixes.
-- **Context recovery**: If context was compressed and you lose track of variables, recover from `git log`, `git branch --show-current`, `gh pr list --head {branch}`, and the workpad — `.claude/plugins/devflow/scripts/workpad.py body $(.claude/plugins/devflow/scripts/workpad.py id $ISSUE_NUMBER)`. The workpad is the source of truth for plan state and every later mutation goes through `workpad.py update $ISSUE_NUMBER`, so the only variable to recover is `$ISSUE_NUMBER` itself (and it's already in `$ARGUMENTS`).
+- **Context recovery**: If context was compressed and you lose track of variables, recover from `git log`, `git branch --show-current`, `gh pr list --head {branch}`, and the workpad — `${CLAUDE_SKILL_DIR}/../../scripts/workpad.py body $(${CLAUDE_SKILL_DIR}/../../scripts/workpad.py id $ISSUE_NUMBER)`. The workpad is the source of truth for plan state and every later mutation goes through `workpad.py update $ISSUE_NUMBER`, so the only variable to recover is `$ISSUE_NUMBER` itself (and it's already in `$ARGUMENTS`).
 - **Surfacing failures**: Anything you "note the failure and continue" on above goes into the workpad's `Devflow Reflection` section so a human can pick it up later. Track these as you go — by the time Phase 4.3 runs, they should already be in the workpad, and no separate end-of-run issue comment is needed.

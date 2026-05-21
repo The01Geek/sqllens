@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 # open-state-pr.sh — commit the learnings files onto a per-run branch and open/update a PR.
 #
 # Usage:

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 # check-excluded-path.sh — check repo-relative paths against the exclusion list.
 #
 # Usage:
@@ -24,21 +26,21 @@ excluded=()
 
 for p in "${paths[@]}"; do
     case "$p" in
-        .claude/plugins/devflow/*)
+        # DevFlow's own engine files. Post-extraction the plugin IS this repo,
+        # so the engine lives at the root (skills/, agents/, lib/, scripts/,
+        # .claude-plugin/). NOTE: these globs are tuned for the devflow-autopilot
+        # repo. An adopter who runs the retrospective loop on a repo that also
+        # has top-level skills/, lib/, or scripts/ directories may want to
+        # narrow this list (it only affects which of their PRs the loop skips).
+        skills/*|agents/*|lib/*|scripts/*|.claude-plugin/*)
             excluded+=("$p") ;;
         .devflow/learnings/*)
             excluded+=("$p") ;;
-        .github/actions/read-project-config/*)
+        .github/actions/*)
             excluded+=("$p") ;;
-        .github/actions/dedupe-pr-events/*)
+        .github/workflows/claude*.yml|.github/workflows/devflow-*.yml)
             excluded+=("$p") ;;
-        .github/actions/get-app-token/*)
-            excluded+=("$p") ;;
-        .github/workflows/claude.yml)
-            excluded+=("$p") ;;
-        .github/project-config.yml)
-            excluded+=("$p") ;;
-        .github/workflows/devflow-*.yml)
+        .github/project-config.yml|.github/project-config.example.yml)
             excluded+=("$p") ;;
     esac
 done

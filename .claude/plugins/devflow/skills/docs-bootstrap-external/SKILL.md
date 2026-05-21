@@ -3,12 +3,16 @@ name: docs-bootstrap-external
 description: Use when setting up external documentation for the first time, performing a comprehensive documentation refresh, or when large portions of internal docs need corresponding external docs created.
 ---
 > **Configuration:** Read documentation paths from `.github/project-config.yml`:
-> - Internal: `.claude/plugins/devflow/scripts/config-get.sh .docs.internal docs/internal/`
-> - External: `.claude/plugins/devflow/scripts/config-get.sh .docs.external docs/external/`
+> - Internal: `${CLAUDE_SKILL_DIR}/../../scripts/config-get.sh .docs.internal docs/internal/`
+> - External: `${CLAUDE_SKILL_DIR}/../../scripts/config-get.sh .docs.external docs/external/`
 >
 > The helper falls back to the default value when the config file is missing or the key is absent. Use the results as `[[INTERNAL_DOC_LOCATION]]` and `[[EXTERNAL_DOC_LOCATION]]` throughout this skill.
 
 # External Documentation Generator Agent
+
+## Preflight
+
+External docs are generated **from** the internal docs. If `[[INTERNAL_DOC_LOCATION]]` is empty or absent, there is nothing to generate from — **stop** and report that internal documentation should be created first (run `/docs-bootstrap-internal`). Do not fabricate external docs without an internal source of truth.
 
 ## **Objective**
 You are an **AI Documentation Generation Agent** for code repositories.

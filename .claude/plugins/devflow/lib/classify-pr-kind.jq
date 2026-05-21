@@ -6,7 +6,12 @@
 #
 # Invocation (named args, no stdin needed):
 #   jq -rn --arg branch "claude/issue-773-..." --argjson watched true \
-#     -f lib/classify-pr-kind.jq
+#     --arg impl_prefix "claude/" -f lib/classify-pr-kind.jq
+#
+# $impl_prefix is the adopter's implementation-bot branch prefix
+# (devflow_retrospective.implementation_branch_prefix, default "claude/").
+# The devflow/* prefixes below are DevFlow's own internal branch conventions
+# and are intentionally fixed.
 #
 # Output: a single string — one of:
 #   "implementation"      -- run the full per-PR retrospective
@@ -15,6 +20,6 @@
 
 if   ($branch | startswith("devflow/learnings-")) then "skip"
 elif ($branch | startswith("devflow/audit-"))     then (if $watched then "audit-intervention" else "skip" end)
-elif ($branch | startswith("claude/"))            then (if $watched then "implementation"     else "skip" end)
+elif ($branch | startswith($impl_prefix))         then (if $watched then "implementation"     else "skip" end)
 else "skip"
 end

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 """DevFlow workpad helper for the /implement skill.
 
 The /implement orchestrator maintains exactly one marker-tagged comment per
@@ -9,8 +11,9 @@ from arguments + live GitHub state on each call.
 
 All subcommands shell out to `gh` for GitHub API access (same auth path as
 the rest of devflow). The workpad marker is read from
-`.github/project-config.yml` via the bundled `config-get.sh` helper, which
-fails fast if the key is missing.
+`.github/project-config.yml` via the bundled `config-get.sh` helper, falling
+back to the built-in default `<!-- devflow:workpad -->` when the config file or
+key is absent (so it works with no config).
 
 Usage:
     workpad.py id      ISSUE
@@ -63,22 +66,20 @@ def _repo_full():
     return r.stdout.strip()
 
 
+_DEFAULT_WORKPAD_MARKER = '<!-- devflow:workpad -->'
+
+
 def _workpad_marker():
+    # Read the marker from .github/project-config.yml, but fall back to the
+    # built-in default so the local tier works with no config file at all.
     here = Path(__file__).resolve().parent
     helper = here / 'config-get.sh'
     try:
-        r = _run([str(helper), '.claude.workpad_marker'])
-    except subprocess.CalledProcessError:
-        sys.stderr.write(
-            "workpad.py: claude.workpad_marker missing from "
-            ".github/project-config.yml\n"
-        )
-        sys.exit(1)
+        r = _run([str(helper), '.claude.workpad_marker', _DEFAULT_WORKPAD_MARKER])
+    except (subprocess.CalledProcessError, OSError):
+        return _DEFAULT_WORKPAD_MARKER
     marker = r.stdout.strip()
-    if not marker:
-        sys.stderr.write("workpad.py: claude.workpad_marker is empty\n")
-        sys.exit(1)
-    return marker
+    return marker or _DEFAULT_WORKPAD_MARKER
 
 
 def cmd_id(args):

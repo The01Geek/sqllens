@@ -9,7 +9,7 @@ You are the optimizer side of the devflow self-improving loop, invoked as a **su
 
 1. An array of context-bundle paths — one per occurrence PR (same schema `fetch-pr-context.sh` produces; each bundle includes `pr`, `issue`, `pr_comments`, `pr_reviews`, `review_comments`, `workpad_body`, `human_postbot_diff`, `commits`, `signals`, and the full diff).
 2. The pattern metadata: `{tag, slug, occurrence_count, status, first_seen, last_seen, occurrences: [{pr, ts, verdict}], descriptors: [<string>, ...]}` — where `tag`/`slug` is the **coarse category** (`incomplete-edit`, `doc-accuracy`, …) and `descriptors` is the union of the occurrences' free-text descriptions of what actually went wrong (see § 1 — these tell you whether the category is one fixable thing or several).
-3. Read `.claude/plugins/devflow/lib/intervention-surfaces.md` for candidate surfaces.
+3. Read `${CLAUDE_SKILL_DIR}/../../lib/intervention-surfaces.md` for candidate surfaces.
 
 The orchestrator has **already** `git checkout -B`'d the intervention branch from `main`. Make your edits directly in the working tree with `Edit`/`Write`. **Do not commit, push, open PRs, or file issues — the orchestrator does all of that based on the JSON you return.** Your only stdout output is one JSON object (see § 6).
 
@@ -36,7 +36,7 @@ Write your own one-paragraph root-cause restatement — do NOT trust the retrosp
 
 Before opening `intervention-surfaces.md`, check whether the pattern points at a defect in the devflow plugin itself. Ask all four questions for every occurrence:
 
-- **Retrospective hallucination?** Does the retrospective's `summary` for the occurrence PRs contradict the primary-source evidence (PR/issue bodies, comments, reviews)? If yes, the fix belongs in `.claude/plugins/devflow/skills/retrospective/SKILL.md`, not in a downstream CLAUDE.md rule.
+- **Retrospective hallucination?** Does the retrospective's `summary` for the occurrence PRs contradict the primary-source evidence (PR/issue bodies, comments, reviews)? If yes, the fix belongs in `skills/retrospective/SKILL.md`, not in a downstream CLAUDE.md rule.
 - **Category vocabulary wrong?** Did the failures get forced into `other`, or into a category that doesn't really fit, because the fixed `categories` vocabulary in `retrospective/SKILL.md` lacks the right bucket — or has a bucket so broad it's useless? (Sub-patterns *within* a category are expected and handled in § 1; this is about the vocabulary itself being mis-designed.) If yes, the fix belongs in that vocabulary in `retrospective/SKILL.md` (and possibly the grouping logic in `lib/compute-patterns.jq`).
 - **Missing primary source?** Did the retrospective miss a piece of context that would have changed the diagnosis (a referenced PR, a CI log, a doc, an issue-comment thread)? If yes, the fix belongs in `fetch-pr-context.sh`.
 - **Threshold mis-tuned?** Are useful patterns suppressed by `cooldown_days` / `min_occurrences`, or surfaced too aggressively? If yes, the fix belongs in `.github/project-config.yml`.
@@ -57,14 +57,17 @@ Do NOT make any working-tree edits when returning this form.
 **Canonical exclusion list** (kept in sync with `lib/check-excluded-path.sh`):
 
 ```
-.claude/plugins/devflow/**
+skills/**
+agents/**
+lib/**
+scripts/**
+.claude-plugin/**
 .devflow/learnings/**
-.github/workflows/claude.yml
+.github/workflows/claude*.yml
 .github/workflows/devflow-*.yml
-.github/actions/read-project-config/**
-.github/actions/dedupe-pr-events/**
-.github/actions/get-app-token/**
+.github/actions/**
 .github/project-config.yml
+.github/project-config.example.yml
 ```
 
 The exclusion limit is **design-review**, not writability. Locally all paths are writable; these route to a meta GitHub issue because they need a human to think about second-order effects on the self-improvement loop.
@@ -73,13 +76,13 @@ The exclusion limit is **design-review**, not writability. Locally all paths are
 
 ## § 3 — Pick the intervention
 
-Read `.claude/plugins/devflow/lib/intervention-surfaces.md`. From those surfaces — or beyond them — pick the **highest-leverage, smallest-blast-radius** single concrete change. The intervention must be one change, not a set of bullet points.
+Read `${CLAUDE_SKILL_DIR}/../../lib/intervention-surfaces.md`. From those surfaces — or beyond them — pick the **highest-leverage, smallest-blast-radius** single concrete change. The intervention must be one change, not a set of bullet points.
 
 **Conflict check:** search the existing rules, skills, and docs for anything that contradicts your proposed change. If you find a conflict, reframe as "strengthen rule X" rather than "add rule Y" — that is always the higher-quality intervention. Document the conflict (or its explicit absence) in the PR body.
 
 Examples of valid surfaces:
 - Strengthen an existing CLAUDE.md rule with a more visible warning and a linkable example.
-- Add or tighten a phpcs sniff that catches the broken pattern mechanically.
+- Add or tighten a linter/static-analysis rule that catches the broken pattern mechanically.
 - Edit `docs/internal/<feature>.md` to fill a gap the bot kept missing.
 - Update the `/create-issue` or `/implement` skill to require a missing check.
 

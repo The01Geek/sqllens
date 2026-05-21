@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 # gh-stub.sh — fake `gh` for devflow tests.
 # Set DEVFLOW_FIXTURE_PR to pick the fixture set (e.g. "793" or "CLEAN").
 # Stubs ignore --jq, -q, --paginate; they always emit one full JSON doc per call.
@@ -9,7 +11,7 @@ ARGS="$*"
 
 case "$ARGS" in
   *"repo view"*)
-    echo "The01Geek/devflow-autopilot"
+    echo "acme/example-repo"
     ;;
   *"pr view"*)
     cat "$FX/${SET}-prview.json"
