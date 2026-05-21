@@ -123,8 +123,10 @@ PyPI versions are immutable after publish — you can yank but not re-upload the
   # ...edits...
   git commit -s && git push origin fix/short-description
   gh pr create --fill
-  gh pr merge --squash --delete-branch --auto    # auto-merge once CI passes
+  # Do NOT enable --auto yet. Wait for the Devflow Review verdict to be final and APPROVE first.
+  gh pr merge --squash --delete-branch --auto    # only after Devflow Review = APPROVE (see below)
   ```
+- **Never enable `--auto` before the `/devflow:review` verdict is final and APPROVE.** The `Devflow Review` check concludes `neutral` (non-blocking) while the review has not yet run, so `gh pr merge --auto` fires the instant required CI goes green — *before* any verdict exists, or while a chronologically-later REJECT is still outstanding. This has merged PRs at their pre-review commit and stranded REJECT fixes on the branch (e.g. #82 merged 4 min before `/devflow:review` was even requested; #123/#151 merged with a REJECT as the last verdict). Sequence it: open the PR, let `/devflow:review` run, and only run `gh pr merge --auto` once the **chronologically-last** verdict is APPROVE (re-check with `gh pr view --json reviews` / the Devflow Review check conclusion). If a REJECT was issued, address it and get a fresh APPROVE — a stale earlier APPROVE does not clear a later REJECT.
 - **CI status check names** in code are load-bearing — if you rename a workflow job, also update the ruleset (`gh api repos/The01Geek/sqllens/rulesets/15633058`).
 - **Workflow file names matter.** Avoid renaming `release.yml` — the PyPI Trusted Publisher is bound to that filename.
 
