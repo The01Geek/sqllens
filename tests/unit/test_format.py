@@ -37,6 +37,7 @@ from sqllens.tools._format import (
     components_to_chart,
     components_to_markdown,
     components_to_table,
+    components_to_widgets,
     render_interactive,
 )
 
@@ -533,6 +534,114 @@ def test_query_info_none_on_error_path() -> None:
     # The rejected write statement must NOT leak into the answer.
     assert "DELETE FROM users" not in markdown
     assert markdown == "Tool failed: refusing to execute non-SELECT SQL"
+
+
+# ───────────────────────── memory_info (hit/miss signal) ────────────────────
+
+
+def _memory_card(
+    *, hit_count: int, top_similarity: float | None, threshold: float = 0.7
+) -> UiComponent:
+    # Mirrors the search_saved_correct_tool_uses STATUS_CARD: the aggregate
+    # hit/miss signal rides metadata["memory_search"], read by the same seam as
+    # the run_sql card's metadata["sql"].
+    return _ui(
+        StatusCardComponent(
+            title="Memory Search",
+            status="success" if hit_count else "info",
+            description="Found patterns" if hit_count else "No similar patterns found",
+            metadata={
+                "memory_search": {
+                    "searched": True,
+                    "hit_count": hit_count,
+                    "top_similarity": top_similarity,
+                    "threshold": threshold,
+                }
+            },
+        )
+    )
+
+
+def test_memory_info_extracted_on_hit() -> None:
+    stream = [
+        _memory_card(hit_count=2, top_similarity=0.83),
+        _ui(RichTextComponent(content="answered with memory help")),
+    ]
+    _, is_error, _, _, _, memory_info = components_to_widgets(stream)
+    assert is_error is False
+    assert memory_info == {
+        "searched": True,
+        "hit_count": 2,
+        "top_similarity": 0.83,
+        "threshold": 0.7,
+    }
+
+
+def test_memory_info_extracted_on_miss() -> None:
+    stream = [
+        _memory_card(hit_count=0, top_similarity=None),
+        _ui(RichTextComponent(content="cold answer")),
+    ]
+    _, is_error, _, _, _, memory_info = components_to_widgets(stream)
+    assert is_error is False
+    assert memory_info == {
+        "searched": True,
+        "hit_count": 0,
+        "top_similarity": None,
+        "threshold": 0.7,
+    }
+
+
+def test_memory_info_none_when_memory_not_searched() -> None:
+    stream = [_ui(RichTextComponent(content="just a text answer"))]
+    _, _, _, _, _, memory_info = components_to_widgets(stream)
+    assert memory_info is None
+
+
+def test_memory_info_last_wins_across_two_searches() -> None:
+    # The agent may search memory more than once in a turn; last-wins mirrors
+    # the run_sql SQL extraction.
+    stream = [
+        _memory_card(hit_count=0, top_similarity=None),
+        _memory_card(hit_count=3, top_similarity=0.91),
+    ]
+    _, _, _, _, _, memory_info = components_to_widgets(stream)
+    assert memory_info is not None
+    assert memory_info["hit_count"] == 3
+    assert memory_info["top_similarity"] == 0.91
+
+
+def test_memory_info_suppressed_on_error_path() -> None:
+    # Mirrors query_info: an error STATUS_CARD short-circuits the whole payload,
+    # so memory_info is None even when a memory card was seen this turn.
+    stream = [
+        _memory_card(hit_count=2, top_similarity=0.83),
+        _ui(StatusCardComponent(title="Query failed", status="error", description="boom")),
+    ]
+    markdown, is_error, table, query_info, chart, memory_info = components_to_widgets(
+        stream
+    )
+    assert is_error is True
+    assert memory_info is None
+    assert table is None
+    assert query_info is None
+    assert chart is None
+    assert markdown == "boom"
+
+
+def test_memory_info_coexists_with_query_info() -> None:
+    # A turn that both searched memory and ran SQL surfaces both signals
+    # independently — neither card's metadata clobbers the other.
+    stream = [
+        _memory_card(hit_count=1, top_similarity=0.77),
+        _sql_card("SELECT id FROM users", status="success"),
+        _ui(DataFrameComponent(rows=[{"id": 1}], columns=["id"])),
+        _ui(RichTextComponent(content="one user")),
+    ]
+    _, is_error, _, query_info, _, memory_info = components_to_widgets(stream)
+    assert is_error is False
+    assert query_info is not None and query_info["sql"] == "SELECT id FROM users"
+    assert memory_info is not None and memory_info["hit_count"] == 1
 
 
 # ───────────────────── interactive / follow-up rendering ────────────────────

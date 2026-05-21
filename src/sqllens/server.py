@@ -50,6 +50,12 @@ _QUERY_META_KEY = "sqllens/query"
 # Chart data channel. Present when the agent emitted a ChartComponent; the
 # widget renders it with ECharts and it takes precedence over the table grid.
 _CHART_META_KEY = "sqllens/chart"
+# Memory hit/miss channel. Present whenever the agent searched memory this turn
+# (independent of ``agent.show_details``). Aggregate signal only —
+# {"searched", "hit_count", "top_similarity", "threshold"} — never the matched
+# memory contents. Plain-text clients get the same signal as a one-line footer
+# when ``agent.show_memory_details`` is on.
+_MEMORY_META_KEY = "sqllens/memory_info"
 # Conversation continuity channel. The resolved conversation id is returned on
 # every successful answer turn — structured here for apps-aware hosts, and as a
 # plain-Markdown footer in the text content for non-apps clients. The calling
@@ -179,8 +185,10 @@ def build_server(cfg: Config) -> FastMCP:
         # id can be returned for the caller to thread on the next turn (passing
         # None down would let the agent mint one we never see).
         conversation_id = conversation_id or str(uuid.uuid4())
-        markdown, table, query_info, chart = await query_database_impl_with_widgets(
-            cfg, question, metadata=metadata, conversation_id=conversation_id
+        markdown, table, query_info, chart, memory_info = (
+            await query_database_impl_with_widgets(
+                cfg, question, metadata=metadata, conversation_id=conversation_id
+            )
         )
         # Attach every structured payload the agent produced; the widget applies
         # the chart > table > text precedence. When a request yields both a
@@ -193,6 +201,8 @@ def build_server(cfg: Config) -> FastMCP:
             extra_meta[_TABLE_META_KEY] = table
         if query_info:
             extra_meta[_QUERY_META_KEY] = query_info
+        if memory_info:
+            extra_meta[_MEMORY_META_KEY] = memory_info
         return _conversation_result(markdown, conversation_id, extra_meta)
 
     @mcp.tool()

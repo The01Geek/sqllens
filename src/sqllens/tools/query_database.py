@@ -97,6 +97,27 @@ def _append_sql_block(markdown: str, query_info: dict | None) -> str:
     return f"{markdown}\n\n**Executed SQL:**\n\n```sql\n{sql}\n```"
 
 
+def _append_memory_footer(markdown: str, memory_info: dict | None) -> str:
+    """Append the memory hit/miss signal as a one-line Markdown footer.
+
+    Structured ``memory_info`` in ``_meta`` is the source of truth; this is the
+    plain-text rendering for non-apps clients, gated by ``agent.show_memory
+    _details`` at the call site. A falsy ``memory_info`` (or one whose
+    ``searched`` flag is false) returns markdown unchanged. Only aggregate
+    counts/scores are rendered — never the matched memory contents.
+    """
+    if not memory_info or not memory_info.get("searched"):
+        return markdown
+    hit_count = memory_info.get("hit_count", 0)
+    if not hit_count:
+        return f"{markdown}\n\n_Memory: no matches_"
+    plural = "s" if hit_count != 1 else ""
+    top = memory_info.get("top_similarity")
+    if isinstance(top, (int, float)):
+        return f"{markdown}\n\n_Memory: {hit_count} hit{plural} (top similarity {top:.2f})_"
+    return f"{markdown}\n\n_Memory: {hit_count} hit{plural}_"
+
+
 async def query_database_impl(
     cfg: Config,
     question: str,
@@ -110,7 +131,7 @@ async def query_database_impl(
     that drops the structured payloads. The error taxonomy, sanitization, and
     exact raised messages are identical — they live in the sibling below.
     """
-    markdown, _, _, _ = await query_database_impl_with_widgets(
+    markdown, _, _, _, _ = await query_database_impl_with_widgets(
         cfg, question, metadata=metadata, conversation_id=conversation_id
     )
     return markdown
@@ -126,10 +147,10 @@ async def query_database_impl_with_table(
     """Translate ``question`` to SQL, execute, return ``(markdown, table, query_info)``.
 
     Thin wrapper over :func:`query_database_impl_with_widgets` that drops the
-    chart payload. The agent path, error taxonomy, and exact raised messages
-    are identical — they live in the sibling below.
+    chart and memory-info payloads. The agent path, error taxonomy, and exact
+    raised messages are identical — they live in the sibling below.
     """
-    markdown, table, query_info, _ = await query_database_impl_with_widgets(
+    markdown, table, query_info, _, _ = await query_database_impl_with_widgets(
         cfg, question, metadata=metadata, conversation_id=conversation_id
     )
     return markdown, table, query_info
@@ -141,8 +162,10 @@ async def query_database_impl_with_widgets(
     *,
     metadata: Mapping[str, Any] | None = None,
     conversation_id: str | None = None,
-) -> tuple[str, dict | None, dict | None, dict | None]:
-    """Translate ``question`` to SQL, execute, return ``(markdown, table, query_info, chart)``.
+) -> tuple[str, dict | None, dict | None, dict | None, dict | None]:
+    """Translate ``question`` to SQL, execute, return widgets + ``memory_info``.
+
+    Returns ``(markdown, table, query_info, chart, memory_info)``.
 
     The single agent path behind the consolidated ``query_database`` MCP tool.
     One ``agent.send_message`` run is buffered and collapsed in a single pass by
@@ -162,6 +185,12 @@ async def query_database_impl_with_widgets(
     ``agent.show_details`` is on, ``None`` otherwise — and when present, the
     same SQL is also appended to ``markdown`` as a fenced ``sql`` block so
     plain-text clients see it too.
+
+    ``memory_info`` carries the aggregate memory hit/miss signal whenever the
+    agent searched memory this turn (``None`` otherwise, and on the error
+    path). It is surfaced regardless of ``agent.show_details``; when
+    ``agent.show_memory_details`` is on, a one-line memory footer is also
+    appended to ``markdown`` for plain-text clients.
 
     ``conversation_id`` is threaded into ``send_message`` so a follow-up turn
     loads the prior ``Conversation`` (its message history) and the agent can
@@ -219,7 +248,9 @@ async def query_database_impl_with_widgets(
         logger.exception("agent.send_message failed")
         raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
 
-    answer, is_error, table, query_info, chart = components_to_widgets(components)
+    answer, is_error, table, query_info, chart, memory_info = components_to_widgets(
+        components
+    )
     if is_error:
         # Agent-reported query failure — SQL-execution error category. S-10's
         # structural leak (raw exception-string interpolation in the except
@@ -234,4 +265,7 @@ async def query_database_impl_with_widgets(
         # the calling agent needs, so it is deliberately not attempted here.
         logger.warning("agent reported query failure: %s", answer)
         raise RuntimeError(f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}")
-    return _append_sql_block(answer, query_info), table, query_info, chart
+    markdown = _append_sql_block(answer, query_info)
+    if cfg.agent.show_memory_details:
+        markdown = _append_memory_footer(markdown, memory_info)
+    return markdown, table, query_info, chart, memory_info
