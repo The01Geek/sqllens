@@ -25,7 +25,10 @@ from sqllens.agent.components.rich.interactive.button import (
     ButtonComponent,
     ButtonGroupComponent,
 )
-from sqllens.agent.components.rich.interactive.ui_state import ChatInputUpdateComponent
+from sqllens.agent.components.rich.interactive.ui_state import (
+    ChatInputUpdateComponent,
+    StatusBarUpdateComponent,
+)
 from sqllens.agent.components.rich.text import RichTextComponent
 from sqllens.agent.core.components import UiComponent
 from sqllens.tools._format import (
@@ -645,6 +648,27 @@ def test_memory_info_ignores_non_dict_memory_search_metadata() -> None:
     _, is_error, _, _, _, memory_info = components_to_widgets([bad])
     assert is_error is False
     assert memory_info is None
+
+
+def test_status_bar_error_is_not_treated_as_agent_error() -> None:
+    # A failed memory search emits a StatusBarUpdateComponent with
+    # status="error" (STATUS_BAR_UPDATE), NOT a STATUS_CARD. The error-detection
+    # branch is scoped to STATUS_CARD, so this must NOT poison the turn: the
+    # answer stands, is_error stays False, and memory_info stays None
+    # (indistinguishable from "did not search"). Guards against a refactor that
+    # broadens error detection to status-bar components and would raise a fake
+    # SQL-execution error on a turn that actually succeeded.
+    stream = [
+        _ui(StatusBarUpdateComponent(status="error", message="Failed to search memory")),
+        _ui(RichTextComponent(content="the answer")),
+    ]
+    markdown, is_error, table, query_info, chart, memory_info = components_to_widgets(
+        stream
+    )
+    assert is_error is False
+    assert memory_info is None
+    assert markdown == "the answer"
+    assert table is None and query_info is None and chart is None
 
 
 def test_memory_info_coexists_with_query_info() -> None:

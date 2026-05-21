@@ -244,3 +244,37 @@ async def test_miss_emits_memory_search_card_with_zero_hits() -> None:
         "top_similarity": None,
         "threshold": 0.7,
     }
+
+
+class _FailingAgentMemory(_RecordingAgentMemory):
+    """Raises on search so the tool's except branch runs."""
+
+    async def search_similar_usage(
+        self,
+        question: str,
+        context: ToolContext,
+        *,
+        limit: int = 10,
+        similarity_threshold: float = 0.7,
+        tool_name_filter: str | None = None,
+    ) -> list[ToolMemorySearchResult]:
+        raise RuntimeError("chromadb unavailable")
+
+
+@pytest.mark.asyncio
+async def test_search_error_emits_no_memory_search_card() -> None:
+    """A failed search returns success=False and emits a status-bar ERROR
+    component carrying no memory_search metadata — so the consumer leaves
+    memory_info None (the documented "errored search yields no signal" path)."""
+    tool = SearchSavedCorrectToolUsesTool(default_similarity_threshold=0.7)
+
+    result = await tool.execute(
+        _context(_FailingAgentMemory()),
+        SearchSavedCorrectToolUsesParams(question="q", similarity_threshold=None),
+    )
+
+    assert result.success is False
+    # The error component is a status-bar update (no `metadata` field at all),
+    # not a memory_search STATUS_CARD — so no memory_search signal is emitted.
+    rich = result.ui_component.rich_component
+    assert "memory_search" not in getattr(rich, "metadata", {})
