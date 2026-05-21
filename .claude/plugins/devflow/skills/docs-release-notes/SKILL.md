@@ -3,16 +3,16 @@ name: docs-release-notes
 description: Use when a PR has customer-visible changes (new features, bug fixes, UI changes) that need a release note entry, or when finalizing a branch before merge.
 ---
 > **Configuration:** Read paths from `.github/project-config.yml`:
-> - Internal docs: `.claude/plugins/devflow/scripts/config-get.sh .docs.internal docs/internal/`
-> - External docs: `.claude/plugins/devflow/scripts/config-get.sh .docs.external docs/external/`
-> - Release notes file: `.claude/plugins/devflow/scripts/config-get.sh .wikiwizard.release_notes_file docs/external/release-notes.md`
+> - Internal docs: `${CLAUDE_SKILL_DIR}/../../scripts/config-get.sh .docs.internal docs/internal/`
+> - External docs: `${CLAUDE_SKILL_DIR}/../../scripts/config-get.sh .docs.external docs/external/`
+> - Release notes file: `${CLAUDE_SKILL_DIR}/../../scripts/config-get.sh .docs.release_notes_file docs/external/release-notes.md`
 > - PR number: `gh pr view --json number -q '.number'` (resolves from current branch)
 >
 > The `config-get.sh` helper falls back to the default value when the config file is missing or the key is absent.
 >
 > Use these values wherever `[[INTERNAL_DOC_LOCATION]]`, `[[EXTERNAL_DOC_LOCATION]]`, `[[RELEASE_NOTES_FILE]]`, and `[[PR_NUMBER]]` appear below.
 
-# WikiWizard Release Notes Agent
+# Release Notes Agent
 
 ## Objective
 

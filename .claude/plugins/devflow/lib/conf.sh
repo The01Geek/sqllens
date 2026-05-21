@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 # conf.sh — read settings from .github/project-config.yml. Source, don't exec.
 #   devflow_conf '.devflow_retrospective.min_occurrences' 2
 set -euo pipefail
-_DEVFLOW_REPO_ROOT="$(git rev-parse --show-toplevel)"
-_DEVFLOW_CONFIG="${_DEVFLOW_REPO_ROOT}/.github/project-config.yml"
+# Repo root via git; fall back to cwd when not in a git tree (don't abort the
+# sourcing chain under `set -e`).
+_DEVFLOW_REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# Config path. Override with DEVFLOW_CONFIG_FILE (used by the test suite to
+# point at a committed fixture instead of the live repo config).
+_DEVFLOW_CONFIG="${DEVFLOW_CONFIG_FILE:-${_DEVFLOW_REPO_ROOT}/.github/project-config.yml}"
 
 # Internal: resolve a dot-path from the YAML config via python3 (yq fallback).
 # python3 + PyYAML is available on all supported systems; yq may not be installed.
@@ -24,8 +30,15 @@ def resolve_path(data, path):
 
 config_file = sys.argv[1]
 path = sys.argv[2]
-with open(config_file) as f:
-    data = yaml.safe_load(f)
+# Missing config file is the expected "no config" path (the local tier needs
+# none) — return __none__ silently so callers apply their defaults, rather than
+# raising and emitting a noisy ::warning:: traceback.
+try:
+    with open(config_file) as f:
+        data = yaml.safe_load(f) or {}
+except FileNotFoundError:
+    print("__none__")
+    sys.exit(0)
 val = resolve_path(data, path)
 if val is None:
     print("__none__")

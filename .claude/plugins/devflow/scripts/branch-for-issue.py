@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 """Compute the canonical feature-branch name for a GitHub issue.
 
 The /implement skill's Phase 1.2 needs a deterministic branch name from an
@@ -28,7 +30,6 @@ Exits 2 on bad arguments.
 import argparse
 import re
 import subprocess
-import sys
 import unicodedata
 from datetime import date
 

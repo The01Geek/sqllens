@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 # meta-issue.sh — file/update a GitHub meta-issue for a devflow pattern that
 # touches an exclusion-list path, and record a dismissal in overrides.json.
 #
@@ -75,8 +77,11 @@ else
     if [[ "$DRY_RUN" -eq 1 ]]; then
         URL="https://example.invalid/issues/DRYRUN"
     else
+        # The "[devflow-retrospective] meta: ${TAG}" prefix is the de-dupe key the
+        # Step-1 search matches on (keep it verbatim); the caller's --title is
+        # appended so the issue carries a human-readable summary too.
         URL="$("$DEVFLOW_GH" issue create \
-            --title "[devflow-retrospective] meta: ${TAG}" \
+            --title "[devflow-retrospective] meta: ${TAG} — ${TITLE}" \
             --body-file "$COMPOSED_BODY")"
         URL="$(printf '%s' "$URL" | tr -d '[:space:]')"
     fi

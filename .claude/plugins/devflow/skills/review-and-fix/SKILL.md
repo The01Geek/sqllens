@@ -431,7 +431,7 @@ Schema:
 {
   "schema_version": 1,
   "pr_branch": "<current branch>",
-  "base_branch": "<from .github/project-config.yml's base_branch key>",
+  "base_branch": "<base_branch from .github/project-config.yml; if absent, the repo default branch via `gh repo view --json defaultBranchRef -q .defaultBranchRef.name`, falling back to `main`>",
   "generated_at": "<ISO 8601 UTC>",
   "deferrals": [
     {

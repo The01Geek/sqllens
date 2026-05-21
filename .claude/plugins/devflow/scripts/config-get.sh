@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 # Read a value from .github/project-config.yml.
 #
 # Usage: config-get.sh KEY [DEFAULT] [CONFIG_FILE]

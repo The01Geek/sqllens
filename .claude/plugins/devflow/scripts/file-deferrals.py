@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 """DevFlow follow-up filer for review-and-fix deferrals.
 
 The /implement skill's Phase 4.0.5 reads the deferrals manifest produced by

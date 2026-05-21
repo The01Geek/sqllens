@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: MIT
 """Parse Acceptance Criteria from a GitHub issue body, classify post-merge.
 
 Implements the parsing + post-merge tagging rules from /implement's Phase 1.4
