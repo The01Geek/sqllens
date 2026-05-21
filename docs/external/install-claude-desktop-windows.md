@@ -58,7 +58,7 @@ Reopen Claude Desktop from the Start menu, then jump to [Verify the connection](
 
 ## Verify the connection
 
-- At the bottom right of the chat input, the MCP indicator should show the server name you configured (for example, `chinook`) with three tools: `query_database`, `visualize_data`, and `list_data_sources`.
+- At the bottom right of the chat input, the MCP indicator should show the server name you configured (for example, `chinook`) with two tools: `query_database` and `list_data_sources`.
 - In a new chat, ask: *"Using sqllens, how many albums did AC/DC release in the chinook database?"*
 - Approve the tool call when prompted. The first query takes 30 to 60 seconds because ChromaDB downloads roughly 80 MB of embedding model weights into `C:\Users\USERNAME\sqllens\chroma\`. Subsequent queries are fast.
 - After a successful query, a `C:\Users\USERNAME\sqllens\<16-hex-chars>\` directory appears with `query_results_*.csv` files. This is the per-query scratch space. The files are safe to delete periodically.

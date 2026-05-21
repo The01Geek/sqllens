@@ -23,9 +23,9 @@ cfg.agent       →  BoundedConversationStore          →  in-process LRU, capp
                    .max_conversations                   cfg.agent.max_conversations (ephemeral)
 ToolRegistry    →  RunSqlTool                          (executes generated SQL, writes a scratch CSV,
                                                         appends truncation hint when df.attrs['truncated'])
-                   EmitChartTool                       (agent-side seam for visualize_data; no SQL/FS;
-                                                        validates the renderer-agnostic chart DSL and
-                                                        emits a ChartComponent, capped at 200 rows)
+                   EmitChartTool                       (agent-side seam for query_database's chart mode;
+                                                        no SQL/FS; validates the renderer-agnostic chart
+                                                        DSL and emits a ChartComponent, capped at 200 rows)
                    SaveQuestionToolArgsTool            (memory write — tool-arg recordings;
                                                         registered only when cfg.memory.save_queries)
                    SearchSavedCorrectToolUsesTool      (memory read; default_similarity_threshold
@@ -37,7 +37,7 @@ ToolRegistry    →  RunSqlTool                          (executes generated SQL
                                                               AgentConfig(max_tool_iterations))
 ```
 
-`EmitChartTool` carries no SQL runner or file-system capability — the agent runs `run_sql` first to get aggregated rows, then hands them to `emit_chart`, which only validates the DSL (`bar | line | area | scatter | pie | heatmap`, ≤ 200 rows, pie/heatmap series-shape rules) and wraps the result in a `ChartComponent`. The MCP-layer `visualize_data` tool reads that component off the agent stream and forwards it to the chart widget. See [mcp-server/tools.md](../mcp-server/tools.md#visualize_data--chart-shaped-sibling-of-query_database) for the wider picture and [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py) for the DSL source.
+`EmitChartTool` carries no SQL runner or file-system capability — the agent runs `run_sql` first to get aggregated rows, then hands them to `emit_chart`, which only validates the DSL (`bar | line | area | scatter | pie | heatmap`, ≤ 200 rows, pie/heatmap series-shape rules) and wraps the result in a `ChartComponent`. The MCP-layer `query_database` tool reads that component off the agent stream and surfaces it through its unified result widget's chart mode (chart > table > text precedence). See [mcp-server/tools.md](../mcp-server/tools.md#chart-mode-the-emitcharttool-seam) for the wider picture and [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py) for the DSL source.
 
 Call order on every query is the reverse of construction. With RLS unconfigured: **ReadOnlyGuardRunner → RowCapRunner → engine runner**. With RLS configured (`cfg.rls` non-empty): **RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner** — the RLS rewrite runs *first* so the read-only guard validates the *rewritten* SQL. The parser rejects before any connection opens; the engine runner streams with `fetchmany(max_rows + 1)` and sets its native statement-timeout primitive; the decorator clamps the result a second time on the way back. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full timeout/cap story and [database-connectors/row-level-security.md](../database-connectors/row-level-security.md) for the RLS rewrite.
 
@@ -122,7 +122,7 @@ Side-effect that's worth knowing: `LocalFileSystem` derives a per-user subfolder
 
 ## Calling pattern from `tools/_agent.py`
 
-The process-wide agent singleton lives in [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py), shared by `query_database` and `visualize_data` so both MCP tools reach the same `Agent` object graph. The double-checked-lock skeleton is:
+The process-wide agent singleton lives in [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py), used by `query_database` and primed by the transport-layer warmup so both reach the same `Agent` object graph. The double-checked-lock skeleton is:
 
 ```python
 _AGENT_STATE: tuple[Agent, Config] | None = None

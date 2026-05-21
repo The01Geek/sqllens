@@ -27,8 +27,8 @@ from ._agent_stubs import StubAgent
 def _reset_query_database_singleton():
     """Guarantee the agent singleton state is reset entering each test.
 
-    The module-level singleton lives in ``sqllens.tools._agent`` (shared by
-    ``query_database`` and ``visualize_data``) and is process-wide. Without
+    The module-level singleton lives in ``sqllens.tools._agent`` (used by
+    ``query_database`` and the transport-layer warmup) and is process-wide. Without
     this fixture, a test that builds the agent leaks state into the next,
     masking isolation bugs and making ordering matter. ``_AGENT_STATE`` is a
     single ``(agent, cfg)`` tuple, so one reset clears both the agent and the

@@ -3,16 +3,16 @@
 
 """Process-wide agent singleton shared by the MCP tool wrappers.
 
-Both ``query_database`` and ``visualize_data`` translate natural language to
-SQL through the *same* agent: it is constructed once per process, wired with
-both ``RunSqlTool`` and ``EmitChartTool``, and reused across requests. This
-module owns that singleton (the agent object graph, the cold-start lock, and
-the boot-time memory warm) so the two tool wrappers cannot accidentally build
-two competing agents.
+The ``query_database`` tool translates natural language to SQL through a single
+agent: it is constructed once per process, wired with both ``RunSqlTool`` and
+``EmitChartTool``, and reused across requests. This module owns that singleton
+(the agent object graph, the cold-start lock, and the boot-time memory warm) so
+a tool wrapper and the transport-layer warmup cannot accidentally build two
+competing agents.
 
 The client-facing error taxonomy is deliberately *not* here — it stays in
-``query_database`` so it is defined in one place; ``visualize_data`` re-imports
-those constants. This module only constructs and caches the agent.
+``query_database`` so it is defined in one place. This module only constructs
+and caches the agent.
 """
 
 from __future__ import annotations

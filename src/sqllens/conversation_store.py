@@ -4,8 +4,8 @@
 """Bounded, in-process conversation store for multi-turn MCP conversations.
 
 SQL Lens threads a ``conversation_id`` through the MCP boundary (see
-``tools/query_database.py`` / ``tools/visualize_data.py``) so the agent can ask
-a clarifying question and see the prior turn on the follow-up call. The
+``tools/query_database.py``) so the agent can ask a clarifying question and see
+the prior turn on the follow-up call. The
 framework default (``MemoryConversationStore``) keeps every conversation
 forever, so a long-running server's memory grows without bound. This store is
 an LRU variant with a hard cap: once ``max_conversations`` is exceeded, the

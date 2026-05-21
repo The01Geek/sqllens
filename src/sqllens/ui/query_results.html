@@ -5,22 +5,33 @@
 <!--
   Self-contained MCP App widget for query_database results.
 
-  No external origins: every asset (this file + ./vendor/app-with-deps.js) is
-  served from the same MCP server origin. No fonts, no analytics, no CDN, no
-  remote XHR/fetch. The host renders this in a sandboxed iframe and pushes the
-  tool's CallToolResult via the MCP Apps postMessage channel; the structured
-  table lives under result._meta["sqllens/table"] and (when agent.show_details
-  is on) the executed SQL under result._meta["sqllens/query"].sql. If the
-  table key is absent or malformed the widget renders an empty-state notice;
-  the SQL section is independent and simply omitted when absent.
+  One widget, three render modes. The host pushes the tool's CallToolResult via
+  the MCP Apps postMessage channel; this widget picks its mode from which
+  _meta channel is present, in precedence order:
+    1. result._meta["sqllens/chart"]  → interactive ECharts chart
+    2. result._meta["sqllens/table"]  → sortable/filterable data grid, with the
+       executed SQL (result._meta["sqllens/query"].sql) in a collapsible section
+    3. neither                        → empty-state notice (the answer text is
+       rendered by the host outside the iframe)
+  When both chart and table channels are present the chart wins — deterministic,
+  no double-render.
 
-  The relative ext-apps SDK import below is replaced at serve time by
+  No external origins: this file plus its two vendored bundles
+  (./vendor/echarts.min.js, ./vendor/app-with-deps.js) form the entire widget.
+  Both bundles are *inlined* into this HTML at serve time by
   sqllens.ui.load_widget_html() — MCP App hosts ``document.write`` the HTML
-  into an about:blank-base iframe with no access to sibling files on the
-  MCP server, so the import has to be inlined or the script never runs.
+  into an about:blank-base iframe with no access to sibling files on the MCP
+  server, so any relative <script src=…> or `import "./vendor/…"` would 404 and
+  the widget would silently hang on "Waiting for results…".
+
+  Renderer: ECharts SVG renderer (echarts.init(el, theme, {renderer:'svg'})).
+  The SVG renderer needs no eval/Function and emits plain DOM, so it cannot
+  trip a strict iframe CSP — chosen deliberately over the canvas renderer so
+  no 'unsafe-eval' is ever required (see issue #138 CSP acceptance criterion).
 -->
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Query results</title>
+<script src="./vendor/echarts.min.js"></script>
 <style>
   :root {
     color-scheme: light dark;
@@ -99,6 +110,10 @@
     font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     white-space: pre-wrap; word-break: break-word;
   }
+  /* Chart mode: the chart host fills the iframe and the canvas/SVG flexes. */
+  .charthost { display: flex; flex-direction: column; height: calc(100vh - 16px); }
+  .charthost #chart { flex: 1 1 auto; min-height: 220px; width: 100%; }
+  .charthost .note { color: var(--muted); font-size: 12px; padding: 4px 2px 0; }
 </style>
 </head>
 <body>
@@ -108,10 +123,15 @@
 import { App } from "./vendor/app-with-deps.js";
 
 const PAGE_SIZE = 50;
-const META_KEY = "sqllens/table";
+const TABLE_META_KEY = "sqllens/table";
 const QUERY_META_KEY = "sqllens/query";
+const CHART_META_KEY = "sqllens/chart";
 
 const state = {
+  // shared
+  mode: "empty", // "chart" | "table" | "empty"
+  theme: "light",
+  // table mode
   columns: [],
   rows: [],
   types: {},
@@ -122,25 +142,31 @@ const state = {
   filter: "",
   page: 0,
   sql: "",
+  // chart mode
+  spec: null,
 };
 
-// Three stable children, painted once per result by ingest() and never
-// destroyed by render(): the SQL section (sqlHost), the filter bar (barHost
-// — input + CSV button + "showing N of M" span), and the grid (gridHost —
-// table + pager). render() owns gridHost only — clearing it on every
-// filter/sort/page keystroke must not (a) destroy and collapse the user's
-// expanded "Executed SQL" panel, NOR (b) replace the filter <input>
-// mid-typing (which would steal focus on every keystroke).
+let chart = null;
+let resizeObserver = null;
+
+// Four stable children. The table hosts (sqlHost, barHost, gridHost) and the
+// chart host (chartHost) all stay in the DOM; ingest() populates the set that
+// matches the active mode and empties the rest. render() owns gridHost only —
+// clearing it on every filter/sort/page keystroke must not (a) destroy and
+// collapse the user's expanded "Executed SQL" panel, NOR (b) replace the
+// filter <input> mid-typing (which would steal focus on every keystroke).
 const root = document.getElementById("root");
 root.textContent = "";
 const sqlHost = document.createElement("div");
 const barHost = document.createElement("div");
 const gridHost = document.createElement("div");
+const chartHost = document.createElement("div");
+chartHost.className = "charthost";
 const _waiting = document.createElement("div");
 _waiting.className = "empty";
 _waiting.textContent = "Waiting for results…";
 gridHost.appendChild(_waiting);
-root.append(sqlHost, barHost, gridHost);
+root.append(sqlHost, barHost, gridHost, chartHost);
 
 // Persistent reference the bar exposes to render(): the meta span's text
 // ("showing N of M") changes as the user filters/sorts/pages, but the
@@ -166,7 +192,16 @@ function applyHostContext(ctx) {
       if (typeof v === "string") document.documentElement.style.setProperty(k, v);
     }
   }
+  if (theme !== state.theme) {
+    state.theme = theme;
+    // ECharts cannot swap theme on a live instance — dispose and re-init so
+    // there is no ghost chart from the previous theme. Only relevant while a
+    // chart is on screen; in table mode there is nothing to rebuild.
+    if (state.mode === "chart") rebuildChart();
+  }
 }
+
+// ───────────────────────────── table mode ───────────────────────────────────
 
 function filteredRows() {
   if (!state.filter) return state.rows;
@@ -329,7 +364,7 @@ async function exportCsv() {
 
 function renderSqlSection() {
   // Collapsed by default — executed SQL is QA detail, not the primary answer.
-  // Called once per result from ingest(), never from render().
+  // Called once per result from ingestTable(), never from render().
   sqlHost.textContent = "";
   if (!state.sql) return;
   const details = document.createElement("details");
@@ -345,7 +380,7 @@ function renderSqlSection() {
 }
 
 function renderBar() {
-  // Painted once per result from ingest(); render() never touches barHost,
+  // Painted once per result from ingestTable(); render() never touches barHost,
   // so the filter input keeps focus across keystrokes. The "showing N of M"
   // span is exposed to render() via _metaSpan so its text can update
   // without rebuilding the input.
@@ -452,14 +487,19 @@ function render() {
   gridHost.appendChild(pager);
 }
 
-function ingest(result) {
-  const meta = (result && result._meta) || {};
+function ingestTable(meta) {
+  state.mode = "table";
+  // Leaving any prior chart behind would keep a live ECharts instance and its
+  // ResizeObserver running under a hidden host; dispose before painting table.
+  disposeChart();
+  chartHost.textContent = "";
+
   const queryInfo = meta[QUERY_META_KEY];
   state.sql =
     queryInfo && typeof queryInfo.sql === "string" ? queryInfo.sql : "";
   renderSqlSection();
 
-  const payload = meta[META_KEY];
+  const payload = meta[TABLE_META_KEY];
   if (!payload || !Array.isArray(payload.columns)) {
     state.columns = [];
     renderBar();
@@ -479,12 +519,244 @@ function ingest(result) {
   render();
 }
 
-function showNotice(text) {
+// ───────────────────────────── chart mode ───────────────────────────────────
+
+function distinct(rows, key) {
+  const seen = new Set();
+  const out = [];
+  for (const r of rows) {
+    const v = r[key];
+    const tag = String(v);
+    if (!seen.has(tag)) {
+      seen.add(tag);
+      out.push(v);
+    }
+  }
+  return out;
+}
+
+function buildEchartsOption(spec) {
+  const rows = Array.isArray(spec.data) ? spec.data : [];
+  const xf = spec.x && spec.x.field;
+  const yf = spec.y && spec.y.field;
+  const xLabel = (spec.x && spec.x.label) || xf;
+  const yLabel = (spec.y && spec.y.label) || yf;
+  const yAxisType = spec.y && spec.y.type === "log" ? "log" : "value";
+  const title = spec.title ? { text: spec.title, left: "center" } : undefined;
+
+  if (spec.chart_type === "pie") {
+    return {
+      title,
+      tooltip: { trigger: "item" },
+      legend: { type: "scroll", bottom: 0 },
+      series: [
+        {
+          type: "pie",
+          radius: "60%",
+          data: rows.map((r) => ({ name: String(r[xf]), value: r[yf] })),
+        },
+      ],
+    };
+  }
+
+  if (spec.chart_type === "heatmap") {
+    const valueField = spec.series; // the z dimension (DSL: series == value field)
+    const xCats = distinct(rows, xf).map(String);
+    const yCats = distinct(rows, yf).map(String);
+    let min = Infinity;
+    let max = -Infinity;
+    const data = rows.map((r) => {
+      const v = Number(r[valueField]);
+      if (Number.isFinite(v)) {
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      return [xCats.indexOf(String(r[xf])), yCats.indexOf(String(r[yf])), r[valueField]];
+    });
+    if (!Number.isFinite(min)) { min = 0; max = 1; }
+    return {
+      title,
+      tooltip: { position: "top" },
+      grid: { containLabel: true },
+      xAxis: { type: "category", data: xCats, name: xLabel },
+      yAxis: { type: "category", data: yCats, name: yLabel },
+      visualMap: { min, max, calculable: true, orient: "horizontal", left: "center", bottom: 0 },
+      series: [{ type: "heatmap", data, label: { show: false } }],
+    };
+  }
+
+  if (spec.chart_type === "scatter") {
+    const mk = (rs) => rs.map((r) => [r[xf], r[yf]]);
+    let series;
+    let legend;
+    if (spec.series) {
+      const groups = distinct(rows, spec.series).map(String);
+      legend = { type: "scroll", bottom: 0, data: groups };
+      series = groups.map((g) => ({
+        name: g,
+        type: "scatter",
+        data: mk(rows.filter((r) => String(r[spec.series]) === g)),
+      }));
+    } else {
+      series = [{ type: "scatter", data: mk(rows) }];
+    }
+    return {
+      title,
+      tooltip: { trigger: "item" },
+      legend,
+      grid: { containLabel: true },
+      xAxis: { type: "value", name: xLabel },
+      yAxis: { type: yAxisType, name: yLabel },
+      series,
+    };
+  }
+
+  // bar | line | area
+  const isArea = spec.chart_type === "area";
+  const baseType = spec.chart_type === "bar" ? "bar" : "line";
+  const xType = spec.x && spec.x.type;
+  const continuous = xType === "time" || xType === "value";
+
+  // Continuous x (time/value): emit [x, y] tuples. Categorical x: align each
+  // series's points to the shared category list, filling gaps with null.
+  const pointsFor = (rs, cats) =>
+    continuous
+      ? rs.map((r) => [r[xf], r[yf]])
+      : (() => {
+          const byCat = new Map(rs.map((r) => [String(r[xf]), r[yf]]));
+          return cats.map((c) => (byCat.has(c) ? byCat.get(c) : null));
+        })();
+
+  const makeSeries = (name, rs, cats) => ({
+    name,
+    type: baseType,
+    smooth: baseType === "line",
+    areaStyle: isArea ? {} : undefined,
+    data: pointsFor(rs, cats),
+  });
+
+  const cats = continuous ? null : distinct(rows, xf).map(String);
+  const xAxis = continuous
+    ? { type: xType, name: xLabel }
+    : { type: "category", data: cats, name: xLabel };
+
+  let series;
+  let legend;
+  if (spec.series) {
+    const groups = distinct(rows, spec.series).map(String);
+    legend = { type: "scroll", bottom: 0, data: groups };
+    series = groups.map((g) =>
+      makeSeries(g, rows.filter((r) => String(r[spec.series]) === g), cats)
+    );
+  } else {
+    series = [makeSeries(undefined, rows, cats)];
+  }
+
+  return {
+    title,
+    tooltip: { trigger: "axis" },
+    legend,
+    grid: { containLabel: true },
+    xAxis,
+    yAxis: { type: yAxisType, name: yLabel },
+    series,
+  };
+}
+
+function disposeChart() {
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
+  if (chart) {
+    chart.dispose();
+    chart = null;
+  }
+}
+
+function rebuildChart() {
+  // Re-render from state.spec under the current theme. Used on first ingest
+  // and on every theme change (ECharts has no live theme swap).
+  disposeChart();
+  chartHost.textContent = "";
+
+  if (!state.spec || !Array.isArray(state.spec.data) || state.spec.data.length === 0) {
+    showNotice("No chartable result for this query.");
+    return;
+  }
+
+  const chartEl = document.createElement("div");
+  chartEl.id = "chart";
+  chartHost.appendChild(chartEl);
+
+  const truncated = typeof state.spec.truncated === "number" ? state.spec.truncated : 0;
+  if (truncated > 0) {
+    const note = document.createElement("div");
+    note.className = "note";
+    const shown = state.spec.row_count != null ? state.spec.row_count : state.spec.data.length;
+    note.textContent = `Rendering first ${shown} of ${shown + truncated} rows.`;
+    chartHost.appendChild(note);
+  }
+
+  try {
+    chart = echarts.init(
+      chartEl,
+      state.theme === "dark" ? "dark" : null,
+      { renderer: "svg" }
+    );
+    chart.setOption(buildEchartsOption(state.spec));
+  } catch (err) {
+    showNotice("Could not render chart: " + (err && err.message ? err.message : err));
+    return;
+  }
+
+  resizeObserver = new ResizeObserver(() => {
+    if (chart) chart.resize();
+  });
+  resizeObserver.observe(chartEl);
+}
+
+function ingestChart(payload) {
+  state.mode = "chart";
+  // Clear any prior table DOM so a stale grid/SQL panel can't show under the
+  // chart host (they share the same iframe).
+  sqlHost.textContent = "";
+  barHost.textContent = "";
   gridHost.textContent = "";
+  _metaSpan = null;
+  state.spec = payload;
+  rebuildChart();
+}
+
+// ───────────────────────────── dispatch ─────────────────────────────────────
+
+function ingest(result) {
+  const meta = (result && result._meta) || {};
+  const chartPayload = meta[CHART_META_KEY];
+  // Chart wins, but only when it is actually renderable; an empty/malformed
+  // chart payload falls through to the table (or empty-state) so a present
+  // table is never hidden behind a blank chart.
+  if (
+    chartPayload &&
+    Array.isArray(chartPayload.data) &&
+    chartPayload.data.length > 0
+  ) {
+    ingestChart(chartPayload);
+    return;
+  }
+  ingestTable(meta);
+}
+
+function showNotice(text) {
+  // Render the notice in whichever host owns the active mode so it replaces
+  // the partial render rather than stacking beneath it.
+  const host = state.mode === "chart" ? chartHost : gridHost;
+  disposeChart();
+  host.textContent = "";
   const d = document.createElement("div");
   d.className = "empty";
   d.textContent = text;
-  gridHost.appendChild(d);
+  host.appendChild(d);
 }
 
 const app = new App({ name: "sqllens-query-results", version: "1.0.0" }, {});
@@ -503,6 +775,7 @@ app.ontoolresult = (params) => {
 function applyHostContextSafe() {
   try {
     applyHostContext(app.getHostContext());
+    if (chart) chart.resize();
   } catch (err) {
     console.warn("host theming failed (non-fatal):", err);
   }

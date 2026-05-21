@@ -169,7 +169,7 @@ def test_chart_empty_data_returns_none_payload() -> None:
 def test_chart_payload_construction_failure_degrades_to_none(monkeypatch) -> None:
     # Parallel of test_format.py::test_table_payload_construction_failure_...
     # Pin the _build_chart_payload broad-except wrapper: a raise inside
-    # _compute_chart_payload must NOT escape visualize_data's sanitized error
+    # _compute_chart_payload must NOT escape query_database's sanitized error
     # taxonomy — instead the widget degrades to None (Markdown stands).
     import sqllens.tools._format as fmt
 
