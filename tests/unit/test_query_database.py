@@ -720,6 +720,37 @@ def test_append_sql_block_returns_unchanged_on_malformed_query_info() -> None:
     assert _append_sql_block("md", {"sql": None}) == "md"
 
 
+def test_append_memory_footer_singular_and_plural_and_no_similarity() -> None:
+    # Pins the client-visible footer literals, including the singular "1 hit"
+    # branch (plural = "" when hit_count == 1) and the no-top_similarity
+    # fallback — neither of which the higher-level footer tests exercise.
+    from sqllens.tools.query_database import _append_memory_footer
+
+    one_hit = {"searched": True, "hit_count": 1, "top_similarity": 0.9, "threshold": 0.7}
+    assert _append_memory_footer("answer", one_hit) == (
+        "answer\n\n_Memory: 1 hit (top similarity 0.90)_"
+    )
+    two_hits = {"searched": True, "hit_count": 2, "top_similarity": 0.5, "threshold": 0.7}
+    assert _append_memory_footer("answer", two_hits).endswith(
+        "_Memory: 2 hits (top similarity 0.50)_"
+    )
+    # A hit with a non-numeric top_similarity (degraded future producer) falls
+    # back to the count-only form rather than crashing on :.2f formatting.
+    no_sim = {"searched": True, "hit_count": 3, "top_similarity": None, "threshold": 0.7}
+    assert _append_memory_footer("answer", no_sim).endswith("_Memory: 3 hits_")
+
+
+def test_append_memory_footer_returns_unchanged_on_falsy_or_unsearched() -> None:
+    # Defensive branches mirroring the _append_sql_block contract: falsy
+    # memory_info, or a payload whose searched flag is false, must return the
+    # markdown byte-for-byte unchanged (no stray footer).
+    from sqllens.tools.query_database import _append_memory_footer
+
+    assert _append_memory_footer("md", None) == "md"
+    assert _append_memory_footer("md", {}) == "md"
+    assert _append_memory_footer("md", {"searched": False, "hit_count": 0}) == "md"
+
+
 @pytest.mark.asyncio
 async def test_concurrent_first_calls_build_once(
     tmp_path: Path,

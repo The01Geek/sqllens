@@ -238,6 +238,11 @@ class SearchSavedCorrectToolUsesTool(Tool[SearchSavedCorrectToolUsesParams]):
 
         except Exception as e:
             error_message = f"Failed to search memories: {str(e)}"
+            # A search that errors emits no memory_search card, so the MCP
+            # client sees no hit/miss signal for this turn — log it server-side
+            # so the failure is not wholly silent (the hit and miss paths above
+            # both log at INFO; an error is the louder case).
+            logger.warning("Agent memory search failed: %s", e)
             return ToolResult(
                 success=False,
                 result_for_llm=error_message,

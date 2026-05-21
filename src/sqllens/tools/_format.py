@@ -183,16 +183,20 @@ def components_to_widgets(
       executed SQL above). Unlike the SQL card, the memory card is the tool's
       own ``ui_component`` — always yielded on the tool's success path,
       independent of ``agent.show_details`` — so ``memory_info`` is surfaced
-      whenever the agent searched memory in this turn.
+      whenever a memory search *completes* (a hit or a miss) this turn. A search
+      that *errors* emits no ``memory_search`` card (it yields a status-bar
+      error component instead, logged server-side), so it leaves
+      ``memory_info`` ``None`` — indistinguishable here from "did not search".
 
     ``table`` / ``chart`` are ``None`` on the error path, when the
     corresponding component is absent, when its data is empty, or when even the
     header-only / data-stripped serialized form exceeds the size budget.
 
     ``memory_info`` is ``None`` on the error path and whenever no memory-search
-    card was seen (the agent answered without consulting memory). When present
-    it is the aggregate ``{"searched", "hit_count", "top_similarity",
-    "threshold"}`` payload — never the matched memory contents.
+    card was seen — which covers both "the agent answered without consulting
+    memory" and "a memory search was attempted but errored". When present it is
+    the aggregate ``{"searched", "hit_count", "top_similarity", "threshold"}``
+    payload — never the matched memory contents.
 
     ``query_info`` is ``None`` whenever no executed SQL is surfaced. The
     config-independent invariant: a guard-rejected non-SELECT (the default

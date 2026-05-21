@@ -186,9 +186,10 @@ async def query_database_impl_with_widgets(
     same SQL is also appended to ``markdown`` as a fenced ``sql`` block so
     plain-text clients see it too.
 
-    ``memory_info`` carries the aggregate memory hit/miss signal whenever the
-    agent searched memory this turn (``None`` otherwise, and on the error
-    path). It is surfaced regardless of ``agent.show_details``; when
+    ``memory_info`` carries the aggregate memory hit/miss signal whenever a
+    memory search *completes* (a hit or a miss) this turn (``None`` otherwise —
+    including a search that errored, and on the agent error path). It is
+    surfaced regardless of ``agent.show_details``; when
     ``agent.show_memory_details`` is on, a one-line memory footer is also
     appended to ``markdown`` for plain-text clients.
 

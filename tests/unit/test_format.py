@@ -629,6 +629,24 @@ def test_memory_info_suppressed_on_error_path() -> None:
     assert markdown == "boom"
 
 
+def test_memory_info_ignores_non_dict_memory_search_metadata() -> None:
+    # The isinstance(memory_search, dict) guard mirrors the SQL extraction's
+    # isinstance(sql, str) guard: a malformed (non-dict) memory_search value
+    # from a degraded producer is ignored, leaving memory_info None rather than
+    # propagating junk into _meta.
+    bad = _ui(
+        StatusCardComponent(
+            title="Memory Search",
+            status="info",
+            description="malformed",
+            metadata={"memory_search": "not-a-dict"},
+        )
+    )
+    _, is_error, _, _, _, memory_info = components_to_widgets([bad])
+    assert is_error is False
+    assert memory_info is None
+
+
 def test_memory_info_coexists_with_query_info() -> None:
     # A turn that both searched memory and ran SQL surfaces both signals
     # independently — neither card's metadata clobbers the other.
