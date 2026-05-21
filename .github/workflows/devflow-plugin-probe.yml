@@ -1,0 +1,48 @@
+name: devflow plugin-path probe (throwaway)
+
+# Throwaway diagnostic: install devflow from the GITHUB marketplace (non-vendored)
+# and learn (1) where claude-code-action puts the plugin on the runner, (2) whether
+# the literal `.claude/plugins/devflow/scripts/*` allowed-tools path the real
+# workflows use still resolves + matches the skill's `${CLAUDE_SKILL_DIR}` invocation
+# style. Delete this workflow + branch after reading the run.
+on:
+  push:
+    branches: ['devflow/plugin-probe']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          plugin_marketplaces: |
+            https://github.com/The01Geek/devflow-autopilot.git
+          plugins: |
+            devflow@devflow-marketplace
+          prompt: |
+            DIAGNOSTIC PROBE. Run each numbered step with the Bash tool and
+            report the raw output, then give the SUMMARY at the end.
+
+            1. echo "CLAUDE_PLUGIN_ROOT=[$CLAUDE_PLUGIN_ROOT]"; echo "CLAUDE_SKILL_DIR=[$CLAUDE_SKILL_DIR]"
+            2. ls -la .claude/plugins/devflow/scripts/ 2>&1 || echo "ABSENT: workspace .claude/plugins/devflow/scripts"
+            3. ls -la "$HOME/.claude/plugins" 2>&1 || echo "no ~/.claude/plugins"
+            4. find "$HOME/.claude" "$GITHUB_WORKSPACE" -name config-get.sh 2>/dev/null || true
+            5a. Literal-path style (this is what the workflow allowed-tools list permits):
+                .claude/plugins/devflow/scripts/config-get.sh .base_branch main
+            5b. Skill style (this is how the devflow skills ACTUALLY call it):
+                ${CLAUDE_SKILL_DIR}/../../scripts/config-get.sh .base_branch main
+
+            SUMMARY (answer explicitly):
+            (a) Absolute install path of the devflow plugin.
+            (b) Does the literal `.claude/plugins/devflow/scripts/config-get.sh` exist on disk?
+            (c) Step 5a — did it EXECUTE, was it PERMISSION-BLOCKED, or FILE-NOT-FOUND?
+            (d) Step 5b — did it EXECUTE, was it PERMISSION-BLOCKED, or FILE-NOT-FOUND?
+            (e) Value of $CLAUDE_PLUGIN_ROOT.
+          claude_args: >-
+            --allowed-tools "Bash(echo:*),Bash(ls:*),Bash(find:*),Bash(env:*),Bash(realpath:*),Bash(cat:*),Bash(.claude/plugins/devflow/scripts/config-get.sh:*)"
