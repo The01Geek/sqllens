@@ -293,6 +293,18 @@ Now implement the feature yourself. You have full context:
 
 Write the code. Follow the patterns and conventions described in `CLAUDE.md`. As plan steps complete, tick them off: `workpad.py update $ISSUE_NUMBER --tick-plan "{substring of completed step}"`.
 
+#### 2.3.0 Changed-contract sweep (mandatory whenever the change modifies a signature, renames/moves a symbol, tightens a validator, or changes a routing/branch predicate)
+
+The 2.3.1–2.3.3 sweeps below all trigger on *deletion*. Modifying a contract is just as blast-radius-prone, but it slips past `git diff` review precisely because every dependent site still *compiles* — the call still resolves, the fixture still parses, the assertion still runs; it is only *semantically* stale. After any change that modifies a signature, renames or moves a symbol, tightens a validator, or alters a predicate that classifies input, before running tests, grep the whole repo for every dependent site and bring each into line:
+
+1. **All variants of a branch/predicate.** If you changed a predicate that classifies input (e.g. `== "SELECT"`), enumerate every value the predicate must now accept or reject (`WITH`, `UNION`, `INTERSECT`, `EXCEPT`, …) and confirm every runner/branch routes them identically. A predicate fixed in one runner but not its siblings is a defect in *this* PR, not a follow-up.
+2. **Sibling call sites of a shared dependency.** If you wrapped or extended a shared object (e.g. a per-request guard on the agent), grep for every tool/caller that consumes that object and confirm each one plumbs the new inputs and handles the new error/exception branch. (E.g. one tool gets the `except RlsError` branch and metadata plumbing while its sibling tool sharing the same agent does not → regression.)
+3. **Fixtures and assertions matching the old contract.** If you tightened a validator or moved output between streams (stdout↔stderr), grep tests for every fixture value and assertion that encoded the old contract — both in the files you touched *and* in shared `conftest.py` / helper modules — and update them. A 10-char fixture under a new 16-char minimum, or a `result.stdout` assertion on a site you rerouted to stderr, is a CI failure waiting for the next merge.
+
+A modify / rename / reroute is not done until grepping for the old symbol, predicate value, stream, or contract returns only the intended sites.
+
+**Re-run this sweep after any merge or rebase of `main`.** A clean *textual* merge is not a clean *semantic* merge: `main` may have added a fixture, call site, or assertion that your new contract now rejects, and git will merge it cleanly without ever surfacing the conflict. After any `git merge main` / `git pull --rebase` the run performs (including the Error Handling conflict-recovery path), re-run steps 1–3 against the newly-arrived sites and treat any new site that violates the change's contract as a defect in *this* PR, not a follow-up. Internal-docs counterpart: [`docs/internal/workflows/implement-skill.md`](../../../../../docs/internal/workflows/implement-skill.md) ("Changed-contract sweep and the post-merge re-sweep").
+
 #### 2.3.1 Orphaned-setup sweep (mandatory whenever the change deletes code)
 
 Removing a call site, a UI block, a branch, or a whole function almost always strands the *setup lines* that fed it — a service-locator/dependency fetch, a query or record lookup, a computed local, an import or `use` clause — whose only consumer was the code you just deleted. These survive `git diff` review because nothing is *syntactically* broken; the line is simply dead. Reviewers keep flagging them as "optional cleanup", which means the PR shipped imperfect.
@@ -588,7 +600,7 @@ Verify each `Status` PATCH actually landed at the time it was issued (see the Up
 ## Error Handling
 
 - **Empty steps**: If any phase produces no file changes, skip the commit and continue. Do not create empty commits.
-- **Git conflicts**: If a push fails due to conflicts, run `git pull --rebase origin {branch}` and retry once. If it fails again, stop and report the error.
+- **Git conflicts**: If a push fails due to conflicts, run `git pull --rebase origin {branch}` and retry once. If it fails again, stop and report the error. After any successful rebase here, re-run the Phase 2.3.0 changed-contract sweep against the newly-arrived sites — a clean textual rebase can still surface a fixture, call site, or assertion from `main` that the change's contract now rejects.
 - **Subagent failures**: If a subagent fails or produces no useful output, note the failure in the workpad's `Devflow Reflection` and continue to the next step. Do not retry the same subagent more than once.
 - **Permission denials**: If a Bash command is denied, note it in the workpad and continue to the next step. Never skip an entire phase because of a single denied command.
 - **Commit prefixes**: Use `docs:` for documentation, `feat:` for implementation, `fix:` for review fixes and test fixes.
