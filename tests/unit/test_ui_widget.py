@@ -131,6 +131,22 @@ def test_widget_dispatch_pins_chart_wins_precedence() -> None:
     assert "ingestTable(meta)" in html
 
 
+def test_widget_emits_resize_notification_and_is_content_sized() -> None:
+    # Issue #174: in a sandboxed cross-origin iframe the host cannot read the
+    # document, so the widget must report its natural height via the MCP Apps
+    # `ui/notifications/resize` notification, and the document must be
+    # content-sized (no 100vh, which collapses to the host viewport and feeds
+    # back a fake height). No JS harness exists, so guard the wiring
+    # structurally: a regression that drops the reporter or reintroduces the
+    # viewport-height trap fails here instead of only in a live host.
+    html = ui.load_widget_html()
+    assert "ui/notifications/resize" in html
+    assert "parent.postMessage" in html
+    assert "ResizeObserver" in html
+    # The viewport-height trap must not return to chart mode.
+    assert "100vh" not in html
+
+
 def test_successful_read_is_cached(monkeypatch) -> None:
     calls = {"n": 0}
 

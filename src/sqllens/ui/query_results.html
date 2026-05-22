@@ -110,9 +110,12 @@
     font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     white-space: pre-wrap; word-break: break-word;
   }
-  /* Chart mode: the chart host fills the iframe and the canvas/SVG flexes. */
-  .charthost { display: flex; flex-direction: column; height: calc(100vh - 16px); }
-  .charthost #chart { flex: 1 1 auto; min-height: 220px; width: 100%; }
+  /* Chart mode: a definite chart height so the document sizes to its content.
+     A viewport-height (vh) sizing would collapse to the iframe viewport and
+     defeat content-based auto-fit (the host can't read a cross-origin
+     sandboxed iframe, so it relies on the size we report); see issue #174. */
+  .charthost { display: flex; flex-direction: column; }
+  .charthost #chart { height: 360px; width: 100%; }
   .charthost .note { color: var(--muted); font-size: 12px; padding: 4px 2px 0; }
 </style>
 </head>
@@ -758,6 +761,37 @@ function showNotice(text) {
   d.textContent = text;
   host.appendChild(d);
 }
+
+// ───────────────────────── host iframe auto-fit ─────────────────────────────
+//
+// MCP App hosts render this widget in a sandboxed iframe without
+// `allow-same-origin`, so the host cannot read our document to size the frame —
+// postMessage is the only channel (issue #174). Because the document is
+// content-sized (no viewport/percentage height on html/body; chart mode uses a
+// definite #chart height), documentElement's height is the true content height.
+// We report it through the MCP Apps `ui/notifications/resize` notification so a
+// host can fit the frame exactly. Hosts that don't implement it (Claude
+// Desktop, MCP Inspector) ignore the unknown message and render standalone.
+let lastPostedHeight = -1;
+function postSize() {
+  const h = Math.ceil(document.documentElement.getBoundingClientRect().height);
+  if (h <= 0 || h === lastPostedHeight) return;
+  lastPostedHeight = h;
+  try {
+    parent.postMessage(
+      { jsonrpc: "2.0", method: "ui/notifications/resize", params: { height: h } },
+      "*"
+    );
+  } catch (err) {
+    console.warn("resize notification failed (non-fatal):", err);
+  }
+}
+// One observer on the root element catches every content change — initial
+// layout, table render/filter/page, chart render, theme reflow, font load —
+// and re-reports the height. ResizeObserver fires once on observe(), so the
+// initial size is reported without a separate call.
+const docResizeObserver = new ResizeObserver(() => postSize());
+docResizeObserver.observe(document.documentElement);
 
 const app = new App({ name: "sqllens-query-results", version: "1.0.0" }, {});
 app.ontoolresult = (params) => {
