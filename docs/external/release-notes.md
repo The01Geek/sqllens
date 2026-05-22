@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 22, 2026
+
+- **[Fix] Interactive results now fit their frame** — On assistants that render inline app widgets (currently Claude Desktop and claude.ai), small `query_database` results, such as a two- or three-row table or a small chart, previously appeared with empty space around them or an extra scrollbar because the widget did not report its true height to the assistant. The widget now reports its own content size, so on hosts that support this a small result fits its frame with no surrounding empty space and no extra scrollbar, while larger results get the full height they need. No configuration change is required, and standalone viewers such as the MCP Inspector are unaffected. (#175)
+
 ## May 20, 2026
 
 - **[Improvement] Executed SQL is now hidden from answers by default** — The `agent.show_details` setting now defaults to `false`, so a `query_database` answer no longer includes the SQL the agent ran. Exposing that SQL to connected clients can reveal details about your database structure and query logic, so it is now off unless you opt in. To restore the previous behavior and surface the executed SQL alongside each answer, set `show_details = true` in `sqllens.toml` or `SQLLENS_AGENT__SHOW_DETAILS=1`. **Action required if you relied on seeing the executed SQL:** set `show_details = true` after upgrading; otherwise answers are returned without the SQL block. (#152)

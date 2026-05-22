@@ -22,6 +22,8 @@ On assistants that support inline app widgets — currently Claude Desktop and c
 
 The same plain-text answer appears in the conversation alongside the widget, so nothing is lost. On every other assistant you continue to receive the Markdown table exactly as before; no configuration or change is needed on your side. A chart appears only when the assistant judges the result to be aggregated or temporal and obviously chartable — plain lookups are returned as a table or text. No separate tool call is needed; charts come straight from `query_database`.
 
+The widget reports its own size so the assistant can fit it to the result. On hosts that support this, a small result, such as a two- or three-row table or a small chart, fits its frame with no surrounding empty space and no extra scrollbar, while larger results get the full height they need.
+
 ## Documentation map
 
 - **[Getting started](getting-started.md)** — Install SQL Lens, point it at the bundled demo database, and run your first question.
