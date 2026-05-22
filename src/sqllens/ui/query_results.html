@@ -789,9 +789,16 @@ function postSize() {
 // One observer on the root element catches every content change — initial
 // layout, table render/filter/page, chart render, theme reflow, font load —
 // and re-reports the height. ResizeObserver fires once on observe(), so the
-// initial size is reported without a separate call.
-const docResizeObserver = new ResizeObserver(() => postSize());
-docResizeObserver.observe(document.documentElement);
+// initial size is reported without a separate call. Guarded: this runs at
+// module load for every render mode (not just chart), so a missing
+// ResizeObserver must not throw and abort the script before app.connect() —
+// that would hang the widget on "Waiting for results…". Without it we still
+// report the initial size once.
+if (typeof ResizeObserver === "function") {
+  new ResizeObserver(() => postSize()).observe(document.documentElement);
+} else {
+  postSize();
+}
 
 const app = new App({ name: "sqllens-query-results", version: "1.0.0" }, {});
 app.ontoolresult = (params) => {
