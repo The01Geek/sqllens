@@ -72,8 +72,11 @@ async def test_internal_schema_introspection_is_allowed() -> None:
     lowered = prompt.lower()
     # Introspection is now explicitly allowed for internal query construction.
     assert "are allowed" in lowered
-    assert "show columns" in lowered
-    assert "describe" in lowered
+    # ...and it must be expressed as a SELECT against the catalog, because the
+    # read-only guard (src/sqllens/safety/readonly.py) only accepts
+    # SELECT-shaped statements — SHOW COLUMNS / DESCRIBE are rejected.
+    assert "information_schema" in lowered
+    assert "select against the catalog" in lowered
     # ...but the results must not leak to the user.
     assert "echoed back to the user" in lowered
     # ...and the agent still refuses an explicit "dump the schema" request.
