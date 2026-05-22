@@ -20,6 +20,8 @@ fail loudly, not silently render a blank iframe):
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 import sqllens.ui as ui
@@ -143,10 +145,18 @@ def test_widget_auto_fits_iframe_via_sdk_autoresize() -> None:
     #      `max-content` measurement cannot collapse, so it would report the
     #      full iframe height and never shrink to fit.
     html = ui.load_widget_html()
-    assert "autoResize: true" in html
-    # The SDK that actually emits the notification is inlined into the widget.
+    # autoResize must be the App's THIRD positional arg (options), not just
+    # present somewhere — the SDK reads it from `this.options`, so a regression
+    # that moved it into the capabilities arg would silently fall back to the
+    # default. Pin it directly after the empty capabilities object.
+    assert re.search(r"\{\},\s*\{\s*autoResize:\s*true\s*\}", html) is not None
+    # The size-changed-capable SDK must be inlined (vendor-drift guard); the
+    # wiring itself is exercised by the autoResize assertion above, not here.
     assert "ui/notifications/size-changed" in html
-    # The viewport-height trap must not return to chart mode.
+    # Chart mode must stay content-sized: a definite #chart height is the
+    # mechanism the SDK's `max-content` measurement relies on, and the prior
+    # viewport-height trap (`100vh`) must not return.
+    assert "#chart { height: 360px" in html
     assert "100vh" not in html
 
 
