@@ -53,6 +53,33 @@ async def test_data_confidentiality_directive_present() -> None:
     assert "decline" in lowered
 
 
+async def test_internal_schema_introspection_is_allowed() -> None:
+    """Internal schema introspection must be permitted (issue #172).
+
+    The agent has no schema source of truth except memory; on an untrained
+    connection memory is empty, so banning introspection entirely forced the
+    agent into a guess-and-retry loop over column names. The directive now
+    permits introspection for internal query construction while still
+    forbidding exposing the schema to the user, and still declines when the
+    user explicitly asks for a schema dump.
+    """
+    builder = DefaultSystemPromptBuilder()
+    user = User(id="test-user")
+
+    prompt = await builder.build_system_prompt(user, tools=[])
+
+    assert prompt is not None
+    lowered = prompt.lower()
+    # Introspection is now explicitly allowed for internal query construction.
+    assert "are allowed" in lowered
+    assert "show columns" in lowered
+    assert "describe" in lowered
+    # ...but the results must not leak to the user.
+    assert "echoed back to the user" in lowered
+    # ...and the agent still refuses an explicit "dump the schema" request.
+    assert "decline" in lowered
+
+
 class _ToolSchemaStub:
     def __init__(self, name: str) -> None:
         self.name = name
