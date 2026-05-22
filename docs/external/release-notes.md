@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 22, 2026
+
+- **[Fix] Read-only guard now allows structural `SHOW` schema-discovery commands (MySQL)** — On MySQL, the agent often runs a `SHOW TABLES` / `SHOW COLUMNS` style command to learn a database's structure before writing a query — typically the first time it sees a database, before it has built up any memory. The read-only guard previously rejected every `SHOW` statement, so these questions could fail before any query ran. The guard now accepts the read-only, structural `SHOW` variants — `SHOW TABLES`, `SHOW COLUMNS`, `SHOW DATABASES`, `SHOW INDEX`, and `SHOW CREATE TABLE`/`VIEW` — while continuing to reject information-disclosing variants such as `SHOW GRANTS`, `SHOW PROCESSLIST`, `SHOW VARIABLES`/`STATUS`, and replication-status commands. This only affects MySQL; on other databases `SHOW` is still rejected. No configuration change is required. (#170)
+
 ## May 20, 2026
 
 - **[Improvement] Executed SQL is now hidden from answers by default** — The `agent.show_details` setting now defaults to `false`, so a `query_database` answer no longer includes the SQL the agent ran. Exposing that SQL to connected clients can reveal details about your database structure and query logic, so it is now off unless you opt in. To restore the previous behavior and surface the executed SQL alongside each answer, set `show_details = true` in `sqllens.toml` or `SQLLENS_AGENT__SHOW_DETAILS=1`. **Action required if you relied on seeing the executed SQL:** set `show_details = true` after upgrading; otherwise answers are returned without the SQL block. (#152)
