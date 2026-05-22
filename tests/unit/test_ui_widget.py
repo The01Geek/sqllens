@@ -131,18 +131,21 @@ def test_widget_dispatch_pins_chart_wins_precedence() -> None:
     assert "ingestTable(meta)" in html
 
 
-def test_widget_emits_resize_notification_and_is_content_sized() -> None:
-    # Issue #174: in a sandboxed cross-origin iframe the host cannot read the
-    # document, so the widget must report its natural height via the MCP Apps
-    # `ui/notifications/resize` notification, and the document must be
-    # content-sized (no 100vh, which collapses to the host viewport and feeds
-    # back a fake height). No JS harness exists, so guard the wiring
-    # structurally: a regression that drops the reporter or reintroduces the
-    # viewport-height trap fails here instead of only in a live host.
+def test_widget_auto_fits_iframe_via_sdk_autoresize() -> None:
+    # Issue #174: in a sandboxed cross-origin iframe the host can't read the
+    # document, so the page must report its own size. The App SDK does this when
+    # constructed with `autoResize` — it emits the protocol's
+    # `ui/notifications/size-changed` with the true content height. Two things
+    # must hold for the fit to work, and neither can be exercised behaviorally
+    # (no JS harness), so guard them structurally:
+    #   1. autoResize is requested explicitly (not left to the SDK default).
+    #   2. chart mode is content-sized — no `100vh`, which the SDK's
+    #      `max-content` measurement cannot collapse, so it would report the
+    #      full iframe height and never shrink to fit.
     html = ui.load_widget_html()
-    assert "ui/notifications/resize" in html
-    assert "parent.postMessage" in html
-    assert "ResizeObserver" in html
+    assert "autoResize: true" in html
+    # The SDK that actually emits the notification is inlined into the widget.
+    assert "ui/notifications/size-changed" in html
     # The viewport-height trap must not return to chart mode.
     assert "100vh" not in html
 
