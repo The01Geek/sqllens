@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 22, 2026
+
+- **[Improvement] The agent now looks up the schema instead of guessing column names** — When SQL Lens queries an unfamiliar database it has not seen before, it can now confirm a column or table name privately before retrying, for example after a query fails with an "Unknown column" error. Previously the agent was prevented from looking up the schema at all, so it would guess names and retry repeatedly until it ran out of steps. Those lookups stay internal and are never shown to you, and SQL Lens still declines requests to list tables, dump column names, or describe your schema. No configuration change is required. (#173)
+
 ## May 20, 2026
 
 - **[Improvement] Executed SQL is now hidden from answers by default** — The `agent.show_details` setting now defaults to `false`, so a `query_database` answer no longer includes the SQL the agent ran. Exposing that SQL to connected clients can reveal details about your database structure and query logic, so it is now off unless you opt in. To restore the previous behavior and surface the executed SQL alongside each answer, set `show_details = true` in `sqllens.toml` or `SQLLENS_AGENT__SHOW_DETAILS=1`. **Action required if you relied on seeing the executed SQL:** set `show_details = true` after upgrading; otherwise answers are returned without the SQL block. (#152)
