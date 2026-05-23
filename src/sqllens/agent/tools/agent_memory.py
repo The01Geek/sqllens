@@ -13,12 +13,11 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 from sqllens.agent.core.tool import Tool, ToolContext, ToolResult
-from sqllens.agent.core.agent.config import UiFeature
 from sqllens.agent.capabilities.agent_memory import AgentMemory
 from sqllens.agent.components import (
     UiComponent,
     StatusBarUpdateComponent,
-    CardComponent,
+    StatusCardComponent,
 )
 
 
@@ -163,45 +162,37 @@ class SearchSavedCorrectToolUsesTool(Tool[SearchSavedCorrectToolUsesParams]):
                     "No similar tool usage patterns found for this question."
                 )
 
-                # Check if user has access to detailed memory results
-                ui_features_available = context.metadata.get(
-                    "ui_features_available", []
-                )
-                show_detailed_results = (
-                    UiFeature.UI_FEATURE_SHOW_MEMORY_DETAILED_RESULTS
-                    in ui_features_available
+                # Symmetric with the hit log below: a miss is observable
+                # server-side too, so operators tuning the similarity threshold
+                # see both outcomes.
+                logger.info(
+                    "Agent memory search: no matches (threshold=%.2f)", threshold
                 )
 
-                # Create UI component based on access level
-                if show_detailed_results:
-                    # Admin view: Show card indicating 0 results
-                    ui_component = UiComponent(
-                        rich_component=CardComponent(
-                            title="🧠 Memory Search: 0 Results",
-                            content="No similar tool usage patterns found for this question.\n\nSearched agent memory with no matches.",
-                            icon="🔍",
-                            status="info",
-                            collapsible=True,
-                            collapsed=True,
-                            markdown=True,
-                        ),
-                        simple_component=None,
-                    )
-                else:
-                    # Non-admin view: Simple status message
-                    ui_component = UiComponent(
-                        rich_component=StatusBarUpdateComponent(
-                            status="idle",
-                            message="No similar patterns found",
-                            detail="Searched agent memory",
-                        ),
-                        simple_component=None,
-                    )
-
+                # Emit the hit/miss signal on a STATUS_CARD whose metadata the
+                # MCP formatter (tools/_format.components_to_widgets) reads — the
+                # same seam used for the run_sql card's executed SQL. Only the
+                # aggregate fact of a miss is exposed, never matched contents.
                 return ToolResult(
                     success=True,
                     result_for_llm=no_results_msg,
-                    ui_component=ui_component,
+                    ui_component=UiComponent(
+                        rich_component=StatusCardComponent(
+                            title="Memory Search",
+                            status="info",
+                            description="No similar patterns found",
+                            icon="🧠",
+                            metadata={
+                                "memory_search": {
+                                    "searched": True,
+                                    "hit_count": 0,
+                                    "top_similarity": None,
+                                    "threshold": threshold,
+                                }
+                            },
+                        ),
+                        simple_component=None,
+                    ),
                 )
 
             # Format results for LLM
@@ -214,59 +205,44 @@ class SearchSavedCorrectToolUsesTool(Tool[SearchSavedCorrectToolUsesParams]):
 
             logger.info(f"Agent memory search results: {results_text.strip()}")
 
-            # Check if user has access to detailed memory results
-            ui_features_available = context.metadata.get("ui_features_available", [])
-            show_detailed_results = (
-                UiFeature.UI_FEATURE_SHOW_MEMORY_DETAILED_RESULTS
-                in ui_features_available
-            )
+            # Coerce to a plain float: the score may arrive as a numpy float
+            # from the ChromaDB backend, which would not survive JSON
+            # serialization into the MCP _meta channel.
+            top_similarity = float(max(result.similarity_score for result in results))
 
-            # Create UI component based on access level
-            if show_detailed_results:
-                # Admin view: Show detailed results in collapsible card
-                detailed_content = "**Retrieved memories passed to LLM:**\n\n"
-                for i, result in enumerate(results, 1):
-                    memory = result.memory
-                    detailed_content += f"**{i}. {memory.tool_name}** (similarity: {result.similarity_score:.2f})\n"
-                    detailed_content += f"- **Question:** {memory.question}\n"
-                    detailed_content += f"- **Arguments:** `{memory.args}`\n"
-                    if memory.timestamp:
-                        detailed_content += f"- **Timestamp:** {memory.timestamp}\n"
-                    if memory.memory_id:
-                        detailed_content += f"- **ID:** `{memory.memory_id}`\n"
-                    detailed_content += "\n"
-
-                ui_component = UiComponent(
-                    rich_component=CardComponent(
-                        title=f"🧠 Memory Search: {len(results)} Result(s)",
-                        content=detailed_content.strip(),
-                        icon="🔍",
-                        status="info",
-                        collapsible=True,
-                        collapsed=True,  # Start collapsed to avoid clutter
-                        markdown=True,  # Render content as markdown
-                    ),
-                    simple_component=None,
-                )
-            else:
-                # Non-admin view: Simple status message
-                ui_component = UiComponent(
-                    rich_component=StatusBarUpdateComponent(
-                        status="success",
-                        message=f"Found {len(results)} similar pattern(s)",
-                        detail="Retrieved from agent memory",
-                    ),
-                    simple_component=None,
-                )
-
+            # Emit the hit signal on a STATUS_CARD whose metadata the MCP
+            # formatter reads (same seam as the miss path and the run_sql card).
+            # Only aggregate counts/scores are exposed here — the matched
+            # questions/args stay server-side (issue #168 out-of-scope).
             return ToolResult(
                 success=True,
                 result_for_llm=results_text.strip(),
-                ui_component=ui_component,
+                ui_component=UiComponent(
+                    rich_component=StatusCardComponent(
+                        title="Memory Search",
+                        status="success",
+                        description=f"Found {len(results)} similar pattern(s)",
+                        icon="🧠",
+                        metadata={
+                            "memory_search": {
+                                "searched": True,
+                                "hit_count": len(results),
+                                "top_similarity": top_similarity,
+                                "threshold": threshold,
+                            }
+                        },
+                    ),
+                    simple_component=None,
+                ),
             )
 
         except Exception as e:
             error_message = f"Failed to search memories: {str(e)}"
+            # A search that errors emits no memory_search card, so the MCP
+            # client sees no hit/miss signal for this turn — log it server-side
+            # so the failure is not wholly silent (the hit and miss paths above
+            # both log at INFO; an error is the louder case).
+            logger.warning("Agent memory search failed: %s", e)
             return ToolResult(
                 success=False,
                 result_for_llm=error_message,

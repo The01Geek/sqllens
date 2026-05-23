@@ -120,7 +120,7 @@ async def test_query_database_returns_calltoolresult_with_meta_when_table(
                "row_count": 1, "truncated": 0}
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "| a |\n|---|\n| 1 |", payload, None, None
+        return "| a |\n|---|\n| 1 |", payload, None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -146,7 +146,7 @@ async def test_query_database_meta_carries_query_info_when_present(
                   "row_count": 1}
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "md\n\n```sql\nSELECT a FROM t\n```", payload, query_info, None
+        return "md\n\n```sql\nSELECT a FROM t\n```", payload, query_info, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -169,7 +169,7 @@ async def test_query_database_meta_query_info_without_table(
     query_info = {"sql": "SELECT 1 WHERE 1=0", "query_type": "SELECT"}
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "no rows\n\n```sql\nSELECT 1 WHERE 1=0\n```", None, query_info, None
+        return "no rows\n\n```sql\nSELECT 1 WHERE 1=0\n```", None, query_info, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -191,7 +191,7 @@ async def test_query_database_returns_conversation_meta_when_no_table(
     mcp = build_server(cfg)
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "just text", None, None, None
+        return "just text", None, None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -213,7 +213,7 @@ async def test_query_database_mints_and_threads_conversation_id(
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
         seen["conversation_id"] = conversation_id
-        return "answer", None, None, None
+        return "answer", None, None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -241,6 +241,33 @@ _CHART_PAYLOAD = {
 }
 
 
+async def test_query_database_meta_carries_memory_info_when_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Memory was searched this turn: the aggregate signal rides _meta under
+    # sqllens/memory_info, independent of show_details.
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+    memory_info = {
+        "searched": True,
+        "hit_count": 2,
+        "top_similarity": 0.83,
+        "threshold": 0.7,
+    }
+
+    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+        return "answer", None, None, None, memory_info
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
+
+    result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
+    assert isinstance(result, CallToolResult)
+    assert result.meta == {
+        "sqllens/memory_info": memory_info,
+        "sqllens/conversation": {"conversation_id": "c-1"},
+    }
+
+
 async def test_query_database_returns_chart_meta_when_chart(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -248,7 +275,7 @@ async def test_query_database_returns_chart_meta_when_chart(
     mcp = build_server(cfg)
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "rendered chart", None, None, _CHART_PAYLOAD
+        return "rendered chart", None, None, _CHART_PAYLOAD, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -278,7 +305,7 @@ async def test_query_database_attaches_both_chart_and_table(
                   "row_count": 1}
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "answer", table, query_info, _CHART_PAYLOAD
+        return "answer", table, query_info, _CHART_PAYLOAD, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
