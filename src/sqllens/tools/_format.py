@@ -168,12 +168,17 @@ def components_to_widgets(
     - Collect all DataFrame components as Markdown tables.
     - Take the *last* TEXT component as the natural-language answer (earlier
       TEXT entries are intermediate agent reasoning).
-    - Track the *terminal* STATUS_CARD status (last-wins, like every other
-      field): a status='error' card marks the turn an error, but a later
-      status='success'/'completed' card supersedes it — the agent self-corrected
-      (describe_table + retry after an "Unknown column" error) and the recovered
-      answer must reach the caller. A genuinely failing final tool call (no
-      later success) still surfaces as an error.
+    - Track the *terminal* run_sql status (last-wins, like every other field):
+      a STATUS_CARD with status='error' marks the turn an error, but a later
+      *run_sql* success card supersedes it — the agent re-issued a corrected
+      query (after an "Unknown column" error it may run a schema-introspection
+      SELECT to confirm the real column, then retry) and the recovered answer
+      must reach the caller. The clear is scoped to run_sql (a card carrying
+      ``metadata["sql"]``): a successful memory-search or chart card never
+      clears a query failure — every turn runs a memory search first, so a
+      broad clear would report a silent success on a failed query. A genuinely
+      failing final run_sql (no later run_sql success) still surfaces as an
+      error.
     - Build ``table`` from the *last* DataFrame and ``chart`` from the *last*
       ``CHART`` component (last-wins; ``query_database`` emits at most one of
       each per request, and chart > table precedence is applied by the caller
@@ -248,22 +253,32 @@ def components_to_widgets(
             last_chart = rich
         elif ctype == ComponentType.STATUS_CARD:
             status = getattr(rich, "status", "")
+            metadata = getattr(rich, "metadata", None)
+            sql = metadata.get("sql") if isinstance(metadata, dict) else None
+            is_run_sql = isinstance(sql, str) and bool(sql.strip())
             if status == "error":
                 error_message = getattr(rich, "description", "") or "Agent reported an error"
-            elif status in ("success", "completed"):
-                # A later successful tool execution supersedes an earlier failure
-                # within the same turn: the agent self-corrected (the system
-                # prompt mandates describe_table + retry after "Unknown column" /
-                # "no such column" / "no such table"), so the recovered answer
-                # must reach the caller. Mirrors the last-wins semantics every
-                # other accumulator in this loop already uses; only a *terminal*
-                # success clears, never the intermediate "running" card.
-                error_message = ""
-            metadata = getattr(rich, "metadata", None)
+            elif status == "success" and is_run_sql:
+                # A successful run_sql supersedes an earlier failure within the
+                # same turn: the agent re-issued a corrected query (after an
+                # "Unknown column" error it may run a schema-introspection SELECT
+                # to confirm the real column, then retry — see the system prompt)
+                # and the retry's completion card reports success, so the
+                # recovered answer must reach the caller. The clear is scoped to
+                # run_sql (a card carrying metadata["sql"]): a successful
+                # memory-search or chart card must NOT mask a query failure —
+                # every turn runs a memory search first, so a broad clear would
+                # let any failed query report a silent success. A genuinely
+                # failing final run_sql (no later run_sql success) still errors.
+                if error_message:
+                    logger.info(
+                        "run_sql error superseded by a later successful run_sql "
+                        "in the same turn; surfacing the recovered answer"
+                    )
+                    error_message = ""
+            if is_run_sql:
+                last_sql = sql
             if isinstance(metadata, dict):
-                sql = metadata.get("sql")
-                if isinstance(sql, str) and sql.strip():
-                    last_sql = sql
                 memory_search = metadata.get("memory_search")
                 if isinstance(memory_search, dict):
                     last_memory = memory_search

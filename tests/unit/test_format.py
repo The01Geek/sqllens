@@ -76,10 +76,10 @@ def test_error_status_card_wins_over_text_and_tables() -> None:
 
 
 def test_self_correction_success_supersedes_earlier_error() -> None:
-    # The agent's first SQL guess fails ("Unknown column"), it self-corrects
-    # (describe_table + retry per the system prompt), the retry succeeds, and a
-    # final TEXT answer is produced. The earlier error card must NOT poison the
-    # turn — a later successful card supersedes it (terminal-status last-wins).
+    # The agent's first SQL guess fails ("Unknown column"), it re-issues a
+    # corrected run_sql, the retry succeeds, and a final TEXT answer is produced.
+    # The earlier error card must NOT poison the turn — a later *run_sql* success
+    # supersedes it (terminal run_sql status last-wins).
     stream = [
         _ui(
             StatusCardComponent(
@@ -114,7 +114,13 @@ def test_error_after_recovery_still_surfaces_as_error() -> None:
     # later error, no further recovery) must still surface as an error, so the
     # self-correction fix doesn't swallow real failures.
     stream = [
-        _ui(StatusCardComponent(title="Executing run_sql", status="success")),
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="success",
+                metadata={"sql": "SELECT 1"},
+            )
+        ),
         _ui(RichTextComponent(content="intermediate reasoning")),
         _ui(
             StatusCardComponent(
@@ -127,6 +133,70 @@ def test_error_after_recovery_still_surfaces_as_error() -> None:
     msg, is_error = components_to_markdown(stream)
     assert is_error is True
     assert msg == "permission denied for table users"
+
+
+def test_memory_search_success_does_not_clear_run_sql_error() -> None:
+    # The dominant silent-success trap: a memory search runs (and succeeds) on
+    # essentially every turn, emitting a status="success" STATUS_CARD. It must
+    # NOT clear a real run_sql failure — only a *run_sql* success may. A failed
+    # query followed by a successful memory search and a give-up TEXT must still
+    # surface as an error, never a silent success with an apology answer.
+    stream = [
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="error",
+                description='Tool failed: (1054, "Unknown column \'order_date\'")',
+                metadata={"sql": "SELECT COUNT(*) FROM orders WHERE order_date > NOW()"},
+            )
+        ),
+        _ui(
+            StatusCardComponent(
+                title="Memory Search",
+                status="success",
+                description="Found 2 similar pattern(s)",
+                metadata={"memory_search": {"searched": True, "hit_count": 2}},
+            )
+        ),
+        _ui(RichTextComponent(content="Sorry, I was unable to retrieve the data.")),
+    ]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is True
+    assert "Unknown column" in msg
+
+
+def test_failed_retry_after_recovery_re_arms_error() -> None:
+    # error -> run_sql success -> run_sql error: the agent recovered once, then
+    # the next query failed too. Terminal run_sql status is the second error, so
+    # the turn must surface as an error (last-wins re-arms after a clear).
+    stream = [
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="error",
+                description="first failure",
+                metadata={"sql": "SELECT a FROM t"},
+            )
+        ),
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="success",
+                metadata={"sql": "SELECT 1"},
+            )
+        ),
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="error",
+                description="second failure",
+                metadata={"sql": "SELECT b FROM t"},
+            )
+        ),
+    ]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is True
+    assert msg == "second failure"
 
 
 def test_last_text_component_survives() -> None:
