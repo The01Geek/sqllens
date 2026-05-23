@@ -165,6 +165,76 @@ def test_memory_search_success_does_not_clear_run_sql_error() -> None:
     assert "Unknown column" in msg
 
 
+def test_introspection_success_does_not_clear_run_sql_error() -> None:
+    # The system prompt has the agent run a schema-introspection SELECT
+    # (information_schema / SHOW) to confirm a column after an "Unknown column"
+    # error. That introspection runs through the same run_sql tool and succeeds,
+    # but it is a step toward an answer, not the answer. If the agent then gives
+    # up without a successful *data* retry, the original failure must still
+    # surface — an introspection success must not clear it.
+    stream = [
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="error",
+                description='Tool failed: Unknown column "order_date"',
+                metadata={"sql": "SELECT COUNT(*) FROM orders WHERE order_date > NOW()"},
+            )
+        ),
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="success",
+                metadata={
+                    "sql": "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'orders'"
+                },
+            )
+        ),
+        _ui(RichTextComponent(content="I could not find an order_date column.")),
+    ]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is True
+    assert "Unknown column" in msg
+
+
+def test_data_retry_after_introspection_clears_error() -> None:
+    # The full self-correction path: data query fails, the agent introspects
+    # (success, but does not clear), then re-runs a corrected *data* query that
+    # succeeds. The terminal data run_sql success clears the error.
+    stream = [
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="error",
+                description="Unknown column",
+                metadata={"sql": "SELECT * FROM orders WHERE order_date > NOW()"},
+            )
+        ),
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="success",
+                metadata={"sql": "SELECT column_name FROM information_schema.columns"},
+            )
+        ),
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="success",
+                metadata={"sql": "SELECT * FROM orders WHERE invoice_date > NOW()"},
+            )
+        ),
+        _ui(DataFrameComponent(rows=[{"id": 1}])),
+        _ui(RichTextComponent(content="There is 1 order.")),
+    ]
+    markdown, is_error, _, query_info, _, _ = components_to_widgets(stream)
+    assert is_error is False
+    assert "There is 1 order." in markdown
+    assert query_info is not None
+    assert query_info["sql"] == "SELECT * FROM orders WHERE invoice_date > NOW()"
+
+
 def test_failed_retry_after_recovery_re_arms_error() -> None:
     # error -> run_sql success -> run_sql error: the agent recovered once, then
     # the next query failed too. Terminal run_sql status is the second error, so

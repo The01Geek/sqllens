@@ -18,6 +18,7 @@ from sqllens.safety import ReadOnlyGuardRunner
 from sqllens.safety.readonly import (
     UnsafeSqlError,
     assert_select_only,
+    is_introspection_query,
     is_read_shaped,
 )
 
@@ -589,3 +590,44 @@ class TestShowIsReadShaped:
     )
     def test_show_is_read_shaped(self, sql: str) -> None:
         assert is_read_shaped(sql) is True
+
+
+class TestIsIntrospectionQuery:
+    """Distinguish schema-introspection reads from data-answering queries.
+
+    The MCP formatter uses this to decide whether a successful run_sql is a
+    *recovered answer* (data query) or merely a step toward one (introspection),
+    so an introspection success cannot mask an earlier query failure.
+    """
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SHOW TABLES",
+            "SHOW COLUMNS FROM orders",
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'orders'",
+            "SELECT * FROM information_schema.tables",
+            "select name from sqlite_master where type = 'table'",
+            "SELECT relname FROM pg_catalog.pg_class",
+            "SELECT * FROM pg_attribute",
+        ],
+    )
+    def test_introspection_queries_detected(self, sql: str) -> None:
+        assert is_introspection_query(sql) is True
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT COUNT(*) FROM orders WHERE invoice_date > NOW()",
+            "SELECT id, name FROM customers",
+            "WITH recent AS (SELECT * FROM orders) SELECT * FROM recent",
+            "SELECT * FROM sales JOIN regions ON sales.region_id = regions.id",
+        ],
+    )
+    def test_data_queries_not_flagged(self, sql: str) -> None:
+        assert is_introspection_query(sql) is False
+
+    def test_unparsable_sql_treated_as_data_query(self) -> None:
+        # Fail-open-to-False: a query we cannot parse is not classified as
+        # introspection, so it does not silently withhold a recovered answer.
+        assert is_introspection_query("this is not sql ;;;") is False

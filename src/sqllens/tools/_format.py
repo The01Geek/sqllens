@@ -20,7 +20,7 @@ from decimal import Decimal
 
 from sqllens.agent.core.components import UiComponent
 from sqllens.agent.core.rich_component import ComponentType
-from sqllens.safety import first_sql_keyword
+from sqllens.safety import first_sql_keyword, is_introspection_query
 
 logger = logging.getLogger("sqllens.tools._format")
 
@@ -168,17 +168,17 @@ def components_to_widgets(
     - Collect all DataFrame components as Markdown tables.
     - Take the *last* TEXT component as the natural-language answer (earlier
       TEXT entries are intermediate agent reasoning).
-    - Track the *terminal* run_sql status (last-wins, like every other field):
-      a STATUS_CARD with status='error' marks the turn an error, but a later
-      *run_sql* success card supersedes it — the agent re-issued a corrected
-      query (after an "Unknown column" error it may run a schema-introspection
-      SELECT to confirm the real column, then retry) and the recovered answer
-      must reach the caller. The clear is scoped to run_sql (a card carrying
-      ``metadata["sql"]``): a successful memory-search or chart card never
-      clears a query failure — every turn runs a memory search first, so a
-      broad clear would report a silent success on a failed query. A genuinely
-      failing final run_sql (no later run_sql success) still surfaces as an
-      error.
+    - Track the *terminal* data-run_sql status (last-wins, like every other
+      field): a STATUS_CARD with status='error' marks the turn an error, but a
+      later *data* run_sql success card supersedes it — the agent re-issued a
+      corrected query and the recovered answer must reach the caller. The clear
+      is scoped two ways so it cannot mask a real failure: (1) run_sql only (a
+      card carrying ``metadata["sql"]``) — a successful memory-search or chart
+      card never clears a query failure; (2) not a schema-introspection read
+      (``is_introspection_query``) — the agent runs an information_schema / SHOW
+      lookup to confirm a column before retrying, so an introspection success is
+      a step toward an answer, not the answer. A genuinely failing final data
+      run_sql (no later data run_sql success) still surfaces as an error.
     - Build ``table`` from the *last* DataFrame and ``chart`` from the *last*
       ``CHART`` component (last-wins; ``query_database`` emits at most one of
       each per request, and chart > table precedence is applied by the caller
@@ -258,18 +258,23 @@ def components_to_widgets(
             is_run_sql = isinstance(sql, str) and bool(sql.strip())
             if status == "error":
                 error_message = getattr(rich, "description", "") or "Agent reported an error"
-            elif status == "success" and is_run_sql:
-                # A successful run_sql supersedes an earlier failure within the
-                # same turn: the agent re-issued a corrected query (after an
-                # "Unknown column" error it may run a schema-introspection SELECT
-                # to confirm the real column, then retry — see the system prompt)
-                # and the retry's completion card reports success, so the
-                # recovered answer must reach the caller. The clear is scoped to
-                # run_sql (a card carrying metadata["sql"]): a successful
-                # memory-search or chart card must NOT mask a query failure —
-                # every turn runs a memory search first, so a broad clear would
-                # let any failed query report a silent success. A genuinely
-                # failing final run_sql (no later run_sql success) still errors.
+            elif status == "success" and is_run_sql and not is_introspection_query(sql):
+                # A successful *data* run_sql supersedes an earlier failure within
+                # the same turn: the agent re-issued a corrected query and the
+                # retry's completion card reports success, so the recovered answer
+                # must reach the caller. The clear is scoped two ways so it can't
+                # mask a real failure:
+                #   1. run_sql only (a card carrying metadata["sql"]) — a
+                #      successful memory-search or chart card must NOT clear, and
+                #      a memory search runs before the query on most turns.
+                #   2. NOT a schema-introspection read — the system prompt has the
+                #      agent run an information_schema / SHOW lookup to confirm a
+                #      column before retrying, so an introspection success is a
+                #      step toward an answer, not the answer. Counting it would
+                #      let "data query failed → introspect → give up" report a
+                #      silent success.
+                # A genuinely failing final run_sql (no later *data* run_sql
+                # success) still surfaces as an error.
                 if error_message:
                     logger.info(
                         "run_sql error superseded by a later successful run_sql "
