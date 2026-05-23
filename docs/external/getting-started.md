@@ -59,7 +59,7 @@ Note: A slow startup or first query never blocks the server from accepting reque
 
 Expected answer: 2 albums.
 
-On Claude Desktop or claude.ai, each `query_database` answer is also shown as an interactive widget alongside the same plain-text answer. A result that contains a table appears as an interactive grid you can sort, filter, page through, and export to CSV. A chart-shaped result appears as an interactive Apache ECharts widget (bar, line, area, scatter, pie, or heatmap) that follows the assistant's theme and resizes responsively. Other assistants display the Markdown text answer only. No setup is required either way.
+On Claude Desktop or claude.ai, each `query_database` answer is also shown as an interactive widget alongside the same plain-text answer. A result that contains a table appears as an interactive grid you can sort, filter, page through, and export to CSV. A chart-shaped result appears as an interactive Apache ECharts widget (bar, line, area, scatter, pie, or heatmap) that follows the assistant's theme and resizes responsively. The widget reports its own size, so on hosts that support this a small result fits its frame with no surrounding empty space and no extra scrollbar, while larger results get the full height they need. Other assistants display the Markdown text answer only. No setup is required either way.
 
 ### Asking for a chart
 
