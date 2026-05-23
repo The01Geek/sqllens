@@ -5,6 +5,7 @@ This page lists user-visible changes in each released version of SQL Lens. For t
 ## May 22, 2026
 
 - **[Fix] Interactive results now fit their frame** — On assistants that render inline app widgets (currently Claude Desktop and claude.ai), small `query_database` results, such as a two- or three-row table or a small chart, previously appeared with empty space around them or an extra scrollbar because the widget did not report its true height to the assistant. The widget now reports its own content size, so on hosts that support this a small result fits its frame with no surrounding empty space and no extra scrollbar, while larger results get the full height they need. No configuration change is required, and standalone viewers such as the MCP Inspector are unaffected. (#175)
+- **[Improvement] The agent now looks up the schema instead of guessing column names** — When SQL Lens queries an unfamiliar database it has not seen before, it can now confirm a column or table name privately before retrying, for example after a query fails with an "Unknown column" error. Previously the agent was prevented from looking up the schema at all, so it would guess names and retry repeatedly until it ran out of steps. Those lookups stay internal and are never shown to you, and SQL Lens still declines requests to list tables, dump column names, or describe your schema. No configuration change is required. (#173)
 
 ## May 20, 2026
 
