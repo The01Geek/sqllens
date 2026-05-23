@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 22, 2026
+
+- **[Improvement] The agent now looks up the schema instead of guessing column names** — When SQL Lens queries an unfamiliar database it has not seen before, it can now confirm a column or table name privately before retrying, for example after a query fails with an "Unknown column" error. Previously the agent was prevented from looking up the schema at all, so it would guess names and retry repeatedly until it ran out of steps. Those lookups stay internal and are never shown to you, and SQL Lens still declines requests to list tables, dump column names, or describe your schema. No configuration change is required. (#173)
+
 ## May 21, 2026
 
 - **[Feature] Surface a memory hit-or-miss summary with each answer** — SQL Lens now reports the result of its memory lookup for a question, so you can see when the assistant reused something it had learned before. A new `agent.show_memory_details` setting (default `false`, environment variable `SQLLENS_AGENT__SHOW_MEMORY_DETAILS`) adds a one-line footer to each answer such as `Memory: 2 hits (top similarity 0.83)` on a match or `Memory: no matches` when nothing relevant was found; only counts and similarity scores are shown, never the content of remembered questions or answers. On hosts that support structured tool metadata, the same summary is always available to the host regardless of this setting. See [Configuration reference](configuration.md#section-agent). (#169)
