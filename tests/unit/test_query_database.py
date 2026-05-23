@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from sqllens.config import Config
+from sqllens.config import AgentRuntimeConfig, Config
 from sqllens.safety import UnsafeSqlError
 from sqllens.tools import _agent as agent_module
 from sqllens.tools.query_database import (
@@ -466,8 +466,8 @@ async def test_with_widgets_returns_chart_payload(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, table, _query_info, chart = await query_database_impl_with_widgets(
-        cfg, "revenue per genre"
+    markdown, table, _query_info, chart, _memory_info = (
+        await query_database_impl_with_widgets(cfg, "revenue per genre")
     )
 
     assert "Here is the chart:" in markdown
@@ -503,8 +503,8 @@ async def test_with_widgets_chart_and_dataframe_both_present(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, table, _query_info, chart = await query_database_impl_with_widgets(
-        cfg, "revenue per genre"
+    markdown, table, _query_info, chart, _memory_info = (
+        await query_database_impl_with_widgets(cfg, "revenue per genre")
     )
 
     # Markdown (the non-apps fallback) still carries the data table + answer.
@@ -529,14 +529,118 @@ async def test_with_widgets_text_only_returns_none_payloads(
     stub = agent_stub_factory([make_text_component("no widget for this one")])
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, table, query_info, chart = await query_database_impl_with_widgets(
-        cfg, "q"
+    markdown, table, query_info, chart, memory_info = (
+        await query_database_impl_with_widgets(cfg, "q")
     )
 
     assert markdown == "no widget for this one"
     assert table is None
     assert query_info is None
     assert chart is None
+    assert memory_info is None
+
+
+def _memory_card(*, hit_count: int, top_similarity: float | None, threshold: float = 0.7):
+    """Build the memory-search STATUS_CARD the search tool emits on a turn.
+
+    Mirrors ``SearchSavedCorrectToolUsesTool.execute``: a STATUS_CARD whose
+    ``metadata["memory_search"]`` carries the aggregate hit/miss signal.
+    """
+    return make_status_card(
+        title="Memory Search",
+        status="success" if hit_count else "info",
+        description="Found patterns" if hit_count else "No similar patterns found",
+        metadata={
+            "memory_search": {
+                "searched": True,
+                "hit_count": hit_count,
+                "top_similarity": top_similarity,
+                "threshold": threshold,
+            }
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_with_widgets_memory_info_surfaced_regardless_of_footer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """memory_info is returned whenever memory was searched; the Markdown footer
+    is gated on show_memory_details (default OFF → no footer, but signal present)."""
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")  # show_memory_details default OFF
+    stub = agent_stub_factory(
+        [
+            _memory_card(hit_count=2, top_similarity=0.83),
+            make_text_component("the answer"),
+        ]
+    )
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    markdown, _table, _query_info, _chart, memory_info = (
+        await query_database_impl_with_widgets(cfg, "q")
+    )
+
+    assert memory_info == {
+        "searched": True,
+        "hit_count": 2,
+        "top_similarity": 0.83,
+        "threshold": 0.7,
+    }
+    # Footer suppressed with the flag off.
+    assert "_Memory:" not in markdown
+    assert markdown == "the answer"
+
+
+@pytest.mark.asyncio
+async def test_with_widgets_memory_hit_footer_when_flag_on(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        agent=AgentRuntimeConfig(show_memory_details=True),
+    )
+    stub = agent_stub_factory(
+        [
+            _memory_card(hit_count=2, top_similarity=0.83),
+            make_text_component("the answer"),
+        ]
+    )
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    markdown, _table, _query_info, _chart, _memory_info = (
+        await query_database_impl_with_widgets(cfg, "q")
+    )
+
+    assert markdown.endswith("_Memory: 2 hits (top similarity 0.83)_")
+
+
+@pytest.mark.asyncio
+async def test_with_widgets_memory_miss_footer_when_flag_on(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        agent=AgentRuntimeConfig(show_memory_details=True),
+    )
+    stub = agent_stub_factory(
+        [
+            _memory_card(hit_count=0, top_similarity=None),
+            make_text_component("the answer"),
+        ]
+    )
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    markdown, _table, _query_info, _chart, _memory_info = (
+        await query_database_impl_with_widgets(cfg, "q")
+    )
+
+    assert markdown.endswith("_Memory: no matches_")
 
 
 @pytest.mark.asyncio
@@ -614,6 +718,37 @@ def test_append_sql_block_returns_unchanged_on_malformed_query_info() -> None:
     assert _append_sql_block("md", {"query_type": "SELECT"}) == "md"
     assert _append_sql_block("md", {"sql": ""}) == "md"
     assert _append_sql_block("md", {"sql": None}) == "md"
+
+
+def test_append_memory_footer_singular_and_plural_and_no_similarity() -> None:
+    # Pins the client-visible footer literals, including the singular "1 hit"
+    # branch (plural = "" when hit_count == 1) and the no-top_similarity
+    # fallback — neither of which the higher-level footer tests exercise.
+    from sqllens.tools.query_database import _append_memory_footer
+
+    one_hit = {"searched": True, "hit_count": 1, "top_similarity": 0.9, "threshold": 0.7}
+    assert _append_memory_footer("answer", one_hit) == (
+        "answer\n\n_Memory: 1 hit (top similarity 0.90)_"
+    )
+    two_hits = {"searched": True, "hit_count": 2, "top_similarity": 0.5, "threshold": 0.7}
+    assert _append_memory_footer("answer", two_hits).endswith(
+        "_Memory: 2 hits (top similarity 0.50)_"
+    )
+    # A hit with a non-numeric top_similarity (degraded future producer) falls
+    # back to the count-only form rather than crashing on :.2f formatting.
+    no_sim = {"searched": True, "hit_count": 3, "top_similarity": None, "threshold": 0.7}
+    assert _append_memory_footer("answer", no_sim).endswith("_Memory: 3 hits_")
+
+
+def test_append_memory_footer_returns_unchanged_on_falsy_or_unsearched() -> None:
+    # Defensive branches mirroring the _append_sql_block contract: falsy
+    # memory_info, or a payload whose searched flag is false, must return the
+    # markdown byte-for-byte unchanged (no stray footer).
+    from sqllens.tools.query_database import _append_memory_footer
+
+    assert _append_memory_footer("md", None) == "md"
+    assert _append_memory_footer("md", {}) == "md"
+    assert _append_memory_footer("md", {"searched": False, "hit_count": 0}) == "md"
 
 
 @pytest.mark.asyncio

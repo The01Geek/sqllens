@@ -158,8 +158,8 @@ def render_interactive(components: Iterable[UiComponent]) -> str:
 
 def components_to_widgets(
     components: Iterable[UiComponent],
-) -> tuple[str, bool, dict | None, dict | None, dict | None]:
-    """Collapse a component stream into ``(markdown, is_error, table, query_info, chart)``.
+) -> tuple[str, bool, dict | None, dict | None, dict | None, dict | None]:
+    """Collapse a stream into ``(markdown, is_error, table, query_info, chart, memory_info)``.
 
     The single source of truth behind the consolidated ``query_database`` tool
     and the narrower :func:`components_to_table` / :func:`components_to_chart` /
@@ -178,10 +178,25 @@ def components_to_widgets(
       identical metadata, so last-wins de-dupes it idempotently. The card is
       only emitted when ``agent.show_details`` unlocked the tool-arguments
       feature; with it off, no SQL is ever seen here.
+    - Capture the memory hit/miss signal from the *last* ``search_saved_correct
+      _tool_uses`` STATUS_CARD's ``metadata["memory_search"]`` (same seam as the
+      executed SQL above). Unlike the SQL card, the memory card is the tool's
+      own ``ui_component`` — always yielded on the tool's success path,
+      independent of ``agent.show_details`` — so ``memory_info`` is surfaced
+      whenever a memory search *completes* (a hit or a miss) this turn. A search
+      that *errors* emits no ``memory_search`` card (it yields a status-bar
+      error component instead, logged server-side), so it leaves
+      ``memory_info`` ``None`` — indistinguishable here from "did not search".
 
     ``table`` / ``chart`` are ``None`` on the error path, when the
     corresponding component is absent, when its data is empty, or when even the
     header-only / data-stripped serialized form exceeds the size budget.
+
+    ``memory_info`` is ``None`` on the error path and whenever no memory-search
+    card was seen — which covers both "the agent answered without consulting
+    memory" and "a memory search was attempted but errored". When present it is
+    the aggregate ``{"searched", "hit_count", "top_similarity", "threshold"}``
+    payload — never the matched memory contents.
 
     ``query_info`` is ``None`` whenever no executed SQL is surfaced. The
     config-independent invariant: a guard-rejected non-SELECT (the default
@@ -207,6 +222,7 @@ def components_to_widgets(
     last_df = None
     last_chart = None
     last_sql: str | None = None
+    last_memory: dict | None = None
 
     for comp in components:
         rich = comp.rich_component
@@ -233,9 +249,12 @@ def components_to_widgets(
                 sql = metadata.get("sql")
                 if isinstance(sql, str) and sql.strip():
                     last_sql = sql
+                memory_search = metadata.get("memory_search")
+                if isinstance(memory_search, dict):
+                    last_memory = memory_search
 
     if error_message:
-        return error_message, True, None, None, None
+        return error_message, True, None, None, None, None
 
     parts = list(tables)
     if text_answer:
@@ -258,7 +277,7 @@ def components_to_widgets(
             else None
         )
         query_info = _query_info_from_sql(last_sql, row_count)
-    return markdown, False, table, query_info, chart
+    return markdown, False, table, query_info, chart, last_memory
 
 
 def components_to_table(
@@ -266,9 +285,10 @@ def components_to_table(
 ) -> tuple[str, bool, dict | None, dict | None]:
     """Collapse a component stream into ``(markdown, is_error, table, query_info)``.
 
-    Thin view over :func:`components_to_widgets` that drops the chart payload.
+    Thin view over :func:`components_to_widgets` that drops the chart and
+    memory-info payloads.
     """
-    markdown, is_error, table, query_info, _ = components_to_widgets(components)
+    markdown, is_error, table, query_info, _, _ = components_to_widgets(components)
     return markdown, is_error, table, query_info
 
 
@@ -280,7 +300,7 @@ def components_to_markdown(components: Iterable[UiComponent]) -> tuple[str, bool
     already depend on (the Markdown branch is unchanged — pinned by
     ``tests/unit/test_format.py``).
     """
-    markdown, is_error, _, _, _ = components_to_widgets(components)
+    markdown, is_error, _, _, _, _ = components_to_widgets(components)
     return markdown, is_error
 
 
@@ -293,7 +313,7 @@ def components_to_chart(
     payload. The structured payload is built from the *last* ``CHART``
     component in the stream (``emit_chart`` runs once per request).
     """
-    markdown, is_error, _, _, chart = components_to_widgets(components)
+    markdown, is_error, _, _, chart, _ = components_to_widgets(components)
     return markdown, is_error, chart
 
 

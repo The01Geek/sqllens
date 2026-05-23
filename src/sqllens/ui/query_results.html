@@ -110,9 +110,15 @@
     font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     white-space: pre-wrap; word-break: break-word;
   }
-  /* Chart mode: the chart host fills the iframe and the canvas/SVG flexes. */
-  .charthost { display: flex; flex-direction: column; height: calc(100vh - 16px); }
-  .charthost #chart { flex: 1 1 auto; min-height: 220px; width: 100%; }
+  /* Chart mode: a definite chart height so the document sizes to its content.
+     The App SDK's autoResize measures content height by briefly forcing
+     documentElement to `max-content`, but that does NOT collapse a
+     viewport-height (vh) value — vh resolves against the iframe viewport, not
+     the ancestor — so a viewport-relative chart-host height would keep
+     reporting the full iframe height and never shrink to fit. A definite
+     height lets the measurement see the real content size; see issue #174. */
+  .charthost { display: flex; flex-direction: column; }
+  .charthost #chart { height: 360px; width: 100%; }
   .charthost .note { color: var(--muted); font-size: 12px; padding: 4px 2px 0; }
 </style>
 </head>
@@ -759,7 +765,21 @@ function showNotice(text) {
   host.appendChild(d);
 }
 
-const app = new App({ name: "sqllens-query-results", version: "1.0.0" }, {});
+// Host iframe auto-fit (issue #174). MCP App hosts render this widget in a
+// sandboxed cross-origin iframe and can't read the document to size the frame,
+// so the page must report its own size. The App SDK already does this: with
+// `autoResize` enabled it observes the document and emits the protocol's
+// `ui/notifications/size-changed` ({width, height}) with the true content
+// height (it measures by briefly forcing documentElement to `max-content`).
+// We pass it explicitly rather than leaning on the SDK default so an upstream
+// default flip can't silently disable auto-fit. The only widget-side
+// requirement is that the document be content-sized — hence the chart host's
+// definite height above (a viewport-height value would defeat the measurement).
+const app = new App(
+  { name: "sqllens-query-results", version: "1.0.0" },
+  {},
+  { autoResize: true }
+);
 app.ontoolresult = (params) => {
   // Without this boundary a malformed payload throws into the SDK's message
   // dispatcher and the widget freezes on "Waiting for results…" with no

@@ -20,6 +20,8 @@ fail loudly, not silently render a blank iframe):
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 import sqllens.ui as ui
@@ -129,6 +131,33 @@ def test_widget_dispatch_pins_chart_wins_precedence() -> None:
     assert "chartPayload.data.length > 0" in html
     assert "ingestChart(chartPayload)" in html
     assert "ingestTable(meta)" in html
+
+
+def test_widget_auto_fits_iframe_via_sdk_autoresize() -> None:
+    # Issue #174: in a sandboxed cross-origin iframe the host can't read the
+    # document, so the page must report its own size. The App SDK does this when
+    # constructed with `autoResize` — it emits the protocol's
+    # `ui/notifications/size-changed` with the true content height. Two things
+    # must hold for the fit to work, and neither can be exercised behaviorally
+    # (no JS harness), so guard them structurally:
+    #   1. autoResize is requested explicitly (not left to the SDK default).
+    #   2. chart mode is content-sized — no `100vh`, which the SDK's
+    #      `max-content` measurement cannot collapse, so it would report the
+    #      full iframe height and never shrink to fit.
+    html = ui.load_widget_html()
+    # autoResize must be the App's THIRD positional arg (options), not just
+    # present somewhere — the SDK reads it from `this.options`, so a regression
+    # that moved it into the capabilities arg would silently fall back to the
+    # default. Pin it directly after the empty capabilities object.
+    assert re.search(r"\{\},\s*\{\s*autoResize:\s*true\s*\}", html) is not None
+    # The size-changed-capable SDK must be inlined (vendor-drift guard); the
+    # wiring itself is exercised by the autoResize assertion above, not here.
+    assert "ui/notifications/size-changed" in html
+    # Chart mode must stay content-sized: a definite #chart height is the
+    # mechanism the SDK's `max-content` measurement relies on, and the prior
+    # viewport-height trap (`100vh`) must not return.
+    assert "#chart { height: 360px" in html
+    assert "100vh" not in html
 
 
 def test_successful_read_is_cached(monkeypatch) -> None:
