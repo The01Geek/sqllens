@@ -31,11 +31,15 @@ def make_status_card(
     title: str = "Error",
     status: str = "error",
     description: str = "something failed",
+    metadata: dict[str, Any] | None = None,
 ) -> UiComponent:
     """Build a UiComponent wrapping a StatusCardComponent."""
     return UiComponent(
         rich_component=StatusCardComponent(
-            title=title, status=status, description=description
+            title=title,
+            status=status,
+            description=description,
+            metadata=metadata or {},
         )
     )
 

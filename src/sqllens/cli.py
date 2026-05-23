@@ -617,6 +617,9 @@ similarity_threshold = 0.7
 # show_details = false   # set true to append the generated SQL to query
                          # answers. OFF by default: exposing the SQL to MCP
                          # clients can leak schema details and query logic.
+# show_memory_details = false  # set true to append a one-line memory hit/miss
+                         # footer to query answers. OFF by default. Aggregate
+                         # signal only (counts/scores) — never matched contents.
 
 [auth]
 mode = "none"            # one of: none, bearer (jwt is not implemented yet)
