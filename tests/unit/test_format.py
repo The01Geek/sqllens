@@ -75,6 +75,60 @@ def test_error_status_card_wins_over_text_and_tables() -> None:
     assert "intermediate" not in msg
 
 
+def test_self_correction_success_supersedes_earlier_error() -> None:
+    # The agent's first SQL guess fails ("Unknown column"), it self-corrects
+    # (describe_table + retry per the system prompt), the retry succeeds, and a
+    # final TEXT answer is produced. The earlier error card must NOT poison the
+    # turn — a later successful card supersedes it (terminal-status last-wins).
+    stream = [
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="error",
+                description='Tool failed: (1054, "Unknown column \'order_date\'")',
+                metadata={"sql": "SELECT COUNT(*) FROM orders WHERE order_date > NOW()"},
+            )
+        ),
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="success",
+                description="Tool completed successfully",
+                metadata={"sql": "SELECT COUNT(*) FROM orders WHERE time > NOW()"},
+            )
+        ),
+        _ui(DataFrameComponent(rows=[{"count": 0}])),
+        _ui(RichTextComponent(content="There are 0 orders in the last 10 days.")),
+    ]
+    markdown, is_error, table, query_info, _, _ = components_to_widgets(stream)
+    assert is_error is False
+    assert "There are 0 orders in the last 10 days." in markdown
+    assert table is not None
+    # The retried (successful) SQL wins last, not the failed first guess.
+    assert query_info is not None
+    assert query_info["sql"] == "SELECT COUNT(*) FROM orders WHERE time > NOW()"
+
+
+def test_error_after_recovery_still_surfaces_as_error() -> None:
+    # The inverse guard: a genuinely failing *final* tool call (success then a
+    # later error, no further recovery) must still surface as an error, so the
+    # self-correction fix doesn't swallow real failures.
+    stream = [
+        _ui(StatusCardComponent(title="Executing run_sql", status="success")),
+        _ui(RichTextComponent(content="intermediate reasoning")),
+        _ui(
+            StatusCardComponent(
+                title="Query failed",
+                status="error",
+                description="permission denied for table users",
+            )
+        ),
+    ]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is True
+    assert msg == "permission denied for table users"
+
+
 def test_last_text_component_survives() -> None:
     stream = [
         _ui(RichTextComponent(content="first thought")),

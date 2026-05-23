@@ -168,7 +168,12 @@ def components_to_widgets(
     - Collect all DataFrame components as Markdown tables.
     - Take the *last* TEXT component as the natural-language answer (earlier
       TEXT entries are intermediate agent reasoning).
-    - If any STATUS_CARD with status='error' appears, report it as an error.
+    - Track the *terminal* STATUS_CARD status (last-wins, like every other
+      field): a status='error' card marks the turn an error, but a later
+      status='success'/'completed' card supersedes it — the agent self-corrected
+      (describe_table + retry after an "Unknown column" error) and the recovered
+      answer must reach the caller. A genuinely failing final tool call (no
+      later success) still surfaces as an error.
     - Build ``table`` from the *last* DataFrame and ``chart`` from the *last*
       ``CHART`` component (last-wins; ``query_database`` emits at most one of
       each per request, and chart > table precedence is applied by the caller
@@ -242,8 +247,18 @@ def components_to_widgets(
         elif ctype == ComponentType.CHART:
             last_chart = rich
         elif ctype == ComponentType.STATUS_CARD:
-            if getattr(rich, "status", "") == "error":
+            status = getattr(rich, "status", "")
+            if status == "error":
                 error_message = getattr(rich, "description", "") or "Agent reported an error"
+            elif status in ("success", "completed"):
+                # A later successful tool execution supersedes an earlier failure
+                # within the same turn: the agent self-corrected (the system
+                # prompt mandates describe_table + retry after "Unknown column" /
+                # "no such column" / "no such table"), so the recovered answer
+                # must reach the caller. Mirrors the last-wins semantics every
+                # other accumulator in this loop already uses; only a *terminal*
+                # success clears, never the intermediate "running" card.
+                error_message = ""
             metadata = getattr(rich, "metadata", None)
             if isinstance(metadata, dict):
                 sql = metadata.get("sql")
