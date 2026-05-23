@@ -149,7 +149,13 @@ sqllens export-memory PATH [--format json|csv] [-c CONFIG]
 
 `build_server` ([src/sqllens/server.py](../../../src/sqllens/server.py)) registers a third tool, `import_memory(bundle_json: str)`, **only when `cfg.memory.allow_import` is true**. The flag is `MemoryConfig.allow_import` (default `False`, env `SQLLENS_MEMORY__ALLOW_IMPORT`). It defaults OFF because a remote client that can write memory can **poison future SQL generation** — imported pairs are retrieved at query time exactly like agent-learned ones. Enable only for trusted operators.
 
-The tool accepts JSON only (no CSV over MCP), runs `import_bundle` with default `clear=False` / `dry_run=False`, and returns `ImportReport.to_markdown()` (a saved/skipped/errors table). Per the CLAUDE.md `isError` contract, a parse failure raises `RuntimeError("Invalid memory bundle: ...")` and a store/write failure raises a sanitized `RuntimeError` (logged via `logger.exception`, never leaking the persist path or a raw traceback). The `MemoryStore` is constructed once at registration time and closed over by the tool. See [mcp-server/tools.md](../mcp-server/tools.md#import_memory--opt-in-third-tool) for how this fits the public tool surface.
+The tool accepts JSON only (no CSV over MCP), runs `import_bundle` with default `clear=False` / `dry_run=False`, and returns `ImportReport.to_markdown()` (a saved/skipped/errors table) **only when the import was fully clean**. Per the CLAUDE.md `isError` contract:
+
+- A parse failure raises `RuntimeError("Invalid memory bundle: ...")`.
+- A store/write failure or a corrupt-baseline `MemoryCorruptionError` raises a sanitized `RuntimeError` (logged via `logger.exception` / `logger.error`, never leaking the persist path or a raw traceback).
+- **Any per-item error is a failure — partial failure is failure.** When `report.errors` is non-empty the tool raises, *even if some pairs saved and only others errored*. The guard is `if report.errors:` (not the older `report.saved == 0 and report.errors`), so a run that saved some items and errored on the rest no longer reaches the client as `isError:false`. The client-facing message is counts-only — `"Memory import failed: N item(s) errored (X saved, Y skipped). A partial import is a failure; check the server logs."` — and the full per-item exception text (which can carry the on-disk persist path / driver internals) goes to the server log via `logger.error`, never to the client. This is pinned by `tests/unit/test_memory_mcp_tool.py::test_tool_signals_error_on_partial_failure`.
+
+The `MemoryStore` is constructed once at registration time and closed over by the tool. See [mcp-server/tools.md](../mcp-server/tools.md#import_memory--opt-in-third-tool) for how this fits the public tool surface.
 
 ## Debugging memory hits
 
