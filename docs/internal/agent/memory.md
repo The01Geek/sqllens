@@ -151,6 +151,12 @@ sqllens export-memory PATH [--format json|csv] [-c CONFIG]
 
 The tool accepts JSON only (no CSV over MCP), runs `import_bundle` with default `clear=False` / `dry_run=False`, and returns `ImportReport.to_markdown()` (a saved/skipped/errors table). Per the CLAUDE.md `isError` contract, a parse failure raises `RuntimeError("Invalid memory bundle: ...")` and a store/write failure raises a sanitized `RuntimeError` (logged via `logger.exception`, never leaking the persist path or a raw traceback). The `MemoryStore` is constructed once at registration time and closed over by the tool. See [mcp-server/tools.md](../mcp-server/tools.md#import_memory--opt-in-third-tool) for how this fits the public tool surface.
 
+## Surfacing the hit/miss signal to MCP clients
+
+`SearchSavedCorrectToolUsesTool` reports an **aggregate** memory hit/miss signal back to the MCP layer on every search it completes. On both its hit and miss success paths it emits a `Memory Search` `StatusCardComponent` whose `metadata["memory_search"]` is `{"searched": True, "hit_count": N, "top_similarity": float | None, "threshold": float}` (`top_similarity` is the max similarity across the returned hits, coerced to a plain `float` for JSON; `None` and `hit_count` `0` on a miss). Only counts and scores are exposed — **never the matched memory contents** (the recalled questions/args). A search that *errors* returns `ToolResult(success=False)` and emits no card, so it surfaces no client-facing signal; it logs at `WARNING` server-side. The hit and miss paths both log at `INFO`.
+
+The MCP formatter ([src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py)) reads that card into a `memory_info` payload, which the server attaches to `_meta["sqllens/memory_info"]` for apps-aware hosts whenever a search completed (independent of any config flag), and — only when `cfg.agent.show_memory_details` is on — `query_database` appends a one-line `_Memory: ..._` footer to the Markdown answer. See [mcp-server/tools.md](../mcp-server/tools.md#memory-hitmiss-channel--agentshow_memory_details) for the full two-rail mechanism and the `show_memory_details` flag.
+
 ## Debugging memory hits
 
 The agent decides on its own when to call `SearchSavedCorrectToolUsesTool`. If memory doesn't seem to help:

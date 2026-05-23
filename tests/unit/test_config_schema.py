@@ -127,6 +127,30 @@ def test_show_details_toml_override(tmp_path: Path) -> None:
     assert cfg.agent.show_details is True
 
 
+# --- #168: AgentRuntimeConfig.show_memory_details ------------------------------
+
+
+def test_show_memory_details_defaults_false() -> None:
+    # OFF by default: the memory hit/miss footer is opt-in; the structured
+    # _meta channel surfaces the same signal regardless.
+    assert AgentRuntimeConfig().show_memory_details is False
+
+
+def test_show_memory_details_env_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SQLLENS_AGENT__SHOW_MEMORY_DETAILS", "true")
+    cfg = Config.load(_minimal_toml(tmp_path))
+    assert cfg.agent.show_memory_details is True
+
+
+def test_show_memory_details_toml_override(tmp_path: Path) -> None:
+    cfg = Config.load(
+        _minimal_toml(tmp_path, "\n[agent]\nshow_memory_details = true\n")
+    )
+    assert cfg.agent.show_memory_details is True
+
+
 # --- #149: AgentRuntimeConfig.max_conversations --------------------------------
 
 

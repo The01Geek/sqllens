@@ -32,8 +32,10 @@ def build_server(cfg: Config) -> FastMCP:
         # Mint a stable id when the caller omits one, so the resolved id can be
         # returned for the caller to thread on the next turn.
         conversation_id = conversation_id or str(uuid.uuid4())
-        markdown, table, query_info, chart = await query_database_impl_with_widgets(
-            cfg, question, metadata=metadata, conversation_id=conversation_id
+        markdown, table, query_info, chart, memory_info = (
+            await query_database_impl_with_widgets(
+                cfg, question, metadata=metadata, conversation_id=conversation_id
+            )
         )
         extra_meta: dict = {}
         if chart is not None:
@@ -42,6 +44,8 @@ def build_server(cfg: Config) -> FastMCP:
             extra_meta["sqllens/table"] = table
         if query_info:
             extra_meta["sqllens/query"] = query_info
+        if memory_info:
+            extra_meta["sqllens/memory_info"] = memory_info
         return _conversation_result(markdown, conversation_id, extra_meta)
 
     @mcp.tool()
@@ -75,15 +79,16 @@ The docstrings are the user-facing tool descriptions that the calling AI client 
 
 ## `_format.components_to_widgets` — the collapse rule
 
-`components_to_widgets` in [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) is the only place that knows the shape of the agent's output stream. It does the collapse in a single pass and returns `(markdown, is_error, table_payload, query_info, chart_payload)`. The narrower views are thin wrappers over it: `components_to_table` drops the chart, `components_to_chart` keeps only the chart, and `components_to_markdown` drops every structured payload for non-apps callers (see "The MCP App interactive result widget"). The Markdown collapse rule below is identical for all of them:
+`components_to_widgets` in [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) is the only place that knows the shape of the agent's output stream. It does the collapse in a single pass and returns `(markdown, is_error, table_payload, query_info, chart_payload, memory_info)`. The narrower views are thin wrappers over it: `components_to_table` drops the chart and memory-info payloads, `components_to_chart` keeps only the chart, and `components_to_markdown` drops every structured payload for non-apps callers (see "The MCP App interactive result widget"). The Markdown collapse rule below is identical for all of them:
 
 | Component type | What we do with it |
 |---|---|
 | `TEXT` | Keep the **last** non-empty entry as the natural-language answer (earlier `TEXT` entries are intermediate reasoning the LLM emits while thinking). |
 | `DATAFRAME` | Render as a Markdown table. **Cap at 500 rows** (`_MAX_ROWS_RENDERED`) with a "Showing first N of M rows" footer. This sits *above* `DatabaseConfig.max_rows` (default 10 000) — the row cap stops the DataFrame from being materialised in the first place; this renderer cap only protects the MCP client from a multi-thousand-row Markdown blob when `max_rows` is raised. The structured `table` payload is built from the **last** DataFrame (last-wins). |
 | `CHART` | Keep the **last** `CHART` component as the structured `chart` payload (last-wins; `emit_chart` runs at most once per request). Not rendered into Markdown — apps-aware hosts get the interactive chart, everyone else still sees the underlying DataFrame table + answer. |
-| `STATUS_CARD` with `status == 'error'` | Treat as a tool error; return `(message, is_error=True, None, None, None)` and let the caller raise `RuntimeError`. |
+| `STATUS_CARD` with `status == 'error'` | Treat as a tool error; return `(message, is_error=True, None, None, None, None)` and let the caller raise `RuntimeError`. |
 | `STATUS_CARD` carrying `metadata["sql"]` | Capture the SQL into `last_sql` (last-wins; the `run_sql` card streams twice — running → completed — with identical metadata, so dedup is idempotent). Drives the `query_info` channel — see [Executed SQL channel](#executed-sql-channel--agentshow_details). Only emitted when `agent.show_details` unlocked `UI_FEATURE_SHOW_TOOL_ARGUMENTS` for the static user group. |
+| `STATUS_CARD` carrying `metadata["memory_search"]` | Capture the dict into `last_memory` (last-wins). This is the `Memory Search` card the `search_saved_correct_tool_uses` tool emits on **both** its hit and miss success paths — independent of `agent.show_details`. Drives the `memory_info` channel — see [Memory hit/miss channel](#memory-hitmiss-channel--agentshow_memory_details). |
 | Everything else | Ignored. |
 
 Output ordering: tables first (in stream order), then the final text answer. If both are empty, fall back to `render_interactive(components)` — the agent's interactive/follow-up affordances rendered as plain Markdown (see "Surfacing interactive affordances" below) — and only when *that* is also empty return `"(no answer)"` rather than the empty string (MCP clients render empty results badly). To enable this second pass over the stream, `components_to_table` / `components_to_chart` now `list()`-materialize their `components` argument up front (the public signature still accepts any `Iterable`, including generators).
@@ -127,9 +132,9 @@ Mechanism:
 
 - `build_server` registers a single resource at `ui://sqllens/query-results.html` with mime `text/html;profile=mcp-app` (and `_meta.ui.prefersBorder = true`). Its body is the self-contained widget loaded by [src/sqllens/ui/__init__.py](../../../src/sqllens/ui/__init__.py)'s `load_widget_html()` (cached; immutable packaged asset). The widget HTML and the vendored `@modelcontextprotocol/ext-apps` SDK **and** Apache ECharts bundle are inlined into the one HTML asset and ship inside the wheel via the `[tool.hatch.build.targets.wheel].include` globs in `pyproject.toml`.
 - The `query_database` tool is decorated with `meta={"ui": {"resourceUri": "ui://sqllens/query-results.html"}}`. `list_data_sources` is **not** — the widget is query-only.
-- `query_database_impl_with_widgets` is the single agent path; `query_database_impl_with_table` (drops the chart) and the legacy `query_database_impl` (drops every structured payload) are now thin wrappers over it. Same agent path, same three error categories. On success it returns `(markdown, table, query_info, chart)` where `table` is `{columns, rows, column_types, row_count, truncated}` (or `None` when the stream has no DataFrame), `chart` is the renderer-agnostic chart spec enriched with `row_count`/`truncated` (or `None` when the agent emitted no `ChartComponent`), and `query_info` carries the executed SQL when `agent.show_details` is on (see [Executed SQL channel](#executed-sql-channel--agentshow_details) below). `_format.components_to_widgets` builds `table` from the **last** DataFrame and `chart` from the **last** `CHART` component, each enforcing a **130 KB serialized-size budget** (`json.dumps(payload, separators=(",", ":"))`), dropping tail rows and reporting the count in `truncated`; if even the header-only / data-stripped form is over budget that payload is `None`. Payload construction is best-effort: any exception degrades to `None` (Markdown still served) rather than escaping the sanitized error taxonomy.
+- `query_database_impl_with_widgets` is the single agent path; `query_database_impl_with_table` (drops the chart and memory-info) and the legacy `query_database_impl` (drops every structured payload) are now thin wrappers over it. Same agent path, same three error categories. On success it returns `(markdown, table, query_info, chart, memory_info)` where `table` is `{columns, rows, column_types, row_count, truncated}` (or `None` when the stream has no DataFrame), `chart` is the renderer-agnostic chart spec enriched with `row_count`/`truncated` (or `None` when the agent emitted no `ChartComponent`), `query_info` carries the executed SQL when `agent.show_details` is on (see [Executed SQL channel](#executed-sql-channel--agentshow_details) below), and `memory_info` carries the aggregate memory hit/miss signal when a memory search completed this turn (see [Memory hit/miss channel](#memory-hitmiss-channel--agentshow_memory_details) below). `_format.components_to_widgets` builds `table` from the **last** DataFrame and `chart` from the **last** `CHART` component, each enforcing a **130 KB serialized-size budget** (`json.dumps(payload, separators=(",", ":"))`), dropping tail rows and reporting the count in `truncated`; if even the header-only / data-stripped form is over budget that payload is `None`. Payload construction is best-effort: any exception degrades to `None` (Markdown still served) rather than escaping the sanitized error taxonomy.
 - **Typed (numeric) client-side sort.** In data-grid mode the widget right-aligns and numerically sorts a column only when `column_types[col] == "number"`. The vendored DataFrame producers never populate `column_types` (`DataFrameComponent.from_records` hard-codes `{}`), so `_format._compute_table_payload` **infers** the type server-side: a column is typed `"number"` when every non-empty coerced cell parses as a finite float (SQL `NULL`/empty cells are skipped; `inf`/`NaN` disqualify the column). Any explicit producer-supplied `column_types` overrides the inferred value (e.g. a zero-padded ID column the agent typed `"string"` stays string-sorted). A non-mapping `column_types` from a producer degrades to inference-only and never fails the payload. Without this inference, numeric columns would sort lexicographically (`1, 10, 100, 2`).
-- The tool body returns a `CallToolResult` carrying the Markdown as text content **and** a `_meta` dict assembled from up to three keys: `"sqllens/chart"` when `chart is not None`, `"sqllens/table"` when `table is not None`, and `"sqllens/query"` when `query_info` is truthy. When all are absent it returns the plain Markdown string (degrades cleanly for non-apps clients). The widget reads these channels via the apps `ontoolresult` channel and **renders in precedence order: chart > data grid (+ collapsible SQL from `sqllens/query`) > plain text**. When both a chart and a table are present (the agent ran SQL *and* emitted a chart) both channels are attached and the widget deterministically renders the chart — no double-render. `structured_output=False` is set on the tool so FastMCP does not derive an `outputSchema` that would reject the deliberately-absent `structuredContent`.
+- The tool body returns a `CallToolResult` carrying the Markdown as text content **and** a `_meta` dict assembled from up to four keys: `"sqllens/chart"` when `chart is not None`, `"sqllens/table"` when `table is not None`, `"sqllens/query"` when `query_info` is truthy, and `"sqllens/memory_info"` when `memory_info` is truthy (the latter is a non-widget observability channel — see [Memory hit/miss channel](#memory-hitmiss-channel--agentshow_memory_details); the result widget does not read it). When all are absent it returns the plain Markdown string (degrades cleanly for non-apps clients). The widget reads these channels via the apps `ontoolresult` channel and **renders in precedence order: chart > data grid (+ collapsible SQL from `sqllens/query`) > plain text**. When both a chart and a table are present (the agent ran SQL *and* emitted a chart) both channels are attached and the widget deterministically renders the chart — no double-render. `structured_output=False` is set on the tool so FastMCP does not derive an `outputSchema` that would reject the deliberately-absent `structuredContent`.
 
 This raised the `mcp` pin to `>=1.26.0,<2` (the lowest 1.x exposing `meta=` on both `FastMCP.tool` — since 1.19.0 — and `FastMCP.resource` — since 1.26.0).
 
@@ -169,6 +174,30 @@ The "no SQL channel" branches are deliberately distinguishable:
 - `agent.show_details = True` and the agent ran SQL but execution failed: the completed `run_sql` card carries `status="error"` (the upstream agent maps `ToolResult(success=False)` → `set_status("error", …)`), which fires the `error_message` short-circuit in `components_to_widgets` *before* `query_info` is built. The tool surfaces the sanitized error message through the [error contract](#the-errorsuccess-contract) below — `_meta` is never populated on the error path.
 
 Pinned by `tests/unit/test_format.py` (component-stream cases), `tests/unit/test_query_database.py` (impl-level wiring + `_append_sql_block`), `tests/unit/test_server.py` (`_meta` assembly), `tests/unit/test_factory_wiring.py` (UI-feature unlock), and `tests/unit/test_ui_widget.py` (widget assertions).
+
+## Memory hit/miss channel — `agent.show_memory_details`
+
+The agent decides on its own when to consult vector memory (see [agent/memory.md](../agent/memory.md)). When it calls `search_saved_correct_tool_uses` (`SearchSavedCorrectToolUsesTool` in [src/sqllens/agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py)), that tool now surfaces an **aggregate** hit/miss signal to the MCP layer. Only the fact of a hit/miss and counts/scores are exposed — **never the matched memory contents** (the recalled questions or args stay server-side; issue #168 deliberately scoped them out).
+
+The signal rides a `Memory Search` `STATUS_CARD` whose `metadata["memory_search"]` is the dict:
+
+```python
+{"searched": True, "hit_count": N, "top_similarity": float | None, "threshold": float}
+```
+
+- It is the tool's own `ui_component`, yielded on **both** the hit and the miss success path — so, unlike the executed-SQL card, it is independent of `agent.show_details`. `top_similarity` is the max similarity across the returned hits (coerced to a plain `float` so it survives JSON serialization into `_meta`); on a miss it is `None` and `hit_count` is `0`.
+- A memory search that **errors** emits no `memory_search` card (the tool returns `ToolResult(success=False)` with a status-bar error component and logs at `WARNING`), so it leaves `memory_info` `None` — indistinguishable downstream from "the agent did not consult memory this turn".
+
+`components_to_widgets` captures the **last** such card's dict into `memory_info` (last-wins). `memory_info` is `None` on the error path and whenever no `memory_search` card was seen. From there the signal is surfaced on two independent rails:
+
+- **`_meta` rail (apps-aware hosts), always-on.** `server.py` sets `_meta["sqllens/memory_info"] = memory_info` on the `CallToolResult` whenever `memory_info` is truthy — i.e. whenever a memory search **completed** (a hit or a miss). This rail is **independent of both `agent.show_details` and `agent.show_memory_details`**; the structured signal is carried regardless of either flag. It is an observability channel, not a widget channel — the result widget does not read it.
+- **Markdown footer rail (every client), gated.** Only when `cfg.agent.show_memory_details` is `true` (env `SQLLENS_AGENT__SHOW_MEMORY_DETAILS`, default `false`), `_append_memory_footer` in [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) appends a one-line footer to the answer text: `_Memory: 2 hits (top similarity 0.83)_` on a hit (the `(top similarity ...)` clause is omitted when `top_similarity` is not numeric), or `_Memory: no matches_` on a miss. A falsy `memory_info`, or one whose `searched` flag is false, leaves the markdown unchanged.
+
+`cfg.agent.show_memory_details` (`AgentRuntimeConfig.show_memory_details` in [src/sqllens/config.py](../../../src/sqllens/config.py), default `False`) is parallel to `agent.show_details` but gates **only** the Markdown footer — never the `_meta` channel. It defaults off to keep answers clean; the structured channel still carries the signal for apps-aware hosts.
+
+Server-side observability is symmetric: the hit and miss paths both log at `INFO`, and a search error logs at `WARNING` — so an operator tuning `memory.similarity_threshold` sees every outcome in the logs.
+
+Pinned by `tests/unit/test_search_memory_threshold.py` (the tool emits the card with the right `memory_search` dict on hit, miss, and the error path), `tests/unit/test_format.py` (`components_to_widgets` extracts `memory_info`), `tests/unit/test_query_database.py` (footer wiring + `_append_memory_footer`), and `tests/unit/test_server.py` (`_meta["sqllens/memory_info"]` assembly).
 
 ## `list_data_sources` — the cheap introspection tool
 

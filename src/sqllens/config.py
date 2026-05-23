@@ -271,6 +271,20 @@ class AgentRuntimeConfig(BaseModel):
             "logic. Enable only for trusted, debugging-oriented deployments."
         ),
     )
+    # When true, query_database appends a one-line memory hit/miss footer to the
+    # Markdown answer (e.g. "_Memory: 2 hits (top similarity 0.83)_"). OFF by
+    # default to keep answers clean; the structured _meta["sqllens/memory_info"]
+    # channel carries the same signal regardless of this flag. Env override:
+    # SQLLENS_AGENT__SHOW_MEMORY_DETAILS.
+    show_memory_details: bool = Field(
+        default=False,
+        description=(
+            "Append a one-line memory hit/miss footer to query answers. OFF by "
+            "default. Only the aggregate fact of a hit/miss and counts/scores "
+            "are shown — never the matched memory contents. The structured "
+            "_meta channel surfaces the same signal independent of this flag."
+        ),
+    )
     # Hard cap on the in-process LRU conversation store that backs multi-turn
     # conversations (see sqllens.conversation_store). Once exceeded, the
     # least-recently-used conversation is evicted so a long-running server does
