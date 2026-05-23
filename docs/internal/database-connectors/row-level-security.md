@@ -28,7 +28,7 @@ The rewrite is **proven-clean**: rather than filtering only the SQL shapes it re
 - A non-query statement (RLS only scopes SELECT-shaped reads — a Postgres `TABLE orders` parses to a non-`exp.Query` root that exposes no `exp.Table` node, so the scope walk would never see the protected read; we reject up front instead of guessing).
 - More than one statement in the input.
 - A scope-analysis failure (sqlglot raised on `traverse_scope`).
-- A dynamic value that is missing from request metadata, of the wrong type, or "suspicious" (very long string, control characters — classic injection-probe shapes).
+- A dynamic value that is missing from request metadata, of the wrong type (including a `bool` — see [How dynamic values are resolved](#how-dynamic-values-are-resolved)), or "suspicious" (empty string, very long string, control characters — classic injection-probe shapes).
 - A protected-table reference whose scope cannot be resolved (e.g. an unrecognised parse shape).
 - Any unexpected exception from the rewrite — `RlsGuardRunner` catches `Exception`, logs with a traceback, and re-raises as `RlsError`. Same invariant as the read-only guard's fail-closed branch.
 
@@ -112,9 +112,12 @@ The final backstop is a full-tree walk: every `exp.Table` whose `.name` *or* `.a
 `apply_rls` is called with a `metadata: Mapping[str, Any]` argument. For each rule with `value_from_metadata` set:
 
 1. The key must be present in `metadata` — otherwise `RlsError` ("requires request metadata key …, which was not supplied by the caller").
-2. For `operator == "in"`, the resolved value must be a non-empty list of scalars; each element is also sanitized.
-3. For every other operator, the resolved value must be a `str`/`int`/`float`/`bool`. `None`, dicts, bytes, nested lists, etc. block.
-4. A `str` value blocks if it is longer than `_MAX_DYNAMIC_STR_LEN` (4 096) or contains control characters (`ord(ch) < 0x20` or `ord(ch) == 0x7F`).
+2. For `operator == "in"`, the resolved value must be a non-empty list of scalars; each element is run through `_is_suspicious_scalar` and blocks on the same rules as the scalar path below.
+3. For every other operator, the resolved value must be a `str`/`int`/`float`. `None`, dicts, bytes, nested lists, etc. block.
+4. A `bool` blocks. `isinstance(True, int)` is true in Python, so an unguarded `int` branch would accept a metadata-supplied boolean and `exp.convert` it to a `TRUE`/`1` literal — turning a rule like `tenant_id = <token>` into `tenant_id = 1` and exposing rows rather than blocking. `_is_suspicious_scalar` therefore checks `isinstance(value, bool)` *before* the `int`/`float` branch and returns `True` (blocks). An identity token is never a boolean. This applies to both the scalar `=` path and each element of the `in`-list path.
+5. A `str` value blocks if it is empty, longer than `_MAX_DYNAMIC_STR_LEN` (4 096), or contains control characters (`ord(ch) < 0x20` or `ord(ch) == 0x7F`).
+
+The sanitization runs **only on dynamic (caller-supplied) values**. Static, operator-authored config values skip `_is_suspicious_scalar` entirely — `_resolve_value` returns `rule.value` before reaching the check — because they are type-validated at config load and never request-influenced. So a configured static boolean is unaffected; only an untrusted dynamic metadata boolean now blocks.
 
 The sanitization is *not* an injection guard — the value is built as a literal node and cannot alter the statement's shape regardless. It is a "this doesn't look like the identity token the operator intended" guard, fail-secure for the case where the embedding application is misbehaving or the caller is probing.
 
@@ -208,7 +211,7 @@ Unit tests live in [tests/unit/test_safety_rls.py](../../../tests/unit/test_safe
 - The end-to-end "misconfigured rule fails config load" case proves `sqllens validate` rejects a typo before the server starts.
 - `TestApplyRls` — the positive rewrites (single table, AND-combined `WHERE`, qualified join predicate, subquery filtered, CTE body filtered + CTE reference left alone, sibling tables ignored, `IN` and numeric forms).
 - `TestApplyRlsScopeEdgeCases` — the scope-walker edges (CTE/derived alias colliding with a protected table name; recursive CTE same name; `WHERE … IN (SELECT …)`; comma joins; schema-qualified or parenthesized table sources still filter; unprovable shape blocks; `TABLE` statement blocks).
-- `TestApplyRlsDynamicValues` — every dynamic-value sanitization path (present, missing, suspicious string, wrong type, list-required for `in`, list-form `in`).
+- `TestApplyRlsDynamicFailSecure` — every dynamic-value sanitization path (present, missing, suspicious string, wrong type, `bool` blocks on both the scalar `=` path (`test_bool_dynamic_value_blocks`) and as an `in`-list element (`test_bool_item_in_dynamic_in_list_blocks`), list-required for `in`, list-form `in`).
 - `TestApplyRlsParseFailures` — parse failures and multi-statement input.
 - The decorator-level tests in the same file (rewritten SQL reaches the inner runner; missing dynamic value blocks before the inner runner sees anything; dynamic value from `ToolContext.metadata`; unexpected error in the rewrite fails closed; static rule works with empty metadata).
 

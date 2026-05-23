@@ -2,6 +2,11 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 23, 2026
+
+- **[Fix] Row-Level Security now blocks a per-request boolean value** — When a Row-Level Security rule resolves its value from per-request metadata (`value_from_metadata`), a `true` or `false` supplied by the calling application is now blocked instead of being accepted and turned into a literal in the predicate. An identity token is never a boolean, and accepting one could weaken a rule such as `tenant_id = <token>` into something that matches more rows than intended. This applies to both single values and each element of an `in` list; static values you write in `sqllens.toml` are unaffected. See [Row-Level Security](row-level-security.md). (#177)
+- **[Fix] A partial memory import is now reported as a failure** — When the optional `import_memory` tool is enabled and a bundle is imported, the tool now reports an error to the connected assistant if any entry fails to save, even when some entries saved and only others failed. Previously a partial import could be reported as a success, so the assistant was not told that part of the import did not complete. The message gives only the counts of saved, skipped and errored entries; the detailed reason for each failure is written to the server log. See [Managing memory](managing-memory.md). (#177)
+
 ## May 22, 2026
 
 - **[Fix] Interactive results now fit their frame** — On assistants that render inline app widgets (currently Claude Desktop and claude.ai), small `query_database` results, such as a two- or three-row table or a small chart, previously appeared with empty space around them or an extra scrollbar because the widget did not report its true height to the assistant. The widget now reports its own content size, so on hosts that support this a small result fits its frame with no surrounding empty space and no extra scrollbar, while larger results get the full height they need. No configuration change is required, and standalone viewers such as the MCP Inspector are unaffected. (#175)
