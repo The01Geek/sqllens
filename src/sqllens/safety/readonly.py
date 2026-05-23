@@ -23,12 +23,14 @@ class UnsafeSqlError(Exception):
 
 
 # First-keyword set used by per-runner adapters to decide whether to route a
-# query through the streaming/row-capped SELECT branch. Mirrors the SQL forms
-# the readonly guard accepts as "SELECT-shaped" (a CTE or set operation that
-# ultimately yields rows). A first-token check is sufficient here because the
-# readonly guard has already parsed and validated the statement upstream.
+# query through the streaming/row-capped row-returning branch. Mirrors the SQL
+# forms the readonly guard accepts (a SELECT, a CTE or set operation that
+# ultimately yields rows, or a structural ``SHOW`` schema-discovery command —
+# all of which return a result set rather than a rows-affected count). A
+# first-token check is sufficient here because the readonly guard has already
+# parsed and validated the statement upstream.
 _READ_SHAPED_KEYWORDS: frozenset[str] = frozenset(
-    {"SELECT", "WITH", "UNION", "INTERSECT", "EXCEPT"}
+    {"SELECT", "WITH", "UNION", "INTERSECT", "EXCEPT", "SHOW"}
 )
 
 
@@ -63,6 +65,33 @@ _ALLOWED_ROOT_TYPES: tuple[type[exp.Expression], ...] = (
     exp.Intersect,
     exp.Except,
     exp.With,  # CTE chain rooted at SELECT
+)
+
+
+# Structural ``SHOW`` commands the agent uses for schema discovery on a fresh
+# database (no ChromaDB memory yet). These are read-only and disclose only the
+# database's *structure* — the same information the agent already needs
+# internally to write queries. Matched (fail-closed) against ``exp.Show``'s
+# ``this`` subkind, uppercased. Anything not in this allowlist is rejected,
+# notably the info-leaking variants ``SHOW GRANTS`` (permission disclosure),
+# ``SHOW PROCESSLIST`` (cross-session SQL leak), ``SHOW {MASTER,SLAVE,REPLICA}
+# STATUS`` (replication topology), and ``SHOW VARIABLES`` / ``SHOW STATUS``
+# (server internals / secrets). ``SHOW`` only parses to ``exp.Show`` under the
+# MySQL dialect; every other dialect falls back to an opaque ``exp.Command``
+# rejected by the root-type gate, so this branch is MySQL-only in practice.
+# sqlglot normalizes some spellings: ``SHOW SCHEMAS`` → ``DATABASES``. ``SHOW
+# KEYS`` / ``SHOW FIELDS`` / ``SHOW INDEXES`` fall back to ``exp.Command`` and
+# stay blocked — use the equivalent ``SHOW INDEX`` / ``SHOW COLUMNS``, which
+# parse cleanly to ``exp.Show``.
+_SAFE_SHOW_SUBKINDS: frozenset[str] = frozenset(
+    {
+        "TABLES",  # SHOW TABLES / SHOW FULL TABLES / SHOW TABLES LIKE ...
+        "COLUMNS",  # SHOW COLUMNS / SHOW FULL COLUMNS FROM ...
+        "DATABASES",  # SHOW DATABASES / SHOW SCHEMAS
+        "INDEX",  # SHOW INDEX FROM ...
+        "CREATE TABLE",  # SHOW CREATE TABLE ...
+        "CREATE VIEW",  # SHOW CREATE VIEW ...
+    }
 )
 
 
@@ -209,7 +238,20 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
     if stmt is None:
         raise UnsafeSqlError("empty parse tree")
 
-    if not isinstance(stmt, _ALLOWED_ROOT_TYPES):
+    if isinstance(stmt, exp.Show):
+        # Structural schema-discovery ``SHOW`` (MySQL). Fail-closed: only the
+        # allowlisted subkinds pass; info-leaking variants (GRANTS, PROCESSLIST,
+        # *STATUS, VARIABLES, ...) fall through to the rejection below. Falls
+        # through to the shared deny-walk so a smuggled side-effecting function
+        # (e.g. ``SHOW COLUMNS FROM t WHERE x = sleep(1)``) is still caught.
+        subkind = str(stmt.args.get("this") or "").upper().strip()
+        if subkind not in _SAFE_SHOW_SUBKINDS:
+            shown = f"SHOW {subkind}".strip()
+            raise UnsafeSqlError(
+                f"only structural schema-discovery SHOW commands are allowed "
+                f"(got {shown})"
+            )
+    elif not isinstance(stmt, _ALLOWED_ROOT_TYPES):
         kind = type(stmt).__name__.upper()
         raise UnsafeSqlError(f"only SELECT statements are allowed (got {kind})")
 

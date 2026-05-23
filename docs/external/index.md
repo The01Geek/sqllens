@@ -11,7 +11,7 @@ SQL Lens exposes two tools to the assistant:
 | `query_database(question)` | Translates a natural-language question into SQL, executes it, and returns the result. The answer is a Markdown table by default and an interactive chart when the result is chart-shaped — the assistant decides which. |
 | `list_data_sources()` | Reports the configured database name, dialect, and read-only state. |
 
-One database is configured per running instance. Generated SQL is parsed and rejected if it is anything other than a `SELECT`, so the default deployment is safe against accidental writes. You can also opt into [Row-Level Security](row-level-security.md) to narrow every answer to the rows a particular request is allowed to see.
+One database is configured per running instance. Generated SQL is parsed and rejected if it is anything other than a read-only `SELECT` (plus, on MySQL, a small set of read-only `SHOW` schema-discovery commands such as `SHOW TABLES`), so the default deployment is safe against accidental writes. You can also opt into [Row-Level Security](row-level-security.md) to narrow every answer to the rows a particular request is allowed to see.
 
 ## Interactive results
 

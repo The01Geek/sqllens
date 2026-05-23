@@ -15,7 +15,11 @@ from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
 from sqllens.agent.integrations.sqlite.sql_runner import SqliteRunner, _readonly_uri
 from sqllens.safety import ReadOnlyGuardRunner
-from sqllens.safety.readonly import UnsafeSqlError, assert_select_only
+from sqllens.safety.readonly import (
+    UnsafeSqlError,
+    assert_select_only,
+    is_read_shaped,
+)
 
 
 class TestAcceptsRead:
@@ -139,6 +143,18 @@ _BYPASS_CORPUS: list[tuple[str, str | None]] = [
         "WITH x AS (DELETE FROM accounts WHERE id = 1 RETURNING id) SELECT * FROM x",
         "postgres",
     ),
+    # Info-leaking SHOW variants — allowed at parse time as exp.Show under
+    # MySQL but rejected by the structural-SHOW allowlist (not schema-discovery).
+    ("SHOW GRANTS", "mysql"),
+    ("SHOW PROCESSLIST", "mysql"),
+    ("SHOW VARIABLES", "mysql"),
+    ("SHOW STATUS", "mysql"),
+    ("SHOW MASTER STATUS", "mysql"),
+    ("SHOW SLAVE STATUS", "mysql"),
+    ("SHOW REPLICA STATUS", "mysql"),
+    ("SHOW ENGINE INNODB STATUS", "mysql"),
+    # A structural SHOW must not be a vector for smuggling a side-effecting fn.
+    ("SHOW COLUMNS FROM t WHERE Field = sleep(1)", "mysql"),
     # SELECT ... INTO — kept in the corpus so it stays pinned.
     ("SELECT * INTO new_tbl FROM users", "postgres"),
     # Plain DML/DDL roots.
@@ -489,3 +505,87 @@ class TestSelectIntoRejected:
                 "SELECT * INTO new_tbl FROM users UNION SELECT * FROM admins",
                 dialect=dialect,
             )
+
+
+class TestStructuralShowAllowed:
+    """Read-only structural ``SHOW`` schema-discovery commands pass the guard.
+
+    These let the agent discover schema on a fresh database (no ChromaDB memory
+    yet) instead of failing before any query runs. ``SHOW`` only parses to
+    ``exp.Show`` under the MySQL dialect.
+    """
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SHOW TABLES",
+            "SHOW FULL TABLES",
+            "SHOW TABLES LIKE '%user%'",
+            "SHOW COLUMNS FROM orders",
+            "SHOW FULL COLUMNS FROM orders",
+            "SHOW DATABASES",
+            "SHOW SCHEMAS",
+            "SHOW INDEX FROM orders",
+            "SHOW CREATE TABLE orders",
+            "SHOW CREATE VIEW order_summary",
+        ],
+    )
+    def test_structural_show_passes(self, sql: str) -> None:
+        assert_select_only(sql, dialect="mysql")
+
+
+class TestUnsafeShowRejected:
+    """Info-leaking ``SHOW`` variants stay rejected (fail-closed allowlist)."""
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SHOW GRANTS",
+            "SHOW PROCESSLIST",
+            "SHOW VARIABLES",
+            "SHOW STATUS",
+            "SHOW MASTER STATUS",
+            "SHOW SLAVE STATUS",
+            "SHOW REPLICA STATUS",
+            "SHOW ENGINE INNODB STATUS",
+            "SHOW WARNINGS",
+            "SHOW TRIGGERS",
+            "SHOW EVENTS",
+            "SHOW TABLE STATUS",
+            "SHOW COLLATION",
+        ],
+    )
+    def test_unsafe_show_rejected(self, sql: str) -> None:
+        with pytest.raises(UnsafeSqlError, match="structural schema-discovery"):
+            assert_select_only(sql, dialect="mysql")
+
+    def test_show_cannot_smuggle_side_effect_function(self) -> None:
+        # An allowlisted subkind must still not become a vector for a denied
+        # function: the shared deny-walk runs on the SHOW node too.
+        with pytest.raises(UnsafeSqlError, match="not allowed"):
+            assert_select_only(
+                "SHOW COLUMNS FROM t WHERE Field = sleep(1)", dialect="mysql"
+            )
+
+    @pytest.mark.parametrize("dialect", ["sqlite", "postgres", "tsql", None])
+    def test_show_rejected_on_non_mysql_dialects(self, dialect: str | None) -> None:
+        # SHOW falls back to an opaque exp.Command outside MySQL; the root-type
+        # gate rejects it (the structural allowlist is MySQL-only in practice).
+        with pytest.raises(UnsafeSqlError):
+            assert_select_only("SHOW TABLES", dialect=dialect)
+
+
+class TestShowIsReadShaped:
+    """A guard-approved SHOW must route through the row-returning runner branch.
+
+    Without this, ``is_read_shaped`` would be False and the MySQL/Postgres/
+    SQLite runners would take the write branch — returning a ``rows_affected``
+    count instead of the actual SHOW result rows.
+    """
+
+    @pytest.mark.parametrize(
+        "sql",
+        ["SHOW TABLES", "SHOW COLUMNS FROM orders", "show create table orders"],
+    )
+    def test_show_is_read_shaped(self, sql: str) -> None:
+        assert is_read_shaped(sql) is True
