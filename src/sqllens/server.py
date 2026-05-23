@@ -246,25 +246,30 @@ def build_server(cfg: Config) -> FastMCP:
                     "Memory import failed while writing to the store; "
                     "the bundle was not (fully) saved. Check the server logs."
                 ) from exc
-            # A run that saved nothing but collected per-item errors is a
-            # failed import, not a success — returning it as a plain string
-            # would reach the client as isError:false. Per the CLAUDE.md
-            # isError contract the calling agent needs a structured failure
-            # signal; the per-item detail is still in the message.
-            if report.saved == 0 and report.errors:
+            # Any per-item error makes this a failed import — including a
+            # partial run that saved some pairs and errored on others. Per the
+            # CLAUDE.md isError contract "partial failure is failure": returning
+            # to_markdown() as a plain string would reach the client as
+            # isError:false even though some items did not save. The calling
+            # agent needs a structured failure signal, so we raise whenever
+            # report.errors is non-empty (not only when report.saved == 0).
+            if report.errors:
                 # Per-item messages are raw exception text and can carry the
                 # on-disk persist path / driver internals; the full detail goes
-                # to the server log, the client gets a sanitized count only.
+                # to the server log, the client gets sanitized counts only.
                 logger.error(
-                    "import_memory: every item failed (%d errors, 0 saved): %s",
+                    "import_memory: %d item(s) failed (%d saved, %d skipped): %s",
                     len(report.errors),
+                    report.saved,
+                    report.skipped_duplicate,
                     "; ".join(
                         f"{e.kind}[{e.index}]: {e.message}" for e in report.errors
                     ),
                 )
                 raise RuntimeError(
-                    f"Memory import saved nothing — all {len(report.errors)} "
-                    "item(s) failed. Nothing was written. Check the server logs."
+                    f"Memory import failed: {len(report.errors)} item(s) errored "
+                    f"({report.saved} saved, {report.skipped_duplicate} skipped). "
+                    "A partial import is a failure; check the server logs."
                 )
             return report.to_markdown()
 

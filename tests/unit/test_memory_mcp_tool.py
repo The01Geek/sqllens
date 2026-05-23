@@ -73,7 +73,45 @@ async def test_tool_signals_error_when_every_item_fails(
             "import_memory",
             {"bundle_json": '{"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]}}'},
         )
-    assert "saved nothing" in str(excinfo.value)
+    msg = str(excinfo.value)
+    assert "import failed" in msg.lower()
+    assert "(0 saved" in msg
+
+
+async def test_tool_signals_error_on_partial_failure(
+    tmp_path, monkeypatch
+) -> None:
+    """A run that saved some items but errored on others is a failed import:
+    per the CLAUDE.md 'partial failure is failure' rule it must reach the
+    client as isError:true, not a success string that merely reports the count.
+    """
+    patch_fake_embeddings(monkeypatch)
+    cfg = _cfg(tmp_path, allow_import=True)
+
+    async def fail_schema_doc(self, content: str) -> None:
+        raise RuntimeError("boom")
+
+    # sql_pair saves fine; only the schema_doc save errors. A generic
+    # RuntimeError is recorded per-item (not systemic), so the import yields
+    # saved=1, errors=1 — exactly the partial-failure shape that previously
+    # slipped through the saved==0 guard as an isError:false success.
+    monkeypatch.setattr(
+        "sqllens.memory.store.MemoryStore.add_schema_doc", fail_schema_doc
+    )
+    mcp = build_server(cfg)
+    with pytest.raises(Exception) as excinfo:
+        await mcp.call_tool(
+            "import_memory",
+            {
+                "bundle_json": (
+                    '{"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]}, '
+                    '"schema_docs": [{"content": "a schema doc"}]}'
+                )
+            },
+        )
+    msg = str(excinfo.value)
+    assert "import failed" in msg.lower()
+    assert "(1 saved" in msg
 
 
 async def test_tool_store_failure_does_not_leak_persist_path(

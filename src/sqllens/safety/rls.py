@@ -74,13 +74,20 @@ class RlsError(Exception):
 def _is_suspicious_scalar(value: object) -> bool:
     """True if a resolved dynamic scalar should block the query.
 
-    Only ``str``/``int``/``float``/``bool`` are usable as a predicate value;
-    anything else (``None``, dict, bytes, nested list, …) blocks. A string
-    blocks if it is absurdly long or carries control characters — neither is
-    plausible for an identity token and both are classic injection-probe
-    shapes (fail-secure even though the value is built as a literal node).
+    Only ``str``/``int``/``float`` are usable as a predicate value; anything
+    else (``None``, dict, bytes, nested list, …) blocks. A ``bool`` also
+    blocks: ``isinstance(True, int)`` is true in Python, so an unguarded
+    ``int`` branch would accept a metadata-supplied boolean and convert it to a
+    ``TRUE``/``1`` literal — coercing a rule like ``tenant_id = <token>`` into
+    ``tenant_id = 1`` on many engines rather than blocking. An identity token
+    is never a boolean. A string blocks if it is empty, absurdly long, or
+    carries control characters — none is plausible for an identity token and
+    all are classic injection-probe shapes (fail-secure even though the value
+    is built as a literal node).
     """
-    if isinstance(value, (bool, int, float)):
+    if isinstance(value, bool):
+        return True
+    if isinstance(value, (int, float)):
         return False
     if isinstance(value, str):
         # Empty string is suspicious: a dynamic predicate of ``= ''`` would

@@ -451,6 +451,20 @@ class TestApplyRlsDynamicFailSecure:
                 metadata={"tids": ["acme", bad]},
             )
 
+    @pytest.mark.parametrize("bad", [True, False])
+    def test_bool_dynamic_value_blocks(self, bad: bool) -> None:
+        # isinstance(True, int) is true in Python: an unguarded int branch
+        # would accept a metadata-supplied bool and convert it to a TRUE/1
+        # literal, coercing ``tenant_id = <token>`` into ``tenant_id = 1``.
+        # An identity token is never a boolean — fail-secure and block.
+        with pytest.raises(RlsError, match="suspicious"):
+            apply_rls(
+                "SELECT id FROM orders",
+                [_rule(value_from_metadata="tenant_id")],
+                dialect="sqlite",
+                metadata={"tenant_id": bad},
+            )
+
     @pytest.mark.parametrize("bad", [None, {"a": 1}, b"bytes", ["nested"]])
     def test_wrong_typed_dynamic_value_blocks(self, bad: object) -> None:
         with pytest.raises(RlsError):
