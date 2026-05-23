@@ -59,6 +59,50 @@ def is_read_shaped(sql: str) -> bool:
     return first_sql_keyword(sql) in _READ_SHAPED_KEYWORDS
 
 
+# Catalog schemas and object-name prefixes that mark a read as schema
+# introspection rather than a data-answering query. The system prompt
+# (agent/core/system_prompt/default.py) tells the agent to run these internally
+# — a SELECT against information_schema / pg_catalog / sqlite_master, or a
+# structural SHOW — to confirm a column/table name before retrying a failed
+# query. Their success is NOT a recovered answer, so the MCP formatter must not
+# treat such a card as one (see tools/_format.py).
+_CATALOG_SCHEMAS: frozenset[str] = frozenset(
+    {"information_schema", "pg_catalog", "mysql", "sys", "performance_schema"}
+)
+_CATALOG_NAME_PREFIXES: tuple[str, ...] = ("pg_", "sqlite_")
+
+
+def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
+    """Return True if ``sql`` is a schema-introspection read, not a data query.
+
+    Schema introspection = a structural ``SHOW`` (SHOW TABLES/COLUMNS/...), or a
+    SELECT whose tables target a catalog (``information_schema``, ``pg_catalog``,
+    ``sqlite_master``, ``pg_*`` system tables, ...). The agent runs these
+    internally to confirm a column name before retrying a failed query, so their
+    success is not a recovered answer for the user's question.
+
+    Best-effort, fail-open-to-``False``: a query that does not parse (rare for
+    one ``run_sql`` already executed) is treated as a data query, biasing toward
+    surfacing a recovered answer rather than misclassifying a real one.
+    """
+    if first_sql_keyword(sql) == "SHOW":
+        return True
+    try:
+        parsed = sqlglot.parse_one(sql, dialect=dialect)
+    except Exception:
+        return False
+    if parsed is None:
+        return False
+    for table in parsed.find_all(exp.Table):
+        schema = (table.db or "").lower()
+        name = (table.name or "").lower()
+        if schema in _CATALOG_SCHEMAS:
+            return True
+        if any(name.startswith(prefix) for prefix in _CATALOG_NAME_PREFIXES):
+            return True
+    return False
+
+
 _ALLOWED_ROOT_TYPES: tuple[type[exp.Expression], ...] = (
     exp.Select,
     exp.Union,  # SELECT ... UNION SELECT ...

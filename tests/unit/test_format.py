@@ -75,6 +75,200 @@ def test_error_status_card_wins_over_text_and_tables() -> None:
     assert "intermediate" not in msg
 
 
+def test_self_correction_success_supersedes_earlier_error() -> None:
+    # The agent's first SQL guess fails ("Unknown column"), it re-issues a
+    # corrected run_sql, the retry succeeds, and a final TEXT answer is produced.
+    # The earlier error card must NOT poison the turn — a later *run_sql* success
+    # supersedes it (terminal run_sql status last-wins).
+    stream = [
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="error",
+                description='Tool failed: (1054, "Unknown column \'order_date\'")',
+                metadata={"sql": "SELECT COUNT(*) FROM orders WHERE order_date > NOW()"},
+            )
+        ),
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="success",
+                description="Tool completed successfully",
+                metadata={"sql": "SELECT COUNT(*) FROM orders WHERE time > NOW()"},
+            )
+        ),
+        _ui(DataFrameComponent(rows=[{"count": 0}])),
+        _ui(RichTextComponent(content="There are 0 orders in the last 10 days.")),
+    ]
+    markdown, is_error, table, query_info, _, _ = components_to_widgets(stream)
+    assert is_error is False
+    assert "There are 0 orders in the last 10 days." in markdown
+    assert table is not None
+    # The retried (successful) SQL wins last, not the failed first guess.
+    assert query_info is not None
+    assert query_info["sql"] == "SELECT COUNT(*) FROM orders WHERE time > NOW()"
+
+
+def test_error_after_recovery_still_surfaces_as_error() -> None:
+    # The inverse guard: a genuinely failing *final* tool call (success then a
+    # later error, no further recovery) must still surface as an error, so the
+    # self-correction fix doesn't swallow real failures.
+    stream = [
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="success",
+                metadata={"sql": "SELECT 1"},
+            )
+        ),
+        _ui(RichTextComponent(content="intermediate reasoning")),
+        _ui(
+            StatusCardComponent(
+                title="Query failed",
+                status="error",
+                description="permission denied for table users",
+            )
+        ),
+    ]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is True
+    assert msg == "permission denied for table users"
+
+
+def test_memory_search_success_does_not_clear_run_sql_error() -> None:
+    # The dominant silent-success trap: a memory search runs (and succeeds) on
+    # essentially every turn, emitting a status="success" STATUS_CARD. It must
+    # NOT clear a real run_sql failure — only a *run_sql* success may. A failed
+    # query followed by a successful memory search and a give-up TEXT must still
+    # surface as an error, never a silent success with an apology answer.
+    stream = [
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="error",
+                description='Tool failed: (1054, "Unknown column \'order_date\'")',
+                metadata={"sql": "SELECT COUNT(*) FROM orders WHERE order_date > NOW()"},
+            )
+        ),
+        _ui(
+            StatusCardComponent(
+                title="Memory Search",
+                status="success",
+                description="Found 2 similar pattern(s)",
+                metadata={"memory_search": {"searched": True, "hit_count": 2}},
+            )
+        ),
+        _ui(RichTextComponent(content="Sorry, I was unable to retrieve the data.")),
+    ]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is True
+    assert "Unknown column" in msg
+
+
+def test_introspection_success_does_not_clear_run_sql_error() -> None:
+    # The system prompt has the agent run a schema-introspection SELECT
+    # (information_schema / SHOW) to confirm a column after an "Unknown column"
+    # error. That introspection runs through the same run_sql tool and succeeds,
+    # but it is a step toward an answer, not the answer. If the agent then gives
+    # up without a successful *data* retry, the original failure must still
+    # surface — an introspection success must not clear it.
+    stream = [
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="error",
+                description='Tool failed: Unknown column "order_date"',
+                metadata={"sql": "SELECT COUNT(*) FROM orders WHERE order_date > NOW()"},
+            )
+        ),
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="success",
+                metadata={
+                    "sql": "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'orders'"
+                },
+            )
+        ),
+        _ui(RichTextComponent(content="I could not find an order_date column.")),
+    ]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is True
+    assert "Unknown column" in msg
+
+
+def test_data_retry_after_introspection_clears_error() -> None:
+    # The full self-correction path: data query fails, the agent introspects
+    # (success, but does not clear), then re-runs a corrected *data* query that
+    # succeeds. The terminal data run_sql success clears the error.
+    stream = [
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="error",
+                description="Unknown column",
+                metadata={"sql": "SELECT * FROM orders WHERE order_date > NOW()"},
+            )
+        ),
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="success",
+                metadata={"sql": "SELECT column_name FROM information_schema.columns"},
+            )
+        ),
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="success",
+                metadata={"sql": "SELECT * FROM orders WHERE invoice_date > NOW()"},
+            )
+        ),
+        _ui(DataFrameComponent(rows=[{"id": 1}])),
+        _ui(RichTextComponent(content="There is 1 order.")),
+    ]
+    markdown, is_error, _, query_info, _, _ = components_to_widgets(stream)
+    assert is_error is False
+    assert "There is 1 order." in markdown
+    assert query_info is not None
+    assert query_info["sql"] == "SELECT * FROM orders WHERE invoice_date > NOW()"
+
+
+def test_failed_retry_after_recovery_re_arms_error() -> None:
+    # error -> run_sql success -> run_sql error: the agent recovered once, then
+    # the next query failed too. Terminal run_sql status is the second error, so
+    # the turn must surface as an error (last-wins re-arms after a clear).
+    stream = [
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="error",
+                description="first failure",
+                metadata={"sql": "SELECT a FROM t"},
+            )
+        ),
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="success",
+                metadata={"sql": "SELECT 1"},
+            )
+        ),
+        _ui(
+            StatusCardComponent(
+                title="Executing run_sql",
+                status="error",
+                description="second failure",
+                metadata={"sql": "SELECT b FROM t"},
+            )
+        ),
+    ]
+    msg, is_error = components_to_markdown(stream)
+    assert is_error is True
+    assert msg == "second failure"
+
+
 def test_last_text_component_survives() -> None:
     stream = [
         _ui(RichTextComponent(content="first thought")),
