@@ -34,7 +34,7 @@ Defines the database SQL Lens connects to.
 
 Both `statement_timeout_ms` and `max_rows` are safety bounds that protect SQL Lens (and your database) from runaway queries. The defaults are chosen to handle the vast majority of interactive analytical work without intervention.
 
-**Note:** SQL Lens instructs the assistant not to expose your database structure — it will decline requests to list tables, dump column names, or describe the schema, and it will not run schema-listing queries on a user's behalf. This is a best-effort guardrail, not a hard boundary. To enforce what is reachable, connect SQL Lens with a database user whose grants are limited to the specific tables or views you want queried, with no access to system catalogs.
+**Note:** SQL Lens instructs the assistant not to expose your database structure — it will decline requests to list tables, dump column names, or describe the schema, and it will not echo schema details back to you. It may still look up the schema internally when it needs to write a correct query, for example to confirm a column name after a query fails on an unfamiliar database, but those lookups stay private and are never shown to you. This is a best-effort guardrail, not a hard boundary. To enforce what is reachable, connect SQL Lens with a database user whose grants are limited to the specific tables or views you want queried, with no access to system catalogs.
 
 ### Database URL formats
 
