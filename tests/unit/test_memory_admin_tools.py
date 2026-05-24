@@ -164,6 +164,104 @@ async def test_add_partial_failure_is_error(tmp_path, monkeypatch) -> None:
 # --- get_memory / delete_memory -----------------------------------------------
 
 
+async def test_add_duplicate_dedup_reports_nonzero(tmp_path, monkeypatch) -> None:
+    """Re-adding the same (question, sql) is deduped: duplicate_count > 0,
+    saved_count == 0 on the second add (the dedup contract)."""
+    patch_fake_embeddings(monkeypatch)
+    mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))
+    pair = [{"question": "dup q", "sql": "SELECT 42"}]
+    first = _parse(await _fn(mcp, "add_memories")(data_source_id=_DSID, sql_pairs=pair))
+    assert first["saved_count"] == 1
+    second = _parse(await _fn(mcp, "add_memories")(data_source_id=_DSID, sql_pairs=pair))
+    assert second["saved_count"] == 0
+    assert second["duplicate_count"] == 1
+    assert second["errors"] == []
+
+
+async def test_add_non_dict_item_is_clean_row_error(tmp_path, monkeypatch) -> None:
+    """A bare string in sql_pairs becomes a per-row error (question null), not an
+    AttributeError aborting the batch."""
+    patch_fake_embeddings(monkeypatch)
+    mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))
+    result = await _fn(mcp, "add_memories")(
+        data_source_id=_DSID, sql_pairs=["not a dict"]
+    )
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    payload = _parse(result)
+    assert payload["saved_count"] == 0
+    assert len(payload["errors"]) == 1
+    assert payload["errors"][0]["index"] == 0
+    assert payload["errors"][0]["question"] is None
+
+
+async def test_clear_all_reports_total_and_empties_store(tmp_path, monkeypatch) -> None:
+    patch_fake_embeddings(monkeypatch)
+    mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))
+    await _fn(mcp, "add_memories")(
+        data_source_id=_DSID,
+        sql_pairs=[{"question": "q1", "sql": "SELECT 1"}],
+        schema_docs=[{"content": "doc"}],
+    )
+    cleared = _parse(await _fn(mcp, "clear_memories")(data_source_id=_DSID))
+    assert cleared == {"deleted_count": 2}
+    remaining = _parse(await _fn(mcp, "list_memories")(data_source_id=_DSID))
+    assert remaining["total"] == 0
+
+
+async def test_export_rejects_unknown_format(tmp_path, monkeypatch) -> None:
+    patch_fake_embeddings(monkeypatch)
+    mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))
+    with pytest.raises(RuntimeError) as excinfo:
+        await _fn(mcp, "export_memories")(data_source_id=_DSID, format="xml")
+    assert "Unknown export format" in str(excinfo.value)
+
+
+async def test_export_corrupt_store_fails_loudly(tmp_path, monkeypatch) -> None:
+    """A wholesale-corrupt store must not export as an empty success — the tool
+    surfaces MemoryCorruptionError as a distinct isError, not a green blob."""
+    patch_fake_embeddings(monkeypatch)
+    from sqllens.memory import MemoryCorruptionError
+
+    def boom(self):
+        raise MemoryCorruptionError("12 of 13 rows unrepresentable")
+
+    monkeypatch.setattr("sqllens.memory.store.MemoryStore.iter_all", boom)
+    mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))
+    with pytest.raises(RuntimeError) as excinfo:
+        await _fn(mcp, "export_memories")(data_source_id=_DSID, format="json")
+    assert "corrupt" in str(excinfo.value).lower()
+
+
+async def test_stats_excludes_hits_older_than_30d(tmp_path, monkeypatch) -> None:
+    """An old last_hit_date still counts the memory in tool_usage_count and
+    top_hit_memories, but its hits are excluded from total_hits_last_30d."""
+    patch_fake_embeddings(monkeypatch)
+    cfg = _cfg(tmp_path, allow_admin_tools=True)
+    mcp = build_server(cfg)
+    await _fn(mcp, "add_memories")(
+        data_source_id=_DSID, sql_pairs=[{"question": "old q", "sql": "SELECT 1"}]
+    )
+    listed = _parse(await _fn(mcp, "list_memories")(data_source_id=_DSID))
+    memory_id = listed["memories"][0]["memory_id"]
+
+    # Stamp an old hit directly on the row (simulating a retrieval long ago).
+    from sqllens.memory import MemoryStore
+
+    probe = MemoryStore(cfg)
+    collection = probe._mem._get_collection()
+    existing = collection.get(ids=[memory_id]).get("metadatas")[0]
+    bumped = dict(existing)
+    bumped["hit_count"] = 5
+    bumped["last_hit_date"] = "2020-01-01T00:00:00"
+    collection.update(ids=[memory_id], metadatas=[bumped])
+
+    stats = _parse(await _fn(mcp, "get_memory_stats")(data_source_id=_DSID))
+    assert stats["tool_usage_count"] == 1
+    assert stats["total_hits_last_30d"] == 0  # old hit excluded from the window
+    assert stats["top_hit_memories"][0]["hit_count"] == 5  # still a top-hit row
+
+
 async def test_get_memory_and_not_found(tmp_path, monkeypatch) -> None:
     patch_fake_embeddings(monkeypatch)
     mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))

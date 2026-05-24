@@ -19,7 +19,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Any
+from typing import Any, get_args
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
@@ -300,7 +300,9 @@ def build_server(cfg: Config) -> FastMCP:
         # race the dedup baseline or each other's deletes.
         admin_write_lock = asyncio.Lock()
 
-        _VALID_MEMORY_TYPES = {"tool_usage", "text"}
+        # Single source of truth: derive the runtime gate from the MemoryType
+        # literal so adding a type can't leave this set stale.
+        _VALID_MEMORY_TYPES = set(get_args(memory_admin.MemoryType))
 
         def _parse_memory_type(value: str | None) -> str | None:
             # JSON null arrives as None; tolerate the string forms a client might
@@ -388,9 +390,10 @@ def build_server(cfg: Config) -> FastMCP:
         async def delete_memory(
             data_source_id: str, memory_id: str
         ) -> str | CallToolResult:
-            """Delete one memory by id (requires auth — see allow_admin_tools).
+            """Delete one memory by id (write-guarded — see allow_admin_tools).
 
-            Returns ``{"deleted": true}``, or an ``isError`` result with
+            Refuses to run on an unauthenticated endpoint unless auth.insecure
+            is set. Returns ``{"deleted": true}``, or an ``isError`` result with
             ``{"deleted": false}`` when no memory has that id.
             """
             _require_write_auth()
@@ -413,10 +416,11 @@ def build_server(cfg: Config) -> FastMCP:
         async def clear_memories(
             data_source_id: str, memory_type: str | None = None
         ) -> str:
-            """Delete all memories, or just one type (requires auth).
+            """Delete all memories, or just one type (write-guarded).
 
-            ``memory_type`` is ``tool_usage``, ``text``, or omitted for all.
-            Returns ``{"deleted_count": N}``.
+            Refuses to run on an unauthenticated endpoint unless auth.insecure
+            is set. ``memory_type`` is ``tool_usage``, ``text``, or omitted for
+            all. Returns ``{"deleted_count": N}``.
             """
             _require_write_auth()
             mtype = _parse_memory_type(memory_type)
@@ -442,7 +446,8 @@ def build_server(cfg: Config) -> FastMCP:
 
             ``sql_pairs`` items are ``{"question", "sql"}``; ``schema_docs`` items
             are ``{"content"}``. Exact ``(question, sql)`` / ``content`` matches
-            (already stored or repeated in the batch) are skipped. Requires auth.
+            (already stored or repeated in the batch) are skipped. Write-guarded:
+            refuses on an unauthenticated endpoint unless auth.insecure is set.
 
             Returns ``{"saved_count", "duplicate_count", "skipped_count",
             "errors": [{"index", "question", "error"}]}``. Per the partial-failure
@@ -482,8 +487,10 @@ def build_server(cfg: Config) -> FastMCP:
 
             JSON round-trips: its ``{"sql_pairs": [...], "schema_docs": [...]}``
             output feeds straight back into ``add_memories``. Returns
-            ``{"format", "data", "warnings"}``; a wholesale-corrupt store fails
-            loudly rather than exporting an empty success.
+            ``{"format", "data", "warnings", "lossy"}``; when ``lossy`` is true
+            (data that exists was dropped) the result is an ``isError``, and a
+            wholesale-corrupt store fails loudly rather than exporting an empty
+            success.
             """
             if format not in ("json", "csv"):
                 raise RuntimeError(

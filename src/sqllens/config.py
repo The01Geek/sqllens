@@ -136,7 +136,7 @@ class MemoryConfig(BaseModel):
             "get_memory, delete_memory, clear_memories, add_memories, "
             "export_memories, get_memory_stats) for curating the training set. "
             "OFF by default: these enumerate and mutate the store. The "
-            "destructive subset (delete_memories / clear_memories / add_memories) "
+            "destructive subset (delete_memory / clear_memories / add_memories) "
             "additionally refuses to run on an unauthenticated endpoint "
             "(auth.mode='none') unless auth.insecure acknowledges a closed "
             "network."

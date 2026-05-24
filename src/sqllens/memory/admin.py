@@ -86,11 +86,21 @@ def _record_to_wire(
         # than dropping the whole row from an admin listing.
         try:
             args = json.loads(metadata.get("args_json", "{}"))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            logger.debug(
+                "memory %s has unparseable args_json; surfacing sql as null: %s",
+                record.memory_id,
+                exc,
+            )
             args = {}
         try:
             inner = json.loads(metadata.get("metadata_json", "{}"))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            logger.debug(
+                "memory %s has unparseable metadata_json; provenance null: %s",
+                record.memory_id,
+                exc,
+            )
             inner = {}
         wire["tool_name"] = metadata.get("tool_name")
         wire["sql"] = args.get("sql") if isinstance(args, dict) else None
@@ -176,11 +186,13 @@ def clear_memories(
     store: MemoryStore, *, memory_type: MemoryType | None = None
 ) -> dict[str, Any]:
     """Delete all memories (optionally just one type). Returns the deleted count."""
-    records = store.get_all()
-    if memory_type is not None:
-        records = [r for r in records if _classify(r.metadata) == memory_type]
-    ids = [r.memory_id for r in records]
-    deleted = store.delete_ids(ids)
+    if memory_type is None:
+        # Full wipe: delete by every id the collection reports, so rows with
+        # missing/corrupt metadata (which get_all skips) are removed too — a
+        # "clear all" that left corrupt rows behind would be a silent partial.
+        return {"deleted_count": store.clear()}
+    records = [r for r in store.get_all() if _classify(r.metadata) == memory_type]
+    deleted = store.delete_ids([r.memory_id for r in records])
     return {"deleted_count": deleted}
 
 

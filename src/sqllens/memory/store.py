@@ -205,12 +205,18 @@ class MemoryStore:
             schema_docs=docs or None,
         )
 
-    def clear(self) -> None:
-        """Wipe every entry in the configured collection."""
+    def clear(self) -> int:
+        """Wipe every entry in the configured collection; return how many were deleted.
+
+        Deletes by *every* id the collection reports, so rows with missing or
+        non-dict metadata (which ``get_all`` skips) are still removed — a
+        "clear everything" must not leave corrupt rows behind.
+        """
         collection = self._mem._get_collection()
         ids = collection.get(include=[]).get("ids") or []
         if ids:
             collection.delete(ids=ids)
+        return len(ids)
 
     # --- Raw admin enumeration / mutation -------------------------------------
     # These back the memory-administration MCP tools. They return metadata
@@ -230,7 +236,11 @@ class MemoryStore:
             return None
         try:
             vec = [float(x) for x in raw]
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            # A non-numeric embedding is corrupt, not absent; both map to None
+            # (callers omit the field) but log so the two are distinguishable
+            # in the server logs rather than silently identical.
+            logger.debug("skipping unrepresentable embedding vector: %s", exc)
             return None
         return vec or None
 
@@ -286,16 +296,21 @@ class MemoryStore:
         )
 
     def delete_ids(self, ids: list[str]) -> int:
-        """Delete the given ids; return how many actually existed and were removed.
+        """Delete the given ids; return how many were actually removed.
 
         Chroma's ``delete`` is a no-op for unknown ids and reports nothing, so we
-        first read back which of the requested ids are present and count those —
-        the caller needs an honest deleted-count, never an optimistic one.
+        read back which of the requested ids existed, delete those, then re-read
+        to confirm they are gone. The returned count reflects what actually left
+        the store (present-before minus still-present-after) — never an
+        optimistic "we asked to delete N" count, so a partial-delete failure is
+        not reported as a clean success.
         """
         if not ids:
             return 0
         collection = self._mem._get_collection()
         present = collection.get(ids=ids, include=[]).get("ids") or []
-        if present:
-            collection.delete(ids=present)
-        return len(present)
+        if not present:
+            return 0
+        collection.delete(ids=present)
+        still_present = collection.get(ids=present, include=[]).get("ids") or []
+        return len(present) - len(still_present)
