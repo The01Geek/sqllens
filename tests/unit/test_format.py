@@ -937,6 +937,20 @@ def test_build_agent_trace_top_level_error_takes_precedence() -> None:
     assert trace["terminal_error"] == "An unexpected error occurred. Please try again."
 
 
+def test_build_agent_trace_strips_conversation_id_from_terminal_error() -> None:
+    # The real top-level error card appends "\n\nConversation ID: <id>" to its
+    # description; terminal_error must carry the human reason only (the id rides
+    # the dedicated conversation channel). make_agent_error_card()'s default
+    # reproduces the real shape including the suffix.
+    trace = build_agent_trace(
+        [make_agent_error_card()], total_duration_ms=10, max_iterations=20
+    )
+    assert trace["terminal_error"] == (
+        "An unexpected error occurred while processing your message. Please try again."
+    )
+    assert "Conversation ID" not in trace["terminal_error"]
+
+
 def test_build_agent_trace_flags_max_iterations() -> None:
     # No error card and no failed step, but the agent emitted its tool-limit
     # warning STATUS_BAR_UPDATE: the terminal_error reports the max-iteration stop.

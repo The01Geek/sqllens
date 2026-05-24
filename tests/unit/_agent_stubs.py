@@ -99,17 +99,20 @@ def make_tool_cards(
 
 
 def make_agent_error_card(
-    description: str = "An unexpected error occurred. Please try again.",
+    description: str = (
+        "An unexpected error occurred while processing your message. "
+        "Please try again.\n\nConversation ID: conv-abc123"
+    ),
 ) -> UiComponent:
     """Build the generic top-level error card ``send_message`` emits on a thrown turn.
 
-    Approximates ``agent/core/agent/agent.py``'s ``send_message`` exception
-    handler: a STATUS_CARD titled ``Error Processing Message`` with
-    ``status="error"`` and a deliberately generic description (the real
-    exception is logged server-side, never put in the stream). The default
-    description text here is illustrative — the real card's wording differs
-    slightly and appends the conversation id; ``build_agent_trace`` matches only
-    on title + status, never the description text, so the difference is moot.
+    Mirrors ``agent/core/agent/agent.py``'s ``send_message`` exception handler: a
+    STATUS_CARD titled ``Error Processing Message`` with ``status="error"`` and a
+    deliberately generic description (the real exception is logged server-side,
+    never put in the stream). The default reproduces the real card's wording
+    *including* the appended ``Conversation ID:`` line, so a test that feeds the
+    default exercises ``build_agent_trace``'s stripping of that tail from
+    ``terminal_error``.
     """
     return UiComponent(
         rich_component=StatusCardComponent(

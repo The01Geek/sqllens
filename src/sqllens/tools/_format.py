@@ -365,7 +365,15 @@ def _step_duration_ms(start: object, end: object) -> int | None:
     end_dt = _parse_component_ts(end)
     if start_dt is None or end_dt is None:
         return None
-    delta_ms = (end_dt - start_dt).total_seconds() * 1000.0
+    try:
+        # A naive/aware mismatch (one timestamp carried an offset, the other did
+        # not) raises TypeError here. The agent stamps both with naive
+        # utcnow().isoformat() today, so this is defensive — but degrade just
+        # this step's duration to None rather than letting it bubble to the
+        # outer best-effort guard and void the whole trace.
+        delta_ms = (end_dt - start_dt).total_seconds() * 1000.0
+    except TypeError:
+        return None
     # Clock skew / out-of-order timestamps must never yield a negative duration.
     return int(delta_ms) if delta_ms >= 0 else 0
 
@@ -441,8 +449,13 @@ def build_agent_trace(
         description = getattr(rich, "description", "") or ""
 
         if title == _AGENT_ERROR_CARD_TITLE and status == "error":
-            # Generic top-level failure (real exception is server-side only).
-            agent_error = description.strip() or "agent reported an unexpected error"
+            # Generic top-level failure (real exception is server-side only). The
+            # vendored card appends "\n\nConversation ID: <id>" to its
+            # description (agent/core/agent/agent.py) — strip that tail so
+            # terminal_error is the human reason only; the id already rides the
+            # dedicated sqllens/conversation channel.
+            reason = description.split("\n\nConversation ID:", 1)[0].strip()
+            agent_error = reason or "agent reported an unexpected error"
             continue
         if not title.startswith(_TOOL_CARD_PREFIX):
             continue
