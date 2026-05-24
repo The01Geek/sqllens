@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 24, 2026
+
+- **[Feature] Memory-administration tools for curating the saved memory** — A new `memory.allow_admin_tools` setting (default `false`, environment variable `SQLLENS_MEMORY__ALLOW_ADMIN_TOOLS`) exposes seven optional tools to the connected assistant for inspecting and curating SQL Lens's saved memory: list, get, delete, clear, add, export and statistics. Adding entries skips duplicates automatically and reports an error if any entry fails, exporting reports an error rather than a silent partial backup if anything would be left out, and the statistics tool shows how often saved patterns were reused in the last 30 days. The tools that change memory (delete, clear and add) refuse to run when the server requires no authentication unless you set `auth.insecure` to acknowledge a closed network. Leave this setting off unless you trust every client that can reach the server, since these tools can read and permanently delete saved memory. See [Managing memory](managing-memory.md). (#182)
+
 ## May 23, 2026
 
 - **[Fix] Row-Level Security now blocks a per-request boolean value** — When a Row-Level Security rule resolves its value from per-request metadata (`value_from_metadata`), a `true` or `false` supplied by the calling application is now blocked instead of being accepted and turned into a literal in the predicate. An identity token is never a boolean, and accepting one could weaken a rule such as `tenant_id = <token>` into something that matches more rows than intended. This applies to both single values and each element of an `in` list; static values you write in `sqllens.toml` are unaffected. See [Row-Level Security](row-level-security.md). (#177)
