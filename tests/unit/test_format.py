@@ -938,16 +938,33 @@ def test_build_agent_trace_top_level_error_takes_precedence() -> None:
 
 
 def test_build_agent_trace_flags_max_iterations() -> None:
-    # No error card and no failed step, but the loop ran up to the cap: the
-    # terminal_error reports the max-iteration stop.
+    # No error card and no failed step, but the agent emitted its tool-limit
+    # warning STATUS_BAR_UPDATE: the terminal_error reports the max-iteration stop.
     stream = []
     for i in range(3):
         stream.extend(make_tool_cards("run_sql", {"sql": f"SELECT {i}"}, ok=True))
+    stream.append(
+        _ui(StatusBarUpdateComponent(status="warning", message="Tool limit reached"))
+    )
     trace = build_agent_trace(stream, total_duration_ms=99, max_iterations=3)
     assert trace["iterations"] == 3
     assert trace["terminal_error"] == (
-        "reached max_tool_iterations (3/3); the agent stopped before completing the task"
+        "reached the max_tool_iterations limit (3); "
+        "the agent stopped before completing the task"
     )
+
+
+def test_build_agent_trace_step_count_alone_does_not_flag_max_iterations() -> None:
+    # A clean run whose tool-call count equals the cap (parallel calls in fewer
+    # LLM rounds) must NOT be mislabelled as a max-iteration stop — only the
+    # agent's actual warning card triggers that terminal reason.
+    stream = []
+    for i in range(3):
+        stream.extend(make_tool_cards("run_sql", {"sql": f"SELECT {i}"}, ok=True))
+    stream.append(make_text_component("done"))
+    trace = build_agent_trace(stream, total_duration_ms=10, max_iterations=3)
+    assert trace["iterations"] == 3
+    assert trace["terminal_error"] is None
 
 
 def test_build_agent_trace_incomplete_step_when_no_completion() -> None:

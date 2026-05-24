@@ -337,6 +337,12 @@ _TOOL_FAILED_PREFIX = "Tool failed: "
 # component stream — so the trace can only surface this generic terminal reason;
 # the underlying error lives in the server logs, never in ``_meta``.
 _AGENT_ERROR_CARD_TITLE = "Error Processing Message"
+# Message on the ``STATUS_BAR_UPDATE`` (status="warning") the agent emits when it
+# stops because it exhausted ``max_tool_iterations``. Matched as the max-iteration
+# terminal signal — more accurate than counting steps, because the agent's
+# iteration counter counts LLM *rounds* (a single round can fire several parallel
+# tool calls), so a step count can't be compared to the cap directly.
+_ITERATION_LIMIT_MESSAGE = "Tool limit reached"
 
 
 def _parse_component_ts(value: object) -> datetime | None:
@@ -388,8 +394,10 @@ def build_agent_trace(
        and logged server-side — the real text is *not* in the stream);
     2. else the last failed tool step (a tool failure / DB timeout — its real
        message *is* in the stream, via the completion card description);
-    3. else, when the loop ran up to ``max_iterations`` tool calls, the
-       max-iteration stop;
+    3. else, when the agent emitted its ``max_tool_iterations`` warning, the
+       max-iteration stop (detected from the warning ``STATUS_BAR_UPDATE``, not
+       a step count — the agent counts LLM rounds, and one round can fire
+       several parallel tool calls, so a step count is not the iteration count);
     4. else ``None`` — a clean run.
 
     ``iterations`` is the number of tool steps seen; ``total_duration_ms`` is the
@@ -398,12 +406,21 @@ def build_agent_trace(
     steps: list[dict] = []
     by_id: dict[str, dict] = {}
     agent_error: str | None = None
+    hit_iteration_limit = False
 
     for comp in components:
         rich = comp.rich_component
         if rich is None:
             continue
-        if getattr(rich, "type", None) != ComponentType.STATUS_CARD:
+        ctype = getattr(rich, "type", None)
+        if ctype == ComponentType.STATUS_BAR_UPDATE:
+            if (
+                getattr(rich, "status", "") == "warning"
+                and getattr(rich, "message", "") == _ITERATION_LIMIT_MESSAGE
+            ):
+                hit_iteration_limit = True
+            continue
+        if ctype != ComponentType.STATUS_CARD:
             continue
         title = getattr(rich, "title", "") or ""
         status = getattr(rich, "status", "") or ""
@@ -458,9 +475,9 @@ def build_agent_trace(
         terminal_error: str | None = agent_error
     elif last_failed is not None:
         terminal_error = f"tool '{last_failed['tool']}' failed: {last_failed['_error']}"
-    elif len(steps) >= max_iterations:
+    elif hit_iteration_limit:
         terminal_error = (
-            f"reached max_tool_iterations ({len(steps)}/{max_iterations}); "
+            f"reached the max_tool_iterations limit ({max_iterations}); "
             "the agent stopped before completing the task"
         )
     else:
