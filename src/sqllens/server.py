@@ -62,17 +62,19 @@ _MEMORY_META_KEY = "sqllens/memory_info"
 # on (the same gate as the executed-SQL card, which already admits schema/SQL
 # leakage — so this knob adds no new security surface). Carries the structured
 # loop trace: ``{iterations, max_iterations, total_duration_ms, steps[],
-# terminal_error}``. Attached on the success result and — uniquely among the
-# _meta channels — also on the ``isError`` result, since the failure modes the
-# trace most helps debug (a tool failure, a DB timeout, an LLM error) drive the
-# turn down the error path.
+# terminal_error}``. Attached on the success result and — alone among the
+# *observability/widget* channels (chart/table/query/memory) — also on the
+# ``isError`` result, since the failure modes the trace most helps debug (a tool
+# failure, a DB timeout, an LLM error) drive the turn down the error path. (The
+# conversation channel rides the error result too, via ``_trace_error_result``.)
 _AGENT_TRACE_META_KEY = "sqllens/agent_trace"
 # Conversation continuity channel. The resolved conversation id is returned on
-# every successful answer turn — structured here for apps-aware hosts, and as a
-# plain-Markdown footer in the text content for non-apps clients. The calling
-# model passes it back as the ``conversation_id`` tool argument on the next turn
-# so the agent loads the prior turn's history (e.g. to answer its own clarifying
-# question).
+# every answer turn that resolves a conversation — every successful turn, and
+# also the trace-carrying ``isError`` result (via ``_trace_error_result``).
+# Structured here for apps-aware hosts, and as a plain-Markdown footer in the
+# text content for non-apps clients. The calling model passes it back as the
+# ``conversation_id`` tool argument on the next turn so the agent loads the
+# prior turn's history (e.g. to answer its own clarifying question).
 _CONVERSATION_META_KEY = "sqllens/conversation"
 
 

@@ -340,8 +340,10 @@ _AGENT_TRACE = {
 async def test_query_database_meta_carries_agent_trace_when_present(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # show_details on: the impl returns a trace as the 6th element; the server
-    # attaches it under sqllens/agent_trace on the success result.
+    # The server attaches whatever trace the impl returns (the 6th element) under
+    # sqllens/agent_trace on the success result. The show_details gate itself
+    # lives in the impl (covered by test_with_widgets_no_trace_when_show_details_off);
+    # here the trace is injected directly to pin the server-side attachment.
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
 

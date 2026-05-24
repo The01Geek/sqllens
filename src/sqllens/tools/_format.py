@@ -41,6 +41,12 @@ _MAX_TABLE_PAYLOAD_BYTES = 130 * 1024
 # share one sandboxed-iframe rendering ceiling.
 _MAX_CHART_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES
 
+# Same budget, same reason, for the agent-trace ``_meta["sqllens/agent_trace"]``
+# blob. The trace embeds raw tool arguments (SQL, memory-search text) per step,
+# so it can grow large on a long run — and it rides the same sandboxed-iframe
+# ceiling. Aliased to the table budget so all three _meta blobs share one cap.
+_MAX_TRACE_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES
+
 
 def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
     info: dict = {"sql": sql, "query_type": first_sql_keyword(sql)}
@@ -384,8 +390,9 @@ def build_agent_trace(
     ``status`` is ``"ok"`` on success, ``"error"`` on failure, ``"incomplete"``
     if the run ended before the completion card was emitted; ``duration_ms`` is
     the wall-clock between the two cards' framework timestamps (``None`` if a
-    timestamp is unparseable); ``error`` is present only on a failed step and is
-    the tool's own message (the ``Tool failed: `` boilerplate stripped).
+    timestamp is unparseable; clamped to ``0`` on clock skew / out-of-order
+    timestamps); ``error`` is present only on a failed step and is the tool's
+    own message (the ``Tool failed: `` boilerplate stripped).
 
     ``terminal_error`` is the run-ending reason derived from the same stream,
     in precedence order:
@@ -398,7 +405,14 @@ def build_agent_trace(
        max-iteration stop (detected from the warning ``STATUS_BAR_UPDATE``, not
        a step count — the agent counts LLM rounds, and one round can fire
        several parallel tool calls, so a step count is not the iteration count);
-    4. else ``None`` — a clean run.
+    4. else, when the last step is ``"incomplete"`` (the run ended mid tool
+       call), a note that the run ended in progress — so a truncated run is not
+       silently reported as a clean finish;
+    5. else ``None`` — a clean run.
+
+    Over-budget traces are size-capped by :func:`_cap_trace_size`, which may add
+    ``arguments_truncated``/``steps_truncated`` flags and drop per-step
+    ``arguments`` or trailing steps to fit the ``_meta`` iframe ceiling.
 
     ``iterations`` is the number of tool steps seen; ``total_duration_ms`` is the
     caller-measured wall-clock of the whole turn (``None`` if unmeasured).
@@ -471,6 +485,11 @@ def build_agent_trace(
     last_failed = next(
         (s for s in reversed(steps) if s["status"] == "error"), None
     )
+    # ``agent_error`` and the per-step error text below are agent-authored card
+    # descriptions, surfaced verbatim — the same #91 decision the
+    # ``_SQL_EXECUTION_ERROR_PREFIX`` path in query_database.py already applies:
+    # the agent's structured error is actionable detail the caller needs, not an
+    # infra-string leak, so it is deliberately not scrubbed here either.
     if agent_error is not None:
         terminal_error: str | None = agent_error
     elif last_failed is not None:
@@ -479,6 +498,14 @@ def build_agent_trace(
         terminal_error = (
             f"reached the max_tool_iterations limit ({max_iterations}); "
             "the agent stopped before completing the task"
+        )
+    elif steps and steps[-1]["status"] == "incomplete":
+        # No error card, no failed step, no limit warning — but the last tool
+        # call never completed. The run ended mid-step; reporting None here would
+        # read as a clean finish, hiding the truncation.
+        terminal_error = (
+            f"run ended with tool '{steps[-1]['tool']}' still in progress "
+            "(no completion was emitted)"
         )
     else:
         terminal_error = None
@@ -496,13 +523,57 @@ def build_agent_trace(
             public["error"] = step["_error"]
         public_steps.append(public)
 
-    return {
-        "iterations": len(public_steps),
-        "max_iterations": max_iterations,
-        "total_duration_ms": total_duration_ms,
-        "steps": public_steps,
-        "terminal_error": terminal_error,
-    }
+    return _cap_trace_size(
+        {
+            "iterations": len(public_steps),
+            "max_iterations": max_iterations,
+            "total_duration_ms": total_duration_ms,
+            "steps": public_steps,
+            "terminal_error": terminal_error,
+        }
+    )
+
+
+def _cap_trace_size(trace: dict) -> dict:
+    """Bound the serialized trace to the iframe ``_meta`` budget (issue #180).
+
+    The trace rides the same ``CallToolResult._meta`` blob as the table/chart
+    payloads, which the host pushes into a sandboxed iframe — a multi-MB blob is
+    what actually breaks rendering (see ``_MAX_TABLE_PAYLOAD_BYTES``). Per-step
+    ``arguments`` (raw SQL, memory-search text) are the unbounded part, so when
+    the trace is over budget we drop them first (flagging ``arguments_truncated``
+    and stripping ``arguments`` from each step), then, only if still over, keep
+    the largest contiguous step prefix that fits (recording ``steps_truncated``).
+    A loud flag beats a silently-broken widget on the debugging path.
+    """
+    if _serialized_len(trace) <= _MAX_TRACE_PAYLOAD_BYTES:
+        return trace
+
+    for step in trace["steps"]:
+        step.pop("arguments", None)
+    trace["arguments_truncated"] = True
+    if _serialized_len(trace) <= _MAX_TRACE_PAYLOAD_BYTES:
+        return trace
+
+    full_steps = trace["steps"]
+    total = len(full_steps)
+    trace["steps"] = []
+    if _serialized_len(trace) > _MAX_TRACE_PAYLOAD_BYTES:
+        # Even the step-stripped trace busts the budget — nothing more to drop.
+        trace["steps_truncated"] = total
+        return trace
+
+    lo, hi = 0, total
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        trace["steps"] = full_steps[:mid]
+        if _serialized_len(trace) <= _MAX_TRACE_PAYLOAD_BYTES:
+            lo = mid
+        else:
+            hi = mid - 1
+    trace["steps"] = full_steps[:lo]
+    trace["steps_truncated"] = total - lo
+    return trace
 
 
 def append_conversation_footer(markdown: str, conversation_id: str | None) -> str:

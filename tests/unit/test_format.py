@@ -969,7 +969,9 @@ def test_build_agent_trace_step_count_alone_does_not_flag_max_iterations() -> No
 
 def test_build_agent_trace_incomplete_step_when_no_completion() -> None:
     # A running card with no completion (run ended mid-step) is surfaced as
-    # status="incomplete" with no duration, never silently dropped.
+    # status="incomplete" with no duration, never silently dropped — and the
+    # run's terminal_error reports the in-progress stop rather than reading as
+    # a clean finish (terminal_error=None).
     running, _completed = make_tool_cards("run_sql", {"sql": "SELECT 1"})
     trace = build_agent_trace([running], total_duration_ms=5, max_iterations=20)
     assert trace["iterations"] == 1
@@ -977,6 +979,9 @@ def test_build_agent_trace_incomplete_step_when_no_completion() -> None:
     assert step["status"] == "incomplete"
     assert step["duration_ms"] is None
     assert "error" not in step
+    assert trace["terminal_error"] == (
+        "run ended with tool 'run_sql' still in progress (no completion was emitted)"
+    )
 
 
 def test_build_agent_trace_empty_stream() -> None:
@@ -988,3 +993,54 @@ def test_build_agent_trace_empty_stream() -> None:
         "steps": [],
         "terminal_error": None,
     }
+
+
+def test_build_agent_trace_duration_none_on_unparseable_timestamp() -> None:
+    # A card whose timestamp can't be parsed must yield duration_ms=None, not a
+    # crash — the step is still emitted.
+    cards = make_tool_cards(
+        "run_sql", {"sql": "SELECT 1"}, ok=True, start_ts="not-a-date", end_ts=""
+    )
+    trace = build_agent_trace(cards, total_duration_ms=5, max_iterations=20)
+    assert trace["steps"][0]["status"] == "ok"
+    assert trace["steps"][0]["duration_ms"] is None
+
+
+def test_build_agent_trace_clock_skew_clamps_duration_to_zero() -> None:
+    # End timestamp earlier than start (clock skew / out-of-order): duration_ms
+    # clamps to 0, never a misleading negative.
+    cards = make_tool_cards(
+        "run_sql",
+        {"sql": "SELECT 1"},
+        ok=True,
+        start_ts="2026-05-24T10:00:01.000000",
+        end_ts="2026-05-24T10:00:00.000000",
+    )
+    trace = build_agent_trace(cards, total_duration_ms=5, max_iterations=20)
+    assert trace["steps"][0]["duration_ms"] == 0
+
+
+def test_build_agent_trace_top_level_error_outranks_iteration_limit() -> None:
+    # When BOTH a top-level error card and a tool-limit warning are present, the
+    # generic top-level error wins (precedence rung 1 over rung 3).
+    stream = [
+        *make_tool_cards("run_sql", {"sql": "SELECT 1"}, ok=True),
+        _ui(StatusBarUpdateComponent(status="warning", message="Tool limit reached")),
+        make_agent_error_card("An unexpected error occurred. Please try again."),
+    ]
+    trace = build_agent_trace(stream, total_duration_ms=10, max_iterations=1)
+    assert trace["terminal_error"] == "An unexpected error occurred. Please try again."
+
+
+def test_build_agent_trace_caps_oversized_arguments() -> None:
+    # A step whose arguments blow the _meta iframe budget must not ship an
+    # oversized blob: arguments are dropped and the truncation is flagged loudly.
+    huge_sql = "SELECT " + "x" * (200 * 1024)
+    cards = make_tool_cards("run_sql", {"sql": huge_sql}, ok=True)
+    trace = build_agent_trace(cards, total_duration_ms=5, max_iterations=20)
+    assert trace["arguments_truncated"] is True
+    # arguments were dropped from the over-budget step
+    assert "arguments" not in trace["steps"][0] or trace["steps"][0]["arguments"] == {}
+    # the step itself is retained (only its arguments were dropped)
+    assert trace["steps"][0]["tool"] == "run_sql"
+    assert _serialized_len(trace) <= _MAX_TABLE_PAYLOAD_BYTES

@@ -103,10 +103,13 @@ def make_agent_error_card(
 ) -> UiComponent:
     """Build the generic top-level error card ``send_message`` emits on a thrown turn.
 
-    Mirrors ``agent/core/agent/agent.py``'s ``send_message`` exception handler:
-    a STATUS_CARD titled ``Error Processing Message`` with ``status="error"``
-    and a deliberately generic description (the real exception is logged
-    server-side, never put in the stream).
+    Approximates ``agent/core/agent/agent.py``'s ``send_message`` exception
+    handler: a STATUS_CARD titled ``Error Processing Message`` with
+    ``status="error"`` and a deliberately generic description (the real
+    exception is logged server-side, never put in the stream). The default
+    description text here is illustrative — the real card's wording differs
+    slightly and appends the conversation id; ``build_agent_trace`` matches only
+    on title + status, never the description text, so the difference is moot.
     """
     return UiComponent(
         rich_component=StatusCardComponent(

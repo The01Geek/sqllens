@@ -292,15 +292,24 @@ async def query_database_impl_with_widgets(
     # a trace. Assembled before the is_error branch so the error path can ship
     # it too — that is where the tool-failure / timeout / LLM-error terminal
     # reasons land (a failed tool drives this turn to is_error=True).
-    agent_trace = (
-        build_agent_trace(
-            components,
-            total_duration_ms=total_duration_ms,
-            max_iterations=cfg.agent.max_tool_iterations,
-        )
-        if cfg.agent.show_details
-        else None
-    )
+    #
+    # Best-effort, exactly like the table/chart payload builders in _format.py:
+    # the trace is an observability extra, never the answer, so a malformed
+    # component stream must degrade to "no trace" — never crash an otherwise
+    # successful answer or let an unsanitized exception escape past the error
+    # taxonomy above (CLAUDE.md's most-violated rule). The full traceback is
+    # logged server-side instead.
+    agent_trace: dict | None = None
+    if cfg.agent.show_details:
+        try:
+            agent_trace = build_agent_trace(
+                components,
+                total_duration_ms=total_duration_ms,
+                max_iterations=cfg.agent.max_tool_iterations,
+            )
+        except Exception:
+            logger.exception("agent trace assembly failed; serving answer without trace")
+            agent_trace = None
     if is_error:
         # Agent-reported query failure — SQL-execution error category. S-10's
         # structural leak (raw exception-string interpolation in the except
