@@ -253,14 +253,34 @@ async def test_export_json_roundtrips_into_add(tmp_path, monkeypatch) -> None:
     assert re_added["errors"] == []
 
 
-async def test_export_empty_store_warns(tmp_path, monkeypatch) -> None:
+async def test_export_empty_store_warns_but_succeeds(tmp_path, monkeypatch) -> None:
+    """An empty store is not data loss (nothing existed) — it exports as a
+    non-fatal success carrying an explanatory warning, matching the CLI."""
     patch_fake_embeddings(monkeypatch)
     mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))
     result = await _fn(mcp, "export_memories")(data_source_id=_DSID, format="json")
+    assert isinstance(result, str)
+    payload = _parse(result)
+    assert payload["lossy"] is False
+    assert any("empty" in w for w in payload["warnings"])
+
+
+async def test_export_csv_dropping_schema_docs_is_lossy(tmp_path, monkeypatch) -> None:
+    """CSV can't carry schema docs; dropping ones that EXIST is genuine partial
+    loss → isError, with the warning surfaced in the body."""
+    patch_fake_embeddings(monkeypatch)
+    mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))
+    await _fn(mcp, "add_memories")(
+        data_source_id=_DSID,
+        sql_pairs=[{"question": "q", "sql": "SELECT 1"}],
+        schema_docs=[{"content": "doc that CSV cannot carry"}],
+    )
+    result = await _fn(mcp, "export_memories")(data_source_id=_DSID, format="csv")
     assert isinstance(result, CallToolResult)
     assert result.isError is True
     payload = _parse(result)
-    assert any("empty" in w for w in payload["warnings"])
+    assert payload["lossy"] is True
+    assert any("schema doc" in w for w in payload["warnings"])
 
 
 # --- hit tracking -------------------------------------------------------------

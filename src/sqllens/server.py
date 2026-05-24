@@ -504,9 +504,13 @@ def build_server(cfg: Config) -> FastMCP:
                 raise RuntimeError(
                     "Failed to export the memory store; check the server logs."
                 ) from None
-            # An empty / lossy export is reported with a loud warning, never a
-            # silent green blob (the data-loss trap the isError contract warns of).
-            if result["warnings"]:
+            # Genuine partial loss — data that EXISTS in the store was dropped
+            # from the export (unrepresentable rows, or schema docs absent from a
+            # CSV) — is the data-loss trap the isError contract warns of, so it
+            # reaches the client as isError (warnings still in the body). A
+            # merely-empty store is not loss (nothing existed) and returns
+            # success with an explanatory warning, matching the CLI exporter.
+            if result["lossy"]:
                 return _json_error(result)
             return json.dumps(result)
 

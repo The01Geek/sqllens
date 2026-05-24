@@ -210,12 +210,12 @@ async def add_memories(
             valid_pairs.append(SqlPair(**raw))
             pair_orig_index.append(index)
         except Exception as exc:
+            # raw may not be a dict (a client could send a bare string); guard
+            # the question lookup so a malformed item is a clean per-row error
+            # rather than an AttributeError that fails the whole batch.
+            question = raw.get("question") if isinstance(raw, dict) else None
             errors.append(
-                {
-                    "index": index,
-                    "question": (raw or {}).get("question"),
-                    "error": str(exc),
-                }
+                {"index": index, "question": question, "error": str(exc)}
             )
 
     valid_docs: list[SchemaDoc] = []
@@ -265,16 +265,23 @@ def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str
     only (a ``question,sql`` sheet); schema docs are reported as a warning since
     they are not representable.
 
-    Returns ``{format, data, warnings}``. ``iter_all`` raises
+    Returns ``{format, data, warnings, lossy}``. ``iter_all`` raises
     :class:`~sqllens.memory.store.MemoryCorruptionError` on a wholesale-corrupt
-    store so a destroyed backup never serializes as an empty success.
+    store so a destroyed backup never serializes as an empty success. ``lossy``
+    is True when data that EXISTS in the store was dropped from this export
+    (unrepresentable rows, or schema docs absent from a CSV) — the caller raises
+    on that. A merely-empty store is not lossy (nothing existed to lose): it
+    returns ``lossy=False`` with an explanatory warning, matching the non-fatal
+    behaviour of the CLI ``export_bundle``.
     """
     bundle = store.iter_all()
     pairs = list(bundle.sql_pairs.pairs) if bundle.sql_pairs else []
     docs = list(bundle.schema_docs) if bundle.schema_docs else []
 
     warnings: list[str] = []
+    lossy = False
     if store.last_skipped_rows:
+        lossy = True
         warnings.append(
             f"{store.last_skipped_rows} stored row(s) were unrepresentable and "
             "are NOT in this export."
@@ -284,6 +291,7 @@ def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str
 
     if fmt == "csv":
         if docs:
+            lossy = True
             warnings.append(
                 f"CSV carries SQL pairs only — {len(docs)} schema doc(s) are NOT "
                 "in this export. Use format='json' for a lossless backup."
@@ -306,7 +314,7 @@ def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str
             ensure_ascii=False,
         )
 
-    return {"format": fmt, "data": data, "warnings": warnings}
+    return {"format": fmt, "data": data, "warnings": warnings, "lossy": lossy}
 
 
 def get_memory_stats(store: MemoryStore) -> dict[str, Any]:
