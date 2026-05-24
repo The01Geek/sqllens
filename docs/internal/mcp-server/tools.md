@@ -32,11 +32,19 @@ def build_server(cfg: Config) -> FastMCP:
         # Mint a stable id when the caller omits one, so the resolved id can be
         # returned for the caller to thread on the next turn.
         conversation_id = conversation_id or str(uuid.uuid4())
-        markdown, table, query_info, chart, memory_info = (
-            await query_database_impl_with_widgets(
-                cfg, question, metadata=metadata, conversation_id=conversation_id
+        try:
+            markdown, table, query_info, chart, memory_info, agent_trace = (
+                await query_database_impl_with_widgets(
+                    cfg, question, metadata=metadata, conversation_id=conversation_id
+                )
             )
-        )
+        except AgentRunError as exc:
+            # With show_details on the failure carries the trace: return an
+            # isError result with it on _meta. With it off agent_trace is None:
+            # re-raise so FastMCP formats the failure exactly as before.
+            if exc.agent_trace is None:
+                raise
+            return _trace_error_result(str(exc), conversation_id, exc.agent_trace)
         extra_meta: dict = {}
         if chart is not None:
             extra_meta["sqllens/chart"] = chart
@@ -46,6 +54,8 @@ def build_server(cfg: Config) -> FastMCP:
             extra_meta["sqllens/query"] = query_info
         if memory_info:
             extra_meta["sqllens/memory_info"] = memory_info
+        if agent_trace is not None:
+            extra_meta["sqllens/agent_trace"] = agent_trace
         return _conversation_result(markdown, conversation_id, extra_meta)
 
     @mcp.tool()
@@ -202,6 +212,7 @@ How each field is derived from the stream:
 
 - **`steps`.** Each tool call surfaces as a pair of `STATUS_CARD` components sharing one component `id`: the `running` card (titled `Executing {tool}`, carrying the call `arguments` in `metadata`) and the `success`/`error` completion (`set_status` reuses the id). The pass folds the pair into one step. `status` is `"ok"` on success, `"error"` on failure, `"incomplete"` if the run ended before the completion card was emitted. `duration_ms` is the wall-clock between the two cards' framework `timestamp`s (`None` if a timestamp is unparseable; clamped to `0` on clock skew). On a failed step, `error` is the tool's own message with the agent's `Tool failed: ` boilerplate stripped. These per-call cards are the **same** ones the executed-SQL channel reads — they exist only because `show_details` unlocked `UI_FEATURE_SHOW_TOOL_ARGUMENTS` for the static user group.
 - **`iterations`** is the number of tool steps seen; **`max_iterations`** is `cfg.agent.max_tool_iterations`; **`total_duration_ms`** is wall-clock measured by the impl (`time.monotonic`) around the whole `send_message` consumption.
+- **Size cap.** The trace rides the same `CallToolResult._meta` blob the host pushes into a sandboxed iframe, so it shares the **130 KB serialized-size budget** (`_MAX_TRACE_PAYLOAD_BYTES`, aliased to `_MAX_TABLE_PAYLOAD_BYTES`). Per-step `arguments` (raw SQL, memory-search text) are the unbounded part, so when the trace is over budget `_cap_trace_size` drops them first (flagging `arguments_truncated: true` and stripping each step's `arguments`), then, only if still over, keeps the largest contiguous step prefix that fits (flagging `steps_truncated: <dropped count>`). A loud flag beats a silently-broken widget on the debugging path.
 - **`terminal_error`** is the run-ending reason, in precedence order: (1) the generic top-level `Error Processing Message` error card — an LLM/infra exception the vendored `send_message` caught and logged server-side, so the real text is **not** in the stream and the trace can only report the generic reason; (2) else the last failed tool step (`tool '<name>' failed: <message>` — a tool failure / DB timeout, whose real message **is** in the stream); (3) else the max-iteration stop, detected from the agent's tool-limit warning `STATUS_BAR_UPDATE` (status `warning`, message `Tool limit reached`) rather than a step count — the agent's iteration counter counts LLM *rounds*, and one round can fire several parallel tool calls, so a step count cannot be compared to the cap; (4) else, when the last step is `incomplete` (the run ended mid tool call, no completion card emitted), a note that the run ended in progress — so a truncated run is not surfaced as a clean finish; (5) else `None` for a clean run.
 
 **Delivery on both success and failure.** Unlike every other `_meta` channel, the trace is attached on the **error path too**. This is essential: the vendored agent maps a failed tool to a `status="error"` card, which drives `components_to_widgets` to flag `is_error` and the tool to raise — so a tool failure, a DB timeout, and a top-level LLM/infra error all leave via the error path, and those are precisely the runs an operator most needs the trace for (only the max-iteration stop ends on the success path). The mechanism:
