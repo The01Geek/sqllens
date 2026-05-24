@@ -10,6 +10,7 @@ mechanics (conftest is loaded as a pytest plugin, not a package member).
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
@@ -40,6 +41,78 @@ def make_status_card(
             status=status,
             description=description,
             metadata=metadata or {},
+        )
+    )
+
+
+def make_tool_cards(
+    tool: str,
+    arguments: dict[str, Any] | None = None,
+    *,
+    ok: bool = True,
+    error: str | None = None,
+    start_ts: str = "2026-05-24T10:00:00.000000",
+    end_ts: str = "2026-05-24T10:00:00.250000",
+) -> list[UiComponent]:
+    """Build the running + completed STATUS_CARD pair the agent emits per tool call.
+
+    Mirrors ``agent/core/agent/agent.py``: a ``running`` card titled
+    ``Executing {tool}`` carrying the call ``arguments`` in ``metadata``, then a
+    completion card sharing the same component ``id`` (the real agent reuses the
+    id via ``set_status``) flipped to ``success`` or, on failure, ``error`` with
+    a ``Tool failed: {error}`` description. Explicit ``id`` and timestamps make
+    the trace's ``duration_ms`` deterministic (``end_ts - start_ts``); the real
+    agent stamps both with wall-clock time.
+    """
+    args = arguments or {}
+    card_id = str(uuid.uuid4())
+    running = StatusCardComponent(
+        id=card_id,
+        title=f"Executing {tool}",
+        status="running",
+        description=f"Running tool with {len(args)} arguments",
+        metadata=args,
+        timestamp=start_ts,
+    )
+    if ok:
+        completed = StatusCardComponent(
+            id=card_id,
+            title=f"Executing {tool}",
+            status="success",
+            description="Tool completed successfully",
+            metadata=args,
+            timestamp=end_ts,
+        )
+    else:
+        completed = StatusCardComponent(
+            id=card_id,
+            title=f"Executing {tool}",
+            status="error",
+            description=f"Tool failed: {error or 'Unknown error'}",
+            metadata=args,
+            timestamp=end_ts,
+        )
+    return [
+        UiComponent(rich_component=running),
+        UiComponent(rich_component=completed),
+    ]
+
+
+def make_agent_error_card(
+    description: str = "An unexpected error occurred. Please try again.",
+) -> UiComponent:
+    """Build the generic top-level error card ``send_message`` emits on a thrown turn.
+
+    Mirrors ``agent/core/agent/agent.py``'s ``send_message`` exception handler:
+    a STATUS_CARD titled ``Error Processing Message`` with ``status="error"``
+    and a deliberately generic description (the real exception is logged
+    server-side, never put in the stream).
+    """
+    return UiComponent(
+        rich_component=StatusCardComponent(
+            title="Error Processing Message",
+            status="error",
+            description=description,
         )
     )
 

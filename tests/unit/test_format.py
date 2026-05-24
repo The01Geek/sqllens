@@ -37,11 +37,18 @@ from sqllens.tools._format import (
     _render_dataframe,
     _serialized_len,
     append_conversation_footer,
+    build_agent_trace,
     components_to_chart,
     components_to_markdown,
     components_to_table,
     components_to_widgets,
     render_interactive,
+)
+
+from ._agent_stubs import (
+    make_agent_error_card,
+    make_text_component,
+    make_tool_cards,
 )
 
 
@@ -853,3 +860,114 @@ def test_query_info_ignores_non_sql_status_cards() -> None:
     ]
     _, _, _, query_info = components_to_table(stream)
     assert query_info is None
+
+
+# ──────────────────────────── agent trace ───────────────────────────────────
+
+
+def test_build_agent_trace_pairs_steps_and_fields() -> None:
+    # Two completed tool calls: the running + completed cards (shared id) fold
+    # into one step each, carrying tool name, arguments, status, and duration.
+    stream = [
+        *make_tool_cards(
+            "search_saved_correct_tool_uses",
+            {"question": "how many orders?"},
+            ok=True,
+            start_ts="2026-05-24T10:00:00.000000",
+            end_ts="2026-05-24T10:00:00.400000",
+        ),
+        *make_tool_cards(
+            "run_sql",
+            {"sql": "SELECT count(*) FROM orders"},
+            ok=True,
+            start_ts="2026-05-24T10:00:01.000000",
+            end_ts="2026-05-24T10:00:01.050000",
+        ),
+        make_text_component("42 orders"),
+    ]
+    trace = build_agent_trace(stream, total_duration_ms=1500, max_iterations=20)
+
+    assert trace["iterations"] == 2
+    assert trace["max_iterations"] == 20
+    assert trace["total_duration_ms"] == 1500
+    assert trace["terminal_error"] is None
+    assert [s["tool"] for s in trace["steps"]] == [
+        "search_saved_correct_tool_uses",
+        "run_sql",
+    ]
+    assert [s["index"] for s in trace["steps"]] == [0, 1]
+    first, second = trace["steps"]
+    assert first["arguments"] == {"question": "how many orders?"}
+    assert first["status"] == "ok"
+    assert first["duration_ms"] == 400
+    assert "error" not in first
+    assert second["arguments"] == {"sql": "SELECT count(*) FROM orders"}
+    assert second["duration_ms"] == 50
+
+
+def test_build_agent_trace_records_tool_failure_terminal_error() -> None:
+    # A failed tool step is marked status="error", carries the tool's own
+    # message (the "Tool failed: " boilerplate stripped), and becomes the
+    # terminal_error.
+    stream = [
+        *make_tool_cards(
+            "run_sql",
+            {"sql": "SELECT * FROM orders"},
+            ok=False,
+            error="timeout after 240s",
+        ),
+    ]
+    trace = build_agent_trace(stream, total_duration_ms=240_000, max_iterations=20)
+
+    assert trace["iterations"] == 1
+    step = trace["steps"][0]
+    assert step["status"] == "error"
+    assert step["error"] == "timeout after 240s"
+    assert trace["terminal_error"] == "tool 'run_sql' failed: timeout after 240s"
+
+
+def test_build_agent_trace_top_level_error_takes_precedence() -> None:
+    # The generic top-level error card wins over a failed tool step: it is the
+    # actual run-ending reason (the real exception is server-side only).
+    stream = [
+        *make_tool_cards("run_sql", {"sql": "x"}, ok=False, error="boom"),
+        make_agent_error_card("An unexpected error occurred. Please try again."),
+    ]
+    trace = build_agent_trace(stream, total_duration_ms=10, max_iterations=20)
+    assert trace["terminal_error"] == "An unexpected error occurred. Please try again."
+
+
+def test_build_agent_trace_flags_max_iterations() -> None:
+    # No error card and no failed step, but the loop ran up to the cap: the
+    # terminal_error reports the max-iteration stop.
+    stream = []
+    for i in range(3):
+        stream.extend(make_tool_cards("run_sql", {"sql": f"SELECT {i}"}, ok=True))
+    trace = build_agent_trace(stream, total_duration_ms=99, max_iterations=3)
+    assert trace["iterations"] == 3
+    assert trace["terminal_error"] == (
+        "reached max_tool_iterations (3/3); the agent stopped before completing the task"
+    )
+
+
+def test_build_agent_trace_incomplete_step_when_no_completion() -> None:
+    # A running card with no completion (run ended mid-step) is surfaced as
+    # status="incomplete" with no duration, never silently dropped.
+    running, _completed = make_tool_cards("run_sql", {"sql": "SELECT 1"})
+    trace = build_agent_trace([running], total_duration_ms=5, max_iterations=20)
+    assert trace["iterations"] == 1
+    step = trace["steps"][0]
+    assert step["status"] == "incomplete"
+    assert step["duration_ms"] is None
+    assert "error" not in step
+
+
+def test_build_agent_trace_empty_stream() -> None:
+    trace = build_agent_trace([], total_duration_ms=None, max_iterations=20)
+    assert trace == {
+        "iterations": 0,
+        "max_iterations": 20,
+        "total_duration_ms": None,
+        "steps": [],
+        "terminal_error": None,
+    }

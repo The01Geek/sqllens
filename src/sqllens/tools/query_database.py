@@ -16,6 +16,7 @@ because the forms here remain mutually distinguishable under it.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Mapping
 from typing import Any
 
@@ -23,12 +24,13 @@ from sqllens.agent import RequestContext
 from sqllens.config import RESERVED_METADATA_KEYS, Config
 from sqllens.safety import RlsError, UnsafeSqlError
 from sqllens.tools._agent import get_agent, prime_agent
-from sqllens.tools._format import components_to_widgets
+from sqllens.tools._format import build_agent_trace, components_to_widgets
 
 # ``prime_agent`` lives in ``tools/_agent.py`` but the transport-layer warmup
 # (``transport/http.py``) and several tests import it from here — keep it in
 # ``__all__`` so it is a stable re-export, not an implementation detail.
 __all__ = [
+    "AgentRunError",
     "prime_agent",
     "query_database_impl",
     "query_database_impl_with_table",
@@ -36,6 +38,23 @@ __all__ = [
 ]
 
 logger = logging.getLogger("sqllens.tools.query_database")
+
+
+class AgentRunError(RuntimeError):
+    """An agent-reported query failure that may carry a step-by-step trace.
+
+    Subclasses ``RuntimeError`` so the established error taxonomy is unchanged:
+    callers (and the FastMCP wrapper) that only catch ``RuntimeError`` and read
+    the message keep working byte-for-byte. The extra ``agent_trace`` rides
+    alongside the message so the server can attach it to the ``isError`` result's
+    ``_meta`` when ``agent.show_details`` is on. It is ``None`` when details are
+    off — in which case the server re-raises and FastMCP formats the failure
+    exactly as before, with no trace leaked into a details-off deployment.
+    """
+
+    def __init__(self, message: str, *, agent_trace: dict | None = None) -> None:
+        super().__init__(message)
+        self.agent_trace = agent_trace
 
 # Client-facing error taxonomy. The MCP wrapper collapses every failure into
 # one ``isError: true`` result, so the *message* is the only category signal
@@ -131,7 +150,7 @@ async def query_database_impl(
     that drops the structured payloads. The error taxonomy, sanitization, and
     exact raised messages are identical — they live in the sibling below.
     """
-    markdown, _, _, _, _ = await query_database_impl_with_widgets(
+    markdown, _, _, _, _, _ = await query_database_impl_with_widgets(
         cfg, question, metadata=metadata, conversation_id=conversation_id
     )
     return markdown
@@ -150,7 +169,7 @@ async def query_database_impl_with_table(
     chart and memory-info payloads. The agent path, error taxonomy, and exact
     raised messages are identical — they live in the sibling below.
     """
-    markdown, table, query_info, _, _ = await query_database_impl_with_widgets(
+    markdown, table, query_info, _, _, _ = await query_database_impl_with_widgets(
         cfg, question, metadata=metadata, conversation_id=conversation_id
     )
     return markdown, table, query_info
@@ -162,10 +181,10 @@ async def query_database_impl_with_widgets(
     *,
     metadata: Mapping[str, Any] | None = None,
     conversation_id: str | None = None,
-) -> tuple[str, dict | None, dict | None, dict | None, dict | None]:
+) -> tuple[str, dict | None, dict | None, dict | None, dict | None, dict | None]:
     """Translate ``question`` to SQL, execute, return widgets + ``memory_info``.
 
-    Returns ``(markdown, table, query_info, chart, memory_info)``.
+    Returns ``(markdown, table, query_info, chart, memory_info, agent_trace)``.
 
     The single agent path behind the consolidated ``query_database`` MCP tool.
     One ``agent.send_message`` run is buffered and collapsed in a single pass by
@@ -177,8 +196,9 @@ async def query_database_impl_with_widgets(
 
     Three error categories, unchanged: tool-internal failures raise
     ``_INTERNAL_ERROR_MESSAGE``, agent-reported SQL failures raise
-    ``_SQL_EXECUTION_ERROR_PREFIX + answer``, and ``UnsafeSqlError`` is
-    re-raised verbatim. ``table`` and ``chart`` are ``None`` on the error path
+    ``_SQL_EXECUTION_ERROR_PREFIX + answer`` (as an :class:`AgentRunError`),
+    and ``UnsafeSqlError`` is re-raised verbatim. ``table`` and ``chart`` are
+    ``None`` on the error path
     or whenever the corresponding component is absent (apps-aware callers attach
     whichever is present to ``_meta``; everyone else ignores them and reads the
     Markdown). ``query_info`` carries the executed SQL when
@@ -193,6 +213,18 @@ async def query_database_impl_with_widgets(
     of ``agent.show_details``; when ``agent.show_memory_details`` is on, a
     one-line memory footer is also appended to ``markdown`` for plain-text
     clients.
+
+    ``agent_trace`` is the structured step-by-step trace of the agent loop —
+    per-tool name, arguments, status, duration, and on-failure error, plus the
+    derived ``terminal_error`` — assembled by
+    :func:`~sqllens.tools._format.build_agent_trace` from the same component
+    stream. It is built only when ``agent.show_details`` is on (``None``
+    otherwise), so a details-off deployment is byte-for-byte unchanged. On the
+    agent-error path the function raises :class:`AgentRunError`, carrying this
+    same trace on ``.agent_trace`` so the server can attach it to the
+    ``isError`` result; the three tool-failure / timeout / LLM-error terminal
+    reasons all surface there, while the max-iteration reason surfaces on the
+    success path (the agent answers, so no error is raised).
 
     ``conversation_id`` is threaded into ``send_message`` so a follow-up turn
     loads the prior ``Conversation`` (its message history) and the agent can
@@ -216,6 +248,7 @@ async def query_database_impl_with_widgets(
     )
 
     components = []
+    started = time.monotonic()
     try:
         async for comp in agent.send_message(
             request_context, question, conversation_id=conversation_id
@@ -250,8 +283,23 @@ async def query_database_impl_with_widgets(
         logger.exception("agent.send_message failed")
         raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
 
+    total_duration_ms = int((time.monotonic() - started) * 1000)
     answer, is_error, table, query_info, chart, memory_info = components_to_widgets(
         components
+    )
+    # Built only for a trusted, details-on deployment (the same gate that admits
+    # SQL leakage); ``None`` otherwise so a details-off deployment never carries
+    # a trace. Assembled before the is_error branch so the error path can ship
+    # it too — that is where the tool-failure / timeout / LLM-error terminal
+    # reasons land (a failed tool drives this turn to is_error=True).
+    agent_trace = (
+        build_agent_trace(
+            components,
+            total_duration_ms=total_duration_ms,
+            max_iterations=cfg.agent.max_tool_iterations,
+        )
+        if cfg.agent.show_details
+        else None
     )
     if is_error:
         # Agent-reported query failure — SQL-execution error category. S-10's
@@ -265,9 +313,16 @@ async def query_database_impl_with_widgets(
         # content-scrubbing agent-authored text for possible infra substrings
         # is unspecified by #91 and would risk mangling legitimate SQL detail
         # the calling agent needs, so it is deliberately not attempted here.
+        # Raised as AgentRunError carrying the trace: with show_details on the
+        # server attaches it to the isError _meta; with it off agent_trace is
+        # None and the server re-raises so FastMCP formats the failure exactly
+        # as before (AgentRunError subclasses RuntimeError, so the message and
+        # every ``except RuntimeError`` caller are unchanged either way).
         logger.warning("agent reported query failure: %s", answer)
-        raise RuntimeError(f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}")
+        raise AgentRunError(
+            f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}", agent_trace=agent_trace
+        )
     markdown = _append_sql_block(answer, query_info)
     if cfg.agent.show_memory_details:
         markdown = _append_memory_footer(markdown, memory_info)
-    return markdown, table, query_info, chart, memory_info
+    return markdown, table, query_info, chart, memory_info, agent_trace

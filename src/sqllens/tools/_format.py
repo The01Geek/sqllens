@@ -16,6 +16,7 @@ import json
 import logging
 import math
 from collections.abc import Iterable
+from datetime import datetime
 from decimal import Decimal
 
 from sqllens.agent.core.components import UiComponent
@@ -315,6 +316,176 @@ def components_to_chart(
     """
     markdown, is_error, _, _, chart, _ = components_to_widgets(components)
     return markdown, is_error, chart
+
+
+# The agent's per-tool-call lifecycle STATUS_CARD carries the invoked tool name
+# in its title as ``Executing {tool}`` (agent/core/agent/agent.py). These cards
+# are only emitted when ``UI_FEATURE_SHOW_TOOL_ARGUMENTS`` is unlocked — which
+# is exactly what ``agent.show_details`` does for the single static user group —
+# so a trace is only ever assembled for a deployment that already opted into the
+# SQL-leaking debugging surface. The running card (status="running") carries the
+# call ``arguments`` in ``metadata``; the completed card shares the same
+# component ``id`` (``set_status`` copies it) and flips ``status`` to
+# "success"/"error", with a ``Tool failed: ...`` description on failure.
+_TOOL_CARD_PREFIX = "Executing "
+# Prefix the agent puts on a failed tool's completion description. Stripped so
+# the trace's per-step ``error`` is the tool's own message, not the boilerplate.
+_TOOL_FAILED_PREFIX = "Tool failed: "
+# Title of the top-level error card the vendored ``send_message`` emits when the
+# whole turn throws (an LLM/infra exception it caught and logged server-side).
+# Its description is deliberately generic — the real exception never reaches the
+# component stream — so the trace can only surface this generic terminal reason;
+# the underlying error lives in the server logs, never in ``_meta``.
+_AGENT_ERROR_CARD_TITLE = "Error Processing Message"
+
+
+def _parse_component_ts(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _step_duration_ms(start: object, end: object) -> int | None:
+    start_dt = _parse_component_ts(start)
+    end_dt = _parse_component_ts(end)
+    if start_dt is None or end_dt is None:
+        return None
+    delta_ms = (end_dt - start_dt).total_seconds() * 1000.0
+    # Clock skew / out-of-order timestamps must never yield a negative duration.
+    return int(delta_ms) if delta_ms >= 0 else 0
+
+
+def build_agent_trace(
+    components: Iterable[UiComponent],
+    *,
+    total_duration_ms: int | None,
+    max_iterations: int,
+) -> dict:
+    """Assemble a step-by-step trace of the agent loop from its component stream.
+
+    Gated by the caller on ``agent.show_details`` (see
+    :func:`~sqllens.tools.query_database.query_database_impl_with_widgets`); this
+    function does no gating itself. It is a single forward pass over the buffered
+    ``UiComponent`` stream — it never re-runs or re-instruments the agent.
+
+    Each invoked tool surfaces as a pair of ``STATUS_CARD`` components sharing
+    one component ``id``: a ``running`` card carrying the call ``arguments`` in
+    its ``metadata``, then a ``success``/``error`` completion. The pair is folded
+    into one step ``{index, tool, arguments, status, duration_ms, error?}``:
+    ``status`` is ``"ok"`` on success, ``"error"`` on failure, ``"incomplete"``
+    if the run ended before the completion card was emitted; ``duration_ms`` is
+    the wall-clock between the two cards' framework timestamps (``None`` if a
+    timestamp is unparseable); ``error`` is present only on a failed step and is
+    the tool's own message (the ``Tool failed: `` boilerplate stripped).
+
+    ``terminal_error`` is the run-ending reason derived from the same stream,
+    in precedence order:
+
+    1. the generic top-level error card (an LLM/infra exception the agent caught
+       and logged server-side — the real text is *not* in the stream);
+    2. else the last failed tool step (a tool failure / DB timeout — its real
+       message *is* in the stream, via the completion card description);
+    3. else, when the loop ran up to ``max_iterations`` tool calls, the
+       max-iteration stop;
+    4. else ``None`` — a clean run.
+
+    ``iterations`` is the number of tool steps seen; ``total_duration_ms`` is the
+    caller-measured wall-clock of the whole turn (``None`` if unmeasured).
+    """
+    steps: list[dict] = []
+    by_id: dict[str, dict] = {}
+    agent_error: str | None = None
+
+    for comp in components:
+        rich = comp.rich_component
+        if rich is None:
+            continue
+        if getattr(rich, "type", None) != ComponentType.STATUS_CARD:
+            continue
+        title = getattr(rich, "title", "") or ""
+        status = getattr(rich, "status", "") or ""
+        description = getattr(rich, "description", "") or ""
+
+        if title == _AGENT_ERROR_CARD_TITLE and status == "error":
+            # Generic top-level failure (real exception is server-side only).
+            agent_error = description.strip() or "agent reported an unexpected error"
+            continue
+        if not title.startswith(_TOOL_CARD_PREFIX):
+            continue
+
+        card_id = getattr(rich, "id", None)
+        tool = title[len(_TOOL_CARD_PREFIX):]
+        timestamp = getattr(rich, "timestamp", None)
+        metadata = getattr(rich, "metadata", None)
+        arguments = metadata if isinstance(metadata, dict) else {}
+
+        step = by_id.get(card_id) if isinstance(card_id, str) else None
+        if step is None:
+            # First card for this tool call — the ``running`` open.
+            step = {
+                "index": len(steps),
+                "tool": tool,
+                "arguments": arguments,
+                "status": "incomplete",
+                "duration_ms": None,
+                "_start": timestamp,
+                "_error": None,
+            }
+            steps.append(step)
+            if isinstance(card_id, str):
+                by_id[card_id] = step
+            continue
+
+        # A later card for the same call — the completion. Record the outcome
+        # and the wall-clock between the two cards' timestamps.
+        if status == "success":
+            step["status"] = "ok"
+        elif status == "error":
+            step["status"] = "error"
+            msg = description.strip()
+            if msg.startswith(_TOOL_FAILED_PREFIX):
+                msg = msg[len(_TOOL_FAILED_PREFIX):].strip()
+            step["_error"] = msg or "tool failed"
+        step["duration_ms"] = _step_duration_ms(step["_start"], timestamp)
+
+    last_failed = next(
+        (s for s in reversed(steps) if s["status"] == "error"), None
+    )
+    if agent_error is not None:
+        terminal_error: str | None = agent_error
+    elif last_failed is not None:
+        terminal_error = f"tool '{last_failed['tool']}' failed: {last_failed['_error']}"
+    elif len(steps) >= max_iterations:
+        terminal_error = (
+            f"reached max_tool_iterations ({len(steps)}/{max_iterations}); "
+            "the agent stopped before completing the task"
+        )
+    else:
+        terminal_error = None
+
+    public_steps = []
+    for step in steps:
+        public: dict = {
+            "index": step["index"],
+            "tool": step["tool"],
+            "arguments": step["arguments"],
+            "status": step["status"],
+            "duration_ms": step["duration_ms"],
+        }
+        if step["status"] == "error" and step["_error"]:
+            public["error"] = step["_error"]
+        public_steps.append(public)
+
+    return {
+        "iterations": len(public_steps),
+        "max_iterations": max_iterations,
+        "total_duration_ms": total_duration_ms,
+        "steps": public_steps,
+        "terminal_error": terminal_error,
+    }
 
 
 def append_conversation_footer(markdown: str, conversation_id: str | None) -> str:

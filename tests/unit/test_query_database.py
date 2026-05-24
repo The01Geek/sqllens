@@ -22,6 +22,7 @@ from sqllens.config import AgentRuntimeConfig, Config
 from sqllens.safety import UnsafeSqlError
 from sqllens.tools import _agent as agent_module
 from sqllens.tools.query_database import (
+    AgentRunError,
     prime_agent,
     query_database_impl,
     query_database_impl_with_table,
@@ -33,6 +34,7 @@ from ._agent_stubs import (
     make_dataframe,
     make_status_card,
     make_text_component,
+    make_tool_cards,
 )
 from ._config_builders import build_test_config
 
@@ -466,7 +468,7 @@ async def test_with_widgets_returns_chart_payload(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, table, _query_info, chart, _memory_info = (
+    markdown, table, _query_info, chart, _memory_info, _trace = (
         await query_database_impl_with_widgets(cfg, "revenue per genre")
     )
 
@@ -503,7 +505,7 @@ async def test_with_widgets_chart_and_dataframe_both_present(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, table, _query_info, chart, _memory_info = (
+    markdown, table, _query_info, chart, _memory_info, _trace = (
         await query_database_impl_with_widgets(cfg, "revenue per genre")
     )
 
@@ -529,7 +531,7 @@ async def test_with_widgets_text_only_returns_none_payloads(
     stub = agent_stub_factory([make_text_component("no widget for this one")])
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, table, query_info, chart, memory_info = (
+    markdown, table, query_info, chart, memory_info, _trace = (
         await query_database_impl_with_widgets(cfg, "q")
     )
 
@@ -578,7 +580,7 @@ async def test_with_widgets_memory_info_surfaced_regardless_of_footer(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, _table, _query_info, _chart, memory_info = (
+    markdown, _table, _query_info, _chart, memory_info, _trace = (
         await query_database_impl_with_widgets(cfg, "q")
     )
 
@@ -611,7 +613,7 @@ async def test_with_widgets_memory_hit_footer_when_flag_on(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, _table, _query_info, _chart, _memory_info = (
+    markdown, _table, _query_info, _chart, _memory_info, _trace = (
         await query_database_impl_with_widgets(cfg, "q")
     )
 
@@ -636,7 +638,7 @@ async def test_with_widgets_memory_miss_footer_when_flag_on(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, _table, _query_info, _chart, _memory_info = (
+    markdown, _table, _query_info, _chart, _memory_info, _trace = (
         await query_database_impl_with_widgets(cfg, "q")
     )
 
@@ -997,3 +999,114 @@ async def test_send_message_generator_is_closed_on_exception(
         await query_database_impl(cfg, "q")
 
     assert stub.cleanup_ran is True
+
+
+# ──────────────────────────── agent trace ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_with_widgets_emits_trace_when_show_details_on(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """show_details on: the impl assembles a trace from the tool-call cards and
+    returns it as the 6th element on the success path."""
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        agent=AgentRuntimeConfig(show_details=True),
+    )
+    stub = agent_stub_factory(
+        [
+            *make_tool_cards(
+                "search_saved_correct_tool_uses", {"question": "how many?"}, ok=True
+            ),
+            *make_tool_cards("run_sql", {"sql": "SELECT count(*) FROM orders"}, ok=True),
+            make_text_component("42 orders"),
+        ]
+    )
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    _markdown, _table, _query_info, _chart, _memory_info, trace = (
+        await query_database_impl_with_widgets(cfg, "how many orders?")
+    )
+
+    assert trace is not None
+    assert trace["terminal_error"] is None
+    assert [s["tool"] for s in trace["steps"]] == [
+        "search_saved_correct_tool_uses",
+        "run_sql",
+    ]
+    assert all(s["status"] == "ok" for s in trace["steps"])
+    assert isinstance(trace["total_duration_ms"], int)
+
+
+@pytest.mark.asyncio
+async def test_with_widgets_no_trace_when_show_details_off(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """Default (show_details off): no trace is built — the 6th element is None."""
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    stub = agent_stub_factory(
+        [
+            *make_tool_cards("run_sql", {"sql": "SELECT 1"}, ok=True),
+            make_text_component("done"),
+        ]
+    )
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    _markdown, _table, _query_info, _chart, _memory_info, trace = (
+        await query_database_impl_with_widgets(cfg, "q")
+    )
+
+    assert trace is None
+
+
+@pytest.mark.asyncio
+async def test_with_widgets_raises_agent_run_error_with_trace_on_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """show_details on + a failed tool step: the impl raises AgentRunError
+    carrying the trace, whose terminal_error names the failing tool."""
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        agent=AgentRuntimeConfig(show_details=True),
+    )
+    stub = agent_stub_factory(
+        make_tool_cards(
+            "run_sql", {"sql": "SELECT * FROM orders"}, ok=False, error="timeout after 240s"
+        )
+    )
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    with pytest.raises(AgentRunError) as excinfo:
+        await query_database_impl_with_widgets(cfg, "q")
+
+    trace = excinfo.value.agent_trace
+    assert trace is not None
+    assert trace["terminal_error"] == "tool 'run_sql' failed: timeout after 240s"
+    assert trace["steps"][0]["status"] == "error"
+    assert trace["steps"][0]["error"] == "timeout after 240s"
+
+
+@pytest.mark.asyncio
+async def test_with_widgets_failure_without_show_details_has_no_trace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """Default (show_details off) + a failed tool step: AgentRunError still
+    raised (message unchanged), but agent_trace is None so the server re-raises."""
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    stub = agent_stub_factory(
+        make_tool_cards("run_sql", {"sql": "SELECT 1"}, ok=False, error="boom")
+    )
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    with pytest.raises(AgentRunError) as excinfo:
+        await query_database_impl_with_widgets(cfg, "q")
+    assert excinfo.value.agent_trace is None

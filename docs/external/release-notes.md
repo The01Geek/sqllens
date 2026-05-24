@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## May 24, 2026
+
+- **[Feature] Step-by-step agent trace for debugging** — When `agent.show_details` is enabled, a `query_database` response now carries a structured **step-by-step trace** of the agent's run in its metadata (under the `sqllens/agent_trace` key), in addition to the executed SQL. The trace lists the tools the agent called and in what order, each call's arguments, status, and duration, the error for any step that failed, and the overall terminal reason when a run fails (a tool failure, a database timeout, the agent hitting its tool-iteration limit, or a model error). It is attached to both successful and failed responses, so when a run is slow or returns only a generic error you can see what the agent actually did and where the time went. This is gated on the same `agent.show_details` flag as the executed SQL — it adds no new setting and no new exposure beyond what that flag already permits — and remains off by default, so deployments that leave `show_details` off are unchanged. Enable it only for trusted, debugging-oriented deployments (`show_details = true` in `sqllens.toml`, or `SQLLENS_AGENT__SHOW_DETAILS=1`). See [Configuration reference](configuration.md#section-agent). (#180)
+
 ## May 23, 2026
 
 - **[Fix] Row-Level Security now blocks a per-request boolean value** — When a Row-Level Security rule resolves its value from per-request metadata (`value_from_metadata`), a `true` or `false` supplied by the calling application is now blocked instead of being accepted and turned into a literal in the predicate. An identity token is never a boolean, and accepting one could weaken a rule such as `tenant_id = <token>` into something that matches more rows than intended. This applies to both single values and each element of an `in` list; static values you write in `sqllens.toml` are unaffected. See [Row-Level Security](row-level-security.md). (#177)
