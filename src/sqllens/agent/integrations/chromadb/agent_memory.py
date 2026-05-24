@@ -6,10 +6,13 @@ This implementation uses ChromaDB for local vector storage of tool usage pattern
 
 import json
 import hashlib
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+
+logger = logging.getLogger(__name__)
 
 try:
     import chromadb
@@ -225,6 +228,13 @@ class ChromaAgentMemory(AgentMemory):
             )
 
             search_results = []
+            # Rows that cleared the threshold count as retrieved this turn; their
+            # per-memory hit_count / last_hit_date are bumped below so admins can
+            # tell high-value pairs from dead weight. Collected here, written in
+            # one collection.update() after the loop.
+            hit_ids: list[str] = []
+            hit_metadatas: list[dict] = []
+            now = datetime.now().isoformat()
             if results["ids"] and len(results["ids"][0]) > 0:
                 for i, (id_, distance, metadata) in enumerate(
                     zip(
@@ -261,6 +271,30 @@ class ChromaAgentMemory(AgentMemory):
                                 rank=i + 1,
                             )
                         )
+
+                        # Pass the full existing metadata (copied) with the two
+                        # tracking keys overwritten, so the update is correct
+                        # whether Chroma merges or replaces per-id metadata.
+                        bumped = dict(metadata)
+                        bumped["hit_count"] = int(metadata.get("hit_count", 0)) + 1
+                        bumped["last_hit_date"] = now
+                        hit_ids.append(id_)
+                        hit_metadatas.append(bumped)
+
+            if hit_ids:
+                # Best-effort telemetry: a failure to persist the bumped counts
+                # must not fail the user's query (the matched memories were still
+                # found and returned). Surface it server-side instead of silently
+                # swallowing it.
+                try:
+                    collection.update(ids=hit_ids, metadatas=hit_metadatas)
+                except Exception:
+                    logger.warning(
+                        "failed to update hit_count/last_hit_date for %d memory "
+                        "row(s); retrieval succeeded but counts did not advance",
+                        len(hit_ids),
+                        exc_info=True,
+                    )
 
             return search_results
 
