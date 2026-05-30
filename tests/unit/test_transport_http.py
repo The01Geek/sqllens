@@ -89,20 +89,23 @@ def test_build_asgi_app_returns_lifespan_wrapped(tmp_path: Path) -> None:
 
 
 def test_build_asgi_app_bare_returns_app_without_lifespan(tmp_path: Path) -> None:
-    """The bare seam yields the path-normalized → host-guarded → auth stack.
+    """The bare seam yields the host-guarded → path-normalized → auth stack.
 
-    Pins the composition order after S-8: ``_PathNormalizer`` stays the
-    outermost layer (so ``/healthz`` + ``/readyz`` short-circuit before host
-    validation and auth), then ``TrustedHostMiddleware`` (DNS-rebinding
-    defense), then ``_AuthMiddleware``, then FastMCP.
+    Pins the composition order after S-13: ``TrustedHostMiddleware`` is now
+    the outermost layer so a disallowed ``Host`` is rejected with 400 before
+    *anything* downstream sees the request (including the ``/healthz`` +
+    ``/readyz`` short-circuits in ``_PathNormalizer``), denying drive-by
+    fingerprinting of the readiness state via DNS rebinding. Probes still
+    bypass ``_AuthMiddleware``, so orchestrator probes from an allowed host
+    need no ``Authorization`` header.
     """
     from mcp.server.fastmcp import FastMCP
 
     bare, mcp = _build_asgi_app_bare(_cfg(tmp_path), _Readiness())
-    assert isinstance(bare, _PathNormalizer)
-    assert isinstance(bare.inner, TrustedHostMiddleware)
+    assert isinstance(bare, TrustedHostMiddleware)
     # Starlette's TrustedHostMiddleware stores the wrapped app as ``.app``.
-    assert isinstance(bare.inner.app, _AuthMiddleware)
+    assert isinstance(bare.app, _PathNormalizer)
+    assert isinstance(bare.app.inner, _AuthMiddleware)
     assert isinstance(mcp, FastMCP)
 
 
@@ -924,7 +927,7 @@ def test_warn_bearer_non_loopback_emits_warning(
 ) -> None:
     cfg = _cfg_with(
         tmp_path,
-        auth=AuthConfig(mode="bearer", bearer_token=SecretStr("a-real-token-0123456789")),
+        auth=AuthConfig(mode="bearer", bearer_token=SecretStr("a-real-token-0123456789-padding-x")),
         host="0.0.0.0",
     )
     with caplog.at_level(logging.WARNING, logger=_WARN_LOGGER):
@@ -955,7 +958,7 @@ def test_no_warn_when_loopback_host(
 ) -> None:
     cfg = _cfg_with(
         tmp_path,
-        auth=AuthConfig(mode="bearer", bearer_token=SecretStr("a-real-token-0123456789")),
+        auth=AuthConfig(mode="bearer", bearer_token=SecretStr("a-real-token-0123456789-padding-x")),
         host="127.0.0.1",
     )
     with caplog.at_level(logging.WARNING, logger=_WARN_LOGGER):
@@ -990,7 +993,7 @@ def test_build_asgi_app_invokes_plaintext_credentials_warning(
     )
     cfg = _cfg_with(
         tmp_path,
-        auth=AuthConfig(mode="bearer", bearer_token=SecretStr("a-real-token-0123456789")),
+        auth=AuthConfig(mode="bearer", bearer_token=SecretStr("a-real-token-0123456789-padding-x")),
         host="0.0.0.0",
     )
     build_asgi_app(cfg)
@@ -1107,7 +1110,7 @@ def test_auth_middleware_whitespace_only_bearer_is_rejected_401() -> None:
     from sqllens.auth import build_authenticator
 
     authenticator = build_authenticator(
-        AuthConfig(mode="bearer", bearer_token=SecretStr("a-real-token-0123456789"))
+        AuthConfig(mode="bearer", bearer_token=SecretStr("a-real-token-0123456789-padding-x"))
     )
     inner = _SpyInner()
     mw = _AuthMiddleware(inner, authenticator)
@@ -1190,9 +1193,12 @@ def test_readyz_returns_200_after_warmup() -> None:
 
 
 def test_readyz_short_circuits_before_inner_no_auth_needed() -> None:
-    """``/readyz`` is answered by ``_PathNormalizer`` itself — the inner
-    stack (host check + auth) is never reached, so no ``Authorization`` and
-    no allowed ``Host`` are required.
+    """``/readyz`` is answered by ``_PathNormalizer`` itself — its inner
+    layer (``_AuthMiddleware`` then FastMCP) is never reached, so no
+    ``Authorization`` header is required. (``TrustedHostMiddleware`` now
+    fronts ``_PathNormalizer`` in the real stack, so a disallowed ``Host``
+    is still rejected upstream of this short-circuit; this test exercises
+    the normalizer in isolation.)
     """
     inner = _SpyInner()
     _run_path("/readyz", _Readiness(), inner=inner)

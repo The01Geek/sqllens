@@ -18,6 +18,25 @@ QUESTION_MAX = 1000
 SQL_MAX = 10000
 CONTENT_MAX = 50000
 
+# Defence-in-depth caps on the *outer* shape of a bundle. ``QUESTION_MAX`` /
+# ``SQL_MAX`` / ``CONTENT_MAX`` bound the size of any single item; an
+# authenticated client could still DoS the server by submitting millions of
+# valid-but-cheap items inside one bundle (parsing the list, then writing each
+# inside the held ``import_lock``). These two caps reject such payloads at the
+# parse boundary instead.
+MAX_BUNDLE_BYTES = 10 * 1024 * 1024
+"""Hard ceiling on the raw bundle text accepted by ``parse_json``/``parse_csv``.
+
+Realistic curated bundles fit well under 10 MiB; anything larger is treated as
+a DoS payload and refused before allocation of the parsed object graph. The
+cap is intentionally measured against the raw input length — checking after
+parse defeats the purpose."""
+
+MAX_BUNDLE_ITEMS = 10_000
+"""Per-block item cap enforced via ``Field(max_length=...)`` on the list-typed
+bundle members. Sized to cover the largest realistic curated bundles while
+still bounding the work done under ``import_lock``."""
+
 
 def _require_non_blank(value: str, field: str) -> str:
     stripped = value.strip()
@@ -51,7 +70,7 @@ class SqlPairsBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     training_type: Literal["sql_pairs"] = "sql_pairs"
-    pairs: list[SqlPair] = Field(default_factory=list)
+    pairs: list[SqlPair] = Field(default_factory=list, max_length=MAX_BUNDLE_ITEMS)
 
 
 class SchemaDoc(BaseModel):
@@ -74,7 +93,7 @@ class MemoryBundle(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sql_pairs: SqlPairsBlock | None = None
-    schema_docs: list[SchemaDoc] | None = None
+    schema_docs: list[SchemaDoc] | None = Field(default=None, max_length=MAX_BUNDLE_ITEMS)
 
 
 class ImportItemError(BaseModel):

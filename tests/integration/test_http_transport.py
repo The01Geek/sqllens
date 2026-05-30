@@ -80,9 +80,9 @@ class TestNoAuth:
 class TestBearerAuth:
     async def test_correct_token_works(self, make_server) -> None:
         handle = make_server(
-            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789"))
+            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789-padding-xx"))
         )
-        headers = {"Authorization": "Bearer good-token-0123456789"}
+        headers = {"Authorization": "Bearer good-token-0123456789-padding-xx"}
         async with streamablehttp_client(handle.mcp_url, headers=headers) as (
             read,
             write,
@@ -95,7 +95,7 @@ class TestBearerAuth:
 
     async def test_wrong_token_returns_401(self, make_server) -> None:
         handle = make_server(
-            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789"))
+            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789-padding-xx"))
         )
         async with httpx.AsyncClient() as client:
             r = await client.post(
@@ -120,7 +120,7 @@ class TestBearerAuth:
 
     async def test_missing_token_returns_401(self, make_server) -> None:
         handle = make_server(
-            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789"))
+            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789-padding-xx"))
         )
         async with httpx.AsyncClient() as client:
             r = await client.post(
@@ -148,7 +148,7 @@ class TestHealthz:
     async def test_healthz_bypasses_bearer_auth(self, make_server) -> None:
         """No ``Authorization`` header is required even under bearer auth."""
         handle = make_server(
-            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789"))
+            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789-padding-xx"))
         )
         async with httpx.AsyncClient() as client:
             r = await client.get(handle.base_url + "/healthz")
@@ -297,23 +297,22 @@ class TestTrustedHost:
         assert r.status_code == 200
         assert r.text == '{"status":"ok"}'
 
-    async def test_probes_answer_under_disallowed_host(self, make_server) -> None:
-        """The issue acceptance criterion ("disallowed-Host rejection +
-        /healthz & /readyz still answer") pinned directly: both probes must
-        answer 200 even when the inbound ``Host`` would be rejected by
-        ``TrustedHostMiddleware`` for a normal request, because the probe
-        short-circuits sit ahead of it. Composed coverage (allowed-Host probe +
-        disallowed-Host MCP rejection) does not prove this combination.
+    async def test_probes_rejected_under_disallowed_host(self, make_server) -> None:
+        """Probes inherit the host allowlist (S-13): a request with a
+        disallowed ``Host`` to ``/healthz`` or ``/readyz`` is rejected by
+        ``TrustedHostMiddleware`` with 400, denying a DNS-rebound page from
+        fingerprinting a running SQL Lens or its readiness state. The
+        intentional orchestrator-friendly behaviour (no ``Authorization``
+        required) is preserved by leaving loopback in the allowlist —
+        covered by ``test_probe_with_allowed_host_still_200`` above.
         """
         handle = make_server(AuthConfig(mode="none"))
         evil = {"Host": "evil.example.com"}
         async with httpx.AsyncClient() as client:
             h = await client.get(handle.base_url + "/healthz", headers=evil)
             ry = await client.get(handle.base_url + "/readyz", headers=evil)
-        assert h.status_code == 200
-        assert h.text == '{"status":"ok"}'
-        assert ry.status_code == 200
-        assert ry.text == '{"status":"ready"}'
+        assert h.status_code == 400
+        assert ry.status_code == 400
 
 
 # ─────────────────────── O-5: eager warmup + /readyz ────────────────────────
@@ -340,7 +339,7 @@ class TestReadyz:
         ``auth.mode="bearer"`` (it short-circuits ahead of ``_AuthMiddleware``).
         """
         handle = make_server(
-            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789"))
+            AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789-padding-xx"))
         )
         async with httpx.AsyncClient() as client:
             r = await client.get(handle.base_url + "/readyz")

@@ -17,11 +17,14 @@ from sqllens.memory.io import (
 )
 from sqllens.memory.schema import (
     CONTENT_MAX,
+    MAX_BUNDLE_BYTES,
+    MAX_BUNDLE_ITEMS,
     QUESTION_MAX,
     SQL_MAX,
     MemoryBundle,
     SchemaDoc,
     SqlPair,
+    SqlPairsBlock,
 )
 
 
@@ -100,3 +103,82 @@ def test_csv_serialize_pairs_only() -> None:
     text = serialize_csv(bundle)
     assert text.splitlines()[0] == "question,sql"
     assert "ignored in csv" not in text
+
+
+def test_parse_json_rejects_oversize_bundle() -> None:
+    # A bundle larger than MAX_BUNDLE_BYTES is refused before parse so the
+    # server cannot be DoS'd into allocating the parsed object graph.
+    payload = "x" * (MAX_BUNDLE_BYTES + 1)
+    with pytest.raises(BundleFormatError, match="exceeds"):
+        parse_json(payload)
+
+
+def test_parse_csv_rejects_oversize_bundle() -> None:
+    payload = "x" * (MAX_BUNDLE_BYTES + 1)
+    with pytest.raises(BundleFormatError, match="exceeds"):
+        parse_csv(payload)
+
+
+def test_sql_pairs_block_rejects_too_many_pairs() -> None:
+    # Per-block item cap defends against a structurally-valid JSON whose pairs
+    # list, alone, is large enough to dominate the import_lock window.
+    too_many = [{"question": "q", "sql": "SELECT 1"}] * (MAX_BUNDLE_ITEMS + 1)
+    with pytest.raises(ValidationError):
+        SqlPairsBlock(pairs=too_many)
+
+
+def test_schema_docs_rejects_too_many_entries() -> None:
+    too_many = [{"content": "c"}] * (MAX_BUNDLE_ITEMS + 1)
+    with pytest.raises(ValidationError):
+        MemoryBundle(schema_docs=too_many)
+
+
+def test_parse_csv_defangs_formula_triggers() -> None:
+    # CSV-injection (CWE-1236): a cell starting with =/+/-/@/\t/\r becomes a
+    # formula trigger in Excel/LibreOffice. parse_csv must prefix with ' so
+    # the stored value can never detonate downstream.
+    text = (
+        "question,sql\n"
+        '=cmd|"/c calc"!A1,SELECT 1\n'
+        '+1+1,SELECT 2\n'
+        '-5,SELECT 3\n'
+        '@foo,SELECT 4\n'
+    )
+    bundle = parse_csv(text)
+    assert bundle.sql_pairs is not None
+    pairs = bundle.sql_pairs.pairs
+    assert pairs[0].question.startswith("'=")
+    assert pairs[1].question.startswith("'+")
+    assert pairs[2].question.startswith("'-")
+    assert pairs[3].question.startswith("'@")
+
+
+def test_serialize_csv_defangs_formula_triggers() -> None:
+    # Symmetric guard: a poisoned in-store value cannot escape via export.
+    bundle = MemoryBundle.model_validate(
+        {
+            "sql_pairs": {
+                "pairs": [
+                    {"question": "=DANGER()", "sql": "SELECT 1"},
+                    {"question": "ok", "sql": "@evil"},
+                ]
+            }
+        }
+    )
+    text = serialize_csv(bundle)
+    # csv writer quotes any field containing the field-separator or quotes; the
+    # leading apostrophe ends up either bare or inside the quoted field.
+    assert "'=DANGER()" in text
+    assert "'@evil" in text
+
+
+def test_csv_defang_is_idempotent() -> None:
+    # An already-defanged cell (leading apostrophe) must not accumulate
+    # apostrophes when re-imported then re-exported.
+    text = "question,sql\n'=safe,SELECT 1\n"
+    bundle = parse_csv(text)
+    assert bundle.sql_pairs is not None
+    out = serialize_csv(bundle)
+    # Exactly one leading apostrophe survives in the re-emitted cell.
+    assert "''=safe" not in out
+    assert "'=safe" in out
