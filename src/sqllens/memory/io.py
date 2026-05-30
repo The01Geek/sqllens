@@ -46,12 +46,22 @@ def _enforce_size_cap(text: str) -> None:
     deeper object graph that then has to be walked. Measured against the
     UTF-8-encoded byte length of ``text`` (not ``len(text)``, which counts
     code points) so a multi-byte payload cannot bypass the cap by up to 4x.
+
+    Short-circuits on the cheap code-point length first. UTF-8 is at least
+    one byte per code point, so ``len(text) > MAX_BUNDLE_BYTES`` is a
+    sufficient (lower-bound) rejection — and it skips the ``encode`` of an
+    attacker-shaped payload that we'd otherwise allocate just to measure.
     """
+    if len(text) > MAX_BUNDLE_BYTES:
+        raise BundleFormatError(
+            f"bundle exceeds the {MAX_BUNDLE_BYTES}-byte cap; "
+            "split the bundle into smaller files."
+        )
     raw_bytes = len(text.encode("utf-8"))
     if raw_bytes > MAX_BUNDLE_BYTES:
         raise BundleFormatError(
-            f"bundle exceeds the {MAX_BUNDLE_BYTES}-byte cap "
-            f"(got {raw_bytes} bytes); split the bundle into smaller files."
+            f"bundle exceeds the {MAX_BUNDLE_BYTES}-byte cap; "
+            "split the bundle into smaller files."
         )
 
 

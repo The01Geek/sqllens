@@ -121,6 +121,20 @@ def test_parse_csv_rejects_oversize_bundle() -> None:
         parse_csv(payload)
 
 
+def test_parse_json_rejects_multibyte_oversize_below_codepoint_cap() -> None:
+    # Pins the docstring's promise that the cap is measured against UTF-8
+    # bytes, not code points. The pad is "🚀" (4 UTF-8 bytes per code point):
+    # code-point count is well under MAX_BUNDLE_BYTES but byte count is over,
+    # so a regression that swaps len(text.encode("utf-8")) for len(text)
+    # would silently 4x-inflate the allowed payload size.
+    pad_chars = (MAX_BUNDLE_BYTES // 4) + 1
+    payload = "🚀" * pad_chars
+    assert len(payload) <= MAX_BUNDLE_BYTES
+    assert len(payload.encode("utf-8")) > MAX_BUNDLE_BYTES
+    with pytest.raises(BundleFormatError, match="exceeds"):
+        parse_json(payload)
+
+
 def test_parse_json_rejects_too_many_pairs() -> None:
     # Per-block item cap defends against a structurally-valid JSON whose pairs
     # list, alone, is large enough to dominate the import_lock window.
