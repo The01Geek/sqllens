@@ -38,6 +38,21 @@ A JSON bundle looks like this:
 
 Both top-level blocks are optional. Each question may be up to 1,000 characters, each SQL statement up to 10,000 characters, and each note up to 50,000 characters. Blank values are rejected.
 
+### Bundle size limits
+
+A complete bundle is also limited in size as a defense against a malformed or hostile file consuming server resources at parse time:
+
+- **10 MiB** (10,485,760 bytes, measured against the raw UTF-8 contents) per bundle file. Files larger than this are rejected with `Invalid memory bundle: bundle exceeds the 10485760-byte cap; split the bundle into smaller files.` before SQL Lens parses them.
+- **10,000 items** in each top-level block. A bundle whose `sql_pairs.pairs` list or `schema_docs` list exceeds 10,000 entries is rejected with `Invalid memory bundle: bundle '<block>' exceeds the 10000-item cap (got N); split the bundle.`
+
+Realistic curated bundles fit comfortably under both limits. If you have more curated knowledge than fits in one bundle, split it into multiple files and import them sequentially. The limits apply to both the command-line `sqllens import-memory` and the optional `import_memory` MCP tool.
+
+### CSV files and spreadsheet formulas
+
+When SQL Lens writes a CSV bundle (or reads one back in), any cell whose first character is one of `=`, `+`, `-`, `@`, tab, or carriage return is prefixed with a single apostrophe (`'`). Excel and LibreOffice would otherwise interpret these cells as formulas when an operator opens the file in a spreadsheet — a CSV-injection vector (CWE-1236) by which a planted bundle could execute attacker-supplied formulas on the operator's machine. The apostrophe prefix is the documented spreadsheet convention for "treat this cell as text," so files open as expected.
+
+The defang is idempotent — re-importing and re-exporting the same file does not accumulate apostrophes — and is applied only to CSV bundles. JSON bundles are unchanged, because the tools that consume JSON do not interpret leading `=`/`+`/`-`/`@` as formulas. One side effect: a legitimate value whose first character is one of the trigger characters (for example, a SQL fragment starting with `-` from a comment, or a `@`-prefixed identifier) is stored with a leading apostrophe after a CSV round-trip. If you need to preserve such values exactly, use the JSON bundle format.
+
 ## Importing Memory
 
 Load a bundle into the configured store:
@@ -83,6 +98,8 @@ Use `--format json` (the default) for a complete, lossless backup. Use `--format
 By default, only the command line can import memory. If you set `allow_import = true` in the `[memory]` section (or `SQLLENS_MEMORY__ALLOW_IMPORT=1`), SQL Lens additionally exposes an `import_memory` tool to the connected assistant, which accepts a JSON bundle and returns a summary of what was saved.
 
 If any entry in the bundle fails to save, the tool reports the import as an error to the assistant rather than a success, even when some entries saved and only others failed. A partial import is treated as a failure so the assistant is never told an import succeeded when part of it did not. The reported message gives only the counts of saved, skipped and errored entries; the detailed reason for each failure is written to the server log, not returned to the client.
+
+The same 10 MiB / 10,000-item bundle size limits described under [Bundle size limits](#bundle-size-limits) apply to the tool. A bundle that exceeds either cap is refused with `Invalid memory bundle: ...` before any item is written, so a single oversized request cannot block the server.
 
 **Warning:** Leave `allow_import` off unless you trust every client that can reach the server. A client able to write memory can influence the SQL that SQL Lens generates for future questions. The command-line `import-memory` and `export-memory` commands are unaffected by this setting and remain the recommended way to manage memory.
 

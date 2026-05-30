@@ -623,8 +623,9 @@ similarity_threshold = 0.7
 
 [auth]
 mode = "none"            # one of: none, bearer (jwt is not implemented yet)
-# For mode = "bearer", set a strong random token (>= 32 random bytes), e.g.
-# generate one with:  openssl rand -hex 32
+# For mode = "bearer", set a strong random token. The validator enforces a
+# 32-character floor; generate something well above it with:
+#     openssl rand -hex 32          # 64 hex chars / 256 bits
 # bearer_token = "..."   # or set SQLLENS_AUTH__BEARER_TOKEN env var
 
 [server]

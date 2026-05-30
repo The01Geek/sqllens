@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -17,11 +19,14 @@ from sqllens.memory.io import (
 )
 from sqllens.memory.schema import (
     CONTENT_MAX,
+    MAX_BUNDLE_BYTES,
+    MAX_BUNDLE_ITEMS,
     QUESTION_MAX,
     SQL_MAX,
     MemoryBundle,
     SchemaDoc,
     SqlPair,
+    SqlPairsBlock,
 )
 
 
@@ -100,3 +105,117 @@ def test_csv_serialize_pairs_only() -> None:
     text = serialize_csv(bundle)
     assert text.splitlines()[0] == "question,sql"
     assert "ignored in csv" not in text
+
+
+def test_parse_json_rejects_oversize_bundle() -> None:
+    # A bundle larger than MAX_BUNDLE_BYTES is refused before parse so the
+    # server cannot be DoS'd into allocating the parsed object graph.
+    payload = "x" * (MAX_BUNDLE_BYTES + 1)
+    with pytest.raises(BundleFormatError, match="exceeds"):
+        parse_json(payload)
+
+
+def test_parse_csv_rejects_oversize_bundle() -> None:
+    payload = "x" * (MAX_BUNDLE_BYTES + 1)
+    with pytest.raises(BundleFormatError, match="exceeds"):
+        parse_csv(payload)
+
+
+def test_parse_json_rejects_multibyte_oversize_below_codepoint_cap() -> None:
+    # Pins the docstring's promise that the cap is measured against UTF-8
+    # bytes, not code points. The pad is "🚀" (4 UTF-8 bytes per code point):
+    # code-point count is well under MAX_BUNDLE_BYTES but byte count is over,
+    # so a regression that swaps len(text.encode("utf-8")) for len(text)
+    # would silently 4x-inflate the allowed payload size.
+    pad_chars = (MAX_BUNDLE_BYTES // 4) + 1
+    payload = "🚀" * pad_chars
+    assert len(payload) <= MAX_BUNDLE_BYTES
+    assert len(payload.encode("utf-8")) > MAX_BUNDLE_BYTES
+    with pytest.raises(BundleFormatError, match="exceeds"):
+        parse_json(payload)
+
+
+def test_parse_json_rejects_too_many_pairs() -> None:
+    # Per-block item cap defends against a structurally-valid JSON whose pairs
+    # list, alone, is large enough to dominate the import_lock window.
+    too_many = [{"question": "q", "sql": "SELECT 1"}] * (MAX_BUNDLE_ITEMS + 1)
+    payload = '{"sql_pairs": {"pairs": ' + json.dumps(too_many) + "}}"
+    with pytest.raises(BundleFormatError, match=r"sql_pairs\.pairs.*exceeds"):
+        parse_json(payload)
+
+
+def test_parse_json_rejects_too_many_schema_docs() -> None:
+    too_many = [{"content": "c"}] * (MAX_BUNDLE_ITEMS + 1)
+    payload = '{"schema_docs": ' + json.dumps(too_many) + "}"
+    with pytest.raises(BundleFormatError, match=r"schema_docs.*exceeds"):
+        parse_json(payload)
+
+
+def test_models_accept_more_than_bundle_item_cap_via_construction() -> None:
+    # The cap fires only at the parse boundary. ``MemoryStore.iter_all``
+    # constructs the same models from a live store that may legitimately
+    # exceed the cap; a model-level constraint would crash export/import on
+    # healthy data with > MAX_BUNDLE_ITEMS rows.
+    overflow = [SqlPair(question=f"q{i}", sql="SELECT 1") for i in range(3)]
+    pairs = overflow * (MAX_BUNDLE_ITEMS // len(overflow) + 1)
+    block = SqlPairsBlock(pairs=pairs)
+    assert len(block.pairs) > MAX_BUNDLE_ITEMS
+
+
+def test_parse_csv_defangs_formula_triggers() -> None:
+    # CSV-injection (CWE-1236): a cell starting with =/+/-/@/\t/\r becomes a
+    # formula trigger in Excel/LibreOffice. parse_csv must prefix with ' so
+    # the stored value can never detonate downstream.
+    text = (
+        "question,sql\n"
+        '=cmd|"/c calc"!A1,SELECT 1\n'
+        '+1+1,SELECT 2\n'
+        '-5,SELECT 3\n'
+        '@foo,SELECT 4\n'
+    )
+    bundle = parse_csv(text)
+    assert bundle.sql_pairs is not None
+    pairs = bundle.sql_pairs.pairs
+    assert pairs[0].question.startswith("'=")
+    assert pairs[1].question.startswith("'+")
+    assert pairs[2].question.startswith("'-")
+    assert pairs[3].question.startswith("'@")
+
+
+def test_serialize_csv_defangs_formula_triggers() -> None:
+    # Symmetric guard: a poisoned in-store value cannot escape via export.
+    bundle = MemoryBundle.model_validate(
+        {
+            "sql_pairs": {
+                "pairs": [
+                    {"question": "=DANGER()", "sql": "SELECT 1"},
+                    {"question": "ok", "sql": "@evil"},
+                ]
+            }
+        }
+    )
+    text = serialize_csv(bundle)
+    # csv writer quotes any field containing the field-separator or quotes; the
+    # leading apostrophe ends up either bare or inside the quoted field.
+    assert "'=DANGER()" in text
+    assert "'@evil" in text
+
+
+def test_csv_defang_preserves_blank_rejection_semantics() -> None:
+    # A "\t"-only cell must STILL be rejected — defang must not turn it into
+    # "'\t" (whose strip() is "'", non-blank) and silently accept a broken row.
+    text = 'question,sql\n"\t","SELECT 1"\n'
+    with pytest.raises(BundleFormatError):
+        parse_csv(text)
+
+
+def test_csv_defang_is_idempotent() -> None:
+    # An already-defanged cell (leading apostrophe) must not accumulate
+    # apostrophes when re-imported then re-exported.
+    text = "question,sql\n'=safe,SELECT 1\n"
+    bundle = parse_csv(text)
+    assert bundle.sql_pairs is not None
+    out = serialize_csv(bundle)
+    # Exactly one leading apostrophe survives in the re-emitted cell.
+    assert "''=safe" not in out
+    assert "'=safe" in out

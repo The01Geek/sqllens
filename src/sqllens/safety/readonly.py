@@ -142,11 +142,25 @@ _SIDE_EFFECT_FUNCS: dict[str, frozenset[str]] = {
             "pg_read_file",
             "pg_read_binary_file",
             "pg_ls_dir",
+            # Path / log file disclosure on Postgres (pg_stat_file has been
+            # around since 9.x; pg_ls_logdir / pg_ls_waldir since 10;
+            # pg_read_server_files since 11 — none are new in PG 14). Parse as
+            # exp.Anonymous and would otherwise slip the guard, exposing the
+            # on-disk WAL/log layout to anyone who can issue a SELECT.
+            "pg_stat_file",
+            "pg_read_server_files",
+            "pg_ls_logdir",
+            "pg_ls_waldir",
             "lo_import",
             "lo_export",
         }
     ),
-    "mysql": frozenset({"sleep", "load_file", "benchmark"}),
+    # ``sys_exec`` / ``sys_eval`` are lib_mysqludf_sys UDFs: where the UDF is
+    # installed and the configured DB role has EXECUTE, they are an RCE seam.
+    # They parse as exp.Anonymous and need explicit naming to stay refused.
+    "mysql": frozenset(
+        {"sleep", "load_file", "benchmark", "sys_exec", "sys_eval"}
+    ),
 }
 
 # ``generate_series`` can enumerate billions of rows — a resource-exhaustion

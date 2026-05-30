@@ -605,10 +605,15 @@ BEARER_TOKEN_MISSING_MESSAGE = (
 
 
 # Minimum accepted bearer-token length (post-strip). Shared by the AuthConfig
-# validator and BearerTokenAuthenticator so the construction-time guard and the
-# config-load guard agree. 16 chars is the floor; operators should generate a
-# much longer random token (see BEARER_TOKEN_TOO_SHORT_MESSAGE).
-MIN_BEARER_TOKEN_LENGTH = 16
+# validator and BearerTokenAuthenticator so the construction-time guard and
+# the config-load guard agree. 32 matches the floor produced by the
+# recommended ``openssl rand -hex 32`` generator (64 hex chars / 256 bits);
+# 16 was below that floor and let weak operator-chosen passphrases through.
+# The threat model is online guessing against a leaked-token-replay attacker
+# who can probe the running server, not offline brute-force of a stored hash
+# (there is none — the bearer compare is constant-time against the configured
+# value); operators should still generate something well above the floor.
+MIN_BEARER_TOKEN_LENGTH = 32
 
 
 BEARER_TOKEN_TOO_SHORT_MESSAGE = (

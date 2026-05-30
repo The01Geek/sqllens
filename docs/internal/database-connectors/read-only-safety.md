@@ -35,9 +35,11 @@ No single layer alone is sufficient: a misconfigured role + a code path that byp
   | Dialect | Denied functions |
   |---|---|
   | `sqlite` | `load_extension` |
-  | `postgres` | `dblink_exec`, `pg_sleep`, `pg_terminate_backend`, `pg_cancel_backend`, `pg_read_file`, `pg_read_binary_file`, `pg_ls_dir`, `lo_import`, `lo_export` |
-  | `mysql` | `sleep`, `load_file`, `benchmark` |
+  | `postgres` | `dblink_exec`, `pg_sleep`, `pg_terminate_backend`, `pg_cancel_backend`, `pg_read_file`, `pg_read_binary_file`, `pg_ls_dir`, `pg_stat_file`, `pg_read_server_files`, `pg_ls_logdir`, `pg_ls_waldir`, `lo_import`, `lo_export` |
+  | `mysql` | `sleep`, `load_file`, `benchmark`, `sys_exec`, `sys_eval` |
   | all dialects | `generate_series`, `exploding_generate_series` (resource-exhaustion DoS) |
+
+  Issue #186 (2026-05-30 security audit) extended the Postgres entry with `pg_stat_file` / `pg_read_server_files` / `pg_ls_logdir` / `pg_ls_waldir` — built-ins (pg_stat_file from 9.x, pg_ls_logdir / pg_ls_waldir from 10, pg_read_server_files from 11) that disclose the on-disk WAL/log layout to anyone who can issue a `SELECT`; they parse as `exp.Anonymous` and would otherwise slip the guard. The MySQL entry gained `sys_exec` / `sys_eval`, the `lib_mysqludf_sys` UDFs: when the UDF is installed and the configured DB role has `EXECUTE`, they are an RCE seam, so they need explicit naming to stay refused. Both additions are pinned by `tests/unit/test_safety.py::TestSideEffectFunctionsRejected`.
 
 The `walk()` call yields bare `exp.Expression` nodes (sqlglot is pinned `>=25.0,<26`; the pre-v20 `(node, parent, key)` tuple form is out of range, so the old tuple-vs-bare-node normalisation shim was removed).
 

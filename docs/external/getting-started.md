@@ -108,7 +108,7 @@ Start the server with `sqllens serve` and point your client at `http://127.0.0.1
 
 ### Health and Readiness Endpoints
 
-When running over HTTP, SQL Lens exposes two unauthenticated probe endpoints. Neither requires an `Authorization` header, even when bearer authentication is enabled, and both answer regardless of the request `Host`, so orchestrator probes work without a token.
+When running over HTTP, SQL Lens exposes two unauthenticated probe endpoints. Neither requires an `Authorization` header, even when bearer authentication is enabled, so orchestrator probes work without a token. Both probes are still subject to the host allowlist described in [Host Header Validation](#host-header-validation) below — a probe whose request `Host` header is not on the allowlist is rejected with HTTP 400 before either endpoint replies, so a DNS-rebound page in a victim browser cannot fingerprint a SQL Lens server's liveness or readiness from outside.
 
 **Liveness: `GET /healthz`.** Returns HTTP 200 with the body `{"status":"ok"}` while the server process is up and serving requests.
 
@@ -134,6 +134,16 @@ Use `/readyz` for Kubernetes readiness probes or load-balancer gating so traffic
 ### Host Header Validation
 
 When the server binds a specific host, only requests whose `Host` header matches the configured host or a loopback name (`127.0.0.1`, `localhost`, `::1`) are accepted; any other host is rejected with HTTP 400. This is a built-in defense against DNS-rebinding attacks. If you bind all interfaces with `0.0.0.0` (or `::`), any `Host` is accepted, because binding every interface is treated as an explicit choice to do so. If you front SQL Lens with a reverse proxy under a custom domain, set `server.host` to that domain so the proxied requests are accepted.
+
+The host allowlist also covers `/healthz` and `/readyz` (since May 2026), so probes sent with an unexpected `Host` header are now rejected with HTTP 400 rather than answered with HTTP 200.
+
+**Kubernetes probe note:** kubelet's default `httpGet` liveness and readiness probes send the pod's IP address as the `Host` header, which is not on the allowlist when you set `server.host` to a concrete hostname (anything other than `0.0.0.0` / `::`). On Kubernetes, either:
+
+- bind all interfaces with `server.host = "0.0.0.0"` (the allowlist becomes `["*"]`, accepting any `Host`); or
+- set `httpGet.host: 127.0.0.1` in the probe manifest so kubelet sends a loopback `Host` header that the allowlist accepts; or
+- set `httpGet.httpHeaders` to override `Host` to your configured `server.host`.
+
+A bind to `0.0.0.0` paired with bearer authentication is the simplest setup that satisfies both the non-loopback safety guard and the kubelet probe path.
 
 ### Plain-HTTP Credential Warning
 

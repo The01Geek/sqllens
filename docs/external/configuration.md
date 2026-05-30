@@ -84,7 +84,7 @@ Configures authentication for the HTTP transport. The stdio transport does not n
 | Field | Type | Description |
 |---|---|---|
 | `mode` | String | One of `none` or `bearer`. (`jwt` is reserved but not yet implemented and is rejected at startup — see the [authentication modes](#authentication-modes) below.) |
-| `bearer_token` | String | The shared token required by `bearer` mode. Prefer setting this with `SQLLENS_AUTH__BEARER_TOKEN`. The token must be at least 16 characters long after surrounding whitespace is trimmed; SQL Lens recommends generating a strong random one with `openssl rand -hex 32`. SQL Lens refuses to start if `mode = "bearer"` and this value is missing, empty, only whitespace, or shorter than 16 characters; setting it without also setting `mode = "bearer"` is likewise rejected at config load — pair them, or remove `bearer_token`. |
+| `bearer_token` | String | The shared token required by `bearer` mode. Prefer setting this with `SQLLENS_AUTH__BEARER_TOKEN`. The token must be at least 32 characters long after surrounding whitespace is trimmed; SQL Lens recommends generating a strong random one with `openssl rand -hex 32` (which produces a 64-character / 256-bit token). SQL Lens refuses to start if `mode = "bearer"` and this value is missing, empty, only whitespace, or shorter than 32 characters; setting it without also setting `mode = "bearer"` is likewise rejected at config load — pair them, or remove `bearer_token`. |
 | `insecure` | Boolean | Defaults to `false`. Set to `true` (or `SQLLENS_AUTH__INSECURE=1`) to acknowledge that `mode = "none"` on a non-loopback host is intentional for a closed-network deployment. See [Non-loopback safety guard](#non-loopback-safety-guard) below. |
 
 ### Authentication modes
@@ -92,10 +92,10 @@ Configures authentication for the HTTP transport. The stdio transport does not n
 | Mode | When to use |
 |---|---|
 | `none` | Loopback only. `sqllens serve` refuses to start when this mode is paired with `transport = "http"` and a non-loopback host. See [Non-loopback safety guard](#non-loopback-safety-guard) below. |
-| `bearer` | A single shared token is required on every request. Requires `bearer_token` to be set to a non-blank value of at least 16 characters. The recommended mode for any deployment that listens on a public or shared interface. |
+| `bearer` | A single shared token is required on every request. Requires `bearer_token` to be set to a non-blank value of at least 32 characters. The recommended mode for any deployment that listens on a public or shared interface. |
 | `jwt` | Reserved but not yet implemented. SQL Lens rejects `mode = "jwt"` at configuration-validation time, so both `sqllens validate` and `sqllens serve` fail immediately with a clear message rather than starting a server that rejects every request. Use `none` or `bearer`. |
 
-**Note:** If you select `mode = "bearer"` without providing a usable token (missing, blank, or shorter than 16 characters), both `sqllens serve` and `sqllens validate` exit with an actionable error that names the `SQLLENS_AUTH__BEARER_TOKEN` environment variable and the `[auth]` section of `sqllens.toml`, and suggests generating a strong token with `openssl rand -hex 32`. This prevents a misconfigured server from starting silently and rejecting every request at runtime.
+**Note:** If you select `mode = "bearer"` without providing a usable token (missing, blank, or shorter than 32 characters), both `sqllens serve` and `sqllens validate` exit with an actionable error that names the `SQLLENS_AUTH__BEARER_TOKEN` environment variable and the `[auth]` section of `sqllens.toml`, and suggests generating a strong token with `openssl rand -hex 32`. This prevents a misconfigured server from starting silently and rejecting every request at runtime. The 32-character floor was raised from 16 in May 2026; operators with a 16–31-character token must rotate to a new one (the recommended `openssl rand -hex 32` produces a 64-character token) before their next `sqllens validate` or `sqllens serve`, both of which will otherwise refuse to start.
 
 ### Non-loopback safety guard
 
