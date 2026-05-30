@@ -122,6 +122,31 @@ CSV is a convenience for SQL pairs **only** — a 2-column sheet whose header mu
 
 Validation limits (enforced by the pydantic models, `extra="forbid"` on every model): `question` ≤ 1000 chars, `sql` ≤ 10000 chars, `schema_docs` `content` ≤ 50000 chars. Every string field must be non-blank after stripping. A model rejection during parse is rendered through [src/sqllens/_errors.py](../../../src/sqllens/_errors.py)'s `validation_error_lines` so the offending input (which could be an oversized SQL string) is never echoed back.
 
+### Bundle-level DoS caps (parse-boundary, issue #186)
+
+The per-field limits above bound the size of any single item, but an authenticated client could still DoS the server by submitting millions of valid-but-cheap items inside one bundle (parsing the list, then writing each inside the held `import_lock`). Two outer-shape caps — defined in [src/sqllens/memory/schema.py](../../../src/sqllens/memory/schema.py) and enforced in [src/sqllens/memory/io.py](../../../src/sqllens/memory/io.py) at the parse boundary, **not** as model-level `Field` constraints — refuse such payloads on the way in:
+
+| Cap | Value | Where enforced |
+|---|---|---|
+| `MAX_BUNDLE_BYTES` | `10 * 1024 * 1024` (10 MiB) | `_enforce_size_cap(text)` in `io.py` — runs **before** parse for both `parse_json` and `parse_csv`. Measured against the UTF-8 byte length of the input (not `len(text)` code points) so a multi-byte payload cannot bypass the cap by up to 4x. Short-circuits on the cheap code-point check first (`len(text) > MAX_BUNDLE_BYTES`) — that lower-bound is sufficient to reject without paying the `encode` of an attacker-shaped payload. |
+| `MAX_BUNDLE_ITEMS` | `10_000` | `_enforce_item_caps(bundle)` in `io.py` — runs **after** parse on the validated `MemoryBundle` and checks both `bundle.sql_pairs.pairs` and `bundle.schema_docs` independently. |
+
+Both caps surface a `BundleFormatError` ("bundle exceeds the 10485760-byte cap; split the bundle into smaller files." / "bundle 'sql_pairs.pairs' exceeds the 10000-item cap (got N); split the bundle."). The `import_memory` MCP tool re-raises that as a sanitized `RuntimeError("Invalid memory bundle: ...")` (`isError: true`); the `sqllens import-memory` CLI exits 1 with the same message on stderr.
+
+Enforcing as a Pydantic `Field` constraint would propagate the cap to *every* construction — including `MemoryStore.iter_all` (which is the dedup baseline for `import_bundle` *and* the source for `export_bundle`) — so a healthy store legitimately holding more than `MAX_BUNDLE_ITEMS` rows would blow up at export and at the start of every import. Putting the cap at the parse boundary instead leaves in-process readers/writers unrestricted while still refusing oversized external payloads on the way in.
+
+### CSV-injection defang (CWE-1236, issue #186)
+
+CSV cells whose first character is one of `{=, +, -, @, \t, \r}` are interpreted as formulas by Excel and LibreOffice when the file is opened — a planted bundle could execute attacker-supplied formulas in an operator's spreadsheet after a round-trip through `sqllens export-memory`. `_defang_csv_cell(value)` in [src/sqllens/memory/io.py](../../../src/sqllens/memory/io.py) prefixes such cells with a single apostrophe (`'`) at **both** the parse boundary (`parse_csv` defangs each cell *before* constructing the `SqlPair`) and the serialize boundary (`serialize_csv` defangs each cell on the way out, so a value that reaches a store unprefixed — e.g. a value imported via JSON, or rows the agent itself learned — is still defanged on export).
+
+Three deliberate properties:
+
+- **Empty / whitespace-only cells are not defanged.** `_require_non_blank` on `SqlPair` rejects an empty `question` / `sql`, and rescuing a `"\t"`-only cell into `"'\t"` would slip past that validator (`strip("'\t") == "'"` — non-blank, and accepted into the store as a meaningless single-apostrophe row). The defang therefore returns the value unchanged when `not value or not value.strip()`, leaving the model-level non-blank check to reject it.
+- **Idempotent.** A cell whose first character is already `'` stays unchanged, so a re-imported export does not accumulate apostrophes round after round.
+- **CSV-only.** JSON cells are not defanged — JSON is consumed by tooling that does not interpret leading `=`/`+`/`-`/`@` as formulas, and adding an apostrophe there would silently corrupt the value.
+
+The defang trigger set (`_CSV_FORMULA_TRIGGERS`) is a module-level `frozenset` so it can be referenced from tests; the corpus covering each trigger plus the empty-cell and idempotence cases lives in `tests/unit/test_memory_schema_io.py`.
+
 ### How imported SQL pairs are stored (retrieval-shape contract)
 
 `MemoryStore.add_sql_pair` must write a pair in the **exact shape the agent writes at query time** or retrieval will never match it. It calls `ChromaAgentMemory.save_tool_usage` with `tool_name="run_sql"` (`RUN_SQL_TOOL_NAME` in [store.py](../../../src/sqllens/memory/store.py) — the default name of `RunSqlTool`), `args={"sql": ...}`, `success=True`, and `metadata={"source": "import"}`. `RUN_SQL_TOOL_NAME` is asserted against the live tool in the test suite (`tests/unit/test_run_sql_tool_name.py`) so a future rename of `RunSqlTool` can't silently break retrieval. Schema docs go in via `save_text_memory` (same path the agent's `SaveTextMemoryTool` uses).
