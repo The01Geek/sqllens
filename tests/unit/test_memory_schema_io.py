@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -119,18 +121,31 @@ def test_parse_csv_rejects_oversize_bundle() -> None:
         parse_csv(payload)
 
 
-def test_sql_pairs_block_rejects_too_many_pairs() -> None:
+def test_parse_json_rejects_too_many_pairs() -> None:
     # Per-block item cap defends against a structurally-valid JSON whose pairs
     # list, alone, is large enough to dominate the import_lock window.
     too_many = [{"question": "q", "sql": "SELECT 1"}] * (MAX_BUNDLE_ITEMS + 1)
-    with pytest.raises(ValidationError):
-        SqlPairsBlock(pairs=too_many)
+    payload = '{"sql_pairs": {"pairs": ' + json.dumps(too_many) + "}}"
+    with pytest.raises(BundleFormatError, match=r"sql_pairs\.pairs.*exceeds"):
+        parse_json(payload)
 
 
-def test_schema_docs_rejects_too_many_entries() -> None:
+def test_parse_json_rejects_too_many_schema_docs() -> None:
     too_many = [{"content": "c"}] * (MAX_BUNDLE_ITEMS + 1)
-    with pytest.raises(ValidationError):
-        MemoryBundle(schema_docs=too_many)
+    payload = '{"schema_docs": ' + json.dumps(too_many) + "}"
+    with pytest.raises(BundleFormatError, match=r"schema_docs.*exceeds"):
+        parse_json(payload)
+
+
+def test_models_accept_more_than_bundle_item_cap_via_construction() -> None:
+    # The cap fires only at the parse boundary. ``MemoryStore.iter_all``
+    # constructs the same models from a live store that may legitimately
+    # exceed the cap; a model-level constraint would crash export/import on
+    # healthy data with > MAX_BUNDLE_ITEMS rows.
+    overflow = [SqlPair(question=f"q{i}", sql="SELECT 1") for i in range(3)]
+    pairs = overflow * (MAX_BUNDLE_ITEMS // len(overflow) + 1)
+    block = SqlPairsBlock(pairs=pairs)
+    assert len(block.pairs) > MAX_BUNDLE_ITEMS
 
 
 def test_parse_csv_defangs_formula_triggers() -> None:
@@ -170,6 +185,14 @@ def test_serialize_csv_defangs_formula_triggers() -> None:
     # leading apostrophe ends up either bare or inside the quoted field.
     assert "'=DANGER()" in text
     assert "'@evil" in text
+
+
+def test_csv_defang_preserves_blank_rejection_semantics() -> None:
+    # A "\t"-only cell must STILL be rejected — defang must not turn it into
+    # "'\t" (whose strip() is "'", non-blank) and silently accept a broken row.
+    text = 'question,sql\n"\t","SELECT 1"\n'
+    with pytest.raises(BundleFormatError):
+        parse_csv(text)
 
 
 def test_csv_defang_is_idempotent() -> None:

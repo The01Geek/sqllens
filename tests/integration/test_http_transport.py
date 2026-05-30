@@ -304,7 +304,11 @@ class TestTrustedHost:
         fingerprinting a running SQL Lens or its readiness state. The
         intentional orchestrator-friendly behaviour (no ``Authorization``
         required) is preserved by leaving loopback in the allowlist —
-        covered by ``test_probe_with_allowed_host_still_200`` above.
+        covered by ``test_probe_with_allowed_host_still_200`` above. Body
+        is asserted to NOT carry the probe's success JSON so a regression
+        where the short-circuit answers before the host gate is detected
+        (the literal-byte bodies '{"status":"ok"}' / '{"status":"ready"}'
+        must be unreachable on a disallowed Host).
         """
         handle = make_server(AuthConfig(mode="none"))
         evil = {"Host": "evil.example.com"}
@@ -313,6 +317,8 @@ class TestTrustedHost:
             ry = await client.get(handle.base_url + "/readyz", headers=evil)
         assert h.status_code == 400
         assert ry.status_code == 400
+        assert '"status":"ok"' not in h.text
+        assert '"status":"ready"' not in ry.text
 
 
 # ─────────────────────── O-5: eager warmup + /readyz ────────────────────────

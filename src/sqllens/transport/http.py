@@ -243,9 +243,12 @@ def _build_asgi_app_bare(cfg: Config, readiness: _Readiness) -> tuple[ASGIApp, F
     ``Host`` is rejected with 400 before *anything* downstream sees the
     request — including the ``/healthz`` / ``/readyz`` short-circuits in
     ``_PathNormalizer``. This denies the DNS-rebinding fingerprint of a
-    browser-served page being able to confirm a running SQL Lens and its
-    readiness state from outside the configured host allowlist. Probes still
-    bypass ``_AuthMiddleware`` so orchestrator probes never need an
+    browser-served page confirming a running SQL Lens and its readiness
+    state — *for non-wildcard binds*: when ``cfg.server.host`` is
+    ``0.0.0.0`` / ``::``, ``_allowed_hosts`` returns ``["*"]`` (the operator
+    has explicitly opted into accepting any ``Host``) and the rebinding
+    fingerprint remains possible by design. Probes still bypass
+    ``_AuthMiddleware`` so orchestrator probes never need an
     ``Authorization`` header (loopback and the configured host are in the
     default allowlist).
     """

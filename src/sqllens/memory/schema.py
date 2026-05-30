@@ -22,20 +22,26 @@ CONTENT_MAX = 50000
 # ``SQL_MAX`` / ``CONTENT_MAX`` bound the size of any single item; an
 # authenticated client could still DoS the server by submitting millions of
 # valid-but-cheap items inside one bundle (parsing the list, then writing each
-# inside the held ``import_lock``). These two caps reject such payloads at the
-# parse boundary instead.
+# inside the held ``import_lock``). The two caps below — both enforced in
+# ``memory.io`` at the parse boundary, *not* as model-level ``Field``
+# constraints — reject such payloads on the way in while leaving in-process
+# constructors (notably ``MemoryStore.iter_all``, which is the dedup baseline
+# for ``import_bundle`` and the source for ``export_bundle``) unrestricted.
+# Enforcing as a ``Field`` constraint would propagate the cap to every
+# construction, breaking export and import-baseline reads on a healthy store
+# that legitimately holds more than ``MAX_BUNDLE_ITEMS`` rows.
 MAX_BUNDLE_BYTES = 10 * 1024 * 1024
 """Hard ceiling on the raw bundle text accepted by ``parse_json``/``parse_csv``.
 
-Realistic curated bundles fit well under 10 MiB; anything larger is treated as
-a DoS payload and refused before allocation of the parsed object graph. The
-cap is intentionally measured against the raw input length — checking after
-parse defeats the purpose."""
+Realistic curated bundles fit well under 10 MiB; anything larger is treated
+as a DoS payload and refused before allocation of the parsed object graph.
+Measured against the UTF-8-encoded byte length of the input (not the
+character count) so a multi-byte payload cannot bypass the cap by up to 4x."""
 
 MAX_BUNDLE_ITEMS = 10_000
-"""Per-block item cap enforced via ``Field(max_length=...)`` on the list-typed
-bundle members. Sized to cover the largest realistic curated bundles while
-still bounding the work done under ``import_lock``."""
+"""Per-block item cap enforced by ``memory.io`` after parse. Sized to cover
+the largest realistic curated bundles while still bounding the work done
+under ``import_lock``."""
 
 
 def _require_non_blank(value: str, field: str) -> str:
@@ -70,7 +76,7 @@ class SqlPairsBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     training_type: Literal["sql_pairs"] = "sql_pairs"
-    pairs: list[SqlPair] = Field(default_factory=list, max_length=MAX_BUNDLE_ITEMS)
+    pairs: list[SqlPair] = Field(default_factory=list)
 
 
 class SchemaDoc(BaseModel):
@@ -93,7 +99,7 @@ class MemoryBundle(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sql_pairs: SqlPairsBlock | None = None
-    schema_docs: list[SchemaDoc] | None = Field(default=None, max_length=MAX_BUNDLE_ITEMS)
+    schema_docs: list[SchemaDoc] | None = None
 
 
 class ImportItemError(BaseModel):
