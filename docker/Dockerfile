@@ -57,7 +57,10 @@ USER sqllens
 WORKDIR /home/sqllens
 
 # Where ChromaDB persists by default (overridable via SQLLENS_MEMORY__PERSIST_DIR).
-RUN mkdir -p /home/sqllens/data
+# Also pre-create the ChromaDB embedding-model cache dir so a fresh named volume
+# mounted at /home/sqllens/.cache/chroma inherits sqllens ownership (Docker only
+# carries ownership into a new volume when the path exists in the image).
+RUN mkdir -p /home/sqllens/data /home/sqllens/.cache/chroma
 ENV SQLLENS_MEMORY__PERSIST_DIR=/home/sqllens/data
 
 # HTTP transport defaults — overridable via env. Stdio mode is configured by
