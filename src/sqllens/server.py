@@ -16,9 +16,10 @@ configured auth middleware (none / bearer / jwt) and path normalization.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
-from typing import Any
+from typing import Any, get_args
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
@@ -342,6 +343,257 @@ def build_server(cfg: Config) -> FastMCP:
                     "A partial import is a failure; check the server logs."
                 )
             return report.to_markdown()
+
+    # Opt-in, default OFF: the curation surface for the training set. The
+    # read-only tools (list/get/export/stats) enumerate memory; the destructive
+    # subset (delete/clear/add) additionally refuses to run on an unauthenticated
+    # endpoint unless auth.insecure acknowledges a closed network.
+    if cfg.memory.allow_admin_tools:
+        from sqllens.memory import MemoryCorruptionError, MemoryStore
+        from sqllens.memory import admin as memory_admin
+        from sqllens.memory.admin import MemoryNotFoundError
+
+        admin_store = MemoryStore(cfg)
+        # Serialize admin mutations so concurrent add/delete/clear calls can't
+        # race the dedup baseline or each other's deletes.
+        admin_write_lock = asyncio.Lock()
+
+        # Single source of truth: derive the runtime gate from the MemoryType
+        # literal so adding a type can't leave this set stale.
+        _VALID_MEMORY_TYPES = set(get_args(memory_admin.MemoryType))
+
+        def _parse_memory_type(value: str | None) -> str | None:
+            # JSON null arrives as None; tolerate the string forms a client might
+            # send for "all" too. Anything else is a caller error, surfaced as a
+            # clear isError rather than silently matching nothing.
+            if value is None or value.lower() in ("", "null", "all"):
+                return None
+            if value not in _VALID_MEMORY_TYPES:
+                raise RuntimeError(
+                    f"Unknown memory_type {value!r}; expected 'tool_usage', "
+                    "'text', or omit for all."
+                )
+            return value
+
+        def _require_write_auth() -> None:
+            # "Destructive tools require auth": refuse to mutate the store from an
+            # endpoint that authenticates nobody, unless the operator has
+            # explicitly acknowledged a closed network via auth.insecure.
+            if cfg.auth.mode == "none" and not cfg.auth.insecure:
+                raise RuntimeError(
+                    "This tool mutates the memory store and is disabled on an "
+                    "unauthenticated endpoint. Set auth.mode='bearer' (or "
+                    "auth.insecure=true on a closed network) to enable it."
+                )
+
+        def _json_error(payload: dict[str, Any]) -> CallToolResult:
+            # Structured body AND isError:true — the calling client gets the
+            # per-row detail (e.g. add_memories.errors[]) instead of only a
+            # free-text message, while still seeing the failure signal.
+            return CallToolResult(
+                content=[TextContent(type="text", text=json.dumps(payload))],
+                isError=True,
+            )
+
+        @mcp.tool(structured_output=False)
+        async def list_memories(
+            data_source_id: str,
+            memory_type: str | None = None,
+            limit: int = 1000,
+            include_embedding_preview: bool = False,
+        ) -> str:
+            """List stored memories (newest first), optionally filtered by type.
+
+            ``data_source_id`` is accepted for client-contract stability but is
+            advisory: this server serves a single database. ``memory_type`` is
+            ``tool_usage``, ``text``, or omitted for all. Returns a JSON object
+            ``{"memories": [...], "total": N}``.
+            """
+            mtype = _parse_memory_type(memory_type)
+            try:
+                result = memory_admin.list_memories(
+                    admin_store,
+                    memory_type=mtype,
+                    limit=limit,
+                    include_embedding_preview=include_embedding_preview,
+                )
+            except Exception:
+                logger.exception("list_memories tool failed")
+                raise RuntimeError(
+                    "Failed to read the memory store; check the server logs."
+                ) from None
+            return json.dumps(result)
+
+        @mcp.tool(structured_output=False)
+        async def get_memory(data_source_id: str, memory_id: str) -> str | CallToolResult:
+            """Fetch one memory by id (including its full embedding).
+
+            Returns the memory's JSON object, or an ``isError`` result with
+            ``{"error": ...}`` when no memory has that id.
+            """
+            try:
+                result = memory_admin.get_memory(admin_store, memory_id)
+            except MemoryNotFoundError:
+                return _json_error(
+                    {"error": "memory not found", "memory_id": memory_id}
+                )
+            except Exception:
+                logger.exception("get_memory tool failed")
+                raise RuntimeError(
+                    "Failed to read the memory store; check the server logs."
+                ) from None
+            return json.dumps(result)
+
+        @mcp.tool(structured_output=False)
+        async def delete_memory(
+            data_source_id: str, memory_id: str
+        ) -> str | CallToolResult:
+            """Delete one memory by id (write-guarded — see allow_admin_tools).
+
+            Refuses to run on an unauthenticated endpoint unless auth.insecure
+            is set. Returns ``{"deleted": true}``, or an ``isError`` result with
+            ``{"deleted": false}`` when no memory has that id.
+            """
+            _require_write_auth()
+            try:
+                async with admin_write_lock:
+                    result = memory_admin.delete_memory(admin_store, memory_id)
+            except MemoryNotFoundError:
+                return _json_error(
+                    {"deleted": False, "error": "memory not found",
+                     "memory_id": memory_id}
+                )
+            except Exception:
+                logger.exception("delete_memory tool failed")
+                raise RuntimeError(
+                    "Failed to delete from the memory store; check the server logs."
+                ) from None
+            return json.dumps(result)
+
+        @mcp.tool(structured_output=False)
+        async def clear_memories(
+            data_source_id: str, memory_type: str | None = None
+        ) -> str:
+            """Delete all memories, or just one type (write-guarded).
+
+            Refuses to run on an unauthenticated endpoint unless auth.insecure
+            is set. ``memory_type`` is ``tool_usage``, ``text``, or omitted for
+            all. Returns ``{"deleted_count": N}``.
+            """
+            _require_write_auth()
+            mtype = _parse_memory_type(memory_type)
+            try:
+                async with admin_write_lock:
+                    result = memory_admin.clear_memories(
+                        admin_store, memory_type=mtype
+                    )
+            except Exception:
+                logger.exception("clear_memories tool failed")
+                raise RuntimeError(
+                    "Failed to clear the memory store; check the server logs."
+                ) from None
+            return json.dumps(result)
+
+        @mcp.tool(structured_output=False)
+        async def add_memories(
+            data_source_id: str,
+            sql_pairs: list[dict[str, Any]] | None = None,
+            schema_docs: list[dict[str, Any]] | None = None,
+        ) -> str | CallToolResult:
+            """Bulk-add curated SQL pairs and schema docs, with server-side dedup.
+
+            ``sql_pairs`` items are ``{"question", "sql"}``; ``schema_docs`` items
+            are ``{"content"}``. Exact ``(question, sql)`` / ``content`` matches
+            (already stored or repeated in the batch) are skipped. Write-guarded:
+            refuses on an unauthenticated endpoint unless auth.insecure is set.
+
+            Returns ``{"saved_count", "duplicate_count", "skipped_count",
+            "errors": [{"index", "question", "error"}]}``. Per the partial-failure
+            contract, any per-item error makes this an ``isError`` result (the
+            structured body is still returned so the caller sees which rows
+            failed).
+            """
+            _require_write_auth()
+            try:
+                async with admin_write_lock:
+                    result = await memory_admin.add_memories(
+                        admin_store, sql_pairs=sql_pairs, schema_docs=schema_docs
+                    )
+            except Exception:
+                logger.exception("add_memories tool failed")
+                raise RuntimeError(
+                    "Failed to write to the memory store; the batch was not "
+                    "(fully) saved. Check the server logs."
+                ) from None
+            # Partial failure is failure: a batch that errored on any row reaches
+            # the client as isError, even though some rows may have saved.
+            if result["errors"]:
+                logger.error(
+                    "add_memories: %d item(s) failed (%d saved, %d duplicate)",
+                    len(result["errors"]),
+                    result["saved_count"],
+                    result["duplicate_count"],
+                )
+                return _json_error(result)
+            return json.dumps(result)
+
+        @mcp.tool(structured_output=False)
+        async def export_memories(
+            data_source_id: str, format: str = "json"
+        ) -> str | CallToolResult:
+            """Export the store as a JSON or CSV blob.
+
+            JSON round-trips: its ``{"sql_pairs": [...], "schema_docs": [...]}``
+            output feeds straight back into ``add_memories``. Returns
+            ``{"format", "data", "warnings", "lossy"}``; when ``lossy`` is true
+            (data that exists was dropped) the result is an ``isError``, and a
+            wholesale-corrupt store fails loudly rather than exporting an empty
+            success.
+            """
+            if format not in ("json", "csv"):
+                raise RuntimeError(
+                    f"Unknown export format {format!r}; expected 'json' or 'csv'."
+                )
+            try:
+                result = memory_admin.export_memories(admin_store, format)  # type: ignore[arg-type]
+            except MemoryCorruptionError as exc:
+                # A wholesale-corrupt store must never serialize as an empty
+                # success — distinct, actionable signal, not the generic message.
+                logger.error("export_memories aborted: corrupt store baseline")
+                raise RuntimeError(
+                    f"Memory store looks corrupt: {exc} Export aborted. "
+                    "Check the server logs."
+                ) from exc
+            except Exception:
+                logger.exception("export_memories tool failed")
+                raise RuntimeError(
+                    "Failed to export the memory store; check the server logs."
+                ) from None
+            # Genuine partial loss — data that EXISTS in the store was dropped
+            # from the export (unrepresentable rows, or schema docs absent from a
+            # CSV) — is the data-loss trap the isError contract warns of, so it
+            # reaches the client as isError (warnings still in the body). A
+            # merely-empty store is not loss (nothing existed) and returns
+            # success with an explanatory warning, matching the CLI exporter.
+            if result["lossy"]:
+                return _json_error(result)
+            return json.dumps(result)
+
+        @mcp.tool(structured_output=False)
+        async def get_memory_stats(data_source_id: str) -> str:
+            """Return aggregate memory stats: counts, recent hits, top-hit pairs.
+
+            Shape: ``{"tool_usage_count", "text_count", "total_hits_last_30d",
+            "top_hit_memories": [...]}``.
+            """
+            try:
+                result = memory_admin.get_memory_stats(admin_store)
+            except Exception:
+                logger.exception("get_memory_stats tool failed")
+                raise RuntimeError(
+                    "Failed to read the memory store; check the server logs."
+                ) from None
+            return json.dumps(result)
 
     return mcp
 

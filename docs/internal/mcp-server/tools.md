@@ -2,7 +2,7 @@
 
 The tools that MCP clients see. Source-of-truth reference for [src/sqllens/server.py](../../../src/sqllens/server.py), [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py), [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py), [src/sqllens/tools/list_data_sources.py](../../../src/sqllens/tools/list_data_sources.py), and [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py).
 
-Two tools are **always** registered (`query_database`, `list_data_sources`). A third, `import_memory`, is registered **only when `cfg.memory.allow_import` is true** — see [`import_memory` — opt-in tool](#import_memory--opt-in-tool) below.
+Two tools are **always** registered (`query_database`, `list_data_sources`). Two opt-in surfaces are registered conditionally: `import_memory` **only when `cfg.memory.allow_import` is true** (see [`import_memory` — opt-in tool](#import_memory--opt-in-tool)), and the seven memory-administration tools **only when `cfg.memory.allow_admin_tools` is true** (see [Memory-administration tools](#memory-administration-tools--cfgmemoryallow_admin_tools)).
 
 ## Registration
 
@@ -282,6 +282,35 @@ Behaviour and contract:
   - A store/write failure (Chroma, embedding download, disk) raises a sanitized `RuntimeError("Memory import failed while writing to the store; ... Check the server logs.")`, and a corrupt-baseline `MemoryCorruptionError` raises a distinct `RuntimeError("Memory store looks corrupt: ... Import aborted; ...")`, both with the full detail logged server-side so the persist path is not leaked to the client.
   - **Partial failure is failure.** When `report.errors` is non-empty the tool **raises** — even when some pairs saved and only others errored. The guard is `if report.errors:` (it was previously `if report.saved == 0 and report.errors:`, which let a partial import slip through as `isError: false`). The client-facing message is counts-only: `RuntimeError("Memory import failed: N item(s) errored (X saved, Y skipped). A partial import is a failure; check the server logs.")`. The raw per-item exception text (which can carry the on-disk persist path / driver internals) is logged via `logger.error` and never returned to the client. Pinned by `tests/unit/test_memory_mcp_tool.py::test_tool_signals_error_on_partial_failure`.
 - **Closure-bound store.** The `MemoryStore` is constructed once at registration time and closed over by the tool, mirroring how the two core tools close over `cfg` (next section). The bundle file format, dedup rules, and storage shape are documented in [agent/memory.md](../agent/memory.md#first-party-importexport-srcsqllensmemory).
+
+## Memory-administration tools — `cfg.memory.allow_admin_tools`
+
+`build_server` registers **seven** memory-curation tools **only when `cfg.memory.allow_admin_tools` is true** (`MemoryConfig.allow_admin_tools`, default `False`, env `SQLLENS_MEMORY__ALLOW_ADMIN_TOOLS`). They are an opt-in admin surface for inspecting and curating the agent's vector memory training set, registered on the same MCP endpoint as `query_database` (issue #181). Off by default: the read-only tools enumerate the store and the destructive subset mutates it. The wire-shaping and the seven operations live in [src/sqllens/memory/admin.py](../../../src/sqllens/memory/admin.py); the raw collection enumeration/mutation primitives live in [src/sqllens/memory/store.py](../../../src/sqllens/memory/store.py) — see [agent/memory.md](../agent/memory.md#memory-administration-tools-opt-in-default-off) for the storage-layer detail.
+
+Registration-time wiring inside the `if cfg.memory.allow_admin_tools:` block:
+
+- **One closure-bound `MemoryStore`** (`admin_store = MemoryStore(cfg)`), mirroring `import_memory`.
+- **A single `admin_write_lock` (`asyncio.Lock`)** serializes the mutating tools (`delete_memory` / `clear_memories` / `add_memories`) so concurrent calls can't race the dedup baseline or each other's deletes. The read-only tools (`list_memories` / `get_memory` / `export_memories` / `get_memory_stats`) do not take the lock.
+- **`_parse_memory_type`** maps the wire `memory_type` to the internal filter: JSON `null` / `""` / `"null"` / `"all"` → no filter (all types); `"tool_usage"` / `"text"` pass through; anything else raises a clear `RuntimeError` (→ `isError`) rather than silently matching nothing. The valid set is derived from the `MemoryType` literal in `admin.py` via `get_args`, so adding a type can't leave this gate stale.
+- **`_require_write_auth`** enforces "destructive tools require auth": if `cfg.auth.mode == "none"` and `cfg.auth.insecure` is not set, the mutating tools raise a `RuntimeError` refusing to run on an unauthenticated endpoint. The read-only tools are not gated this way.
+- **`_json_error(payload)`** returns a `CallToolResult` carrying the structured `payload` as JSON text **and** `isError=True`, so the caller sees both the per-row detail (e.g. `add_memories.errors[]`) and the failure signal.
+
+Every tool is decorated `@mcp.tool(structured_output=False)` and returns a JSON string (success) or a `_json_error` `CallToolResult`. Each tool accepts a required `data_source_id` that is **advisory** — SQL Lens is single-tenant, so it does not partition storage (Option A, issue #181). `memory_id` is the stable Chroma document UUID.
+
+| Tool | Args | Success shape | Notes |
+|---|---|---|---|
+| `list_memories` | `data_source_id`, `memory_type?`, `limit=1000`, `include_embedding_preview=False` | `{"memories": [...], "total": N}` | Newest first. `total` counts all rows matching `memory_type`, not just the returned slice. Preview adds an 8-float `embedding_preview` + `embedding_dim`. |
+| `get_memory` | `data_source_id`, `memory_id` | the memory's JSON object (with **full** `embedding`) | `MemoryNotFoundError` → `isError` `{"error": "memory not found", "memory_id"}`. |
+| `delete_memory` | `data_source_id`, `memory_id` | `{"deleted": true}` | **Write-guarded.** Absent id → `isError` `{"deleted": false, ...}`. |
+| `clear_memories` | `data_source_id`, `memory_type?` | `{"deleted_count": N}` | **Write-guarded.** Omit `memory_type` to wipe all (by every reported id, so corrupt rows go too). |
+| `add_memories` | `data_source_id`, `sql_pairs?`, `schema_docs?` | `{"saved_count", "duplicate_count", "skipped_count", "errors": [...]}` | **Write-guarded.** Bulk add via `import_bundle` (server-side exact-match dedup). **Partial failure is failure**: any non-empty `errors` makes this an `isError` result (structured body still returned so the caller sees which rows failed). |
+| `export_memories` | `data_source_id`, `format="json"` | `{"format", "data", "warnings", "lossy"}` | JSON round-trips back into `add_memories`; CSV is SQL-pairs-only. **`lossy=True` → `isError`** (data that exists was dropped). A wholesale-corrupt store raises a distinct `RuntimeError` instead of exporting an empty success. A bad `format` raises before touching the store. A merely-empty store is success-with-warning. |
+| `get_memory_stats` | `data_source_id` | `{"tool_usage_count", "text_count", "total_hits_last_30d", "top_hit_memories": [...]}` | Top-10 by `hit_count`. Backed by the per-memory hit tracking in `search_similar_usage` — see [agent/memory.md](../agent/memory.md#what-the-memory-feature-actually-does). |
+
+**Error handling** follows the CLAUDE.md `isError` contract. Every tool wraps its `admin.py` call in `try/except Exception`, logs the full detail via `logger.exception`, and re-raises a sanitized `RuntimeError("Failed to ... ; check the server logs.")` (FastMCP → `isError`), so the persist path / driver internals are never echoed to the client. Two cases are deliberately distinct, structured signals rather than the generic message:
+
+- **`add_memories` partial failure** → `_json_error(result)` carrying `errors[]`, after logging the failed/saved/duplicate counts at `ERROR`.
+- **`export_memories` lossy / corrupt** → `_json_error(result)` on genuine loss (data that exists was dropped), and a distinct `RuntimeError("Memory store looks corrupt: ... Export aborted. ...")` on a `MemoryCorruptionError` baseline.
 
 ## Eager warmup shares the request-path singleton (issue #116)
 

@@ -15,6 +15,8 @@ There are two persistence modes, both backed by the same Chroma collection:
 
 The question is the embedded text; the tool name and args ride along as Chroma metadata. The next time a similar question comes in, the agent calls `SearchSavedCorrectToolUsesTool` with the new question — Chroma returns the nearest neighbours by cosine similarity, and the agent uses the previous SQL as a starting point instead of re-deriving it from scratch.
 
+**Per-memory hit tracking.** When `ChromaAgentMemory.search_similar_usage` ([src/sqllens/agent/integrations/chromadb/agent_memory.py](../../../src/sqllens/agent/integrations/chromadb/agent_memory.py)) returns a memory that cleared the similarity threshold, it counts as *retrieved* this turn: the row's `hit_count` metadata is incremented and its `last_hit_date` is set to `datetime.now().isoformat()` (naive-local). The bumps for every hit in a turn are collected and written in a single `collection.update()` after the result loop. This is **best-effort telemetry** — a failure to persist the bumped counts logs at `WARNING` and is swallowed (the matched memories were still found and returned, so the user's query is not failed). These counters let the admin curation tools (`get_memory_stats`, `list_memories`) distinguish high-value pairs from dead weight; they are absent (`hit_count` defaults to `0`) on a never-retrieved memory.
+
 `SaveQuestionToolArgsTool` is registered **only when `cfg.memory.save_queries` is true** (it defaults to `false`). When the flag is off the tool is never wired into the agent, so the agent cannot write tool-use memory — reading existing tool-use memory via `SearchSavedCorrectToolUsesTool` is unaffected.
 
 **Text memory (free-form).** The agent can also call `SaveTextMemoryTool` to record free-form notes — domain vocabulary, semantic hints, "column X actually means Y in this schema", etc. These are stored in the same Chroma collection but as text-memory entries rather than tool-arg recordings. The default system prompt (`src/sqllens/agent/core/system_prompt/default.py`) gates its text-memory instructions on `has_text_memory = "save_text_memory" in tool_names`, so the tool must be registered for the LLM to be told about it.
@@ -64,6 +66,8 @@ These live under `[memory]` in `sqllens.toml` (or `SQLLENS_MEMORY__*` env vars).
 | `collection` | `sqllens` | `SQLLENS_MEMORY__COLLECTION` | Logical collection name inside the persisted store. Letting two processes share a `persist_dir` with different collections is supported but rarely useful. |
 | `similarity_threshold` | `0.7` | `SQLLENS_MEMORY__SIMILARITY_THRESHOLD` | Cosine similarity floor in `[0.0, 1.0]`. Hits below this are dropped. Used as the *server-configured default*: the LLM may override it per call via the `similarity_threshold` parameter on `search_saved_correct_tool_uses`, including the legitimate value `0.0` (return everything) which is preserved exactly — not coerced. |
 | `save_queries` | `false` | `SQLLENS_MEMORY__SAVE_QUERIES` | Registers `SaveQuestionToolArgsTool` so the agent can persist successful question → SQL pairs into tool-use memory. Off by default; when off the tool is not registered and the system prompt drops its save instructions. Reading saved memory is unaffected. |
+| `allow_import` | `false` | `SQLLENS_MEMORY__ALLOW_IMPORT` | Registers the single `import_memory` MCP tool. Off by default — a remote writer can poison future SQL generation. The CLI import/export commands are unaffected. |
+| `allow_admin_tools` | `false` | `SQLLENS_MEMORY__ALLOW_ADMIN_TOOLS` | Registers the seven memory-administration MCP tools (`list_memories`, `get_memory`, `delete_memory`, `clear_memories`, `add_memories`, `export_memories`, `get_memory_stats`) for curating the training set. Off by default — they enumerate and mutate the store. The destructive subset (`delete_memory` / `clear_memories` / `add_memories`) additionally refuses to run on an unauthenticated endpoint (`auth.mode='none'`) unless `auth.insecure` acknowledges a closed network. See [Memory-administration tools](#memory-administration-tools-opt-in-default-off) below. |
 
 Schema definition: `MemoryConfig` in [src/sqllens/config.py](../../../src/sqllens/config.py).
 
@@ -156,6 +160,39 @@ The tool accepts JSON only (no CSV over MCP), runs `import_bundle` with default 
 - **Any per-item error is a failure — partial failure is failure.** When `report.errors` is non-empty the tool raises, *even if some pairs saved and only others errored*. The guard is `if report.errors:` (not the older `report.saved == 0 and report.errors`), so a run that saved some items and errored on the rest no longer reaches the client as `isError:false`. The client-facing message is counts-only — `"Memory import failed: N item(s) errored (X saved, Y skipped). A partial import is a failure; check the server logs."` — and the full per-item exception text (which can carry the on-disk persist path / driver internals) goes to the server log via `logger.error`, never to the client. This is pinned by `tests/unit/test_memory_mcp_tool.py::test_tool_signals_error_on_partial_failure`.
 
 The `MemoryStore` is constructed once at registration time and closed over by the tool. See [mcp-server/tools.md](../mcp-server/tools.md#import_memory--opt-in-third-tool) for how this fits the public tool surface.
+
+## Memory-administration tools (opt-in, default OFF)
+
+`build_server` ([src/sqllens/server.py](../../../src/sqllens/server.py)) registers seven memory-curation MCP tools **only when `cfg.memory.allow_admin_tools` is true** (`MemoryConfig.allow_admin_tools`, default `False`, env `SQLLENS_MEMORY__ALLOW_ADMIN_TOOLS`). They are an admin surface for inspecting and curating the agent's vector memory training set, registered on the same MCP endpoint as `query_database`. The wire-shaping and the seven operations live in [src/sqllens/memory/admin.py](../../../src/sqllens/memory/admin.py); the raw collection enumeration/mutation primitives they sit on live in [src/sqllens/memory/store.py](../../../src/sqllens/memory/store.py).
+
+Off by default because the read-only tools enumerate the store and the destructive subset mutates it. See [mcp-server/tools.md](../mcp-server/tools.md#memory-administration-tools--cfgmemoryallow_admin_tools) for the full per-tool wire contracts, auth gating, and error/`isError` handling.
+
+### `data_source_id` is advisory (single-tenant, Option A)
+
+Every admin tool accepts a required `data_source_id` argument, but SQL Lens serves **one database per running instance**, so the value is **advisory — it does not partition storage** and is not used to look anything up. It is accepted to keep the wire contract stable with a multi-tenant client (Option A in issue #181). `memory_id` is the stable Chroma document UUID and is the only handle that addresses a specific row.
+
+### `MemoryRecord` and the raw `store.py` seam
+
+[src/sqllens/memory/store.py](../../../src/sqllens/memory/store.py) gained a frozen `MemoryRecord` dataclass (`memory_id`, `metadata`, optional `embedding`) and four raw collection operations that back the admin layer. Unlike `iter_all` (which only re-materializes the two bundle-representable kinds), these return metadata **verbatim** so the admin layer can surface every stored row — auto-learned tool memories included — with its discriminator (`is_text_memory`), tracking keys (`hit_count` / `last_hit_date`), and provenance intact:
+
+| Method | Behaviour |
+|---|---|
+| `get_all(include_embeddings=False)` | Every stored row as a `MemoryRecord`. Rows whose metadata is missing/non-dict are skipped (they cannot be classified or addressed). |
+| `get_one(memory_id, include_embedding=False)` | One row by id, or `None` if absent. |
+| `delete_ids(ids)` | Deletes the given ids; returns how many *actually* left the store (present-before minus still-present-after), never an optimistic "asked to delete N" — so a partial-delete failure is not reported as a clean success. |
+| `clear()` | Now **returns the deleted count** (was `None`). Deletes by *every* id the collection reports, so rows with missing/corrupt metadata are removed too. |
+
+Embeddings (often numpy arrays) are coerced to plain `float` lists by `_coerce_embedding`; a non-numeric vector is treated as absent (`None`) and logged at `DEBUG`. `_get_collection()` access stays confined to `store.py`.
+
+### The wire reshaping (`admin.py`)
+
+[src/sqllens/memory/admin.py](../../../src/sqllens/memory/admin.py) reshapes raw `MemoryRecord` rows into the JSON shapes the tools return. A row is classified `text` iff its metadata carries the `is_text_memory` discriminator, otherwise `tool_usage`. Corrupt `args_json` / `metadata_json` (Chroma stores only primitives, so these ride as JSON strings) are tolerated per-row — the parse failure logs at `DEBUG` and the affected field surfaces as `null` rather than dropping the whole row from an admin listing.
+
+Notable contracts:
+
+- **`add_memories` round-trip / partial failure.** Per-item validation failures (a malformed `SqlPair` / `SchemaDoc`, including a non-dict item) are collected into `errors` with the original input index rather than aborting the batch; valid items go through `import_bundle` (the same dedup path the CLI/`import_memory` use). `import_bundle`'s own per-item errors are mapped back to the caller's original indices. Returns `{saved_count, duplicate_count, skipped_count, errors}` (`skipped_count` is always `0` today — dedup duplicates are counted under `duplicate_count`). The server treats any non-empty `errors` as an `isError` result.
+- **`export_memories` lossy contract.** Calls `store.iter_all()`, which raises `MemoryCorruptionError` on a wholesale-corrupt store so a destroyed backup never serializes as an empty success. `lossy` is `True` when data that **exists** in the store was dropped (unrepresentable rows reported by `last_skipped_rows`, or schema docs absent from a CSV export); the server raises `isError` on that. A merely-**empty** store is *not* lossy (nothing existed to lose) — it returns `lossy=False` with an explanatory warning, matching the non-fatal CLI `export_bundle`. JSON emits `{"sql_pairs": [{question, sql}], "schema_docs": [{content}]}` — the exact argument shape `add_memories` accepts, so an export round-trips straight back in. CSV carries SQL pairs only.
+- **`get_memory_stats` recent-hit window.** Counts `tool_usage_count` / `text_count`, sums `hit_count` over the last 30 days into `total_hits_last_30d`, and returns the top-10 by `hit_count` as `top_hit_memories`. The 30-day cutoff is computed with `datetime.now().isoformat()` (naive-local) so its lexical ISO-8601 comparison against the stored `last_hit_date` (written the same way by `search_similar_usage`) is valid.
 
 ## Surfacing the hit/miss signal to MCP clients
 
