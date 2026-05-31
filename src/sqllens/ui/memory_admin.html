@@ -433,8 +433,17 @@ function emptyDiv(text) {
 const errbar = document.getElementById("errbar");
 const okbar = document.getElementById("okbar");
 
+// Monotonic counter stamped onto errbar by every showError. Used by
+// loadBrowse({preserveBanner}) to distinguish "the banner I asked to
+// preserve is still up" from "*some* banner is up" — without this, an
+// unrelated intervening showError (e.g. a row-click get_memory failure
+// during an in-flight silent refresh) would satisfy the preserveBanner
+// gate and silently drop the refresh's own list_memories failure.
+let _bannerSeq = 0;
+
 function showError(title, message, details) {
   errbar.textContent = "";
+  errbar.dataset.seq = String(++_bannerSeq);
   const head = document.createElement("div");
   head.className = "head";
   // Title + dismiss-× on the same row. The × is the only way to clear the
@@ -637,20 +646,26 @@ async function loadBrowse(opts) {
   // NOT overwrite that banner — its absence would silently hide the real
   // failure under a generic "Failed to list memories" message.
   //
-  // The check has TWO conditions: the caller asked for preservation AND
-  // a banner is still live at the time the response arrives. The user can
-  // dismiss the prior banner via × between call dispatch and response;
-  // suppressing the refresh failure when there is no banner left to
-  // preserve would silently lose the second error.
+  // The check correlates by banner identity (errbar.dataset.seq snapshotted
+  // at dispatch and re-checked at response). A coarser "any banner is up"
+  // check would let an unrelated intervening showError (e.g. a row-click
+  // get_memory failure that paints its own banner mid-flight) satisfy the
+  // gate, silently dropping the refresh's own failure. The user-dismiss-via-×
+  // case is handled because dismissing removes the `on` class but does not
+  // change the seq; the bannerStillLive check below rejects that path too.
   const callerWantsPreserve = !!(opts && opts.preserveBanner);
+  const expectedBannerSeq = callerWantsPreserve ? errbar.dataset.seq : null;
   browseBody.textContent = "";
   browseBody.appendChild(emptyDiv("Loading memories…"));
   const args = { data_source_id: DSID, limit: LIST_LIMIT };
   if (state.typeFilter) args.memory_type = state.typeFilter;
   const res = await callTool("list_memories", args);
   if (res.isError) {
-    const bannerStillLive = errbar.classList.contains("on");
-    const preserve = callerWantsPreserve && bannerStillLive;
+    const sameBannerStillLive =
+      callerWantsPreserve &&
+      errbar.classList.contains("on") &&
+      errbar.dataset.seq === expectedBannerSeq;
+    const preserve = sameBannerStillLive;
     if (!preserve) {
       showError("Failed to list memories", res.message, res.data);
     } else {
