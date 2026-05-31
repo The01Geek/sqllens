@@ -636,21 +636,29 @@ async function loadBrowse(opts) {
   // refreshed underneath it, a follow-up list_memories failure here must
   // NOT overwrite that banner — its absence would silently hide the real
   // failure under a generic "Failed to list memories" message.
-  const preserveBanner = !!(opts && opts.preserveBanner);
+  //
+  // The check has TWO conditions: the caller asked for preservation AND
+  // a banner is still live at the time the response arrives. The user can
+  // dismiss the prior banner via × between call dispatch and response;
+  // suppressing the refresh failure when there is no banner left to
+  // preserve would silently lose the second error.
+  const callerWantsPreserve = !!(opts && opts.preserveBanner);
   browseBody.textContent = "";
   browseBody.appendChild(emptyDiv("Loading memories…"));
   const args = { data_source_id: DSID, limit: LIST_LIMIT };
   if (state.typeFilter) args.memory_type = state.typeFilter;
   const res = await callTool("list_memories", args);
   if (res.isError) {
-    if (!preserveBanner) {
+    const bannerStillLive = errbar.classList.contains("on");
+    const preserve = callerWantsPreserve && bannerStillLive;
+    if (!preserve) {
       showError("Failed to list memories", res.message, res.data);
     } else {
       console.warn("list_memories failed during silent refresh:", res.message);
     }
     browseBody.textContent = "";
     browseBody.appendChild(emptyDiv(
-      preserveBanner
+      preserve
         ? "Could not refresh memories after the previous error."
         : "Could not load memories — see the error banner above."
     ));
@@ -684,15 +692,14 @@ async function openRow(id) {
   const res = await callTool("get_memory", { data_source_id: DSID, memory_id: id });
   modalBody.textContent = "";
   if (res.isError) {
-    // Surface the failure both in the modal (where the user is looking) AND
-    // in the global banner (so closing the modal does not erase the only
-    // record that something went wrong — esp. for "memory not found" on a
-    // row another session deleted out from under this view).
-    const d = document.createElement("div");
-    d.className = "errbar on";
-    d.textContent = "Failed to load memory: " + res.message;
-    modalBody.appendChild(d);
+    // Single durable surface: the global error banner survives modal close
+    // and carries the dismiss × button. The modal-local note just points
+    // at it, so the two surfaces share the same lifecycle.
     showError("Failed to load memory " + id, res.message, res.data);
+    const note = document.createElement("div");
+    note.className = "meta";
+    note.textContent = "Could not load memory — see the error banner above.";
+    modalBody.appendChild(note);
     return;
   }
   const m = res.data || {};
@@ -1001,10 +1008,13 @@ async function offerDownload(filename, mimeType, text, warnings) {
     showOk("Export copied to clipboard (" + filename + ")." + warningsTail);
     return;
   }
-  showOverlay(filename, text);
-  // The textarea overlay is the visible surface; surface warnings separately
-  // there, since showOk would be hidden behind the modal.
-  if (warningsTail) showError("Export warnings", warnings.join("; "));
+  // The textarea overlay IS the visible success surface; surface warnings
+  // inside the modal as a grey meta line — using showError here would
+  // paint red for a non-lossy warning (e.g. "store is empty"), making the
+  // same server response look like a failure on one cascade branch and a
+  // success on three others. Lossy warnings already short-circuited to red
+  // before this function was called (export handler branches on isError).
+  showOverlay(filename, text, warningsTail.trim());
 }
 
 function copyViaExecCommand(text) {
@@ -1024,7 +1034,7 @@ function copyViaExecCommand(text) {
   return ok;
 }
 
-function showOverlay(filename, text) {
+function showOverlay(filename, text, warningNote) {
   modalBody.textContent = "";
   const hint = document.createElement("div");
   hint.className = "meta";
@@ -1036,6 +1046,13 @@ function showOverlay(filename, text) {
   ta.value = text;
   ta.style.minHeight = "240px";
   modalBody.append(hint, ta);
+  if (warningNote) {
+    const warn = document.createElement("div");
+    warn.className = "meta";
+    warn.style.marginTop = "6px";
+    warn.textContent = warningNote;
+    modalBody.appendChild(warn);
+  }
   rowModal.classList.add("on");
   ta.focus(); ta.select();
 }
