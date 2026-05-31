@@ -106,6 +106,19 @@ Each entry has a stable identifier you can pass to the get and delete tools. SQL
 
 **Warning:** Leave `allow_admin_tools` off unless you trust every client that can reach the server. These tools can read and permanently delete the saved memory, and adding entries can influence the SQL that SQL Lens generates for future questions.
 
+### Interactive Memory-Administration Panel
+
+When `allow_admin_tools` is enabled, SQL Lens also ships a packaged interactive panel that compatible assistants can render inline alongside the chat. The panel groups the seven tools into four sections:
+
+- **Browse**: lists saved memories newest first with a search filter and a row-detail view that exposes a per-row delete action.
+- **Import**: accepts a pasted or uploaded JSON bundle and adds it through the same add-memories path as the tool, with duplicates skipped automatically and any failures surfaced as an explicit error.
+- **Stats**: shows count cards for each kind of entry and a top-hits chart for the last 30 days.
+- **Danger zone**: exposes export (JSON or CSV), delete one memory by identifier, and clear all or one type. Destructive actions are gated by a type-`CLEAR`-to-confirm box for clear-all and a click-to-confirm dialog for every delete.
+
+The panel runs entirely through your assistant: it makes no direct network connection to the SQL Lens server, so it renders identically whether your assistant reaches SQL Lens directly or through a private proxy. The panel is only advertised when `allow_admin_tools` is enabled, the destructive actions still require authentication (or `auth.insecure = true`) just like the underlying tools, and partial imports or lossy exports are surfaced as an explicit error rather than as a silent success.
+
+**Note:** The interactive panel is supported only by assistants that render MCP App widgets (currently Claude Desktop and claude.ai). Every other assistant continues to use the seven memory-administration tools exactly as before, with no configuration change required on your side.
+
 ## See Also
 
 - **[Configuration reference](configuration.md#section-memory)** for every memory setting.
