@@ -167,7 +167,7 @@ The `MemoryStore` is constructed once at registration time and closed over by th
 
 Off by default because the read-only tools enumerate the store and the destructive subset mutates it. See [mcp-server/tools.md](../mcp-server/tools.md#memory-administration-tools--cfgmemoryallow_admin_tools) for the full per-tool wire contracts, auth gating, and error/`isError` handling.
 
-The same `if cfg.memory.allow_admin_tools:` block additionally registers a single `ui://` widget resource — `ui://sqllens/memory-admin.html` — that exposes the seven tools as a self-driving MCP App panel (issue #188). The widget calls the admin tools directly via `App.callServerTool(...)` (no model in the loop) and renders the full Browse / Import / Stats / Danger-zone surface from the same JSON contract those tools already speak. See [mcp-server/tools.md](../mcp-server/tools.md#the-self-driving-memory-admin-widget--uisqllensmemory-adminhtml) for the widget contract.
+The same `if cfg.memory.allow_admin_tools:` block additionally registers a single `ui://` widget resource — `ui://sqllens/memory-admin.html` — that exposes the seven tools as a self-driving MCP App panel (issue #188). The widget calls the admin tools directly via `app.callServerTool(...)` (no model in the loop) and renders the full Browse / Import / Stats / Danger-zone surface from the same JSON contract those tools already speak. See [mcp-server/tools.md](../mcp-server/tools.md#the-self-driving-memory-admin-widget--uisqllensmemory-adminhtml) for the widget contract.
 
 ### `data_source_id` is advisory (single-tenant, Option A)
 

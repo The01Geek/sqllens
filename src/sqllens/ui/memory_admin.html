@@ -9,7 +9,7 @@
 
   Unlike query_results.html — which is *pushed* a CallToolResult by the host
   via ontoolresult — this widget *pulls* its own data on mount via
-  App.callServerTool(...) and drives every user action by calling an admin
+  app.callServerTool(...) and drives every user action by calling an admin
   tool. No model is in the loop.
 
   Topology-agnostic: this widget never opens its own network connection (no
@@ -280,8 +280,9 @@
   <div class="section-block">
     <h3>Export the store</h3>
     <p class="meta">
-      JSON export round-trips back into Import. CSV exports SQL pairs only and is reported as an
-      error if schema docs would be silently dropped.
+      JSON export round-trips back into Import. CSV exports SQL pairs only; if schema docs
+      would be dropped the server marks the response <code>lossy:true</code> and the widget
+      paints it red.
     </p>
     <div class="bar">
       <button data-export="json">Export JSON</button>
@@ -433,10 +434,27 @@ const errbar = document.getElementById("errbar");
 const okbar = document.getElementById("okbar");
 
 function showError(title, message, details) {
-  errbar.innerHTML = "";
+  errbar.textContent = "";
   const head = document.createElement("div");
   head.className = "head";
-  head.textContent = title;
+  // Title + dismiss-× on the same row. The × is the only way to clear the
+  // banner on a user action (tab switches preserve error banners — the
+  // banner is the only signal that a partial/lossy/transport failure
+  // happened, and it must not vanish on an accidental misclick).
+  head.style.display = "flex";
+  head.style.justifyContent = "space-between";
+  head.style.gap = "8px";
+  const titleSpan = document.createElement("span");
+  titleSpan.textContent = title;
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.textContent = "×";
+  dismiss.title = "Dismiss";
+  dismiss.setAttribute("aria-label", "Dismiss error");
+  dismiss.style.cssText =
+    "background:transparent;border:0;color:inherit;font-size:18px;line-height:1;cursor:pointer;padding:0 4px;";
+  dismiss.addEventListener("click", () => errbar.classList.remove("on"));
+  head.append(titleSpan, dismiss);
   errbar.appendChild(head);
   const body = document.createElement("div");
   body.textContent = message;
@@ -473,7 +491,10 @@ tabs.addEventListener("click", (ev) => {
   for (const p of document.querySelectorAll(".pane")) {
     p.classList.toggle("active", p.id === "pane-" + pane);
   }
-  clearBanners();
+  // Only clear the success ribbon on tab switch — a live error banner must
+  // survive an accidental tab click. The user dismisses it via the × button
+  // on the banner itself (see showError).
+  okbar.classList.remove("on");
   if (pane === "stats" && state.stats == null) loadStats();
 });
 
@@ -499,7 +520,12 @@ function filteredMemories() {
   if (!state.filter) return state.memories;
   const needle = state.filter.toLowerCase();
   return state.memories.filter((m) => {
-    const fields = [m.id, m.type, m.question, m.sql, m.content, m.created_at]
+    // Field names match the wire shape produced by _record_to_wire in
+    // src/sqllens/memory/admin.py: memory_id, memory_type, timestamp,
+    // last_hit_date. NOT id/type/created_at/last_hit_at — those exist only
+    // in the dev shim's mock and would silently render every row empty
+    // against a real server.
+    const fields = [m.memory_id, m.memory_type, m.question, m.sql, m.content, m.timestamp]
       .map((v) => (v == null ? "" : String(v).toLowerCase()));
     return fields.some((s) => s.includes(needle));
   });
@@ -546,11 +572,11 @@ function renderBrowse() {
     const tr = document.createElement("tr");
     tr.className = "click";
     const cells = [
-      shortId(m.id),
-      m.type || "",
+      shortId(m.memory_id),
+      m.memory_type || "",
       previewOf(m),
       m.hit_count == null ? "" : String(m.hit_count),
-      m.created_at || "",
+      m.timestamp || "",
     ];
     cells.forEach((cell, i) => {
       const td = document.createElement("td");
@@ -559,7 +585,7 @@ function renderBrowse() {
       td.textContent = cell;
       tr.appendChild(td);
     });
-    tr.addEventListener("click", () => openRow(m.id));
+    tr.addEventListener("click", () => openRow(m.memory_id));
     tbody.appendChild(tr);
   }
   tbl.appendChild(tbody);
@@ -590,10 +616,12 @@ function shortId(id) {
 }
 
 function previewOf(m) {
-  if (m.type === "tool_usage") {
-    const q = m.question || "";
-    return q || (m.sql ? truncate(m.sql, 80) : "");
-  }
+  // Question/sql for tool_usage rows; content for text rows. Use field
+  // presence rather than memory_type because get_memory_stats's
+  // top_hit_memories[] omits memory_type — every row there carries a
+  // question by construction (the stats helper only includes tool_usage).
+  if (m.question != null && m.question !== "") return truncate(m.question, 120);
+  if (m.sql != null && m.sql !== "") return truncate(m.sql, 80);
   return truncate(m.content || "", 120);
 }
 
@@ -602,16 +630,30 @@ function truncate(s, n) {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
-async function loadBrowse() {
+async function loadBrowse(opts) {
+  // preserveBanner: when the caller has already painted a more important
+  // error banner (e.g. partial-import failure) and only wants the table
+  // refreshed underneath it, a follow-up list_memories failure here must
+  // NOT overwrite that banner — its absence would silently hide the real
+  // failure under a generic "Failed to list memories" message.
+  const preserveBanner = !!(opts && opts.preserveBanner);
   browseBody.textContent = "";
   browseBody.appendChild(emptyDiv("Loading memories…"));
   const args = { data_source_id: DSID, limit: LIST_LIMIT };
   if (state.typeFilter) args.memory_type = state.typeFilter;
   const res = await callTool("list_memories", args);
   if (res.isError) {
-    showError("Failed to list memories", res.message, res.data);
+    if (!preserveBanner) {
+      showError("Failed to list memories", res.message, res.data);
+    } else {
+      console.warn("list_memories failed during silent refresh:", res.message);
+    }
     browseBody.textContent = "";
-    browseBody.appendChild(emptyDiv("Could not load memories — see the error banner above."));
+    browseBody.appendChild(emptyDiv(
+      preserveBanner
+        ? "Could not refresh memories after the previous error."
+        : "Could not load memories — see the error banner above."
+    ));
     return;
   }
   const payload = res.data || {};
@@ -642,10 +684,15 @@ async function openRow(id) {
   const res = await callTool("get_memory", { data_source_id: DSID, memory_id: id });
   modalBody.textContent = "";
   if (res.isError) {
+    // Surface the failure both in the modal (where the user is looking) AND
+    // in the global banner (so closing the modal does not erase the only
+    // record that something went wrong — esp. for "memory not found" on a
+    // row another session deleted out from under this view).
     const d = document.createElement("div");
     d.className = "errbar on";
     d.textContent = "Failed to load memory: " + res.message;
     modalBody.appendChild(d);
+    showError("Failed to load memory " + id, res.message, res.data);
     return;
   }
   const m = res.data || {};
@@ -657,13 +704,17 @@ async function openRow(id) {
   del.className = "danger";
   del.textContent = "Delete this memory";
   del.addEventListener("click", async () => {
-    if (!confirm("Permanently delete memory " + (m.id || id) + "?")) return;
-    const r = await callTool("delete_memory", { data_source_id: DSID, memory_id: m.id || id });
+    const mid = m.memory_id || id;
+    if (!confirm("Permanently delete memory " + mid + "?")) return;
+    const r = await callTool("delete_memory", { data_source_id: DSID, memory_id: mid });
     if (r.isError) {
       showError("Delete failed", r.message, r.data);
     } else {
-      showOk("Deleted memory " + (m.id || id));
+      showOk("Deleted memory " + mid);
       rowModal.classList.remove("on");
+      // Invalidate stats so the next visit to Stats refetches the new counts
+      // and top-hit list — single-row delete changes both.
+      state.stats = null;
       loadBrowse();
     }
   });
@@ -672,15 +723,16 @@ async function openRow(id) {
 }
 
 function renderRow(host, m) {
+  // Field names match _record_to_wire (src/sqllens/memory/admin.py).
   const fields = [
-    ["id", m.id],
-    ["type", m.type],
-    ["created_at", m.created_at],
+    ["memory_id", m.memory_id],
+    ["memory_type", m.memory_type],
+    ["timestamp", m.timestamp],
     ["question", m.question],
     ["sql", m.sql],
     ["content", m.content],
     ["hit_count", m.hit_count],
-    ["last_hit_at", m.last_hit_at],
+    ["last_hit_date", m.last_hit_date],
   ];
   for (const [k, v] of fields) {
     if (v == null || v === "") continue;
@@ -784,7 +836,12 @@ document.getElementById("doImport").addEventListener("click", async () => {
       Array.isArray(d.errors) && d.errors.length ? d.errors : null);
     importMeta.textContent = "import failed";
     renderImportSummary(importResult, d, true);
-    loadBrowse();
+    // Refresh Browse silently so a follow-up list_memories failure cannot
+    // overwrite the import-error banner the user is reading. Stats may also
+    // have changed if any rows landed (partial); invalidate so a Stats
+    // visit refetches.
+    state.stats = null;
+    loadBrowse({ preserveBanner: true });
     return;
   }
   const d = res.data || {};
@@ -793,6 +850,8 @@ document.getElementById("doImport").addEventListener("click", async () => {
     ", duplicate " + (d.duplicate_count ?? 0) +
     ", skipped " + (d.skipped_count ?? 0);
   showOk("Imported " + (d.saved_count ?? 0) + " memorie(s).");
+  // Counts and top-hit list change on import; invalidate stats too.
+  state.stats = null;
   renderImportSummary(importResult, d, false);
   loadBrowse();
 });
@@ -896,7 +955,7 @@ function drawStatsChart(rows) {
 
 function disposeChart() {
   if (state.chart) {
-    try { state.chart.dispose(); } catch (_e) { /* never throw from dispose */ }
+    try { state.chart.dispose(); } catch (_e) { /* swallow — dispose must not block re-init */ }
     state.chart = null;
   }
 }
@@ -908,7 +967,11 @@ function disposeChart() {
 // doesn't grant clipboard-write permissions-policy, so the obvious paths
 // silently no-op there. Cascade: ui/download-file → clipboard → execCommand
 // → inline textarea overlay (always works).
-async function offerDownload(filename, mimeType, text) {
+async function offerDownload(filename, mimeType, text, warnings) {
+  const warningsTail =
+    Array.isArray(warnings) && warnings.length > 0
+      ? " Warnings: " + warnings.join("; ")
+      : "";
   const caps = (app.getHostCapabilities && app.getHostCapabilities()) || {};
   if (caps.downloadFile) {
     try {
@@ -918,7 +981,7 @@ async function offerDownload(filename, mimeType, text) {
             resource: { uri: filename, mimeType: mimeType, text: text } },
         ],
       });
-      showOk("Exported via host download (" + filename + ").");
+      showOk("Exported via host download (" + filename + ")." + warningsTail);
       return;
     } catch (err) {
       console.warn("ui/download-file failed:", err);
@@ -926,16 +989,22 @@ async function offerDownload(filename, mimeType, text) {
   }
   try {
     await navigator.clipboard.writeText(text);
-    showOk("Export copied to clipboard (" + filename + ", " + text.length + " chars).");
+    showOk(
+      "Export copied to clipboard (" + filename + ", " + text.length + " chars)." +
+      warningsTail
+    );
     return;
   } catch (err) {
     console.warn("clipboard.writeText failed:", err);
   }
   if (copyViaExecCommand(text)) {
-    showOk("Export copied to clipboard (" + filename + ").");
+    showOk("Export copied to clipboard (" + filename + ")." + warningsTail);
     return;
   }
   showOverlay(filename, text);
+  // The textarea overlay is the visible surface; surface warnings separately
+  // there, since showOk would be hidden behind the modal.
+  if (warningsTail) showError("Export warnings", warnings.join("; "));
 }
 
 function copyViaExecCommand(text) {
@@ -989,18 +1058,17 @@ for (const btn of document.querySelectorAll('button[data-export]')) {
     const resolvedFormat = d.format || format;
     const filename = "memory-export." + resolvedFormat;
     const mime = resolvedFormat === "csv" ? "text/csv" : "application/json";
-    const text = format === "json"
-      ? JSON.stringify(d.data, null, 2)
-      : String(d.data || "");
+    // Server already returns `data` as a serialized string for BOTH formats:
+    // admin.export_memories does json.dumps(...) for JSON and csv.writer's
+    // buf.getvalue() for CSV. Re-stringifying the JSON string would emit a
+    // double-encoded blob ("\"{\\\"sql_pairs\\\":...}\""). Just use it as-is.
+    const text = String(d.data == null ? "" : d.data);
     exportMeta.textContent =
       "exported " + text.length + " chars" +
       (warnings.length ? " (warnings: " + warnings.length + ")" : "");
-    await offerDownload(filename, mime, text);
-    if (warnings.length > 0) {
-      // Non-lossy warnings (e.g. "store is empty") — surface them but not as
-      // a red error; the export itself succeeded.
-      showOk("Export warnings: " + warnings.join("; "));
-    }
+    // Pass the warnings into offerDownload so the success banner can include
+    // them inline rather than being clobbered by a follow-up showOk(...).
+    await offerDownload(filename, mime, text, warnings);
   });
 }
 
@@ -1019,6 +1087,8 @@ document.getElementById("doDelete").addEventListener("click", async () => {
   }
   showOk("Deleted memory " + id + ".");
   document.getElementById("delId").value = "";
+  // Counts and top-hit list change with any single-row delete; force a refetch.
+  state.stats = null;
   loadBrowse();
 });
 

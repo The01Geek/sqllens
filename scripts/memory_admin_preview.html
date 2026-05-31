@@ -34,24 +34,27 @@ let forcePartial = false;
 const frame = document.getElementById("f");
 const hint = document.getElementById("hint");
 
-// Mock memory store
+// Mock memory store. Field names MUST match the wire shape produced by
+// _record_to_wire in src/sqllens/memory/admin.py: memory_id, memory_type,
+// timestamp, last_hit_date. A drift here would silently let the widget render
+// fine against the shim while failing against a live server.
 const STORE = {
   memories: [
-    { id: "11111111-aaaa-bbbb-cccc-000000000001", type: "tool_usage",
+    { memory_id: "11111111-aaaa-bbbb-cccc-000000000001", memory_type: "tool_usage",
       question: "How many orders last week?",
       sql: "SELECT COUNT(*) FROM orders WHERE created_at >= now() - interval '7 days';",
-      created_at: "2026-05-01T08:32:00Z", hit_count: 12, last_hit_at: "2026-05-29T10:00:00Z" },
-    { id: "22222222-aaaa-bbbb-cccc-000000000002", type: "tool_usage",
+      timestamp: "2026-05-01T08:32:00Z", hit_count: 12, last_hit_date: "2026-05-29T10:00:00Z" },
+    { memory_id: "22222222-aaaa-bbbb-cccc-000000000002", memory_type: "tool_usage",
       question: "Top 10 customers by revenue",
       sql: "SELECT customer_id, SUM(amount) AS revenue FROM orders GROUP BY 1 ORDER BY 2 DESC LIMIT 10;",
-      created_at: "2026-05-02T09:00:00Z", hit_count: 8, last_hit_at: "2026-05-28T14:00:00Z" },
-    { id: "33333333-aaaa-bbbb-cccc-000000000003", type: "text",
+      timestamp: "2026-05-02T09:00:00Z", hit_count: 8, last_hit_date: "2026-05-28T14:00:00Z" },
+    { memory_id: "33333333-aaaa-bbbb-cccc-000000000003", memory_type: "text",
       content: "orders.created_at is UTC. status is one of new/paid/shipped/cancelled.",
-      created_at: "2026-05-03T10:00:00Z", hit_count: 4 },
-    { id: "44444444-aaaa-bbbb-cccc-000000000004", type: "tool_usage",
+      timestamp: "2026-05-03T10:00:00Z", hit_count: 4 },
+    { memory_id: "44444444-aaaa-bbbb-cccc-000000000004", memory_type: "tool_usage",
       question: "Daily revenue over the last 30 days",
       sql: "SELECT date_trunc('day', created_at) d, SUM(amount) r FROM orders WHERE created_at > now() - interval '30 days' GROUP BY 1 ORDER BY 1;",
-      created_at: "2026-05-04T11:00:00Z", hit_count: 22, last_hit_at: "2026-05-30T08:00:00Z" },
+      timestamp: "2026-05-04T11:00:00Z", hit_count: 22, last_hit_date: "2026-05-30T08:00:00Z" },
   ],
 };
 
@@ -68,26 +71,29 @@ function plainError(msg) {
 function handleCallTool(name, args) {
   if (name === "list_memories") {
     let rows = STORE.memories.slice();
-    if (args.memory_type) rows = rows.filter((m) => m.type === args.memory_type);
-    rows.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    if (args.memory_type) rows = rows.filter((m) => m.memory_type === args.memory_type);
+    rows.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
     if (args.limit) rows = rows.slice(0, args.limit);
     return jsonResult({ memories: rows, total: STORE.memories.length });
   }
   if (name === "get_memory") {
-    const m = STORE.memories.find((x) => x.id === args.memory_id);
+    const m = STORE.memories.find((x) => x.memory_id === args.memory_id);
     if (!m) return jsonError({ error: "memory not found", memory_id: args.memory_id });
     return jsonResult({ ...m, embedding: new Array(384).fill(0).map((_, i) => Math.sin(i / 10)) });
   }
   if (name === "delete_memory") {
-    const i = STORE.memories.findIndex((x) => x.id === args.memory_id);
+    const i = STORE.memories.findIndex((x) => x.memory_id === args.memory_id);
     if (i < 0) return jsonError({ deleted: false, error: "memory not found", memory_id: args.memory_id });
     STORE.memories.splice(i, 1);
     return jsonResult({ deleted: true });
   }
   if (name === "clear_memories") {
     const before = STORE.memories.length;
-    if (args.memory_type) STORE.memories = STORE.memories.filter((x) => x.type !== args.memory_type);
-    else STORE.memories = [];
+    if (args.memory_type) {
+      STORE.memories = STORE.memories.filter((x) => x.memory_type !== args.memory_type);
+    } else {
+      STORE.memories = [];
+    }
     return jsonResult({ deleted_count: before - STORE.memories.length });
   }
   if (name === "add_memories") {
@@ -110,17 +116,17 @@ function handleCallTool(name, args) {
     for (const p of pairs) {
       if (STORE.memories.some((m) => m.question === p.question && m.sql === p.sql)) continue;
       STORE.memories.push({
-        id: "new-" + Math.random().toString(36).slice(2, 10),
-        type: "tool_usage", question: p.question, sql: p.sql,
-        created_at: new Date().toISOString(), hit_count: 0,
+        memory_id: "new-" + Math.random().toString(36).slice(2, 10),
+        memory_type: "tool_usage", question: p.question, sql: p.sql,
+        timestamp: new Date().toISOString(), hit_count: 0,
       });
       saved += 1;
     }
     for (const d of docs) {
       STORE.memories.push({
-        id: "new-" + Math.random().toString(36).slice(2, 10),
-        type: "text", content: d.content,
-        created_at: new Date().toISOString(), hit_count: 0,
+        memory_id: "new-" + Math.random().toString(36).slice(2, 10),
+        memory_type: "text", content: d.content,
+        timestamp: new Date().toISOString(), hit_count: 0,
       });
       saved += 1;
     }
@@ -131,37 +137,54 @@ function handleCallTool(name, args) {
   }
   if (name === "export_memories") {
     const fmt = args.format || "json";
+    // Server returns `data` as a SERIALIZED STRING for both formats — the
+    // shim mirrors that (the widget feeds it directly into the download
+    // cascade and would mangle anything else).
     if (forceLossy) {
       forceLossy = false;
       hint.textContent = "";
+      const lossyData = fmt === "json"
+        ? JSON.stringify({ sql_pairs: [], schema_docs: [] }, null, 2)
+        : "question,sql\n";
       return jsonError({
         format: fmt,
-        data: fmt === "json" ? { sql_pairs: [], schema_docs: [] } : "question,sql\n",
+        data: lossyData,
         warnings: ["schema docs dropped: CSV cannot represent free-form text"],
         lossy: true,
       });
     }
     if (fmt === "csv") {
       const lines = ["question,sql"];
-      for (const m of STORE.memories) if (m.type === "tool_usage")
+      for (const m of STORE.memories) if (m.memory_type === "tool_usage")
         lines.push('"' + (m.question || "").replace(/"/g, '""') + '","' + (m.sql || "").replace(/"/g, '""') + '"');
       return jsonResult({ format: "csv", data: lines.join("\n"), warnings: [], lossy: false });
     }
+    const payload = {
+      sql_pairs: STORE.memories.filter((m) => m.memory_type === "tool_usage").map((m) => ({ question: m.question, sql: m.sql })),
+      schema_docs: STORE.memories.filter((m) => m.memory_type === "text").map((m) => ({ content: m.content })),
+    };
     return jsonResult({
       format: "json",
-      data: {
-        sql_pairs: STORE.memories.filter((m) => m.type === "tool_usage").map((m) => ({ question: m.question, sql: m.sql })),
-        schema_docs: STORE.memories.filter((m) => m.type === "text").map((m) => ({ content: m.content })),
-      },
+      data: JSON.stringify(payload, null, 2),
       warnings: [], lossy: false,
     });
   }
   if (name === "get_memory_stats") {
+    // Mirror admin.get_memory_stats: top_hit_memories rows carry only
+    // {memory_id, question, hit_count, last_hit_date} — no memory_type.
+    const topHits = STORE.memories
+      .filter((m) => m.memory_type === "tool_usage" && (m.hit_count || 0) > 0)
+      .sort((a, b) => (b.hit_count || 0) - (a.hit_count || 0))
+      .slice(0, 10)
+      .map((m) => ({
+        memory_id: m.memory_id, question: m.question,
+        hit_count: m.hit_count, last_hit_date: m.last_hit_date,
+      }));
     return jsonResult({
-      tool_usage_count: STORE.memories.filter((m) => m.type === "tool_usage").length,
-      text_count: STORE.memories.filter((m) => m.type === "text").length,
+      tool_usage_count: STORE.memories.filter((m) => m.memory_type === "tool_usage").length,
+      text_count: STORE.memories.filter((m) => m.memory_type === "text").length,
       total_hits_last_30d: STORE.memories.reduce((s, m) => s + (m.hit_count || 0), 0),
-      top_hit_memories: STORE.memories.slice().sort((a, b) => (b.hit_count || 0) - (a.hit_count || 0)).slice(0, 10),
+      top_hit_memories: topHits,
     });
   }
   return plainError("Unknown tool: " + name);

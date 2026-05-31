@@ -342,6 +342,33 @@ def test_memory_admin_widget_paints_red_on_iserror() -> None:
     assert "confirm(" in html  # window.confirm gate for destructive actions
 
 
+def test_memory_admin_widget_reads_real_wire_field_names() -> None:
+    # The server-side wire shape produced by `_record_to_wire` in
+    # `src/sqllens/memory/admin.py` is `memory_id` / `memory_type` /
+    # `timestamp` / `last_hit_date`. Pre-fix the widget read `id` / `type` /
+    # `created_at` / `last_hit_at`, which exist only in the dev-shim mock —
+    # against a real server, Browse table rows rendered with empty
+    # id/type/created columns, row clicks called `get_memory` with
+    # `memory_id: undefined`, and stats chart bars had blank y-axis labels.
+    # Pin the canonical field names so this drift cannot return; absence
+    # of the legacy names is asserted via a separate guard below.
+    html = ui.load_widget_html("memory_admin.html")
+    for canonical in ("m.memory_id", "m.memory_type", "m.timestamp", "m.last_hit_date"):
+        assert canonical in html, f"widget no longer reads wire field {canonical}"
+    # The legacy mock-only names must NOT appear as widget reads. Use a
+    # word-boundary regex so `m.id` doesn't match `m.identifier` or
+    # similar (none exist today, but the guard outlives them).
+    import re as _re
+    raw = ui._read_text("memory_admin.html") if hasattr(ui, "_read_text") else html
+    for legacy in ("id", "type", "created_at", "last_hit_at"):
+        # Match `m.id` / `m.type` / etc as a complete dotted-access read.
+        pattern = _re.compile(r"\bm\." + legacy + r"\b")
+        assert not pattern.search(raw), (
+            f"widget still reads legacy mock-only field m.{legacy}; "
+            "should be the wire shape from _record_to_wire"
+        )
+
+
 def test_memory_admin_widget_clear_confirm_is_uppercase_token() -> None:
     # Type-to-confirm: the "Clear" action must require the user to type
     # "CLEAR" exactly. A regression that swaps it for a click-only confirm
