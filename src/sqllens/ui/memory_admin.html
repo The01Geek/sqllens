@@ -403,6 +403,30 @@ async function callTool(name, args) {
   return { isError: false, data, message: null };
 }
 
+// ───────────────────────────── DOM helpers ──────────────────────────────────
+
+// Hoisted: used by both the Browse pane and renderImportSummary. Builds the
+// same .card > .label + .value structure the CSS expects.
+function makeCard(label, value) {
+  const c = document.createElement("div");
+  c.className = "card";
+  const l = document.createElement("div");
+  l.className = "label";
+  l.textContent = label;
+  const v = document.createElement("div");
+  v.className = "value";
+  v.textContent = String(value);
+  c.append(l, v);
+  return c;
+}
+
+function emptyDiv(text) {
+  const d = document.createElement("div");
+  d.className = "empty";
+  d.textContent = text;
+  return d;
+}
+
 // ───────────────────────────── banners ──────────────────────────────────────
 
 const errbar = document.getElementById("errbar");
@@ -497,17 +521,11 @@ function renderBrowse() {
 
   browseBody.textContent = "";
   if (state.memories.length === 0) {
-    const d = document.createElement("div");
-    d.className = "empty";
-    d.textContent = "No memories in the store. Use Import to seed it.";
-    browseBody.appendChild(d);
+    browseBody.appendChild(emptyDiv("No memories in the store. Use Import to seed it."));
     return;
   }
   if (filtered.length === 0) {
-    const d = document.createElement("div");
-    d.className = "empty";
-    d.textContent = "No memories match the current filter.";
-    browseBody.appendChild(d);
+    browseBody.appendChild(emptyDiv("No memories match the current filter."));
     return;
   }
 
@@ -586,20 +604,14 @@ function truncate(s, n) {
 
 async function loadBrowse() {
   browseBody.textContent = "";
-  const loading = document.createElement("div");
-  loading.className = "empty";
-  loading.textContent = "Loading memories…";
-  browseBody.appendChild(loading);
+  browseBody.appendChild(emptyDiv("Loading memories…"));
   const args = { data_source_id: DSID, limit: LIST_LIMIT };
   if (state.typeFilter) args.memory_type = state.typeFilter;
   const res = await callTool("list_memories", args);
   if (res.isError) {
     showError("Failed to list memories", res.message, res.data);
     browseBody.textContent = "";
-    const d = document.createElement("div");
-    d.className = "empty";
-    d.textContent = "Could not load memories — see the error banner above.";
-    browseBody.appendChild(d);
+    browseBody.appendChild(emptyDiv("Could not load memories — see the error banner above."));
     return;
   }
   const payload = res.data || {};
@@ -801,18 +813,7 @@ function renderImportSummary(host, d, hadError) {
     ["Skipped", d.skipped_count ?? 0],
     ["Errors", Array.isArray(d.errors) ? d.errors.length : 0],
   ];
-  for (const [label, value] of counters) {
-    const c = document.createElement("div");
-    c.className = "card";
-    const l = document.createElement("div");
-    l.className = "label";
-    l.textContent = label;
-    const v = document.createElement("div");
-    v.className = "value";
-    v.textContent = String(value);
-    c.append(l, v);
-    cards.appendChild(c);
-  }
+  for (const [label, value] of counters) cards.appendChild(makeCard(label, value));
   block.appendChild(cards);
   host.appendChild(block);
 }
@@ -845,19 +846,6 @@ async function loadStats() {
   ];
   for (const [label, value] of counts) statsCards.appendChild(makeCard(label, value));
   drawStatsChart(s.top_hit_memories || []);
-}
-
-function makeCard(label, value) {
-  const c = document.createElement("div");
-  c.className = "card";
-  const l = document.createElement("div");
-  l.className = "label";
-  l.textContent = label;
-  const v = document.createElement("div");
-  v.className = "value";
-  v.textContent = String(value);
-  c.append(l, v);
-  return c;
 }
 
 function drawStatsChart(rows) {
@@ -983,28 +971,30 @@ function showOverlay(filename, text) {
   ta.focus(); ta.select();
 }
 
+const exportMeta = document.getElementById("exportMeta");
 for (const btn of document.querySelectorAll('button[data-export]')) {
   btn.addEventListener("click", async () => {
     clearBanners();
     const format = btn.dataset.export;
-    document.getElementById("exportMeta").textContent = "exporting " + format + "…";
+    exportMeta.textContent = "exporting " + format + "…";
     const res = await callTool("export_memories", { data_source_id: DSID, format });
     if (res.isError) {
       const d = res.data || {};
-      showError("Export failed (" + format + ")", res.message,
-        d.warnings || d);
-      document.getElementById("exportMeta").textContent = "export failed";
+      showError("Export failed (" + format + ")", res.message, d.warnings || d);
+      exportMeta.textContent = "export failed";
       return;
     }
     const d = res.data || {};
     const warnings = Array.isArray(d.warnings) ? d.warnings : [];
-    const filename = "memory-export." + (d.format || format);
-    const mime = (d.format || format) === "csv" ? "text/csv" : "application/json";
+    const resolvedFormat = d.format || format;
+    const filename = "memory-export." + resolvedFormat;
+    const mime = resolvedFormat === "csv" ? "text/csv" : "application/json";
     const text = format === "json"
       ? JSON.stringify(d.data, null, 2)
       : String(d.data || "");
-    document.getElementById("exportMeta").textContent =
-      "exported " + text.length + " chars" + (warnings.length ? " (warnings: " + warnings.length + ")" : "");
+    exportMeta.textContent =
+      "exported " + text.length + " chars" +
+      (warnings.length ? " (warnings: " + warnings.length + ")" : "");
     await offerDownload(filename, mime, text);
     if (warnings.length > 0) {
       // Non-lossy warnings (e.g. "store is empty") — surface them but not as

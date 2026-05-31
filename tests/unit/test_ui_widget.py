@@ -297,8 +297,11 @@ def test_memory_admin_widget_makes_no_direct_network_calls() -> None:
     assert leaks == [], f"widget has direct network surface: {leaks}"
     # No remote <script src> in the raw widget either. The two ./vendor refs
     # are spliced out by the inliner; both should be relative paths only.
-    assert "src=\"http" not in raw and "src='http" not in raw
-    assert "import.*http" not in raw  # no remote ESM import
+    assert 'src="http' not in raw and "src='http" not in raw
+    # No remote ESM import: every `import ... from "..."` in the widget must
+    # resolve to a relative path (the inliner replaces ./vendor/...).
+    remote_imports = re.findall(r'import[^\n;]+from\s+["\']https?://', raw)
+    assert remote_imports == [], f"widget has remote ESM imports: {remote_imports}"
 
 
 def test_memory_admin_widget_self_drives_on_mount() -> None:
