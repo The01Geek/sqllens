@@ -20,6 +20,7 @@ from mcp.types import CallToolResult
 
 import sqllens.server as server_module
 from sqllens.server import build_server
+from sqllens.tools.query_database import AgentRunError
 
 from ._config_builders import build_test_config
 
@@ -120,7 +121,7 @@ async def test_query_database_returns_calltoolresult_with_meta_when_table(
                "row_count": 1, "truncated": 0}
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "| a |\n|---|\n| 1 |", payload, None, None, None
+        return "| a |\n|---|\n| 1 |", payload, None, None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -146,7 +147,7 @@ async def test_query_database_meta_carries_query_info_when_present(
                   "row_count": 1}
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "md\n\n```sql\nSELECT a FROM t\n```", payload, query_info, None, None
+        return "md\n\n```sql\nSELECT a FROM t\n```", payload, query_info, None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -169,7 +170,7 @@ async def test_query_database_meta_query_info_without_table(
     query_info = {"sql": "SELECT 1 WHERE 1=0", "query_type": "SELECT"}
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "no rows\n\n```sql\nSELECT 1 WHERE 1=0\n```", None, query_info, None, None
+        return "no rows\n\n```sql\nSELECT 1 WHERE 1=0\n```", None, query_info, None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -191,7 +192,7 @@ async def test_query_database_returns_conversation_meta_when_no_table(
     mcp = build_server(cfg)
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "just text", None, None, None, None
+        return "just text", None, None, None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -213,7 +214,7 @@ async def test_query_database_mints_and_threads_conversation_id(
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
         seen["conversation_id"] = conversation_id
-        return "answer", None, None, None, None
+        return "answer", None, None, None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -256,7 +257,7 @@ async def test_query_database_meta_carries_memory_info_when_present(
     }
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "answer", None, None, None, memory_info
+        return "answer", None, None, None, memory_info, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -275,7 +276,7 @@ async def test_query_database_returns_chart_meta_when_chart(
     mcp = build_server(cfg)
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "rendered chart", None, None, _CHART_PAYLOAD, None
+        return "rendered chart", None, None, _CHART_PAYLOAD, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -305,7 +306,7 @@ async def test_query_database_attaches_both_chart_and_table(
                   "row_count": 1}
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "answer", table, query_info, _CHART_PAYLOAD, None
+        return "answer", table, query_info, _CHART_PAYLOAD, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -317,3 +318,103 @@ async def test_query_database_attaches_both_chart_and_table(
         "sqllens/query": query_info,
         "sqllens/conversation": {"conversation_id": "c-1"},
     }
+
+
+# ───────────────────────── agent trace (unified tool) ───────────────────────
+
+
+_AGENT_TRACE = {
+    "iterations": 2,
+    "max_iterations": 20,
+    "total_duration_ms": 1234,
+    "steps": [
+        {"index": 0, "tool": "search_saved_correct_tool_uses",
+         "arguments": {"question": "q"}, "status": "ok", "duration_ms": 12},
+        {"index": 1, "tool": "run_sql",
+         "arguments": {"sql": "SELECT 1"}, "status": "ok", "duration_ms": 30},
+    ],
+    "terminal_error": None,
+}
+
+
+async def test_query_database_meta_carries_agent_trace_when_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The server attaches whatever trace the impl returns (the 6th element) under
+    # sqllens/agent_trace on the success result. The show_details gate itself
+    # lives in the impl (covered by test_with_widgets_no_trace_when_show_details_off);
+    # here the trace is injected directly to pin the server-side attachment.
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+
+    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+        return "answer", None, None, None, None, _AGENT_TRACE
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
+
+    result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
+    assert isinstance(result, CallToolResult)
+    assert result.isError in (False, None)
+    assert result.meta == {
+        "sqllens/agent_trace": _AGENT_TRACE,
+        "sqllens/conversation": {"conversation_id": "c-1"},
+    }
+
+
+async def test_query_database_attaches_trace_on_error_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # show_details on + agent-reported failure: the impl raises AgentRunError
+    # carrying the trace; the server returns an isError result with the trace
+    # (and conversation id) in _meta, and the client text mirrors FastMCP's
+    # own tool-error format so the message is unchanged from the details-off path.
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+
+    error_trace = {
+        "iterations": 1,
+        "max_iterations": 20,
+        "total_duration_ms": 240_000,
+        "steps": [
+            {"index": 0, "tool": "run_sql", "arguments": {"sql": "SELECT 1"},
+             "status": "error", "duration_ms": 240_000,
+             "error": "timeout after 240s"},
+        ],
+        "terminal_error": "tool 'run_sql' failed: timeout after 240s",
+    }
+
+    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+        raise AgentRunError(
+            "SQL execution error: the query failed", agent_trace=error_trace
+        )
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
+
+    result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    assert result.meta == {
+        "sqllens/agent_trace": error_trace,
+        "sqllens/conversation": {"conversation_id": "c-1"},
+    }
+    assert result.content[0].text == (
+        "Error executing tool query_database: SQL execution error: the query failed"
+    )
+
+
+async def test_query_database_reraises_error_without_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # show_details off: AgentRunError carries no trace, so the server re-raises
+    # and lets FastMCP format the failure exactly as before — no isError result
+    # built here, no _meta, behavior byte-for-byte unchanged.
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+
+    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+        raise AgentRunError("SQL execution error: boom", agent_trace=None)
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
+
+    with pytest.raises(AgentRunError, match="SQL execution error: boom"):
+        await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")

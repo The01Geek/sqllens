@@ -27,7 +27,7 @@ from mcp.types import CallToolResult, TextContent
 from sqllens.config import Config
 from sqllens.tools._format import append_conversation_footer
 from sqllens.tools.list_data_sources import list_data_sources_impl
-from sqllens.tools.query_database import query_database_impl_with_widgets
+from sqllens.tools.query_database import AgentRunError, query_database_impl_with_widgets
 from sqllens.ui import load_widget_html
 
 logger = logging.getLogger("sqllens.server")
@@ -67,12 +67,23 @@ _CHART_META_KEY = "sqllens/chart"
 # "threshold"} — never the matched memory contents. Plain-text clients get the
 # same signal as a one-line footer when ``agent.show_memory_details`` is on.
 _MEMORY_META_KEY = "sqllens/memory_info"
+# Step-by-step agent-trace channel. Present only when ``agent.show_details`` is
+# on (the same gate as the executed-SQL card, which already admits schema/SQL
+# leakage — so this knob adds no new security surface). Carries the structured
+# loop trace: ``{iterations, max_iterations, total_duration_ms, steps[],
+# terminal_error}``. Attached on the success result and — alone among the
+# *observability/widget* channels (chart/table/query/memory) — also on the
+# ``isError`` result, since the failure modes the trace most helps debug (a tool
+# failure, a DB timeout, an LLM error) drive the turn down the error path. (The
+# conversation channel rides the error result too, via ``_trace_error_result``.)
+_AGENT_TRACE_META_KEY = "sqllens/agent_trace"
 # Conversation continuity channel. The resolved conversation id is returned on
-# every successful answer turn — structured here for apps-aware hosts, and as a
-# plain-Markdown footer in the text content for non-apps clients. The calling
-# model passes it back as the ``conversation_id`` tool argument on the next turn
-# so the agent loads the prior turn's history (e.g. to answer its own clarifying
-# question).
+# every answer turn that resolves a conversation — every successful turn, and
+# also the trace-carrying ``isError`` result (via ``_trace_error_result``).
+# Structured here for apps-aware hosts, and as a plain-Markdown footer in the
+# text content for non-apps clients. The calling model passes it back as the
+# ``conversation_id`` tool argument on the next turn so the agent loads the
+# prior turn's history (e.g. to answer its own clarifying question).
 _CONVERSATION_META_KEY = "sqllens/conversation"
 
 
@@ -95,6 +106,33 @@ def _conversation_result(
             )
         ],
         _meta=meta,
+    )
+
+
+def _trace_error_result(
+    message: str, conversation_id: str, agent_trace: dict
+) -> CallToolResult:
+    """Build the ``isError`` CallToolResult that carries the agent trace.
+
+    Used only when ``agent.show_details`` is on and the agent reported a query
+    failure. The text deliberately mirrors FastMCP's own tool-error format
+    (``Error executing tool query_database: <message>`` — see
+    ``mcp.server.fastmcp.tools.base.Tool.run``) so the client-facing message is
+    byte-for-byte identical to the details-off path; the only difference with
+    the flag on is the added ``_meta`` trace (and conversation) channels.
+    """
+    return CallToolResult(
+        content=[
+            TextContent(
+                type="text",
+                text=f"Error executing tool query_database: {message}",
+            )
+        ],
+        isError=True,
+        _meta={
+            _CONVERSATION_META_KEY: {"conversation_id": conversation_id},
+            _AGENT_TRACE_META_KEY: agent_trace,
+        },
     )
 
 
@@ -184,23 +222,41 @@ def build_server(cfg: Config) -> FastMCP:
         context. Omit it to start a fresh conversation; the response always
         reports the conversation id (as ``_meta`` and a plain-text footer).
 
-        When ``agent.show_details`` is on (the default) and the agent
-        successfully executed a SQL query, the answer also includes the
-        executed SQL — as a fenced ``sql`` block in the text and, for
-        apps-aware hosts, as structured data the result widget renders.
-        Non-SELECT / no-SQL / error responses omit the SQL block; setting
-        ``agent.show_details = false`` suppresses it unconditionally.
+        When ``agent.show_details`` is on and the agent successfully executed a
+        SQL query, the answer also includes the executed SQL — as a fenced
+        ``sql`` block in the text and, for apps-aware hosts, as structured data
+        the result widget renders. Non-SELECT / no-SQL / error responses omit
+        the SQL block; setting ``agent.show_details = false`` (the default)
+        suppresses it unconditionally.
+
+        ``agent.show_details`` additionally attaches a structured step-by-step
+        agent trace under ``_meta["sqllens/agent_trace"]`` — per-tool name,
+        arguments, status, duration, on-failure error, and the run's
+        ``terminal_error`` — on both successful and failed responses, so a
+        debugging client can see what the agent did and where a slow or failed
+        run spent its time. It is omitted entirely when the flag is off.
         """
         metadata = _request_metadata(ctx)
         # Mint a stable id when the caller did not supply one, so the resolved
         # id can be returned for the caller to thread on the next turn (passing
         # None down would let the agent mint one we never see).
         conversation_id = conversation_id or str(uuid.uuid4())
-        markdown, table, query_info, chart, memory_info = (
-            await query_database_impl_with_widgets(
-                cfg, question, metadata=metadata, conversation_id=conversation_id
+        try:
+            markdown, table, query_info, chart, memory_info, agent_trace = (
+                await query_database_impl_with_widgets(
+                    cfg, question, metadata=metadata, conversation_id=conversation_id
+                )
             )
-        )
+        except AgentRunError as exc:
+            # Agent-reported failure. With show_details on it carries the trace,
+            # so return an isError result with the trace attached to _meta (the
+            # tool-failure / timeout / LLM-error terminal reasons land here, not
+            # on the success path). With the flag off agent_trace is None: re-raise
+            # so FastMCP formats the failure exactly as before, no _meta — a
+            # details-off deployment stays byte-for-byte unchanged.
+            if exc.agent_trace is None:
+                raise
+            return _trace_error_result(str(exc), conversation_id, exc.agent_trace)
         # Attach every structured payload the agent produced; the widget applies
         # the chart > table > text precedence. When a request yields both a
         # chart and a table, both channels are present and the widget renders
@@ -214,6 +270,8 @@ def build_server(cfg: Config) -> FastMCP:
             extra_meta[_QUERY_META_KEY] = query_info
         if memory_info:
             extra_meta[_MEMORY_META_KEY] = memory_info
+        if agent_trace is not None:
+            extra_meta[_AGENT_TRACE_META_KEY] = agent_trace
         return _conversation_result(markdown, conversation_id, extra_meta)
 
     @mcp.tool()
