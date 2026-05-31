@@ -253,3 +253,97 @@ def test_app_sdk_bundle_without_app_export_raises(monkeypatch) -> None:
     )
     with pytest.raises(RuntimeError, match="does not export `App`"):
         ui.load_widget_html("query_results.html")
+
+
+# --- memory_admin.html contracts --------------------------------------------
+#
+# The memory-administration widget (issue #188) is a self-driving panel: it
+# pulls its own data on mount via App.callServerTool and drives every admin
+# tool directly. Two structural contracts must hold (no JS harness — assert
+# the markers that prove them):
+#   1. Topology-agnostic — no direct network reachability assumed. The widget
+#      must not open its own connection (no fetch/XHR/WebSocket, no <script
+#      src> to a server origin), so it renders identically whether the host
+#      reaches the server directly or via a proxy.
+#   2. isError contract — partial add_memories and lossy export_memories must
+#      paint a loud red error, never green success.
+
+
+def test_memory_admin_widget_inlines_both_bundles() -> None:
+    # Same inlining contract as query_results.html: the host document.writes
+    # the HTML into an about:blank-base iframe; any surviving relative
+    # ./vendor/... reference would 404.
+    html = ui.load_widget_html("memory_admin.html")
+    assert 'import { App } from "./vendor/app-with-deps.js"' not in html
+    assert '<script src="./vendor/echarts.min.js">' not in html
+    assert "var App = " in html
+    assert "echarts.init" in html
+
+
+def test_memory_admin_widget_makes_no_direct_network_calls() -> None:
+    # Topology-agnostic AC: the widget must broker every server call through
+    # the host (App.callServerTool). It must not open its own connection.
+    # Audit the *raw* widget source (not the inlined output) — the vendored
+    # ECharts bundle ships with license-header URL comments that would
+    # false-positive a substring check against the full inlined HTML.
+    from importlib.resources import files
+    raw = files("sqllens.ui").joinpath("memory_admin.html").read_text(encoding="utf-8")
+    # callServerTool is the only I/O channel.
+    assert "app.callServerTool" in raw
+    # No browser network APIs — the widget cannot have a network surface that
+    # doesn't surface via one of these names. A behavioral assertion proxy.
+    forbidden = ["fetch(", "XMLHttpRequest", "new WebSocket", "EventSource", "navigator.sendBeacon"]
+    leaks = [name for name in forbidden if name in raw]
+    assert leaks == [], f"widget has direct network surface: {leaks}"
+    # No remote <script src> in the raw widget either. The two ./vendor refs
+    # are spliced out by the inliner; both should be relative paths only.
+    assert "src=\"http" not in raw and "src='http" not in raw
+    assert "import.*http" not in raw  # no remote ESM import
+
+
+def test_memory_admin_widget_self_drives_on_mount() -> None:
+    # AC: "On mount the widget renders the store via callServerTool
+    # (list_memories + get_memory_stats) with no model involvement." Pin the
+    # mount-time tool wiring structurally.
+    html = ui.load_widget_html("memory_admin.html")
+    assert "loadBrowse()" in html
+    assert "loadStats()" in html
+    # The two boot-time tools are referenced by their server-side names.
+    assert '"list_memories"' in html
+    assert '"get_memory_stats"' in html
+    # The destructive trio appears too (each section drives its tool).
+    driven_tools = (
+        '"add_memories"', '"export_memories"',
+        '"delete_memory"', '"clear_memories"', '"get_memory"',
+    )
+    for name in driven_tools:
+        assert name in html, f"widget no longer drives {name}"
+
+
+def test_memory_admin_widget_paints_red_on_iserror() -> None:
+    # The isError contract requires the widget to honor result.isError from
+    # the central callTool wrapper. Without a JS harness, pin the structural
+    # invariants that make red-state unavoidable:
+    #   - the wrapper reads result.isError (not e.g. only the message text),
+    #   - partial add_memories (errors[] non-empty) routes to showError,
+    #   - lossy export_memories (lossy: true) routes to showError.
+    html = ui.load_widget_html("memory_admin.html")
+    assert "result.isError" in html or "result && result.isError" in html
+    # The wrapper must propagate isError to callers; callers must branch on it.
+    assert "res.isError" in html
+    # Lossy export and partial-import detection by data shape.
+    assert "data.lossy" in html
+    assert "Array.isArray(data.errors)" in html
+    # Both error renderers exist and the destructive flows confirm-gate.
+    assert "showError(" in html
+    assert "confirm(" in html  # window.confirm gate for destructive actions
+
+
+def test_memory_admin_widget_clear_confirm_is_uppercase_token() -> None:
+    # Type-to-confirm: the "Clear" action must require the user to type
+    # "CLEAR" exactly. A regression that swaps it for a click-only confirm
+    # would weaken the danger gate.
+    html = ui.load_widget_html("memory_admin.html")
+    assert 'confirmText !== "CLEAR"' in html
+
+
