@@ -40,6 +40,10 @@
   :root {
     color-scheme: light dark;
     --bg: var(--color-background-primary, transparent);
+    /* Opaque elevated surface for the floating modal. Unlike --bg (which
+       falls back to transparent so the panel blends into the host), a modal
+       overlay MUST be opaque or the dimmed page shows straight through it. */
+    --surface: var(--color-background-primary, #ffffff);
     --fg: var(--color-text-primary, #1a1a1a);
     --muted: var(--color-text-secondary, #6b7280);
     --line: var(--color-border-primary, #d1d5db);
@@ -54,6 +58,7 @@
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
+      --surface: var(--color-background-primary, #1e1e1e);
       --fg: var(--color-text-primary, #e6e6e6);
       --muted: var(--color-text-secondary, #a1a1aa);
       --line: var(--color-border-primary, #3a3a40);
@@ -66,6 +71,7 @@
     }
   }
   :root[data-theme="dark"] {
+    --surface: var(--color-background-primary, #1e1e1e);
     --fg: var(--color-text-primary, #e6e6e6);
     --muted: var(--color-text-secondary, #a1a1aa);
     --line: var(--color-border-primary, #3a3a40);
@@ -177,8 +183,11 @@
   .modal.on { display: flex; }
   .modal .card {
     flex: 0 1 640px;
-    background: var(--bg, #fff);
+    background: var(--surface);
     color: var(--fg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
     max-height: 80vh; overflow: auto;
     padding: 12px 16px;
   }
@@ -231,8 +240,8 @@
     <input type="search" id="filter" placeholder="Filter rows (client-side)…" />
     <select id="typeFilter" aria-label="Memory type">
       <option value="">All types</option>
-      <option value="tool_usage">tool_usage</option>
-      <option value="text">text</option>
+      <option value="tool_usage">SQL pair</option>
+      <option value="text">Schema doc</option>
     </select>
     <button id="refresh">Refresh</button>
     <span class="meta" id="browseMeta"></span>
@@ -306,8 +315,8 @@
     <div class="bar">
       <select id="clearType" aria-label="Clear scope">
         <option value="">All types</option>
-        <option value="tool_usage">tool_usage</option>
-        <option value="text">text</option>
+        <option value="tool_usage">SQL pair</option>
+        <option value="text">Schema doc</option>
       </select>
       <input type="text" id="clearConfirm" placeholder='type CLEAR to confirm' />
       <button id="doClear" class="danger">Clear</button>
@@ -322,6 +331,23 @@
       <button id="closeModal">Close</button>
     </div>
     <div id="modalBody"></div>
+  </div>
+</div>
+
+<!--
+  In-widget confirmation dialog. MCP App widgets run in a sandboxed iframe;
+  unless the host grants `allow-modals`, window.confirm() is silently ignored
+  (returns false), so a native confirm() gate makes destructive buttons appear
+  to do nothing. This DOM-based dialog works regardless of sandbox flags.
+  z-index sits above .modal so it can confirm an action from the row modal.
+-->
+<div id="confirmModal" class="modal" role="dialog" aria-modal="true" style="z-index: 200;">
+  <div class="card" style="flex: 0 1 420px;">
+    <div id="confirmMsg" style="margin-bottom: 12px; white-space: pre-wrap;"></div>
+    <div class="bar" style="justify-content: flex-end; margin-bottom: 0;">
+      <button id="confirmCancel">Cancel</button>
+      <button id="confirmOk" class="danger">Confirm</button>
+    </div>
   </div>
 </div>
 
@@ -504,7 +530,18 @@ tabs.addEventListener("click", (ev) => {
   // survive an accidental tab click. The user dismisses it via the × button
   // on the banner itself (see showError).
   okbar.classList.remove("on");
-  if (pane === "stats" && state.stats == null) loadStats();
+  if (pane === "stats") {
+    if (state.stats == null) {
+      loadStats();
+    } else if (state.chart) {
+      // The chart may have been init'd on mount while this pane was
+      // display:none — ECharts measured a zero-width container and laid the
+      // bars out cramped on the left. A CSS display toggle fires no resize
+      // event, and the SDK's autoResize only tracks the iframe, so reflow
+      // explicitly now that the pane has its real width.
+      try { state.chart.resize(); } catch (_e) { /* reflow is best-effort */ }
+    }
+  }
 });
 
 // ───────────────────────────── Browse pane ──────────────────────────────────
@@ -582,7 +619,7 @@ function renderBrowse() {
     tr.className = "click";
     const cells = [
       shortId(m.memory_id),
-      m.memory_type || "",
+      typeLabel(m.memory_type),
       previewOf(m),
       m.hit_count == null ? "" : String(m.hit_count),
       m.timestamp || "",
@@ -622,6 +659,17 @@ function shortId(id) {
   if (!id) return "";
   const s = String(id);
   return s.length > 14 ? s.slice(0, 8) + "…" + s.slice(-4) : s;
+}
+
+// The server classifies every record as one of two internal memory_type
+// values (src/sqllens/memory/admin.py): "tool_usage" (a saved question→SQL
+// example) and "text" (a free-form schema/business-context doc). Those are
+// implementation labels; surface them in the curation-facing wording the
+// import bundle uses — "SQL pair" / "Schema doc".
+function typeLabel(t) {
+  if (t === "tool_usage") return "SQL pair";
+  if (t === "text") return "Schema doc";
+  return t == null ? "" : String(t);
 }
 
 function previewOf(m) {
@@ -697,6 +745,36 @@ rowModal.addEventListener("click", (ev) => {
   if (ev.target === rowModal) rowModal.classList.remove("on");
 });
 
+// Sandbox-safe replacement for window.confirm(): a DOM dialog that resolves a
+// Promise<boolean>. window.confirm is blocked (silently returns false) inside
+// the sandboxed iframe unless the host sets allow-modals, which we cannot
+// assume — so every destructive gate awaits this instead.
+const confirmModal = document.getElementById("confirmModal");
+const confirmMsg = document.getElementById("confirmMsg");
+const confirmOkBtn = document.getElementById("confirmOk");
+const confirmCancelBtn = document.getElementById("confirmCancel");
+let confirmResolve = null;
+function closeConfirm(result) {
+  confirmModal.classList.remove("on");
+  const resolve = confirmResolve;
+  confirmResolve = null;
+  if (resolve) resolve(result);
+}
+function confirmDialog(message, { confirmLabel = "Confirm" } = {}) {
+  // Resolve any dialog already open (treat as cancel) before opening a new one.
+  if (confirmResolve) closeConfirm(false);
+  confirmMsg.textContent = message;
+  confirmOkBtn.textContent = confirmLabel;
+  confirmModal.classList.add("on");
+  confirmOkBtn.focus();
+  return new Promise((resolve) => { confirmResolve = resolve; });
+}
+confirmOkBtn.addEventListener("click", () => closeConfirm(true));
+confirmCancelBtn.addEventListener("click", () => closeConfirm(false));
+confirmModal.addEventListener("click", (ev) => {
+  if (ev.target === confirmModal) closeConfirm(false);
+});
+
 async function openRow(id) {
   modalBody.textContent = "";
   const loading = document.createElement("div");
@@ -727,7 +805,8 @@ async function openRow(id) {
   del.textContent = "Delete this memory";
   del.addEventListener("click", async () => {
     const mid = m.memory_id || id;
-    if (!confirm("Permanently delete memory " + mid + "?")) return;
+    if (!(await confirmDialog("Permanently delete memory " + mid + "?",
+      { confirmLabel: "Delete" }))) return;
     const r = await callTool("delete_memory", { data_source_id: DSID, memory_id: mid });
     if (r.isError) {
       showError("Delete failed", r.message, r.data);
@@ -748,7 +827,7 @@ function renderRow(host, m) {
   // Field names match _record_to_wire (src/sqllens/memory/admin.py).
   const fields = [
     ["memory_id", m.memory_id],
-    ["memory_type", m.memory_type],
+    ["type", typeLabel(m.memory_type)],
     ["timestamp", m.timestamp],
     ["question", m.question],
     ["sql", m.sql],
@@ -920,8 +999,8 @@ async function loadStats() {
   state.stats = s;
   statsCards.textContent = "";
   const counts = [
-    ["tool_usage", s.tool_usage_count ?? 0],
-    ["text", s.text_count ?? 0],
+    [typeLabel("tool_usage"), s.tool_usage_count ?? 0],
+    [typeLabel("text"), s.text_count ?? 0],
     ["hits (last 30d)", s.total_hits_last_30d ?? 0],
     ["top-hit rows", Array.isArray(s.top_hit_memories) ? s.top_hit_memories.length : 0],
   ];
@@ -1111,7 +1190,8 @@ document.getElementById("doDelete").addEventListener("click", async () => {
     showError("No memory id", "Enter a memory id to delete.");
     return;
   }
-  if (!confirm("Permanently delete memory " + id + "?")) return;
+  if (!(await confirmDialog("Permanently delete memory " + id + "?",
+    { confirmLabel: "Delete" }))) return;
   const res = await callTool("delete_memory", { data_source_id: DSID, memory_id: id });
   if (res.isError) {
     showError("Delete failed", res.message, res.data);
@@ -1136,7 +1216,8 @@ document.getElementById("doClear").addEventListener("click", async () => {
   const args = { data_source_id: DSID };
   if (scope) args.memory_type = scope;
   const label = scope ? ("all " + scope + " memories") : "every memory in the store";
-  if (!confirm("This will permanently remove " + label + ". Proceed?")) return;
+  if (!(await confirmDialog("This will permanently remove " + label + ". Proceed?",
+    { confirmLabel: "Clear" }))) return;
   const res = await callTool("clear_memories", args);
   if (res.isError) {
     showError("Clear failed", res.message, res.data);

@@ -339,7 +339,13 @@ def test_memory_admin_widget_paints_red_on_iserror() -> None:
     assert "Array.isArray(data.errors)" in html
     # Both error renderers exist and the destructive flows confirm-gate.
     assert "showError(" in html
-    assert "confirm(" in html  # window.confirm gate for destructive actions
+    # Destructive actions gate on the in-widget confirmDialog() rather than
+    # window.confirm(): the sandboxed iframe silently ignores native confirm()
+    # (returns false unless the host sets allow-modals), which would make
+    # delete/clear appear to do nothing. Guard against a regression to the
+    # native call.
+    assert "confirmDialog(" in html
+    assert "if (!confirm(" not in html, "native confirm() is blocked in the sandbox"
 
 
 def test_memory_admin_widget_reads_real_wire_field_names() -> None:
