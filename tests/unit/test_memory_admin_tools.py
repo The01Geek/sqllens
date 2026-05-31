@@ -80,6 +80,47 @@ async def test_admin_tools_present_when_enabled(tmp_path) -> None:
     assert _ADMIN_TOOLS <= names
 
 
+# --- Self-driving memory-admin widget resource (#188) ------------------------
+#
+# The widget URI is registered only inside the same `allow_admin_tools` gate
+# as the seven backing tools, so a host never advertises a panel it cannot
+# power. The two tests below pin: (a) the gate works in both directions, and
+# (b) the served HTML is the inlined, self-contained payload.
+
+_MEMORY_WIDGET_URI = "ui://sqllens/memory-admin.html"
+
+
+async def test_memory_admin_widget_absent_when_admin_tools_off(tmp_path) -> None:
+    mcp = build_server(_cfg(tmp_path, allow_admin_tools=False))
+    uris = {str(r.uri) for r in await mcp.list_resources()}
+    assert _MEMORY_WIDGET_URI not in uris
+
+
+async def test_memory_admin_widget_listed_when_admin_tools_on(tmp_path) -> None:
+    mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))
+    resources = await mcp.list_resources()
+    matching = [r for r in resources if str(r.uri) == _MEMORY_WIDGET_URI]
+    assert len(matching) == 1
+    assert matching[0].mimeType == "text/html;profile=mcp-app"
+
+
+async def test_memory_admin_widget_serves_self_contained_html(tmp_path) -> None:
+    # The served body must be the inlined HTML — vendored JS spliced in, no
+    # relative <script src> or `import "./vendor/…"` surviving — so the host
+    # can document.write it into an about:blank-base iframe with no further
+    # fetch to the server origin.
+    mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))
+    contents = await mcp.read_resource(_MEMORY_WIDGET_URI)
+    body = "".join(c.content for c in contents)
+    assert "<!doctype html>" in body.lower()
+    assert 'import { App } from "./vendor/app-with-deps.js"' not in body
+    assert '<script src="./vendor/echarts.min.js">' not in body
+    assert "var App =" in body
+    assert "echarts.init" in body
+    # Self-driving wiring: the widget pulls its own data via callServerTool.
+    assert "app.callServerTool" in body
+
+
 # --- add_memories + list_memories ---------------------------------------------
 
 

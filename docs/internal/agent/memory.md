@@ -167,6 +167,8 @@ The `MemoryStore` is constructed once at registration time and closed over by th
 
 Off by default because the read-only tools enumerate the store and the destructive subset mutates it. See [mcp-server/tools.md](../mcp-server/tools.md#memory-administration-tools--cfgmemoryallow_admin_tools) for the full per-tool wire contracts, auth gating, and error/`isError` handling.
 
+The same `if cfg.memory.allow_admin_tools:` block additionally registers a single `ui://` widget resource — `ui://sqllens/memory-admin.html` — that exposes the seven tools as a self-driving MCP App panel (issue #188). The widget calls the admin tools directly via `app.callServerTool(...)` (no model in the loop) and renders the full Browse / Import / Stats / Danger-zone surface from the same JSON contract those tools already speak. See [mcp-server/tools.md](../mcp-server/tools.md#the-self-driving-memory-admin-widget--uisqllensmemory-adminhtml) for the widget contract.
+
 ### `data_source_id` is advisory (single-tenant, Option A)
 
 Every admin tool accepts a required `data_source_id` argument, but SQL Lens serves **one database per running instance**, so the value is **advisory — it does not partition storage** and is not used to look anything up. It is accepted to keep the wire contract stable with a multi-tenant client (Option A in issue #181). `memory_id` is the stable Chroma document UUID and is the only handle that addresses a specific row.

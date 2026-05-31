@@ -41,6 +41,14 @@ logger = logging.getLogger("sqllens.server")
 # Non-apps hosts ignore ``_meta`` entirely, so the plain Markdown text content
 # keeps working byte-for-byte everywhere else.
 _WIDGET_URI = "ui://sqllens/query-results.html"
+# Self-driving memory-administration widget. Registered only inside the
+# allow_admin_tools block so a host never advertises a widget whose backing
+# tools are off. Unlike _WIDGET_URI (a *push* surface — the model invokes
+# query_database and the host pushes the CallToolResult into the widget via
+# ontoolresult), this widget *pulls* its own data on mount via the App SDK's
+# callServerTool(...) and drives every admin tool directly. Resource-only —
+# no launcher tool; hosts mount it via resources/read.
+_MEMORY_WIDGET_URI = "ui://sqllens/memory-admin.html"
 _TABLE_META_KEY = "sqllens/table"
 # Sibling data channel to _TABLE_META_KEY: the executed SQL + lightweight
 # metadata ({"sql", "query_type", "row_count"?}). Present only when
@@ -294,6 +302,17 @@ def build_server(cfg: Config) -> FastMCP:
         from sqllens.memory import MemoryCorruptionError, MemoryStore
         from sqllens.memory import admin as memory_admin
         from sqllens.memory.admin import MemoryNotFoundError
+
+        # Self-driving memory-administration widget. Gated on the same flag as
+        # the seven backing tools so a host never advertises a widget it can't
+        # power — resources/list shows it iff allow_admin_tools is set.
+        @mcp.resource(
+            _MEMORY_WIDGET_URI,
+            mime_type="text/html;profile=mcp-app",
+            meta={"ui": {"prefersBorder": True}},
+        )
+        def memory_admin_widget() -> str:
+            return load_widget_html("memory_admin.html")
 
         admin_store = MemoryStore(cfg)
         # Serialize admin mutations so concurrent add/delete/clear calls can't
