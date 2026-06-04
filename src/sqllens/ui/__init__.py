@@ -3,23 +3,35 @@
 
 """Packaged MCP App widget assets.
 
-The HTML widget and its vendored JS bundles ship inside the wheel (see the
+The HTML widgets and their vendored JS bundles ship inside the wheel (see the
 ``[tool.hatch.build.targets.wheel].include`` globs in ``pyproject.toml``).
-``server.py`` serves :func:`load_widget_html` results as the single ``ui://``
-resource an apps-aware host renders in a sandboxed iframe for the consolidated
-``query_database`` tool (``query_results.html``). That one widget renders a
-chart, a data grid, or plain text depending on which structured ``_meta``
-payload the tool produced.
+``server.py`` serves :func:`load_widget_html` results as ``ui://`` resources
+an apps-aware host renders in sandboxed iframes:
+
+- ``query_results.html`` — always registered. Renders a chart, a data grid,
+  or plain text depending on which ``_meta`` payload the ``query_database``
+  tool pushed via the host's ``ontoolresult`` channel.
+- ``memory_admin.html`` — registered only inside ``cfg.memory.allow_admin_tools``.
+  A self-driving panel that *pulls* its own data on mount via the App SDK's
+  ``callServerTool(...)`` and drives every admin tool (list / get / delete /
+  clear / add / export / stats) directly. No model in the loop.
 
 The vendored JS bundles are *inlined* into the HTML at load time. MCP App
 hosts only fetch the single ``ui://`` resource — they then ``document.write``
 the HTML into an ``about:blank``-base iframe whose origin cannot resolve
 sibling files on the MCP server. A relative ``import "./vendor/…"`` or
 ``<script src="./vendor/…">`` will 404 inside that iframe, the script never
-runs, and the widget hangs on its initial ``Waiting for results…``
-placeholder. Inlining keeps the on-disk multi-file layout (so the vendored
-bundles' SHA bookkeeping in ``vendor/README`` still works for upgrades) and
-ships a single self-contained HTML payload to the host.
+runs, and the widget hangs on its initial placeholder. Inlining keeps the
+on-disk multi-file layout (so the vendored bundles' SHA bookkeeping in
+``vendor/README`` still works for upgrades) and ships a single
+self-contained HTML payload to the host.
+
+A *self-contained* payload is also a hard requirement for topology-agnostic
+deployment: the memory-admin widget never opens its own network connection
+(no fetch, no XHR, no ``<script src>`` to a server origin), so it renders
+identically whether a host reaches the server directly (public deployment)
+or through a proxy (private deployment). Every server I/O it issues goes
+through the host as a ``tools/call`` over the App SDK's postMessage transport.
 """
 
 from __future__ import annotations
@@ -97,6 +109,10 @@ def _inline_echarts(html: str, bundle: str) -> str:
 # ever needs no inlining, register it with an empty list.
 _RECIPES: dict[str, list[tuple[str, Callable[[str, str], str]]]] = {
     "query_results.html": [
+        ("echarts.min.js", _inline_echarts),
+        ("app-with-deps.js", _inline_app_sdk),
+    ],
+    "memory_admin.html": [
         ("echarts.min.js", _inline_echarts),
         ("app-with-deps.js", _inline_app_sdk),
     ],

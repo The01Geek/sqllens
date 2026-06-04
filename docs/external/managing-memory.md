@@ -86,6 +86,39 @@ If any entry in the bundle fails to save, the tool reports the import as an erro
 
 **Warning:** Leave `allow_import` off unless you trust every client that can reach the server. A client able to write memory can influence the SQL that SQL Lens generates for future questions. The command-line `import-memory` and `export-memory` commands are unaffected by this setting and remain the recommended way to manage memory.
 
+## Memory-Administration Tools for the Assistant
+
+For deeper curation than a one-shot import, SQL Lens can expose a set of memory-administration tools to the connected assistant. Set `allow_admin_tools = true` in the `[memory]` section (or `SQLLENS_MEMORY__ALLOW_ADMIN_TOOLS=1`) to enable them. They are off by default. Once enabled, the assistant can list, inspect, add, delete, clear, export and summarize the saved memory through the same connection it uses to answer questions.
+
+The seven tools are:
+
+- **List memories**: returns the saved entries, newest first, with a total count. You can filter to question-and-answer pairs or free-form notes, and limit how many are returned.
+- **Get memory**: returns a single entry by its identifier.
+- **Delete memory**: removes a single entry by its identifier.
+- **Clear memories**: removes all entries, or only one kind, and reports how many were deleted.
+- **Add memories**: bulk-adds curated question-and-answer pairs and free-form notes, skipping duplicates automatically. If any entry fails, the tool reports an error to the assistant rather than a success, and lists which entries failed.
+- **Export memories**: returns the saved memory as a JSON or CSV blob. The JSON form can be fed straight back into the add tool. If the export would leave anything out, for example free-form notes in a CSV export, the tool reports it as an error so a partial backup is never mistaken for a complete one.
+- **Memory statistics**: returns counts of each kind of entry, how often saved patterns were reused in the last 30 days, and the most-reused patterns.
+
+Each entry has a stable identifier you can pass to the get and delete tools. SQL Lens connects to a single database per instance, so although the tools accept a data-source identifier for compatibility, the value does not change which database is used.
+
+**Note:** The tools that change memory (delete, clear and add) refuse to run when the server requires no authentication. To use them, configure authentication (see the [Configuration reference](configuration.md#section-auth)), or set `auth.insecure` to acknowledge that the server runs on a closed, trusted network.
+
+**Warning:** Leave `allow_admin_tools` off unless you trust every client that can reach the server. These tools can read and permanently delete the saved memory, and adding entries can influence the SQL that SQL Lens generates for future questions.
+
+### Interactive Memory-Administration Panel
+
+When `allow_admin_tools` is enabled, SQL Lens also ships a packaged interactive panel that compatible assistants can render inline alongside the chat. The panel groups the seven tools into four sections:
+
+- **Browse**: lists saved memories newest first with a search filter and a row-detail view that exposes a per-row delete action.
+- **Import**: accepts a pasted or uploaded JSON bundle and adds it through the same add-memories path as the tool, with duplicates skipped automatically and any failures surfaced as an explicit error.
+- **Stats**: shows count cards for each kind of entry and a top-hits chart for the last 30 days.
+- **Danger zone**: exposes export (JSON or CSV), delete one memory by identifier, and clear all or one type. Destructive actions are gated by a type-`CLEAR`-to-confirm box for clear-all and a click-to-confirm dialog for every delete.
+
+The panel runs entirely through your assistant: it makes no direct network connection to the SQL Lens server, so it renders identically whether your assistant reaches SQL Lens directly or through a private proxy. The panel is only advertised when `allow_admin_tools` is enabled, the destructive actions still require authentication (or `auth.insecure = true`) just like the underlying tools, and partial imports or lossy exports are surfaced as an explicit error rather than as a silent success.
+
+**Note:** The interactive panel is supported only by assistants that render MCP App widgets (currently Claude Desktop and claude.ai). Every other assistant continues to use the seven memory-administration tools exactly as before, with no configuration change required on your side.
+
 ## See Also
 
 - **[Configuration reference](configuration.md#section-memory)** for every memory setting.

@@ -1,0 +1,244 @@
+<!doctype html>
+<!--
+  Dev-only preview for src/sqllens/ui/memory_admin.html. Undocumented, delete-friendly.
+  Usage: open scripts/memory_admin_preview.html in a browser. The page stubs the
+  MCP Apps host: it answers ui/initialize, then responds to tools/call requests
+  with canned payloads so every section of the widget renders without a live
+  server. The ui/* method strings below are hardcoded; keep them in sync with
+  the vendored @modelcontextprotocol/ext-apps version (see ui/vendor/README).
+
+  Type CLEAR in the danger pane to exercise the confirm guard.
+-->
+<html lang="en">
+<head><meta charset="utf-8" /><title>memory-admin preview</title>
+<style>
+  body{margin:0;font:13px system-ui}
+  header{padding:6px 10px;background:#eee;display:flex;gap:8px;align-items:center}
+  iframe{border:0;width:100%;height:92vh}
+  button{font:inherit;padding:4px 8px}
+</style>
+</head>
+<body>
+<header>
+  memory_admin_preview — dev shim.
+  <button id="theme">toggle theme</button>
+  <button id="lossy">next export: lossy</button>
+  <button id="partial">next add_memories: partial failure</button>
+  <span id="hint" style="color:#666"></span>
+</header>
+<iframe id="f" src="../src/sqllens/ui/memory_admin.html"></iframe>
+<script>
+let theme = "light";
+let forceLossy = false;
+let forcePartial = false;
+const frame = document.getElementById("f");
+const hint = document.getElementById("hint");
+
+// Mock memory store. Field names MUST match the wire shape produced by
+// _record_to_wire in src/sqllens/memory/admin.py: memory_id, memory_type,
+// timestamp, last_hit_date. A drift here would silently let the widget render
+// fine against the shim while failing against a live server.
+const STORE = {
+  memories: [
+    { memory_id: "11111111-aaaa-bbbb-cccc-000000000001", memory_type: "tool_usage",
+      question: "How many orders last week?",
+      sql: "SELECT COUNT(*) FROM orders WHERE created_at >= now() - interval '7 days';",
+      timestamp: "2026-05-01T08:32:00Z", hit_count: 12, last_hit_date: "2026-05-29T10:00:00Z" },
+    { memory_id: "22222222-aaaa-bbbb-cccc-000000000002", memory_type: "tool_usage",
+      question: "Top 10 customers by revenue",
+      sql: "SELECT customer_id, SUM(amount) AS revenue FROM orders GROUP BY 1 ORDER BY 2 DESC LIMIT 10;",
+      timestamp: "2026-05-02T09:00:00Z", hit_count: 8, last_hit_date: "2026-05-28T14:00:00Z" },
+    { memory_id: "33333333-aaaa-bbbb-cccc-000000000003", memory_type: "text",
+      content: "orders.created_at is UTC. status is one of new/paid/shipped/cancelled.",
+      timestamp: "2026-05-03T10:00:00Z", hit_count: 4 },
+    { memory_id: "44444444-aaaa-bbbb-cccc-000000000004", memory_type: "tool_usage",
+      question: "Daily revenue over the last 30 days",
+      sql: "SELECT date_trunc('day', created_at) d, SUM(amount) r FROM orders WHERE created_at > now() - interval '30 days' GROUP BY 1 ORDER BY 1;",
+      timestamp: "2026-05-04T11:00:00Z", hit_count: 22, last_hit_date: "2026-05-30T08:00:00Z" },
+  ],
+};
+
+function jsonResult(obj) {
+  return { content: [{ type: "text", text: JSON.stringify(obj) }] };
+}
+function jsonError(obj) {
+  return { content: [{ type: "text", text: JSON.stringify(obj) }], isError: true };
+}
+function plainError(msg) {
+  return { content: [{ type: "text", text: msg }], isError: true };
+}
+
+function handleCallTool(name, args) {
+  if (name === "list_memories") {
+    let rows = STORE.memories.slice();
+    if (args.memory_type) rows = rows.filter((m) => m.memory_type === args.memory_type);
+    rows.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+    if (args.limit) rows = rows.slice(0, args.limit);
+    return jsonResult({ memories: rows, total: STORE.memories.length });
+  }
+  if (name === "get_memory") {
+    const m = STORE.memories.find((x) => x.memory_id === args.memory_id);
+    if (!m) return jsonError({ error: "memory not found", memory_id: args.memory_id });
+    return jsonResult({ ...m, embedding: new Array(384).fill(0).map((_, i) => Math.sin(i / 10)) });
+  }
+  if (name === "delete_memory") {
+    const i = STORE.memories.findIndex((x) => x.memory_id === args.memory_id);
+    if (i < 0) return jsonError({ deleted: false, error: "memory not found", memory_id: args.memory_id });
+    STORE.memories.splice(i, 1);
+    return jsonResult({ deleted: true });
+  }
+  if (name === "clear_memories") {
+    const before = STORE.memories.length;
+    if (args.memory_type) {
+      STORE.memories = STORE.memories.filter((x) => x.memory_type !== args.memory_type);
+    } else {
+      STORE.memories = [];
+    }
+    return jsonResult({ deleted_count: before - STORE.memories.length });
+  }
+  if (name === "add_memories") {
+    const pairs = args.sql_pairs || [];
+    const docs = args.schema_docs || [];
+    if (forcePartial) {
+      forcePartial = false;
+      hint.textContent = "";
+      return jsonError({
+        saved_count: 1,
+        duplicate_count: 0,
+        skipped_count: 0,
+        errors: [
+          { kind: "sql_pair", index: 1, question: "bad row",
+            error: "embedding model unavailable while saving" },
+        ],
+      });
+    }
+    let saved = 0;
+    for (const p of pairs) {
+      if (STORE.memories.some((m) => m.question === p.question && m.sql === p.sql)) continue;
+      STORE.memories.push({
+        memory_id: "new-" + Math.random().toString(36).slice(2, 10),
+        memory_type: "tool_usage", question: p.question, sql: p.sql,
+        timestamp: new Date().toISOString(), hit_count: 0,
+      });
+      saved += 1;
+    }
+    for (const d of docs) {
+      STORE.memories.push({
+        memory_id: "new-" + Math.random().toString(36).slice(2, 10),
+        memory_type: "text", content: d.content,
+        timestamp: new Date().toISOString(), hit_count: 0,
+      });
+      saved += 1;
+    }
+    return jsonResult({
+      saved_count: saved, duplicate_count: pairs.length + docs.length - saved,
+      skipped_count: 0, errors: [],
+    });
+  }
+  if (name === "export_memories") {
+    const fmt = args.format || "json";
+    // Server returns `data` as a SERIALIZED STRING for both formats — the
+    // shim mirrors that (the widget feeds it directly into the download
+    // cascade and would mangle anything else).
+    if (forceLossy) {
+      forceLossy = false;
+      hint.textContent = "";
+      const lossyData = fmt === "json"
+        ? JSON.stringify({ sql_pairs: [], schema_docs: [] }, null, 2)
+        : "question,sql\n";
+      return jsonError({
+        format: fmt,
+        data: lossyData,
+        warnings: ["schema docs dropped: CSV cannot represent free-form text"],
+        lossy: true,
+      });
+    }
+    if (fmt === "csv") {
+      const lines = ["question,sql"];
+      for (const m of STORE.memories) if (m.memory_type === "tool_usage")
+        lines.push('"' + (m.question || "").replace(/"/g, '""') + '","' + (m.sql || "").replace(/"/g, '""') + '"');
+      return jsonResult({ format: "csv", data: lines.join("\n"), warnings: [], lossy: false });
+    }
+    const payload = {
+      sql_pairs: STORE.memories.filter((m) => m.memory_type === "tool_usage").map((m) => ({ question: m.question, sql: m.sql })),
+      schema_docs: STORE.memories.filter((m) => m.memory_type === "text").map((m) => ({ content: m.content })),
+    };
+    return jsonResult({
+      format: "json",
+      data: JSON.stringify(payload, null, 2),
+      warnings: [], lossy: false,
+    });
+  }
+  if (name === "get_memory_stats") {
+    // Mirror admin.get_memory_stats: top_hit_memories rows carry only
+    // {memory_id, question, hit_count, last_hit_date} — no memory_type.
+    const topHits = STORE.memories
+      .filter((m) => m.memory_type === "tool_usage" && (m.hit_count || 0) > 0)
+      .sort((a, b) => (b.hit_count || 0) - (a.hit_count || 0))
+      .slice(0, 10)
+      .map((m) => ({
+        memory_id: m.memory_id, question: m.question,
+        hit_count: m.hit_count, last_hit_date: m.last_hit_date,
+      }));
+    return jsonResult({
+      tool_usage_count: STORE.memories.filter((m) => m.memory_type === "tool_usage").length,
+      text_count: STORE.memories.filter((m) => m.memory_type === "text").length,
+      total_hits_last_30d: STORE.memories.reduce((s, m) => s + (m.hit_count || 0), 0),
+      top_hit_memories: topHits,
+    });
+  }
+  return plainError("Unknown tool: " + name);
+}
+
+frame.addEventListener("load", () => {
+  const win = frame.contentWindow;
+  win.addEventListener("message", (ev) => {
+    const m = ev.data;
+    if (!m || m.jsonrpc !== "2.0") return;
+    if (m.method === "ui/initialize") {
+      win.postMessage({
+        jsonrpc: "2.0", id: m.id,
+        result: {
+          protocolVersion: "2026-01-26",
+          hostInfo: { name: "memory-admin-preview", version: "0.0.0" },
+          hostCapabilities: { downloadFile: true },
+          hostContext: { theme, styles: {} },
+        },
+      }, "*");
+    } else if (m.method === "tools/call") {
+      const r = handleCallTool(m.params.name, m.params.arguments || {});
+      win.postMessage({ jsonrpc: "2.0", id: m.id, result: r }, "*");
+    } else if (m.method === "ui/download-file") {
+      const c = m.params.contents && m.params.contents[0];
+      if (c && c.resource) {
+        const blob = new Blob([c.resource.text || ""], { type: c.resource.mimeType || "text/plain" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = c.resource.uri || "export.txt";
+        document.body.appendChild(a); a.click(); a.remove();
+      }
+      win.postMessage({ jsonrpc: "2.0", id: m.id, result: {} }, "*");
+    } else if (m.id !== undefined && m.method) {
+      win.postMessage({ jsonrpc: "2.0", id: m.id, result: {} }, "*");
+    }
+  });
+});
+
+document.getElementById("theme").addEventListener("click", () => {
+  theme = theme === "light" ? "dark" : "light";
+  frame.contentWindow.postMessage({
+    jsonrpc: "2.0", method: "ui/notifications/host-context-changed",
+    params: { theme },
+  }, "*");
+});
+document.getElementById("lossy").addEventListener("click", () => {
+  forceLossy = true;
+  hint.textContent = "next export will be reported lossy";
+});
+document.getElementById("partial").addEventListener("click", () => {
+  forcePartial = true;
+  hint.textContent = "next import will be reported partial failure";
+});
+</script>
+</body>
+</html>

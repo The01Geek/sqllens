@@ -31,7 +31,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
@@ -65,6 +66,22 @@ class MemoryCorruptionError(RuntimeError):
     Signals systemic corruption / version skew rather than a single bad row,
     so callers fail loud instead of treating a near-empty result as success.
     """
+
+
+@dataclass(frozen=True)
+class MemoryRecord:
+    """One raw stored row: the Chroma document id, its metadata, and (optionally)
+    its embedding vector.
+
+    This is the low-level shape the admin-tool layer (``memory.admin``) reshapes
+    into the wire contract; it deliberately carries metadata verbatim so the
+    discriminator (``is_text_memory``), tracking keys (``hit_count`` /
+    ``last_hit_date``) and provenance are all visible to the caller.
+    """
+
+    memory_id: str
+    metadata: dict[str, Any]
+    embedding: list[float] | None = None
 
 
 class MemoryStore:
@@ -188,9 +205,112 @@ class MemoryStore:
             schema_docs=docs or None,
         )
 
-    def clear(self) -> None:
-        """Wipe every entry in the configured collection."""
+    def clear(self) -> int:
+        """Wipe every entry in the configured collection; return how many were deleted.
+
+        Deletes by *every* id the collection reports, so rows with missing or
+        non-dict metadata (which ``get_all`` skips) are still removed — a
+        "clear everything" must not leave corrupt rows behind.
+        """
         collection = self._mem._get_collection()
         ids = collection.get(include=[]).get("ids") or []
         if ids:
             collection.delete(ids=ids)
+        return len(ids)
+
+    # --- Raw admin enumeration / mutation -------------------------------------
+    # These back the memory-administration MCP tools. They return metadata
+    # verbatim (no bundle-shape filtering, unlike ``iter_all``) so the admin
+    # layer can surface every stored row — auto-learned tool memories included —
+    # with its tracking and provenance keys intact. ``_get_collection()`` stays
+    # confined to this module (see module docstring).
+
+    @staticmethod
+    def _coerce_embedding(raw: Any) -> list[float] | None:
+        """Convert a Chroma embedding (often a numpy array) to plain floats.
+
+        Returns ``None`` when no embedding is present so callers can omit the
+        field rather than emit an empty vector.
+        """
+        if raw is None:
+            return None
+        try:
+            vec = [float(x) for x in raw]
+        except (TypeError, ValueError) as exc:
+            # A non-numeric embedding is corrupt, not absent; both map to None
+            # (callers omit the field) but log so the two are distinguishable
+            # in the server logs rather than silently identical.
+            logger.debug("skipping unrepresentable embedding vector: %s", exc)
+            return None
+        return vec or None
+
+    def get_all(self, *, include_embeddings: bool = False) -> list[MemoryRecord]:
+        """Return every stored row as a :class:`MemoryRecord`.
+
+        Rows whose metadata is missing/non-dict are skipped (they cannot be
+        addressed or classified); everything else is returned verbatim.
+        """
+        collection = self._mem._get_collection()
+        include = ["metadatas", "embeddings"] if include_embeddings else ["metadatas"]
+        got = collection.get(include=include)
+        ids = got.get("ids") or []
+        metadatas = got.get("metadatas") or []
+        embeddings = got.get("embeddings") if include_embeddings else None
+
+        records: list[MemoryRecord] = []
+        for i, memory_id in enumerate(ids):
+            metadata = metadatas[i] if i < len(metadatas) else None
+            if not isinstance(metadata, dict):
+                continue
+            embedding = None
+            if embeddings is not None and i < len(embeddings):
+                embedding = self._coerce_embedding(embeddings[i])
+            records.append(
+                MemoryRecord(
+                    memory_id=memory_id, metadata=dict(metadata), embedding=embedding
+                )
+            )
+        return records
+
+    def get_one(
+        self, memory_id: str, *, include_embedding: bool = False
+    ) -> MemoryRecord | None:
+        """Return a single row by id, or ``None`` if it does not exist."""
+        collection = self._mem._get_collection()
+        include = ["metadatas", "embeddings"] if include_embedding else ["metadatas"]
+        got = collection.get(ids=[memory_id], include=include)
+        ids = got.get("ids") or []
+        if not ids:
+            return None
+        metadatas = got.get("metadatas") or []
+        metadata = metadatas[0] if metadatas else None
+        if not isinstance(metadata, dict):
+            metadata = {}
+        embedding = None
+        if include_embedding:
+            embeddings = got.get("embeddings")
+            if embeddings is not None and len(embeddings) > 0:
+                embedding = self._coerce_embedding(embeddings[0])
+        return MemoryRecord(
+            memory_id=ids[0], metadata=dict(metadata), embedding=embedding
+        )
+
+    def delete_ids(self, ids: list[str]) -> int:
+        """Delete the given ids; return how many were actually removed.
+
+        Chroma's ``delete`` is a no-op for unknown ids and reports nothing, so we
+        read back which of the requested ids existed, delete those, then re-read
+        to confirm they are gone. The returned count reflects what actually left
+        the store (present-before minus still-present-after) — never an
+        optimistic "we asked to delete N" count, so a partial-delete failure is
+        not reported as a clean success.
+        """
+        if not ids:
+            return 0
+        collection = self._mem._get_collection()
+        present = collection.get(ids=ids, include=[]).get("ids") or []
+        if not present:
+            return 0
+        collection.delete(ids=present)
+        still_present = collection.get(ids=present, include=[]).get("ids") or []
+        return len(present) - len(still_present)
