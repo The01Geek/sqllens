@@ -16,6 +16,7 @@ import json
 import logging
 import math
 from collections.abc import Iterable
+from datetime import datetime
 from decimal import Decimal
 
 from sqllens.agent.core.components import UiComponent
@@ -39,6 +40,12 @@ _MAX_TABLE_PAYLOAD_BYTES = 130 * 1024
 # blob. Aliased to the table budget so the two cannot drift apart — both blobs
 # share one sandboxed-iframe rendering ceiling.
 _MAX_CHART_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES
+
+# Same budget, same reason, for the agent-trace ``_meta["sqllens/agent_trace"]``
+# blob. The trace embeds raw tool arguments (SQL, memory-search text) per step,
+# so it can grow large on a long run — and it rides the same sandboxed-iframe
+# ceiling. Aliased to the table budget so all three _meta blobs share one cap.
+_MAX_TRACE_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES
 
 
 def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
@@ -315,6 +322,271 @@ def components_to_chart(
     """
     markdown, is_error, _, _, chart, _ = components_to_widgets(components)
     return markdown, is_error, chart
+
+
+# The agent's per-tool-call lifecycle STATUS_CARD carries the invoked tool name
+# in its title as ``Executing {tool}`` (agent/core/agent/agent.py). These cards
+# are only emitted when ``UI_FEATURE_SHOW_TOOL_ARGUMENTS`` is unlocked — which
+# is exactly what ``agent.show_details`` does for the single static user group —
+# so a trace is only ever assembled for a deployment that already opted into the
+# SQL-leaking debugging surface. The running card (status="running") carries the
+# call ``arguments`` in ``metadata``; the completed card shares the same
+# component ``id`` (``set_status`` copies it) and flips ``status`` to
+# "success"/"error", with a ``Tool failed: ...`` description on failure.
+_TOOL_CARD_PREFIX = "Executing "
+# Prefix the agent puts on a failed tool's completion description. Stripped so
+# the trace's per-step ``error`` is the tool's own message, not the boilerplate.
+_TOOL_FAILED_PREFIX = "Tool failed: "
+# Title of the top-level error card the vendored ``send_message`` emits when the
+# whole turn throws (an LLM/infra exception it caught and logged server-side).
+# Its description is deliberately generic — the real exception never reaches the
+# component stream — so the trace can only surface this generic terminal reason;
+# the underlying error lives in the server logs, never in ``_meta``.
+_AGENT_ERROR_CARD_TITLE = "Error Processing Message"
+# Message on the ``STATUS_BAR_UPDATE`` (status="warning") the agent emits when it
+# stops because it exhausted ``max_tool_iterations``. Matched as the max-iteration
+# terminal signal — more accurate than counting steps, because the agent's
+# iteration counter counts LLM *rounds* (a single round can fire several parallel
+# tool calls), so a step count can't be compared to the cap directly.
+_ITERATION_LIMIT_MESSAGE = "Tool limit reached"
+
+
+def _parse_component_ts(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _step_duration_ms(start: object, end: object) -> int | None:
+    start_dt = _parse_component_ts(start)
+    end_dt = _parse_component_ts(end)
+    if start_dt is None or end_dt is None:
+        return None
+    try:
+        # A naive/aware mismatch (one timestamp carried an offset, the other did
+        # not) raises TypeError here. The agent stamps both with naive
+        # utcnow().isoformat() today, so this is defensive — but degrade just
+        # this step's duration to None rather than letting it bubble to the
+        # outer best-effort guard and void the whole trace.
+        delta_ms = (end_dt - start_dt).total_seconds() * 1000.0
+    except TypeError:
+        return None
+    # Clock skew / out-of-order timestamps must never yield a negative duration.
+    return int(delta_ms) if delta_ms >= 0 else 0
+
+
+def build_agent_trace(
+    components: Iterable[UiComponent],
+    *,
+    total_duration_ms: int | None,
+    max_iterations: int,
+) -> dict:
+    """Assemble a step-by-step trace of the agent loop from its component stream.
+
+    Gated by the caller on ``agent.show_details`` (see
+    :func:`~sqllens.tools.query_database.query_database_impl_with_widgets`); this
+    function does no gating itself. It is a single forward pass over the buffered
+    ``UiComponent`` stream — it never re-runs or re-instruments the agent.
+
+    Each invoked tool surfaces as a pair of ``STATUS_CARD`` components sharing
+    one component ``id``: a ``running`` card carrying the call ``arguments`` in
+    its ``metadata``, then a ``success``/``error`` completion. The pair is folded
+    into one step ``{index, tool, arguments, status, duration_ms, error?}``:
+    ``status`` is ``"ok"`` on success, ``"error"`` on failure, ``"incomplete"``
+    if the run ended before the completion card was emitted; ``duration_ms`` is
+    the wall-clock between the two cards' framework timestamps (``None`` if a
+    timestamp is unparseable; clamped to ``0`` on clock skew / out-of-order
+    timestamps); ``error`` is present only on a failed step and is the tool's
+    own message (the ``Tool failed: `` boilerplate stripped).
+
+    ``terminal_error`` is the run-ending reason derived from the same stream,
+    in precedence order:
+
+    1. the generic top-level error card (an LLM/infra exception the agent caught
+       and logged server-side — the real text is *not* in the stream);
+    2. else the last failed tool step (a tool failure / DB timeout — its real
+       message *is* in the stream, via the completion card description);
+    3. else, when the agent emitted its ``max_tool_iterations`` warning, the
+       max-iteration stop (detected from the warning ``STATUS_BAR_UPDATE``, not
+       a step count — the agent counts LLM rounds, and one round can fire
+       several parallel tool calls, so a step count is not the iteration count);
+    4. else, when the last step is ``"incomplete"`` (the run ended mid tool
+       call), a note that the run ended in progress — so a truncated run is not
+       silently reported as a clean finish;
+    5. else ``None`` — a clean run.
+
+    Over-budget traces are size-capped by :func:`_cap_trace_size`, which may add
+    ``arguments_truncated``/``steps_truncated`` flags and drop per-step
+    ``arguments`` or trailing steps to fit the ``_meta`` iframe ceiling.
+
+    ``iterations`` is the number of tool steps seen; ``total_duration_ms`` is the
+    caller-measured wall-clock of the whole turn (``None`` if unmeasured).
+    """
+    steps: list[dict] = []
+    by_id: dict[str, dict] = {}
+    agent_error: str | None = None
+    hit_iteration_limit = False
+
+    for comp in components:
+        rich = comp.rich_component
+        if rich is None:
+            continue
+        ctype = getattr(rich, "type", None)
+        if ctype == ComponentType.STATUS_BAR_UPDATE:
+            if (
+                getattr(rich, "status", "") == "warning"
+                and getattr(rich, "message", "") == _ITERATION_LIMIT_MESSAGE
+            ):
+                hit_iteration_limit = True
+            continue
+        if ctype != ComponentType.STATUS_CARD:
+            continue
+        title = getattr(rich, "title", "") or ""
+        status = getattr(rich, "status", "") or ""
+        description = getattr(rich, "description", "") or ""
+
+        if title == _AGENT_ERROR_CARD_TITLE and status == "error":
+            # Generic top-level failure (real exception is server-side only). The
+            # vendored card appends "\n\nConversation ID: <id>" to its
+            # description (agent/core/agent/agent.py) — strip that tail so
+            # terminal_error is the human reason only; the id already rides the
+            # dedicated sqllens/conversation channel.
+            reason = description.split("\n\nConversation ID:", 1)[0].strip()
+            agent_error = reason or "agent reported an unexpected error"
+            continue
+        if not title.startswith(_TOOL_CARD_PREFIX):
+            continue
+
+        card_id = getattr(rich, "id", None)
+        tool = title[len(_TOOL_CARD_PREFIX):]
+        timestamp = getattr(rich, "timestamp", None)
+        metadata = getattr(rich, "metadata", None)
+        arguments = metadata if isinstance(metadata, dict) else {}
+
+        step = by_id.get(card_id) if isinstance(card_id, str) else None
+        if step is None:
+            # First card for this tool call — the ``running`` open.
+            step = {
+                "index": len(steps),
+                "tool": tool,
+                "arguments": arguments,
+                "status": "incomplete",
+                "duration_ms": None,
+                "_start": timestamp,
+                "_error": None,
+            }
+            steps.append(step)
+            if isinstance(card_id, str):
+                by_id[card_id] = step
+            continue
+
+        # A later card for the same call — the completion. Record the outcome
+        # and the wall-clock between the two cards' timestamps.
+        if status == "success":
+            step["status"] = "ok"
+        elif status == "error":
+            step["status"] = "error"
+            msg = description.strip()
+            if msg.startswith(_TOOL_FAILED_PREFIX):
+                msg = msg[len(_TOOL_FAILED_PREFIX):].strip()
+            step["_error"] = msg or "tool failed"
+        step["duration_ms"] = _step_duration_ms(step["_start"], timestamp)
+
+    last_failed = next(
+        (s for s in reversed(steps) if s["status"] == "error"), None
+    )
+    # ``agent_error`` and the per-step error text below are agent-authored card
+    # descriptions, surfaced verbatim — the same #91 decision the
+    # ``_SQL_EXECUTION_ERROR_PREFIX`` path in query_database.py already applies:
+    # the agent's structured error is actionable detail the caller needs, not an
+    # infra-string leak, so it is deliberately not scrubbed here either.
+    if agent_error is not None:
+        terminal_error: str | None = agent_error
+    elif last_failed is not None:
+        terminal_error = f"tool '{last_failed['tool']}' failed: {last_failed['_error']}"
+    elif hit_iteration_limit:
+        terminal_error = (
+            f"reached the max_tool_iterations limit ({max_iterations}); "
+            "the agent stopped before completing the task"
+        )
+    elif steps and steps[-1]["status"] == "incomplete":
+        # No error card, no failed step, no limit warning — but the last tool
+        # call never completed. The run ended mid-step; reporting None here would
+        # read as a clean finish, hiding the truncation.
+        terminal_error = (
+            f"run ended with tool '{steps[-1]['tool']}' still in progress "
+            "(no completion was emitted)"
+        )
+    else:
+        terminal_error = None
+
+    public_steps = []
+    for step in steps:
+        public: dict = {
+            "index": step["index"],
+            "tool": step["tool"],
+            "arguments": step["arguments"],
+            "status": step["status"],
+            "duration_ms": step["duration_ms"],
+        }
+        if step["status"] == "error" and step["_error"]:
+            public["error"] = step["_error"]
+        public_steps.append(public)
+
+    return _cap_trace_size(
+        {
+            "iterations": len(public_steps),
+            "max_iterations": max_iterations,
+            "total_duration_ms": total_duration_ms,
+            "steps": public_steps,
+            "terminal_error": terminal_error,
+        }
+    )
+
+
+def _cap_trace_size(trace: dict) -> dict:
+    """Bound the serialized trace to the iframe ``_meta`` budget (issue #180).
+
+    The trace rides the same ``CallToolResult._meta`` blob as the table/chart
+    payloads, which the host pushes into a sandboxed iframe — a multi-MB blob is
+    what actually breaks rendering (see ``_MAX_TABLE_PAYLOAD_BYTES``). Per-step
+    ``arguments`` (raw SQL, memory-search text) are the unbounded part, so when
+    the trace is over budget we drop them first (flagging ``arguments_truncated``
+    and stripping ``arguments`` from each step), then, only if still over, keep
+    the largest contiguous step prefix that fits (recording ``steps_truncated``).
+    A loud flag beats a silently-broken widget on the debugging path.
+    """
+    if _serialized_len(trace) <= _MAX_TRACE_PAYLOAD_BYTES:
+        return trace
+
+    for step in trace["steps"]:
+        step.pop("arguments", None)
+    trace["arguments_truncated"] = True
+    if _serialized_len(trace) <= _MAX_TRACE_PAYLOAD_BYTES:
+        return trace
+
+    full_steps = trace["steps"]
+    total = len(full_steps)
+    trace["steps"] = []
+    if _serialized_len(trace) > _MAX_TRACE_PAYLOAD_BYTES:
+        # Even the step-stripped trace busts the budget — nothing more to drop.
+        trace["steps_truncated"] = total
+        return trace
+
+    lo, hi = 0, total
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        trace["steps"] = full_steps[:mid]
+        if _serialized_len(trace) <= _MAX_TRACE_PAYLOAD_BYTES:
+            lo = mid
+        else:
+            hi = mid - 1
+    trace["steps"] = full_steps[:lo]
+    trace["steps_truncated"] = total - lo
+    return trace
 
 
 def append_conversation_footer(markdown: str, conversation_id: str | None) -> str:

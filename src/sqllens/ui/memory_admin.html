@@ -1,0 +1,1282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<!--
+  Self-driving MCP App widget for the memory-administration surface
+  (list_memories / get_memory / delete_memory / clear_memories / add_memories /
+   export_memories / get_memory_stats — see src/sqllens/server.py).
+
+  Unlike query_results.html — which is *pushed* a CallToolResult by the host
+  via ontoolresult — this widget *pulls* its own data on mount via
+  app.callServerTool(...) and drives every user action by calling an admin
+  tool. No model is in the loop.
+
+  Topology-agnostic: this widget never opens its own network connection (no
+  fetch, no XHR, no WebSocket, no <script src> to a server origin). Every
+  server interaction is brokered by the host as a tools/call notification
+  over the App SDK's postMessage transport, so the widget renders identically
+  whether the host reaches the server directly (public deployment) or
+  through a proxy (private deployment). This is enforced structurally by the
+  serve-time inliner (sqllens.ui.load_widget_html) which inlines both
+  vendored JS bundles into this single HTML payload.
+
+  isError contract (CLAUDE.md): every tool call routes through `callTool`,
+  which renders a loud red banner on isError. Partial add_memories
+  (errors[] non-empty) and lossy export_memories (lossy: true) reach the
+  client with isError=true and must paint red, not green. Destructive
+  tools (delete / clear / add) are confirm-gated client-side; the server's
+  _require_write_auth refusal (RuntimeError) surfaces through the same
+  banner — the widget does not replicate auth logic.
+
+  Renderer: ECharts SVG (echarts.init(el, theme, {renderer:'svg'})). The SVG
+  renderer needs no eval/Function and emits plain DOM, so the widget runs
+  inside a sandboxed iframe with a strict CSP (no 'unsafe-eval').
+-->
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memory administration</title>
+<script src="./vendor/echarts.min.js"></script>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: var(--color-background-primary, transparent);
+    /* Opaque elevated surface for the floating modal. Unlike --bg (which
+       falls back to transparent so the panel blends into the host), a modal
+       overlay MUST be opaque or the dimmed page shows straight through it. */
+    --surface: var(--color-background-primary, #ffffff);
+    --fg: var(--color-text-primary, #1a1a1a);
+    --muted: var(--color-text-secondary, #6b7280);
+    --line: var(--color-border-primary, #d1d5db);
+    --row-alt: var(--color-background-secondary, rgba(127, 127, 127, 0.06));
+    --accent: var(--color-background-info, #2563eb);
+    --control-bg: var(--color-background-tertiary, rgba(127, 127, 127, 0.10));
+    --err-fg: var(--color-text-danger, #991b1b);
+    --err-bg: var(--color-background-danger, rgba(220, 38, 38, 0.12));
+    --err-line: var(--color-border-danger, #dc2626);
+    --ok-fg: var(--color-text-success, #166534);
+    --ok-bg: var(--color-background-success, rgba(22, 163, 74, 0.10));
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface: var(--color-background-primary, #1e1e1e);
+      --fg: var(--color-text-primary, #e6e6e6);
+      --muted: var(--color-text-secondary, #a1a1aa);
+      --line: var(--color-border-primary, #3a3a40);
+      --row-alt: var(--color-background-secondary, rgba(255, 255, 255, 0.04));
+      --control-bg: var(--color-background-tertiary, rgba(255, 255, 255, 0.08));
+      --err-fg: var(--color-text-danger, #fca5a5);
+      --err-bg: var(--color-background-danger, rgba(220, 38, 38, 0.18));
+      --ok-fg: var(--color-text-success, #86efac);
+      --ok-bg: var(--color-background-success, rgba(22, 163, 74, 0.18));
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface: var(--color-background-primary, #1e1e1e);
+    --fg: var(--color-text-primary, #e6e6e6);
+    --muted: var(--color-text-secondary, #a1a1aa);
+    --line: var(--color-border-primary, #3a3a40);
+    --row-alt: var(--color-background-secondary, rgba(255, 255, 255, 0.04));
+    --control-bg: var(--color-background-tertiary, rgba(255, 255, 255, 0.08));
+    --err-fg: var(--color-text-danger, #fca5a5);
+    --err-bg: var(--color-background-danger, rgba(220, 38, 38, 0.18));
+    --ok-fg: var(--color-text-success, #86efac);
+    --ok-bg: var(--color-background-success, rgba(22, 163, 74, 0.18));
+  }
+  html, body { margin: 0; padding: 0; background: transparent; }
+  body {
+    color: var(--fg);
+    font: 13px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 8px;
+  }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 10px; flex-wrap: wrap; }
+  .tabs button {
+    font: inherit; color: var(--fg); background: transparent;
+    border: 0; padding: 6px 12px; cursor: pointer;
+    border-bottom: 2px solid transparent; border-radius: 0;
+  }
+  .tabs button:hover { color: var(--accent); }
+  .tabs button.active { border-bottom-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .pane { display: none; }
+  .pane.active { display: block; }
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .bar input, .bar select, .bar button, .bar textarea {
+    font: inherit; color: var(--fg);
+    background: var(--control-bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px;
+  }
+  .bar input[type="search"], .bar input[type="text"] { flex: 1 1 160px; min-width: 120px; }
+  .bar button { cursor: pointer; }
+  .bar button:hover:not([disabled]) { border-color: var(--accent); }
+  .bar button[disabled] { opacity: 0.4; cursor: default; }
+  .danger { color: #fff; background: var(--err-line); border-color: var(--err-line); }
+  .danger:hover:not([disabled]) { background: #b91c1c; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .wrap { overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td {
+    text-align: left; padding: 5px 10px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  th { position: sticky; top: 0; background: var(--control-bg); user-select: none; }
+  tbody tr:nth-child(even) { background: var(--row-alt); }
+  tbody tr.click { cursor: pointer; }
+  tbody tr.click:hover { background: var(--control-bg); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.trunc { max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+  .pager { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .pager button[disabled] { opacity: 0.4; cursor: default; }
+  .empty { color: var(--muted); padding: 16px; }
+  /* Loud red error banner — never green on isError. Persistent until cleared. */
+  .errbar {
+    margin: 0 0 10px 0;
+    padding: 8px 12px;
+    color: var(--err-fg);
+    background: var(--err-bg);
+    border: 1px solid var(--err-line);
+    border-left-width: 4px;
+    border-radius: 6px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    display: none;
+  }
+  .errbar.on { display: block; }
+  .errbar .head { font-weight: 600; margin-bottom: 4px; }
+  .errbar pre {
+    margin: 6px 0 0; padding: 6px;
+    background: rgba(0, 0, 0, 0.05); border-radius: 4px;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    max-height: 160px; overflow: auto;
+  }
+  .okbar {
+    margin: 0 0 10px 0;
+    padding: 6px 12px;
+    color: var(--ok-fg);
+    background: var(--ok-bg);
+    border: 1px solid var(--ok-fg);
+    border-left-width: 4px;
+    border-radius: 6px;
+    display: none;
+  }
+  .okbar.on { display: block; }
+  .cards { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .card {
+    flex: 1 1 140px; min-width: 120px;
+    padding: 8px 12px;
+    background: var(--control-bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  .card .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .card .value { font-size: 22px; font-variant-numeric: tabular-nums; font-weight: 600; margin-top: 2px; }
+  .chartwrap { display: flex; flex-direction: column; }
+  .chartwrap #statschart { height: 320px; width: 100%; }
+  .chartwrap .empty-chart { color: var(--muted); padding: 16px; }
+  .modal {
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: none;
+    align-items: center; justify-content: center;
+    padding: 12px;
+    z-index: 100;
+  }
+  .modal.on { display: flex; }
+  .modal .card {
+    flex: 0 1 640px;
+    background: var(--surface);
+    color: var(--fg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+    max-height: 80vh; overflow: auto;
+    padding: 12px 16px;
+  }
+  .modal .row { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
+  .modal .row .k { color: var(--muted); flex: 0 0 110px; }
+  .modal .row .v { flex: 1; word-break: break-word; }
+  .modal pre {
+    margin: 4px 0; padding: 6px;
+    background: var(--control-bg); border: 1px solid var(--line);
+    border-radius: 6px; overflow: auto;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 240px;
+  }
+  textarea {
+    width: 100%; box-sizing: border-box;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--fg);
+    background: var(--control-bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px;
+    resize: vertical;
+  }
+  .section-block {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+  .section-block h3 {
+    margin: 0 0 8px 0; font-size: 13px; font-weight: 600;
+  }
+  .danger-block { border-color: var(--err-line); }
+  .danger-block h3 { color: var(--err-fg); }
+</style>
+</head>
+<body>
+<div id="banners">
+  <div id="errbar" class="errbar" role="alert"></div>
+  <div id="okbar" class="okbar" role="status"></div>
+</div>
+<nav class="tabs" id="tabs" role="tablist">
+  <button data-pane="browse" class="active" role="tab">Browse</button>
+  <button data-pane="import" role="tab">Import</button>
+  <button data-pane="stats" role="tab">Stats</button>
+  <button data-pane="danger" role="tab">Danger zone</button>
+</nav>
+
+<section id="pane-browse" class="pane active" role="tabpanel">
+  <div class="bar">
+    <input type="search" id="filter" placeholder="Filter rows (client-side)…" />
+    <select id="typeFilter" aria-label="Memory type">
+      <option value="">All types</option>
+      <option value="tool_usage">SQL pair</option>
+      <option value="text">Schema doc</option>
+    </select>
+    <button id="refresh">Refresh</button>
+    <span class="meta" id="browseMeta"></span>
+  </div>
+  <div id="browseBody"><div class="empty">Loading memories…</div></div>
+</section>
+
+<section id="pane-import" class="pane" role="tabpanel">
+  <div class="section-block">
+    <h3>Import a memory bundle</h3>
+    <p class="meta">
+      Paste or load a JSON bundle with optional <code>sql_pairs</code> and <code>schema_docs</code>
+      blocks. Exact duplicates are skipped server-side. Partial failures (errors[] non-empty) are
+      reported as an error, never as success.
+    </p>
+    <div class="bar">
+      <input type="file" id="importFile" accept=".json,application/json" />
+      <button id="loadDemo">Load demo</button>
+      <button id="clearImport">Clear</button>
+    </div>
+    <textarea id="importJson" rows="10" placeholder='{"sql_pairs": [{"question": "...", "sql": "..."}], "schema_docs": [{"content": "..."}]}'></textarea>
+    <div class="bar" style="margin-top: 8px;">
+      <button id="doImport">Import</button>
+      <span class="meta" id="importMeta"></span>
+    </div>
+    <div id="importResult"></div>
+  </div>
+</section>
+
+<section id="pane-stats" class="pane" role="tabpanel">
+  <div class="cards" id="statsCards"></div>
+  <div class="section-block">
+    <h3>Top-hit memories (last 30 days)</h3>
+    <div class="chartwrap">
+      <div id="statschart"></div>
+      <div class="meta" id="statsHint"></div>
+    </div>
+  </div>
+  <div class="bar">
+    <button id="refreshStats">Refresh stats</button>
+  </div>
+</section>
+
+<section id="pane-danger" class="pane" role="tabpanel">
+  <div class="section-block">
+    <h3>Export the store</h3>
+    <p class="meta">
+      JSON export round-trips back into Import. CSV exports SQL pairs only; if schema docs
+      would be dropped the server marks the response <code>lossy:true</code> and the widget
+      paints it red.
+    </p>
+    <div class="bar">
+      <button data-export="json">Export JSON</button>
+      <button data-export="csv">Export CSV</button>
+      <span class="meta" id="exportMeta"></span>
+    </div>
+  </div>
+  <div class="section-block danger-block">
+    <h3>Delete one memory by id</h3>
+    <div class="bar">
+      <input type="text" id="delId" placeholder="memory id…" />
+      <button id="doDelete" class="danger">Delete</button>
+    </div>
+  </div>
+  <div class="section-block danger-block">
+    <h3>Clear memories</h3>
+    <p class="meta">
+      Permanently removes memories. Type <code>CLEAR</code> to confirm. Choose a type to scope, or
+      leave as "All types" to wipe the store.
+    </p>
+    <div class="bar">
+      <select id="clearType" aria-label="Clear scope">
+        <option value="">All types</option>
+        <option value="tool_usage">SQL pair</option>
+        <option value="text">Schema doc</option>
+      </select>
+      <input type="text" id="clearConfirm" placeholder='type CLEAR to confirm' />
+      <button id="doClear" class="danger">Clear</button>
+    </div>
+  </div>
+</section>
+
+<div id="rowModal" class="modal" role="dialog" aria-modal="true">
+  <div class="card">
+    <div class="bar" style="margin-bottom: 8px;">
+      <strong style="flex:1;">Memory</strong>
+      <button id="closeModal">Close</button>
+    </div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<!--
+  In-widget confirmation dialog. MCP App widgets run in a sandboxed iframe;
+  unless the host grants `allow-modals`, window.confirm() is silently ignored
+  (returns false), so a native confirm() gate makes destructive buttons appear
+  to do nothing. This DOM-based dialog works regardless of sandbox flags.
+  z-index sits above .modal so it can confirm an action from the row modal.
+-->
+<div id="confirmModal" class="modal" role="dialog" aria-modal="true" style="z-index: 200;">
+  <div class="card" style="flex: 0 1 420px;">
+    <div id="confirmMsg" style="margin-bottom: 12px; white-space: pre-wrap;"></div>
+    <div class="bar" style="justify-content: flex-end; margin-bottom: 0;">
+      <button id="confirmCancel">Cancel</button>
+      <button id="confirmOk" class="danger">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { App } from "./vendor/app-with-deps.js";
+
+// Single-database server: data_source_id is advisory per src/sqllens/server.py
+// docstrings on every admin tool ("accepted for client-contract stability but
+// is advisory: this server serves a single database"), but the tool argument
+// is still required, so the widget passes a stable placeholder for every call.
+const DSID = "memory-admin";
+const LIST_LIMIT = 1000;
+const PAGE_SIZE = 50;
+const DEMO_BUNDLE = {
+  sql_pairs: [
+    { question: "How many orders last week?",
+      sql: "SELECT COUNT(*) FROM orders WHERE created_at >= now() - interval '7 days';" }
+  ],
+  schema_docs: [
+    { content: "orders.created_at is UTC; orders.status is one of new/paid/shipped/cancelled." }
+  ]
+};
+
+const state = {
+  theme: "light",
+  // Browse
+  memories: [],
+  total: 0,
+  filter: "",
+  typeFilter: "",
+  page: 0,
+  // Stats
+  stats: null,
+  chart: null,
+};
+
+// ───────────────────────────── tool call layer ──────────────────────────────
+
+// Single seam for every server call. callServerTool is the *only* I/O channel
+// the widget uses; there is no fetch/XHR/WebSocket anywhere — see header
+// comment. The host brokers the tools/call request, so the widget renders
+// identically whether the host reaches the server directly or via a proxy.
+async function callTool(name, args) {
+  let result;
+  try {
+    result = await app.callServerTool({ name, arguments: args });
+  } catch (err) {
+    // The SDK request failed before reaching the server (transport closed,
+    // host timed out, callServerTool called before connect() finished). Treat
+    // as isError so it paints red, never as a silent green success.
+    return {
+      isError: true,
+      data: null,
+      message:
+        "Call to " + name + " failed before reaching the server: " +
+        (err && err.message ? err.message : String(err)),
+    };
+  }
+  const text =
+    (result && result.content && result.content[0] && result.content[0].text) || "";
+  let data = null;
+  try {
+    data = JSON.parse(text);
+  } catch (_e) {
+    // Tool returned a non-JSON message (RuntimeError → FastMCP formats as
+    // "Error executing tool <name>: <msg>"). Keep `data` null; the raw text
+    // becomes the message below.
+  }
+  if (result && result.isError) {
+    let msg = text || "tool returned isError with no message";
+    if (data && typeof data === "object") {
+      if (data.error) msg = String(data.error);
+      else if (Array.isArray(data.errors) && data.errors.length > 0)
+        msg = data.errors.length + " item(s) errored; see details below.";
+      else if (data.lossy === true)
+        msg = "Export was lossy: data that exists in the store was dropped.";
+    }
+    return { isError: true, data, message: msg };
+  }
+  return { isError: false, data, message: null };
+}
+
+// ───────────────────────────── DOM helpers ──────────────────────────────────
+
+// Hoisted: used by both the Browse pane and renderImportSummary. Builds the
+// same .card > .label + .value structure the CSS expects.
+function makeCard(label, value) {
+  const c = document.createElement("div");
+  c.className = "card";
+  const l = document.createElement("div");
+  l.className = "label";
+  l.textContent = label;
+  const v = document.createElement("div");
+  v.className = "value";
+  v.textContent = String(value);
+  c.append(l, v);
+  return c;
+}
+
+function emptyDiv(text) {
+  const d = document.createElement("div");
+  d.className = "empty";
+  d.textContent = text;
+  return d;
+}
+
+// ───────────────────────────── banners ──────────────────────────────────────
+
+const errbar = document.getElementById("errbar");
+const okbar = document.getElementById("okbar");
+
+// Monotonic counter stamped onto errbar by every showError. Used by
+// loadBrowse({preserveBanner}) to distinguish "the banner I asked to
+// preserve is still up" from "*some* banner is up" — without this, an
+// unrelated intervening showError (e.g. a row-click get_memory failure
+// during an in-flight silent refresh) would satisfy the preserveBanner
+// gate and silently drop the refresh's own list_memories failure.
+let _bannerSeq = 0;
+
+function showError(title, message, details) {
+  errbar.textContent = "";
+  errbar.dataset.seq = String(++_bannerSeq);
+  const head = document.createElement("div");
+  head.className = "head";
+  // Title + dismiss-× on the same row. The × is the only way to clear the
+  // banner on a user action (tab switches preserve error banners — the
+  // banner is the only signal that a partial/lossy/transport failure
+  // happened, and it must not vanish on an accidental misclick).
+  head.style.display = "flex";
+  head.style.justifyContent = "space-between";
+  head.style.gap = "8px";
+  const titleSpan = document.createElement("span");
+  titleSpan.textContent = title;
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.textContent = "×";
+  dismiss.title = "Dismiss";
+  dismiss.setAttribute("aria-label", "Dismiss error");
+  dismiss.style.cssText =
+    "background:transparent;border:0;color:inherit;font-size:18px;line-height:1;cursor:pointer;padding:0 4px;";
+  dismiss.addEventListener("click", () => errbar.classList.remove("on"));
+  head.append(titleSpan, dismiss);
+  errbar.appendChild(head);
+  const body = document.createElement("div");
+  body.textContent = message;
+  errbar.appendChild(body);
+  if (details) {
+    const pre = document.createElement("pre");
+    pre.textContent =
+      typeof details === "string" ? details : JSON.stringify(details, null, 2);
+    errbar.appendChild(pre);
+  }
+  errbar.classList.add("on");
+  okbar.classList.remove("on");
+}
+
+function showOk(message) {
+  okbar.textContent = message;
+  okbar.classList.add("on");
+  errbar.classList.remove("on");
+}
+
+function clearBanners() {
+  errbar.classList.remove("on");
+  okbar.classList.remove("on");
+}
+
+// ───────────────────────────── tabs ─────────────────────────────────────────
+
+const tabs = document.getElementById("tabs");
+tabs.addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-pane]");
+  if (!btn) return;
+  const pane = btn.dataset.pane;
+  for (const b of tabs.querySelectorAll("button")) b.classList.toggle("active", b === btn);
+  for (const p of document.querySelectorAll(".pane")) {
+    p.classList.toggle("active", p.id === "pane-" + pane);
+  }
+  // Only clear the success ribbon on tab switch — a live error banner must
+  // survive an accidental tab click. The user dismisses it via the × button
+  // on the banner itself (see showError).
+  okbar.classList.remove("on");
+  if (pane === "stats") {
+    if (state.stats == null) {
+      loadStats();
+    } else if (state.chart) {
+      // The chart may have been init'd on mount while this pane was
+      // display:none — ECharts measured a zero-width container and laid the
+      // bars out cramped on the left. A CSS display toggle fires no resize
+      // event, and the SDK's autoResize only tracks the iframe, so reflow
+      // explicitly now that the pane has its real width.
+      try { state.chart.resize(); } catch (_e) { /* reflow is best-effort */ }
+    }
+  }
+});
+
+// ───────────────────────────── Browse pane ──────────────────────────────────
+
+const browseBody = document.getElementById("browseBody");
+const browseMeta = document.getElementById("browseMeta");
+const filterInput = document.getElementById("filter");
+const typeFilterSelect = document.getElementById("typeFilter");
+
+filterInput.addEventListener("input", () => {
+  state.filter = filterInput.value;
+  state.page = 0;
+  renderBrowse();
+});
+typeFilterSelect.addEventListener("change", () => {
+  state.typeFilter = typeFilterSelect.value;
+  loadBrowse();
+});
+document.getElementById("refresh").addEventListener("click", loadBrowse);
+
+function filteredMemories() {
+  if (!state.filter) return state.memories;
+  const needle = state.filter.toLowerCase();
+  return state.memories.filter((m) => {
+    // Field names match the wire shape produced by _record_to_wire in
+    // src/sqllens/memory/admin.py: memory_id, memory_type, timestamp,
+    // last_hit_date. NOT id/type/created_at/last_hit_at — those exist only
+    // in the dev shim's mock and would silently render every row empty
+    // against a real server.
+    const fields = [m.memory_id, m.memory_type, m.question, m.sql, m.content, m.timestamp]
+      .map((v) => (v == null ? "" : String(v).toLowerCase()));
+    return fields.some((s) => s.includes(needle));
+  });
+}
+
+function renderBrowse() {
+  const filtered = filteredMemories();
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  if (state.page >= pages) state.page = pages - 1;
+  if (state.page < 0) state.page = 0;
+  const start = state.page * PAGE_SIZE;
+  const pageRows = filtered.slice(start, start + PAGE_SIZE);
+
+  let metaText = "showing " + filtered.length + " of " + state.memories.length;
+  if (state.total > state.memories.length) {
+    metaText += " (window of " + LIST_LIMIT + "; store has " + state.total + ")";
+  }
+  browseMeta.textContent = metaText;
+
+  browseBody.textContent = "";
+  if (state.memories.length === 0) {
+    browseBody.appendChild(emptyDiv("No memories in the store. Use Import to seed it."));
+    return;
+  }
+  if (filtered.length === 0) {
+    browseBody.appendChild(emptyDiv("No memories match the current filter."));
+    return;
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = "wrap";
+  const tbl = document.createElement("table");
+  const thead = document.createElement("thead");
+  const htr = document.createElement("tr");
+  ["id", "type", "preview", "hits", "created"].forEach((name) => {
+    const th = document.createElement("th");
+    th.textContent = name;
+    htr.appendChild(th);
+  });
+  thead.appendChild(htr);
+  tbl.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  for (const m of pageRows) {
+    const tr = document.createElement("tr");
+    tr.className = "click";
+    const cells = [
+      shortId(m.memory_id),
+      typeLabel(m.memory_type),
+      previewOf(m),
+      m.hit_count == null ? "" : String(m.hit_count),
+      m.timestamp || "",
+    ];
+    cells.forEach((cell, i) => {
+      const td = document.createElement("td");
+      if (i === 3) td.className = "num";
+      else if (i === 2) td.className = "trunc";
+      td.textContent = cell;
+      tr.appendChild(td);
+    });
+    tr.addEventListener("click", () => openRow(m.memory_id));
+    tbody.appendChild(tr);
+  }
+  tbl.appendChild(tbody);
+  wrap.appendChild(tbl);
+  browseBody.appendChild(wrap);
+
+  const pager = document.createElement("div");
+  pager.className = "pager";
+  const prev = document.createElement("button");
+  prev.textContent = "‹ Prev";
+  prev.disabled = state.page === 0;
+  prev.addEventListener("click", () => { state.page--; renderBrowse(); });
+  const next = document.createElement("button");
+  next.textContent = "Next ›";
+  next.disabled = state.page >= pages - 1;
+  next.addEventListener("click", () => { state.page++; renderBrowse(); });
+  const pos = document.createElement("span");
+  pos.className = "meta";
+  pos.textContent = "page " + (state.page + 1) + " / " + pages;
+  pager.append(prev, next, pos);
+  browseBody.appendChild(pager);
+}
+
+function shortId(id) {
+  if (!id) return "";
+  const s = String(id);
+  return s.length > 14 ? s.slice(0, 8) + "…" + s.slice(-4) : s;
+}
+
+// The server classifies every record as one of two internal memory_type
+// values (src/sqllens/memory/admin.py): "tool_usage" (a saved question→SQL
+// example) and "text" (a free-form schema/business-context doc). Those are
+// implementation labels; surface them in the curation-facing wording the
+// import bundle uses — "SQL pair" / "Schema doc".
+function typeLabel(t) {
+  if (t === "tool_usage") return "SQL pair";
+  if (t === "text") return "Schema doc";
+  return t == null ? "" : String(t);
+}
+
+function previewOf(m) {
+  // Question/sql for tool_usage rows; content for text rows. Use field
+  // presence rather than memory_type because get_memory_stats's
+  // top_hit_memories[] omits memory_type — every row there carries a
+  // question by construction (the stats helper only includes tool_usage).
+  if (m.question != null && m.question !== "") return truncate(m.question, 120);
+  if (m.sql != null && m.sql !== "") return truncate(m.sql, 80);
+  return truncate(m.content || "", 120);
+}
+
+function truncate(s, n) {
+  s = String(s).replace(/\s+/g, " ");
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+async function loadBrowse(opts) {
+  // preserveBanner: when the caller has already painted a more important
+  // error banner (e.g. partial-import failure) and only wants the table
+  // refreshed underneath it, a follow-up list_memories failure here must
+  // NOT overwrite that banner — its absence would silently hide the real
+  // failure under a generic "Failed to list memories" message.
+  //
+  // The check correlates by banner identity (errbar.dataset.seq snapshotted
+  // at dispatch and re-checked at response). A coarser "any banner is up"
+  // check would let an unrelated intervening showError (e.g. a row-click
+  // get_memory failure that paints its own banner mid-flight) satisfy the
+  // gate, silently dropping the refresh's own failure. The user-dismiss-via-×
+  // case is handled because dismissing removes the `on` class but does not
+  // change the seq; the bannerStillLive check below rejects that path too.
+  const callerWantsPreserve = !!(opts && opts.preserveBanner);
+  const expectedBannerSeq = callerWantsPreserve ? errbar.dataset.seq : null;
+  browseBody.textContent = "";
+  browseBody.appendChild(emptyDiv("Loading memories…"));
+  const args = { data_source_id: DSID, limit: LIST_LIMIT };
+  if (state.typeFilter) args.memory_type = state.typeFilter;
+  const res = await callTool("list_memories", args);
+  if (res.isError) {
+    const sameBannerStillLive =
+      callerWantsPreserve &&
+      errbar.classList.contains("on") &&
+      errbar.dataset.seq === expectedBannerSeq;
+    const preserve = sameBannerStillLive;
+    if (!preserve) {
+      showError("Failed to list memories", res.message, res.data);
+    } else {
+      console.warn("list_memories failed during silent refresh:", res.message);
+    }
+    browseBody.textContent = "";
+    browseBody.appendChild(emptyDiv(
+      preserve
+        ? "Could not refresh memories after the previous error."
+        : "Could not load memories — see the error banner above."
+    ));
+    return;
+  }
+  const payload = res.data || {};
+  state.memories = Array.isArray(payload.memories) ? payload.memories : [];
+  state.total = typeof payload.total === "number" ? payload.total : state.memories.length;
+  state.page = 0;
+  renderBrowse();
+}
+
+// ───────────────────────────── Row detail modal ─────────────────────────────
+
+const rowModal = document.getElementById("rowModal");
+const modalBody = document.getElementById("modalBody");
+document.getElementById("closeModal").addEventListener("click", () => {
+  rowModal.classList.remove("on");
+});
+rowModal.addEventListener("click", (ev) => {
+  if (ev.target === rowModal) rowModal.classList.remove("on");
+});
+
+// Sandbox-safe replacement for window.confirm(): a DOM dialog that resolves a
+// Promise<boolean>. window.confirm is blocked (silently returns false) inside
+// the sandboxed iframe unless the host sets allow-modals, which we cannot
+// assume — so every destructive gate awaits this instead.
+const confirmModal = document.getElementById("confirmModal");
+const confirmMsg = document.getElementById("confirmMsg");
+const confirmOkBtn = document.getElementById("confirmOk");
+const confirmCancelBtn = document.getElementById("confirmCancel");
+let confirmResolve = null;
+function closeConfirm(result) {
+  confirmModal.classList.remove("on");
+  const resolve = confirmResolve;
+  confirmResolve = null;
+  if (resolve) resolve(result);
+}
+function confirmDialog(message, { confirmLabel = "Confirm" } = {}) {
+  // Resolve any dialog already open (treat as cancel) before opening a new one.
+  if (confirmResolve) closeConfirm(false);
+  confirmMsg.textContent = message;
+  confirmOkBtn.textContent = confirmLabel;
+  confirmModal.classList.add("on");
+  confirmOkBtn.focus();
+  return new Promise((resolve) => { confirmResolve = resolve; });
+}
+confirmOkBtn.addEventListener("click", () => closeConfirm(true));
+confirmCancelBtn.addEventListener("click", () => closeConfirm(false));
+confirmModal.addEventListener("click", (ev) => {
+  if (ev.target === confirmModal) closeConfirm(false);
+});
+
+async function openRow(id) {
+  modalBody.textContent = "";
+  const loading = document.createElement("div");
+  loading.className = "meta";
+  loading.textContent = "Loading…";
+  modalBody.appendChild(loading);
+  rowModal.classList.add("on");
+  const res = await callTool("get_memory", { data_source_id: DSID, memory_id: id });
+  modalBody.textContent = "";
+  if (res.isError) {
+    // Single durable surface: the global error banner survives modal close
+    // and carries the dismiss × button. The modal-local note just points
+    // at it, so the two surfaces share the same lifecycle.
+    showError("Failed to load memory " + id, res.message, res.data);
+    const note = document.createElement("div");
+    note.className = "meta";
+    note.textContent = "Could not load memory — see the error banner above.";
+    modalBody.appendChild(note);
+    return;
+  }
+  const m = res.data || {};
+  renderRow(modalBody, m);
+  const actions = document.createElement("div");
+  actions.className = "bar";
+  actions.style.marginTop = "8px";
+  const del = document.createElement("button");
+  del.className = "danger";
+  del.textContent = "Delete this memory";
+  del.addEventListener("click", async () => {
+    const mid = m.memory_id || id;
+    if (!(await confirmDialog("Permanently delete memory " + mid + "?",
+      { confirmLabel: "Delete" }))) return;
+    const r = await callTool("delete_memory", { data_source_id: DSID, memory_id: mid });
+    if (r.isError) {
+      showError("Delete failed", r.message, r.data);
+    } else {
+      showOk("Deleted memory " + mid);
+      rowModal.classList.remove("on");
+      // Invalidate stats so the next visit to Stats refetches the new counts
+      // and top-hit list — single-row delete changes both.
+      state.stats = null;
+      loadBrowse();
+    }
+  });
+  actions.appendChild(del);
+  modalBody.appendChild(actions);
+}
+
+function renderRow(host, m) {
+  // Field names match _record_to_wire (src/sqllens/memory/admin.py).
+  const fields = [
+    ["memory_id", m.memory_id],
+    ["type", typeLabel(m.memory_type)],
+    ["timestamp", m.timestamp],
+    ["question", m.question],
+    ["sql", m.sql],
+    ["content", m.content],
+    ["hit_count", m.hit_count],
+    ["last_hit_date", m.last_hit_date],
+  ];
+  for (const [k, v] of fields) {
+    if (v == null || v === "") continue;
+    const row = document.createElement("div");
+    row.className = "row";
+    const kd = document.createElement("div");
+    kd.className = "k";
+    kd.textContent = k;
+    const vd = document.createElement("div");
+    vd.className = "v";
+    if (k === "sql" || (k === "content" && String(v).length > 80)) {
+      const pre = document.createElement("pre");
+      pre.textContent = String(v);
+      vd.appendChild(pre);
+    } else {
+      vd.textContent = String(v);
+    }
+    row.append(kd, vd);
+    host.appendChild(row);
+  }
+  if (m.embedding && Array.isArray(m.embedding)) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const kd = document.createElement("div");
+    kd.className = "k";
+    kd.textContent = "embedding";
+    const vd = document.createElement("div");
+    vd.className = "v meta";
+    vd.textContent = m.embedding.length + " dims (first 4: " +
+      m.embedding.slice(0, 4).map((x) => Number(x).toFixed(4)).join(", ") + "…)";
+    row.append(kd, vd);
+    host.appendChild(row);
+  }
+}
+
+// ───────────────────────────── Import pane ──────────────────────────────────
+
+const importJson = document.getElementById("importJson");
+const importMeta = document.getElementById("importMeta");
+const importResult = document.getElementById("importResult");
+
+document.getElementById("loadDemo").addEventListener("click", () => {
+  importJson.value = JSON.stringify(DEMO_BUNDLE, null, 2);
+  importMeta.textContent = "loaded demo bundle";
+});
+document.getElementById("clearImport").addEventListener("click", () => {
+  importJson.value = "";
+  importMeta.textContent = "";
+  importResult.textContent = "";
+});
+document.getElementById("importFile").addEventListener("change", async (ev) => {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    importJson.value = text;
+    importMeta.textContent = "loaded " + file.name + " (" + text.length + " chars)";
+  } catch (err) {
+    showError("Could not read file", err && err.message ? err.message : String(err));
+  }
+});
+
+document.getElementById("doImport").addEventListener("click", async () => {
+  clearBanners();
+  importResult.textContent = "";
+  let bundle;
+  try {
+    bundle = JSON.parse(importJson.value || "{}");
+  } catch (err) {
+    showError("Bundle JSON is not valid",
+      err && err.message ? err.message : String(err));
+    return;
+  }
+  if (typeof bundle !== "object" || bundle == null) {
+    showError("Bundle must be a JSON object",
+      "Expected an object with sql_pairs and/or schema_docs blocks.");
+    return;
+  }
+  const args = { data_source_id: DSID };
+  if (Array.isArray(bundle.sql_pairs)) args.sql_pairs = bundle.sql_pairs;
+  if (Array.isArray(bundle.schema_docs)) args.schema_docs = bundle.schema_docs;
+  if (!args.sql_pairs && !args.schema_docs) {
+    showError("Bundle is empty",
+      "Provide at least one of sql_pairs (array) or schema_docs (array).");
+    return;
+  }
+  importMeta.textContent = "importing…";
+  const res = await callTool("add_memories", args);
+  // Per the isError contract, a partial add_memories (errors[] non-empty)
+  // reaches the client as isError=true and must paint red, never green.
+  // The server's structured body is still returned so the user sees which
+  // rows failed.
+  if (res.isError) {
+    const d = res.data || {};
+    const summary =
+      "saved=" + (d.saved_count ?? 0) +
+      " duplicate=" + (d.duplicate_count ?? 0) +
+      " skipped=" + (d.skipped_count ?? 0) +
+      " errors=" + (Array.isArray(d.errors) ? d.errors.length : "?");
+    showError("Import failed — " + res.message, summary,
+      Array.isArray(d.errors) && d.errors.length ? d.errors : null);
+    importMeta.textContent = "import failed";
+    renderImportSummary(importResult, d, true);
+    // Refresh Browse silently so a follow-up list_memories failure cannot
+    // overwrite the import-error banner the user is reading. Stats may also
+    // have changed if any rows landed (partial); invalidate so a Stats
+    // visit refetches.
+    state.stats = null;
+    loadBrowse({ preserveBanner: true });
+    return;
+  }
+  const d = res.data || {};
+  importMeta.textContent =
+    "saved " + (d.saved_count ?? 0) +
+    ", duplicate " + (d.duplicate_count ?? 0) +
+    ", skipped " + (d.skipped_count ?? 0);
+  showOk("Imported " + (d.saved_count ?? 0) + " memorie(s).");
+  // Counts and top-hit list change on import; invalidate stats too.
+  state.stats = null;
+  renderImportSummary(importResult, d, false);
+  loadBrowse();
+});
+
+function renderImportSummary(host, d, hadError) {
+  host.textContent = "";
+  const block = document.createElement("div");
+  block.className = "section-block";
+  block.style.marginTop = "8px";
+  const head = document.createElement("h3");
+  head.textContent = hadError ? "Import result (with errors)" : "Import result";
+  block.appendChild(head);
+  const cards = document.createElement("div");
+  cards.className = "cards";
+  const counters = [
+    ["Saved", d.saved_count ?? 0],
+    ["Duplicate", d.duplicate_count ?? 0],
+    ["Skipped", d.skipped_count ?? 0],
+    ["Errors", Array.isArray(d.errors) ? d.errors.length : 0],
+  ];
+  for (const [label, value] of counters) cards.appendChild(makeCard(label, value));
+  block.appendChild(cards);
+  host.appendChild(block);
+}
+
+// ───────────────────────────── Stats pane ───────────────────────────────────
+
+const statsCards = document.getElementById("statsCards");
+const statsHint = document.getElementById("statsHint");
+const statsChartEl = document.getElementById("statschart");
+document.getElementById("refreshStats").addEventListener("click", () => loadStats());
+
+async function loadStats() {
+  statsCards.textContent = "";
+  statsCards.appendChild(makeCard("Loading…", ""));
+  const res = await callTool("get_memory_stats", { data_source_id: DSID });
+  if (res.isError) {
+    showError("Failed to load stats", res.message, res.data);
+    statsCards.textContent = "";
+    statsCards.appendChild(makeCard("Stats", "—"));
+    return;
+  }
+  const s = res.data || {};
+  state.stats = s;
+  statsCards.textContent = "";
+  const counts = [
+    [typeLabel("tool_usage"), s.tool_usage_count ?? 0],
+    [typeLabel("text"), s.text_count ?? 0],
+    ["hits (last 30d)", s.total_hits_last_30d ?? 0],
+    ["top-hit rows", Array.isArray(s.top_hit_memories) ? s.top_hit_memories.length : 0],
+  ];
+  for (const [label, value] of counts) statsCards.appendChild(makeCard(label, value));
+  drawStatsChart(s.top_hit_memories || []);
+}
+
+function drawStatsChart(rows) {
+  disposeChart();
+  if (!rows || rows.length === 0) {
+    statsChartEl.innerHTML = "";
+    statsChartEl.style.height = "auto";
+    const d = document.createElement("div");
+    d.className = "empty-chart";
+    d.textContent =
+      "No hit history yet. Run query_database against a saved memory to populate this chart.";
+    statsChartEl.appendChild(d);
+    statsHint.textContent = "";
+    return;
+  }
+  statsChartEl.style.height = "320px";
+  const labels = rows.map((r) => previewOf(r));
+  const counts = rows.map((r) => r.hit_count || 0);
+  try {
+    state.chart = echarts.init(
+      statsChartEl,
+      state.theme === "dark" ? "dark" : null,
+      { renderer: "svg" }
+    );
+    state.chart.setOption({
+      tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+      grid: { left: 8, right: 16, bottom: 8, top: 16, containLabel: true },
+      xAxis: { type: "value", name: "hits" },
+      yAxis: { type: "category", data: labels.slice().reverse(), axisLabel: { width: 280, overflow: "truncate" } },
+      series: [
+        {
+          type: "bar",
+          data: counts.slice().reverse(),
+          itemStyle: { color: "#2563eb" },
+          label: { show: true, position: "right" },
+        },
+      ],
+    });
+    statsHint.textContent = "Showing " + rows.length + " top-hit memorie(s).";
+  } catch (err) {
+    statsChartEl.innerHTML = "";
+    const d = document.createElement("div");
+    d.className = "empty-chart";
+    d.textContent = "Could not render chart: " + (err && err.message ? err.message : err);
+    statsChartEl.appendChild(d);
+  }
+}
+
+function disposeChart() {
+  if (state.chart) {
+    try { state.chart.dispose(); } catch (_e) { /* swallow — dispose must not block re-init */ }
+    state.chart = null;
+  }
+}
+
+// ───────────────────────────── Danger zone ──────────────────────────────────
+
+// Export download cascade — same tiered approach as query_results.html. MCP
+// App iframes are commonly sandboxed without allow-downloads, and Inspector
+// doesn't grant clipboard-write permissions-policy, so the obvious paths
+// silently no-op there. Cascade: ui/download-file → clipboard → execCommand
+// → inline textarea overlay (always works).
+async function offerDownload(filename, mimeType, text, warnings) {
+  const warningsTail =
+    Array.isArray(warnings) && warnings.length > 0
+      ? " Warnings: " + warnings.join("; ")
+      : "";
+  const caps = (app.getHostCapabilities && app.getHostCapabilities()) || {};
+  if (caps.downloadFile) {
+    try {
+      await app.downloadFile({
+        contents: [
+          { type: "resource",
+            resource: { uri: filename, mimeType: mimeType, text: text } },
+        ],
+      });
+      showOk("Exported via host download (" + filename + ")." + warningsTail);
+      return;
+    } catch (err) {
+      console.warn("ui/download-file failed:", err);
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    showOk(
+      "Export copied to clipboard (" + filename + ", " + text.length + " chars)." +
+      warningsTail
+    );
+    return;
+  } catch (err) {
+    console.warn("clipboard.writeText failed:", err);
+  }
+  if (copyViaExecCommand(text)) {
+    showOk("Export copied to clipboard (" + filename + ")." + warningsTail);
+    return;
+  }
+  // The textarea overlay IS the visible success surface; surface warnings
+  // inside the modal as a grey meta line — using showError here would
+  // paint red for a non-lossy warning (e.g. "store is empty"), making the
+  // same server response look like a failure on one cascade branch and a
+  // success on three others. Lossy warnings already short-circuited to red
+  // before this function was called (export handler branches on isError).
+  showOverlay(filename, text, warningsTail.trim());
+}
+
+function copyViaExecCommand(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed"; ta.style.left = "-9999px"; ta.style.top = "0";
+  ta.setAttribute("readonly", "");
+  document.body.appendChild(ta);
+  let ok = false;
+  try {
+    ta.select(); ta.setSelectionRange(0, ta.value.length);
+    ok = document.execCommand("copy");
+  } catch (err) {
+    console.warn("execCommand('copy') failed:", err);
+    ok = false;
+  } finally { ta.remove(); }
+  return ok;
+}
+
+function showOverlay(filename, text, warningNote) {
+  modalBody.textContent = "";
+  const hint = document.createElement("div");
+  hint.className = "meta";
+  hint.style.marginBottom = "6px";
+  hint.textContent =
+    "Host blocked the file download and clipboard. Select all and copy (" + filename + "):";
+  const ta = document.createElement("textarea");
+  ta.readOnly = true;
+  ta.value = text;
+  ta.style.minHeight = "240px";
+  modalBody.append(hint, ta);
+  if (warningNote) {
+    const warn = document.createElement("div");
+    warn.className = "meta";
+    warn.style.marginTop = "6px";
+    warn.textContent = warningNote;
+    modalBody.appendChild(warn);
+  }
+  rowModal.classList.add("on");
+  ta.focus(); ta.select();
+}
+
+const exportMeta = document.getElementById("exportMeta");
+for (const btn of document.querySelectorAll('button[data-export]')) {
+  btn.addEventListener("click", async () => {
+    clearBanners();
+    const format = btn.dataset.export;
+    exportMeta.textContent = "exporting " + format + "…";
+    const res = await callTool("export_memories", { data_source_id: DSID, format });
+    if (res.isError) {
+      const d = res.data || {};
+      showError("Export failed (" + format + ")", res.message, d.warnings || d);
+      exportMeta.textContent = "export failed";
+      return;
+    }
+    const d = res.data || {};
+    const warnings = Array.isArray(d.warnings) ? d.warnings : [];
+    const resolvedFormat = d.format || format;
+    const filename = "memory-export." + resolvedFormat;
+    const mime = resolvedFormat === "csv" ? "text/csv" : "application/json";
+    // Server already returns `data` as a serialized string for BOTH formats:
+    // admin.export_memories does json.dumps(...) for JSON and csv.writer's
+    // buf.getvalue() for CSV. Re-stringifying the JSON string would emit a
+    // double-encoded blob ("\"{\\\"sql_pairs\\\":...}\""). Just use it as-is.
+    const text = String(d.data == null ? "" : d.data);
+    exportMeta.textContent =
+      "exported " + text.length + " chars" +
+      (warnings.length ? " (warnings: " + warnings.length + ")" : "");
+    // Pass the warnings into offerDownload so the success banner can include
+    // them inline rather than being clobbered by a follow-up showOk(...).
+    await offerDownload(filename, mime, text, warnings);
+  });
+}
+
+document.getElementById("doDelete").addEventListener("click", async () => {
+  clearBanners();
+  const id = document.getElementById("delId").value.trim();
+  if (!id) {
+    showError("No memory id", "Enter a memory id to delete.");
+    return;
+  }
+  if (!(await confirmDialog("Permanently delete memory " + id + "?",
+    { confirmLabel: "Delete" }))) return;
+  const res = await callTool("delete_memory", { data_source_id: DSID, memory_id: id });
+  if (res.isError) {
+    showError("Delete failed", res.message, res.data);
+    return;
+  }
+  showOk("Deleted memory " + id + ".");
+  document.getElementById("delId").value = "";
+  // Counts and top-hit list change with any single-row delete; force a refetch.
+  state.stats = null;
+  loadBrowse();
+});
+
+document.getElementById("doClear").addEventListener("click", async () => {
+  clearBanners();
+  const confirmText = document.getElementById("clearConfirm").value;
+  if (confirmText !== "CLEAR") {
+    showError("Confirm required",
+      'Type CLEAR exactly (uppercase) in the confirmation box to enable the action.');
+    return;
+  }
+  const scope = document.getElementById("clearType").value;
+  const args = { data_source_id: DSID };
+  if (scope) args.memory_type = scope;
+  const label = scope ? ("all " + scope + " memories") : "every memory in the store";
+  if (!(await confirmDialog("This will permanently remove " + label + ". Proceed?",
+    { confirmLabel: "Clear" }))) return;
+  const res = await callTool("clear_memories", args);
+  if (res.isError) {
+    showError("Clear failed", res.message, res.data);
+    return;
+  }
+  const d = res.data || {};
+  showOk("Cleared " + (d.deleted_count ?? 0) + " memorie(s).");
+  document.getElementById("clearConfirm").value = "";
+  loadBrowse();
+  state.stats = null;
+});
+
+// ───────────────────────────── theming + bootstrap ─────────────────────────
+
+function applyHostContext(ctx) {
+  if (!ctx) return;
+  const theme = ctx.theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  const vars = ctx.styles && ctx.styles.variables;
+  if (vars) {
+    for (const [k, v] of Object.entries(vars)) {
+      if (typeof v === "string") document.documentElement.style.setProperty(k, v);
+    }
+  }
+  if (theme !== state.theme) {
+    state.theme = theme;
+    if (state.stats) drawStatsChart(state.stats.top_hit_memories || []);
+  }
+}
+
+function applyHostContextSafe() {
+  try {
+    applyHostContext(app.getHostContext());
+  } catch (err) {
+    console.warn("host theming failed (non-fatal):", err);
+  }
+}
+
+const app = new App(
+  { name: "sqllens-memory-admin", version: "1.0.0" },
+  {},
+  { autoResize: true }
+);
+app.onhostcontextchanged = applyHostContextSafe;
+
+app.connect()
+  .then(async () => {
+    applyHostContextSafe();
+    // Acceptance criterion: on mount the widget renders the store via
+    // callServerTool (list_memories + get_memory_stats). Issued in parallel.
+    await Promise.all([loadBrowse(), loadStats()]);
+  })
+  .catch((err) => {
+    showError(
+      "Failed to connect to host",
+      err && err.message ? err.message : String(err)
+    );
+  });
+</script>
+</body>
+</html>
