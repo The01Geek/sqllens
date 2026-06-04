@@ -57,6 +57,8 @@ The first time SQL Lens runs, it downloads roughly 80 MB of embedding model weig
 
 Note: A slow startup or first query never blocks the server from accepting requests. If the warm-up cannot finish (for example, the database is briefly unreachable), SQL Lens still starts and retries the next time you ask a question.
 
+Note: SQL Lens may run more than one query to answer a single question. When its first attempt does not match your database, for example because a column or table name is not what it expected, it checks the schema, corrects the query, and tries again. This is most common on a brand-new database, after memory has been cleared, or when column names are unusual. As long as a corrected attempt succeeds, you receive the answer. Earlier versions could report a "SQL execution error" in this case even though the agent had already found the right answer on its retry; that recovered answer now reaches you.
+
 Expected answer: 2 albums.
 
 On Claude Desktop or claude.ai, each `query_database` answer is also shown as an interactive widget alongside the same plain-text answer. A result that contains a table appears as an interactive grid you can sort, filter, page through, and export to CSV. A chart-shaped result appears as an interactive Apache ECharts widget (bar, line, area, scatter, pie, or heatmap) that follows the assistant's theme and resizes responsively. The widget reports its own size, so on hosts that support this a small result fits its frame with no surrounding empty space and no extra scrollbar, while larger results get the full height they need. Other assistants display the Markdown text answer only. No setup is required either way.

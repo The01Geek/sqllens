@@ -38,6 +38,7 @@ from sqllens.safety.readonly import (
     UnsafeSqlError,
     assert_select_only,
     first_sql_keyword,
+    is_introspection_query,
     is_read_shaped,
 )
 from sqllens.safety.rls import RlsError, apply_rls
@@ -59,6 +60,7 @@ __all__ = [
     "apply_rls",
     "assert_select_only",
     "first_sql_keyword",
+    "is_introspection_query",
     "is_read_shaped",
     "mark_truncation",
 ]
