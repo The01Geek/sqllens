@@ -112,6 +112,20 @@ def parse_json(text: str) -> MemoryBundle:
         raw = json.loads(text)
     except json.JSONDecodeError as exc:
         raise BundleFormatError(f"invalid JSON: {exc}") from exc
+    except RecursionError as exc:
+        # CPython's _json C scanner recurses on the native stack and bypasses
+        # ``sys.getrecursionlimit()`` for several thousand levels before
+        # raising ``RecursionError("maximum recursion depth exceeded while
+        # decoding a JSON array...")``. A 20 KB ``[[[…]]]`` bomb sails past
+        # the ``MAX_BUNDLE_BYTES`` size cap and blows the scanner stack
+        # mid-parse. ``RecursionError`` is an ``Exception`` subclass but
+        # NOT a ``JSONDecodeError``, so without this handler the unstructured
+        # error propagates past the ``except BundleFormatError`` callers in
+        # ``server.import_memory`` / ``cli.import_memory``, violating the
+        # CLAUDE.md "structured signal, never an unguarded crash" contract.
+        raise BundleFormatError(
+            "bundle JSON is too deeply nested to parse safely"
+        ) from exc
     if not isinstance(raw, dict):
         raise BundleFormatError("bundle root must be a JSON object")
     try:

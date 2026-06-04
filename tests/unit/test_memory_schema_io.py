@@ -121,6 +121,21 @@ def test_parse_csv_rejects_oversize_bundle() -> None:
         parse_csv(payload)
 
 
+def test_parse_json_rejects_deeply_nested_under_size_cap() -> None:
+    # CPython's _json C scanner recurses on the native stack and raises
+    # RecursionError beyond ~5-9k depth. RecursionError is an Exception but
+    # NOT a JSONDecodeError, so without the dedicated handler the unstructured
+    # error escapes past every BundleFormatError caller in server.import_memory
+    # and cli.import_memory — violating the CLAUDE.md structured-signal rule
+    # AND the _enforce_size_cap docstring's "refused before allocation"
+    # promise (a 20KB nested-array bomb is well below MAX_BUNDLE_BYTES).
+    depth = 10_000
+    payload = "[" * depth + "1" + "]" * depth
+    assert len(payload.encode("utf-8")) < MAX_BUNDLE_BYTES
+    with pytest.raises(BundleFormatError, match="deeply nested"):
+        parse_json(payload)
+
+
 def test_parse_json_rejects_multibyte_oversize_below_codepoint_cap() -> None:
     # Pins the docstring's promise that the cap is measured against UTF-8
     # bytes, not code points. The pad is "🚀" (4 UTF-8 bytes per code point):
