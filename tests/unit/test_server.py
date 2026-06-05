@@ -7,8 +7,9 @@ Pins the apps-spec contract: a single widget resource is registered with the
 ``text/html;profile=mcp-app`` mime, the consolidated ``query_database`` tool
 advertises ``_meta.ui.resourceUri`` pointing at it, and ``list_data_sources``
 carries no ``_meta.ui`` (the widget is query-only). The one tool attaches
-whichever structured payload(s) the agent produced — chart, table (+ query),
-or none — and the widget picks chart > table > text precedence.
+the ordered ``_meta["sqllens/blocks"]`` array (the single structured-data
+channel for the rendered answer); the widget renders each block in stream
+order with no chart/table precedence.
 """
 
 from __future__ import annotations
@@ -111,26 +112,32 @@ async def test_widget_resource_serves_html(tmp_path: Path) -> None:
     assert "echarts.init" in body
 
 
-async def test_query_database_returns_calltoolresult_with_meta_when_table(
+async def test_query_database_returns_calltoolresult_with_meta_when_table_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
 
-    payload = {"columns": ["a"], "rows": [["1"]], "column_types": {},
-               "row_count": 1, "truncated": 0}
+    table_block = {"type": "table", "columns": ["a"], "rows": [["1"]],
+                   "column_types": {}, "row_count": 1, "truncated": 0}
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "| a |\n|---|\n| 1 |", payload, None, None, None, None
+        return "| a |\n|---|\n| 1 |", [table_block], None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
     result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
     assert isinstance(result, CallToolResult)
     assert result.meta == {
-        "sqllens/table": payload,
+        "sqllens/blocks": [table_block],
         "sqllens/conversation": {"conversation_id": "c-1"},
     }
+    # Retired flat channels must NOT appear in _meta — apps-aware hosts and
+    # downstream structured-data consumers must migrate to the ordered blocks
+    # array. A regression that re-introduces either key reaches the client
+    # silently otherwise.
+    assert "sqllens/table" not in result.meta
+    assert "sqllens/chart" not in result.meta
     assert result.content[0].text.startswith("| a |\n|---|\n| 1 |")
     assert "Conversation ID: `c-1`" in result.content[0].text
 
@@ -141,58 +148,59 @@ async def test_query_database_meta_carries_query_info_when_present(
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
 
-    payload = {"columns": ["a"], "rows": [["1"]], "column_types": {},
-               "row_count": 1, "truncated": 0}
+    table_block = {"type": "table", "columns": ["a"], "rows": [["1"]],
+                   "column_types": {}, "row_count": 1, "truncated": 0}
     query_info = {"sql": "SELECT a FROM t", "query_type": "SELECT",
                   "row_count": 1}
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "md\n\n```sql\nSELECT a FROM t\n```", payload, query_info, None, None, None
+        return "md\n\n```sql\nSELECT a FROM t\n```", [table_block], query_info, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
     result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
     assert isinstance(result, CallToolResult)
     assert result.meta == {
-        "sqllens/table": payload,
+        "sqllens/blocks": [table_block],
         "sqllens/query": query_info,
         "sqllens/conversation": {"conversation_id": "c-1"},
     }
 
 
-async def test_query_database_meta_query_info_without_table(
+async def test_query_database_meta_query_info_without_blocks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # SELECT returning zero rows: empty DataFrame → no table payload, but the
-    # executed SQL is still surfaced via _meta and the text block.
+    # SELECT returning zero rows: empty DataFrame → no blocks emitted, but the
+    # executed SQL is still surfaced via _meta and the text block of markdown.
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
     query_info = {"sql": "SELECT 1 WHERE 1=0", "query_type": "SELECT"}
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "no rows\n\n```sql\nSELECT 1 WHERE 1=0\n```", None, query_info, None, None, None
+        return "no rows\n\n```sql\nSELECT 1 WHERE 1=0\n```", [], query_info, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
     result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
     assert isinstance(result, CallToolResult)
+    # Empty blocks list → no sqllens/blocks key (only non-empty attaches).
     assert result.meta == {
         "sqllens/query": query_info,
         "sqllens/conversation": {"conversation_id": "c-1"},
     }
 
 
-async def test_query_database_returns_conversation_meta_when_no_table(
+async def test_query_database_returns_conversation_meta_when_no_blocks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Even a plain text answer (no table, no query_info) carries the
+    # Even a plain text answer (no blocks, no query_info) carries the
     # conversation id now — in _meta and as a plain-text footer — so the caller
     # can thread the next turn.
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "just text", None, None, None, None, None
+        return "just text", [], None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -214,7 +222,7 @@ async def test_query_database_mints_and_threads_conversation_id(
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
         seen["conversation_id"] = conversation_id
-        return "answer", None, None, None, None, None
+        return "answer", [], None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -227,10 +235,11 @@ async def test_query_database_mints_and_threads_conversation_id(
     assert f"Conversation ID: `{minted}`" in result.content[0].text
 
 
-# ───────────────────────── chart payload (unified tool) ─────────────────────
+# ───────────────────────── ordered multi-block payloads ─────────────────────
 
 
-_CHART_PAYLOAD = {
+_CHART_BLOCK = {
+    "type": "chart",
     "chart_type": "bar",
     "title": "T",
     "x": {"field": "x", "label": "X", "type": "category"},
@@ -257,7 +266,7 @@ async def test_query_database_meta_carries_memory_info_when_present(
     }
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "answer", None, None, None, memory_info, None
+        return "answer", [], None, memory_info, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
@@ -269,55 +278,65 @@ async def test_query_database_meta_carries_memory_info_when_present(
     }
 
 
-async def test_query_database_returns_chart_meta_when_chart(
+async def test_query_database_returns_chart_block_in_blocks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "rendered chart", None, None, _CHART_PAYLOAD, None, None
+        return "rendered chart", [_CHART_BLOCK], None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
     result = await _query_database_fn(mcp)("chart it", _StubCtx(), conversation_id="c-1")
     assert isinstance(result, CallToolResult)
     assert result.meta == {
-        "sqllens/chart": _CHART_PAYLOAD,
+        "sqllens/blocks": [_CHART_BLOCK],
         "sqllens/conversation": {"conversation_id": "c-1"},
     }
+    # The retired flat sqllens/chart key must NOT be present.
+    assert "sqllens/chart" not in result.meta
     assert result.content[0].text.startswith("rendered chart")
     assert "Conversation ID: `c-1`" in result.content[0].text
 
 
-async def test_query_database_attaches_both_chart_and_table(
+async def test_query_database_attaches_ordered_multi_block_payload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Edge case: a single request that yields both a DataFrame and a
-    # ChartComponent. The server attaches both channels; the widget applies
-    # the chart > table precedence, so this resolves deterministically without
-    # double-rendering or erroring at the tool boundary.
+    # AC #2 for #194: a query that yields multiple artifacts returns
+    # _meta["sqllens/blocks"] as an ordered array of multiple typed blocks,
+    # with NO sqllens/chart and NO sqllens/table keys anywhere in _meta. The
+    # widget renders the blocks in stream order — no chart-wins precedence.
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
 
-    table = {"columns": ["x", "y"], "rows": [["a", "1"]], "column_types": {},
-             "row_count": 1, "truncated": 0}
+    table_block = {"type": "table", "columns": ["x", "y"], "rows": [["a", "1"]],
+                   "column_types": {}, "row_count": 1, "truncated": 0}
+    text_block = {"type": "text", "text": "Here is the breakdown:"}
+    blocks = [_CHART_BLOCK, text_block, table_block]
     query_info = {"sql": "SELECT x, y FROM t", "query_type": "SELECT",
                   "row_count": 1}
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "answer", table, query_info, _CHART_PAYLOAD, None, None
+        return "answer", blocks, query_info, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
     result = await _query_database_fn(mcp)("chart and table", _StubCtx(), conversation_id="c-1")
     assert isinstance(result, CallToolResult)
     assert result.meta == {
-        "sqllens/chart": _CHART_PAYLOAD,
-        "sqllens/table": table,
+        "sqllens/blocks": blocks,  # ordered, with the chart-text-table sequence preserved
         "sqllens/query": query_info,
         "sqllens/conversation": {"conversation_id": "c-1"},
     }
+    # Order preservation: the type sequence in _meta must match the source.
+    assert [b["type"] for b in result.meta["sqllens/blocks"]] == [
+        "chart", "text", "table",
+    ]
+    # Retired flat keys absent — AC #2's "no sqllens/chart and no sqllens/table".
+    assert "sqllens/chart" not in result.meta
+    assert "sqllens/table" not in result.meta
 
 
 # ───────────────────────── agent trace (unified tool) ───────────────────────
@@ -348,7 +367,7 @@ async def test_query_database_meta_carries_agent_trace_when_present(
     mcp = build_server(cfg)
 
     async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
-        return "answer", None, None, None, None, _AGENT_TRACE
+        return "answer", [], None, None, _AGENT_TRACE
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 

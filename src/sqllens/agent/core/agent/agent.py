@@ -1038,9 +1038,17 @@ class Agent:
                     conversation.add_message(
                         Message(role="assistant", content=response.content)
                     )
+                    # The terminal answer is "answer-marked" via ``data={"is_answer":
+                    # True}``, sharing one marker shape with ``emit_text`` so the
+                    # MCP-layer block builder (components_to_blocks) can include
+                    # deliberate prose without leaking intermediate reasoning TEXT
+                    # (yielded above when UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT
+                    # is on).
                     yield UiComponent(
                         rich_component=RichTextComponent(
-                            content=response.content, markdown=True
+                            content=response.content,
+                            markdown=True,
+                            data={"is_answer": True},
                         ),
                         simple_component=SimpleTextComponent(text=response.content),
                     )
@@ -1074,7 +1082,9 @@ You can:
 
             yield UiComponent(
                 rich_component=RichTextComponent(
-                    content=warning_message, markdown=True
+                    content=warning_message,
+                    markdown=True,
+                    data={"is_answer": True},
                 ),
                 simple_component=SimpleTextComponent(
                     text=f"Tool limit reached after {tool_iterations} executions. Task may be incomplete."

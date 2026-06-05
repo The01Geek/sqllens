@@ -25,7 +25,6 @@ from sqllens.tools.query_database import (
     AgentRunError,
     prime_agent,
     query_database_impl,
-    query_database_impl_with_table,
     query_database_impl_with_widgets,
 )
 
@@ -319,49 +318,60 @@ async def test_happy_path_returns_markdown(
 
 
 @pytest.mark.asyncio
-async def test_with_table_returns_payload_on_dataframe(
+async def test_with_widgets_returns_table_block_on_dataframe(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
 ) -> None:
-    """The sibling returns ``(markdown, dict, query_info)`` with a DataFrame."""
+    """A DataFrame in the stream → one ``{"type": "table", ...}`` block."""
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     stub = agent_stub_factory([make_dataframe([{"name": "Alice", "age": 30}])])
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, table, query_info = await query_database_impl_with_table(
-        cfg, "list users"
+    markdown, blocks, query_info, _memory, _trace = (
+        await query_database_impl_with_widgets(cfg, "list users")
     )
 
     assert "| name | age |" in markdown
-    assert table is not None
-    assert table["columns"] == ["name", "age"]
-    assert table["rows"] == [["Alice", "30"]]
+    assert len(blocks) == 1
+    assert blocks[0]["type"] == "table"
+    assert blocks[0]["columns"] == ["name", "age"]
+    assert blocks[0]["rows"] == [["Alice", "30"]]
     # No run_sql STATUS_CARD in this stub stream → no query_info, no SQL block.
     assert query_info is None
     assert "```sql" not in markdown
 
 
 @pytest.mark.asyncio
-async def test_with_table_returns_none_table_on_text_only(
+async def test_with_widgets_returns_empty_blocks_on_text_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
 ) -> None:
-    """No DataFrame in the stream → ``table`` is ``None`` (apps fallback)."""
+    """No DataFrame/chart in the stream → ``blocks`` carries only the text block.
+
+    The agent's terminal answer TEXT is answer-marked (see
+    ``agent/core/agent/agent.py``) so it surfaces as a text block; tests using
+    bare ``RichTextComponent`` rely on the last-text-fallback to emit the same
+    block. Either way, a text-only stream still produces a one-element
+    ``blocks`` list — never an empty array unless the answer truly had no
+    rendered prose.
+    """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     stub = agent_stub_factory([make_text_component("text answer")])
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, table, query_info = await query_database_impl_with_table(cfg, "q")
+    markdown, blocks, query_info, _memory, _trace = (
+        await query_database_impl_with_widgets(cfg, "q")
+    )
 
     assert markdown == "text answer"
-    assert table is None
+    assert blocks == [{"type": "text", "text": "text answer"}]
     assert query_info is None
 
 
 @pytest.mark.asyncio
-async def test_with_table_surfaces_executed_sql(
+async def test_with_widgets_surfaces_executed_sql(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
@@ -390,18 +400,19 @@ async def test_with_table_surfaces_executed_sql(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, table, query_info = await query_database_impl_with_table(
-        cfg, "list users"
+    markdown, blocks, query_info, _memory, _trace = (
+        await query_database_impl_with_widgets(cfg, "list users")
     )
 
     assert query_info == {"sql": sql, "query_type": "SELECT", "row_count": 1}
-    assert table is not None
+    # Table block was emitted (from the DataFrame component).
+    assert any(b["type"] == "table" for b in blocks)
     assert f"```sql\n{sql}\n```" in markdown
     assert markdown.startswith("| name | age |")
 
 
 @pytest.mark.asyncio
-async def test_with_table_no_sql_card_means_no_sql_block(
+async def test_with_widgets_no_sql_card_means_no_sql_block(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
@@ -423,13 +434,13 @@ async def test_with_table_no_sql_card_means_no_sql_block(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, table, query_info = await query_database_impl_with_table(
-        cfg, "list users"
+    markdown, blocks, query_info, _memory, _trace = (
+        await query_database_impl_with_widgets(cfg, "list users")
     )
 
     assert query_info is None
     assert "```sql" not in markdown
-    assert table is not None
+    assert any(b["type"] == "table" for b in blocks)
 
 
 def _chart_spec(rows, **over):
@@ -448,16 +459,12 @@ def _chart_spec(rows, **over):
 
 
 @pytest.mark.asyncio
-async def test_with_widgets_returns_chart_payload(
+async def test_with_widgets_returns_chart_block(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
 ) -> None:
-    """A ChartComponent in the stream → a structured chart payload.
-
-    This is the path the consolidated ``query_database`` tool uses to render a
-    chart; it was previously the ``visualize_data`` tool's job.
-    """
+    """A ChartComponent in the stream → a ``{"type": "chart", ...}`` block."""
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     rows = [{"genre": "Rock", "revenue": 1200}, {"genre": "Jazz", "revenue": 800}]
     stub = agent_stub_factory(
@@ -468,32 +475,33 @@ async def test_with_widgets_returns_chart_payload(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, table, _query_info, chart, _memory_info, _trace = (
+    markdown, blocks, _query_info, _memory, _trace = (
         await query_database_impl_with_widgets(cfg, "revenue per genre")
     )
 
+    # The text block (the agent's "answer" prose, here from last-text-fallback)
+    # AND the chart block both appear, in stream order.
     assert "Here is the chart:" in markdown
-    assert table is None
-    assert chart is not None
-    assert chart["chart_type"] == "bar"
-    assert chart["data"] == rows
+    chart_blocks = [b for b in blocks if b["type"] == "chart"]
+    assert len(chart_blocks) == 1
+    assert chart_blocks[0]["chart_type"] == "bar"
+    assert chart_blocks[0]["data"] == rows
 
 
 @pytest.mark.asyncio
-async def test_with_widgets_chart_and_dataframe_both_present(
+async def test_with_widgets_chart_and_dataframe_yield_ordered_blocks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
 ) -> None:
-    """Both a DataFrame and a ChartComponent in one stream → both payloads.
+    """Both a DataFrame and a ChartComponent in one stream → two ordered blocks.
 
-    The server attaches both _meta channels and the widget applies chart-wins
-    precedence; the impl simply returns both, deterministically, without error.
+    #194's "ordered multi-block" core promise: the impl preserves stream order
+    (table → chart) and never collapses them via last-wins. A regression that
+    cross-wires the two would feed the DataFrame rows into the chart block (or
+    vice versa) and the distinct-data assertions below catch it.
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
-    # Distinct data per channel so a regression that cross-wires last_df and
-    # last_chart in components_to_widgets (feeding the DataFrame into the chart
-    # payload or vice versa) is caught — identical rows would mask it.
     df_rows = [{"city": "Oslo", "sales": 42}]
     chart_rows = [{"genre": "Rock", "revenue": 1200}]
     stub = agent_stub_factory(
@@ -505,24 +513,27 @@ async def test_with_widgets_chart_and_dataframe_both_present(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, table, _query_info, chart, _memory_info, _trace = (
+    markdown, blocks, _query_info, _memory, _trace = (
         await query_database_impl_with_widgets(cfg, "revenue per genre")
     )
 
     # Markdown (the non-apps fallback) still carries the data table + answer.
     assert "| city | sales |" in markdown
     assert "revenue by genre" in markdown
-    assert table is not None
-    assert table["columns"] == ["city", "sales"]
-    assert table["rows"] == [["Oslo", "42"]]
-    assert chart is not None
-    assert chart["chart_type"] == "bar"
-    # The chart payload carries the chart rows, NOT the DataFrame rows.
-    assert chart["data"] == chart_rows
+    # Stream order preserved: table → chart → text (the text block is the
+    # last-text-fallback for the unmarked RichTextComponent).
+    assert [b["type"] for b in blocks] == ["table", "chart", "text"]
+    table_block = blocks[0]
+    assert table_block["columns"] == ["city", "sales"]
+    assert table_block["rows"] == [["Oslo", "42"]]
+    chart_block = blocks[1]
+    assert chart_block["chart_type"] == "bar"
+    # The chart block carries the chart rows, NOT the DataFrame rows.
+    assert chart_block["data"] == chart_rows
 
 
 @pytest.mark.asyncio
-async def test_with_widgets_text_only_returns_none_payloads(
+async def test_with_widgets_text_only_yields_single_text_block(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
@@ -531,14 +542,14 @@ async def test_with_widgets_text_only_returns_none_payloads(
     stub = agent_stub_factory([make_text_component("no widget for this one")])
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, table, query_info, chart, memory_info, _trace = (
+    markdown, blocks, query_info, memory_info, _trace = (
         await query_database_impl_with_widgets(cfg, "q")
     )
 
     assert markdown == "no widget for this one"
-    assert table is None
+    # Last-text-fallback emits one text block for an unmarked terminal TEXT.
+    assert blocks == [{"type": "text", "text": "no widget for this one"}]
     assert query_info is None
-    assert chart is None
     assert memory_info is None
 
 
@@ -580,7 +591,7 @@ async def test_with_widgets_memory_info_surfaced_regardless_of_footer(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, _table, _query_info, _chart, memory_info, _trace = (
+    markdown, _blocks, _query_info, memory_info, _trace = (
         await query_database_impl_with_widgets(cfg, "q")
     )
 
@@ -613,7 +624,7 @@ async def test_with_widgets_memory_hit_footer_when_flag_on(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, _table, _query_info, _chart, _memory_info, _trace = (
+    markdown, _blocks, _query_info, _memory_info, _trace = (
         await query_database_impl_with_widgets(cfg, "q")
     )
 
@@ -638,7 +649,7 @@ async def test_with_widgets_memory_miss_footer_when_flag_on(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    markdown, _table, _query_info, _chart, _memory_info, _trace = (
+    markdown, _blocks, _query_info, _memory_info, _trace = (
         await query_database_impl_with_widgets(cfg, "q")
     )
 
@@ -1027,7 +1038,7 @@ async def test_with_widgets_emits_trace_when_show_details_on(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    _markdown, _table, _query_info, _chart, _memory_info, trace = (
+    _markdown, _blocks, _query_info, _memory_info, trace = (
         await query_database_impl_with_widgets(cfg, "how many orders?")
     )
 
@@ -1057,7 +1068,7 @@ async def test_with_widgets_no_trace_when_show_details_off(
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
-    _markdown, _table, _query_info, _chart, _memory_info, trace = (
+    _markdown, _blocks, _query_info, _memory_info, trace = (
         await query_database_impl_with_widgets(cfg, "q")
     )
 

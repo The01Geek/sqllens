@@ -188,7 +188,7 @@ class _HitAgentMemory(_RecordingAgentMemory):
 @pytest.mark.asyncio
 async def test_hit_emits_memory_search_card_with_aggregate_metadata() -> None:
     """The real tool's HIT path emits a STATUS_CARD whose metadata['memory_search']
-    is the exact aggregate shape components_to_widgets reads.
+    is the exact aggregate shape components_to_blocks reads.
 
     Pins the producer side of the cross-file contract (the consumer tests use
     hand-built cards) and the float(max(...)) coercion that keeps a numpy score
@@ -228,7 +228,7 @@ async def test_hit_emits_memory_search_card_with_aggregate_metadata() -> None:
 @pytest.mark.asyncio
 async def test_miss_emits_memory_search_card_with_zero_hits() -> None:
     """The real tool's MISS path emits a STATUS_CARD with hit_count 0 and a
-    None top_similarity — the aggregate shape components_to_widgets reads."""
+    None top_similarity — the aggregate shape components_to_blocks reads."""
     tool = SearchSavedCorrectToolUsesTool(default_similarity_threshold=0.7)
 
     result = await tool.execute(

@@ -147,8 +147,9 @@ def make_chart(
     """Build a UiComponent wrapping a ChartComponent.
 
     ``spec`` is the renderer-agnostic DSL dict ``EmitChartTool`` puts in
-    ``ChartComponent.data`` (and the MCP layer writes to
-    ``_meta["sqllens/chart"]``). ``chart_type`` defaults to ``spec``'s.
+    ``ChartComponent.data`` (and the MCP layer writes inside a
+    ``{"type": "chart", ...}`` block in ``_meta["sqllens/blocks"]``).
+    ``chart_type`` defaults to ``spec``'s.
     """
     return UiComponent(
         rich_component=ChartComponent(

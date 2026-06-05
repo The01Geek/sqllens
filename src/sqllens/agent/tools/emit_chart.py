@@ -1,15 +1,16 @@
 """Chart-emitting tool: turns aggregated rows into a renderer-agnostic spec.
 
-``EmitChartTool`` is the agent-side seam for the chart mode of the
-``query_database`` MCP tool. It does not run SQL itself — the agent runs
-``run_sql`` first, then hands the
-(already aggregated) rows to this tool, which validates a small DSL and emits
-a ``ChartComponent``. The widget owns all rendering decisions (palette,
-tooltips, legend, axis formatting, theming); this tool only describes *what*
-to plot, not *how*.
+``EmitChartTool`` is the agent-side seam for the chart blocks of the
+``query_database`` MCP tool's ordered ``blocks`` response. It does not run SQL
+itself — the agent runs ``run_sql`` first, then hands the (already aggregated)
+rows to this tool, which validates a small DSL and emits a ``ChartComponent``.
+The widget owns all rendering decisions (palette, tooltips, legend, axis
+formatting, theming); this tool only describes *what* to plot, not *how*.
 
-The same DSL dict is both the ``ChartComponent.data`` payload and the JSON the
-MCP layer writes to ``_meta["sqllens/chart"]``.
+The same DSL dict is both the ``ChartComponent.data`` payload and the JSON
+payload wrapped as a ``{"type": "chart", ...}`` block in
+``_meta["sqllens/blocks"]``. May be called multiple times per request to emit
+multiple chart blocks; each call appends a new chart block in stream order.
 """
 
 import logging
@@ -107,8 +108,9 @@ class EmitChartTool(Tool[EmitChartParams]):
         types = ", ".join(get_args(ChartTypeLiteral))
         return (
             "Render an interactive chart from already-aggregated rows. Call "
-            "AFTER run_sql, once per request, when the user asked for a chart "
-            f"and the result is aggregated/temporal. chart_type is one of: "
+            "AFTER run_sql when the user asked for a chart and the result is "
+            "aggregated/temporal. May be called more than once per request to "
+            f"emit multiple distinct charts. chart_type is one of: "
             f"{types}. At most {_MAX_CHART_ROWS} rows — aggregate in SQL first."
         )
 

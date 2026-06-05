@@ -4,10 +4,12 @@
 """Unit tests for ``sqllens.tools._format``.
 
 The format module owns the ``(markdown, is_error)`` contract that drives MCP
-``isError``, the "last TEXT wins" suppression, the 500-row truncation footer,
-the ``"(no answer)"`` empty fallback, and naive ``str(value)`` cell coercion.
-These tests pin that behavior so refactors of the agent stream collapse logic
-or downstream cell formatting cannot silently regress what the MCP client sees.
+``isError``, the ordered ``blocks`` array that backs the ``sqllens/blocks``
+``_meta`` channel, the answer-marker filter on TEXT components, the 500-row
+truncation footer, the ``"(no answer)"`` empty fallback, and naive
+``str(value)`` cell coercion. These tests pin that behavior so refactors of
+the agent stream collapse logic or downstream cell formatting cannot silently
+regress what the MCP client (or the widget) sees.
 """
 
 from __future__ import annotations
@@ -32,21 +34,22 @@ from sqllens.agent.components.rich.interactive.ui_state import (
 from sqllens.agent.components.rich.text import RichTextComponent
 from sqllens.agent.core.components import UiComponent
 from sqllens.tools._format import (
+    _MAX_BLOCKS_TOTAL_BYTES,
     _MAX_ROWS_RENDERED,
     _MAX_TABLE_PAYLOAD_BYTES,
     _render_dataframe,
     _serialized_len,
+    _serialized_len_list,
     append_conversation_footer,
     build_agent_trace,
-    components_to_chart,
+    components_to_blocks,
     components_to_markdown,
-    components_to_table,
-    components_to_widgets,
     render_interactive,
 )
 
 from ._agent_stubs import (
     make_agent_error_card,
+    make_chart,
     make_text_component,
     make_tool_cards,
 )
@@ -61,6 +64,27 @@ def _df(columns: list[str], rows: list[dict]) -> SimpleNamespace:
     # field combinations the real constructor would normalize away (e.g. empty
     # columns with non-empty rows, which DataFrameComponent.__init__ back-fills).
     return SimpleNamespace(columns=columns, rows=rows)
+
+
+def _answer_text(content: str) -> UiComponent:
+    """A deliberately-rendered (answer-marked) TEXT — what emit_text emits."""
+    return _ui(RichTextComponent(content=content, data={"is_answer": True}))
+
+
+def _chart_spec(rows, *, chart_type="bar", title="T"):
+    return {
+        "chart_type": chart_type,
+        "title": title,
+        "x": {"field": "x", "label": "X", "type": "category"},
+        "y": {"field": "y", "label": "Y", "type": "value"},
+        "series": None,
+        "data": rows,
+        "row_count": len(rows),
+        "truncated": 0,
+    }
+
+
+# ───────────────────────── error / recovery invariants ─────────────────────
 
 
 def test_error_status_card_wins_over_text_and_tables() -> None:
@@ -80,6 +104,22 @@ def test_error_status_card_wins_over_text_and_tables() -> None:
     assert msg == "permission denied for table users"
     assert "alpha" not in msg
     assert "intermediate" not in msg
+
+
+def test_error_path_returns_empty_blocks_list() -> None:
+    # The error short-circuit means blocks is empty (no table/text/chart) —
+    # apps-aware hosts get the error message in the text content, not a
+    # half-rendered widget.
+    stream = [
+        _ui(DataFrameComponent(rows=[{"id": 1}])),
+        _ui(StatusCardComponent(title="x", status="error", description="boom")),
+    ]
+    msg, is_error, blocks, query_info, memory_info = components_to_blocks(stream)
+    assert is_error is True
+    assert msg == "boom"
+    assert blocks == []
+    assert query_info is None
+    assert memory_info is None
 
 
 def test_self_correction_success_supersedes_earlier_error() -> None:
@@ -107,10 +147,10 @@ def test_self_correction_success_supersedes_earlier_error() -> None:
         _ui(DataFrameComponent(rows=[{"count": 0}])),
         _ui(RichTextComponent(content="There are 0 orders in the last 10 days.")),
     ]
-    markdown, is_error, table, query_info, _, _ = components_to_widgets(stream)
+    markdown, is_error, blocks, query_info, _mi = components_to_blocks(stream)
     assert is_error is False
     assert "There are 0 orders in the last 10 days." in markdown
-    assert table is not None
+    assert any(b["type"] == "table" for b in blocks)
     # The retried (successful) SQL wins last, not the failed first guess.
     assert query_info is not None
     assert query_info["sql"] == "SELECT COUNT(*) FROM orders WHERE time > NOW()"
@@ -145,9 +185,7 @@ def test_error_after_recovery_still_surfaces_as_error() -> None:
 def test_memory_search_success_does_not_clear_run_sql_error() -> None:
     # The dominant silent-success trap: a memory search runs (and succeeds) on
     # essentially every turn, emitting a status="success" STATUS_CARD. It must
-    # NOT clear a real run_sql failure — only a *run_sql* success may. A failed
-    # query followed by a successful memory search and a give-up TEXT must still
-    # surface as an error, never a silent success with an apology answer.
+    # NOT clear a real run_sql failure — only a *run_sql* success may.
     stream = [
         _ui(
             StatusCardComponent(
@@ -173,12 +211,9 @@ def test_memory_search_success_does_not_clear_run_sql_error() -> None:
 
 
 def test_introspection_success_does_not_clear_run_sql_error() -> None:
-    # The system prompt has the agent run a schema-introspection SELECT
-    # (information_schema / SHOW) to confirm a column after an "Unknown column"
-    # error. That introspection runs through the same run_sql tool and succeeds,
-    # but it is a step toward an answer, not the answer. If the agent then gives
-    # up without a successful *data* retry, the original failure must still
-    # surface — an introspection success must not clear it.
+    # An introspection SELECT (information_schema / SHOW) is a step toward an
+    # answer, not the answer. An introspection success must NOT clear the
+    # earlier error.
     stream = [
         _ui(
             StatusCardComponent(
@@ -235,7 +270,7 @@ def test_data_retry_after_introspection_clears_error() -> None:
         _ui(DataFrameComponent(rows=[{"id": 1}])),
         _ui(RichTextComponent(content="There is 1 order.")),
     ]
-    markdown, is_error, _, query_info, _, _ = components_to_widgets(stream)
+    markdown, is_error, _blocks, query_info, _mi = components_to_blocks(stream)
     assert is_error is False
     assert "There is 1 order." in markdown
     assert query_info is not None
@@ -244,8 +279,7 @@ def test_data_retry_after_introspection_clears_error() -> None:
 
 def test_failed_retry_after_recovery_re_arms_error() -> None:
     # error -> run_sql success -> run_sql error: the agent recovered once, then
-    # the next query failed too. Terminal run_sql status is the second error, so
-    # the turn must surface as an error (last-wins re-arms after a clear).
+    # the next query failed too. Terminal run_sql status is the second error.
     stream = [
         _ui(
             StatusCardComponent(
@@ -276,7 +310,13 @@ def test_failed_retry_after_recovery_re_arms_error() -> None:
     assert msg == "second failure"
 
 
-def test_last_text_component_survives() -> None:
+# ───────────────────────── TEXT block selection ────────────────────────────
+
+
+def test_last_text_component_survives_when_unmarked() -> None:
+    # Backwards-compat: a stream with only unmarked TEXTs falls back to
+    # last-text-wins so existing tests / streams without the answer marker
+    # still surface the terminal answer.
     stream = [
         _ui(RichTextComponent(content="first thought")),
         _ui(RichTextComponent(content="second thought")),
@@ -289,15 +329,45 @@ def test_last_text_component_survives() -> None:
     assert "second" not in msg
 
 
+def test_answer_marker_text_included_in_stream_order() -> None:
+    # #194 core promise: an answer-marked TEXT becomes a text block at its
+    # stream position. Multiple marked TEXTs all survive in order — and
+    # intermediate unmarked TEXTs are dropped as reasoning chatter.
+    stream = [
+        _ui(RichTextComponent(content="reasoning chatter — should not appear")),
+        _answer_text("Introducing the chart:"),
+        _ui(RichTextComponent(content="more reasoning — also dropped")),
+        _answer_text("And the summary."),
+    ]
+    _, _is_error, blocks, _qi, _mi = components_to_blocks(stream)
+    text_blocks = [b for b in blocks if b["type"] == "text"]
+    assert [b["text"] for b in text_blocks] == [
+        "Introducing the chart:",
+        "And the summary.",
+    ]
+
+
+def test_marked_text_only_excludes_intermediate_reasoning() -> None:
+    # When ANY answer-marked TEXT exists, the last-text fallback is NOT used —
+    # so an intermediate unmarked TEXT cannot leak into the rendered answer
+    # even when it happens to be the very last TEXT in the stream.
+    stream = [
+        _answer_text("THE answer"),
+        _ui(RichTextComponent(content="trailing reasoning chatter")),
+    ]
+    _, _is_error, blocks, _qi, _mi = components_to_blocks(stream)
+    text_blocks = [b for b in blocks if b["type"] == "text"]
+    assert text_blocks == [{"type": "text", "text": "THE answer"}]
+
+
 def test_empty_stream_returns_no_answer() -> None:
-    assert components_to_markdown([]) == ("(no answer)", False)
+    msg, is_error = components_to_markdown([])
+    assert (msg, is_error) == ("(no answer)", False)
+    _, _, blocks, _, _ = components_to_blocks([])
+    assert blocks == []
 
 
 def test_error_status_card_with_empty_description_uses_fallback_message() -> None:
-    # Pins the user-visible message when an upstream agent emits an error
-    # status_card without a description. components_to_table's error branch
-    # falls back to "Agent reported an error" — a typo there would ship
-    # silently otherwise.
     stream = [
         _ui(StatusCardComponent(title="Query failed", status="error", description=None)),
     ]
@@ -307,10 +377,8 @@ def test_error_status_card_with_empty_description_uses_fallback_message() -> Non
 
 
 def test_whitespace_only_text_does_not_clobber_real_answer() -> None:
-    # Pins the .strip() guard in components_to_table's TEXT branch: trailing
-    # empty/whitespace TEXT components must not overwrite an earlier non-empty
-    # answer. Dropping the strip+truthiness check here would silently surface
-    # whitespace as the user-visible MCP response.
+    # Pins the .strip() guard in the TEXT branch: trailing empty/whitespace
+    # TEXT components must not overwrite an earlier non-empty answer.
     stream = [
         _ui(RichTextComponent(content="real answer")),
         _ui(RichTextComponent(content="   \n  ")),
@@ -321,9 +389,8 @@ def test_whitespace_only_text_does_not_clobber_real_answer() -> None:
 
 
 def test_dataframe_then_text_renders_table_before_summary() -> None:
-    # Pins the happy-path shape of an MCP response that mixes a table with a
-    # natural-language summary: tables come first, then the answer, separated
-    # by a blank line (components_to_table joins parts with "\n\n").
+    # The happy-path shape: tables in stream order, then the final answer text,
+    # separated by blank lines (the serializer joins parts with "\n\n").
     stream = [
         _ui(DataFrameComponent(rows=[{"id": 1, "name": "alpha"}])),
         _ui(RichTextComponent(content="one row returned")),
@@ -333,6 +400,89 @@ def test_dataframe_then_text_renders_table_before_summary() -> None:
     assert msg.startswith("| id | name |")
     assert msg.endswith("one row returned")
     assert "\n\none row returned" in msg
+
+
+# ───────────────────────── ordered multi-block output ──────────────────────
+
+
+def test_ordered_blocks_preserves_stream_position_for_chart_text_table() -> None:
+    # The flagship #194 scenario: chart → emit_text → table → emit_text. Each
+    # artifact becomes a block at its stream position, with no reordering and
+    # no last-wins collapse.
+    stream = [
+        make_chart(_chart_spec([{"x": "a", "y": 1}])),
+        _answer_text("Top-level summary chart above."),
+        _ui(DataFrameComponent(rows=[{"region": "NA", "revenue": 1200}])),
+        _answer_text("Full breakdown below."),
+    ]
+    _md, is_error, blocks, _qi, _mi = components_to_blocks(stream)
+    assert is_error is False
+    assert [b["type"] for b in blocks] == ["chart", "text", "table", "text"]
+    assert blocks[1]["text"] == "Top-level summary chart above."
+    assert blocks[3]["text"] == "Full breakdown below."
+
+
+def test_multiple_table_blocks_each_surface_independently() -> None:
+    # Two DataFrames in one stream → two table blocks, with distinct columns
+    # preserved (no last-wins collapse).
+    stream = [
+        _ui(DataFrameComponent(rows=[{"a": 1}], columns=["a"])),
+        _ui(DataFrameComponent(rows=[{"b": 2}], columns=["b"])),
+    ]
+    _, _, blocks, _qi, _mi = components_to_blocks(stream)
+    tables = [b for b in blocks if b["type"] == "table"]
+    assert [t["columns"] for t in tables] == [["a"], ["b"]]
+    assert [t["rows"] for t in tables] == [[["1"]], [["2"]]]
+
+
+def test_blocks_total_budget_trims_trailing_blocks_with_notice(caplog) -> None:
+    # The overall blocks-ceiling: a long stream of in-budget blocks still
+    # cannot blow ``_MAX_BLOCKS_TOTAL_BYTES``. Trim trailing blocks, append an
+    # explicit truncation notice, log loud (CLAUDE.md: never silently drop).
+    # Each row's column name is fat enough that one DataFrame ≈ near the
+    # per-block cap, so 8 of them blow the 512 KB overall ceiling.
+    fat_cell = "x" * (100 * 1024)
+    dfs = [
+        _ui(DataFrameComponent(rows=[{f"c{i}": fat_cell}], columns=[f"c{i}"]))
+        for i in range(8)
+    ]
+    with caplog.at_level("WARNING", logger="sqllens.tools._format"):
+        _, is_error, blocks, _qi, _mi = components_to_blocks(dfs)
+    assert is_error is False
+    # The trim landed: total size is under the ceiling and a notice text block
+    # is the last element.
+    assert _serialized_len_list(blocks) <= _MAX_BLOCKS_TOTAL_BYTES
+    assert blocks[-1]["type"] == "text"
+    assert "Response truncated" in blocks[-1]["text"]
+    assert "trailing block" in blocks[-1]["text"]
+    # And the server-side log fired (CLAUDE.md: never silently drop).
+    assert any(
+        "sqllens/blocks budget exceeded" in r.getMessage() for r in caplog.records
+    ), "expected a warning when blocks were trimmed"
+
+
+def test_blocks_within_budget_emit_no_truncation_notice() -> None:
+    # Sanity: an under-budget stream has no notice block tacked on.
+    stream = [
+        _ui(DataFrameComponent(rows=[{"a": 1}], columns=["a"])),
+        _answer_text("done"),
+    ]
+    _, _, blocks, _qi, _mi = components_to_blocks(stream)
+    assert all("truncated" not in (b.get("text") or "") for b in blocks)
+    assert blocks == [
+        {
+            "type": "table",
+            "columns": ["a"],
+            "rows": [["1"]],
+            "column_types": {"a": "number"},
+            "row_count": 1,
+            "truncated": 0,
+        },
+        {"type": "text", "text": "done"},
+    ]
+
+
+# ───────────────────────── per-block table payload ─────────────────────────
 
 
 def test_dataframe_columns_fallback_from_first_row() -> None:
@@ -365,9 +515,6 @@ def test_dataframe_empty_columns_and_rows_renders_nothing() -> None:
 
 
 def test_explicit_columns_override_row_keys_and_drop_extras() -> None:
-    # Pins that an explicit `columns` list controls header order AND projection:
-    # _render_dataframe uses row.get(c, "") so unlisted row keys are silently
-    # dropped, and column order follows the caller, not rows[0].keys().
     rendered = _render_dataframe(_df(columns=["b", "a"], rows=[{"a": 1, "b": 2, "c": 3}]))
     header = rendered.splitlines()[0]
     assert header == "| b | a |"
@@ -377,19 +524,12 @@ def test_explicit_columns_override_row_keys_and_drop_extras() -> None:
 
 
 def test_heterogeneous_rows_missing_keys_render_as_empty_cell() -> None:
-    # Pins row.get(c, "") behavior: declared columns missing from a given row
-    # render as empty cells, not KeyError. Common shape when an agent merges
-    # partial results.
     rendered = _render_dataframe(_df(columns=["a", "b"], rows=[{"a": 1}, {"b": 2}]))
     body_lines = rendered.splitlines()[2:]
     assert body_lines == ["| 1 |  |", "|  | 2 |"]
 
 
 def test_cell_value_coercion_none_and_decimal_and_datetime() -> None:
-    # Pinning test: documents the current naive ``str(value)`` coercion in
-    # _render_dataframe. Any change to cell formatting (e.g. nicer NULL
-    # rendering, locale-aware decimals) must update these expectations
-    # deliberately rather than slip through silently.
     rich = _df(
         columns=["null_cell", "decimal_cell", "datetime_cell"],
         rows=[
@@ -406,54 +546,32 @@ def test_cell_value_coercion_none_and_decimal_and_datetime() -> None:
 
 
 def test_markdown_pipe_in_cell_value_is_escaped_or_documented() -> None:
-    # Pinning test: documents that pipes inside cell values are NOT escaped
-    # today. A literal "a|b" leaks into the rendered row, which a strict
-    # Markdown renderer would interpret as a column boundary. This is filed
-    # as a known limitation (issue P-5); the test guards against accidental
-    # changes in either direction.
     rendered = _render_dataframe(_df(["text"], [{"text": "a|b"}]))
     body_line = rendered.splitlines()[-1]
     assert body_line == "| a|b |"
-    # The escaped form is explicitly NOT what we produce today.
     assert "a\\|b" not in rendered
 
 
-# ───────────────────────── components_to_table ──────────────────────────────
-
-
-def test_table_empty_stream_returns_none_payload() -> None:
-    markdown, is_error, payload, _ = components_to_table([])
-    assert (markdown, is_error) == ("(no answer)", False)
-    assert payload is None
-
-
-def test_table_error_card_returns_none_payload() -> None:
-    stream = [
-        _ui(DataFrameComponent(rows=[{"id": 1}])),
-        _ui(StatusCardComponent(title="x", status="error", description="boom")),
-    ]
-    markdown, is_error, payload, _ = components_to_table(stream)
-    assert is_error is True
-    assert markdown == "boom"
-    assert payload is None
-
-
-def test_table_small_dataframe_exact_payload() -> None:
+def test_table_small_dataframe_exact_block_payload() -> None:
     df = DataFrameComponent(
         rows=[{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}],
         columns=["name", "age"],
         column_types={"age": "number", "name": "string"},
     )
-    markdown, is_error, payload, _ = components_to_table([_ui(df)])
+    markdown, is_error, blocks, _qi, _mi = components_to_blocks([_ui(df)])
     assert is_error is False
     assert markdown.startswith("| name | age |")
-    assert payload == {
-        "columns": ["name", "age"],
-        "rows": [["Alice", "30"], ["Bob", "25"]],
-        "column_types": {"age": "number", "name": "string"},
-        "row_count": 2,
-        "truncated": 0,
-    }
+    table_blocks = [b for b in blocks if b["type"] == "table"]
+    assert table_blocks == [
+        {
+            "type": "table",
+            "columns": ["name", "age"],
+            "rows": [["Alice", "30"], ["Bob", "25"]],
+            "column_types": {"age": "number", "name": "string"},
+            "row_count": 2,
+            "truncated": 0,
+        }
+    ]
 
 
 def test_table_explicit_column_types_round_trip() -> None:
@@ -462,18 +580,12 @@ def test_table_explicit_column_types_round_trip() -> None:
         columns=["a"],
         column_types={"a": "number"},
     )
-    _, _, payload, _ = components_to_table([_ui(df)])
-    assert payload is not None
-    assert payload["column_types"] == {"a": "number"}
+    _, _, blocks, _qi, _mi = components_to_blocks([_ui(df)])
+    table = next(b for b in blocks if b["type"] == "table")
+    assert table["column_types"] == {"a": "number"}
 
 
 def test_table_column_types_inferred_from_production_from_records() -> None:
-    # Production reality: DataFrameComponent.from_records hard-codes
-    # column_types={} (agent/components/rich/data/dataframe.py). Without
-    # server-side inference in _compute_table_payload the widget would sort
-    # every column lexicographically. This pins that an all-numeric column is
-    # typed "number" while a mixed/string column is left untyped — exactly the
-    # shape the agent emits in practice (issue #120 typed-sort criterion).
     df = DataFrameComponent.from_records(
         [
             {"id": 1, "name": "alpha", "score": "3.5"},
@@ -482,16 +594,13 @@ def test_table_column_types_inferred_from_production_from_records() -> None:
         ]
     )
     assert df.column_types == {}  # producer really emits no types
-    _, _, payload, _ = components_to_table([_ui(df)])
-    assert payload is not None
-    assert payload["column_types"] == {"id": "number", "score": "number"}
-    assert "name" not in payload["column_types"]
+    _, _, blocks, _qi, _mi = components_to_blocks([_ui(df)])
+    table = next(b for b in blocks if b["type"] == "table")
+    assert table["column_types"] == {"id": "number", "score": "number"}
+    assert "name" not in table["column_types"]
 
 
 def test_table_inference_ignores_null_cells_and_rejects_non_finite() -> None:
-    # A column that is numeric on its real values but has SQL NULLs (coerced to
-    # "None") must still type "number". A column containing inf/NaN must NOT —
-    # the widget right-aligns and numerically sorts on the "number" flag.
     df = DataFrameComponent.from_records(
         [
             {"qty": 5, "ratio": "1.0", "blank": None},
@@ -499,33 +608,29 @@ def test_table_inference_ignores_null_cells_and_rejects_non_finite() -> None:
             {"qty": 7, "ratio": "2.0", "blank": None},
         ]
     )
-    _, _, payload, _ = components_to_table([_ui(df)])
-    assert payload is not None
-    assert payload["column_types"] == {"qty": "number"}
+    _, _, blocks, _qi, _mi = components_to_blocks([_ui(df)])
+    table = next(b for b in blocks if b["type"] == "table")
+    assert table["column_types"] == {"qty": "number"}
 
 
 def test_table_explicit_column_type_overrides_inference() -> None:
-    # A numeric-looking column the producer explicitly typed "string" (e.g. a
-    # zero-padded ID) must keep the producer's type, not the inferred one.
     df = DataFrameComponent(
         rows=[{"zip": "01001"}, {"zip": "02134"}],
         columns=["zip"],
         column_types={"zip": "string"},
     )
-    _, _, payload, _ = components_to_table([_ui(df)])
-    assert payload is not None
-    assert payload["column_types"] == {"zip": "string"}
+    _, _, blocks, _qi, _mi = components_to_blocks([_ui(df)])
+    table = next(b for b in blocks if b["type"] == "table")
+    assert table["column_types"] == {"zip": "string"}
 
 
 def test_table_non_mapping_column_types_degrades_not_crashes() -> None:
-    # A producer handing back a non-mapping column_types must degrade to
-    # inferred-only types, never nuke the whole widget payload.
     df = DataFrameComponent.from_records([{"n": 1}, {"n": 2}])
     object.__setattr__(df, "column_types", ["not", "a", "mapping"])
-    _, is_error, payload, _ = components_to_table([_ui(df)])
+    _, is_error, blocks, _qi, _mi = components_to_blocks([_ui(df)])
     assert is_error is False
-    assert payload is not None
-    assert payload["column_types"] == {"n": "number"}
+    table = next(b for b in blocks if b["type"] == "table")
+    assert table["column_types"] == {"n": "number"}
 
 
 def test_table_cell_coercion_mirrors_markdown_path() -> None:
@@ -539,67 +644,49 @@ def test_table_cell_coercion_mirrors_markdown_path() -> None:
         ],
         columns=["null_cell", "decimal_cell", "datetime_cell"],
     )
-    _, _, payload, _ = components_to_table([_ui(df)])
-    assert payload is not None
-    assert payload["rows"] == [["None", "1.50", "2026-01-02 03:04:05"]]
+    _, _, blocks, _qi, _mi = components_to_blocks([_ui(df)])
+    table = next(b for b in blocks if b["type"] == "table")
+    assert table["rows"] == [["None", "1.50", "2026-01-02 03:04:05"]]
 
 
-def test_table_last_dataframe_wins() -> None:
-    stream = [
-        _ui(DataFrameComponent(rows=[{"a": 1}], columns=["a"])),
-        _ui(DataFrameComponent(rows=[{"b": 2}], columns=["b"])),
-    ]
-    _, _, payload, _ = components_to_table(stream)
-    assert payload is not None
-    assert payload["columns"] == ["b"]
-    assert payload["rows"] == [["2"]]
-
-
-def test_table_oversized_payload_truncates_under_budget() -> None:
-    # Wide cells so the serialized payload blows past 130 KB well before any
-    # row cap could matter — size is the only thing enforced.
+def test_table_oversized_payload_truncates_under_per_block_budget() -> None:
     big = "x" * 200
     rows = [{"c": f"{i}-{big}"} for i in range(4000)]
     df = DataFrameComponent(rows=rows, columns=["c"])
-    _, is_error, payload, _ = components_to_table([_ui(df)])
+    _, is_error, blocks, _qi, _mi = components_to_blocks([_ui(df)])
     assert is_error is False
-    assert payload is not None
-    assert payload["truncated"] > 0
-    assert payload["row_count"] == len(payload["rows"])
-    assert payload["row_count"] + payload["truncated"] == 4000
-    assert _serialized_len(payload) <= _MAX_TABLE_PAYLOAD_BYTES
+    table = next(b for b in blocks if b["type"] == "table")
+    assert table["truncated"] > 0
+    assert table["row_count"] == len(table["rows"])
+    assert table["row_count"] + table["truncated"] == 4000
+    # Strip the discriminator before measuring against the per-block budget.
+    inner = {k: v for k, v in table.items() if k != "type"}
+    assert _serialized_len(inner) <= _MAX_TABLE_PAYLOAD_BYTES
 
 
-def test_table_header_only_over_budget_returns_none() -> None:
-    # A single column whose name alone busts the budget: even the row-stripped
-    # payload can't fit, so there is nothing useful to hand the widget.
+def test_table_header_only_over_budget_emits_no_table_block() -> None:
     huge_col = "h" * (_MAX_TABLE_PAYLOAD_BYTES + 50)
     df = DataFrameComponent(rows=[{huge_col: 1}], columns=[huge_col])
-    _, is_error, payload, _ = components_to_table([_ui(df)])
+    _, is_error, blocks, _qi, _mi = components_to_blocks([_ui(df)])
     assert is_error is False
-    assert payload is None
+    assert [b for b in blocks if b["type"] == "table"] == []
 
 
-def test_table_header_fits_but_no_row_fits_returns_empty_payload() -> None:
-    # Distinct from header-only-over-budget: the header fits, but the single
-    # row alone busts the budget, so the binary search settles at zero rows.
-    # The payload is non-None (the widget can still show "0 of N, N truncated").
+def test_table_header_fits_but_no_row_fits_emits_empty_rows_block() -> None:
     huge_cell = "x" * (_MAX_TABLE_PAYLOAD_BYTES + 50)
     df = DataFrameComponent(rows=[{"c": huge_cell}], columns=["c"])
-    _, is_error, payload, _ = components_to_table([_ui(df)])
+    _, is_error, blocks, _qi, _mi = components_to_blocks([_ui(df)])
     assert is_error is False
-    assert payload is not None
-    assert payload["rows"] == []
-    assert payload["row_count"] == 0
-    assert payload["truncated"] == 1
+    table = next(b for b in blocks if b["type"] == "table")
+    assert table["rows"] == []
+    assert table["row_count"] == 0
+    assert table["truncated"] == 1
 
 
-def test_table_payload_construction_failure_degrades_to_markdown_only(
-    monkeypatch,
-) -> None:
-    # The iter-2 robustness wrapper: if payload construction raises, the widget
-    # degrades to None (Markdown answer still stands) rather than letting the
-    # exception escape the sanitized error taxonomy.
+def test_table_payload_construction_failure_drops_table_block_only(monkeypatch) -> None:
+    # The iter-2 robustness wrapper: if payload construction raises, the table
+    # block is silently dropped (Markdown answer still stands) rather than
+    # letting the exception escape the sanitized error taxonomy.
     import sqllens.tools._format as fmt
 
     def boom(_rich):
@@ -607,17 +694,16 @@ def test_table_payload_construction_failure_degrades_to_markdown_only(
 
     monkeypatch.setattr(fmt, "_compute_table_payload", boom)
     stream = [_ui(DataFrameComponent(rows=[{"id": 1}], columns=["id"]))]
-    markdown, is_error, payload, _ = components_to_table(stream)
+    _, is_error, blocks, _qi, _mi = components_to_blocks(stream)
     assert is_error is False
-    assert markdown.startswith("| id |")
-    assert payload is None
+    assert [b for b in blocks if b["type"] == "table"] == []
 
 
-def test_table_present_but_empty_dataframe_returns_none() -> None:
+def test_table_present_but_empty_dataframe_emits_no_table_block() -> None:
     stream = [_ui(DataFrameComponent(rows=[], columns=[]))]
-    markdown, is_error, payload, _ = components_to_table(stream)
+    markdown, is_error, blocks, _qi, _mi = components_to_blocks(stream)
     assert (markdown, is_error) == ("(no answer)", False)
-    assert payload is None
+    assert [b for b in blocks if b["type"] == "table"] == []
 
 
 # ───────────────────────── query_info (executed SQL) ────────────────────────
@@ -643,20 +729,21 @@ def test_query_info_extracted_from_run_sql_status_card() -> None:
         _sql_card("SELECT id FROM users", status="success"),
         _ui(RichTextComponent(content="two users")),
     ]
-    _, is_error, payload, query_info = components_to_table(stream)
+    _, is_error, blocks, query_info, _mi = components_to_blocks(stream)
     assert is_error is False
     assert query_info == {
         "sql": "SELECT id FROM users",
         "query_type": "SELECT",
         "row_count": 2,
     }
-    assert payload is not None and payload["row_count"] == 2
+    table = next(b for b in blocks if b["type"] == "table")
+    assert table["row_count"] == 2
 
 
 def test_query_info_row_count_is_true_total_under_truncation() -> None:
     # row_count must report the SQL's true result size, not the size-capped
-    # rendered subset: payload["row_count"] (kept prefix) + truncated (dropped
-    # tail). A regression to bare payload["row_count"] under-reports here.
+    # rendered subset: block["row_count"] (kept prefix) + truncated (dropped
+    # tail). A regression to bare block["row_count"] under-reports here.
     big = "x" * 200
     rows = [{"c": f"{i}-{big}"} for i in range(4000)]
     stream = [
@@ -664,25 +751,23 @@ def test_query_info_row_count_is_true_total_under_truncation() -> None:
         _ui(DataFrameComponent(rows=rows, columns=["c"])),
         _sql_card("SELECT c FROM t", status="success"),
     ]
-    _, is_error, payload, query_info = components_to_table(stream)
+    _, is_error, blocks, query_info, _mi = components_to_blocks(stream)
     assert is_error is False
-    assert payload is not None and payload["truncated"] > 0
+    table = next(b for b in blocks if b["type"] == "table")
+    assert table["truncated"] > 0
     assert query_info is not None
     assert query_info["row_count"] == 4000
-    assert query_info["row_count"] == payload["row_count"] + payload["truncated"]
+    assert query_info["row_count"] == table["row_count"] + table["truncated"]
 
 
 def test_query_info_deduped_across_running_then_completed() -> None:
-    # The card streams twice with identical metadata; last-wins must yield a
-    # single query_info, not two extractions.
     stream = [
         _sql_card("select 1", status="running"),
         _sql_card("select 1", status="success"),
     ]
-    _, _, _, query_info = components_to_table(stream)
+    _, _, _, query_info, _mi = components_to_blocks(stream)
     assert query_info is not None
     assert query_info["sql"] == "select 1"
-    # query_type derivation upper-cases the first token regardless of input case.
     assert query_info["query_type"] == "SELECT"
     # No DataFrame in the stream → row_count omitted, not None-valued.
     assert "row_count" not in query_info
@@ -690,34 +775,24 @@ def test_query_info_deduped_across_running_then_completed() -> None:
 
 def test_query_info_absent_when_no_sql_card() -> None:
     stream = [_ui(RichTextComponent(content="just a text answer"))]
-    _, _, _, query_info = components_to_table(stream)
+    _, _, _, query_info, _mi = components_to_blocks(stream)
     assert query_info is None
 
 
 def test_query_info_with_sql_card_and_empty_dataframe() -> None:
-    # The S-10-defended branch the row_count `.get` was hardened for:
-    # SQL card present, _build_table_payload returns None (empty DataFrame).
-    # query_info must still be built (sql/query_type) but row_count omitted —
-    # the `.get(..., 0)` is masked here because payload is None entirely.
     stream = [
         _sql_card("SELECT 1", status="running"),
         _ui(DataFrameComponent(rows=[], columns=[])),
         _sql_card("SELECT 1", status="success"),
     ]
-    _, is_error, payload, query_info = components_to_table(stream)
+    _, is_error, blocks, query_info, _mi = components_to_blocks(stream)
     assert is_error is False
-    assert payload is None
+    assert [b for b in blocks if b["type"] == "table"] == []
     assert query_info == {"sql": "SELECT 1", "query_type": "SELECT"}
     assert "row_count" not in query_info
 
 
 def test_query_info_none_on_error_path() -> None:
-    # Faithfully mirror the real guard-rejection stream: the agent emits ONE
-    # StatusCardComponent (metadata == tool_call.arguments == {"sql": ...}),
-    # yields it status="running", then re-yields it via set_status("error",
-    # "Tool failed: ...") on ToolResult(success=False). set_status preserves
-    # metadata, so the completed error card *still* carries the rejected SQL —
-    # the error short-circuit, not an absent card, is what nulls query_info.
     card = StatusCardComponent(
         title="Executing run_sql",
         status="running",
@@ -728,14 +803,13 @@ def test_query_info_none_on_error_path() -> None:
     completed = _ui(
         card.set_status("error", "Tool failed: refusing to execute non-SELECT SQL")
     )
-    # The completed card must still carry the SQL (set_status preserves
-    # metadata) — this is the load-bearing seam the formatter relies on.
     assert completed.rich_component.metadata == {"sql": "DELETE FROM users"}
-    markdown, is_error, payload, query_info = components_to_table([running, completed])
+    markdown, is_error, blocks, query_info, _mi = components_to_blocks(
+        [running, completed]
+    )
     assert is_error is True
     assert query_info is None
-    assert payload is None
-    # The rejected write statement must NOT leak into the answer.
+    assert blocks == []
     assert "DELETE FROM users" not in markdown
     assert markdown == "Tool failed: refusing to execute non-SELECT SQL"
 
@@ -746,9 +820,6 @@ def test_query_info_none_on_error_path() -> None:
 def _memory_card(
     *, hit_count: int, top_similarity: float | None, threshold: float = 0.7
 ) -> UiComponent:
-    # Mirrors the search_saved_correct_tool_uses STATUS_CARD: the aggregate
-    # hit/miss signal rides metadata["memory_search"], read by the same seam as
-    # the run_sql card's metadata["sql"].
     return _ui(
         StatusCardComponent(
             title="Memory Search",
@@ -771,7 +842,7 @@ def test_memory_info_extracted_on_hit() -> None:
         _memory_card(hit_count=2, top_similarity=0.83),
         _ui(RichTextComponent(content="answered with memory help")),
     ]
-    _, is_error, _, _, _, memory_info = components_to_widgets(stream)
+    _, is_error, _blocks, _qi, memory_info = components_to_blocks(stream)
     assert is_error is False
     assert memory_info == {
         "searched": True,
@@ -786,7 +857,7 @@ def test_memory_info_extracted_on_miss() -> None:
         _memory_card(hit_count=0, top_similarity=None),
         _ui(RichTextComponent(content="cold answer")),
     ]
-    _, is_error, _, _, _, memory_info = components_to_widgets(stream)
+    _, is_error, _blocks, _qi, memory_info = components_to_blocks(stream)
     assert is_error is False
     assert memory_info == {
         "searched": True,
@@ -798,46 +869,35 @@ def test_memory_info_extracted_on_miss() -> None:
 
 def test_memory_info_none_when_memory_not_searched() -> None:
     stream = [_ui(RichTextComponent(content="just a text answer"))]
-    _, _, _, _, _, memory_info = components_to_widgets(stream)
+    _, _, _blocks, _qi, memory_info = components_to_blocks(stream)
     assert memory_info is None
 
 
 def test_memory_info_last_wins_across_two_searches() -> None:
-    # The agent may search memory more than once in a turn; last-wins mirrors
-    # the run_sql SQL extraction.
     stream = [
         _memory_card(hit_count=0, top_similarity=None),
         _memory_card(hit_count=3, top_similarity=0.91),
     ]
-    _, _, _, _, _, memory_info = components_to_widgets(stream)
+    _, _, _blocks, _qi, memory_info = components_to_blocks(stream)
     assert memory_info is not None
     assert memory_info["hit_count"] == 3
     assert memory_info["top_similarity"] == 0.91
 
 
 def test_memory_info_suppressed_on_error_path() -> None:
-    # Mirrors query_info: an error STATUS_CARD short-circuits the whole payload,
-    # so memory_info is None even when a memory card was seen this turn.
     stream = [
         _memory_card(hit_count=2, top_similarity=0.83),
         _ui(StatusCardComponent(title="Query failed", status="error", description="boom")),
     ]
-    markdown, is_error, table, query_info, chart, memory_info = components_to_widgets(
-        stream
-    )
+    markdown, is_error, blocks, query_info, memory_info = components_to_blocks(stream)
     assert is_error is True
     assert memory_info is None
-    assert table is None
+    assert blocks == []
     assert query_info is None
-    assert chart is None
     assert markdown == "boom"
 
 
 def test_memory_info_ignores_non_dict_memory_search_metadata() -> None:
-    # The isinstance(memory_search, dict) guard mirrors the SQL extraction's
-    # isinstance(sql, str) guard: a malformed (non-dict) memory_search value
-    # from a degraded producer is ignored, leaving memory_info None rather than
-    # propagating junk into _meta.
     bad = _ui(
         StatusCardComponent(
             title="Memory Search",
@@ -846,42 +906,35 @@ def test_memory_info_ignores_non_dict_memory_search_metadata() -> None:
             metadata={"memory_search": "not-a-dict"},
         )
     )
-    _, is_error, _, _, _, memory_info = components_to_widgets([bad])
+    _, is_error, _blocks, _qi, memory_info = components_to_blocks([bad])
     assert is_error is False
     assert memory_info is None
 
 
 def test_status_bar_error_is_not_treated_as_agent_error() -> None:
     # A failed memory search emits a StatusBarUpdateComponent with
-    # status="error" (STATUS_BAR_UPDATE), NOT a STATUS_CARD. The error-detection
-    # branch is scoped to STATUS_CARD, so this must NOT poison the turn: the
-    # answer stands, is_error stays False, and memory_info stays None
-    # (indistinguishable from "did not search"). Guards against a refactor that
-    # broadens error detection to status-bar components and would raise a fake
-    # SQL-execution error on a turn that actually succeeded.
+    # status="error" (STATUS_BAR_UPDATE), NOT a STATUS_CARD. This must NOT
+    # poison the turn: the answer stands, is_error stays False.
     stream = [
         _ui(StatusBarUpdateComponent(status="error", message="Failed to search memory")),
         _ui(RichTextComponent(content="the answer")),
     ]
-    markdown, is_error, table, query_info, chart, memory_info = components_to_widgets(
-        stream
-    )
+    markdown, is_error, blocks, query_info, memory_info = components_to_blocks(stream)
     assert is_error is False
     assert memory_info is None
     assert markdown == "the answer"
-    assert table is None and query_info is None and chart is None
+    assert blocks == [{"type": "text", "text": "the answer"}]
+    assert query_info is None
 
 
 def test_memory_info_coexists_with_query_info() -> None:
-    # A turn that both searched memory and ran SQL surfaces both signals
-    # independently — neither card's metadata clobbers the other.
     stream = [
         _memory_card(hit_count=1, top_similarity=0.77),
         _sql_card("SELECT id FROM users", status="success"),
         _ui(DataFrameComponent(rows=[{"id": 1}], columns=["id"])),
         _ui(RichTextComponent(content="one user")),
     ]
-    _, is_error, _, query_info, _, memory_info = components_to_widgets(stream)
+    _, is_error, _blocks, query_info, memory_info = components_to_blocks(stream)
     assert is_error is False
     assert query_info is not None and query_info["sql"] == "SELECT id FROM users"
     assert memory_info is not None and memory_info["hit_count"] == 1
@@ -891,8 +944,6 @@ def test_memory_info_coexists_with_query_info() -> None:
 
 
 def test_chat_input_prompt_surfaced_when_only_interactive() -> None:
-    # The agent's clarifying question expressed only as a CHAT_INPUT_UPDATE
-    # placeholder must surface as the answer, not "(no answer)".
     stream = [_ui(ChatInputUpdateComponent(placeholder="Which region: EU or US?"))]
     msg, is_error = components_to_markdown(stream)
     assert is_error is False
@@ -932,9 +983,6 @@ def test_notification_message_surfaced() -> None:
 
 
 def test_alert_text_read_from_data_dict() -> None:
-    # ALERT has no first-party component class; an emitted ALERT is a bare
-    # RichComponent whose text lives in `data` (pydantic drops unknown top-level
-    # kwargs). The renderer must read `data`, else the ALERT surfaces as empty.
     from sqllens.agent.core.rich_component import ComponentType, RichComponent
 
     alert = RichComponent(
@@ -947,9 +995,6 @@ def test_alert_text_read_from_data_dict() -> None:
 
 
 def test_error_level_notification_not_surfaced_as_answer() -> None:
-    # An error-level notification carries the raw driver exception; surfacing it
-    # as a normal answer would bypass the sanitized error taxonomy. It must NOT
-    # become the answer — the turn falls back to "(no answer)".
     stream = [
         _ui(
             NotificationComponent(
@@ -973,17 +1018,12 @@ def test_error_level_notification_not_surfaced_as_answer() -> None:
     ],
 )
 def test_generic_finalization_placeholder_not_surfaced(placeholder: str) -> None:
-    # The agent emits these finalization CHAT_INPUT_UPDATE placeholders on a
-    # normal/error turn; none is a clarifying question, so an otherwise-empty
-    # turn must still fall back to "(no answer)" rather than echo the placeholder.
     stream = [_ui(ChatInputUpdateComponent(placeholder=placeholder, disabled=False))]
     msg, _ = components_to_markdown(stream)
     assert msg == "(no answer)"
 
 
 def test_text_answer_wins_over_interactive_no_regression() -> None:
-    # A clarification emitted as TEXT keeps the last-TEXT-wins path; interactive
-    # affordances alongside it are not appended.
     stream = [
         _ui(RichTextComponent(content="Here is your answer")),
         _ui(ButtonGroupComponent(buttons=[{"label": "More", "action": "/more"}])),
@@ -993,13 +1033,14 @@ def test_text_answer_wins_over_interactive_no_regression() -> None:
     assert "More" not in msg
 
 
-def test_interactive_fallback_applies_to_chart_path() -> None:
-    # Symmetry: visualize_data's collapse also surfaces the question.
+def test_interactive_fallback_applies_when_no_blocks() -> None:
+    # When no blocks are produced (no TEXT, DATAFRAME, or CHART), the markdown
+    # falls back to render_interactive (clarifying questions, button choices).
     stream = [_ui(ChatInputUpdateComponent(placeholder="Pick a metric"))]
-    markdown, is_error, chart = components_to_chart(stream)
+    markdown, is_error, blocks, _qi, _mi = components_to_blocks(stream)
     assert is_error is False
     assert markdown == "Pick a metric"
-    assert chart is None
+    assert blocks == []
 
 
 def test_render_interactive_empty_when_nothing_interactive() -> None:
@@ -1039,8 +1080,6 @@ def test_append_conversation_footer_noop_on_empty_id() -> None:
 
 
 def test_query_info_ignores_non_sql_status_cards() -> None:
-    # Other tools also emit STATUS_CARDs (metadata == their args). Only a
-    # string under the `sql` key identifies the executed-SQL card.
     stream = [
         _ui(
             StatusCardComponent(
@@ -1052,7 +1091,7 @@ def test_query_info_ignores_non_sql_status_cards() -> None:
         ),
         _ui(RichTextComponent(content="done")),
     ]
-    _, _, _, query_info = components_to_table(stream)
+    _, _, _, query_info, _mi = components_to_blocks(stream)
     assert query_info is None
 
 
@@ -1060,8 +1099,6 @@ def test_query_info_ignores_non_sql_status_cards() -> None:
 
 
 def test_build_agent_trace_pairs_steps_and_fields() -> None:
-    # Two completed tool calls: the running + completed cards (shared id) fold
-    # into one step each, carrying tool name, arguments, status, and duration.
     stream = [
         *make_tool_cards(
             "search_saved_correct_tool_uses",
@@ -1100,9 +1137,6 @@ def test_build_agent_trace_pairs_steps_and_fields() -> None:
 
 
 def test_build_agent_trace_records_tool_failure_terminal_error() -> None:
-    # A failed tool step is marked status="error", carries the tool's own
-    # message (the "Tool failed: " boilerplate stripped), and becomes the
-    # terminal_error.
     stream = [
         *make_tool_cards(
             "run_sql",
@@ -1121,8 +1155,6 @@ def test_build_agent_trace_records_tool_failure_terminal_error() -> None:
 
 
 def test_build_agent_trace_top_level_error_takes_precedence() -> None:
-    # The generic top-level error card wins over a failed tool step: it is the
-    # actual run-ending reason (the real exception is server-side only).
     stream = [
         *make_tool_cards("run_sql", {"sql": "x"}, ok=False, error="boom"),
         make_agent_error_card("An unexpected error occurred. Please try again."),
@@ -1132,10 +1164,6 @@ def test_build_agent_trace_top_level_error_takes_precedence() -> None:
 
 
 def test_build_agent_trace_strips_conversation_id_from_terminal_error() -> None:
-    # The real top-level error card appends "\n\nConversation ID: <id>" to its
-    # description; terminal_error must carry the human reason only (the id rides
-    # the dedicated conversation channel). make_agent_error_card()'s default
-    # reproduces the real shape including the suffix.
     trace = build_agent_trace(
         [make_agent_error_card()], total_duration_ms=10, max_iterations=20
     )
@@ -1146,8 +1174,6 @@ def test_build_agent_trace_strips_conversation_id_from_terminal_error() -> None:
 
 
 def test_build_agent_trace_flags_max_iterations() -> None:
-    # No error card and no failed step, but the agent emitted its tool-limit
-    # warning STATUS_BAR_UPDATE: the terminal_error reports the max-iteration stop.
     stream = []
     for i in range(3):
         stream.extend(make_tool_cards("run_sql", {"sql": f"SELECT {i}"}, ok=True))
@@ -1163,9 +1189,6 @@ def test_build_agent_trace_flags_max_iterations() -> None:
 
 
 def test_build_agent_trace_step_count_alone_does_not_flag_max_iterations() -> None:
-    # A clean run whose tool-call count equals the cap (parallel calls in fewer
-    # LLM rounds) must NOT be mislabelled as a max-iteration stop — only the
-    # agent's actual warning card triggers that terminal reason.
     stream = []
     for i in range(3):
         stream.extend(make_tool_cards("run_sql", {"sql": f"SELECT {i}"}, ok=True))
@@ -1176,10 +1199,6 @@ def test_build_agent_trace_step_count_alone_does_not_flag_max_iterations() -> No
 
 
 def test_build_agent_trace_incomplete_step_when_no_completion() -> None:
-    # A running card with no completion (run ended mid-step) is surfaced as
-    # status="incomplete" with no duration, never silently dropped — and the
-    # run's terminal_error reports the in-progress stop rather than reading as
-    # a clean finish (terminal_error=None).
     running, _completed = make_tool_cards("run_sql", {"sql": "SELECT 1"})
     trace = build_agent_trace([running], total_duration_ms=5, max_iterations=20)
     assert trace["iterations"] == 1
@@ -1204,8 +1223,6 @@ def test_build_agent_trace_empty_stream() -> None:
 
 
 def test_build_agent_trace_duration_none_on_unparseable_timestamp() -> None:
-    # A card whose timestamp can't be parsed must yield duration_ms=None, not a
-    # crash — the step is still emitted.
     cards = make_tool_cards(
         "run_sql", {"sql": "SELECT 1"}, ok=True, start_ts="not-a-date", end_ts=""
     )
@@ -1215,8 +1232,6 @@ def test_build_agent_trace_duration_none_on_unparseable_timestamp() -> None:
 
 
 def test_build_agent_trace_clock_skew_clamps_duration_to_zero() -> None:
-    # End timestamp earlier than start (clock skew / out-of-order): duration_ms
-    # clamps to 0, never a misleading negative.
     cards = make_tool_cards(
         "run_sql",
         {"sql": "SELECT 1"},
@@ -1229,8 +1244,6 @@ def test_build_agent_trace_clock_skew_clamps_duration_to_zero() -> None:
 
 
 def test_build_agent_trace_top_level_error_outranks_iteration_limit() -> None:
-    # When BOTH a top-level error card and a tool-limit warning are present, the
-    # generic top-level error wins (precedence rung 1 over rung 3).
     stream = [
         *make_tool_cards("run_sql", {"sql": "SELECT 1"}, ok=True),
         _ui(StatusBarUpdateComponent(status="warning", message="Tool limit reached")),
@@ -1241,14 +1254,10 @@ def test_build_agent_trace_top_level_error_outranks_iteration_limit() -> None:
 
 
 def test_build_agent_trace_caps_oversized_arguments() -> None:
-    # A step whose arguments blow the _meta iframe budget must not ship an
-    # oversized blob: arguments are dropped and the truncation is flagged loudly.
     huge_sql = "SELECT " + "x" * (200 * 1024)
     cards = make_tool_cards("run_sql", {"sql": huge_sql}, ok=True)
     trace = build_agent_trace(cards, total_duration_ms=5, max_iterations=20)
     assert trace["arguments_truncated"] is True
-    # arguments were dropped from the over-budget step
     assert "arguments" not in trace["steps"][0] or trace["steps"][0]["arguments"] == {}
-    # the step itself is retained (only its arguments were dropped)
     assert trace["steps"][0]["tool"] == "run_sql"
     assert _serialized_len(trace) <= _MAX_TABLE_PAYLOAD_BYTES

@@ -144,10 +144,15 @@ async def test_emit_chart_usage_block_present_when_tool_registered() -> None:
 
     assert prompt is not None
     assert "EMIT_CHART USAGE" in prompt
-    # Pin the load-bearing rules: chart-type allow-list, the once-per-request
-    # rule, the row cap, and the pie/heatmap series semantics.
+    # Pin the load-bearing rules: chart-type allow-list, the multi-chart
+    # permission (#194 removed the once-per-request restriction), the row cap,
+    # and the pie/heatmap series semantics.
     assert "bar, line, area, scatter, pie, heatmap" in prompt
-    assert "EXACTLY ONCE" in prompt
+    # #194: charts MAY be emitted more than once per request — the rubric must
+    # tell the LLM that explicitly so it doesn't silently fall back to the
+    # old single-chart constraint.
+    assert "more than once per request" in prompt
+    assert "EXACTLY ONCE" not in prompt  # retired in #194
     assert "200 rows" in prompt
     assert "MUST be absent for pie" in prompt
     assert "REQUIRED" in prompt  # heatmap requires series

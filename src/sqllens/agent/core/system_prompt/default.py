@@ -52,6 +52,7 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
         has_search = "search_saved_correct_tool_uses" in tool_names
         has_save = "save_question_tool_args" in tool_names
         has_text_memory = "save_text_memory" in tool_names
+        has_emit_text = "emit_text" in tool_names
 
         # Get today's date
         today_date = datetime.now().strftime("%Y-%m-%d")
@@ -88,7 +89,7 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
                     "",
                     "Call emit_chart ONLY when the user asked for a chart/plot/graph AND the result is aggregated or temporal and obviously chartable. For plain lookups, return run_sql's result as text — do NOT force a chart.",
                     "",
-                    "Workflow: run_sql first to get the aggregated rows, then call emit_chart EXACTLY ONCE with those rows. Never call emit_chart before run_sql, and never more than once per request.",
+                    "Workflow: run_sql first to get the aggregated rows, then call emit_chart with those rows. Never call emit_chart before run_sql. You MAY call emit_chart more than once per request when the answer warrants multiple distinct charts (e.g. one chart per metric, or one chart per comparison axis); each call emits a separate chart block in stream order.",
                     "",
                     "DSL (emit_chart arguments):",
                     "  • chart_type: one of bar, line, area, scatter, pie, heatmap",
@@ -105,6 +106,32 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
                     "  • correlation between two numerics → scatter (x.type=value)",
                     "  • value over two categorical dimensions → heatmap (series = value field)",
                     "  • cumulative / filled trend → area",
+                ]
+            )
+
+        if has_emit_text:
+            prompt_parts.extend(
+                [
+                    "\n" + "=" * 60,
+                    "ANSWER COMPOSITION (emit_text):",
+                    "=" * 60,
+                    "",
+                    "Your answer is an *ordered sequence of blocks* — tables (from run_sql), charts (from emit_chart), and prose (from emit_text) — rendered to the user in the order you produce them. The user SEES the blocks; everything else (your reasoning, tool-call narration, mid-loop thoughts) is hidden.",
+                    "",
+                    "RULES:",
+                    "  • emit_text is the ONLY way to put deliberate prose in the rendered answer. Non-emit_text assistant text is treated as hidden reasoning and is NOT shown to the user.",
+                    "  • Use emit_text for: brief introductions before a chart/table, captions between two artifacts, the natural-language summary at the end.",
+                    "  • Do NOT call emit_text just to say \"here is your data\" — let the table/chart speak for itself. emit_text earns its place when it adds context the artifact cannot convey.",
+                    "  • You MAY call emit_text more than once per request — each call emits a separate text block in stream order.",
+                    "  • A multi-artifact answer naturally interleaves: run_sql → emit_chart → emit_text (comment) → run_sql → emit_text (summary).",
+                    "",
+                    "Example shape for a query that warrants both a chart and a supporting table:",
+                    "  1. search_saved_correct_tool_uses (memory first)",
+                    "  2. run_sql (aggregated)",
+                    "  3. emit_chart (the chart of the aggregate)",
+                    "  4. emit_text (\"The top three regions account for ~80% of revenue. Here are the full per-region numbers:\")",
+                    "  5. run_sql (the supporting per-region breakdown)",
+                    "  6. emit_text (final one-line takeaway)",
                 ]
             )
 

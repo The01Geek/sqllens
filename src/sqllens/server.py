@@ -5,12 +5,12 @@
 
 Builds the FastMCP instance and registers the two always-on tools
 (``query_database``, ``list_data_sources``) plus the single ``ui://`` widget
-resource that renders either a chart, a data grid, or plain text depending on
-which structured payload the agent produced. An opt-in third tool
-(``import_memory``) is registered only when ``cfg.memory.allow_import`` is
-set. ``run()`` dispatches to stdio or HTTP based on ``cfg.server.transport``;
-the HTTP transport (``sqllens.transport.http``) wraps this server with the
-configured auth middleware (none / bearer / jwt) and path normalization.
+resource that renders the agent's ordered ``blocks`` array (text, table, and
+chart blocks in stream order). An opt-in third tool (``import_memory``) is
+registered only when ``cfg.memory.allow_import`` is set. ``run()`` dispatches
+to stdio or HTTP based on ``cfg.server.transport``; the HTTP transport
+(``sqllens.transport.http``) wraps this server with the configured auth
+middleware (none / bearer / jwt) and path normalization.
 """
 
 from __future__ import annotations
@@ -35,11 +35,12 @@ logger = logging.getLogger("sqllens.server")
 # MCP Apps spec (2026-01-26). The host renders the ``ui://`` resource in a
 # sandboxed iframe when a tool's ``_meta.ui.resourceUri`` points at it, then
 # pushes the CallToolResult in. A single widget backs the one ``query_database``
-# tool and picks its render mode from the present ``_meta`` channel: a chart
-# (``_CHART_META_KEY``) takes precedence, else a data grid (``_TABLE_META_KEY``,
-# with the collapsible SQL section from ``_QUERY_META_KEY``), else nothing.
-# Non-apps hosts ignore ``_meta`` entirely, so the plain Markdown text content
-# keeps working byte-for-byte everywhere else.
+# tool and renders the ordered ``_meta["sqllens/blocks"]`` array — one container
+# per block (chart, table, or text) in stream order. The widget also reads
+# ``_meta["sqllens/query"]`` for a collapsible "Executed SQL" panel. Non-apps
+# hosts ignore ``_meta`` entirely, so the plain Markdown text content (a
+# serialization of the same ordered blocks) keeps working byte-for-byte
+# everywhere else.
 _WIDGET_URI = "ui://sqllens/query-results.html"
 # Self-driving memory-administration widget. Registered only inside the
 # allow_admin_tools block so a host never advertises a widget whose backing
@@ -49,16 +50,18 @@ _WIDGET_URI = "ui://sqllens/query-results.html"
 # callServerTool(...) and drives every admin tool directly. Resource-only —
 # no launcher tool; hosts mount it via resources/read.
 _MEMORY_WIDGET_URI = "ui://sqllens/memory-admin.html"
-_TABLE_META_KEY = "sqllens/table"
-# Sibling data channel to _TABLE_META_KEY: the executed SQL + lightweight
-# metadata ({"sql", "query_type", "row_count"?}). Present only when
-# ``agent.show_details`` is on and SQL ran. The widget renders a collapsible
-# section from it; plain-text clients get the same SQL as a fenced block in
-# the Markdown content.
+# Ordered typed-block data channel. The single structured-data channel for the
+# query result: a JSON array of discriminated blocks ({"type": "text", "text":
+# ...}, {"type": "table", ...table payload...}, {"type": "chart", ...chart
+# payload...}). Apps-aware hosts render each block in order; the widget reads
+# this same key. The previous flat sqllens/chart + sqllens/table channels were
+# retired in favour of this ordered array (#194).
+_BLOCKS_META_KEY = "sqllens/blocks"
+# Sibling channel: the executed SQL + lightweight metadata ({"sql",
+# "query_type", "row_count"?}). Present only when ``agent.show_details`` is on
+# and SQL ran. The widget renders a collapsible section from it; plain-text
+# clients get the same SQL as a fenced block in the Markdown content.
 _QUERY_META_KEY = "sqllens/query"
-# Chart data channel. Present when the agent emitted a ChartComponent; the
-# widget renders it with ECharts and it takes precedence over the table grid.
-_CHART_META_KEY = "sqllens/chart"
 # Memory hit/miss channel. Present whenever a memory search completed (a hit or
 # a miss) this turn (a search that errored emits no signal). This channel is
 # independent of both ``agent.show_details`` and ``agent.show_memory_details``;
@@ -93,8 +96,8 @@ def _conversation_result(
     """Build the success CallToolResult for the conversational ``query_database`` tool.
 
     Seeds ``_meta`` with the resolved conversation id, merges the tool-specific
-    ``extra_meta`` (table/query/chart payloads), and appends the conversation-id
-    footer to the text content.
+    ``extra_meta`` (ordered blocks + query/memory/trace channels), and appends
+    the conversation-id footer to the text content.
     """
     meta: dict = {_CONVERSATION_META_KEY: {"conversation_id": conversation_id}}
     meta.update(extra_meta)
@@ -210,11 +213,13 @@ def build_server(cfg: Config) -> FastMCP:
     async def query_database(
         question: str, ctx: Context, conversation_id: str | None = None
     ) -> str | CallToolResult:
-        """Ask a question in natural language. Returns a chart, table, or text answer.
+        """Ask a question; return an ordered list of text/table/chart blocks.
 
-        The agent decides the response shape: chart-shaped results render as an
-        interactive chart, tabular results as a data grid, everything else as
-        plain text.
+        The agent decides the response shape: an answer can interleave any
+        number of charts, tables, and prose blocks (chart → text → table → ...)
+        which apps-aware hosts render in stream order via
+        ``_meta["sqllens/blocks"]``. Non-apps clients receive a stable Markdown
+        rendering of the same blocks in the text content.
 
         For multi-turn conversations (e.g. the agent asks a clarifying
         question), pass the ``conversation_id`` returned by the previous turn
@@ -242,7 +247,7 @@ def build_server(cfg: Config) -> FastMCP:
         # None down would let the agent mint one we never see).
         conversation_id = conversation_id or str(uuid.uuid4())
         try:
-            markdown, table, query_info, chart, memory_info, agent_trace = (
+            markdown, blocks, query_info, memory_info, agent_trace = (
                 await query_database_impl_with_widgets(
                     cfg, question, metadata=metadata, conversation_id=conversation_id
                 )
@@ -257,15 +262,13 @@ def build_server(cfg: Config) -> FastMCP:
             if exc.agent_trace is None:
                 raise
             return _trace_error_result(str(exc), conversation_id, exc.agent_trace)
-        # Attach every structured payload the agent produced; the widget applies
-        # the chart > table > text precedence. When a request yields both a
-        # chart and a table, both channels are present and the widget renders
-        # the chart — deterministic, no double-render.
+        # Attach the ordered ``blocks`` array (the single structured-data channel
+        # for the rendered answer) plus the independent observability channels.
+        # The widget iterates ``blocks`` and renders one container per block in
+        # stream order — no chart-wins precedence, no chart vs. table conflict.
         extra_meta: dict = {}
-        if chart is not None:
-            extra_meta[_CHART_META_KEY] = chart
-        if table is not None:
-            extra_meta[_TABLE_META_KEY] = table
+        if blocks:
+            extra_meta[_BLOCKS_META_KEY] = blocks
         if query_info:
             extra_meta[_QUERY_META_KEY] = query_info
         if memory_info:
