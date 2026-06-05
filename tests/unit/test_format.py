@@ -508,10 +508,11 @@ def test_blocks_chart_markdown_placeholder_escapes_markdown_chars() -> None:
 
 
 def test_blocks_chart_markdown_placeholder_unavailable_when_no_label() -> None:
-    # A chart block with no title AND no chart_type would have produced the
-    # ambiguous literal "_[chart: chart]_" in the prior code (reading as a
-    # chart literally named "chart"). The serializer now emits a generic
-    # "_[chart unavailable]_" instead.
+    # A chart block with no title AND no chart_type would, under a naïve
+    # ``_[chart: {label}]_`` template, degrade to the literal ``_[chart:
+    # chart]_`` (reading as a chart literally named "chart") — ambiguous
+    # rendering for non-apps clients. The serializer emits a generic
+    # ``_[chart unavailable]_`` placeholder in that case instead.
     chart_block = {
         "type": "chart",
         "chart_type": None,
@@ -529,26 +530,29 @@ def test_blocks_chart_markdown_placeholder_unavailable_when_no_label() -> None:
     assert rendered == "_[chart unavailable]_"
 
 
-def test_components_to_blocks_unmarked_fallback_logs_warning(caplog) -> None:
+def test_components_to_blocks_unmarked_fallback_logs_info(caplog) -> None:
     # The last-text-fallback fires when no answer-marked TEXT is in the
-    # stream. In production this indicates either an abnormal termination
+    # stream. In production this signals either an abnormal termination
     # (the agent never reached its terminal-answer yield) or a marker-
-    # emission regression — both worth a server-side log so the operator can
-    # diagnose without grep-ing for "(no answer)" in user reports. The
-    # function still returns the fallback block (backwards-compat preserved)
-    # but the warning makes the silent-degradation case visible.
+    # emission regression — both worth a server-side trail so the operator
+    # can diagnose without grep-ing for "(no answer)" in user reports. The
+    # function still returns the fallback block (backwards-compat preserved).
+    # Logged at info level (not warning) because the bare-RichTextComponent
+    # case fires in many existing tests; warning-level would pollute the
+    # operator surface with test-fixture noise.
     stream = [
         _ui(RichTextComponent(content="some unmarked reasoning")),
     ]
-    with caplog.at_level("WARNING", logger="sqllens.tools._format"):
+    with caplog.at_level("INFO", logger="sqllens.tools._format"):
         _, _is_error, blocks, _qi, _mi = components_to_blocks(stream)
     # Backwards-compat: the fallback still emits a text block.
     assert blocks == [{"type": "text", "text": "some unmarked reasoning"}]
-    # And the warning fires so the abnormal-termination signal is loud.
+    # And the info message fires so the abnormal-termination signal is in the
+    # operator's trail under verbose logging.
     assert any(
         "no answer-marked TEXT in stream" in r.getMessage()
         for r in caplog.records
-    ), "expected the fallback to log a warning"
+    ), "expected the fallback to log the abnormal-termination signal"
 
 
 def test_components_to_blocks_marker_strict_identity_check() -> None:
@@ -902,6 +906,36 @@ def test_query_info_with_sql_card_and_empty_dataframe() -> None:
     assert is_error is False
     assert [b for b in blocks if b["type"] == "table"] == []
     assert query_info == {"sql": "SELECT 1", "query_type": "SELECT", "row_count": 0}
+
+
+def test_query_info_row_count_recovered_from_raw_rows_on_payload_reject(
+    monkeypatch,
+) -> None:
+    # The DATAFRAME branch's "payload returned None" else-arm sources the row
+    # count from rich.rows directly so a SQL whose result was rejected by the
+    # payload computer (header-only over budget, or a payload-construction
+    # exception caught by the broad-except in _build_table_payload) still
+    # reports the TRUE row count to query_info — not the misleading 0 that
+    # an earlier version of this fix produced. Force _build_table_payload to
+    # return None to exercise the recovery branch.
+    import sqllens.tools._format as fmt
+
+    monkeypatch.setattr(fmt, "_build_table_payload", lambda _rich: None)
+    stream = [
+        _sql_card("SELECT * FROM big_table", status="running"),
+        _ui(DataFrameComponent(rows=[{"x": i} for i in range(10)], columns=["x"])),
+        _sql_card("SELECT * FROM big_table", status="success"),
+    ]
+    _, is_error, blocks, query_info, _mi = components_to_blocks(stream)
+    assert is_error is False
+    # Payload rejected → no table block emitted.
+    assert [b for b in blocks if b["type"] == "table"] == []
+    # But query_info row_count is still accurate — recovered from rich.rows.
+    assert query_info == {
+        "sql": "SELECT * FROM big_table",
+        "query_type": "SELECT",
+        "row_count": 10,
+    }
 
 
 def test_query_info_row_count_attributed_to_last_run_sql_when_empty() -> None:

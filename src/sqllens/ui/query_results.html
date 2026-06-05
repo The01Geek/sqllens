@@ -777,12 +777,26 @@ function renderBlocks(result) {
     if (block.type === "text") node = renderTextBlock(block);
     else if (block.type === "table") node = renderTableBlock(block);
     else if (block.type === "chart") node = renderChartBlock(block);
+    else {
+      // Unknown discriminator (producer drift, future block type the widget
+      // doesn't know yet, missing ``type`` key). Surface the loss to the
+      // console AND the rendered output rather than silently dropping the
+      // block: an invisible drop hides a producer regression behind a
+      // shorter-than-expected answer that's hard to diagnose from the user
+      // side. Mirrors the Python serializer's symmetric handling.
+      console.warn("renderBlocks: unknown block type", block.type, block);
+      const d = document.createElement("div");
+      d.className = "block empty";
+      d.textContent = `Unsupported block type: ${block.type}`;
+      node = d;
+    }
     if (node) blocksHost.appendChild(node);
   }
   // Finalization pass: every chart container is now in the DOM with real
   // dimensions, so ECharts.init can measure correctly. teardownChartRegistry
-  // above cleared the registry to just the newly-pushed entries from this
-  // render, so this loop only touches the fresh charts.
+  // above emptied the registry; renderChartBlock (inside the dispatch loop)
+  // re-populated it with exactly this render's chart entries, so this loop
+  // iterates only the fresh charts — no stale instances from prior renders.
   for (const entry of chartRegistry) rebuildChartInto(entry);
 }
 

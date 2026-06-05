@@ -35,9 +35,13 @@ def _ctx() -> ToolContext:
 @pytest.mark.asyncio
 async def test_execute_emits_answer_marked_text_component() -> None:
     # The load-bearing assertion: the emitted RichTextComponent carries
-    # ``data["is_answer"] = True`` — the discriminator the block builder reads
-    # to include this prose in the rendered answer. Without it the block
-    # builder would drop the TEXT as intermediate reasoning chatter.
+    # ``data["is_answer"] = True`` — the discriminator the block builder
+    # reads to include this prose in the rendered answer. Without it the
+    # block builder treats this TEXT as intermediate reasoning chatter and
+    # excludes it whenever any answer-marked TEXT is present in the stream
+    # (i.e. on every normal multi-block turn — the agent's terminal answer
+    # is always marked). The backwards-compat unmarked-only fallback would
+    # rescue it in an isolated unmarked stream, with an info-level log.
     params = EmitTextParams(text="Hello world.")
     result = await EmitTextTool().execute(_ctx(), params)
 

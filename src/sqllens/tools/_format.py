@@ -271,14 +271,28 @@ def components_to_blocks(
     last_memory: dict | None = None
     # Row count attributable to the *last* run_sql, tracked in stream order so
     # query_info reports the correct total even when the agent runs multiple
-    # run_sql calls in one turn. The walker resets this on every run_sql card
-    # (the next DATAFRAME will be its result) and updates it on every
-    # DATAFRAME (the rows of the latest run_sql). When the last run_sql
-    # returns no rows (no DATAFRAME, or an empty DATAFRAME the payload
-    # computer rejects), this stays None and query_info correctly omits
-    # row_count — preventing the misattribution where an earlier table's row
-    # count would otherwise be reported as the last SQL's. See the new test
-    # `test_query_info_row_count_attributed_to_last_run_sql_when_empty`.
+    # run_sql calls in one turn. The walker resets this on every NEW run_sql
+    # invocation (the next DATAFRAME will be its result) and updates it on
+    # every DATAFRAME (the rows of the latest run_sql). End-state:
+    #
+    #   - No DATAFRAME component followed the last run_sql at all (zero-row
+    #     SELECTs whose driver emits no component, or a tool error before any
+    #     DATAFRAME yield) → stays None → query_info omits ``row_count``.
+    #   - DATAFRAME component present, payload built successfully → set to
+    #     ``payload["row_count"] + payload["truncated"]`` (the TRUE size, not
+    #     the rendered subset; per-block size cap may have dropped a tail).
+    #   - DATAFRAME component present but payload computer rejected the
+    #     result → use the raw row count from the component itself
+    #     (``len(rich.rows)``) so the over-budget / payload-exception case
+    #     doesn't silently misattribute the 0-rows count to a SQL that
+    #     returned N > 0 rows. This is the CLAUDE.md "lossy success needs
+    #     loud warning, not green output" trap.
+    #
+    # Preventing the misattribution where an earlier table's row count would
+    # be reported as the LATEST SQL's is the regression
+    # ``test_query_info_row_count_attributed_to_last_run_sql_when_empty``
+    # pins; the over-budget / payload-fail nuance is pinned by
+    # ``test_query_info_row_count_recovered_from_raw_rows_on_payload_reject``.
     last_sql_row_count: int | None = None
     # Candidate blocks. Text blocks carry a private "_is_answer" tag we strip
     # before emitting — never expose internal bookkeeping fields in the public
@@ -313,12 +327,17 @@ def components_to_blocks(
                     "truncated", 0
                 )
             else:
-                # An empty/header-only DataFrame still corresponds to a
-                # successful run_sql that returned 0 rows. Record 0 (not None)
-                # so query_info reports the truth rather than "row_count
-                # unknown" — but only when the DataFrame component itself was
-                # present (we only enter this branch then).
-                last_sql_row_count = 0
+                # ``_build_table_payload`` returns None in three distinct
+                # cases: (a) the DataFrame is genuinely empty (no columns,
+                # no rows), (b) the header-only form busts the per-block
+                # size cap, (c) the broad ``except`` caught a payload-
+                # construction exception. Only case (a) means "0 rows" —
+                # cases (b) and (c) have the real rows on the component
+                # itself. Source the count from ``rich.rows`` so we don't
+                # silently misreport "0 rows" to a user whose SQL actually
+                # returned N > 0 rows.
+                raw_rows = getattr(rich, "rows", None) or []
+                last_sql_row_count = len(raw_rows)
         elif ctype == ComponentType.CHART:
             payload = _build_chart_payload(rich)
             if payload is not None:
@@ -356,13 +375,24 @@ def components_to_blocks(
                     )
                     error_message = ""
             if is_run_sql:
-                # A new run_sql card means a fresh SQL is about to execute (or
-                # has just executed). Reset the row-count tracker so the
-                # following DATAFRAME (if any) is attributed to THIS sql, not
-                # a previous one. If no DATAFRAME follows (zero rows; tool
-                # error after the SQL was logged), last_sql_row_count stays
-                # None and query_info correctly omits row_count.
-                if sql != last_sql:
+                # Reset the row-count tracker on the ``running`` card (which
+                # uniquely fires once per call) rather than on the completed
+                # card. This handles two cases the earlier ``sql != last_sql``
+                # guard got wrong:
+                #
+                #   1. The running/completed pair share the same SQL metadata
+                #      (last-wins de-dupe in ``_format`` relies on this), so
+                #      resetting on the completed card would wipe the row
+                #      count that the intervening DATAFRAME just populated.
+                #      ``status == "running"`` only fires once per call, so
+                #      the reset lands at the right moment (before the call's
+                #      DataFrame is emitted) without disturbing the completion.
+                #   2. A real retry of the *same* SQL text (agent re-runs an
+                #      identical query, e.g. after a deadlock) was previously
+                #      missed by the text-equality guard, leaving the prior
+                #      run's row count to leak through. The ``status`` check
+                #      catches each call independently of SQL text.
+                if status == "running":
                     last_sql_row_count = None
                 last_sql = sql
             if isinstance(metadata, dict):
@@ -398,18 +428,24 @@ def components_to_blocks(
             blocks.append(cand)
     # The agent's production terminal-answer / iteration-limit-warning yields
     # always set the marker; the EmitTextTool also always marks its emission.
-    # So in production a stream with at least one TEXT but no marked TEXT
-    # indicates either (a) an abnormal termination (the agent exited before
+    # So a stream with at least one TEXT but no marked TEXT typically means
+    # either (a) a test fixture using bare ``RichTextComponent`` (common, not
+    # a problem), or (b) an abnormal termination (the agent exited before
     # reaching its terminal-answer yield, e.g. a caught-and-re-raised
-    # exception inside the LLM loop) or (b) a regression where one of the
-    # producers forgot the marker. Either way, the operator needs the signal
-    # — log it loudly so the silent-fallback path is not a debugging dead end.
+    # exception inside the LLM loop) or a producer-side marker-emission
+    # regression (rare, but worth a trail). Log at ``info`` rather than
+    # ``warning`` so the diagnostic is captured under verbose logging without
+    # polluting the warning-level operator surface with the test-fixture
+    # case. An operator watching for the abnormal-termination signal can
+    # raise the log level to INFO and grep for this exact message.
     if not any_marked_text and last_unmarked_text_idx is not None:
-        logger.warning(
+        logger.info(
             "components_to_blocks: no answer-marked TEXT in stream; falling "
-            "back to last unmarked TEXT as the rendered answer. Likely an "
-            "abnormal termination (the agent never reached its terminal-answer "
-            "yield) or a marker-emission regression on one of the producers."
+            "back to last unmarked TEXT as the rendered answer. In production "
+            "this signals either an abnormal termination (the agent never "
+            "reached its terminal-answer yield) or a marker-emission "
+            "regression on one of the producers; in tests it commonly fires "
+            "when fixtures use unmarked RichTextComponent on purpose."
         )
 
     blocks = _trim_blocks_to_budget(blocks)
@@ -1035,17 +1071,19 @@ def _trim_blocks_to_budget(blocks: list[dict]) -> list[dict]:
                 _MAX_BLOCKS_TOTAL_BYTES,
             )
             return [*kept, notice]
-    # Even the notice alone busts the budget — a near-impossible case since
-    # the notice is ~100 bytes and the budget is hundreds of kilobytes. Per
-    # CLAUDE.md's "Lossy / empty success needs a loud warning, not green
-    # output" rule, returning an empty list here would let the caller's
-    # interactive/no-answer fallback render `"(no answer)"` to the user — a
-    # silent success on a turn that actually produced data. Instead, return a
-    # single notice block (the resulting `_meta` slightly exceeds the
-    # ceiling, but the user sees the truncation signal rather than nothing).
+    # Even the notice alone busts the budget — only reachable if the budget
+    # has been configured below the ~100 byte notice size (a configuration
+    # error, not a normal state — the production ceiling is hundreds of
+    # kilobytes). Per CLAUDE.md's "Lossy / empty success needs a loud
+    # warning, not green output" rule, returning an empty list here would
+    # let the caller's interactive/no-answer fallback render `"(no answer)"`
+    # to the user — a silent success on a turn that actually produced data.
+    # Instead, return a single notice block so the user sees the truncation
+    # signal rather than nothing.
     logger.error(
         "sqllens/blocks budget exceeded with zero in-budget prefix; emitting "
-        "notice-only blocks list (size slightly exceeds the %d byte ceiling)",
+        "notice-only blocks list (budget %d bytes is below the notice size, "
+        "likely a misconfiguration)",
         _MAX_BLOCKS_TOTAL_BYTES,
     )
     return [_truncation_notice_block(total)]
@@ -1056,7 +1094,7 @@ def _truncation_notice_block(dropped: int) -> dict:
     return {
         "type": "text",
         "text": (
-            f"_⚠️ Response truncated: {dropped} trailing block{plural} dropped "
+            f"_Response truncated: {dropped} trailing block{plural} dropped "
             "to fit the rendering size budget._"
         ),
     }
@@ -1099,6 +1137,18 @@ def _serialize_blocks_to_markdown(blocks: list[dict]) -> str:
                     "_", r"\_"
                 ).replace("*", r"\*")
                 parts.append(f"_[chart: {escaped}]_")
+        else:
+            # Unknown discriminator — a producer-side regression (typo, case
+            # mismatch, future block type the renderer doesn't know yet, or
+            # a missing ``type`` key). CLAUDE.md: never silently drop. Surface
+            # the loss to both the operator log AND the rendered output so a
+            # regression cannot ship with the contents invisibly missing.
+            logger.warning(
+                "_serialize_blocks_to_markdown: dropping unknown block type "
+                "%r from markdown serialization (likely producer drift)",
+                btype,
+            )
+            parts.append(f"_[unsupported block type: {btype!r}]_")
     return "\n\n".join(parts)
 
 

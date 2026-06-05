@@ -77,11 +77,15 @@ class EmitTextTool(Tool[EmitTextParams]):
         """
         try:
             # The answer marker (sqllens.agent.markers.IS_ANSWER_MARKER_KEY)
-            # is the discriminator the MCP-layer block builder reads to include
-            # this TEXT in the rendered answer. Without it, the builder would
-            # drop the block as intermediate reasoning chatter (the assistant
-            # text that accompanies tool calls when
-            # UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT is on).
+            # is the discriminator the MCP-layer block builder reads to
+            # include this TEXT in the rendered answer. Without it, the
+            # builder treats this block as intermediate reasoning chatter and
+            # excludes it whenever any answer-marked TEXT is present in the
+            # stream — i.e. on every normal multi-block turn (the agent's
+            # terminal answer is always marked). It would survive only via
+            # the backwards-compat unmarked-only fallback (with an info-level
+            # server-side log), which is the test-fixture safety net rather
+            # than a production path.
             text_component = RichTextComponent(
                 content=args.text,
                 markdown=True,

@@ -343,7 +343,7 @@ async def test_with_widgets_returns_table_block_on_dataframe(
 
 
 @pytest.mark.asyncio
-async def test_with_widgets_returns_empty_blocks_on_text_only(
+async def test_with_widgets_returns_single_text_block_on_text_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     agent_stub_factory,
