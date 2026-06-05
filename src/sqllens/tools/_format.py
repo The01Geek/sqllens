@@ -375,24 +375,32 @@ def components_to_blocks(
                     )
                     error_message = ""
             if is_run_sql:
-                # Reset the row-count tracker on the ``running`` card (which
-                # uniquely fires once per call) rather than on the completed
-                # card. This handles two cases the earlier ``sql != last_sql``
-                # guard got wrong:
+                # Reset the row-count tracker on EITHER edge that uniquely
+                # marks the start of a new run_sql call: the ``running`` card
+                # (today the agent's emission pattern), OR a SQL-text change
+                # against the previous card (defence in depth for streams
+                # where the running card is missing or dropped). Combining
+                # the two predicates catches three failure modes:
                 #
                 #   1. The running/completed pair share the same SQL metadata
                 #      (last-wins de-dupe in ``_format`` relies on this), so
-                #      resetting on the completed card would wipe the row
-                #      count that the intervening DATAFRAME just populated.
-                #      ``status == "running"`` only fires once per call, so
-                #      the reset lands at the right moment (before the call's
-                #      DataFrame is emitted) without disturbing the completion.
+                #      resetting on the completed card alone would wipe the
+                #      row count that the intervening DATAFRAME just
+                #      populated. ``status == "running"`` only fires once
+                #      per normal call, so the reset lands at the right
+                #      moment (before the call's DataFrame is emitted).
                 #   2. A real retry of the *same* SQL text (agent re-runs an
-                #      identical query, e.g. after a deadlock) was previously
-                #      missed by the text-equality guard, leaving the prior
-                #      run's row count to leak through. The ``status`` check
-                #      catches each call independently of SQL text.
-                if status == "running":
+                #      identical query, e.g. after a deadlock) where the
+                #      running card IS emitted — covered by clause 1.
+                #   3. Defensive: a future producer that emits a completion-
+                #      only card (no preceding ``running``), or an upstream
+                #      exception between the running and completion yields
+                #      that drops the running emission. The text-change
+                #      clause catches the new-SQL-without-running case and
+                #      keeps the iter-1 regression
+                #      ``test_query_info_row_count_attributed_to_last_run_sql
+                #      _when_empty`` honest against emission drift.
+                if status == "running" or sql != last_sql:
                     last_sql_row_count = None
                 last_sql = sql
             if isinstance(metadata, dict):
@@ -1143,12 +1151,22 @@ def _serialize_blocks_to_markdown(blocks: list[dict]) -> str:
             # a missing ``type`` key). CLAUDE.md: never silently drop. Surface
             # the loss to both the operator log AND the rendered output so a
             # regression cannot ship with the contents invisibly missing.
+            #
+            # The btype value is wrapped in a fenced-code span (`` ` ``)
+            # rather than the bare ``{btype!r}`` interpolation an earlier
+            # iteration used: a typical producer-drift btype is an
+            # identifier-like string (e.g. ``"my_block"``), and its
+            # ``_`` characters would prematurely terminate the surrounding
+            # italic span, mangling the rest of the rendered Markdown
+            # downstream. The fenced-code wrapper is XSS-safe in any
+            # markdown renderer and renders correctly regardless of which
+            # markdown-significant characters the discriminator contains.
             logger.warning(
                 "_serialize_blocks_to_markdown: dropping unknown block type "
                 "%r from markdown serialization (likely producer drift)",
                 btype,
             )
-            parts.append(f"_[unsupported block type: {btype!r}]_")
+            parts.append(f"_[unsupported block type: `{btype}`]_")
     return "\n\n".join(parts)
 
 

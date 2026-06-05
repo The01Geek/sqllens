@@ -540,6 +540,8 @@ def test_components_to_blocks_unmarked_fallback_logs_info(caplog) -> None:
     # Logged at info level (not warning) because the bare-RichTextComponent
     # case fires in many existing tests; warning-level would pollute the
     # operator surface with test-fixture noise.
+    import logging
+
     stream = [
         _ui(RichTextComponent(content="some unmarked reasoning")),
     ]
@@ -547,12 +549,67 @@ def test_components_to_blocks_unmarked_fallback_logs_info(caplog) -> None:
         _, _is_error, blocks, _qi, _mi = components_to_blocks(stream)
     # Backwards-compat: the fallback still emits a text block.
     assert blocks == [{"type": "text", "text": "some unmarked reasoning"}]
-    # And the info message fires so the abnormal-termination signal is in the
-    # operator's trail under verbose logging.
+    # Find the matching record AND assert its level is INFO — without the
+    # level assertion, a regression back to logger.warning(...) would still
+    # pass the message-substring assertion, defeating the test's purpose.
+    matching = [
+        r for r in caplog.records
+        if "no answer-marked TEXT in stream" in r.getMessage()
+    ]
+    assert matching, "expected the fallback to log the abnormal-termination signal"
+    assert matching[0].levelno == logging.INFO, (
+        f"expected INFO log level, got {matching[0].levelname} — a "
+        f"regression to warning-level would pollute the operator surface"
+    )
+
+
+def test_serialize_blocks_to_markdown_unknown_block_type_surfaced(caplog) -> None:
+    # CLAUDE.md "never silently drop" rule: an unknown block type (producer
+    # drift — typo, case mismatch, future type the renderer doesn't know
+    # yet, missing ``type`` key) must surface to both the log AND the
+    # rendered output rather than vanish silently. Pin both surfaces.
+    from sqllens.tools._format import _serialize_blocks_to_markdown
+
+    blocks = [{"type": "unsupported_block", "text": "won't render but should not vanish"}]
+    with caplog.at_level("WARNING", logger="sqllens.tools._format"):
+        rendered = _serialize_blocks_to_markdown(blocks)
+    # User-visible placeholder names the unknown discriminator inside a
+    # fenced-code wrapper, so identifier-like names (which contain `_`)
+    # don't break the surrounding italics span downstream.
+    assert "unsupported block type" in rendered
+    assert "`unsupported_block`" in rendered
+    # Operator-visible warning fires so a producer regression isn't invisible.
     assert any(
-        "no answer-marked TEXT in stream" in r.getMessage()
+        "dropping unknown block type" in r.getMessage()
         for r in caplog.records
-    ), "expected the fallback to log the abnormal-termination signal"
+    ), "expected a warning log when an unknown block type was dropped"
+
+
+def test_query_info_row_count_reset_on_sql_change_without_running_card() -> None:
+    # Defence in depth for the reset-on-running-card change: if a future
+    # producer (or a test fixture) emits a completion-only run_sql card with
+    # no preceding ``running`` card, the SQL-text-change clause must still
+    # reset last_sql_row_count so the prior call's count doesn't leak into
+    # the new SQL's query_info. Pre-iter-3 (with only ``status == "running"``
+    # guard) would mis-attribute the 5-row count to the second SQL.
+    stream = [
+        # First SQL: completion-only card (no running), with a 5-row table.
+        _sql_card("SELECT * FROM big_table", status="success"),
+        _ui(DataFrameComponent(rows=[{"x": i} for i in range(5)], columns=["x"])),
+        # Second SQL: completion-only card, distinct text, no DataFrame.
+        _sql_card("SELECT * FROM empty_table", status="success"),
+    ]
+    _, is_error, _blocks, query_info, _mi = components_to_blocks(stream)
+    assert is_error is False
+    # Second-SQL query_info must NOT report the first SQL's 5 rows.
+    # Without the sql-change clause, the second card would be the only
+    # run_sql signal seen with no reset, so last_sql_row_count would still
+    # carry 5 from the prior DataFrame.
+    assert query_info is not None
+    assert query_info["sql"] == "SELECT * FROM empty_table"
+    # No DataFrame followed the second card → row_count stays None →
+    # omitted from query_info (not 5).
+    assert "row_count" not in query_info
 
 
 def test_components_to_blocks_marker_strict_identity_check() -> None:
