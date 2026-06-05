@@ -26,24 +26,15 @@ from sqllens.tools._format import (
     components_to_blocks,
 )
 
-from ._agent_stubs import make_chart, make_dataframe
+from ._agent_stubs import make_chart, make_chart_spec, make_dataframe, wrap
 
 
 def _spec(rows, *, chart_type="bar", series=None, title="T"):
-    return {
-        "chart_type": chart_type,
-        "title": title,
-        "x": {"field": "x", "label": "X", "type": "category"},
-        "y": {"field": "y", "label": "Y", "type": "value"},
-        "series": series,
-        "data": rows,
-        "row_count": len(rows),
-        "truncated": 0,
-    }
+    return make_chart_spec(rows, chart_type=chart_type, series=series, title=title)
 
 
 def _ui(rich) -> UiComponent:
-    return UiComponent(rich_component=rich)
+    return wrap(rich)
 
 
 def _chart_blocks(blocks):

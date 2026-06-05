@@ -20,11 +20,59 @@ from sqllens.agent.components.rich.data.dataframe import DataFrameComponent
 from sqllens.agent.components.rich.feedback.status_card import StatusCardComponent
 from sqllens.agent.components.rich.text import RichTextComponent
 from sqllens.agent.core.components import UiComponent
+from sqllens.agent.markers import answer_marker_data
+
+
+def wrap(rich) -> UiComponent:  # type: ignore[no-untyped-def]
+    """One-line helper used across the test suite to wrap a rich component.
+
+    Equivalent to ``UiComponent(rich_component=rich)``. Centralized here so
+    test modules don't each redefine their own ``_ui`` shim.
+    """
+    return UiComponent(rich_component=rich)
 
 
 def make_text_component(content: str) -> UiComponent:
-    """Build a UiComponent wrapping a RichTextComponent."""
+    """Build a UiComponent wrapping a RichTextComponent (unmarked)."""
     return UiComponent(rich_component=RichTextComponent(content=content))
+
+
+def make_answer_text(content: str) -> UiComponent:
+    """Build an answer-marked TEXT UiComponent (what EmitTextTool emits).
+
+    Carries :data:`sqllens.agent.markers.IS_ANSWER_MARKER_KEY` so the MCP
+    block builder treats it as deliberate prose (a rendered TEXT block) rather
+    than intermediate reasoning chatter that the block builder drops.
+    """
+    return UiComponent(
+        rich_component=RichTextComponent(content=content, data=answer_marker_data())
+    )
+
+
+def make_chart_spec(
+    rows: list[dict[str, Any]],
+    *,
+    chart_type: str = "bar",
+    series: str | None = None,
+    title: str = "T",
+) -> dict[str, Any]:
+    """Build a renderer-agnostic chart DSL dict for tests.
+
+    Single source of truth shared by test_format.py and test_chart_payload.py
+    so a chart-DSL change (new required field, renamed axis key) only has to
+    be made here. ``data`` defaults to ``rows`` and ``row_count`` is derived;
+    ``truncated`` is always 0 in test fixtures (production sets it on trim).
+    """
+    return {
+        "chart_type": chart_type,
+        "title": title,
+        "x": {"field": "x", "label": "X", "type": "category"},
+        "y": {"field": "y", "label": "Y", "type": "value"},
+        "series": series,
+        "data": rows,
+        "row_count": len(rows),
+        "truncated": 0,
+    }
 
 
 def make_status_card(

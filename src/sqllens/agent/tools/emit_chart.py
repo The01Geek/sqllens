@@ -20,12 +20,11 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from sqllens.agent.components import (
     ChartComponent,
-    ComponentType,
-    NotificationComponent,
     SimpleTextComponent,
     UiComponent,
 )
 from sqllens.agent.core.tool import Tool, ToolContext, ToolResult
+from sqllens.agent.tools._errors import structured_tool_error
 
 logger = logging.getLogger("sqllens.agent.tools.emit_chart")
 
@@ -167,24 +166,16 @@ class EmitChartTool(Tool[EmitChartParams]):
         except Exception as e:
             # The args are already Pydantic-validated, so reaching this path is
             # an implementation bug (e.g. a producer overriding ``model_dump``
-            # incorrectly). Log the full traceback server-side and surface a
-            # sanitized message to the LLM / widget — never echo raw exception
-            # text into the iframe or LLM context. ``ToolResult.error`` keeps
-            # the raw string for the agent's internal bookkeeping (tests + any
-            # future telemetry that wants to count by exception type).
-            logger.exception("emit_chart execute failed")
-            sanitized = "Error emitting chart: internal error; see server logs"
-            return ToolResult(
-                success=False,
-                result_for_llm=sanitized,
-                ui_component=UiComponent(
-                    rich_component=NotificationComponent(
-                        type=ComponentType.NOTIFICATION,
-                        level="error",
-                        message=sanitized,
-                    ),
-                    simple_component=SimpleTextComponent(text=sanitized),
-                ),
-                error=str(e),
-                metadata={"error_type": "chart_error"},
+            # incorrectly). The shared helper logs the full traceback
+            # server-side and surfaces a sanitized message to the LLM / widget —
+            # never echo raw exception text into the iframe or LLM context.
+            # ``ToolResult.error`` keeps the raw string for the agent's
+            # internal bookkeeping (tests + any future telemetry that wants to
+            # count by exception type).
+            return structured_tool_error(
+                logger=logger,
+                where="emit_chart execute failed",
+                error_type="chart_error",
+                exc=e,
+                sanitized="Error emitting chart: internal error; see server logs",
             )

@@ -17,13 +17,13 @@ from typing import Type
 from pydantic import BaseModel, Field, field_validator
 
 from sqllens.agent.components import (
-    ComponentType,
-    NotificationComponent,
     RichTextComponent,
     SimpleTextComponent,
     UiComponent,
 )
 from sqllens.agent.core.tool import Tool, ToolContext, ToolResult
+from sqllens.agent.markers import answer_marker_data
+from sqllens.agent.tools._errors import structured_tool_error
 
 logger = logging.getLogger("sqllens.agent.tools.emit_text")
 
@@ -76,15 +76,16 @@ class EmitTextTool(Tool[EmitTextParams]):
         as a structured error, never an unhandled exception.
         """
         try:
-            # ``data["is_answer"] = True`` is the discriminator the MCP-layer
-            # block builder reads to include this TEXT in the rendered answer.
-            # Without it, the builder would drop the block as intermediate
-            # reasoning chatter (the assistant text that accompanies tool calls
-            # when UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT is on).
+            # The answer marker (sqllens.agent.markers.IS_ANSWER_MARKER_KEY)
+            # is the discriminator the MCP-layer block builder reads to include
+            # this TEXT in the rendered answer. Without it, the builder would
+            # drop the block as intermediate reasoning chatter (the assistant
+            # text that accompanies tool calls when
+            # UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT is on).
             text_component = RichTextComponent(
                 content=args.text,
                 markdown=True,
-                data={"is_answer": True},
+                data=answer_marker_data(),
             )
             return ToolResult(
                 success=True,
@@ -95,19 +96,10 @@ class EmitTextTool(Tool[EmitTextParams]):
                 ),
             )
         except Exception as e:
-            logger.exception("emit_text execute failed")
-            sanitized = "Error emitting text: internal error; see server logs"
-            return ToolResult(
-                success=False,
-                result_for_llm=sanitized,
-                ui_component=UiComponent(
-                    rich_component=NotificationComponent(
-                        type=ComponentType.NOTIFICATION,
-                        level="error",
-                        message=sanitized,
-                    ),
-                    simple_component=SimpleTextComponent(text=sanitized),
-                ),
-                error=str(e),
-                metadata={"error_type": "text_error"},
+            return structured_tool_error(
+                logger=logger,
+                where="emit_text execute failed",
+                error_type="text_error",
+                exc=e,
+                sanitized="Error emitting text: internal error; see server logs",
             )

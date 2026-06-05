@@ -26,6 +26,7 @@ from decimal import Decimal
 
 from sqllens.agent.core.components import UiComponent
 from sqllens.agent.core.rich_component import ComponentType
+from sqllens.agent.markers import IS_ANSWER_MARKER_KEY
 from sqllens.safety import first_sql_keyword, is_introspection_query
 
 logger = logging.getLogger("sqllens.tools._format")
@@ -181,13 +182,14 @@ def _text_is_answer_marked(rich) -> bool:  # type: ignore[no-untyped-def]
     a tool call (``agent/core/agent/agent.py``: ``RichTextComponent(content=
     response.content, ...)`` inside the LLM loop, gated on
     ``UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT``) and the terminal
-    answer / iteration-limit warning at end-of-turn — both of which set
-    ``data["is_answer"] = True``. The ``EmitTextTool`` sets the same flag on
-    deliberate interleaved prose. So a marked TEXT is something the user should
-    see; an unmarked TEXT is reasoning chatter.
+    answer / iteration-limit warning at end-of-turn — both of which set the
+    :data:`~sqllens.agent.markers.IS_ANSWER_MARKER_KEY` flag in ``data``. The
+    ``EmitTextTool`` sets the same flag on deliberate interleaved prose. So a
+    marked TEXT is something the user should see; an unmarked TEXT is
+    reasoning chatter.
     """
     data = getattr(rich, "data", None)
-    return isinstance(data, dict) and bool(data.get("is_answer"))
+    return isinstance(data, dict) and bool(data.get(IS_ANSWER_MARKER_KEY))
 
 
 def components_to_blocks(
@@ -247,19 +249,24 @@ def components_to_blocks(
     When no blocks are produced, :func:`render_interactive` is consulted for an
     interactive-affordance fallback before settling on ``"(no answer)"``.
     """
-    # Materialize once: the second pass (block emission) needs random access
-    # and ``render_interactive`` does another pass; the public signature accepts
-    # any Iterable (incl. generators).
+    # Materialize once: ``render_interactive`` (the no-blocks fallback below)
+    # does another pass over the stream; the public signature accepts any
+    # Iterable (incl. generators).
     components = list(components)
 
-    # ── First pass: error state, executed SQL, memory hit/miss, text indices.
+    # Single forward pass: collect block candidates in stream order (each text
+    # block tagged with its is_answer marker so we can filter unmarked TEXTs
+    # post-walk), plus the cross-cutting error / last_sql / last_memory state.
     error_message = ""
     last_sql: str | None = None
     last_memory: dict | None = None
-    marked_text_indices: set[int] = set()
-    last_text_idx: int | None = None
+    # Candidate blocks. Text blocks carry a private "_is_answer" tag we strip
+    # before emitting — never expose internal bookkeeping fields in the public
+    # ``sqllens/blocks`` wire shape.
+    candidates: list[dict] = []
+    any_marked_text = False
 
-    for idx, comp in enumerate(components):
+    for comp in components:
         rich = comp.rich_component
         if rich is None:
             continue
@@ -269,9 +276,20 @@ def components_to_blocks(
             content = (getattr(rich, "content", "") or "").strip()
             if not content:
                 continue
-            if _text_is_answer_marked(rich):
-                marked_text_indices.add(idx)
-            last_text_idx = idx
+            is_marked = _text_is_answer_marked(rich)
+            if is_marked:
+                any_marked_text = True
+            candidates.append(
+                {"type": "text", "text": content, "_is_answer": is_marked}
+            )
+        elif ctype == ComponentType.DATAFRAME:
+            payload = _build_table_payload(rich)
+            if payload is not None:
+                candidates.append({"type": "table", **payload})
+        elif ctype == ComponentType.CHART:
+            payload = _build_chart_payload(rich)
+            if payload is not None:
+                candidates.append({"type": "chart", **payload})
         elif ctype == ComponentType.STATUS_CARD:
             status = getattr(rich, "status", "")
             metadata = getattr(rich, "metadata", None)
@@ -314,38 +332,27 @@ def components_to_blocks(
     if error_message:
         return error_message, True, [], None, None
 
-    # Determine which TEXT indices to emit as text blocks. Prefer the explicit
-    # answer-marker (set by EmitTextTool and the agent's terminal answer); if
-    # the stream carries no marker (e.g. tests using bare RichTextComponent),
-    # fall back to the very last non-empty TEXT — the same "last TEXT wins"
-    # semantics the previous collapse used as the terminal-answer heuristic.
-    text_include: set[int]
-    if marked_text_indices:
-        text_include = marked_text_indices
-    elif last_text_idx is not None:
-        text_include = {last_text_idx}
-    else:
-        text_include = set()
-
-    # ── Second pass: emit blocks in stream order.
+    # Resolve text-block inclusion: prefer the explicit answer-marker (set by
+    # EmitTextTool and the agent's terminal answer); if the stream carries no
+    # marker (e.g. tests using bare RichTextComponent), fall back to the last
+    # non-empty TEXT alone — the same "last TEXT wins" semantics the previous
+    # collapse used as the terminal-answer heuristic. In either case, strip
+    # the private "_is_answer" tag before emitting the public block.
     blocks: list[dict] = []
-    for idx, comp in enumerate(components):
-        rich = comp.rich_component
-        if rich is None:
+    last_unmarked_text_idx: int | None = None
+    for i, cand in enumerate(candidates):
+        if cand["type"] != "text":
             continue
-        ctype = getattr(rich, "type", None)
-        if ctype == ComponentType.TEXT and idx in text_include:
-            content = (getattr(rich, "content", "") or "").strip()
-            if content:
-                blocks.append({"type": "text", "text": content})
-        elif ctype == ComponentType.DATAFRAME:
-            payload = _build_table_payload(rich)
-            if payload is not None:
-                blocks.append({"type": "table", **payload})
-        elif ctype == ComponentType.CHART:
-            payload = _build_chart_payload(rich)
-            if payload is not None:
-                blocks.append({"type": "chart", **payload})
+        if not cand["_is_answer"]:
+            last_unmarked_text_idx = i
+    for i, cand in enumerate(candidates):
+        if cand["type"] == "text":
+            if cand["_is_answer"]:
+                blocks.append({"type": "text", "text": cand["text"]})
+            elif not any_marked_text and i == last_unmarked_text_idx:
+                blocks.append({"type": "text", "text": cand["text"]})
+        else:
+            blocks.append(cand)
 
     blocks = _trim_blocks_to_budget(blocks)
 
@@ -829,16 +836,14 @@ def _compute_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     return payload
 
 
-def _serialized_len(payload: dict) -> int:
+def _serialized_len(payload: dict | list) -> int:
     # json.dumps defaults to ensure_ascii=True, so the result is pure ASCII and
     # len(str) == the serialized byte size the host actually receives — non-ASCII
     # cells escape to \uXXXX rather than inflating bytes past this measure.
+    # Accepts both dicts (individual payloads) and lists (the whole ``blocks``
+    # array) so the per-block cap and the blocks-total cap measure size the
+    # same way and cannot drift apart.
     return len(json.dumps(payload, separators=(",", ":")))
-
-
-def _serialized_len_list(blocks: list[dict]) -> int:
-    """Serialized byte size of the whole ``blocks`` array under the ``_meta`` cap."""
-    return len(json.dumps(blocks, separators=(",", ":")))
 
 
 def _coerce_chart_value(value: object) -> object:
@@ -953,32 +958,32 @@ def _trim_blocks_to_budget(blocks: list[dict]) -> list[dict]:
 
     Each individual block is already capped by the per-block budget; this
     bounds the *sum* so a long stream of in-budget blocks still cannot blow
-    the iframe ``_meta`` ceiling. When over budget, keep the longest prefix
-    that fits with a single appended truncation-notice text block; emit a
-    server-side ``logger.warning`` whenever any trimming happens (CLAUDE.md:
-    never silently drop).
+    the iframe ``_meta`` ceiling. When over budget, drop trailing blocks one
+    at a time until the kept prefix + an appended truncation-notice text block
+    fits; emit a server-side ``logger.warning`` whenever any trimming happens
+    (CLAUDE.md: never silently drop).
     """
-    if not blocks:
-        return blocks
-    if _serialized_len_list(blocks) <= _MAX_BLOCKS_TOTAL_BYTES:
+    if not blocks or _serialized_len(blocks) <= _MAX_BLOCKS_TOTAL_BYTES:
         return blocks
     total = len(blocks)
-    # Try progressively shorter prefixes (with the notice appended) until one
-    # fits. Block counts are bounded — a few dozen per turn at most — so linear
-    # is fine and the code is clearer than a binary search here.
-    for keep in range(total - 1, -1, -1):
-        notice = _truncation_notice_block(total - keep)
-        candidate = [*blocks[:keep], notice]
-        if _serialized_len_list(candidate) <= _MAX_BLOCKS_TOTAL_BYTES:
+    kept = list(blocks)
+    # Shrink the kept prefix one block at a time, re-checking against the
+    # budget WITH the notice appended (the notice's size grows by ~one digit
+    # as the dropped count rises, but stays under a hundred bytes — its
+    # contribution is bounded and we don't need to predict it).
+    while kept:
+        kept.pop()
+        notice = _truncation_notice_block(total - len(kept))
+        if _serialized_len([*kept, notice]) <= _MAX_BLOCKS_TOTAL_BYTES:
             logger.warning(
                 "sqllens/blocks budget exceeded; trimmed %d trailing block(s) "
                 "of %d (kept %d) to fit %d byte ceiling",
-                total - keep,
+                total - len(kept),
                 total,
-                keep,
+                len(kept),
                 _MAX_BLOCKS_TOTAL_BYTES,
             )
-            return candidate
+            return [*kept, notice]
     # Even the notice alone busts the budget — nothing we can return that
     # honours the ceiling AND surfaces the truncation. Log loud, return empty
     # so the caller's interactive/no-answer fallback engages.
@@ -1052,25 +1057,22 @@ def _table_block_to_markdown(block: dict) -> str:
 
 
 def _render_dataframe(rich) -> str:  # type: ignore[no-untyped-def]
-    """Render a DataFrame component as a Markdown table (legacy helper, tests).
+    """Render a DataFrame component as a Markdown table (delegates to block path).
 
     Retained because ``tests/unit/test_format.py`` pins the precise Markdown
     shape (header, separator, cell coercion, 500-row truncation footer) by
     calling this directly. The production path goes through
     :func:`components_to_blocks` → :func:`_serialize_blocks_to_markdown`, which
-    produces the same shape.
+    invokes :func:`_table_block_to_markdown` — the same function this helper
+    delegates to, so the two paths emit byte-identical Markdown.
     """
     columns, rows = _columns_and_rows(rich)
     if not columns and not rows:
         return ""
-
-    header = "| " + " | ".join(columns) + " |"
-    separator = "|" + "|".join(["---"] * len(columns)) + "|"
-    body_rows = []
-    for row in rows[:_MAX_ROWS_RENDERED]:
-        body_rows.append("| " + " | ".join(_coerce_cell(row.get(c, "")) for c in columns) + " |")
-
-    note = ""
-    if len(rows) > _MAX_ROWS_RENDERED:
-        note = f"\n\n_Showing first {_MAX_ROWS_RENDERED} of {len(rows)} rows._"
-    return "\n".join([header, separator, *body_rows]) + note
+    block = {
+        "columns": [_coerce_cell(c) for c in columns],
+        "rows": [[_coerce_cell(row.get(c, "")) for c in columns] for row in rows],
+        "row_count": len(rows),
+        "truncated": 0,
+    }
+    return _table_block_to_markdown(block)

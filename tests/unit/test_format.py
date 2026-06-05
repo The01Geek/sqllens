@@ -39,7 +39,6 @@ from sqllens.tools._format import (
     _MAX_TABLE_PAYLOAD_BYTES,
     _render_dataframe,
     _serialized_len,
-    _serialized_len_list,
     append_conversation_footer,
     build_agent_trace,
     components_to_blocks,
@@ -49,14 +48,17 @@ from sqllens.tools._format import (
 
 from ._agent_stubs import (
     make_agent_error_card,
+    make_answer_text,
     make_chart,
+    make_chart_spec,
     make_text_component,
     make_tool_cards,
+    wrap,
 )
 
 
 def _ui(rich) -> UiComponent:
-    return UiComponent(rich_component=rich)
+    return wrap(rich)
 
 
 def _df(columns: list[str], rows: list[dict]) -> SimpleNamespace:
@@ -67,21 +69,8 @@ def _df(columns: list[str], rows: list[dict]) -> SimpleNamespace:
 
 
 def _answer_text(content: str) -> UiComponent:
-    """A deliberately-rendered (answer-marked) TEXT — what emit_text emits."""
-    return _ui(RichTextComponent(content=content, data={"is_answer": True}))
-
-
-def _chart_spec(rows, *, chart_type="bar", title="T"):
-    return {
-        "chart_type": chart_type,
-        "title": title,
-        "x": {"field": "x", "label": "X", "type": "category"},
-        "y": {"field": "y", "label": "Y", "type": "value"},
-        "series": None,
-        "data": rows,
-        "row_count": len(rows),
-        "truncated": 0,
-    }
+    """Alias for :func:`tests.unit._agent_stubs.make_answer_text`."""
+    return make_answer_text(content)
 
 
 # ───────────────────────── error / recovery invariants ─────────────────────
@@ -410,7 +399,7 @@ def test_ordered_blocks_preserves_stream_position_for_chart_text_table() -> None
     # artifact becomes a block at its stream position, with no reordering and
     # no last-wins collapse.
     stream = [
-        make_chart(_chart_spec([{"x": "a", "y": 1}])),
+        make_chart(make_chart_spec([{"x": "a", "y": 1}])),
         _answer_text("Top-level summary chart above."),
         _ui(DataFrameComponent(rows=[{"region": "NA", "revenue": 1200}])),
         _answer_text("Full breakdown below."),
@@ -451,7 +440,7 @@ def test_blocks_total_budget_trims_trailing_blocks_with_notice(caplog) -> None:
     assert is_error is False
     # The trim landed: total size is under the ceiling and a notice text block
     # is the last element.
-    assert _serialized_len_list(blocks) <= _MAX_BLOCKS_TOTAL_BYTES
+    assert _serialized_len(blocks) <= _MAX_BLOCKS_TOTAL_BYTES
     assert blocks[-1]["type"] == "text"
     assert "Response truncated" in blocks[-1]["text"]
     assert "trailing block" in blocks[-1]["text"]
