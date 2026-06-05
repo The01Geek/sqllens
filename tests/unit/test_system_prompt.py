@@ -172,3 +172,52 @@ async def test_emit_chart_usage_block_absent_without_tool() -> None:
     assert prompt is not None
     assert "EMIT_CHART USAGE" not in prompt
     assert "emit_chart" not in prompt
+
+
+async def test_answer_composition_block_present_when_emit_text_registered() -> None:
+    """When ``emit_text`` is registered, the ANSWER COMPOSITION rubric must
+    be present — without it the LLM has no instructions on when to call
+    ``emit_text`` vs. emit bare assistant text, and the multi-block answer
+    feature silently regresses to terminal-text-only. Mirrors the precedent
+    ``test_emit_chart_usage_block_present_when_tool_registered`` for the
+    sibling ``emit_chart`` block.
+    """
+    builder = DefaultSystemPromptBuilder()
+    user = User(id="test-user")
+    prompt = await builder.build_system_prompt(
+        user,
+        tools=[
+            _ToolSchemaStub("run_sql"),
+            _ToolSchemaStub("emit_chart"),
+            _ToolSchemaStub("emit_text"),
+        ],
+    )
+
+    assert prompt is not None
+    assert "ANSWER COMPOSITION" in prompt
+    # Pin the load-bearing rules: emit_text is the only path for deliberate
+    # prose, multiple calls per request are permitted, and the interleaved
+    # few-shot uses the run_sql → emit_chart → emit_text → run_sql → emit_text
+    # shape (the interleaved AC from issue #194).
+    assert "emit_text is the ONLY way" in prompt
+    assert "more than once per request" in prompt
+    # The example workflow in the rubric demonstrates the interleaved few-shot
+    # the issue body explicitly calls out.
+    assert "emit_chart" in prompt and "emit_text" in prompt
+
+
+async def test_answer_composition_block_absent_without_emit_text() -> None:
+    """No ANSWER COMPOSITION block when ``emit_text`` isn't registered — the
+    rubric must be gated on the tool's presence, just like EMIT_CHART USAGE.
+    """
+    builder = DefaultSystemPromptBuilder()
+    user = User(id="test-user")
+    prompt = await builder.build_system_prompt(
+        user, tools=[_ToolSchemaStub("run_sql"), _ToolSchemaStub("emit_chart")]
+    )
+
+    assert prompt is not None
+    assert "ANSWER COMPOSITION" not in prompt
+    # The emit_chart block must still appear — the gating is per-tool, not
+    # all-or-nothing.
+    assert "EMIT_CHART USAGE" in prompt

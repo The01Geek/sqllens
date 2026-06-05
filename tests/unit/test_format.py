@@ -450,6 +450,124 @@ def test_blocks_total_budget_trims_trailing_blocks_with_notice(caplog) -> None:
     ), "expected a warning when blocks were trimmed"
 
 
+def test_blocks_catastrophic_trim_returns_notice_block_not_empty(
+    monkeypatch, caplog
+) -> None:
+    # The degenerate near-impossible case the CLAUDE.md silent-failure rule
+    # warns about: the truncation notice itself exceeds the overall ceiling.
+    # Force the situation by monkeypatching the ceiling down to a tiny value
+    # (smaller than the notice's serialized length). The function must NOT
+    # return an empty list — that would silently render `"(no answer)"` to a
+    # user whose turn actually produced data. Instead, it returns a
+    # notice-only list (slightly over budget, but the user sees the
+    # truncation signal rather than nothing) and logs an error.
+    import sqllens.tools._format as fmt
+
+    monkeypatch.setattr(fmt, "_MAX_BLOCKS_TOTAL_BYTES", 50)  # under notice size
+    fat_cell = "x" * 200
+    stream = [
+        _ui(DataFrameComponent(rows=[{"c": fat_cell}], columns=["c"])),
+    ]
+    with caplog.at_level("ERROR", logger="sqllens.tools._format"):
+        _, is_error, blocks, _qi, _mi = components_to_blocks(stream)
+    assert is_error is False
+    # Notice-only return — the user sees the truncation message rather than
+    # an empty render.
+    assert len(blocks) == 1
+    assert blocks[0]["type"] == "text"
+    assert "Response truncated" in blocks[0]["text"]
+    # The error log fired (server-side signal of the near-impossible path).
+    assert any(
+        "zero in-budget prefix" in r.getMessage() for r in caplog.records
+    ), "expected an error log when even the notice busts the budget"
+
+
+def test_blocks_chart_markdown_placeholder_escapes_markdown_chars() -> None:
+    # AC for the chart-placeholder markdown serialization: a chart whose
+    # title contains markdown-significant characters (underscores, asterisks)
+    # must not break the surrounding italics formatting in the rendered
+    # answer. The serializer escapes both, so a title like
+    # "user_id_*by*_month" comes through as "user\_id\_\*by\*\_month".
+    chart_block = {
+        "type": "chart",
+        "chart_type": "bar",
+        "title": "user_id_*by*_month",
+        "x": {"field": "x"},
+        "y": {"field": "y"},
+        "series": None,
+        "data": [{"x": "a", "y": 1}],
+        "row_count": 1,
+        "truncated": 0,
+    }
+    from sqllens.tools._format import _serialize_blocks_to_markdown
+
+    rendered = _serialize_blocks_to_markdown([chart_block])
+    # Both underscores and asterisks are backslash-escaped, leaving the
+    # surrounding italics wrapper intact.
+    assert rendered == r"_[chart: user\_id\_\*by\*\_month]_"
+
+
+def test_blocks_chart_markdown_placeholder_unavailable_when_no_label() -> None:
+    # A chart block with no title AND no chart_type would have produced the
+    # ambiguous literal "_[chart: chart]_" in the prior code (reading as a
+    # chart literally named "chart"). The serializer now emits a generic
+    # "_[chart unavailable]_" instead.
+    chart_block = {
+        "type": "chart",
+        "chart_type": None,
+        "title": None,
+        "x": {"field": "x"},
+        "y": {"field": "y"},
+        "series": None,
+        "data": [],
+        "row_count": 0,
+        "truncated": 0,
+    }
+    from sqllens.tools._format import _serialize_blocks_to_markdown
+
+    rendered = _serialize_blocks_to_markdown([chart_block])
+    assert rendered == "_[chart unavailable]_"
+
+
+def test_components_to_blocks_unmarked_fallback_logs_warning(caplog) -> None:
+    # The last-text-fallback fires when no answer-marked TEXT is in the
+    # stream. In production this indicates either an abnormal termination
+    # (the agent never reached its terminal-answer yield) or a marker-
+    # emission regression — both worth a server-side log so the operator can
+    # diagnose without grep-ing for "(no answer)" in user reports. The
+    # function still returns the fallback block (backwards-compat preserved)
+    # but the warning makes the silent-degradation case visible.
+    stream = [
+        _ui(RichTextComponent(content="some unmarked reasoning")),
+    ]
+    with caplog.at_level("WARNING", logger="sqllens.tools._format"):
+        _, _is_error, blocks, _qi, _mi = components_to_blocks(stream)
+    # Backwards-compat: the fallback still emits a text block.
+    assert blocks == [{"type": "text", "text": "some unmarked reasoning"}]
+    # And the warning fires so the abnormal-termination signal is loud.
+    assert any(
+        "no answer-marked TEXT in stream" in r.getMessage()
+        for r in caplog.records
+    ), "expected the fallback to log a warning"
+
+
+def test_components_to_blocks_marker_strict_identity_check() -> None:
+    # The marker check is strict-identity (``is True``), so a producer drift
+    # that puts a truthy non-bool value under the marker key (string "yes",
+    # truthy list) does NOT silently flip the discrimination. Pin this so a
+    # future refactor that loosens the check (`bool(data.get(...))`) fails.
+    not_a_real_marker = _ui(
+        RichTextComponent(content="impostor", data={"is_answer": "yes"})
+    )
+    real_marker = _answer_text("real answer")
+    stream = [not_a_real_marker, real_marker]
+    _, _, blocks, _, _ = components_to_blocks(stream)
+    # Only the real-marker text survives; the truthy-but-not-True impostor
+    # is treated as unmarked reasoning chatter and excluded.
+    text_blocks = [b for b in blocks if b["type"] == "text"]
+    assert text_blocks == [{"type": "text", "text": "real answer"}]
+
+
 def test_blocks_within_budget_emit_no_truncation_notice() -> None:
     # Sanity: an under-budget stream has no notice block tacked on.
     stream = [
@@ -769,6 +887,12 @@ def test_query_info_absent_when_no_sql_card() -> None:
 
 
 def test_query_info_with_sql_card_and_empty_dataframe() -> None:
+    # An empty DataFrame from a successful SELECT means "SQL ran, 0 rows".
+    # The new walker captures that explicitly via last_sql_row_count = 0 so
+    # query_info reports row_count: 0 — more informative than the prior
+    # implementation's None (which was a side-effect of last_df being the
+    # empty DataFrame whose payload was rejected, not an intentional
+    # "no row count" signal).
     stream = [
         _sql_card("SELECT 1", status="running"),
         _ui(DataFrameComponent(rows=[], columns=[])),
@@ -777,8 +901,33 @@ def test_query_info_with_sql_card_and_empty_dataframe() -> None:
     _, is_error, blocks, query_info, _mi = components_to_blocks(stream)
     assert is_error is False
     assert [b for b in blocks if b["type"] == "table"] == []
-    assert query_info == {"sql": "SELECT 1", "query_type": "SELECT"}
-    assert "row_count" not in query_info
+    assert query_info == {"sql": "SELECT 1", "query_type": "SELECT", "row_count": 0}
+
+
+def test_query_info_row_count_attributed_to_last_run_sql_when_empty() -> None:
+    # Multi-run_sql turn where the LAST run_sql returned no rows but an
+    # earlier run_sql had a 5-row table. The walker must NOT misattribute the
+    # earlier table's row count to the later SQL — that was the corroborated
+    # silent-failure-hunter / general-purpose finding from /devflow:review on
+    # the first pass of #194. Pin row_count: 0 against the LATER SQL.
+    stream = [
+        _sql_card("SELECT * FROM big_table", status="running"),
+        _ui(DataFrameComponent(rows=[{"x": i} for i in range(5)], columns=["x"])),
+        _sql_card("SELECT * FROM big_table", status="success"),
+        _sql_card("SELECT * FROM empty_table", status="running"),
+        _ui(DataFrameComponent(rows=[], columns=[])),
+        _sql_card("SELECT * FROM empty_table", status="success"),
+    ]
+    _, is_error, _blocks, query_info, _mi = components_to_blocks(stream)
+    assert is_error is False
+    # query_info reflects the LATEST SQL with that SQL's actual row count (0).
+    # The pre-fix walker would have found the 5-row table block via reversed()
+    # iteration and reported row_count=5 attributed to the empty-table SQL.
+    assert query_info == {
+        "sql": "SELECT * FROM empty_table",
+        "query_type": "SELECT",
+        "row_count": 0,
+    }
 
 
 def test_query_info_none_on_error_path() -> None:

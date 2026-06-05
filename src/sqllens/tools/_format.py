@@ -178,18 +178,25 @@ def render_interactive(components: Iterable[UiComponent]) -> str:
 def _text_is_answer_marked(rich) -> bool:  # type: ignore[no-untyped-def]
     """True iff this TEXT component is deliberate prose, not reasoning chatter.
 
-    The agent emits two kinds of TEXT: intermediate reasoning that accompanies
-    a tool call (``agent/core/agent/agent.py``: ``RichTextComponent(content=
-    response.content, ...)`` inside the LLM loop, gated on
-    ``UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT``) and the terminal
-    answer / iteration-limit warning at end-of-turn — both of which set the
-    :data:`~sqllens.agent.markers.IS_ANSWER_MARKER_KEY` flag in ``data``. The
-    ``EmitTextTool`` sets the same flag on deliberate interleaved prose. So a
-    marked TEXT is something the user should see; an unmarked TEXT is
-    reasoning chatter.
+    The agent emits two distinct kinds of TEXT, and only one sets the marker:
+
+    - **Intermediate reasoning** that accompanies a tool call
+      (``agent/core/agent/agent.py``: ``RichTextComponent(content=response.
+      content, ...)`` inside the LLM loop, gated on
+      ``UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT``). This branch does
+      **NOT** set the marker — that is the discriminator.
+    - The **terminal answer** and **iteration-limit warning** at end-of-turn,
+      both of which DO set the
+      :data:`~sqllens.agent.markers.IS_ANSWER_MARKER_KEY` flag in ``data``.
+
+    The ``EmitTextTool`` sets the same flag on deliberate interleaved prose.
+    So a marked TEXT is something the user should see; an unmarked TEXT is
+    reasoning chatter. The check is strict-identity (``is True``) so a
+    producer drift that stuffs a non-bool value under the marker key (string
+    "yes", truthy list) does not silently flip the discrimination.
     """
     data = getattr(rich, "data", None)
-    return isinstance(data, dict) and bool(data.get(IS_ANSWER_MARKER_KEY))
+    return isinstance(data, dict) and data.get(IS_ANSWER_MARKER_KEY) is True
 
 
 def components_to_blocks(
@@ -243,11 +250,13 @@ def components_to_blocks(
       ``logger.warning`` fires whenever any trimming happens.
 
     The returned ``markdown`` is :func:`_serialize_blocks_to_markdown` over the
-    (possibly trimmed) blocks — keeping the plain-Markdown answer non-apps
-    clients depend on stable in spirit (tables rendered as Markdown tables,
-    text blocks verbatim, charts as a short ``_[chart: …]_`` placeholder).
-    When no blocks are produced, :func:`render_interactive` is consulted for an
-    interactive-affordance fallback before settling on ``"(no answer)"``.
+    (possibly trimmed) blocks — tables rendered as Markdown tables, text
+    blocks verbatim, charts as a short ``_[chart: …]_`` placeholder. Order
+    follows the agent's stream rather than the previous collapse's
+    tables-then-text convention, so a ``[text, table]`` stream now renders
+    text before the table; the per-element rendering shape is unchanged.
+    When no blocks are produced, :func:`render_interactive` is consulted for
+    an interactive-affordance fallback before settling on ``"(no answer)"``.
     """
     # Materialize once: ``render_interactive`` (the no-blocks fallback below)
     # does another pass over the stream; the public signature accepts any
@@ -260,6 +269,17 @@ def components_to_blocks(
     error_message = ""
     last_sql: str | None = None
     last_memory: dict | None = None
+    # Row count attributable to the *last* run_sql, tracked in stream order so
+    # query_info reports the correct total even when the agent runs multiple
+    # run_sql calls in one turn. The walker resets this on every run_sql card
+    # (the next DATAFRAME will be its result) and updates it on every
+    # DATAFRAME (the rows of the latest run_sql). When the last run_sql
+    # returns no rows (no DATAFRAME, or an empty DATAFRAME the payload
+    # computer rejects), this stays None and query_info correctly omits
+    # row_count — preventing the misattribution where an earlier table's row
+    # count would otherwise be reported as the last SQL's. See the new test
+    # `test_query_info_row_count_attributed_to_last_run_sql_when_empty`.
+    last_sql_row_count: int | None = None
     # Candidate blocks. Text blocks carry a private "_is_answer" tag we strip
     # before emitting — never expose internal bookkeeping fields in the public
     # ``sqllens/blocks`` wire shape.
@@ -286,6 +306,19 @@ def components_to_blocks(
             payload = _build_table_payload(rich)
             if payload is not None:
                 candidates.append({"type": "table", **payload})
+                # The size-capped payload may have dropped a tail; row_count
+                # is the kept prefix and truncated the dropped tail, so the
+                # sum is the TRUE row count the SQL produced.
+                last_sql_row_count = payload.get("row_count", 0) + payload.get(
+                    "truncated", 0
+                )
+            else:
+                # An empty/header-only DataFrame still corresponds to a
+                # successful run_sql that returned 0 rows. Record 0 (not None)
+                # so query_info reports the truth rather than "row_count
+                # unknown" — but only when the DataFrame component itself was
+                # present (we only enter this branch then).
+                last_sql_row_count = 0
         elif ctype == ComponentType.CHART:
             payload = _build_chart_payload(rich)
             if payload is not None:
@@ -323,6 +356,14 @@ def components_to_blocks(
                     )
                     error_message = ""
             if is_run_sql:
+                # A new run_sql card means a fresh SQL is about to execute (or
+                # has just executed). Reset the row-count tracker so the
+                # following DATAFRAME (if any) is attributed to THIS sql, not
+                # a previous one. If no DATAFRAME follows (zero rows; tool
+                # error after the SQL was logged), last_sql_row_count stays
+                # None and query_info correctly omits row_count.
+                if sql != last_sql:
+                    last_sql_row_count = None
                 last_sql = sql
             if isinstance(metadata, dict):
                 memory_search = metadata.get("memory_search")
@@ -334,10 +375,12 @@ def components_to_blocks(
 
     # Resolve text-block inclusion: prefer the explicit answer-marker (set by
     # EmitTextTool and the agent's terminal answer); if the stream carries no
-    # marker (e.g. tests using bare RichTextComponent), fall back to the last
-    # non-empty TEXT alone — the same "last TEXT wins" semantics the previous
-    # collapse used as the terminal-answer heuristic. In either case, strip
-    # the private "_is_answer" tag before emitting the public block.
+    # marker (e.g. tests using bare RichTextComponent, or an abnormal
+    # termination path where the agent never reached its terminal-answer
+    # yield), fall back to the last non-empty TEXT alone — the same "last
+    # TEXT wins" semantics the previous collapse used as the terminal-answer
+    # heuristic. In either case, strip the private "_is_answer" tag before
+    # emitting the public block.
     blocks: list[dict] = []
     last_unmarked_text_idx: int | None = None
     for i, cand in enumerate(candidates):
@@ -353,6 +396,21 @@ def components_to_blocks(
                 blocks.append({"type": "text", "text": cand["text"]})
         else:
             blocks.append(cand)
+    # The agent's production terminal-answer / iteration-limit-warning yields
+    # always set the marker; the EmitTextTool also always marks its emission.
+    # So in production a stream with at least one TEXT but no marked TEXT
+    # indicates either (a) an abnormal termination (the agent exited before
+    # reaching its terminal-answer yield, e.g. a caught-and-re-raised
+    # exception inside the LLM loop) or (b) a regression where one of the
+    # producers forgot the marker. Either way, the operator needs the signal
+    # — log it loudly so the silent-fallback path is not a debugging dead end.
+    if not any_marked_text and last_unmarked_text_idx is not None:
+        logger.warning(
+            "components_to_blocks: no answer-marked TEXT in stream; falling "
+            "back to last unmarked TEXT as the rendered answer. Likely an "
+            "abnormal termination (the agent never reached its terminal-answer "
+            "yield) or a marker-emission regression on one of the producers."
+        )
 
     blocks = _trim_blocks_to_budget(blocks)
 
@@ -369,24 +427,17 @@ def components_to_blocks(
 
     query_info = None
     if last_sql is not None:
-        # True result size, not the rendered subset: the *last* table block
-        # corresponds to the executed SQL whose result reached the renderer.
-        # Per-block size cap may have dropped a tail (row_count is the kept
-        # prefix, truncated the dropped tail) but the SQL ran against the
-        # whole set. ``.get`` keeps a partial future payload from raising an
-        # unsanitized KeyError past query_database's except blocks (which
-        # sanitize driver-exception strings into a stable internal-error
-        # message). If the trailing table block was itself trimmed away by the
-        # overall budget cut, ``row_count`` is None — the SQL was still run.
-        last_table = next(
-            (b for b in reversed(blocks) if b.get("type") == "table"), None
-        )
-        row_count: int | None
-        if last_table is not None:
-            row_count = last_table.get("row_count", 0) + last_table.get("truncated", 0)
-        else:
-            row_count = None
-        query_info = _query_info_from_sql(last_sql, row_count)
+        # Row count is captured in the walker against the LAST run_sql card so
+        # the count is correctly attributed to the SQL that produced it — not
+        # to whatever the trailing table block in ``blocks`` happens to be.
+        # The two diverge when the last run_sql returned 0 rows (no DataFrame
+        # / empty DataFrame → no table block) but an earlier run_sql in the
+        # same turn had rows: walking blocks backward would land on the
+        # earlier table and misattribute its count to the later SQL.
+        # ``last_sql_row_count`` is None when the SQL ran but no DATAFRAME was
+        # seen (zero rows on stdout-only output, or a tool error after the
+        # SQL was logged) — query_info correctly omits row_count in that case.
+        query_info = _query_info_from_sql(last_sql, last_sql_row_count)
     return markdown, False, blocks, query_info, last_memory
 
 
@@ -984,15 +1035,20 @@ def _trim_blocks_to_budget(blocks: list[dict]) -> list[dict]:
                 _MAX_BLOCKS_TOTAL_BYTES,
             )
             return [*kept, notice]
-    # Even the notice alone busts the budget — nothing we can return that
-    # honours the ceiling AND surfaces the truncation. Log loud, return empty
-    # so the caller's interactive/no-answer fallback engages.
+    # Even the notice alone busts the budget — a near-impossible case since
+    # the notice is ~100 bytes and the budget is hundreds of kilobytes. Per
+    # CLAUDE.md's "Lossy / empty success needs a loud warning, not green
+    # output" rule, returning an empty list here would let the caller's
+    # interactive/no-answer fallback render `"(no answer)"` to the user — a
+    # silent success on a turn that actually produced data. Instead, return a
+    # single notice block (the resulting `_meta` slightly exceeds the
+    # ceiling, but the user sees the truncation signal rather than nothing).
     logger.error(
         "sqllens/blocks budget exceeded with zero in-budget prefix; emitting "
-        "no blocks (truncation notice itself busts the %d byte ceiling)",
+        "notice-only blocks list (size slightly exceeds the %d byte ceiling)",
         _MAX_BLOCKS_TOTAL_BYTES,
     )
-    return []
+    return [_truncation_notice_block(total)]
 
 
 def _truncation_notice_block(dropped: int) -> dict:
@@ -1011,9 +1067,10 @@ def _serialize_blocks_to_markdown(blocks: list[dict]) -> str:
 
     Tables become Markdown tables (the same shape :func:`_render_dataframe`
     produces), text blocks pass through verbatim, charts collapse to a short
-    ``_[chart: …]_`` placeholder — apps-aware hosts render the real ECharts
-    chart via ``_meta["sqllens/blocks"]``. Parts are joined with blank lines
-    to match the previous tables-then-text Markdown shape.
+    ``_[chart: …]_`` placeholder (apps-aware hosts render the real ECharts
+    chart via ``_meta["sqllens/blocks"]``). Parts are joined with ``\\n\\n``;
+    element order follows the agent's stream (unlike the previous collapse
+    which always put tables before text).
     """
     parts: list[str] = []
     for b in blocks:
@@ -1027,10 +1084,21 @@ def _serialize_blocks_to_markdown(blocks: list[dict]) -> str:
             if md:
                 parts.append(md)
         elif btype == "chart":
-            label = (
-                b.get("title") or b.get("chart_type") or "chart"
-            )
-            parts.append(f"_[chart: {label}]_")
+            label = b.get("title") or b.get("chart_type")
+            if not label:
+                # No meaningful identifier — emit a generic "unavailable"
+                # placeholder rather than the ambiguous "_[chart: chart]_"
+                # which reads as a literal-string-named chart.
+                parts.append("_[chart unavailable]_")
+            else:
+                # Escape Markdown-significant characters so a chart title
+                # containing underscores or asterisks (e.g. an SQL identifier
+                # title like "user_id_*by*_month") does not break the
+                # surrounding italics formatting.
+                escaped = str(label).replace("\\", "\\\\").replace(
+                    "_", r"\_"
+                ).replace("*", r"\*")
+                parts.append(f"_[chart: {escaped}]_")
     return "\n\n".join(parts)
 
 

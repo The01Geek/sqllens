@@ -124,8 +124,10 @@ class EmitChartTool(Tool[EmitChartParams]):
         Arguments are already Pydantic-validated by the registry (the row cap
         and the pie/heatmap shape rules raise there and surface to the LLM as
         ``ToolResult(success=False)``). This body only assembles the spec; the
-        broad ``except`` mirrors ``RunSqlTool`` so an unexpected failure still
-        reaches the LLM as a structured error, never an unhandled exception.
+        broad ``except`` routes through
+        :func:`sqllens.agent.tools._errors.structured_tool_error` so an
+        unexpected failure reaches the LLM as a structured, sanitized error —
+        the raw exception text never leaks into the iframe or the LLM context.
         """
         try:
             # row_count / truncated belong to the MCP-layer payload, not the

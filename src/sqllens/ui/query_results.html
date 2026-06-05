@@ -721,11 +721,16 @@ function rebuildChartInto(entry) {
 }
 
 function renderChartBlock(block) {
+  // Create + register the chart entry, but DO NOT call rebuildChartInto here:
+  // ECharts.init reads clientWidth/clientHeight at construction, and a
+  // container that's not yet in the DOM measures as 0×0, leading to a broken
+  // first paint. renderBlocks does a finalization pass after all containers
+  // are appended (see the loop at the bottom of renderBlocks) so every chart
+  // initializes against a properly-sized in-DOM element.
   const container = document.createElement("div");
   container.className = "block charthost";
   const entry = { el: container, instance: null, observer: null, spec: block };
   chartRegistry.push(entry);
-  rebuildChartInto(entry);
   return container;
 }
 
@@ -774,6 +779,11 @@ function renderBlocks(result) {
     else if (block.type === "chart") node = renderChartBlock(block);
     if (node) blocksHost.appendChild(node);
   }
+  // Finalization pass: every chart container is now in the DOM with real
+  // dimensions, so ECharts.init can measure correctly. teardownChartRegistry
+  // above cleared the registry to just the newly-pushed entries from this
+  // render, so this loop only touches the fresh charts.
+  for (const entry of chartRegistry) rebuildChartInto(entry);
 }
 
 function showNotice(text) {
