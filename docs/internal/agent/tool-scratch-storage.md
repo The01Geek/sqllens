@@ -112,7 +112,7 @@ When `write_file` raises (or any other `RunSqlTool` internal step fails), the LL
 
 ### 3. No cleanup
 
-Scratch CSVs accumulate forever. The upstream consumer (`visualize_data`) was pruned during the lift, and SQL Lens's charting path (`EmitChartTool`, surfaced through `query_database`'s chart mode) takes already-aggregated rows rather than reading the CSV — so currently nothing reads them after they're written. The scratch root now lives under `tempfile.gettempdir()`, which on most platforms is reclaimed by the OS on reboot or by periodic cleaners (`systemd-tmpfiles`, macOS's launchd `cleanup` task, Disk Cleanup on Windows) — so the absolute floor on accumulation is "one reboot's worth of queries". A proper consumer-driven cleanup pass is still the right long-term fix.
+Scratch CSVs accumulate forever. The upstream consumer (`visualize_data`) was pruned during the lift, and SQL Lens's charting path (`EmitChartTool`, surfaced as chart blocks in `query_database`'s ordered `_meta["sqllens/blocks"]` response) takes already-aggregated rows rather than reading the CSV — so currently nothing reads them after they're written. The scratch root now lives under `tempfile.gettempdir()`, which on most platforms is reclaimed by the OS on reboot or by periodic cleaners (`systemd-tmpfiles`, macOS's launchd `cleanup` task, Disk Cleanup on Windows) — so the absolute floor on accumulation is "one reboot's worth of queries". A proper consumer-driven cleanup pass is still the right long-term fix.
 
 ### 4. No configurable scratch directory
 

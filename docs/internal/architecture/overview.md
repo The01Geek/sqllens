@@ -6,7 +6,7 @@ A reading map for SQL Lens. Start here if you are new to the codebase.
 
 A standalone MCP server that exposes a single configured database to MCP-aware AI clients (Cursor, Claude Desktop, Windsurf, custom). It ships two tools:
 
-- `query_database(question)` — natural-language → SQL → executed → Markdown, backed on apps-aware hosts by a single interactive widget that renders an ECharts chart, a sortable data grid, or plain text depending on what the agent produced (the agent decides chart-vs-table internally for chart-shaped, aggregated/temporal questions).
+- `query_database(question)` — natural-language → SQL → executed → Markdown, backed on apps-aware hosts by a single interactive widget that renders the agent's ordered list of text/table/chart blocks (the agent emits any combination of `run_sql`, `emit_chart`, and `emit_text` calls, in any order, any number of times; the widget draws one container per block in stream order).
 - `list_data_sources()` — describes the configured database.
 
 An opt-in third tool, `import_memory`, is registered only when `cfg.memory.allow_import` is set.
@@ -43,9 +43,9 @@ Cross-cutting modules can be imported from anywhere:
 | [src/sqllens/config.py](../../../src/sqllens/config.py) | pydantic-settings: TOML + `SQLLENS_*` env. See [setup/config-loading.md](../setup/config-loading.md). |
 | [src/sqllens/server.py](../../../src/sqllens/server.py) | `build_server(cfg)` registers tools; `run(cfg)` dispatches stdio vs HTTP. |
 | [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py) | Process-wide singleton `Agent` behind `query_database`, also primed by the transport warmup (`get_agent`, `prime_agent`, `_warm_memory`). |
-| [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) | Markdown + table/chart-payload tool implementation (`query_database_impl_with_widgets`); defines the error taxonomy constants. |
+| [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) | Markdown + ordered-blocks tool implementation (`query_database_impl_with_widgets`); defines the error taxonomy constants. |
 | [src/sqllens/tools/list_data_sources.py](../../../src/sqllens/tools/list_data_sources.py) | Describes the configured DSN. |
-| [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) | `components_to_widgets` collapses the agent's `UiComponent` stream into Markdown and the structured table/chart payloads in one pass. |
+| [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) | `components_to_blocks` collapses the agent's `UiComponent` stream into Markdown and the ordered `_meta["sqllens/blocks"]` typed-block array in one pass. |
 | [src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py) | `build_agent` / `build_sql_runner` — see [agent/factory.md](../agent/factory.md). |
 | [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py) | Streamable HTTP transport + auth + path fix. See [mcp-server/transport.md](../mcp-server/transport.md). |
 | [src/sqllens/safety/readonly.py](../../../src/sqllens/safety/readonly.py) | sqlglot-based read-only enforcement. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md). |
@@ -70,8 +70,9 @@ query_database(...)    — tools/query_database.py
   ↓
 agent.send_message     — emits an async stream of UiComponent
   ↓
-components_to_widgets   — collapses the stream to a single Markdown string (+ an optional
-                          structured table and/or chart payload for apps-aware hosts)
+components_to_blocks    — collapses the stream to a single Markdown string + an ordered
+                          list of typed text/table/chart blocks (apps-aware hosts render
+                          one container per block; non-apps clients see the Markdown)
   ↓
 client receives the tool result
 ```
@@ -88,11 +89,11 @@ What was kept:
 - `agent/core/` — `Agent`, `RequestContext`, `ToolRegistry`, `UiComponent`, etc.
 - `agent/capabilities/` — `SqlRunner`, `FileSystem`, `AgentMemory` abstractions.
 - `agent/integrations/` — `anthropic`, `chromadb`, `local`, `sqlite`, `postgres`, `mysql`.
-- `agent/tools/` — `RunSqlTool`, `EmitChartTool` (the agent-side seam for `query_database`'s chart mode — first-party, not lifted; see [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py)), and the three `agent_memory` tools (`SaveQuestionToolArgsTool`, `SearchSavedCorrectToolUsesTool`, `SaveTextMemoryTool`).
+- `agent/tools/` — `RunSqlTool`, `EmitChartTool` (the agent-side seam for `query_database`'s chart blocks — first-party, not lifted; see [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py)), `EmitTextTool` (the agent-side seam for deliberate prose blocks in the multi-block response — first-party, see [src/sqllens/agent/tools/emit_text.py](../../../src/sqllens/agent/tools/emit_text.py)), and the three `agent_memory` tools (`SaveQuestionToolArgsTool`, `SearchSavedCorrectToolUsesTool`, `SaveTextMemoryTool`).
 - `agent/components/` — Rich-component rendering (we only ever use the markdown conversion).
 
 What was dropped, and why we might regret it:
-- The upstream `visualize_data` tool was pruned during the lift. SQL Lens reintroduces charting as its own, first-party `EmitChartTool` (Apache ECharts + a renderer-agnostic DSL) under [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py); the chart it emits is now surfaced through `query_database`'s unified result widget (chart mode), not a separate MCP tool — see [mcp-server/tools.md](../mcp-server/tools.md#chart-mode-the-emitcharttool-seam). `RunSqlTool` still writes scratch CSVs; see [agent/tool-scratch-storage.md](../agent/tool-scratch-storage.md).
+- The upstream `visualize_data` tool was pruned during the lift. SQL Lens reintroduces charting as its own, first-party `EmitChartTool` (Apache ECharts + a renderer-agnostic DSL) under [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py); the chart blocks it emits are surfaced through `query_database`'s ordered-blocks response, not a separate MCP tool — see [mcp-server/tools.md](../mcp-server/tools.md#chart-blocks-the-emitcharttool-seam). `RunSqlTool` still writes scratch CSVs; see [agent/tool-scratch-storage.md](../agent/tool-scratch-storage.md).
 - `python` and `file_system` tools — pruned (out of scope for SQL-only).
 - Other LLM integrations (OpenAI, Gemini, Bedrock, …) — pruned. The `AnthropicLlmService` import in `agent/factory.py` is the only blessed entry; adding a provider means re-lifting the relevant integration package and exposing it through the factory.
 
