@@ -27,6 +27,7 @@ from sqllens.agent.integrations.local import LocalFileSystem
 from sqllens.agent.integrations.mysql import MySQLRunner
 from sqllens.agent.tools import (
     EmitChartTool,
+    EmitTextTool,
     RunSqlTool,
     SaveQuestionToolArgsTool,
     SaveTextMemoryTool,
@@ -102,6 +103,11 @@ def build_agent(cfg: Config) -> Agent:
     # EmitChartTool needs no SQL/FS — the agent runs run_sql first, then hands
     # the aggregated rows to this tool, which only validates the chart DSL.
     tools.register_local_tool(EmitChartTool(), access_groups=access)
+    # EmitTextTool emits answer-marked prose so the agent can deliberately
+    # interleave text between artifacts (chart → text → table → ...). Non-
+    # emit_text assistant text is treated as hidden reasoning by the MCP-layer
+    # block builder.
+    tools.register_local_tool(EmitTextTool(), access_groups=access)
     # save_question_tool_args lets the agent write question -> SQL pairs into
     # memory. Gated by memory.save_queries (OFF by default); the default system
     # prompt switches its save instructions on the tool's presence, so dropping

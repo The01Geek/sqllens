@@ -8,19 +8,22 @@ SQL Lens exposes two tools to the assistant:
 
 | Tool | Purpose |
 |---|---|
-| `query_database(question)` | Translates a natural-language question into SQL, executes it, and returns the result. The answer is a Markdown table by default and an interactive chart when the result is chart-shaped — the assistant decides which. |
+| `query_database(question)` | Translates a natural-language question into SQL, executes it, and returns the result as an ordered sequence of blocks — tables, charts, and prose paragraphs — in the order the agent produced them. A single answer can include any combination, including more than one table or more than one chart, with deliberate captions in between. |
 | `list_data_sources()` | Reports the configured database name, dialect, and read-only state. |
 
 One database is configured per running instance. Generated SQL is parsed and rejected if it is anything other than a read-only `SELECT` (plus, on MySQL, a small set of read-only `SHOW` schema-discovery commands such as `SHOW TABLES`), so the default deployment is safe against accidental writes. You can also opt into [Row-Level Security](row-level-security.md) to narrow every answer to the rows a particular request is allowed to see.
 
 ## Interactive results
 
-On assistants that support inline app widgets — currently Claude Desktop and claude.ai — each `query_database` answer is also shown as an inline widget in the conversation. A single widget adapts to the result:
+On assistants that support inline app widgets — currently Claude Desktop and claude.ai — each `query_database` answer is also shown as an inline widget in the conversation. The widget renders the agent's answer as an **ordered list of blocks** in the order they were produced:
 
-- **Tables** display as an interactive grid you can sort by column, filter with a search box, page through, and export to CSV.
-- **Chart-shaped results** display as an interactive chart (bar, line, area, scatter, pie, or heatmap) rendered with Apache ECharts. It honors the assistant's light or dark theme and resizes responsively.
+- **Table blocks** display as an interactive grid you can sort by column, filter with a search box, page through, and export to CSV. Each table has its own independent controls — sorting, filtering, paging, and CSV export on one table never affect another in the same answer.
+- **Chart blocks** display as an interactive chart (bar, line, area, scatter, pie, or heatmap) rendered with Apache ECharts. Each chart honors the assistant's light or dark theme and resizes responsively.
+- **Text blocks** display as Markdown paragraphs the agent wrote to introduce or summarize the artifacts.
 
-The same plain-text answer appears in the conversation alongside the widget, so nothing is lost. On every other assistant you continue to receive the Markdown table exactly as before; no configuration or change is needed on your side. A chart appears only when the assistant judges the result to be aggregated or temporal and obviously chartable — plain lookups are returned as a table or text. No separate tool call is needed; charts come straight from `query_database`.
+An answer can mix any combination of these in any order — for example, a brief introduction, a chart of an aggregate, a one-line summary, then a supporting per-row table. The assistant decides what to include based on your question.
+
+The same plain-text answer appears in the conversation alongside the widget, so nothing is lost. On every other assistant you receive a Markdown rendering of the same blocks; no configuration or change is needed on your side. Charts appear only when the assistant judges the result to be aggregated or temporal and obviously chartable — plain lookups are returned as tables or text.
 
 The widget reports its own size so the assistant can fit it to the result. On hosts that support this, a small result, such as a two- or three-row table or a small chart, fits its frame with no surrounding empty space and no extra scrollbar, while larger results get the full height they need.
 

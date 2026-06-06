@@ -4,10 +4,15 @@
 """Utilities for converting agent UI components into MCP-friendly output.
 
 The agent yields a stream of ``UiComponent`` objects (status cards, text,
-dataframes, etc.). MCP tools must return a single string. This module collapses
-that stream into a Markdown answer suitable for an AI client to read, and —
-for apps-aware hosts — also extracts a structured table payload from the last
-DataFrame so an interactive widget can render it.
+dataframes, charts, etc.). MCP tools must return a single string. This module
+collapses that stream:
+
+- :func:`components_to_blocks` walks the stream once and emits an ordered list
+  of typed ``blocks`` (text / table / chart) — the single structured-data
+  channel that apps-aware hosts render in order via ``_meta["sqllens/blocks"]``
+  and the self-contained widget renders per-block.
+- :func:`components_to_markdown` is the same walker, but the resulting block
+  list is serialized to a plain Markdown answer for non-apps clients.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ from decimal import Decimal
 
 from sqllens.agent.core.components import UiComponent
 from sqllens.agent.core.rich_component import ComponentType
+from sqllens.agent.markers import IS_ANSWER_MARKER_KEY
 from sqllens.safety import first_sql_keyword, is_introspection_query
 
 logger = logging.getLogger("sqllens.tools._format")
@@ -30,15 +36,15 @@ logger = logging.getLogger("sqllens.tools._format")
 # Markdown table when max_rows is raised above the rendering budget.
 _MAX_ROWS_RENDERED = 500
 
-# Serialized-size budget for the structured table payload. The host pushes the
-# whole CallToolResult into a sandboxed iframe; a multi-MB ``_meta`` blob is the
-# only thing that actually breaks rendering, so size — not row count — is the
-# cap. Measured against ``json.dumps(payload, separators=(",", ":"))``.
+# Serialized-size budget for one structured table block. The host pushes the
+# whole CallToolResult into a sandboxed iframe; a multi-MB ``_meta`` blob is
+# the only thing that actually breaks rendering, so size — not row count — is
+# the cap. Measured against ``json.dumps(payload, separators=(",", ":"))``.
 _MAX_TABLE_PAYLOAD_BYTES = 130 * 1024
 
-# Same budget, same reason, for the chart widget's ``_meta["sqllens/chart"]``
-# blob. Aliased to the table budget so the two cannot drift apart — both blobs
-# share one sandboxed-iframe rendering ceiling.
+# Same budget, same reason, for one chart block. Aliased to the table budget so
+# the two cannot drift apart — both blobs share one sandboxed-iframe rendering
+# ceiling.
 _MAX_CHART_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES
 
 # Same budget, same reason, for the agent-trace ``_meta["sqllens/agent_trace"]``
@@ -46,6 +52,12 @@ _MAX_CHART_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES
 # so it can grow large on a long run — and it rides the same sandboxed-iframe
 # ceiling. Aliased to the table budget so all three _meta blobs share one cap.
 _MAX_TRACE_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES
+
+# Overall ceiling across the whole ``sqllens/blocks`` array. The per-block cap
+# above bounds each individual block; this caps the *sum* so a long stream of
+# in-budget blocks still cannot blow the iframe ceiling. Set well above the
+# per-block cap so a handful of full-budget blocks fit comfortably.
+_MAX_BLOCKS_TOTAL_BYTES = 512 * 1024
 
 
 def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
@@ -163,83 +175,130 @@ def render_interactive(components: Iterable[UiComponent]) -> str:
     return "\n\n".join(pieces)
 
 
-def components_to_widgets(
+def _text_is_answer_marked(rich) -> bool:  # type: ignore[no-untyped-def]
+    """True iff this TEXT component is deliberate prose, not reasoning chatter.
+
+    The agent emits two distinct kinds of TEXT, and only one sets the marker:
+
+    - **Intermediate reasoning** that accompanies a tool call
+      (``agent/core/agent/agent.py``: ``RichTextComponent(content=response.
+      content, ...)`` inside the LLM loop, gated on
+      ``UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT``). This branch does
+      **NOT** set the marker — that is the discriminator.
+    - The **terminal answer** and **iteration-limit warning** at end-of-turn,
+      both of which DO set the
+      :data:`~sqllens.agent.markers.IS_ANSWER_MARKER_KEY` flag in ``data``.
+
+    The ``EmitTextTool`` sets the same flag on deliberate interleaved prose.
+    So a marked TEXT is something the user should see; an unmarked TEXT is
+    reasoning chatter. The check is strict-identity (``is True``) so a
+    producer drift that stuffs a non-bool value under the marker key (string
+    "yes", truthy list) does not silently flip the discrimination.
+    """
+    data = getattr(rich, "data", None)
+    return isinstance(data, dict) and data.get(IS_ANSWER_MARKER_KEY) is True
+
+
+def components_to_blocks(
     components: Iterable[UiComponent],
-) -> tuple[str, bool, dict | None, dict | None, dict | None, dict | None]:
-    """Collapse a stream into ``(markdown, is_error, table, query_info, chart, memory_info)``.
+) -> tuple[str, bool, list[dict], dict | None, dict | None]:
+    """Collapse a stream into ``(markdown, is_error, blocks, query_info, memory_info)``.
 
     The single source of truth behind the consolidated ``query_database`` tool
-    and the narrower :func:`components_to_table` / :func:`components_to_chart` /
-    :func:`components_to_markdown` views. One pass over the stream:
+    and the narrower :func:`components_to_markdown` view. One ordered pass over
+    the stream:
 
-    - Collect all DataFrame components as Markdown tables.
-    - Take the *last* TEXT component as the natural-language answer (earlier
-      TEXT entries are intermediate agent reasoning).
-    - Track the *terminal* data-run_sql status (last-wins, like every other
-      field): a STATUS_CARD with status='error' marks the turn an error, but a
-      later *data* run_sql success card supersedes it — the agent re-issued a
-      corrected query and the recovered answer must reach the caller. The clear
-      is scoped two ways so it cannot mask a real failure: (1) run_sql only (a
-      card carrying ``metadata["sql"]``) — a successful memory-search or chart
-      card never clears a query failure; (2) not a schema-introspection read
-      (``is_introspection_query``) — the agent runs an information_schema / SHOW
-      lookup to confirm a column before retrying, so an introspection success is
-      a step toward an answer, not the answer. A genuinely failing final data
-      run_sql (no later data run_sql success) still surfaces as an error.
-    - Build ``table`` from the *last* DataFrame and ``chart`` from the *last*
-      ``CHART`` component (last-wins; ``query_database`` emits at most one of
-      each per request, and chart > table precedence is applied by the caller
-      / widget, not here — both payloads are returned when both are present).
-    - Capture the executed SQL from the *last* ``run_sql`` STATUS_CARD's
-      ``metadata["sql"]``. The card streams twice (running → completed) with
-      identical metadata, so last-wins de-dupes it idempotently. The card is
-      only emitted when ``agent.show_details`` unlocked the tool-arguments
-      feature; with it off, no SQL is ever seen here.
-    - Capture the memory hit/miss signal from the *last* ``search_saved_correct
-      _tool_uses`` STATUS_CARD's ``metadata["memory_search"]`` (same seam as the
-      executed SQL above). Unlike the SQL card, the memory card is the tool's
-      own ``ui_component`` — always yielded on the tool's success path,
-      independent of ``agent.show_details`` — so ``memory_info`` is surfaced
-      whenever a memory search *completes* (a hit or a miss) this turn. A search
-      that *errors* emits no ``memory_search`` card (it yields a status-bar
-      error component instead, logged server-side), so it leaves
-      ``memory_info`` ``None`` — indistinguishable here from "did not search".
+    - Every ``DATAFRAME`` becomes a ``{"type": "table", ...table payload...}``
+      block at its stream position.
+    - Every ``CHART`` becomes a ``{"type": "chart", ...chart payload...}``
+      block at its stream position.
+    - Every **answer-marked** ``TEXT`` (deliberate prose: ``EmitTextTool``
+      output and the agent's terminal answer / iteration-limit warning) becomes
+      a ``{"type": "text", "text": ...}`` block at its stream position.
+      Intermediate-reasoning ``TEXT`` (the assistant prose that accompanies a
+      tool call when ``UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT`` is on)
+      is excluded.
+    - As a backwards-compat fallback, if *no* answer-marked TEXT was seen but
+      at least one non-empty TEXT exists, the **last** such TEXT is included
+      as a text block (preserves last-wins behavior for unmarked streams).
 
-    ``table`` / ``chart`` are ``None`` on the error path, when the
-    corresponding component is absent, when its data is empty, or when even the
-    header-only / data-stripped serialized form exceeds the size budget.
+    Control-flow invariants preserved from the prior single-artifact collapse:
 
-    ``memory_info`` is ``None`` on the error path and whenever no memory-search
-    card was seen — which covers both "the agent answered without consulting
-    memory" and "a memory search was attempted but errored". When present it is
-    the aggregate ``{"searched", "hit_count", "top_similarity", "threshold"}``
-    payload — never the matched memory contents.
+    - **Error short-circuit.** A terminal ``STATUS_CARD`` with ``status="error"``
+      returns the error path immediately — ``blocks`` is empty and the markdown
+      is the error message.
+    - **Later-success-supersedes-earlier-failure.** A later *data* ``run_sql``
+      success card (one carrying ``metadata["sql"]`` and not an
+      ``is_introspection_query``) clears an earlier error within the same turn,
+      so the recovered answer reaches the caller.
+    - **Last-wins for executed SQL and memory hit/miss.** ``query_info`` is
+      built from the *last* ``run_sql`` STATUS_CARD's ``metadata["sql"]``;
+      ``memory_info`` is built from the *last* ``search_saved_correct_tool_uses``
+      STATUS_CARD's ``metadata["memory_search"]``. The cards stream twice per
+      tool call (running → completed) with identical metadata; last-wins
+      de-dupes them idempotently.
 
-    ``query_info`` is ``None`` whenever no executed SQL is surfaced. The
-    config-independent invariant: a guard-rejected non-SELECT (the default
-    read-only deployment) and a pure-text / no-SQL answer never yield
-    ``query_info``. The mechanism differs by config and is intentional:
+    Size budgets (CLAUDE.md: never silently drop):
 
-    - ``show_details`` on: the run_sql card *is* emitted and carries
-      ``metadata["sql"]``, so ``last_sql`` is set even for a rejected
-      non-SELECT — but a failed tool drives the completed card to
-      ``status="error"`` (``agent`` maps ``ToolResult(success=False)`` →
-      ``set_status("error", ...)``), so the ``error_message`` short-circuit
-      below returns before ``query_info`` is built.
-    - ``show_details`` off: neither the running nor the completed card is
-      emitted, so ``last_sql`` stays ``None`` and ``query_info`` is ``None``
-      because no SQL card was seen — not via the error short-circuit.
+    - Each table / chart block is bounded by ``_MAX_TABLE_PAYLOAD_BYTES`` /
+      ``_MAX_CHART_PAYLOAD_BYTES`` via the existing binary search in
+      :func:`_compute_table_payload` / :func:`_compute_chart_payload` — the
+      block's ``row_count`` is the kept prefix, ``truncated`` the dropped tail.
+    - The whole ``blocks`` array is bounded by ``_MAX_BLOCKS_TOTAL_BYTES``;
+      :func:`_trim_blocks_to_budget` keeps the largest prefix that fits and
+      appends an explicit truncation-notice text block. A server-side
+      ``logger.warning`` fires whenever any trimming happens.
+
+    The returned ``markdown`` is :func:`_serialize_blocks_to_markdown` over the
+    (possibly trimmed) blocks — tables rendered as Markdown tables, text
+    blocks verbatim, charts as a short ``_[chart: …]_`` placeholder. Order
+    follows the agent's stream rather than the previous collapse's
+    tables-then-text convention, so a ``[text, table]`` stream now renders
+    text before the table; the per-element rendering shape is unchanged.
+    When no blocks are produced, :func:`render_interactive` is consulted for
+    an interactive-affordance fallback before settling on ``"(no answer)"``.
     """
-    # Materialize once: render_interactive (the no-answer fallback below) needs a
-    # second pass, and the public signature accepts any Iterable (incl. generators).
+    # Materialize once: ``render_interactive`` (the no-blocks fallback below)
+    # does another pass over the stream; the public signature accepts any
+    # Iterable (incl. generators).
     components = list(components)
-    text_answer = ""
-    tables: list[str] = []
+
+    # Single forward pass: collect block candidates in stream order (each text
+    # block tagged with its is_answer marker so we can filter unmarked TEXTs
+    # post-walk), plus the cross-cutting error / last_sql / last_memory state.
     error_message = ""
-    last_df = None
-    last_chart = None
     last_sql: str | None = None
     last_memory: dict | None = None
+    # Row count attributable to the *last* run_sql, tracked in stream order so
+    # query_info reports the correct total even when the agent runs multiple
+    # run_sql calls in one turn. The walker resets this on every NEW run_sql
+    # invocation (the next DATAFRAME will be its result) and updates it on
+    # every DATAFRAME (the rows of the latest run_sql). End-state:
+    #
+    #   - No DATAFRAME component followed the last run_sql at all (zero-row
+    #     SELECTs whose driver emits no component, or a tool error before any
+    #     DATAFRAME yield) → stays None → query_info omits ``row_count``.
+    #   - DATAFRAME component present, payload built successfully → set to
+    #     ``payload["row_count"] + payload["truncated"]`` (the TRUE size, not
+    #     the rendered subset; per-block size cap may have dropped a tail).
+    #   - DATAFRAME component present but payload computer rejected the
+    #     result → use the raw row count from the component itself
+    #     (``len(rich.rows)``) so the over-budget / payload-exception case
+    #     doesn't silently misattribute the 0-rows count to a SQL that
+    #     returned N > 0 rows. This is the CLAUDE.md "lossy success needs
+    #     loud warning, not green output" trap.
+    #
+    # Preventing the misattribution where an earlier table's row count would
+    # be reported as the LATEST SQL's is the regression
+    # ``test_query_info_row_count_attributed_to_last_run_sql_when_empty``
+    # pins; the over-budget / payload-fail nuance is pinned by
+    # ``test_query_info_row_count_recovered_from_raw_rows_on_payload_reject``.
+    last_sql_row_count: int | None = None
+    # Candidate blocks. Text blocks carry a private "_is_answer" tag we strip
+    # before emitting — never expose internal bookkeeping fields in the public
+    # ``sqllens/blocks`` wire shape.
+    candidates: list[dict] = []
+    any_marked_text = False
 
     for comp in components:
         rich = comp.rich_component
@@ -249,39 +308,66 @@ def components_to_widgets(
 
         if ctype == ComponentType.TEXT:
             content = (getattr(rich, "content", "") or "").strip()
-            if content:
-                text_answer = content
+            if not content:
+                continue
+            is_marked = _text_is_answer_marked(rich)
+            if is_marked:
+                any_marked_text = True
+            candidates.append(
+                {"type": "text", "text": content, "_is_answer": is_marked}
+            )
         elif ctype == ComponentType.DATAFRAME:
-            table_md = _render_dataframe(rich)
-            if table_md:
-                tables.append(table_md)
-            last_df = rich
+            payload = _build_table_payload(rich)
+            if payload is not None:
+                candidates.append({"type": "table", **payload})
+                # The size-capped payload may have dropped a tail; row_count
+                # is the kept prefix and truncated the dropped tail, so the
+                # sum is the TRUE row count the SQL produced.
+                last_sql_row_count = payload.get("row_count", 0) + payload.get(
+                    "truncated", 0
+                )
+            else:
+                # ``_build_table_payload`` returns None in three distinct
+                # cases: (a) the DataFrame is genuinely empty (no columns,
+                # no rows), (b) the header-only form busts the per-block
+                # size cap, (c) the broad ``except`` caught a payload-
+                # construction exception. Only case (a) means "0 rows" —
+                # cases (b) and (c) have the real rows on the component
+                # itself. Source the count from ``rich.rows`` so we don't
+                # silently misreport "0 rows" to a user whose SQL actually
+                # returned N > 0 rows.
+                raw_rows = getattr(rich, "rows", None) or []
+                last_sql_row_count = len(raw_rows)
         elif ctype == ComponentType.CHART:
-            last_chart = rich
+            payload = _build_chart_payload(rich)
+            if payload is not None:
+                candidates.append({"type": "chart", **payload})
         elif ctype == ComponentType.STATUS_CARD:
             status = getattr(rich, "status", "")
             metadata = getattr(rich, "metadata", None)
             sql = metadata.get("sql") if isinstance(metadata, dict) else None
             is_run_sql = isinstance(sql, str) and bool(sql.strip())
             if status == "error":
-                error_message = getattr(rich, "description", "") or "Agent reported an error"
-            elif status == "success" and is_run_sql and not is_introspection_query(sql):
-                # A successful *data* run_sql supersedes an earlier failure within
-                # the same turn: the agent re-issued a corrected query and the
-                # retry's completion card reports success, so the recovered answer
-                # must reach the caller. The clear is scoped two ways so it can't
-                # mask a real failure:
-                #   1. run_sql only (a card carrying metadata["sql"]) — a
-                #      successful memory-search or chart card must NOT clear, and
-                #      a memory search runs before the query on most turns.
-                #   2. NOT a schema-introspection read — the system prompt has the
-                #      agent run an information_schema / SHOW lookup to confirm a
-                #      column before retrying, so an introspection success is a
-                #      step toward an answer, not the answer. Counting it would
-                #      let "data query failed → introspect → give up" report a
-                #      silent success.
-                # A genuinely failing final run_sql (no later *data* run_sql
-                # success) still surfaces as an error.
+                error_message = (
+                    getattr(rich, "description", "") or "Agent reported an error"
+                )
+            elif (
+                status == "success"
+                and is_run_sql
+                and not is_introspection_query(sql)
+            ):
+                # See the docstring's "later-success-supersedes-earlier-failure"
+                # invariant: a successful *data* run_sql clears an earlier error
+                # within the same turn (the agent re-issued a corrected query).
+                # Scoped two ways so it cannot mask a real failure: (1) run_sql
+                # only (carries metadata["sql"]) — a successful memory-search or
+                # chart card never clears, and a memory search runs before the
+                # query on most turns; (2) NOT a schema-introspection read — the
+                # agent runs information_schema / SHOW lookups to confirm a
+                # column before retrying, so an introspection success is a step
+                # toward an answer, not the answer. A genuinely failing final
+                # data run_sql (no later data run_sql success) still surfaces as
+                # an error.
                 if error_message:
                     logger.info(
                         "run_sql error superseded by a later successful run_sql "
@@ -289,6 +375,33 @@ def components_to_widgets(
                     )
                     error_message = ""
             if is_run_sql:
+                # Reset the row-count tracker on EITHER edge that uniquely
+                # marks the start of a new run_sql call: the ``running`` card
+                # (today the agent's emission pattern), OR a SQL-text change
+                # against the previous card (defence in depth for streams
+                # where the running card is missing or dropped). Combining
+                # the two predicates catches three failure modes:
+                #
+                #   1. The running/completed pair share the same SQL metadata
+                #      (last-wins de-dupe in ``_format`` relies on this), so
+                #      resetting on the completed card alone would wipe the
+                #      row count that the intervening DATAFRAME just
+                #      populated. ``status == "running"`` only fires once
+                #      per normal call, so the reset lands at the right
+                #      moment (before the call's DataFrame is emitted).
+                #   2. A real retry of the *same* SQL text (agent re-runs an
+                #      identical query, e.g. after a deadlock) where the
+                #      running card IS emitted — covered by clause 1.
+                #   3. Defensive: a future producer that emits a completion-
+                #      only card (no preceding ``running``), or an upstream
+                #      exception between the running and completion yields
+                #      that drops the running emission. The text-change
+                #      clause catches the new-SQL-without-running case and
+                #      keeps the iter-1 regression
+                #      ``test_query_info_row_count_attributed_to_last_run_sql
+                #      _when_empty`` honest against emission drift.
+                if status == "running" or sql != last_sql:
+                    last_sql_row_count = None
                 last_sql = sql
             if isinstance(metadata, dict):
                 memory_search = metadata.get("memory_search")
@@ -296,69 +409,102 @@ def components_to_widgets(
                     last_memory = memory_search
 
     if error_message:
-        return error_message, True, None, None, None, None
+        return error_message, True, [], None, None
 
-    parts = list(tables)
-    if text_answer:
-        parts.append(text_answer)
-    markdown = "\n\n".join(parts) if parts else (render_interactive(components) or "(no answer)")
+    # Resolve text-block inclusion: prefer the explicit answer-marker (set by
+    # EmitTextTool and the agent's terminal answer); if the stream carries no
+    # marker (e.g. tests using bare RichTextComponent, or an abnormal
+    # termination path where the agent never reached its terminal-answer
+    # yield), fall back to the last non-empty TEXT alone — the same "last
+    # TEXT wins" semantics the previous collapse used as the terminal-answer
+    # heuristic. In either case, strip the private "_is_answer" tag before
+    # emitting the public block.
+    blocks: list[dict] = []
+    last_unmarked_text_idx: int | None = None
+    for i, cand in enumerate(candidates):
+        if cand["type"] != "text":
+            continue
+        if not cand["_is_answer"]:
+            last_unmarked_text_idx = i
+    for i, cand in enumerate(candidates):
+        if cand["type"] == "text":
+            if cand["_is_answer"]:
+                blocks.append({"type": "text", "text": cand["text"]})
+            elif not any_marked_text and i == last_unmarked_text_idx:
+                blocks.append({"type": "text", "text": cand["text"]})
+        else:
+            blocks.append(cand)
+    # The agent's production terminal-answer / iteration-limit-warning yields
+    # always set the marker; the EmitTextTool also always marks its emission.
+    # So a stream with at least one TEXT but no marked TEXT typically means
+    # either (a) a test fixture using bare ``RichTextComponent`` (common, not
+    # a problem), or (b) an abnormal termination (the agent exited before
+    # reaching its terminal-answer yield, e.g. a caught-and-re-raised
+    # exception inside the LLM loop) or a producer-side marker-emission
+    # regression (rare, but worth a trail). Log at ``info`` rather than
+    # ``warning`` so the diagnostic is captured under verbose logging without
+    # polluting the warning-level operator surface with the test-fixture
+    # case. An operator watching for the abnormal-termination signal can
+    # raise the log level to INFO and grep for this exact message.
+    if not any_marked_text and last_unmarked_text_idx is not None:
+        logger.info(
+            "components_to_blocks: no answer-marked TEXT in stream; falling "
+            "back to last unmarked TEXT as the rendered answer. In production "
+            "this signals either an abnormal termination (the agent never "
+            "reached its terminal-answer yield) or a marker-emission "
+            "regression on one of the producers; in tests it commonly fires "
+            "when fixtures use unmarked RichTextComponent on purpose."
+        )
 
-    table = _build_table_payload(last_df) if last_df is not None else None
-    chart = _build_chart_payload(last_chart) if last_chart is not None else None
+    blocks = _trim_blocks_to_budget(blocks)
+
+    # Markdown answer: serialize the blocks; fall back to the interactive-only
+    # surface (clarifying question, button choices) before the literal
+    # ``"(no answer)"`` so a turn that produced only an interactive affordance
+    # still surfaces the question to non-apps clients.
+    if blocks:
+        markdown = _serialize_blocks_to_markdown(blocks)
+        if not markdown:
+            markdown = render_interactive(components) or "(no answer)"
+    else:
+        markdown = render_interactive(components) or "(no answer)"
+
     query_info = None
     if last_sql is not None:
-        # True result size, not the rendered subset: the payload may be
-        # size-capped (row_count is the kept prefix, truncated the dropped
-        # tail), but the SQL ran against the whole set. ``.get`` keeps a
-        # partial future payload from raising an unsanitized KeyError past
-        # query_database's except blocks (which sanitize driver-exception
-        # strings into a stable internal-error message).
-        row_count = (
-            table.get("row_count", 0) + table.get("truncated", 0)
-            if table is not None
-            else None
-        )
-        query_info = _query_info_from_sql(last_sql, row_count)
-    return markdown, False, table, query_info, chart, last_memory
+        # Row count is captured in the walker against the LAST run_sql card so
+        # the count is correctly attributed to the SQL that produced it — not
+        # to whatever the trailing table block in ``blocks`` happens to be.
+        # The two diverge when the last run_sql returned 0 rows (no DataFrame
+        # / empty DataFrame → no table block) but an earlier run_sql in the
+        # same turn had rows: walking blocks backward would land on the
+        # earlier table and misattribute its count to the later SQL.
+        # ``last_sql_row_count`` is None when the SQL ran but no DATAFRAME was
+        # seen (zero rows on stdout-only output, or a tool error after the
+        # SQL was logged) — query_info correctly omits row_count in that case.
+        query_info = _query_info_from_sql(last_sql, last_sql_row_count)
+    return markdown, False, blocks, query_info, last_memory
 
 
-def components_to_table(
+def components_to_markdown(
     components: Iterable[UiComponent],
-) -> tuple[str, bool, dict | None, dict | None]:
-    """Collapse a component stream into ``(markdown, is_error, table, query_info)``.
-
-    Thin view over :func:`components_to_widgets` that drops the chart and
-    memory-info payloads.
-    """
-    markdown, is_error, table, query_info, _, _ = components_to_widgets(components)
-    return markdown, is_error, table, query_info
-
-
-def components_to_markdown(components: Iterable[UiComponent]) -> tuple[str, bool]:
+) -> tuple[str, bool]:
     """Collapse a stream of components into ``(markdown, is_error)``.
 
-    Thin view over :func:`components_to_widgets` that drops the structured
+    Thin view over :func:`components_to_blocks` that drops the structured
     payloads; returns the same ``(markdown, is_error)`` pair non-apps hosts
-    already depend on (the Markdown branch is unchanged — pinned by
+    already depend on (the Markdown branch is unchanged in spirit — pinned by
     ``tests/unit/test_format.py``).
     """
-    markdown, is_error, _, _, _, _ = components_to_widgets(components)
+    markdown, is_error, _blocks, _qi, _mi = components_to_blocks(components)
     return markdown, is_error
 
 
-def components_to_chart(
-    components: Iterable[UiComponent],
-) -> tuple[str, bool, dict | None]:
-    """Collapse a component stream into ``(markdown, is_error, chart_payload)``.
-
-    Thin view over :func:`components_to_widgets` that keeps only the chart
-    payload. The structured payload is built from the *last* ``CHART``
-    component in the stream (``emit_chart`` runs once per request).
-    """
-    markdown, is_error, _, _, chart, _ = components_to_widgets(components)
-    return markdown, is_error, chart
-
-
+# Title of the top-level error card the vendored ``send_message`` emits when the
+# whole turn throws (an LLM/infra exception it caught and logged server-side).
+# Its description is deliberately generic — the real exception never reaches the
+# component stream — so the trace can only surface this generic terminal reason;
+# the underlying error lives in the server logs, never in ``_meta``.
+_AGENT_ERROR_CARD_TITLE = "Error Processing Message"
 # The agent's per-tool-call lifecycle STATUS_CARD carries the invoked tool name
 # in its title as ``Executing {tool}`` (agent/core/agent/agent.py). These cards
 # are only emitted when ``UI_FEATURE_SHOW_TOOL_ARGUMENTS`` is unlocked — which
@@ -372,12 +518,6 @@ _TOOL_CARD_PREFIX = "Executing "
 # Prefix the agent puts on a failed tool's completion description. Stripped so
 # the trace's per-step ``error`` is the tool's own message, not the boilerplate.
 _TOOL_FAILED_PREFIX = "Tool failed: "
-# Title of the top-level error card the vendored ``send_message`` emits when the
-# whole turn throws (an LLM/infra exception it caught and logged server-side).
-# Its description is deliberately generic — the real exception never reaches the
-# component stream — so the trace can only surface this generic terminal reason;
-# the underlying error lives in the server logs, never in ``_meta``.
-_AGENT_ERROR_CARD_TITLE = "Error Processing Message"
 # Message on the ``STATUS_BAR_UPDATE`` (status="warning") the agent emits when it
 # stops because it exhausted ``max_tool_iterations``. Matched as the max-iteration
 # terminal signal — more accurate than counting steps, because the agent's
@@ -716,7 +856,7 @@ def _build_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     # The widget is best-effort: if anything in payload construction raises
     # (a pathological column object whose __str__ throws, a json.dumps edge),
     # degrade to "no widget" and let the Markdown answer stand, rather than
-    # letting the exception escape *after* query_database_impl_with_table's
+    # letting the exception escape *after* query_database_impl_with_widgets's
     # except blocks and bypass the sanitized error taxonomy.
     try:
         return _compute_table_payload(rich)
@@ -734,6 +874,11 @@ def _build_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
 
 
 def _compute_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
+    # Returns the table payload WITHOUT the ``"type": "table"`` discriminator —
+    # ``components_to_blocks`` wraps it with the discriminator before appending
+    # to the blocks list. This keeps the size-budget binary search ignorant of
+    # the discriminator while still bounding the per-block size to
+    # ``_MAX_TABLE_PAYLOAD_BYTES`` (the discriminator key adds < 20 bytes).
     columns, rows = _columns_and_rows(rich)
     if not columns and not rows:
         return None
@@ -786,10 +931,13 @@ def _compute_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     return payload
 
 
-def _serialized_len(payload: dict) -> int:
+def _serialized_len(payload: dict | list) -> int:
     # json.dumps defaults to ensure_ascii=True, so the result is pure ASCII and
     # len(str) == the serialized byte size the host actually receives — non-ASCII
     # cells escape to \uXXXX rather than inflating bytes past this measure.
+    # Accepts both dicts (individual payloads) and lists (the whole ``blocks``
+    # array) so the per-block cap and the blocks-total cap measure size the
+    # same way and cannot drift apart.
     return len(json.dumps(payload, separators=(",", ":")))
 
 
@@ -831,6 +979,9 @@ def _build_chart_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
 
 
 def _compute_chart_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
+    # Returns the chart payload WITHOUT the ``"type": "chart"`` discriminator —
+    # the wrapping is done by ``components_to_blocks``. The per-block size cap
+    # is enforced here against ``_MAX_CHART_PAYLOAD_BYTES``.
     spec = getattr(rich, "data", None)
     if not isinstance(spec, dict):
         return None
@@ -897,18 +1048,167 @@ def _compute_chart_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     return payload
 
 
-def _render_dataframe(rich) -> str:  # type: ignore[no-untyped-def]
-    columns, rows = _columns_and_rows(rich)
+def _trim_blocks_to_budget(blocks: list[dict]) -> list[dict]:
+    """Bound the whole ``blocks`` array to ``_MAX_BLOCKS_TOTAL_BYTES``.
+
+    Each individual block is already capped by the per-block budget; this
+    bounds the *sum* so a long stream of in-budget blocks still cannot blow
+    the iframe ``_meta`` ceiling. When over budget, drop trailing blocks one
+    at a time until the kept prefix + an appended truncation-notice text block
+    fits; emit a server-side ``logger.warning`` whenever any trimming happens
+    (CLAUDE.md: never silently drop).
+    """
+    if not blocks or _serialized_len(blocks) <= _MAX_BLOCKS_TOTAL_BYTES:
+        return blocks
+    total = len(blocks)
+    kept = list(blocks)
+    # Shrink the kept prefix one block at a time, re-checking against the
+    # budget WITH the notice appended (the notice's size grows by ~one digit
+    # as the dropped count rises, but stays under a hundred bytes — its
+    # contribution is bounded and we don't need to predict it).
+    while kept:
+        kept.pop()
+        notice = _truncation_notice_block(total - len(kept))
+        if _serialized_len([*kept, notice]) <= _MAX_BLOCKS_TOTAL_BYTES:
+            logger.warning(
+                "sqllens/blocks budget exceeded; trimmed %d trailing block(s) "
+                "of %d (kept %d) to fit %d byte ceiling",
+                total - len(kept),
+                total,
+                len(kept),
+                _MAX_BLOCKS_TOTAL_BYTES,
+            )
+            return [*kept, notice]
+    # Even the notice alone busts the budget — only reachable if the budget
+    # has been configured below the ~100 byte notice size (a configuration
+    # error, not a normal state — the production ceiling is hundreds of
+    # kilobytes). Per CLAUDE.md's "Lossy / empty success needs a loud
+    # warning, not green output" rule, returning an empty list here would
+    # let the caller's interactive/no-answer fallback render `"(no answer)"`
+    # to the user — a silent success on a turn that actually produced data.
+    # Instead, return a single notice block so the user sees the truncation
+    # signal rather than nothing.
+    logger.error(
+        "sqllens/blocks budget exceeded with zero in-budget prefix; emitting "
+        "notice-only blocks list (budget %d bytes is below the notice size, "
+        "likely a misconfiguration)",
+        _MAX_BLOCKS_TOTAL_BYTES,
+    )
+    return [_truncation_notice_block(total)]
+
+
+def _truncation_notice_block(dropped: int) -> dict:
+    plural = "s" if dropped != 1 else ""
+    return {
+        "type": "text",
+        "text": (
+            f"_Response truncated: {dropped} trailing block{plural} dropped "
+            "to fit the rendering size budget._"
+        ),
+    }
+
+
+def _serialize_blocks_to_markdown(blocks: list[dict]) -> str:
+    """Render the ordered blocks as a plain-Markdown answer for non-apps clients.
+
+    Tables become Markdown tables (the same shape :func:`_render_dataframe`
+    produces), text blocks pass through verbatim, charts collapse to a short
+    ``_[chart: …]_`` placeholder (apps-aware hosts render the real ECharts
+    chart via ``_meta["sqllens/blocks"]``). Parts are joined with ``\\n\\n``;
+    element order follows the agent's stream (unlike the previous collapse
+    which always put tables before text).
+    """
+    parts: list[str] = []
+    for b in blocks:
+        btype = b.get("type")
+        if btype == "text":
+            text = b.get("text", "")
+            if isinstance(text, str) and text:
+                parts.append(text)
+        elif btype == "table":
+            md = _table_block_to_markdown(b)
+            if md:
+                parts.append(md)
+        elif btype == "chart":
+            label = b.get("title") or b.get("chart_type")
+            if not label:
+                # No meaningful identifier — emit a generic "unavailable"
+                # placeholder rather than the ambiguous "_[chart: chart]_"
+                # which reads as a literal-string-named chart.
+                parts.append("_[chart unavailable]_")
+            else:
+                # Escape Markdown-significant characters so a chart title
+                # containing underscores or asterisks (e.g. an SQL identifier
+                # title like "user_id_*by*_month") does not break the
+                # surrounding italics formatting.
+                escaped = str(label).replace("\\", "\\\\").replace(
+                    "_", r"\_"
+                ).replace("*", r"\*")
+                parts.append(f"_[chart: {escaped}]_")
+        else:
+            # Unknown discriminator — a producer-side regression (typo, case
+            # mismatch, future block type the renderer doesn't know yet, or
+            # a missing ``type`` key). CLAUDE.md: never silently drop. Surface
+            # the loss to both the operator log AND the rendered output so a
+            # regression cannot ship with the contents invisibly missing.
+            #
+            # The btype value is wrapped in a fenced-code span (`` ` ``)
+            # rather than the bare ``{btype!r}`` interpolation an earlier
+            # iteration used: a typical producer-drift btype is an
+            # identifier-like string (e.g. ``"my_block"``), and its
+            # ``_`` characters would prematurely terminate the surrounding
+            # italic span, mangling the rest of the rendered Markdown
+            # downstream. The fenced-code wrapper is XSS-safe in any
+            # markdown renderer and renders correctly regardless of which
+            # markdown-significant characters the discriminator contains.
+            logger.warning(
+                "_serialize_blocks_to_markdown: dropping unknown block type "
+                "%r from markdown serialization (likely producer drift)",
+                btype,
+            )
+            parts.append(f"_[unsupported block type: `{btype}`]_")
+    return "\n\n".join(parts)
+
+
+def _table_block_to_markdown(block: dict) -> str:
+    """Render one table block as a Markdown table (mirrors :func:`_render_dataframe`)."""
+    columns = block.get("columns") or []
+    rows = block.get("rows") or []
     if not columns and not rows:
         return ""
 
-    header = "| " + " | ".join(columns) + " |"
+    header = "| " + " | ".join(str(c) for c in columns) + " |"
     separator = "|" + "|".join(["---"] * len(columns)) + "|"
     body_rows = []
     for row in rows[:_MAX_ROWS_RENDERED]:
-        body_rows.append("| " + " | ".join(_coerce_cell(row.get(c, "")) for c in columns) + " |")
-
+        cells = [str(c) for c in row]
+        body_rows.append("| " + " | ".join(cells) + " |")
     note = ""
-    if len(rows) > _MAX_ROWS_RENDERED:
-        note = f"\n\n_Showing first {_MAX_ROWS_RENDERED} of {len(rows)} rows._"
+    # row_count is the kept prefix after the per-block size cap; truncated is
+    # the dropped tail. The "true" total served by the SQL is their sum.
+    total = block.get("row_count", len(rows)) + block.get("truncated", 0)
+    if total > _MAX_ROWS_RENDERED:
+        note = f"\n\n_Showing first {_MAX_ROWS_RENDERED} of {total} rows._"
     return "\n".join([header, separator, *body_rows]) + note
+
+
+def _render_dataframe(rich) -> str:  # type: ignore[no-untyped-def]
+    """Render a DataFrame component as a Markdown table (delegates to block path).
+
+    Retained because ``tests/unit/test_format.py`` pins the precise Markdown
+    shape (header, separator, cell coercion, 500-row truncation footer) by
+    calling this directly. The production path goes through
+    :func:`components_to_blocks` → :func:`_serialize_blocks_to_markdown`, which
+    invokes :func:`_table_block_to_markdown` — the same function this helper
+    delegates to, so the two paths emit byte-identical Markdown.
+    """
+    columns, rows = _columns_and_rows(rich)
+    if not columns and not rows:
+        return ""
+    block = {
+        "columns": [_coerce_cell(c) for c in columns],
+        "rows": [[_coerce_cell(row.get(c, "")) for c in columns] for row in rows],
+        "row_count": len(rows),
+        "truncated": 0,
+    }
+    return _table_block_to_markdown(block)

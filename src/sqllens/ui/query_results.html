@@ -5,16 +5,19 @@
 <!--
   Self-contained MCP App widget for query_database results.
 
-  One widget, three render modes. The host pushes the tool's CallToolResult via
-  the MCP Apps postMessage channel; this widget picks its mode from which
-  _meta channel is present, in precedence order:
-    1. result._meta["sqllens/chart"]  → interactive ECharts chart
-    2. result._meta["sqllens/table"]  → sortable/filterable data grid, with the
-       executed SQL (result._meta["sqllens/query"].sql) in a collapsible section
-    3. neither                        → empty-state notice (the answer text is
-       rendered by the host outside the iframe)
-  When both chart and table channels are present the chart wins — deterministic,
-  no double-render.
+  Per-block container model. The host pushes the tool's CallToolResult via the
+  MCP Apps postMessage channel; this widget reads the ordered
+  ``_meta["sqllens/blocks"]`` array and renders one container per block in
+  stream order:
+    - {"type": "chart", ...}  → its own ECharts canvas
+    - {"type": "table", ...}  → its own data grid with isolated sort/filter/page state
+    - {"type": "text",  ...}  → a Markdown paragraph
+
+  An optional collapsible "Executed SQL" panel at the top is sourced from
+  ``_meta["sqllens/query"].sql`` when present (show_details on).
+
+  Empty/missing ``sqllens/blocks`` falls through to an empty-state notice (the
+  plain text answer is rendered by the host outside the iframe).
 
   No external origins: this file plus its two vendored bundles
   (./vendor/echarts.min.js, ./vendor/app-with-deps.js) form the entire widget.
@@ -74,6 +77,9 @@
     font: 13px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     padding: 8px;
   }
+  .block { margin-bottom: 16px; }
+  .block:last-child { margin-bottom: 0; }
+  .textblock { white-space: pre-wrap; }
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
   .bar input, .bar button {
     font: inherit; color: var(--fg);
@@ -110,15 +116,15 @@
     font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     white-space: pre-wrap; word-break: break-word;
   }
-  /* Chart mode: a definite chart height so the document sizes to its content.
-     The App SDK's autoResize measures content height by briefly forcing
-     documentElement to `max-content`, but that does NOT collapse a
+  /* Per-block chart container: a definite height so the document sizes to its
+     content. The App SDK's autoResize measures content height by briefly
+     forcing documentElement to `max-content`, but that does NOT collapse a
      viewport-height (vh) value — vh resolves against the iframe viewport, not
      the ancestor — so a viewport-relative chart-host height would keep
      reporting the full iframe height and never shrink to fit. A definite
      height lets the measurement see the real content size; see issue #174. */
   .charthost { display: flex; flex-direction: column; }
-  .charthost #chart { height: 360px; width: 100%; }
+  .charthost .chart { height: 360px; width: 100%; }
   .charthost .note { color: var(--muted); font-size: 12px; padding: 4px 2px 0; }
 </style>
 </head>
@@ -129,59 +135,30 @@
 import { App } from "./vendor/app-with-deps.js";
 
 const PAGE_SIZE = 50;
-const TABLE_META_KEY = "sqllens/table";
+const BLOCKS_META_KEY = "sqllens/blocks";
 const QUERY_META_KEY = "sqllens/query";
-const CHART_META_KEY = "sqllens/chart";
 
-const state = {
-  // shared
-  mode: "empty", // "chart" | "table" | "empty"
+// Global widget-level state — only the host-theme and the SQL panel container
+// live here. Per-block state (sort/filter/page for tables, ECharts instance
+// for charts) hangs off the block's container DOM node so each block is
+// independent — sorting one table never touches another.
+const widgetState = {
   theme: "light",
-  // table mode
-  columns: [],
-  rows: [],
-  types: {},
-  rowCount: 0,
-  truncated: 0,
-  sortCol: -1,
-  sortDir: 1,
-  filter: "",
-  page: 0,
-  sql: "",
-  // chart mode
-  spec: null,
 };
 
-let chart = null;
-let resizeObserver = null;
+// Live ECharts instances + ResizeObservers per chart block, so theme swaps
+// and tear-down work uniformly across all chart containers.
+const chartRegistry = []; // [{el, instance, observer, spec}, ...]
 
-// Four stable children. The table hosts (sqlHost, barHost, gridHost) and the
-// chart host (chartHost) all stay in the DOM; ingest() populates the set that
-// matches the active mode and empties the rest. render() owns gridHost only —
-// clearing it on every filter/sort/page keystroke must not (a) destroy and
-// collapse the user's expanded "Executed SQL" panel, NOR (b) replace the
-// filter <input> mid-typing (which would steal focus on every keystroke).
 const root = document.getElementById("root");
 root.textContent = "";
 const sqlHost = document.createElement("div");
-const barHost = document.createElement("div");
-const gridHost = document.createElement("div");
-const chartHost = document.createElement("div");
-chartHost.className = "charthost";
+const blocksHost = document.createElement("div");
 const _waiting = document.createElement("div");
 _waiting.className = "empty";
 _waiting.textContent = "Waiting for results…";
-gridHost.appendChild(_waiting);
-root.append(sqlHost, barHost, gridHost, chartHost);
-
-// Persistent reference the bar exposes to render(): the meta span's text
-// ("showing N of M") changes as the user filters/sorts/pages, but the
-// containing input + CSV button DOM is stable so focus survives.
-let _metaSpan = null;
-
-function isNumeric(colIndex) {
-  return state.types[state.columns[colIndex]] === "number";
-}
+blocksHost.appendChild(_waiting);
+root.append(sqlHost, blocksHost);
 
 function applyHostContext(ctx) {
   if (!ctx) return;
@@ -198,334 +175,347 @@ function applyHostContext(ctx) {
       if (typeof v === "string") document.documentElement.style.setProperty(k, v);
     }
   }
-  if (theme !== state.theme) {
-    state.theme = theme;
-    // ECharts cannot swap theme on a live instance — dispose and re-init so
-    // there is no ghost chart from the previous theme. Only relevant while a
-    // chart is on screen; in table mode there is nothing to rebuild.
-    if (state.mode === "chart") rebuildChart();
-  }
-}
-
-// ───────────────────────────── table mode ───────────────────────────────────
-
-function filteredRows() {
-  if (!state.filter) return state.rows;
-  const needle = state.filter.toLowerCase();
-  return state.rows.filter((r) =>
-    r.some((cell) => String(cell).toLowerCase().includes(needle))
-  );
-}
-
-function sortedRows(rows) {
-  if (state.sortCol < 0) return rows;
-  const c = state.sortCol;
-  const numeric = isNumeric(c);
-  const copy = rows.slice();
-  copy.sort((a, b) => {
-    const x = a[c], y = b[c];
-    let cmp;
-    if (numeric) {
-      const nx = parseFloat(x), ny = parseFloat(y);
-      const xn = Number.isNaN(nx), yn = Number.isNaN(ny);
-      if (xn && yn) cmp = 0;
-      else if (xn) cmp = 1;
-      else if (yn) cmp = -1;
-      else cmp = nx - ny;
-    } else {
-      cmp = String(x).localeCompare(String(y));
-    }
-    return cmp * state.sortDir;
-  });
-  return copy;
-}
-
-function csvEscape(v) {
-  const s = String(v);
-  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
-
-function buildCsvText() {
-  const rows = sortedRows(filteredRows());
-  const lines = [state.columns.map(csvEscape).join(",")];
-  for (const r of rows) lines.push(r.map(csvEscape).join(","));
-  return lines.join("\r\n");
-}
-
-// Show a transient message in the meta span ("showing N of M") and restore
-// the count after a couple of seconds. Used to give CSV-export feedback
-// without destroying the table (showNotice() would clear gridHost).
-function flashMeta(text) {
-  if (!_metaSpan) return;
-  _metaSpan.textContent = text;
-  setTimeout(() => { if (_metaSpan) render(); }, 2500);
-}
-
-// Last-resort fallback: render the CSV inline in a textarea so the user can
-// always read/copy it manually. Works in any sandbox because it requires no
-// permissions and no host capability. The "Back to table" button restores
-// the grid.
-function showCsvOverlay(csvText) {
-  gridHost.textContent = "";
-  const wrap = document.createElement("div");
-  wrap.className = "wrap";
-  wrap.style.padding = "8px";
-  const hint = document.createElement("div");
-  hint.className = "meta";
-  hint.style.marginBottom = "6px";
-  hint.textContent =
-    "Host blocked the file download and clipboard. Select all and copy:";
-  const ta = document.createElement("textarea");
-  ta.readOnly = true;
-  ta.value = csvText;
-  ta.style.width = "100%";
-  ta.style.minHeight = "240px";
-  ta.style.font = "12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
-  ta.style.background = "var(--control-bg)";
-  ta.style.color = "var(--fg)";
-  ta.style.border = "1px solid var(--line)";
-  ta.style.borderRadius = "6px";
-  ta.style.padding = "6px";
-  const done = document.createElement("button");
-  done.textContent = "Back to table";
-  done.style.marginTop = "8px";
-  done.addEventListener("click", render);
-  wrap.append(hint, ta, done);
-  gridHost.appendChild(wrap);
-  ta.focus();
-  ta.select();
-}
-
-// Synchronous clipboard copy via a temporary <textarea>. The async
-// navigator.clipboard.writeText needs `clipboard-write` permissions-policy
-// that MCP Inspector's sandbox doesn't grant; document.execCommand("copy")
-// is deprecated but doesn't need that grant and works inside sandboxed
-// iframes that have `allow-same-origin`. Returns true on success.
-function copyViaExecCommand(text) {
-  const ta = document.createElement("textarea");
-  ta.value = text;
-  ta.style.position = "fixed";
-  ta.style.left = "-9999px";
-  ta.style.top = "0";
-  ta.setAttribute("readonly", "");
-  document.body.appendChild(ta);
-  let ok = false;
-  try {
-    ta.select();
-    ta.setSelectionRange(0, ta.value.length);
-    ok = document.execCommand("copy");
-  } catch (err) {
-    console.warn("execCommand('copy') failed:", err);
-    ok = false;
-  } finally {
-    ta.remove();
-  }
-  return ok;
-}
-
-async function exportCsv() {
-  // Tiered export. MCP App iframes are sandboxed without `allow-downloads`
-  // and Inspector doesn't grant `clipboard-write` permissions-policy, so
-  // both the obvious <a download> and the async clipboard API silently
-  // no-op there. Cascade:
-  //   1) ui/download-file — spec-compliant hosts (Claude Desktop).
-  //   2) navigator.clipboard.writeText — modern, needs clipboard-write.
-  //   3) document.execCommand("copy") — legacy, works without that grant.
-  //   4) Inline textarea overlay — always works; user copies manually.
-  const csvText = buildCsvText();
-  const caps = (app.getHostCapabilities && app.getHostCapabilities()) || {};
-  if (caps.downloadFile) {
-    try {
-      await app.downloadFile({
-        contents: [
-          {
-            type: "resource",
-            resource: {
-              uri: "query_results.csv",
-              mimeType: "text/csv",
-              text: csvText,
-            },
-          },
-        ],
-      });
-      flashMeta("downloaded ✓");
-      return;
-    } catch (err) {
-      console.warn("ui/download-file failed:", err);
+  if (theme !== widgetState.theme) {
+    widgetState.theme = theme;
+    // ECharts cannot swap theme on a live instance — dispose and re-init each
+    // chart so there is no ghost chart from the previous theme. Reusing the
+    // same per-block container preserves stream order.
+    for (const entry of chartRegistry) {
+      rebuildChartInto(entry);
     }
   }
-  try {
-    await navigator.clipboard.writeText(csvText);
-    flashMeta("copied to clipboard ✓");
-    return;
-  } catch (err) {
-    console.warn("clipboard.writeText failed:", err);
-  }
-  if (copyViaExecCommand(csvText)) {
-    flashMeta("copied to clipboard ✓");
-    return;
-  }
-  showCsvOverlay(csvText);
 }
 
-function renderSqlSection() {
+// ───────────────────────────── SQL panel ────────────────────────────────────
+
+function renderSqlSection(sql) {
   // Collapsed by default — executed SQL is QA detail, not the primary answer.
-  // Called once per result from ingestTable(), never from render().
+  // Rendered once per ingest from the optional sqllens/query channel.
   sqlHost.textContent = "";
-  if (!state.sql) return;
+  if (!sql) return;
   const details = document.createElement("details");
   details.className = "sql";
   const summary = document.createElement("summary");
   summary.textContent = "Executed SQL";
   const pre = document.createElement("pre");
   const code = document.createElement("code");
-  code.textContent = state.sql;
+  code.textContent = sql;
   pre.appendChild(code);
   details.append(summary, pre);
   sqlHost.appendChild(details);
 }
 
-function renderBar() {
-  // Painted once per result from ingestTable(); render() never touches barHost,
-  // so the filter input keeps focus across keystrokes. The "showing N of M"
-  // span is exposed to render() via _metaSpan so its text can update
-  // without rebuilding the input.
-  barHost.textContent = "";
-  _metaSpan = null;
-  if (!state.columns.length) return;
-  const bar = document.createElement("div");
-  bar.className = "bar";
-  const search = document.createElement("input");
-  search.type = "search";
-  search.placeholder = "Filter rows…";
-  search.value = state.filter;
-  search.addEventListener("input", () => {
-    state.filter = search.value;
-    state.page = 0;
-    render();
-  });
-  const csvBtn = document.createElement("button");
-  csvBtn.textContent = "Export CSV";
-  csvBtn.addEventListener("click", exportCsv);
-  const meta = document.createElement("span");
-  meta.className = "meta";
-  bar.append(search, csvBtn, meta);
-  barHost.appendChild(bar);
-  _metaSpan = meta;
-}
+// ───────────────────────────── table block ─────────────────────────────────
 
-function render() {
-  const matched = filteredRows();
-  const sorted = sortedRows(matched);
-  const pages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  if (state.page >= pages) state.page = pages - 1;
-  if (state.page < 0) state.page = 0;
-  const start = state.page * PAGE_SIZE;
-  const pageRows = sorted.slice(start, start + PAGE_SIZE);
+function renderTableBlock(block) {
+  // Per-block container with its OWN sort / filter / page state. Multiple
+  // table blocks in one response render independently — sorting block 1 does
+  // not touch block 2's order, paging block 2 does not reset block 1's page.
+  const container = document.createElement("div");
+  container.className = "block tableblock";
 
-  if (_metaSpan) {
-    let msg = `showing ${matched.length} of ${state.rowCount}`;
-    if (state.truncated > 0) msg += ` (${state.truncated} truncated)`;
-    _metaSpan.textContent = msg;
+  // Per-block state lives on the container, not on the widget. This is the
+  // load-bearing isolation that lets two table blocks coexist without their
+  // controls fighting each other.
+  const state = {
+    columns: Array.isArray(block.columns) ? block.columns : [],
+    rows: Array.isArray(block.rows) ? block.rows : [],
+    types: (block.column_types && typeof block.column_types === "object") ? block.column_types : {},
+    rowCount: typeof block.row_count === "number" ? block.row_count : (Array.isArray(block.rows) ? block.rows.length : 0),
+    truncated: typeof block.truncated === "number" ? block.truncated : 0,
+    sortCol: -1,
+    sortDir: 1,
+    filter: "",
+    page: 0,
+  };
+
+  const barHost = document.createElement("div");
+  const gridHost = document.createElement("div");
+  container.append(barHost, gridHost);
+
+  function isNumeric(colIndex) {
+    return state.types[state.columns[colIndex]] === "number";
   }
 
-  gridHost.textContent = "";
-
-  if (!state.columns.length) {
-    const d = document.createElement("div");
-    d.className = "empty";
-    d.textContent = "No tabular result for this query.";
-    gridHost.appendChild(d);
-    return;
+  function filteredRows() {
+    if (!state.filter) return state.rows;
+    const needle = state.filter.toLowerCase();
+    return state.rows.filter((r) =>
+      r.some((cell) => String(cell).toLowerCase().includes(needle))
+    );
   }
 
-  const wrap = document.createElement("div");
-  wrap.className = "wrap";
-  const table = document.createElement("table");
-  const thead = document.createElement("thead");
-  const htr = document.createElement("tr");
-  state.columns.forEach((name, i) => {
-    const th = document.createElement("th");
-    th.textContent = name + " ";
-    const ind = document.createElement("span");
-    ind.className = "ind";
-    ind.textContent = state.sortCol === i ? (state.sortDir === 1 ? "▲" : "▼") : "";
-    th.appendChild(ind);
-    th.addEventListener("click", () => {
-      if (state.sortCol === i) state.sortDir = -state.sortDir;
-      else { state.sortCol = i; state.sortDir = 1; }
+  function sortedRows(rows) {
+    if (state.sortCol < 0) return rows;
+    const c = state.sortCol;
+    const numeric = isNumeric(c);
+    const copy = rows.slice();
+    copy.sort((a, b) => {
+      const x = a[c], y = b[c];
+      let cmp;
+      if (numeric) {
+        const nx = parseFloat(x), ny = parseFloat(y);
+        const xn = Number.isNaN(nx), yn = Number.isNaN(ny);
+        if (xn && yn) cmp = 0;
+        else if (xn) cmp = 1;
+        else if (yn) cmp = -1;
+        else cmp = nx - ny;
+      } else {
+        cmp = String(x).localeCompare(String(y));
+      }
+      return cmp * state.sortDir;
+    });
+    return copy;
+  }
+
+  // ── CSV export (per-block) ────────────────────────────────────────────────
+
+  function csvEscape(v) {
+    const s = String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  function buildCsvText() {
+    const rows = sortedRows(filteredRows());
+    const lines = [state.columns.map(csvEscape).join(",")];
+    for (const r of rows) lines.push(r.map(csvEscape).join(","));
+    return lines.join("\r\n");
+  }
+
+  // Show a transient message in the meta span ("showing N of M") and restore
+  // the count after a couple of seconds. Used to give CSV-export feedback
+  // without destroying the table.
+  function flashMeta(text) {
+    if (!metaSpan) return;
+    metaSpan.textContent = text;
+    setTimeout(() => { if (metaSpan) render(); }, 2500);
+  }
+
+  // Last-resort fallback: render the CSV inline in a textarea so the user can
+  // always read/copy it manually. Works in any sandbox because it requires no
+  // permissions and no host capability. The "Back to table" button restores
+  // the grid.
+  function showCsvOverlay(csvText) {
+    gridHost.textContent = "";
+    const wrap = document.createElement("div");
+    wrap.className = "wrap";
+    wrap.style.padding = "8px";
+    const hint = document.createElement("div");
+    hint.className = "meta";
+    hint.style.marginBottom = "6px";
+    hint.textContent =
+      "Host blocked the file download and clipboard. Select all and copy:";
+    const ta = document.createElement("textarea");
+    ta.readOnly = true;
+    ta.value = csvText;
+    ta.style.width = "100%";
+    ta.style.minHeight = "240px";
+    ta.style.font = "12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+    ta.style.background = "var(--control-bg)";
+    ta.style.color = "var(--fg)";
+    ta.style.border = "1px solid var(--line)";
+    ta.style.borderRadius = "6px";
+    ta.style.padding = "6px";
+    const done = document.createElement("button");
+    done.textContent = "Back to table";
+    done.style.marginTop = "8px";
+    done.addEventListener("click", render);
+    wrap.append(hint, ta, done);
+    gridHost.appendChild(wrap);
+    ta.focus();
+    ta.select();
+  }
+
+  // Synchronous clipboard copy via a temporary <textarea>. The async
+  // navigator.clipboard.writeText needs `clipboard-write` permissions-policy
+  // that MCP Inspector's sandbox doesn't grant; document.execCommand("copy")
+  // is deprecated but doesn't need that grant and works inside sandboxed
+  // iframes that have `allow-same-origin`. Returns true on success.
+  function copyViaExecCommand(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    ta.style.top = "0";
+    ta.setAttribute("readonly", "");
+    document.body.appendChild(ta);
+    let ok = false;
+    try {
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      ok = document.execCommand("copy");
+    } catch (err) {
+      console.warn("execCommand('copy') failed:", err);
+      ok = false;
+    } finally {
+      ta.remove();
+    }
+    return ok;
+  }
+
+  async function exportCsv() {
+    // Tiered export. MCP App iframes are sandboxed without `allow-downloads`
+    // and Inspector doesn't grant `clipboard-write` permissions-policy, so
+    // both the obvious <a download> and the async clipboard API silently
+    // no-op there. Cascade:
+    //   1) ui/download-file — spec-compliant hosts (Claude Desktop).
+    //   2) navigator.clipboard.writeText — modern, needs clipboard-write.
+    //   3) document.execCommand("copy") — legacy, works without that grant.
+    //   4) Inline textarea overlay — always works; user copies manually.
+    const csvText = buildCsvText();
+    const caps = (app.getHostCapabilities && app.getHostCapabilities()) || {};
+    if (caps.downloadFile) {
+      try {
+        await app.downloadFile({
+          contents: [
+            {
+              type: "resource",
+              resource: {
+                uri: "query_results.csv",
+                mimeType: "text/csv",
+                text: csvText,
+              },
+            },
+          ],
+        });
+        flashMeta("downloaded ✓");
+        return;
+      } catch (err) {
+        console.warn("ui/download-file failed:", err);
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(csvText);
+      flashMeta("copied to clipboard ✓");
+      return;
+    } catch (err) {
+      console.warn("clipboard.writeText failed:", err);
+    }
+    if (copyViaExecCommand(csvText)) {
+      flashMeta("copied to clipboard ✓");
+      return;
+    }
+    showCsvOverlay(csvText);
+  }
+
+  // ── Bar (filter input + meta span) ───────────────────────────────────────
+
+  let metaSpan = null;
+
+  function renderBar() {
+    // Painted once per block on creation; render() never touches barHost, so
+    // the filter input keeps focus across keystrokes. The "showing N of M"
+    // span is exposed to render() via metaSpan so its text can update
+    // without rebuilding the input.
+    barHost.textContent = "";
+    metaSpan = null;
+    if (!state.columns.length) return;
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    const search = document.createElement("input");
+    search.type = "search";
+    search.placeholder = "Filter rows…";
+    search.value = state.filter;
+    search.addEventListener("input", () => {
+      state.filter = search.value;
+      state.page = 0;
       render();
     });
-    htr.appendChild(th);
-  });
-  thead.appendChild(htr);
-  table.appendChild(thead);
+    const csvBtn = document.createElement("button");
+    csvBtn.textContent = "Export CSV";
+    csvBtn.addEventListener("click", exportCsv);
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    bar.append(search, csvBtn, meta);
+    barHost.appendChild(bar);
+    metaSpan = meta;
+  }
 
-  const tbody = document.createElement("tbody");
-  for (const r of pageRows) {
-    const tr = document.createElement("tr");
-    r.forEach((cell, i) => {
-      const td = document.createElement("td");
-      if (isNumeric(i)) td.className = "num";
-      td.textContent = String(cell);
-      tr.appendChild(td);
+  function render() {
+    const matched = filteredRows();
+    const sorted = sortedRows(matched);
+    const pages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+    if (state.page >= pages) state.page = pages - 1;
+    if (state.page < 0) state.page = 0;
+    const start = state.page * PAGE_SIZE;
+    const pageRows = sorted.slice(start, start + PAGE_SIZE);
+
+    if (metaSpan) {
+      let msg = `showing ${matched.length} of ${state.rowCount}`;
+      if (state.truncated > 0) msg += ` (${state.truncated} truncated)`;
+      metaSpan.textContent = msg;
+    }
+
+    gridHost.textContent = "";
+
+    if (!state.columns.length) {
+      const d = document.createElement("div");
+      d.className = "empty";
+      d.textContent = "No tabular result for this query.";
+      gridHost.appendChild(d);
+      return;
+    }
+
+    const wrap = document.createElement("div");
+    wrap.className = "wrap";
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const htr = document.createElement("tr");
+    state.columns.forEach((name, i) => {
+      const th = document.createElement("th");
+      th.textContent = name + " ";
+      const ind = document.createElement("span");
+      ind.className = "ind";
+      ind.textContent = state.sortCol === i ? (state.sortDir === 1 ? "▲" : "▼") : "";
+      th.appendChild(ind);
+      th.addEventListener("click", () => {
+        if (state.sortCol === i) state.sortDir = -state.sortDir;
+        else { state.sortCol = i; state.sortDir = 1; }
+        render();
+      });
+      htr.appendChild(th);
     });
-    tbody.appendChild(tr);
+    thead.appendChild(htr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    for (const r of pageRows) {
+      const tr = document.createElement("tr");
+      r.forEach((cell, i) => {
+        const td = document.createElement("td");
+        if (isNumeric(i)) td.className = "num";
+        td.textContent = String(cell);
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    gridHost.appendChild(wrap);
+
+    const pager = document.createElement("div");
+    pager.className = "pager";
+    const prev = document.createElement("button");
+    prev.textContent = "‹ Prev";
+    prev.disabled = state.page === 0;
+    prev.addEventListener("click", () => { state.page--; render(); });
+    const next = document.createElement("button");
+    next.textContent = "Next ›";
+    next.disabled = state.page >= pages - 1;
+    next.addEventListener("click", () => { state.page++; render(); });
+    const pos = document.createElement("span");
+    pos.className = "meta";
+    pos.textContent = `page ${state.page + 1} / ${pages}`;
+    pager.append(prev, next, pos);
+    gridHost.appendChild(pager);
   }
-  table.appendChild(tbody);
-  wrap.appendChild(table);
-  gridHost.appendChild(wrap);
 
-  const pager = document.createElement("div");
-  pager.className = "pager";
-  const prev = document.createElement("button");
-  prev.textContent = "‹ Prev";
-  prev.disabled = state.page === 0;
-  prev.addEventListener("click", () => { state.page--; render(); });
-  const next = document.createElement("button");
-  next.textContent = "Next ›";
-  next.disabled = state.page >= pages - 1;
-  next.addEventListener("click", () => { state.page++; render(); });
-  const pos = document.createElement("span");
-  pos.className = "meta";
-  pos.textContent = `page ${state.page + 1} / ${pages}`;
-  pager.append(prev, next, pos);
-  gridHost.appendChild(pager);
-}
-
-function ingestTable(meta) {
-  state.mode = "table";
-  // Leaving any prior chart behind would keep a live ECharts instance and its
-  // ResizeObserver running under a hidden host; dispose before painting table.
-  disposeChart();
-  chartHost.textContent = "";
-
-  const queryInfo = meta[QUERY_META_KEY];
-  state.sql =
-    queryInfo && typeof queryInfo.sql === "string" ? queryInfo.sql : "";
-  renderSqlSection();
-
-  const payload = meta[TABLE_META_KEY];
-  if (!payload || !Array.isArray(payload.columns)) {
-    state.columns = [];
-    renderBar();
-    render();
-    return;
-  }
-  state.columns = payload.columns;
-  state.rows = Array.isArray(payload.rows) ? payload.rows : [];
-  state.types = payload.column_types || {};
-  state.rowCount = typeof payload.row_count === "number" ? payload.row_count : state.rows.length;
-  state.truncated = typeof payload.truncated === "number" ? payload.truncated : 0;
-  state.sortCol = -1;
-  state.sortDir = 1;
-  state.filter = "";
-  state.page = 0;
   renderBar();
   render();
+  return container;
 }
 
-// ───────────────────────────── chart mode ───────────────────────────────────
+// ───────────────────────────── chart block ─────────────────────────────────
 
 function distinct(rows, key) {
   const seen = new Set();
@@ -669,100 +659,154 @@ function buildEchartsOption(spec) {
   };
 }
 
-function disposeChart() {
-  if (resizeObserver) {
-    resizeObserver.disconnect();
-    resizeObserver = null;
+function disposeChartEntry(entry) {
+  if (entry.observer) {
+    entry.observer.disconnect();
+    entry.observer = null;
   }
-  if (chart) {
-    chart.dispose();
-    chart = null;
+  if (entry.instance) {
+    entry.instance.dispose();
+    entry.instance = null;
   }
 }
 
-function rebuildChart() {
-  // Re-render from state.spec under the current theme. Used on first ingest
-  // and on every theme change (ECharts has no live theme swap).
-  disposeChart();
-  chartHost.textContent = "";
+function rebuildChartInto(entry) {
+  // Re-render entry.spec under the current theme into entry.el. Used on first
+  // ingest of each chart block AND on every theme change (ECharts has no live
+  // theme swap, so we dispose + re-init each chart).
+  disposeChartEntry(entry);
+  entry.el.textContent = "";
 
-  if (!state.spec || !Array.isArray(state.spec.data) || state.spec.data.length === 0) {
-    showNotice("No chartable result for this query.");
+  if (!entry.spec || !Array.isArray(entry.spec.data) || entry.spec.data.length === 0) {
+    const d = document.createElement("div");
+    d.className = "empty";
+    d.textContent = "No chartable result for this block.";
+    entry.el.appendChild(d);
     return;
   }
 
   const chartEl = document.createElement("div");
-  chartEl.id = "chart";
-  chartHost.appendChild(chartEl);
+  chartEl.className = "chart";
+  entry.el.appendChild(chartEl);
 
-  const truncated = typeof state.spec.truncated === "number" ? state.spec.truncated : 0;
+  const truncated = typeof entry.spec.truncated === "number" ? entry.spec.truncated : 0;
   if (truncated > 0) {
     const note = document.createElement("div");
     note.className = "note";
-    const shown = state.spec.row_count != null ? state.spec.row_count : state.spec.data.length;
+    const shown = entry.spec.row_count != null ? entry.spec.row_count : entry.spec.data.length;
     note.textContent = `Rendering first ${shown} of ${shown + truncated} rows.`;
-    chartHost.appendChild(note);
+    entry.el.appendChild(note);
   }
 
   try {
-    chart = echarts.init(
+    entry.instance = echarts.init(
       chartEl,
-      state.theme === "dark" ? "dark" : null,
+      widgetState.theme === "dark" ? "dark" : null,
       { renderer: "svg" }
     );
-    chart.setOption(buildEchartsOption(state.spec));
+    entry.instance.setOption(buildEchartsOption(entry.spec));
   } catch (err) {
-    showNotice("Could not render chart: " + (err && err.message ? err.message : err));
+    entry.el.textContent = "";
+    const d = document.createElement("div");
+    d.className = "empty";
+    d.textContent = "Could not render chart: " + (err && err.message ? err.message : err);
+    entry.el.appendChild(d);
     return;
   }
 
-  resizeObserver = new ResizeObserver(() => {
-    if (chart) chart.resize();
+  entry.observer = new ResizeObserver(() => {
+    if (entry.instance) entry.instance.resize();
   });
-  resizeObserver.observe(chartEl);
+  entry.observer.observe(chartEl);
 }
 
-function ingestChart(payload) {
-  state.mode = "chart";
-  // Clear any prior table DOM so a stale grid/SQL panel can't show under the
-  // chart host (they share the same iframe).
-  sqlHost.textContent = "";
-  barHost.textContent = "";
-  gridHost.textContent = "";
-  _metaSpan = null;
-  state.spec = payload;
-  rebuildChart();
+function renderChartBlock(block) {
+  // Create + register the chart entry, but DO NOT call rebuildChartInto here:
+  // ECharts.init reads clientWidth/clientHeight at construction, and a
+  // container that's not yet in the DOM measures as 0×0, leading to a broken
+  // first paint. renderBlocks does a finalization pass after all containers
+  // are appended (see the loop at the bottom of renderBlocks) so every chart
+  // initializes against a properly-sized in-DOM element.
+  const container = document.createElement("div");
+  container.className = "block charthost";
+  const entry = { el: container, instance: null, observer: null, spec: block };
+  chartRegistry.push(entry);
+  return container;
+}
+
+// ───────────────────────────── text block ──────────────────────────────────
+
+function renderTextBlock(block) {
+  // Text blocks pass through verbatim as Markdown source — we render only the
+  // most basic structure (paragraphs preserved via white-space: pre-wrap). A
+  // full Markdown parser would inflate the bundle for marginal gain; the
+  // raw-text fallback the host already shows uses the same content.
+  const container = document.createElement("div");
+  container.className = "block textblock";
+  container.textContent = typeof block.text === "string" ? block.text : "";
+  return container;
 }
 
 // ───────────────────────────── dispatch ─────────────────────────────────────
 
-function ingest(result) {
+function teardownChartRegistry() {
+  for (const entry of chartRegistry) disposeChartEntry(entry);
+  chartRegistry.length = 0;
+}
+
+function renderBlocks(result) {
   const meta = (result && result._meta) || {};
-  const chartPayload = meta[CHART_META_KEY];
-  // Chart wins, but only when it is actually renderable; an empty/malformed
-  // chart payload falls through to the table (or empty-state) so a present
-  // table is never hidden behind a blank chart.
-  if (
-    chartPayload &&
-    Array.isArray(chartPayload.data) &&
-    chartPayload.data.length > 0
-  ) {
-    ingestChart(chartPayload);
+  const queryInfo = meta[QUERY_META_KEY];
+  renderSqlSection(queryInfo && typeof queryInfo.sql === "string" ? queryInfo.sql : "");
+
+  teardownChartRegistry();
+  blocksHost.textContent = "";
+
+  const blocks = meta[BLOCKS_META_KEY];
+  if (!Array.isArray(blocks) || blocks.length === 0) {
+    const d = document.createElement("div");
+    d.className = "empty";
+    d.textContent = "No structured result for this query.";
+    blocksHost.appendChild(d);
     return;
   }
-  ingestTable(meta);
+
+  for (const block of blocks) {
+    if (!block || typeof block !== "object") continue;
+    let node = null;
+    if (block.type === "text") node = renderTextBlock(block);
+    else if (block.type === "table") node = renderTableBlock(block);
+    else if (block.type === "chart") node = renderChartBlock(block);
+    else {
+      // Unknown discriminator (producer drift, future block type the widget
+      // doesn't know yet, missing ``type`` key). Surface the loss to the
+      // console AND the rendered output rather than silently dropping the
+      // block: an invisible drop hides a producer regression behind a
+      // shorter-than-expected answer that's hard to diagnose from the user
+      // side. Mirrors the Python serializer's symmetric handling.
+      console.warn("renderBlocks: unknown block type", block.type, block);
+      const d = document.createElement("div");
+      d.className = "block empty";
+      d.textContent = `Unsupported block type: ${block.type}`;
+      node = d;
+    }
+    if (node) blocksHost.appendChild(node);
+  }
+  // Finalization pass: every chart container is now in the DOM with real
+  // dimensions, so ECharts.init can measure correctly. teardownChartRegistry
+  // above emptied the registry; renderChartBlock (inside the dispatch loop)
+  // re-populated it with exactly this render's chart entries, so this loop
+  // iterates only the fresh charts — no stale instances from prior renders.
+  for (const entry of chartRegistry) rebuildChartInto(entry);
 }
 
 function showNotice(text) {
-  // Render the notice in whichever host owns the active mode so it replaces
-  // the partial render rather than stacking beneath it.
-  const host = state.mode === "chart" ? chartHost : gridHost;
-  disposeChart();
-  host.textContent = "";
+  teardownChartRegistry();
+  blocksHost.textContent = "";
   const d = document.createElement("div");
   d.className = "empty";
   d.textContent = text;
-  host.appendChild(d);
+  blocksHost.appendChild(d);
 }
 
 // Host iframe auto-fit (issue #174). MCP App hosts render this widget in a
@@ -773,8 +817,9 @@ function showNotice(text) {
 // height (it measures by briefly forcing documentElement to `max-content`).
 // We pass it explicitly rather than leaning on the SDK default so an upstream
 // default flip can't silently disable auto-fit. The only widget-side
-// requirement is that the document be content-sized — hence the chart host's
-// definite height above (a viewport-height value would defeat the measurement).
+// requirement is that the document be content-sized — hence each chart
+// container's definite height above (a viewport-height value would defeat
+// the measurement).
 const app = new App(
   { name: "sqllens-query-results", version: "1.0.0" },
   {},
@@ -785,7 +830,7 @@ app.ontoolresult = (params) => {
   // dispatcher and the widget freezes on "Waiting for results…" with no
   // signal that data arrived but failed to render.
   try {
-    ingest(params);
+    renderBlocks(params);
   } catch (err) {
     showNotice("Could not render results: " + (err && err.message ? err.message : err));
   }
@@ -795,7 +840,7 @@ app.ontoolresult = (params) => {
 function applyHostContextSafe() {
   try {
     applyHostContext(app.getHostContext());
-    if (chart) chart.resize();
+    for (const entry of chartRegistry) if (entry.instance) entry.instance.resize();
   } catch (err) {
     console.warn("host theming failed (non-fatal):", err);
   }

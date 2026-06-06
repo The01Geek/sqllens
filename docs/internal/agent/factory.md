@@ -23,9 +23,16 @@ cfg.agent       →  BoundedConversationStore          →  in-process LRU, capp
                    .max_conversations                   cfg.agent.max_conversations (ephemeral)
 ToolRegistry    →  RunSqlTool                          (executes generated SQL, writes a scratch CSV,
                                                         appends truncation hint when df.attrs['truncated'])
-                   EmitChartTool                       (agent-side seam for query_database's chart mode;
+                   EmitChartTool                       (agent-side seam for query_database's chart blocks;
                                                         no SQL/FS; validates the renderer-agnostic chart
-                                                        DSL and emits a ChartComponent, capped at 200 rows)
+                                                        DSL and emits a ChartComponent, capped at 200 rows;
+                                                        may be called more than once per request — each
+                                                        call appends a chart block in stream order)
+                   EmitTextTool                        (agent-side seam for deliberate prose blocks;
+                                                        no SQL/FS; emits an answer-marked RichTextComponent
+                                                        so the MCP-layer block builder lifts the prose into
+                                                        a {"type":"text",...} block at this stream position —
+                                                        non-emit_text assistant text is hidden reasoning)
                    SaveQuestionToolArgsTool            (memory write — tool-arg recordings;
                                                         registered only when cfg.memory.save_queries)
                    SearchSavedCorrectToolUsesTool      (memory read; default_similarity_threshold
@@ -37,7 +44,9 @@ ToolRegistry    →  RunSqlTool                          (executes generated SQL
                                                               AgentConfig(max_tool_iterations))
 ```
 
-`EmitChartTool` carries no SQL runner or file-system capability — the agent runs `run_sql` first to get aggregated rows, then hands them to `emit_chart`, which only validates the DSL (`bar | line | area | scatter | pie | heatmap`, ≤ 200 rows, pie/heatmap series-shape rules) and wraps the result in a `ChartComponent`. The MCP-layer `query_database` tool reads that component off the agent stream and surfaces it through its unified result widget's chart mode (chart > table > text precedence). See [mcp-server/tools.md](../mcp-server/tools.md#chart-mode-the-emitcharttool-seam) for the wider picture and [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py) for the DSL source.
+`EmitChartTool` carries no SQL runner or file-system capability — the agent runs `run_sql` first to get aggregated rows, then hands them to `emit_chart`, which only validates the DSL (`bar | line | area | scatter | pie | heatmap`, ≤ 200 rows, pie/heatmap series-shape rules) and wraps the result in a `ChartComponent`. The MCP-layer `query_database` tool reads that component off the agent stream and surfaces it as a `{"type": "chart", ...}` block in the ordered `_meta["sqllens/blocks"]` array; the widget draws each chart block in stream order, alongside any sibling table or text blocks (no chart-vs-table precedence). `emit_chart` may be called more than once per request (#194) when the answer warrants multiple distinct charts. See [mcp-server/tools.md](../mcp-server/tools.md#chart-blocks-the-emitcharttool-seam) for the wider picture and [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py) for the DSL source.
+
+`EmitTextTool` is the companion seam introduced with the multi-block response (#194): the agent calls `emit_text(text=...)` to place a deliberate prose block at a chosen position in the response stream (a caption between two artifacts, a one-line summary at the end, a brief introduction before a chart). It carries no SQL/FS capability either; it only emits a `RichTextComponent` whose `data` carries the answer marker (`IS_ANSWER_MARKER_KEY = "is_answer"` from [src/sqllens/agent/markers.py](../../../src/sqllens/agent/markers.py)) so the MCP-layer block builder includes the prose in the rendered answer. **Non-`emit_text` assistant text is treated as hidden reasoning and excluded from the rendered answer** — the agent's terminal answer yield and iteration-limit warning carry the same marker and so converge on one discriminator. See [mcp-server/tools.md](../mcp-server/tools.md#text-composition-the-emittexttool-seam) and [src/sqllens/agent/tools/emit_text.py](../../../src/sqllens/agent/tools/emit_text.py).
 
 Call order on every query is the reverse of construction. With RLS unconfigured: **ReadOnlyGuardRunner → RowCapRunner → engine runner**. With RLS configured (`cfg.rls` non-empty): **RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner** — the RLS rewrite runs *first* so the read-only guard validates the *rewritten* SQL. The parser rejects before any connection opens; the engine runner streams with `fetchmany(max_rows + 1)` and sets its native statement-timeout primitive; the decorator clamps the result a second time on the way back. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full timeout/cap story and [database-connectors/row-level-security.md](../database-connectors/row-level-security.md) for the RLS rewrite.
 

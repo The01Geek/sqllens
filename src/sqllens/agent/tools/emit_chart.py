@@ -1,15 +1,16 @@
 """Chart-emitting tool: turns aggregated rows into a renderer-agnostic spec.
 
-``EmitChartTool`` is the agent-side seam for the chart mode of the
-``query_database`` MCP tool. It does not run SQL itself — the agent runs
-``run_sql`` first, then hands the
-(already aggregated) rows to this tool, which validates a small DSL and emits
-a ``ChartComponent``. The widget owns all rendering decisions (palette,
-tooltips, legend, axis formatting, theming); this tool only describes *what*
-to plot, not *how*.
+``EmitChartTool`` is the agent-side seam for the chart blocks of the
+``query_database`` MCP tool's ordered ``blocks`` response. It does not run SQL
+itself — the agent runs ``run_sql`` first, then hands the (already aggregated)
+rows to this tool, which validates a small DSL and emits a ``ChartComponent``.
+The widget owns all rendering decisions (palette, tooltips, legend, axis
+formatting, theming); this tool only describes *what* to plot, not *how*.
 
-The same DSL dict is both the ``ChartComponent.data`` payload and the JSON the
-MCP layer writes to ``_meta["sqllens/chart"]``.
+The same DSL dict is both the ``ChartComponent.data`` payload and the JSON
+payload wrapped as a ``{"type": "chart", ...}`` block in
+``_meta["sqllens/blocks"]``. May be called multiple times per request to emit
+multiple chart blocks; each call appends a new chart block in stream order.
 """
 
 import logging
@@ -19,12 +20,11 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from sqllens.agent.components import (
     ChartComponent,
-    ComponentType,
-    NotificationComponent,
     SimpleTextComponent,
     UiComponent,
 )
 from sqllens.agent.core.tool import Tool, ToolContext, ToolResult
+from sqllens.agent.tools._errors import structured_tool_error
 
 logger = logging.getLogger("sqllens.agent.tools.emit_chart")
 
@@ -107,8 +107,9 @@ class EmitChartTool(Tool[EmitChartParams]):
         types = ", ".join(get_args(ChartTypeLiteral))
         return (
             "Render an interactive chart from already-aggregated rows. Call "
-            "AFTER run_sql, once per request, when the user asked for a chart "
-            f"and the result is aggregated/temporal. chart_type is one of: "
+            "AFTER run_sql when the user asked for a chart and the result is "
+            "aggregated/temporal. May be called more than once per request to "
+            f"emit multiple distinct charts. chart_type is one of: "
             f"{types}. At most {_MAX_CHART_ROWS} rows — aggregate in SQL first."
         )
 
@@ -123,8 +124,10 @@ class EmitChartTool(Tool[EmitChartParams]):
         Arguments are already Pydantic-validated by the registry (the row cap
         and the pie/heatmap shape rules raise there and surface to the LLM as
         ``ToolResult(success=False)``). This body only assembles the spec; the
-        broad ``except`` mirrors ``RunSqlTool`` so an unexpected failure still
-        reaches the LLM as a structured error, never an unhandled exception.
+        broad ``except`` routes through
+        :func:`sqllens.agent.tools._errors.structured_tool_error` so an
+        unexpected failure reaches the LLM as a structured, sanitized error —
+        the raw exception text never leaks into the iframe or the LLM context.
         """
         try:
             # row_count / truncated belong to the MCP-layer payload, not the
@@ -165,24 +168,16 @@ class EmitChartTool(Tool[EmitChartParams]):
         except Exception as e:
             # The args are already Pydantic-validated, so reaching this path is
             # an implementation bug (e.g. a producer overriding ``model_dump``
-            # incorrectly). Log the full traceback server-side and surface a
-            # sanitized message to the LLM / widget — never echo raw exception
-            # text into the iframe or LLM context. ``ToolResult.error`` keeps
-            # the raw string for the agent's internal bookkeeping (tests + any
-            # future telemetry that wants to count by exception type).
-            logger.exception("emit_chart execute failed")
-            sanitized = "Error emitting chart: internal error; see server logs"
-            return ToolResult(
-                success=False,
-                result_for_llm=sanitized,
-                ui_component=UiComponent(
-                    rich_component=NotificationComponent(
-                        type=ComponentType.NOTIFICATION,
-                        level="error",
-                        message=sanitized,
-                    ),
-                    simple_component=SimpleTextComponent(text=sanitized),
-                ),
-                error=str(e),
-                metadata={"error_type": "chart_error"},
+            # incorrectly). The shared helper logs the full traceback
+            # server-side and surfaces a sanitized message to the LLM / widget —
+            # never echo raw exception text into the iframe or LLM context.
+            # ``ToolResult.error`` keeps the raw string for the agent's
+            # internal bookkeeping (tests + any future telemetry that wants to
+            # count by exception type).
+            return structured_tool_error(
+                logger=logger,
+                where="emit_chart execute failed",
+                error_type="chart_error",
+                exc=e,
+                sanitized="Error emitting chart: internal error; see server logs",
             )

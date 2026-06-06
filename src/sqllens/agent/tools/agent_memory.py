@@ -170,7 +170,7 @@ class SearchSavedCorrectToolUsesTool(Tool[SearchSavedCorrectToolUsesParams]):
                 )
 
                 # Emit the hit/miss signal on a STATUS_CARD whose metadata the
-                # MCP formatter (tools/_format.components_to_widgets) reads — the
+                # MCP formatter (tools/_format.components_to_blocks) reads — the
                 # same seam used for the run_sql card's executed SQL. Only the
                 # aggregate fact of a miss is exposed, never matched contents.
                 return ToolResult(

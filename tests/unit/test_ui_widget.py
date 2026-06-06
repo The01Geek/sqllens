@@ -107,30 +107,42 @@ def test_widget_asset_wires_executed_sql_section() -> None:
     # collapsible "Executed SQL" section from _meta["sqllens/query"] and
     # degrades when absent) cannot be exercised behaviorally here. This
     # structural guard at least fails loudly if a future re-lift or edit drops
-    # the SQL-section wiring: the meta key constant and the two-host split
-    # (sqlHost painted once by ingest(), gridHost re-cleared by render()).
+    # the SQL-section wiring: the meta key constant and the sqlHost container
+    # (painted once per ingest from the sqllens/query channel).
     html = ui.load_widget_html()
     assert 'QUERY_META_KEY = "sqllens/query"' in html
     assert "sqlHost" in html
-    assert "gridHost" in html
 
 
-def test_widget_dispatch_pins_chart_wins_precedence() -> None:
-    # The repo has no JS test harness, so the widget's chart > table > text
-    # render-mode dispatch (the one genuinely-new behavior of the consolidation)
-    # cannot be exercised behaviorally here. This structural guard fails loudly
-    # if a refactor drops the load-bearing predicate: (a) the chart channel is
-    # consulted, (b) chart mode is entered only when chart data is non-empty —
-    # so an empty/malformed chart payload falls through to the table rather than
-    # hiding a present grid behind a blank chart, and (c) both render-mode
-    # entrypoints exist.
+def test_widget_dispatch_renders_ordered_blocks_per_container() -> None:
+    # #194: the widget reads the ordered ``_meta["sqllens/blocks"]`` array and
+    # renders one container per block (chart, table, or text) in stream order.
+    # The repo has no JS test harness, so guard structurally: (a) the single
+    # blocks channel is the data source (and the retired flat chart/table
+    # channels are absent — apps-aware hosts must not still see the old keys),
+    # (b) the dispatch entrypoint exists with one renderer per block type, and
+    # (c) per-block table state lives on the container (the "state hangs off
+    # the container" isolation that lets two tables coexist without their
+    # controls fighting each other).
     html = ui.load_widget_html()
-    assert 'const CHART_META_KEY = "sqllens/chart";' in html
-    assert 'const TABLE_META_KEY = "sqllens/table";' in html
-    # chart-wins guard: chart mode requires a non-empty data array.
-    assert "chartPayload.data.length > 0" in html
-    assert "ingestChart(chartPayload)" in html
-    assert "ingestTable(meta)" in html
+    assert 'const BLOCKS_META_KEY = "sqllens/blocks";' in html
+    assert 'CHART_META_KEY = "sqllens/chart"' not in html
+    assert 'TABLE_META_KEY = "sqllens/table"' not in html
+    # Dispatch hook + per-block renderers (one per discriminator).
+    assert "function renderBlocks" in html
+    assert 'block.type === "text"' in html
+    assert 'block.type === "table"' in html
+    assert 'block.type === "chart"' in html
+    # Per-block table state isolation: the renderer creates a fresh ``state``
+    # object inside ``renderTableBlock`` rather than mutating a widget-level
+    # singleton. Pin both the comment that explains it AND the indicator the
+    # per-block bar exists (a per-table filter input).
+    assert "renderTableBlock" in html
+    assert "Per-block container with its OWN sort / filter / page state" in html
+    # Theme swap walks the per-chart registry (each chart container holds its
+    # own ECharts instance) — pin the registry name so a regression that drops
+    # the per-chart tear-down fails loudly.
+    assert "chartRegistry" in html
 
 
 def test_widget_auto_fits_iframe_via_sdk_autoresize() -> None:
@@ -141,7 +153,7 @@ def test_widget_auto_fits_iframe_via_sdk_autoresize() -> None:
     # must hold for the fit to work, and neither can be exercised behaviorally
     # (no JS harness), so guard them structurally:
     #   1. autoResize is requested explicitly (not left to the SDK default).
-    #   2. chart mode is content-sized — no `100vh`, which the SDK's
+    #   2. Each chart container is content-sized — no `100vh`, which the SDK's
     #      `max-content` measurement cannot collapse, so it would report the
     #      full iframe height and never shrink to fit.
     html = ui.load_widget_html()
@@ -153,10 +165,10 @@ def test_widget_auto_fits_iframe_via_sdk_autoresize() -> None:
     # The size-changed-capable SDK must be inlined (vendor-drift guard); the
     # wiring itself is exercised by the autoResize assertion above, not here.
     assert "ui/notifications/size-changed" in html
-    # Chart mode must stay content-sized: a definite #chart height is the
-    # mechanism the SDK's `max-content` measurement relies on, and the prior
-    # viewport-height trap (`100vh`) must not return.
-    assert "#chart { height: 360px" in html
+    # Each chart container must stay content-sized: a definite .chart height is
+    # the mechanism the SDK's `max-content` measurement relies on, and the
+    # prior viewport-height trap (`100vh`) must not return.
+    assert ".chart { height: 360px" in html
     assert "100vh" not in html
 
 
