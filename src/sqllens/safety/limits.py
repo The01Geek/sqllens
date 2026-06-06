@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
+from sqllens.runtime import get_effective_settings
 
 if TYPE_CHECKING:
     from sqllens.agent.core.tool import ToolContext
@@ -60,17 +61,24 @@ class RowCapRunner(SqlRunner):
         self._max_rows = max_rows
 
     async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
+        # Per-request profile overrides land on the runtime ContextVar before
+        # the agent is invoked; reading here lets a profile narrow the cap
+        # tighter than the build-time default. We never widen above the
+        # constructor cap (that bound is the operator's ceiling), so the
+        # effective cap is the *minimum* of the two.
+        effective = get_effective_settings()
+        cap = self._max_rows if effective is None else min(self._max_rows, effective.max_rows)
         df = await self._inner.run_sql(args, context)
         already_truncated = bool(df.attrs.get(TRUNCATED_ATTR, False))
-        if len(df) > self._max_rows:
-            df = df.iloc[: self._max_rows].copy()
-            mark_truncation(df, truncated=True, max_rows=self._max_rows)
+        if len(df) > cap:
+            df = df.iloc[:cap].copy()
+            mark_truncation(df, truncated=True, max_rows=cap)
         elif already_truncated:
             mark_truncation(
                 df,
                 truncated=True,
-                max_rows=int(df.attrs.get(MAX_ROWS_ATTR, self._max_rows)),
+                max_rows=int(df.attrs.get(MAX_ROWS_ATTR, cap)),
             )
         else:
-            mark_truncation(df, truncated=False, max_rows=self._max_rows)
+            mark_truncation(df, truncated=False, max_rows=cap)
         return df

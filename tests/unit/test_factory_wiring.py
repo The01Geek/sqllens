@@ -163,15 +163,18 @@ def test_show_details_on_unlocks_only_tool_arguments(tmp_path: Path) -> None:
     ]
 
 
-def test_show_details_off_keeps_tool_arguments_admin_only(tmp_path: Path) -> None:
-    """show_details=False → tool_arguments stays admin-gated, so the static
-    user never sees the executed-SQL card (pre-feature behavior).
+def test_show_details_off_still_admits_default_group_at_build_time(
+    tmp_path: Path,
+) -> None:
+    """Per-request profile design (#198): UiFeatures now ALWAYS admits the
+    static user group for tool_arguments, so the executed-SQL card is always
+    produced into the stream — even when base ``cfg.agent.show_details`` is
+    off. The per-request emit-time filter in ``query_database`` is what
+    drops it from the answer/_meta on the default profile.
 
-    Also exercises the actual gate function the agent calls
-    (can_user_access_feature) with the resolved static user, end-to-end:
-    config → factory → AgentConfig.ui_features → gate verdict. This pins
-    the chain the _format.py docstring's "show_details off → no SQL card
-    is ever emitted" invariant depends on.
+    The test pins the *new* invariant: the framework gate is permissive at
+    build time; per-request semantic correctness lives in the
+    ``query_database`` filter (covered separately in test_query_database).
     """
     from sqllens.agent import User
     from sqllens.agent.core.agent.config import UiFeature
@@ -183,14 +186,14 @@ def test_show_details_off_keeps_tool_arguments_admin_only(tmp_path: Path) -> Non
     agent = build_agent(cfg)
 
     fga = agent.config.ui_features.feature_group_access
-    assert fga[UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS] == ["admin"]
+    assert "default" in fga[UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS]
 
     static_user = User(id="anyone", group_memberships=["default"])
     assert (
         agent.config.ui_features.can_user_access_feature(
             UiFeature.UI_FEATURE_SHOW_TOOL_ARGUMENTS, static_user
         )
-        is False
+        is True
     )
 
 

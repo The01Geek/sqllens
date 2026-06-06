@@ -19,6 +19,11 @@ from sqllens.agent.components import (
     StatusBarUpdateComponent,
     StatusCardComponent,
 )
+# Minimal documented dependency on sqllens.runtime so a named per-request
+# profile can shift the similarity threshold fallback when the agent omits
+# it from its call. The per-call agent-supplied threshold always wins; only
+# the *fallback* changes per profile.
+from sqllens.runtime import get_effective_settings
 
 
 class SaveQuestionToolArgsParams(BaseModel):
@@ -144,11 +149,19 @@ class SearchSavedCorrectToolUsesTool(Tool[SearchSavedCorrectToolUsesParams]):
     ) -> ToolResult:
         """Search for similar tool usage patterns."""
         try:
-            threshold = (
-                args.similarity_threshold
-                if args.similarity_threshold is not None
-                else self._default_similarity_threshold
-            )
+            # Precedence: the agent's explicit per-call threshold wins; when
+            # omitted, fall back to the request-local profile's effective
+            # value (if any); finally fall back to the build-time default
+            # baked in by the factory.
+            if args.similarity_threshold is not None:
+                threshold = args.similarity_threshold
+            else:
+                effective = get_effective_settings()
+                threshold = (
+                    effective.similarity_threshold
+                    if effective is not None
+                    else self._default_similarity_threshold
+                )
             results = await context.agent_memory.search_similar_usage(
                 question=args.question,
                 context=context,

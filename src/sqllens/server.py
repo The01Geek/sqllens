@@ -25,6 +25,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
 
 from sqllens.config import Config
+from sqllens.profiles import DEFAULT_PROFILE_NAME, Profile, ProfileStore
 from sqllens.tools._format import append_conversation_footer
 from sqllens.tools.list_data_sources import list_data_sources_impl
 from sqllens.tools.query_database import AgentRunError, query_database_impl_with_widgets
@@ -50,6 +51,12 @@ _WIDGET_URI = "ui://sqllens/query-results.html"
 # callServerTool(...) and drives every admin tool directly. Resource-only —
 # no launcher tool; hosts mount it via resources/read.
 _MEMORY_WIDGET_URI = "ui://sqllens/memory-admin.html"
+# Self-driving profile-administration widget. Same shape as the memory-admin
+# widget — pulls its own data on mount via the App SDK's callServerTool(...)
+# and drives every profile-admin tool directly. Gated on
+# cfg.profiles.allow_admin_tools alongside the four backing tools so a host
+# never advertises a widget whose backing tools are off.
+_CONFIG_WIDGET_URI = "ui://sqllens/config-admin.html"
 # Ordered typed-block data channel. The single structured-data channel for the
 # query result: a JSON array of discriminated blocks ({"type": "text", "text":
 # ...}, {"type": "table", ...table payload...}, {"type": "chart", ...chart
@@ -209,9 +216,24 @@ def build_server(cfg: Config) -> FastMCP:
     # structured_output=False: the success path may return a CallToolResult
     # carrying _meta; an auto-derived outputSchema would make FastMCP validate
     # a (deliberately absent) structuredContent and reject it.
+    # Lazily-built profile store; the singleton is shared between the
+    # ``query_database`` tool and the profile-admin tools so both see the same
+    # in-memory cache and atomic-file-replace write path. Built only once on
+    # first use to avoid the disk read on stdio servers that never use
+    # profiles. Closure-local so it is rebuilt per ``build_server`` call.
+    _profile_store: list[ProfileStore | None] = [None]
+
+    def _get_profile_store() -> ProfileStore:
+        if _profile_store[0] is None:
+            _profile_store[0] = ProfileStore(cfg)
+        return _profile_store[0]
+
     @mcp.tool(meta={"ui": {"resourceUri": _WIDGET_URI}}, structured_output=False)
     async def query_database(
-        question: str, ctx: Context, conversation_id: str | None = None
+        question: str,
+        ctx: Context,
+        conversation_id: str | None = None,
+        profile: str | None = None,
     ) -> str | CallToolResult:
         """Ask a question; return an ordered list of text/table/chart blocks.
 
@@ -227,19 +249,26 @@ def build_server(cfg: Config) -> FastMCP:
         context. Omit it to start a fresh conversation; the response always
         reports the conversation id (as ``_meta`` and a plain-text footer).
 
-        When ``agent.show_details`` is on and the agent successfully executed a
-        SQL query, the answer also includes the executed SQL — as a fenced
-        ``sql`` block in the text and, for apps-aware hosts, as structured data
-        the result widget renders. Non-SELECT / no-SQL / error responses omit
-        the SQL block; setting ``agent.show_details = false`` (the default)
-        suppresses it unconditionally.
+        ``profile`` selects a named config profile for this single request —
+        the request-local overlay of result-shaping knobs (``show_details``,
+        ``show_memory_details``, ``max_tool_iterations``, ``max_rows``,
+        ``similarity_threshold``). Omitting it (or passing an unknown name)
+        resolves through the reserved ``default`` profile, which falls back
+        to base config — existing callers see no change. Profiles are managed
+        through ``upsert_profile`` / ``list_profiles`` (gated on
+        ``profiles.allow_admin_tools``).
 
-        ``agent.show_details`` additionally attaches a structured step-by-step
-        agent trace under ``_meta["sqllens/agent_trace"]`` — per-tool name,
-        arguments, status, duration, on-failure error, and the run's
-        ``terminal_error`` — on both successful and failed responses, so a
-        debugging client can see what the agent did and where a slow or failed
-        run spent its time. It is omitted entirely when the flag is off.
+        When the resolved profile's ``show_details`` is on and the agent
+        successfully executed a SQL query, the answer also includes the
+        executed SQL — as a fenced ``sql`` block in the text and, for
+        apps-aware hosts, as structured data the result widget renders.
+        Non-SELECT / no-SQL / error responses omit the SQL block; the default
+        profile keeps ``show_details`` off so the SQL block is suppressed.
+
+        The same effective ``show_details`` additionally attaches a structured
+        step-by-step agent trace under ``_meta["sqllens/agent_trace"]`` —
+        per-tool name, arguments, status, duration, on-failure error, and the
+        run's ``terminal_error`` — on both successful and failed responses.
         """
         metadata = _request_metadata(ctx)
         # Mint a stable id when the caller did not supply one, so the resolved
@@ -249,7 +278,12 @@ def build_server(cfg: Config) -> FastMCP:
         try:
             markdown, blocks, query_info, memory_info, agent_trace = (
                 await query_database_impl_with_widgets(
-                    cfg, question, metadata=metadata, conversation_id=conversation_id
+                    cfg,
+                    question,
+                    metadata=metadata,
+                    conversation_id=conversation_id,
+                    profile=profile,
+                    profile_store=_get_profile_store(),
                 )
             )
         except AgentRunError as exc:
@@ -616,6 +650,178 @@ def build_server(cfg: Config) -> FastMCP:
                     "Failed to read the memory store; check the server logs."
                 ) from None
             return json.dumps(result)
+
+    # Profile-admin surface — opt-in, default OFF. Mirrors the memory-admin
+    # block above: a read-only triple (list_profiles, get_profile) plus a
+    # write-guarded pair (upsert_profile, delete_profile) that refuses to run
+    # on an unauthenticated endpoint unless ``auth.insecure`` acknowledges a
+    # closed network. The lazy ``_get_profile_store()`` singleton above backs
+    # both the request-path and these admin tools so they share one in-memory
+    # cache and the atomic-file-replace write path.
+    if cfg.profiles.allow_admin_tools:
+        # Same widget/host advertisement contract as the memory-admin widget:
+        # gated on the admin flag so a host never sees a widget whose backing
+        # tools are off.
+        @mcp.resource(
+            _CONFIG_WIDGET_URI,
+            mime_type="text/html;profile=mcp-app",
+            meta={"ui": {"prefersBorder": True}},
+        )
+        def config_admin_widget() -> str:
+            return load_widget_html("config_admin.html")
+
+        # Serialize profile-admin mutations; the underlying ProfileStore also
+        # holds its own write lock, but this lock guards the read-then-write
+        # pattern below (validation + upsert) atomically end-to-end.
+        profile_admin_lock = asyncio.Lock()
+
+        def _require_profile_write_auth() -> None:
+            # Same gate as the memory-admin destructive subset: refuse to
+            # mutate the persisted store from an endpoint that authenticates
+            # nobody, unless the operator explicitly acknowledged a closed
+            # network via auth.insecure.
+            if cfg.auth.mode == "none" and not cfg.auth.insecure:
+                raise RuntimeError(
+                    "This tool mutates the profile store and is disabled on "
+                    "an unauthenticated endpoint. Set auth.mode='bearer' "
+                    "(or auth.insecure=true on a closed network) to enable it."
+                )
+
+        def _profile_error(payload: dict[str, Any]) -> CallToolResult:
+            return CallToolResult(
+                content=[TextContent(type="text", text=json.dumps(payload))],
+                isError=True,
+            )
+
+        # Bounds mirror the live config so a profile cannot bypass a ceiling
+        # that the operator chose for the base. Source of truth for the
+        # widget's bounded number inputs too.
+        _PROFILE_BOUNDS = {
+            "max_tool_iterations": {"ge": 1, "le": 100},
+            "max_rows": {"ge": 1, "le": 1_000_000},
+            "similarity_threshold": {"ge": 0.0, "le": 1.0},
+        }
+
+        @mcp.tool(structured_output=False)
+        async def list_profiles() -> str:
+            """List stored named profiles plus base-config values and per-knob bounds.
+
+            Returns ``{"default_name": "default", "base": {...}, "bounds":
+            {...}, "profiles": [{"name": ..., "knobs": {...}}, ...]}``. No
+            secrets, no DB URL — the response is safe to render in a widget
+            and to log.
+            """
+            store = _get_profile_store()
+            profiles_view: list[dict[str, Any]] = []
+            for name, p in sorted(store.list_profiles().items()):
+                profiles_view.append(
+                    {"name": name, "knobs": p.model_dump(exclude_none=True)}
+                )
+            payload: dict[str, Any] = {
+                "default_name": DEFAULT_PROFILE_NAME,
+                "base": {
+                    "show_details": cfg.agent.show_details,
+                    "show_memory_details": cfg.agent.show_memory_details,
+                    "max_tool_iterations": cfg.agent.max_tool_iterations,
+                    "max_rows": cfg.database.max_rows,
+                    "similarity_threshold": cfg.memory.similarity_threshold,
+                },
+                "bounds": _PROFILE_BOUNDS,
+                "profiles": profiles_view,
+            }
+            if store.load_error:
+                payload["warning"] = store.load_error
+            return json.dumps(payload)
+
+        @mcp.tool(structured_output=False)
+        async def get_profile(name: str) -> str | CallToolResult:
+            """Fetch one named profile by name.
+
+            Returns the profile's JSON object, or an ``isError`` result with
+            ``{"error": "profile not found", "name": ...}`` when no profile
+            has that name. Per CLAUDE.md's isError discipline an unknown name
+            is a failed lookup, not a green ``null``.
+            """
+            store = _get_profile_store()
+            profile = store.get(name)
+            if profile is None:
+                return _profile_error(
+                    {"error": "profile not found", "name": name}
+                )
+            return json.dumps(
+                {"name": name, "knobs": profile.model_dump(exclude_none=True)}
+            )
+
+        @mcp.tool(structured_output=False)
+        async def upsert_profile(
+            name: str, knobs: dict[str, Any]
+        ) -> str | CallToolResult:
+            """Create or replace ``name`` with ``knobs`` (write-guarded).
+
+            ``knobs`` is a dict of the five profile fields; omit a field to
+            mean "inherit from base config". Refuses on an unauthenticated
+            endpoint unless ``auth.insecure`` is set. Returns the saved
+            profile; an out-of-bounds value or unknown field returns
+            ``isError`` with a structured ``{"error": ...}`` body — never a
+            success that merely reports the failure.
+            """
+            _require_profile_write_auth()
+            if not isinstance(name, str) or not name.strip():
+                return _profile_error(
+                    {"error": "profile name must be a non-empty string"}
+                )
+            if not isinstance(knobs, dict):
+                return _profile_error(
+                    {"error": "knobs must be a JSON object"}
+                )
+            try:
+                profile = Profile.model_validate(knobs)
+            except Exception as exc:
+                return _profile_error(
+                    {"error": f"invalid profile body: {exc}"}
+                )
+            store = _get_profile_store()
+            try:
+                async with profile_admin_lock:
+                    saved = await store.upsert(name, profile)
+            except Exception:
+                logger.exception("upsert_profile tool failed")
+                raise RuntimeError(
+                    "Failed to write the profile store; check the server logs."
+                ) from None
+            return json.dumps(
+                {"name": name, "knobs": saved.model_dump(exclude_none=True)}
+            )
+
+        @mcp.tool(structured_output=False)
+        async def delete_profile(name: str) -> str | CallToolResult:
+            """Delete the named profile (write-guarded).
+
+            The reserved ``default`` name cannot be deleted; the call returns
+            ``isError`` with a clear message. An unknown name also returns
+            ``isError``. Refuses on an unauthenticated endpoint unless
+            ``auth.insecure`` is set.
+            """
+            _require_profile_write_auth()
+            if name == DEFAULT_PROFILE_NAME:
+                return _profile_error(
+                    {"error": "cannot delete the reserved 'default' profile",
+                     "name": name}
+                )
+            store = _get_profile_store()
+            try:
+                async with profile_admin_lock:
+                    await store.delete(name)
+            except KeyError:
+                return _profile_error(
+                    {"error": "profile not found", "name": name}
+                )
+            except Exception:
+                logger.exception("delete_profile tool failed")
+                raise RuntimeError(
+                    "Failed to delete from the profile store; check the server logs."
+                ) from None
+            return json.dumps({"deleted": True, "name": name})
 
     return mcp
 

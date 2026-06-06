@@ -38,6 +38,11 @@ from sqllens.agent.core.enricher import ToolContextEnricher
 from sqllens.agent.core.enhancer import LlmContextEnhancer, DefaultLlmContextEnhancer
 from sqllens.agent.core.filter import ConversationFilter
 from sqllens.agent.core.observability import ObservabilityProvider
+# Minimal documented dependency on sqllens.runtime so a per-request profile
+# can cap the tool-call iteration loop tighter than the build-time default
+# baked into AgentConfig. The constructor cap stays the ceiling; the
+# effective cap is the *minimum* of the two.
+from sqllens.runtime import get_effective_settings
 from sqllens.agent.core.user.resolver import UserResolver
 from sqllens.agent.core.user.request_context import RequestContext
 from sqllens.agent.core.agent.config import UiFeature
@@ -649,7 +654,18 @@ class Agent:
         # Process with tool loop
         tool_iterations = 0
 
-        while tool_iterations < self.config.max_tool_iterations:
+        # Per-request profile may narrow the iteration cap; never widen above
+        # the constructor cap (the operator's ceiling). The effective cap is
+        # the *minimum* of the two so a profile cannot raise the runaway-loop
+        # ceiling the framework's AgentConfig set.
+        _effective_settings = get_effective_settings()
+        _max_iterations = (
+            self.config.max_tool_iterations
+            if _effective_settings is None
+            else min(self.config.max_tool_iterations, _effective_settings.max_tool_iterations)
+        )
+
+        while tool_iterations < _max_iterations:
             if self.config.include_thinking_indicators and tool_iterations == 0:
                 # TODO: Yield thinking indicator
                 pass
@@ -1055,10 +1071,10 @@ class Agent:
                 break
 
         # Check if we hit the tool iteration limit
-        if tool_iterations >= self.config.max_tool_iterations:
+        if tool_iterations >= _max_iterations:
             # The loop exited due to hitting the limit, not due to a natural completion
             logger.warning(
-                f"Tool iteration limit reached: {tool_iterations}/{self.config.max_tool_iterations}"
+                f"Tool iteration limit reached: {tool_iterations}/{_max_iterations}"
             )
 
             # Update status bar to show warning
@@ -1151,7 +1167,7 @@ You can:
             message_span.set_attribute("tool_iterations", tool_iterations)
 
             # Track if we hit the tool iteration limit
-            hit_tool_limit = tool_iterations >= self.config.max_tool_iterations
+            hit_tool_limit = tool_iterations >= _max_iterations
             message_span.set_attribute("hit_tool_limit", hit_tool_limit)
             if hit_tool_limit:
                 message_span.set_attribute("incomplete_response", True)
