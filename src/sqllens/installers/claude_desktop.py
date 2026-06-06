@@ -23,13 +23,14 @@ import json
 import os
 import shutil
 import sys
-import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
+
+from sqllens._atomic import atomic_write_text as _atomic_write_text
 
 PLATFORM_WIN = "win32"
 PLATFORM_MAC = "darwin"
@@ -738,36 +739,6 @@ def _revert_cmd_bytes(cmd_path: Path, original: bytes | None) -> None:
             file=sys.stderr,
             flush=True,
         )
-
-
-def _atomic_write_text(path: Path, content: str) -> None:
-    """Write *content* to *path* atomically (tempfile + os.replace).
-
-    ``os.replace`` is atomic on POSIX and on Windows ≥ Vista, so a kill mid-
-    write cannot leave the user's ``claude_desktop_config.json`` truncated.
-    """
-    encoded = content.encode("utf-8")
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=path.name + ".",
-        suffix=".tmp",
-        dir=str(path.parent),
-    )
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(encoded)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except OSError:
-        # Cleanup is best-effort: a PermissionError on the unlink itself
-        # would otherwise replace the original write failure, leaving the
-        # user with a misleading message and a leaked tempfile either way.
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
 
 
 def _restore_hint(platform_name: str, backup_path: Path, config_path: Path) -> str:

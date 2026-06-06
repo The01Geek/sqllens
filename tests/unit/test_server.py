@@ -121,7 +121,9 @@ async def test_query_database_returns_calltoolresult_with_meta_when_table_block(
     table_block = {"type": "table", "columns": ["a"], "rows": [["1"]],
                    "column_types": {}, "row_count": 1, "truncated": 0}
 
-    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
         return "| a |\n|---|\n| 1 |", [table_block], None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
@@ -153,7 +155,9 @@ async def test_query_database_meta_carries_query_info_when_present(
     query_info = {"sql": "SELECT a FROM t", "query_type": "SELECT",
                   "row_count": 1}
 
-    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
         return "md\n\n```sql\nSELECT a FROM t\n```", [table_block], query_info, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
@@ -176,7 +180,9 @@ async def test_query_database_meta_query_info_without_blocks(
     mcp = build_server(cfg)
     query_info = {"sql": "SELECT 1 WHERE 1=0", "query_type": "SELECT"}
 
-    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
         return "no rows\n\n```sql\nSELECT 1 WHERE 1=0\n```", [], query_info, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
@@ -199,7 +205,9 @@ async def test_query_database_returns_conversation_meta_when_no_blocks(
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
 
-    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
         return "just text", [], None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
@@ -220,7 +228,9 @@ async def test_query_database_mints_and_threads_conversation_id(
     mcp = build_server(cfg)
     seen: dict = {}
 
-    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
         seen["conversation_id"] = conversation_id
         return "answer", [], None, None, None
 
@@ -265,7 +275,9 @@ async def test_query_database_meta_carries_memory_info_when_present(
         "threshold": 0.7,
     }
 
-    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
         return "answer", [], None, memory_info, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
@@ -284,7 +296,9 @@ async def test_query_database_returns_chart_block_in_blocks(
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
 
-    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
         return "rendered chart", [_CHART_BLOCK], None, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
@@ -318,7 +332,9 @@ async def test_query_database_attaches_ordered_multi_block_payload(
     query_info = {"sql": "SELECT x, y FROM t", "query_type": "SELECT",
                   "row_count": 1}
 
-    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
         return "answer", blocks, query_info, None, None
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
@@ -366,7 +382,9 @@ async def test_query_database_meta_carries_agent_trace_when_present(
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
 
-    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
         return "answer", [], None, None, _AGENT_TRACE
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
@@ -402,7 +420,9 @@ async def test_query_database_attaches_trace_on_error_result(
         "terminal_error": "tool 'run_sql' failed: timeout after 240s",
     }
 
-    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
         raise AgentRunError(
             "SQL execution error: the query failed", agent_trace=error_trace
         )
@@ -430,7 +450,9 @@ async def test_query_database_reraises_error_without_trace(
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
 
-    async def fake_impl(_cfg, _q, *, metadata=None, conversation_id=None):
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
         raise AgentRunError("SQL execution error: boom", agent_trace=None)
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)

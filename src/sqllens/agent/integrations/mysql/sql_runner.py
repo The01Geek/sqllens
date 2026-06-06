@@ -6,7 +6,8 @@ import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
-from sqllens.safety.limits import rows_to_capped_df
+# See the sqlite runner for the rationale on this shared helper.
+from sqllens.safety.limits import effective_row_cap, rows_to_capped_df
 from sqllens.safety.readonly import is_read_shaped
 
 
@@ -124,8 +125,9 @@ class MySQLRunner(SqlRunner):
                 # ``finally: conn.close()`` tears the socket down server-side.
                 cursor = conn.cursor(self.pymysql.cursors.SSDictCursor)
                 cursor.execute(args.sql)
-                rows = cursor.fetchmany(self._max_rows + 1)
-                return rows_to_capped_df(rows, self._max_rows)
+                cap = effective_row_cap(self._max_rows)
+                rows = cursor.fetchmany(cap + 1)
+                return rows_to_capped_df(rows, cap)
 
             cursor = conn.cursor(self.pymysql.cursors.DictCursor)
             try:

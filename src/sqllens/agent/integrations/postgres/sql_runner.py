@@ -7,7 +7,8 @@ import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
-from sqllens.safety.limits import rows_to_capped_df
+# See the sqlite runner for the rationale on this shared helper.
+from sqllens.safety.limits import effective_row_cap, rows_to_capped_df
 from sqllens.safety.readonly import is_read_shaped
 
 
@@ -141,7 +142,8 @@ class PostgresRunner(SqlRunner):
                 )
                 try:
                     cursor.execute(args.sql)
-                    rows = cursor.fetchmany(self._max_rows + 1)
+                    cap = effective_row_cap(self._max_rows)
+                    rows = cursor.fetchmany(cap + 1)
                 finally:
                     # Log-and-swallow secondary exceptions on the SELECT cleanup
                     # path so the primary query error (e.g. statement_timeout /
@@ -154,7 +156,7 @@ class PostgresRunner(SqlRunner):
                         logger.warning(
                             "cursor.close() failed during cleanup", exc_info=True
                         )
-                return rows_to_capped_df(rows, self._max_rows)
+                return rows_to_capped_df(rows, cap)
 
             cursor = conn.cursor()
             try:

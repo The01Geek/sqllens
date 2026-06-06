@@ -20,6 +20,7 @@ from sqllens.config import (
     DatabaseConfig,
     LLMConfig,
     MemoryConfig,
+    ProfilesConfig,
 )
 
 
@@ -31,6 +32,7 @@ def build_test_config(
     save_queries: bool = False,
     allow_admin_tools: bool = False,
     auth: AuthConfig | None = None,
+    profiles_allow_admin_tools: bool = False,
 ) -> Config:
     """Build a ``Config`` from kwargs, bypassing env-var resolution.
 
@@ -49,4 +51,5 @@ def build_test_config(
         ),
         auth=auth or AuthConfig(mode="none"),
         agent=agent or AgentRuntimeConfig(),
+        profiles=ProfilesConfig(allow_admin_tools=profiles_allow_admin_tools),
     )

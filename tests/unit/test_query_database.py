@@ -381,8 +381,15 @@ async def test_with_widgets_surfaces_executed_sql(
         StatusCardComponent,
     )
     from sqllens.agent.core.components import UiComponent
+    from sqllens.config import AgentRuntimeConfig
 
-    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    # Per-request filter (#198) drops query_info when effective show_details
+    # is False; this test is about the on-path. Set the base config knob so
+    # the resolved default-profile effective settings keep details on.
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        agent=AgentRuntimeConfig(show_details=True),
+    )
     sql = "SELECT name, age FROM users"
     stub = agent_stub_factory(
         [
@@ -419,13 +426,11 @@ async def test_with_widgets_no_sql_card_means_no_sql_block(
 ) -> None:
     """No run_sql STATUS_CARD in the stream → no query_info, no ```sql block.
 
-    This pins the *formatter/impl* half of the byte-for-byte guarantee: given a
-    stream with no SQL card (what show_details=off produces, since the agent
-    suppresses card emission), output is identical to pre-feature behavior. The
-    *config-gating* half — that show_details=off actually keeps the agent from
-    emitting the card — is pinned separately at the factory layer by
-    test_show_details_off_keeps_tool_arguments_admin_only in
-    tests/unit/test_factory_wiring.py.
+    This pins the *formatter/impl* half: given a stream with no SQL card,
+    output is identical to pre-feature behavior. Per #198 the framework now
+    always emits the card; the per-request emit-time filter (covered by
+    test_default_profile_drops_query_info_even_with_sql_card below) is what
+    drops the card from the default-profile answer.
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     assert cfg.agent.show_details is False  # default-off

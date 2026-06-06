@@ -23,8 +23,10 @@ from typing import Any, get_args
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
+from pydantic import ValidationError
 
 from sqllens.config import Config
+from sqllens.profiles import DEFAULT_PROFILE_NAME, Profile, ProfileStore
 from sqllens.tools._format import append_conversation_footer
 from sqllens.tools.list_data_sources import list_data_sources_impl
 from sqllens.tools.query_database import AgentRunError, query_database_impl_with_widgets
@@ -50,6 +52,12 @@ _WIDGET_URI = "ui://sqllens/query-results.html"
 # callServerTool(...) and drives every admin tool directly. Resource-only —
 # no launcher tool; hosts mount it via resources/read.
 _MEMORY_WIDGET_URI = "ui://sqllens/memory-admin.html"
+# Self-driving profile-administration widget. Same shape as the memory-admin
+# widget — pulls its own data on mount via the App SDK's callServerTool(...)
+# and drives every profile-admin tool directly. Gated on
+# cfg.profiles.allow_admin_tools alongside the four backing tools so a host
+# never advertises a widget whose backing tools are off.
+_CONFIG_WIDGET_URI = "ui://sqllens/config-admin.html"
 # Ordered typed-block data channel. The single structured-data channel for the
 # query result: a JSON array of discriminated blocks ({"type": "text", "text":
 # ...}, {"type": "table", ...table payload...}, {"type": "chart", ...chart
@@ -88,6 +96,27 @@ _AGENT_TRACE_META_KEY = "sqllens/agent_trace"
 # ``conversation_id`` tool argument on the next turn so the agent loads the
 # prior turn's history (e.g. to answer its own clarifying question).
 _CONVERSATION_META_KEY = "sqllens/conversation"
+
+
+def _profile_field_bounds() -> dict[str, dict[str, float]]:
+    """Derive the per-knob ``ge``/``le`` bounds from the ``Profile`` pydantic model.
+
+    Single source of truth: the bounds shipped over the wire (and into the
+    widget's bounded number inputs) come from the same pydantic Field
+    metadata the upsert path validates against, so a model change cannot
+    leave the widget admitting values the validator rejects.
+    """
+    bounds: dict[str, dict[str, float]] = {}
+    for name, info in Profile.model_fields.items():
+        knob: dict[str, float] = {}
+        for meta in info.metadata:
+            for attr in ("ge", "le"):
+                value = getattr(meta, attr, None)
+                if value is not None:
+                    knob[attr] = value
+        if knob:
+            bounds[name] = knob
+    return bounds
 
 
 def _conversation_result(
@@ -206,12 +235,45 @@ def build_server(cfg: Config) -> FastMCP:
     def query_results_widget() -> str:
         return load_widget_html()
 
+    # Eager profile-store singleton shared between ``query_database`` and the
+    # profile-admin tools. Construction is one small JSON file read at boot —
+    # paying it here keeps the request path free of a first-request hitch and
+    # matches the eager construction of ``admin_store`` for memory-admin below.
+    profile_store = ProfileStore(cfg)
+
+    def _json_error_result(payload: dict[str, Any]) -> CallToolResult:
+        """Structured-body + ``isError: true`` CallToolResult.
+
+        Shared by every admin tool (memory + profile) so the wire shape stays
+        identical and the helper has exactly one home.
+        """
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(payload))],
+            isError=True,
+        )
+
+    def _require_write_auth(noun: str) -> None:
+        """Refuse to mutate a persisted store on an unauthenticated endpoint.
+
+        ``noun`` ("memory" / "profile") only changes the error string; the
+        gate is identical, so the policy lives in one place.
+        """
+        if cfg.auth.mode == "none" and not cfg.auth.insecure:
+            raise RuntimeError(
+                f"This tool mutates the {noun} store and is disabled on an "
+                "unauthenticated endpoint. Set auth.mode='bearer' (or "
+                "auth.insecure=true on a closed network) to enable it."
+            )
+
     # structured_output=False: the success path may return a CallToolResult
     # carrying _meta; an auto-derived outputSchema would make FastMCP validate
     # a (deliberately absent) structuredContent and reject it.
     @mcp.tool(meta={"ui": {"resourceUri": _WIDGET_URI}}, structured_output=False)
     async def query_database(
-        question: str, ctx: Context, conversation_id: str | None = None
+        question: str,
+        ctx: Context,
+        conversation_id: str | None = None,
+        profile: str | None = None,
     ) -> str | CallToolResult:
         """Ask a question; return an ordered list of text/table/chart blocks.
 
@@ -227,19 +289,28 @@ def build_server(cfg: Config) -> FastMCP:
         context. Omit it to start a fresh conversation; the response always
         reports the conversation id (as ``_meta`` and a plain-text footer).
 
-        When ``agent.show_details`` is on and the agent successfully executed a
-        SQL query, the answer also includes the executed SQL — as a fenced
-        ``sql`` block in the text and, for apps-aware hosts, as structured data
-        the result widget renders. Non-SELECT / no-SQL / error responses omit
-        the SQL block; setting ``agent.show_details = false`` (the default)
-        suppresses it unconditionally.
+        ``profile`` selects a named config profile for this single request —
+        the request-local overlay of result-shaping knobs (``show_details``,
+        ``show_memory_details``, ``max_tool_iterations``, ``max_rows``,
+        ``similarity_threshold``). Omitting it (or passing an unknown name)
+        resolves through the reserved ``default`` profile, which falls back
+        to base config — existing callers see no change. Profiles are managed
+        through ``list_profiles`` / ``get_profile`` / ``upsert_profile`` /
+        ``delete_profile`` (all gated on ``profiles.allow_admin_tools``).
 
-        ``agent.show_details`` additionally attaches a structured step-by-step
-        agent trace under ``_meta["sqllens/agent_trace"]`` — per-tool name,
-        arguments, status, duration, on-failure error, and the run's
-        ``terminal_error`` — on both successful and failed responses, so a
-        debugging client can see what the agent did and where a slow or failed
-        run spent its time. It is omitted entirely when the flag is off.
+        When the resolved profile's ``show_details`` is on and the agent
+        successfully executed a SQL query, the answer also includes the
+        executed SQL — as a fenced ``sql`` block in the text and, for
+        apps-aware hosts, as structured data the result widget renders.
+        Non-SELECT / no-SQL / error responses omit the SQL block; the default
+        profile keeps ``show_details`` off so the SQL block is suppressed.
+
+        The same effective ``show_details`` additionally attaches a structured
+        step-by-step agent trace under ``_meta["sqllens/agent_trace"]`` —
+        per-tool name, arguments, status, duration, on-failure error, and the
+        run's ``terminal_error`` — on both successful and failed responses.
+        The ``sqllens/agent_trace`` key is omitted entirely when the resolved
+        profile's ``show_details`` is off.
         """
         metadata = _request_metadata(ctx)
         # Mint a stable id when the caller did not supply one, so the resolved
@@ -249,7 +320,12 @@ def build_server(cfg: Config) -> FastMCP:
         try:
             markdown, blocks, query_info, memory_info, agent_trace = (
                 await query_database_impl_with_widgets(
-                    cfg, question, metadata=metadata, conversation_id=conversation_id
+                    cfg,
+                    question,
+                    metadata=metadata,
+                    conversation_id=conversation_id,
+                    profile=profile,
+                    profile_store=profile_store,
                 )
             )
         except AgentRunError as exc:
@@ -397,25 +473,10 @@ def build_server(cfg: Config) -> FastMCP:
                 )
             return value
 
-        def _require_write_auth() -> None:
-            # "Destructive tools require auth": refuse to mutate the store from an
-            # endpoint that authenticates nobody, unless the operator has
-            # explicitly acknowledged a closed network via auth.insecure.
-            if cfg.auth.mode == "none" and not cfg.auth.insecure:
-                raise RuntimeError(
-                    "This tool mutates the memory store and is disabled on an "
-                    "unauthenticated endpoint. Set auth.mode='bearer' (or "
-                    "auth.insecure=true on a closed network) to enable it."
-                )
+        def _memory_write_auth() -> None:
+            _require_write_auth("memory")
 
-        def _json_error(payload: dict[str, Any]) -> CallToolResult:
-            # Structured body AND isError:true — the calling client gets the
-            # per-row detail (e.g. add_memories.errors[]) instead of only a
-            # free-text message, while still seeing the failure signal.
-            return CallToolResult(
-                content=[TextContent(type="text", text=json.dumps(payload))],
-                isError=True,
-            )
+        _json_error = _json_error_result
 
         @mcp.tool(structured_output=False)
         async def list_memories(
@@ -476,7 +537,7 @@ def build_server(cfg: Config) -> FastMCP:
             is set. Returns ``{"deleted": true}``, or an ``isError`` result with
             ``{"deleted": false}`` when no memory has that id.
             """
-            _require_write_auth()
+            _memory_write_auth()
             try:
                 async with admin_write_lock:
                     result = memory_admin.delete_memory(admin_store, memory_id)
@@ -502,7 +563,7 @@ def build_server(cfg: Config) -> FastMCP:
             is set. ``memory_type`` is ``tool_usage``, ``text``, or omitted for
             all. Returns ``{"deleted_count": N}``.
             """
-            _require_write_auth()
+            _memory_write_auth()
             mtype = _parse_memory_type(memory_type)
             try:
                 async with admin_write_lock:
@@ -535,7 +596,7 @@ def build_server(cfg: Config) -> FastMCP:
             structured body is still returned so the caller sees which rows
             failed).
             """
-            _require_write_auth()
+            _memory_write_auth()
             try:
                 async with admin_write_lock:
                     result = await memory_admin.add_memories(
@@ -616,6 +677,206 @@ def build_server(cfg: Config) -> FastMCP:
                     "Failed to read the memory store; check the server logs."
                 ) from None
             return json.dumps(result)
+
+    # Profile-admin surface — opt-in, default OFF. Mirrors the memory-admin
+    # block above: a read-only triple (list_profiles, get_profile) plus a
+    # write-guarded pair (upsert_profile, delete_profile) that refuses to run
+    # on an unauthenticated endpoint unless ``auth.insecure`` acknowledges a
+    # closed network. The eager ``profile_store`` singleton above backs
+    # both the request path and these admin tools so they share one in-memory
+    # cache and the atomic-file-replace write path.
+    if cfg.profiles.allow_admin_tools:
+        # Same widget/host advertisement contract as the memory-admin widget:
+        # gated on the admin flag so a host never sees a widget whose backing
+        # tools are off.
+        @mcp.resource(
+            _CONFIG_WIDGET_URI,
+            mime_type="text/html;profile=mcp-app",
+            meta={"ui": {"prefersBorder": True}},
+        )
+        def config_admin_widget() -> str:
+            return load_widget_html("config_admin.html")
+
+        # Serialize profile-admin mutations. The underlying ProfileStore
+        # already holds its own write lock per call; this lock is a thin
+        # outer guard around the *call* so the cache-mutation-plus-disk-write
+        # the store performs cannot be interleaved with a sibling write
+        # against the same shared store instance from a different admin tool.
+        # Body validation (``Profile.model_validate``) deliberately stays
+        # OUTSIDE this lock — it is a pure function on the request input and
+        # holds no reference to the store.
+        profile_admin_lock = asyncio.Lock()
+
+        def _profile_write_auth() -> None:
+            _require_write_auth("profile")
+
+        _profile_error = _json_error_result
+
+        # Bounds derived from the live Profile pydantic model so the wire
+        # shape (and the widget's bounded inputs) cannot drift from the
+        # validator the upsert path enforces. Adding a sixth knob to
+        # ``Profile`` makes the bounds surface here pick it up automatically
+        # via ``_profile_field_bounds``; the sibling ``base`` dict in
+        # ``list_profiles`` below hardcodes the five field names and must be
+        # extended by hand.
+        _PROFILE_BOUNDS = _profile_field_bounds()
+
+        @mcp.tool(structured_output=False)
+        async def list_profiles() -> str | CallToolResult:
+            """List stored named profiles plus base-config values and per-knob bounds.
+
+            Returns ``{"default_name": "default", "base": {...}, "bounds":
+            {...}, "profiles": [{"name": ..., "knobs": {...}}, ...]}``. No
+            secrets, no DB URL — the response is safe to render in a widget
+            and to log. When the underlying store failed to load (corrupt
+            JSON, unreadable file, malformed entries), the same payload is
+            returned as an ``isError`` with a top-level ``"warning"`` so a
+            non-LLM client cannot mistake the empty / partial listing for a
+            clean state. Mirrors the discipline ``export_memories`` applies
+            to a lossy export.
+            """
+            store = profile_store
+            profiles_view: list[dict[str, Any]] = []
+            for name, p in sorted(store.list_profiles().items()):
+                profiles_view.append(
+                    {"name": name, "knobs": p.model_dump(exclude_none=True)}
+                )
+            payload: dict[str, Any] = {
+                "default_name": DEFAULT_PROFILE_NAME,
+                "base": {
+                    "show_details": cfg.agent.show_details,
+                    "show_memory_details": cfg.agent.show_memory_details,
+                    "max_tool_iterations": cfg.agent.max_tool_iterations,
+                    "max_rows": cfg.database.max_rows,
+                    "similarity_threshold": cfg.memory.similarity_threshold,
+                },
+                "bounds": _PROFILE_BOUNDS,
+                "profiles": profiles_view,
+            }
+            if store.load_error:
+                payload["warning"] = store.load_error
+                return _profile_error(payload)
+            return json.dumps(payload)
+
+        @mcp.tool(structured_output=False)
+        async def get_profile(name: str) -> str | CallToolResult:
+            """Fetch one named profile by name.
+
+            Returns the profile's JSON object, or an ``isError`` result with
+            ``{"error": "profile not found", "name": ...}`` when no profile
+            has that name. Per CLAUDE.md's isError discipline an unknown name
+            is a failed lookup, not a green ``null``. When the underlying
+            store failed to load, a degraded-store ``isError`` is returned
+            instead — a plain "not found" against a corrupt store would
+            silently mask the real reason the profile is unreachable.
+            """
+            store = profile_store
+            if store.load_error:
+                return _profile_error(
+                    {
+                        "error": "profile store is in a degraded state",
+                        "warning": store.load_error,
+                        "name": name,
+                    }
+                )
+            profile = store.get(name)
+            if profile is None:
+                return _profile_error(
+                    {"error": "profile not found", "name": name}
+                )
+            return json.dumps(
+                {"name": name, "knobs": profile.model_dump(exclude_none=True)}
+            )
+
+        @mcp.tool(structured_output=False)
+        async def upsert_profile(
+            name: str, knobs: dict[str, Any]
+        ) -> str | CallToolResult:
+            """Create or replace ``name`` with ``knobs`` (write-guarded).
+
+            ``knobs`` is a dict of the five profile fields; omit a field to
+            mean "inherit from base config". Refuses on an unauthenticated
+            endpoint unless ``auth.insecure`` is set. Returns the saved
+            profile; an out-of-bounds value or unknown field returns
+            ``isError`` with a structured ``{"error": ...}`` body — never a
+            success that merely reports the failure.
+            """
+            _profile_write_auth()
+            if not isinstance(name, str) or not name.strip():
+                return _profile_error(
+                    {"error": "profile name must be a non-empty string"}
+                )
+            if not isinstance(knobs, dict):
+                return _profile_error(
+                    {"error": "knobs must be a JSON object"}
+                )
+            try:
+                profile = Profile.model_validate(knobs)
+            except ValidationError as exc:
+                # Narrow catch: a broader `except Exception` would route
+                # genuinely unexpected failures (an environmental import
+                # error, a future pydantic refactor) through the
+                # "invalid profile body" message, sending operators on a
+                # phantom-validation chase. Pydantic raises ValidationError
+                # for body-shape problems; anything else is real signal and
+                # should reach the server log via the broad-except branch
+                # below on store.upsert (or surface through the FastMCP
+                # wrapper if it escapes here).
+                return _profile_error(
+                    {"error": f"invalid profile body: {exc}"}
+                )
+            store = profile_store
+            try:
+                async with profile_admin_lock:
+                    saved = await store.upsert(name, profile)
+            except Exception:
+                logger.exception("upsert_profile tool failed")
+                raise RuntimeError(
+                    "Failed to write the profile store; check the server logs."
+                ) from None
+            return json.dumps(
+                {"name": name, "knobs": saved.model_dump(exclude_none=True)}
+            )
+
+        @mcp.tool(structured_output=False)
+        async def delete_profile(name: str) -> str | CallToolResult:
+            """Delete the named profile (write-guarded).
+
+            The reserved ``default`` name cannot be deleted; the call returns
+            ``isError`` with a clear message. An unknown name also returns
+            ``isError``. Refuses on an unauthenticated endpoint unless
+            ``auth.insecure`` is set. A degraded store (load failed) returns
+            ``isError`` rather than a misleading "not found" — see
+            ``get_profile`` for the same short-circuit rationale.
+            """
+            _profile_write_auth()
+            if name == DEFAULT_PROFILE_NAME:
+                return _profile_error(
+                    {"error": "cannot delete the reserved 'default' profile",
+                     "name": name}
+                )
+            store = profile_store
+            if store.load_error:
+                return _profile_error(
+                    {
+                        "error": "profile store is in a degraded state",
+                        "warning": store.load_error,
+                        "name": name,
+                    }
+                )
+            try:
+                async with profile_admin_lock:
+                    await store.delete(name)
+            except KeyError:
+                return _profile_error(
+                    {"error": "profile not found", "name": name}
+                )
+            except Exception:
+                logger.exception("delete_profile tool failed")
+                raise RuntimeError(
+                    "Failed to delete from the profile store; check the server logs."
+                ) from None
+            return json.dumps({"deleted": True, "name": name})
 
     return mcp
 

@@ -116,6 +116,10 @@ _RECIPES: dict[str, list[tuple[str, Callable[[str, str], str]]]] = {
         ("echarts.min.js", _inline_echarts),
         ("app-with-deps.js", _inline_app_sdk),
     ],
+    # No ECharts — the profile-admin widget renders only forms and a list.
+    "config_admin.html": [
+        ("app-with-deps.js", _inline_app_sdk),
+    ],
 }
 
 

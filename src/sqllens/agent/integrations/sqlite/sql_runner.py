@@ -8,7 +8,11 @@ import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
-from sqllens.safety.limits import rows_to_capped_df
+# Minimal documented dependency on sqllens.safety so a per-request profile
+# can narrow the streaming row cap without rebuilding the agent. The
+# integration runners (mysql/postgres/sqlite) each call this shared helper
+# in their fetchmany path — keeping the per-request policy in one place.
+from sqllens.safety.limits import effective_row_cap, rows_to_capped_df
 from sqllens.safety.readonly import is_read_shaped
 
 
@@ -115,8 +119,9 @@ class SqliteRunner(SqlRunner):
             cursor.execute(args.sql)
 
             if is_read_shaped(args.sql):
-                rows = cursor.fetchmany(self._max_rows + 1)
-                return rows_to_capped_df(rows, self._max_rows)
+                cap = effective_row_cap(self._max_rows)
+                rows = cursor.fetchmany(cap + 1)
+                return rows_to_capped_df(rows, cap)
 
             conn.commit()
             rows_affected = cursor.rowcount

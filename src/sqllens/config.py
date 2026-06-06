@@ -144,6 +144,39 @@ class MemoryConfig(BaseModel):
     )
 
 
+class ProfilesConfig(BaseModel):
+    """Per-request named-profile settings.
+
+    Named profiles overlay base ``Config`` knobs (``show_details``,
+    ``show_memory_details``, ``max_tool_iterations``, ``max_rows``,
+    ``similarity_threshold``) per request via the ``profile`` argument on
+    ``query_database``. The profile data itself is **not** part of ``Config``
+    — it lives in a JSON store under ``memory.persist_dir`` and is loaded by
+    :mod:`sqllens.profiles`. This config section only carries the admin gate
+    that opts a server into exposing the profile-admin MCP tools.
+    """
+
+    # extra="forbid" so a misspelled key under [profiles] (e.g.
+    # ``allow_admintools``) fails loudly at load — via TOML or the
+    # SQLLENS_PROFILES__ env path — instead of silently reverting to the
+    # closed-by-default admin gate. Pydantic v2 does NOT cascade the top-level
+    # Config(extra="forbid") into nested BaseModels, so each nested section
+    # that wants strict admit-on-rename must set it itself.
+    model_config = ConfigDict(extra="forbid")
+
+    allow_admin_tools: bool = Field(
+        default=False,
+        description=(
+            "Expose the profile-admin MCP tools (list_profiles, get_profile, "
+            "upsert_profile, delete_profile) and the config-admin widget. OFF "
+            "by default: these tools mutate the persisted profile store. "
+            "Write paths additionally refuse to run on an unauthenticated "
+            "endpoint (auth.mode='none') unless auth.insecure acknowledges a "
+            "closed network — same gate the memory-admin tools use."
+        ),
+    )
+
+
 class AuthConfig(BaseModel):
     """Authentication mode."""
 
@@ -505,6 +538,7 @@ class Config(BaseSettings):
     auth: AuthConfig = Field(default_factory=lambda: AuthConfig())
     server: ServerConfig = Field(default_factory=lambda: ServerConfig())
     agent: AgentRuntimeConfig = Field(default_factory=lambda: AgentRuntimeConfig())
+    profiles: ProfilesConfig = Field(default_factory=lambda: ProfilesConfig())
     # Opt-in row-level-security predicates; empty disables the guard entirely.
     rls: list[RlsRule] = Field(default_factory=list)
 

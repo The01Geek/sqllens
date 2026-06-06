@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<!--
+  Self-driving MCP App widget for the profile-administration surface
+  (list_profiles / get_profile / upsert_profile / delete_profile — see
+  src/sqllens/server.py).
+
+  Unlike query_results.html — which is *pushed* a CallToolResult by the host
+  via ontoolresult — this widget *pulls* its own data on mount via
+  app.callServerTool(...) and drives every user action by calling an admin
+  tool. No model is in the loop.
+
+  Topology-agnostic: this widget never opens its own network connection (no
+  fetch, no XHR, no WebSocket, no <script src> to a server origin). Every
+  server interaction is brokered by the host as a tools/call notification
+  over the App SDK's postMessage transport, so the widget renders identically
+  whether the host reaches the server directly (public deployment) or
+  through a proxy (private deployment).
+
+  isError contract (CLAUDE.md): every tool call routes through `callTool`,
+  which renders a loud red banner on isError. Out-of-bounds upsert,
+  delete_profile("default"), and unknown-name get/delete all reach the
+  client with isError=true and paint red.
+-->
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Profile administration</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: var(--color-background-primary, transparent);
+    --surface: var(--color-background-primary, #ffffff);
+    --fg: var(--color-text-primary, #1a1a1a);
+    --muted: var(--color-text-secondary, #6b7280);
+    --line: var(--color-border-primary, #d1d5db);
+    --row-alt: var(--color-background-secondary, rgba(127, 127, 127, 0.06));
+    --accent: var(--color-background-info, #2563eb);
+    --control-bg: var(--color-background-tertiary, rgba(127, 127, 127, 0.10));
+    --err-fg: var(--color-text-danger, #991b1b);
+    --err-bg: var(--color-background-danger, rgba(220, 38, 38, 0.12));
+    --err-line: var(--color-border-danger, #dc2626);
+    --ok-fg: var(--color-text-success, #166534);
+    --ok-bg: var(--color-background-success, rgba(22, 163, 74, 0.10));
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface: var(--color-background-primary, #1e1e1e);
+      --fg: var(--color-text-primary, #e6e6e6);
+      --muted: var(--color-text-secondary, #a1a1aa);
+      --line: var(--color-border-primary, #3a3a40);
+    }
+  }
+  html, body {
+    margin: 0; padding: 0;
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+  }
+  .layout { display: grid; grid-template-columns: 240px 1fr; gap: 16px; padding: 16px; }
+  .sidebar { border-right: 1px solid var(--line); padding-right: 16px; }
+  .sidebar h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .profile-list { list-style: none; margin: 0 0 12px; padding: 0; }
+  .profile-list li {
+    padding: 6px 8px; border-radius: 4px; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .profile-list li:hover { background: var(--row-alt); }
+  .profile-list li.selected { background: var(--accent); color: white; }
+  .profile-list li .badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--control-bg); color: var(--muted); }
+  .profile-list li.selected .badge { background: rgba(255, 255, 255, 0.25); color: white; }
+  .new-row { display: flex; gap: 6px; }
+  .new-row input { flex: 1; }
+  .editor h2 { margin: 0 0 4px; font-size: 16px; }
+  .editor .subtitle { margin: 0 0 16px; color: var(--muted); font-size: 12px; }
+  .editor .empty { color: var(--muted); padding: 24px; text-align: center; }
+  .knob { border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin-bottom: 10px; background: var(--surface); }
+  .knob-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .knob-head .name { font-weight: 600; }
+  .knob-head .base { color: var(--muted); font-size: 12px; }
+  .knob-body { margin-top: 8px; display: flex; gap: 12px; align-items: center; }
+  .knob-body label { display: inline-flex; gap: 4px; align-items: center; color: var(--muted); }
+  .knob-body input[type="number"], .knob-body select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--fg); }
+  .knob.set { border-left: 4px solid var(--accent); }
+  button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--control-bg); color: var(--fg); cursor: pointer; font: inherit; }
+  button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  button.danger { color: var(--err-fg); border-color: var(--err-line); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .actions { display: flex; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .banner { padding: 8px 12px; border-radius: 4px; margin: 0 16px 12px; font-size: 12px; display: none; }
+  .banner.show { display: block; }
+  .banner.err { background: var(--err-bg); color: var(--err-fg); border: 1px solid var(--err-line); }
+  .banner.ok { background: var(--ok-bg); color: var(--ok-fg); }
+</style>
+</head>
+<body>
+<div id="errbar" class="banner err"></div>
+<div id="okbar" class="banner ok"></div>
+<div class="layout">
+  <aside class="sidebar">
+    <h2>Profiles</h2>
+    <ul id="profile-list" class="profile-list"></ul>
+    <div class="new-row">
+      <input id="new-name" type="text" placeholder="new profile name" />
+      <button id="new-btn" class="primary">+</button>
+    </div>
+  </aside>
+  <section class="editor">
+    <div id="editor-body">
+      <div class="empty">Select a profile to edit, or create a new one.</div>
+    </div>
+  </section>
+</div>
+
+<script type="module">
+import { App } from "./vendor/app-with-deps.js";
+
+const app = new App({ name: "sqllens-config-admin", version: "1.0.0" }, {}, { autoResize: true });
+
+const state = {
+  base: null,
+  bounds: null,
+  defaultName: "default",
+  profiles: [],
+  selected: null,
+  draft: null,
+};
+
+const KNOBS = [
+  { key: "show_details", type: "bool", label: "show_details", help: "Surface executed SQL and the agent trace." },
+  { key: "show_memory_details", type: "bool", label: "show_memory_details", help: "Append memory hit/miss footer to answers." },
+  { key: "max_tool_iterations", type: "int", label: "max_tool_iterations", help: "Hard cap on the agent's tool-call loop." },
+  { key: "max_rows", type: "int", label: "max_rows", help: "Hard ceiling on rows materialised per query." },
+  { key: "similarity_threshold", type: "float", label: "similarity_threshold", help: "Minimum cosine similarity for memory hits." },
+];
+
+// ───────── tool call layer ─────────
+async function callTool(name, args) {
+  let result;
+  try {
+    result = await app.callServerTool({ name, arguments: args });
+  } catch (err) {
+    return {
+      isError: true, data: null,
+      message: "Call to " + name + " failed before reaching the server: " +
+        (err && err.message ? err.message : String(err)),
+    };
+  }
+  const text =
+    (result && result.content && result.content[0] && result.content[0].text) || "";
+  let data = null;
+  try { data = JSON.parse(text); } catch (_e) { /* non-JSON message */ }
+  if (result && result.isError) {
+    let msg = text || "tool returned isError with no message";
+    if (data && typeof data === "object" && data.error) msg = String(data.error);
+    return { isError: true, data, message: msg };
+  }
+  return { isError: false, data, message: null };
+}
+
+function showError(msg) {
+  const bar = document.getElementById("errbar");
+  bar.textContent = msg;
+  bar.classList.add("show");
+  document.getElementById("okbar").classList.remove("show");
+}
+function showOk(msg) {
+  const bar = document.getElementById("okbar");
+  bar.textContent = msg;
+  bar.classList.add("show");
+  document.getElementById("errbar").classList.remove("show");
+}
+function clearBanners() {
+  document.getElementById("errbar").classList.remove("show");
+  document.getElementById("okbar").classList.remove("show");
+}
+
+// ───────── host theming ─────────
+function applyHostContext(ctx) {
+  if (!ctx) return;
+  if (ctx.theme === "dark" || ctx.theme === "light") {
+    document.documentElement.setAttribute("data-theme", ctx.theme);
+  }
+  const vars = ctx.styles && ctx.styles.variables;
+  if (vars && typeof vars === "object") {
+    for (const k of Object.keys(vars)) {
+      try { document.documentElement.style.setProperty(k, vars[k]); } catch (_e) { /* ignore */ }
+    }
+  }
+}
+function applyHostContextSafe() {
+  try { applyHostContext(app.getHostContext ? app.getHostContext() : null); }
+  catch (_e) { /* host did not provide context */ }
+}
+
+// ───────── load + render ─────────
+async function loadList() {
+  const r = await callTool("list_profiles", {});
+  if (r.isError) { showError("list_profiles: " + r.message); return; }
+  state.base = r.data.base;
+  state.bounds = r.data.bounds;
+  state.defaultName = r.data.default_name || "default";
+  state.profiles = r.data.profiles || [];
+  if (r.data.warning) { showError(r.data.warning); }
+  // Ensure default is always present in the picker even when not stored.
+  const names = new Set(state.profiles.map((p) => p.name));
+  if (!names.has(state.defaultName)) {
+    state.profiles.unshift({ name: state.defaultName, knobs: {} });
+  }
+  renderList();
+}
+
+function renderList() {
+  const ul = document.getElementById("profile-list");
+  ul.textContent = "";
+  for (const p of state.profiles) {
+    const li = document.createElement("li");
+    if (state.selected === p.name) li.classList.add("selected");
+    const name = document.createElement("span");
+    name.textContent = p.name;
+    li.append(name);
+    if (p.name === state.defaultName) {
+      const b = document.createElement("span");
+      b.className = "badge";
+      b.textContent = "default";
+      li.append(b);
+    }
+    li.addEventListener("click", () => selectProfile(p.name));
+    ul.append(li);
+  }
+}
+
+function selectProfile(name) {
+  state.selected = name;
+  const p = state.profiles.find((x) => x.name === name);
+  state.draft = {};
+  for (const k of KNOBS) {
+    state.draft[k.key] = p && k.key in p.knobs ? p.knobs[k.key] : null;
+  }
+  renderList();
+  renderEditor();
+  clearBanners();
+}
+
+function renderEditor() {
+  const body = document.getElementById("editor-body");
+  body.textContent = "";
+  if (!state.selected || !state.draft) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.textContent = "Select a profile to edit, or create a new one.";
+    body.append(e);
+    return;
+  }
+  const h = document.createElement("h2");
+  h.textContent = state.selected;
+  body.append(h);
+  const sub = document.createElement("p");
+  sub.className = "subtitle";
+  sub.textContent = state.selected === state.defaultName
+    ? "Reserved name. Inherits from base config when fields are unset."
+    : "Set fields override base config; unset fields inherit.";
+  body.append(sub);
+  for (const k of KNOBS) {
+    body.append(renderKnob(k));
+  }
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const save = document.createElement("button");
+  save.className = "primary";
+  save.textContent = "Save";
+  save.addEventListener("click", saveDraft);
+  actions.append(save);
+  if (state.selected !== state.defaultName) {
+    const del = document.createElement("button");
+    del.className = "danger";
+    del.textContent = "Delete";
+    del.addEventListener("click", deleteCurrent);
+    actions.append(del);
+  }
+  body.append(actions);
+}
+
+function renderKnob(k) {
+  const wrap = document.createElement("div");
+  wrap.className = "knob";
+  const cur = state.draft[k.key];
+  if (cur !== null && cur !== undefined) wrap.classList.add("set");
+  const head = document.createElement("div");
+  head.className = "knob-head";
+  const name = document.createElement("div");
+  name.className = "name";
+  name.textContent = k.label;
+  const base = document.createElement("div");
+  base.className = "base";
+  base.textContent = "base: " + String(state.base[k.key]);
+  head.append(name, base);
+  wrap.append(head);
+
+  const bodyRow = document.createElement("div");
+  bodyRow.className = "knob-body";
+  const inheritLabel = document.createElement("label");
+  const inheritChk = document.createElement("input");
+  inheritChk.type = "checkbox";
+  inheritChk.checked = cur === null || cur === undefined;
+  inheritChk.addEventListener("change", () => {
+    state.draft[k.key] = inheritChk.checked ? null : defaultFor(k);
+    renderEditor();
+  });
+  inheritLabel.append(inheritChk, document.createTextNode(" inherit"));
+  bodyRow.append(inheritLabel);
+
+  if (cur !== null && cur !== undefined) {
+    if (k.type === "bool") {
+      const sel = document.createElement("select");
+      const opts = [["true", "true"], ["false", "false"]];
+      for (const [v, lab] of opts) {
+        const o = document.createElement("option");
+        o.value = v; o.textContent = lab;
+        if (String(cur) === v) o.selected = true;
+        sel.append(o);
+      }
+      sel.addEventListener("change", () => { state.draft[k.key] = sel.value === "true"; });
+      bodyRow.append(sel);
+    } else {
+      const inp = document.createElement("input");
+      inp.type = "number";
+      const b = state.bounds && state.bounds[k.key];
+      if (b) {
+        if (b.ge !== undefined) inp.min = String(b.ge);
+        if (b.le !== undefined) inp.max = String(b.le);
+      }
+      if (k.type === "float") inp.step = "0.05";
+      inp.value = String(cur);
+      inp.addEventListener("change", () => {
+        const n = inp.valueAsNumber;
+        state.draft[k.key] = Number.isNaN(n) ? null : (k.type === "int" ? Math.trunc(n) : n);
+      });
+      bodyRow.append(inp);
+    }
+  }
+  const help = document.createElement("div");
+  help.style.color = "var(--muted)";
+  help.style.fontSize = "11px";
+  help.style.marginTop = "4px";
+  help.textContent = k.help;
+  wrap.append(bodyRow, help);
+  return wrap;
+}
+
+function defaultFor(k) {
+  if (k.type === "bool") return false;
+  return state.base[k.key];
+}
+
+async function saveDraft() {
+  if (!state.selected || !state.draft) return;
+  const knobs = {};
+  for (const [key, val] of Object.entries(state.draft)) {
+    if (val !== null && val !== undefined) knobs[key] = val;
+  }
+  const r = await callTool("upsert_profile", { name: state.selected, knobs });
+  if (r.isError) { showError("upsert_profile: " + r.message); return; }
+  showOk("Saved profile '" + state.selected + "'.");
+  await loadList();
+  selectProfile(state.selected);
+}
+
+async function deleteCurrent() {
+  if (!state.selected || state.selected === state.defaultName) return;
+  if (!confirm("Delete profile '" + state.selected + "'?")) return;
+  const r = await callTool("delete_profile", { name: state.selected });
+  if (r.isError) { showError("delete_profile: " + r.message); return; }
+  showOk("Deleted profile '" + state.selected + "'.");
+  state.selected = null;
+  state.draft = null;
+  await loadList();
+  renderEditor();
+}
+
+document.getElementById("new-btn").addEventListener("click", () => {
+  const name = (document.getElementById("new-name").value || "").trim();
+  if (!name) { showError("Enter a profile name."); return; }
+  if (!state.profiles.find((p) => p.name === name)) {
+    state.profiles.push({ name, knobs: {} });
+  }
+  document.getElementById("new-name").value = "";
+  selectProfile(name);
+});
+
+app.connect().then(async () => {
+  applyHostContextSafe();
+  await loadList();
+}).catch((err) => {
+  showError("Failed to connect to host: " + (err && err.message ? err.message : String(err)));
+});
+</script>
+</body>
+</html>

@@ -22,6 +22,12 @@ from typing import Any
 
 from sqllens.agent import RequestContext
 from sqllens.config import RESERVED_METADATA_KEYS, Config
+from sqllens.profiles import ProfileStore, resolve_effective_settings
+from sqllens.runtime import (
+    EffectiveSettings,
+    reset_effective_settings,
+    set_effective_settings,
+)
 from sqllens.safety import RlsError, UnsafeSqlError
 from sqllens.tools._agent import get_agent, prime_agent
 from sqllens.tools._format import build_agent_trace, components_to_blocks
@@ -142,6 +148,8 @@ async def query_database_impl(
     *,
     metadata: Mapping[str, Any] | None = None,
     conversation_id: str | None = None,
+    profile: str | None = None,
+    profile_store: ProfileStore | None = None,
 ) -> str:
     """Translate ``question`` to SQL, execute, and return a Markdown answer.
 
@@ -150,7 +158,12 @@ async def query_database_impl(
     exact raised messages are identical — they live in the sibling below.
     """
     markdown, _, _, _, _ = await query_database_impl_with_widgets(
-        cfg, question, metadata=metadata, conversation_id=conversation_id
+        cfg,
+        question,
+        metadata=metadata,
+        conversation_id=conversation_id,
+        profile=profile,
+        profile_store=profile_store,
     )
     return markdown
 
@@ -161,6 +174,8 @@ async def query_database_impl_with_widgets(
     *,
     metadata: Mapping[str, Any] | None = None,
     conversation_id: str | None = None,
+    profile: str | None = None,
+    profile_store: ProfileStore | None = None,
 ) -> tuple[str, list[dict], dict | None, dict | None, dict | None]:
     """Translate ``question`` to SQL, execute, return ordered ``blocks`` + ``memory_info``.
 
@@ -182,15 +197,19 @@ async def query_database_impl_with_widgets(
     on the error path and on a turn that produced no structured artifacts;
     callers attach it to ``_meta`` only when non-empty.
 
-    ``query_info`` carries the executed SQL when ``agent.show_details`` is on,
-    ``None`` otherwise — and when present, the same SQL is also appended to
-    ``markdown`` as a fenced ``sql`` block so plain-text clients see it too.
+    ``query_info`` carries the executed SQL when the **resolved profile's**
+    ``show_details`` is on, ``None`` otherwise — and when present, the same
+    SQL is also appended to ``markdown`` as a fenced ``sql`` block so
+    plain-text clients see it too. The gate is the per-request
+    ``effective.show_details``; a profile can flip it on for one request
+    without ``cfg.agent.show_details`` ever being true.
 
     ``memory_info`` carries the aggregate memory hit/miss signal whenever a
     memory search *completes* (a hit or a miss) this turn. It is ``None`` when
     only a search error occurred (no card emitted); on the agent error path the
     function raises before returning anything at all. It is surfaced regardless
-    of ``agent.show_details``; when ``agent.show_memory_details`` is on, a
+    of the resolved ``show_details``; when the resolved profile's
+    ``show_memory_details`` is on (``effective.show_memory_details``), a
     one-line memory footer is also appended to ``markdown`` for plain-text
     clients.
 
@@ -198,8 +217,10 @@ async def query_database_impl_with_widgets(
     per-tool name, arguments, status, duration, and on-failure error, plus the
     derived ``terminal_error`` — assembled by
     :func:`~sqllens.tools._format.build_agent_trace` from the same component
-    stream. It is built only when ``agent.show_details`` is on (``None``
-    otherwise), so a details-off deployment is byte-for-byte unchanged. On the
+    stream. It is built only when the resolved profile's ``show_details``
+    (``effective.show_details``) is on (``None`` otherwise), so a deployment
+    whose base config has ``show_details=False`` and whose callers do not
+    select a profile that turns it on is byte-for-byte unchanged. On the
     agent-error path the function raises :class:`AgentRunError`, carrying this
     same trace on ``.agent_trace`` so the server can attach it to the
     ``isError`` result; the three tool-failure / timeout / LLM-error terminal
@@ -211,107 +232,93 @@ async def query_database_impl_with_widgets(
     answer its own clarifying question. ``None`` lets the agent mint a fresh id
     internally; the MCP server layer mints and returns a stable id to the caller.
     """
-    try:
-        agent = await get_agent(cfg)
-    except Exception as e:
-        # Cold-start failures (DB driver connect, ChromaDB, embedding-model
-        # download, bad API key) carry the same host/port/role strings S-10
-        # targets. Sanitize them identically: full traceback server-side,
-        # stable internal message to the client.
-        logger.exception("agent construction failed")
-        raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
-    # Per-request metadata (caller-supplied MCP metadata, used by the
-    # row-level-security guard) flows in here, with reserved internal-control
-    # keys stripped at the boundary (see strip_reserved_metadata).
-    request_context = RequestContext(
-        headers={}, cookies={}, metadata=strip_reserved_metadata(metadata)
+    # Resolve the named profile into an EffectiveSettings and publish it on
+    # the ContextVar BEFORE the agent is invoked, so every downstream shaping
+    # site (each integration runner's fetchmany cap, RowCapRunner, the agent
+    # run-loop iteration cap, the search-memory threshold fallback) reads the
+    # request-local value. An unknown / omitted profile name resolves through
+    # ``default`` to base config — existing callers see no change.
+    effective: EffectiveSettings = resolve_effective_settings(
+        cfg, profile, store=profile_store
     )
-
-    components = []
-    started = time.monotonic()
+    _profile_token = set_effective_settings(effective)
     try:
-        async for comp in agent.send_message(
-            request_context, question, conversation_id=conversation_id
-        ):
-            components.append(comp)
-    except UnsafeSqlError as e:
-        # Defensive path: the current vendored agent catches a read-only-guard
-        # violation inside its SQL tool (RunSqlTool.execute's broad
-        # ``except Exception`` at agent/tools/run_sql.py:182) and feeds it back
-        # as a tool result rather than propagating UnsafeSqlError out of
-        # send_message, so this branch is not exercised by that pipeline today
-        # (a real guard violation surfaces via the is_error path below). It is
-        # kept because UnsafeSqlError *is* actionable safety feedback (not an
-        # infra leak): if it ever propagates (a direct guard call, a future
-        # code path), it must reach the client verbatim, distinct from the
-        # sanitized internal-error category below.
-        logger.warning("query rejected by read-only guard: %s", e)
-        raise RuntimeError(str(e)) from e
-    except RlsError as e:
-        # Same defensive rationale as the UnsafeSqlError branch above: the
-        # vendored RunSqlTool swallows this into a tool result today, so this
-        # branch is not exercised by that pipeline — but an RLS block is
-        # actionable safety feedback, not an infra leak, so if it ever
-        # propagates it must reach the client verbatim, not get collapsed
-        # into the sanitized internal-error category below.
-        logger.warning("query rejected by row-level-security guard: %s", e)
-        raise RuntimeError(str(e)) from e
-    except Exception as e:
-        # Tool-internal / infrastructure failure. The driver exception string
-        # (host, port, db, role) is logged server-side only; the client gets a
-        # stable, sanitized message it can distinguish from a SQL error.
-        logger.exception("agent.send_message failed")
-        raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
-
-    total_duration_ms = int((time.monotonic() - started) * 1000)
-    answer, is_error, blocks, query_info, memory_info = components_to_blocks(
-        components
-    )
-    # Built only for a trusted, details-on deployment (the same gate that admits
-    # SQL leakage); ``None`` otherwise so a details-off deployment never carries
-    # a trace. Assembled before the is_error branch so the error path can ship
-    # it too — that is where the tool-failure / timeout / LLM-error terminal
-    # reasons land (a failed tool drives this turn to is_error=True).
-    #
-    # Best-effort, exactly like the table/chart payload builders in _format.py:
-    # the trace is an observability extra, never the answer, so a malformed
-    # component stream must degrade to "no trace" — never crash an otherwise
-    # successful answer or let an unsanitized exception escape past the error
-    # taxonomy above (CLAUDE.md's most-violated rule). The full traceback is
-    # logged server-side instead.
-    agent_trace: dict | None = None
-    if cfg.agent.show_details:
         try:
-            agent_trace = build_agent_trace(
-                components,
-                total_duration_ms=total_duration_ms,
-                max_iterations=cfg.agent.max_tool_iterations,
-            )
-        except Exception:
-            logger.exception("agent trace assembly failed; serving answer without trace")
-            agent_trace = None
-    if is_error:
-        # Agent-reported query failure — SQL-execution error category. S-10's
-        # structural leak (raw exception-string interpolation in the except
-        # blocks above) is fixed; this path is different: ``answer`` is the
-        # agent's own structured error report, and #14 requires it reach the
-        # caller as actionable, categorized detail — collapsing it into the
-        # sanitized internal message would defeat the category split's whole
-        # purpose. Logged server-side so this branch keeps the same
-        # operator-debugging trail as every sibling branch. Heuristically
-        # content-scrubbing agent-authored text for possible infra substrings
-        # is unspecified by #91 and would risk mangling legitimate SQL detail
-        # the calling agent needs, so it is deliberately not attempted here.
-        # Raised as AgentRunError carrying the trace: with show_details on the
-        # server attaches it to the isError _meta; with it off agent_trace is
-        # None and the server re-raises so FastMCP formats the failure exactly
-        # as before (AgentRunError subclasses RuntimeError, so the message and
-        # every ``except RuntimeError`` caller are unchanged either way).
-        logger.warning("agent reported query failure: %s", answer)
-        raise AgentRunError(
-            f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}", agent_trace=agent_trace
+            agent = await get_agent(cfg)
+        except Exception as e:
+            logger.exception("agent construction failed")
+            raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
+        # Per-request metadata (caller-supplied MCP metadata, used by the
+        # row-level-security guard) flows in here, with reserved internal-control
+        # keys stripped at the boundary (see strip_reserved_metadata).
+        request_context = RequestContext(
+            headers={}, cookies={}, metadata=strip_reserved_metadata(metadata)
         )
-    markdown = _append_sql_block(answer, query_info)
-    if cfg.agent.show_memory_details:
-        markdown = _append_memory_footer(markdown, memory_info)
-    return markdown, blocks, query_info, memory_info, agent_trace
+
+        components = []
+        started = time.monotonic()
+        try:
+            async for comp in agent.send_message(
+                request_context, question, conversation_id=conversation_id
+            ):
+                components.append(comp)
+        except UnsafeSqlError as e:
+            # Defensive path: the vendored agent catches the read-only guard
+            # violation inside RunSqlTool today, so this branch is not
+            # exercised by that pipeline. Kept so a future direct guard call
+            # or a code-path change surfaces UnsafeSqlError verbatim, distinct
+            # from the sanitized internal-error category below.
+            logger.warning("query rejected by read-only guard: %s", e)
+            raise RuntimeError(str(e)) from e
+        except RlsError as e:
+            # Same defensive rationale as the UnsafeSqlError branch above.
+            logger.warning("query rejected by row-level-security guard: %s", e)
+            raise RuntimeError(str(e)) from e
+        except Exception as e:
+            # Tool-internal / infrastructure failure. The driver exception
+            # string (host, port, db, role) is logged server-side only; the
+            # client gets a stable, sanitized message.
+            logger.exception("agent.send_message failed")
+            raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
+
+        total_duration_ms = int((time.monotonic() - started) * 1000)
+        answer, is_error, blocks, query_info, memory_info = components_to_blocks(
+            components
+        )
+        # The build-time UiFeatures gate now always admits the tool-args card,
+        # so the run_sql STATUS_CARD is always present in the component stream
+        # — meaning ``query_info`` is always populated when SQL ran. The
+        # per-request profile filters it out at emit time: dropping it here
+        # is what makes the default profile show NO SQL fence, NO query
+        # _meta channel, and NO agent trace — even though the framework now
+        # always emits the card. This filter MUST NOT LEAK: if effective
+        # show_details is false, neither query_info nor agent_trace can
+        # reach the caller.
+        if not effective.show_details:
+            query_info = None
+        # Trace is gated by the same effective.show_details — same security
+        # surface as the SQL card (admits schema/SQL detail). Built before the
+        # is_error branch so the error path can ship it too (tool-failure /
+        # timeout / LLM-error terminal reasons land there).
+        agent_trace: dict | None = None
+        if effective.show_details:
+            try:
+                agent_trace = build_agent_trace(
+                    components,
+                    total_duration_ms=total_duration_ms,
+                    max_iterations=effective.max_tool_iterations,
+                )
+            except Exception:
+                logger.exception("agent trace assembly failed; serving answer without trace")
+                agent_trace = None
+        if is_error:
+            logger.warning("agent reported query failure: %s", answer)
+            raise AgentRunError(
+                f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}", agent_trace=agent_trace
+            )
+        markdown = _append_sql_block(answer, query_info)
+        if effective.show_memory_details:
+            markdown = _append_memory_footer(markdown, memory_info)
+        return markdown, blocks, query_info, memory_info, agent_trace
+    finally:
+        reset_effective_settings(_profile_token)
