@@ -153,6 +153,21 @@ def test_profile_rejects_unknown_field(tmp_path: Path) -> None:
         Profile.model_validate({"maxrows": 100})
 
 
+def test_profiles_config_rejects_unknown_field() -> None:
+    """A typo under [profiles] in TOML / SQLLENS_PROFILES__ fails at load.
+
+    Pydantic v2 does NOT cascade ``Config(extra="forbid")`` into nested
+    BaseModels, so each nested section must declare it. This pins the
+    contract for ProfilesConfig — a regression that drops the per-model
+    extra='forbid' would silently revert to the closed-by-default admin
+    gate and miss every misspelled override.
+    """
+    from sqllens.config import ProfilesConfig
+
+    with pytest.raises(ValidationError):
+        ProfilesConfig.model_validate({"allow_admintools": True})
+
+
 # --------------------------------------------------------------------------
 # Corrupt-store fallback
 # --------------------------------------------------------------------------
@@ -595,7 +610,7 @@ async def test_delete_rolls_back_cache_when_save_fails(
 
 
 async def test_contextvar_resets_when_agent_raises(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent_stub_factory
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A failure inside the agent must not leak the request-local EffectiveSettings.
 
