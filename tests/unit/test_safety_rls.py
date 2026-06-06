@@ -740,3 +740,84 @@ class TestMetadataPlumbing:
             request_context = _RC()
 
         assert _request_metadata(_Ctx()) == {}
+
+    def test_request_metadata_rejects_too_many_keys(self) -> None:
+        # An authenticated MCP client can include arbitrarily many keys in
+        # _meta; bound the count and fail-secure to {} so dynamic RLS rules
+        # block the query rather than the request influencing it unfiltered.
+        from sqllens.server import _MAX_META_KEYS, _request_metadata
+
+        class _Meta:
+            model_extra: dict = {  # noqa: RUF012
+                f"k{i}": "v" for i in range(_MAX_META_KEYS + 1)
+            }
+
+        class _RC:
+            meta = _Meta()
+
+        class _Ctx:
+            request_context = _RC()
+
+        assert _request_metadata(_Ctx()) == {}
+
+    def test_request_metadata_rejects_oversized_payload(self) -> None:
+        # A single 100 MB _meta blob (or a few dozen MB across many keys)
+        # would consume proportional memory per request. Reject and fail-secure.
+        from sqllens.server import _MAX_META_BYTES, _request_metadata
+
+        class _Meta:
+            model_extra: dict = {  # noqa: RUF012
+                "tenant_id": "acme",
+                "payload": "x" * (_MAX_META_BYTES + 1),
+            }
+
+        class _RC:
+            meta = _Meta()
+
+        class _Ctx:
+            request_context = _RC()
+
+        assert _request_metadata(_Ctx()) == {}
+
+    def test_request_metadata_accepts_under_caps(self) -> None:
+        # A normal-sized metadata blob passes through unchanged.
+        from sqllens.server import _request_metadata
+
+        class _Meta:
+            model_extra: dict = {  # noqa: RUF012
+                "tenant_id": "acme",
+                "user_id": "u-123",
+                "request_id": "req-xyz",
+            }
+
+        class _RC:
+            meta = _Meta()
+
+        class _Ctx:
+            request_context = _RC()
+
+        assert _request_metadata(_Ctx()) == {
+            "tenant_id": "acme",
+            "user_id": "u-123",
+            "request_id": "req-xyz",
+        }
+
+    def test_request_metadata_rejects_unserializable_extras(self) -> None:
+        # Pathological extras (circular refs, non-JSON-serializable types not
+        # covered by default=str) yield {} so the dynamic RLS rule blocks
+        # the query rather than the tool crashing with a raw traceback.
+        from sqllens.server import _request_metadata
+
+        circular: dict = {"tenant_id": "acme"}
+        circular["self"] = circular
+
+        class _Meta:
+            model_extra = circular
+
+        class _RC:
+            meta = _Meta()
+
+        class _Ctx:
+            request_context = _RC()
+
+        assert _request_metadata(_Ctx()) == {}

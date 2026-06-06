@@ -89,6 +89,17 @@ _AGENT_TRACE_META_KEY = "sqllens/agent_trace"
 # prior turn's history (e.g. to answer its own clarifying question).
 _CONVERSATION_META_KEY = "sqllens/conversation"
 
+# Soft caps on the inbound ``_meta`` payload an authenticated MCP client can
+# attach to a request. The MCP SDK materializes unknown ``_meta`` keys onto
+# ``RequestParams.Meta.model_extra``; without bounds a client can ship an
+# arbitrarily large blob (uvicorn/FastMCP impose no body-size limit by
+# default), and ``dict(extra)`` would then materialize the whole thing per
+# request — proportional memory/CPU per call. Bound both the key count and
+# the serialized size; overflow yields ``{}`` so dynamic RLS rules fail-secure
+# (the same documented behaviour as a missing or unreadable ``_meta``).
+_MAX_META_KEYS = 64
+_MAX_META_BYTES = 16 * 1024
+
 
 def _conversation_result(
     markdown: str, conversation_id: str, extra_meta: dict[str, Any]
@@ -191,7 +202,37 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
             "dynamic RLS rules will see no metadata"
         )
         return {}
-    return dict(extra) if extra else {}
+    if not extra:
+        return {}
+    if len(extra) > _MAX_META_KEYS:
+        logger.warning(
+            "request _meta has %d extra keys (cap %d); discarding for fail-secure metadata",
+            len(extra),
+            _MAX_META_KEYS,
+        )
+        return {}
+    try:
+        serialized_len = len(
+            json.dumps(dict(extra), separators=(",", ":"), default=str)
+        )
+    except (TypeError, ValueError):
+        # default=str above covers most non-JSON-native values; this catches
+        # anything pathological (e.g. circular refs raising ValueError). Same
+        # fail-secure: dynamic RLS rules see no metadata.
+        logger.warning(
+            "request _meta extras not JSON-serializable; discarding for fail-secure metadata",
+            exc_info=True,
+        )
+        return {}
+    if serialized_len > _MAX_META_BYTES:
+        logger.warning(
+            "request _meta extras serialize to %d bytes (cap %d); "
+            "discarding for fail-secure metadata",
+            serialized_len,
+            _MAX_META_BYTES,
+        )
+        return {}
+    return dict(extra)
 
 
 def build_server(cfg: Config) -> FastMCP:

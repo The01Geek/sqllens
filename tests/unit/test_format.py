@@ -1483,10 +1483,91 @@ def test_build_agent_trace_top_level_error_outranks_iteration_limit() -> None:
 
 
 def test_build_agent_trace_caps_oversized_arguments() -> None:
+    # Per-value truncation (the new first-tier cap) bounds the single huge SQL
+    # arg to _MAX_TRACE_ARGUMENT_VALUE_BYTES, keeping the trace well under the
+    # whole-trace budget. The whole-trace _cap_trace_size fallback is therefore
+    # *not* triggered — the arguments key is preserved (truncated), not dropped.
+    from sqllens.tools._format import _TRACE_TRUNCATION_SUFFIX
+
     huge_sql = "SELECT " + "x" * (200 * 1024)
     cards = make_tool_cards("run_sql", {"sql": huge_sql}, ok=True)
     trace = build_agent_trace(cards, total_duration_ms=5, max_iterations=20)
-    assert trace["arguments_truncated"] is True
-    assert "arguments" not in trace["steps"][0] or trace["steps"][0]["arguments"] == {}
+    assert "arguments_truncated" not in trace
     assert trace["steps"][0]["tool"] == "run_sql"
+    assert trace["steps"][0]["arguments"]["sql"].endswith(_TRACE_TRUNCATION_SUFFIX)
     assert _serialized_len(trace) <= _MAX_TABLE_PAYLOAD_BYTES
+
+
+def test_build_agent_trace_whole_trace_cap_falls_back_for_many_steps() -> None:
+    # The whole-trace ``_cap_trace_size`` fallback still kicks in when the sum
+    # of (per-value-truncated) steps exceeds the trace budget — e.g. a very long
+    # run with many tool calls. All arguments are then stripped and
+    # ``arguments_truncated`` is flagged, as before.
+    cards: list = []
+    for i in range(400):
+        cards.extend(
+            make_tool_cards("run_sql", {"sql": "SELECT " + "x" * 900, "i": i}, ok=True)
+        )
+    trace = build_agent_trace(cards, total_duration_ms=5, max_iterations=500)
+    assert trace.get("arguments_truncated") is True
+    assert _serialized_len(trace) <= _MAX_TABLE_PAYLOAD_BYTES
+
+
+def test_build_agent_trace_truncates_long_string_argument_values() -> None:
+    # A single oversize string value (e.g. save_text_memory's full content) is
+    # truncated to the per-value cap with a suffix flagging the elision — the
+    # arg structure is preserved (the tool name and key are still visible) but
+    # the content cannot echo unbounded back to the client.
+    from sqllens.tools._format import (
+        _MAX_TRACE_ARGUMENT_VALUE_BYTES,
+        _TRACE_TRUNCATION_SUFFIX,
+    )
+
+    long_content = "a" * (4 * 1024)
+    cards = make_tool_cards("save_text_memory", {"content": long_content}, ok=True)
+    trace = build_agent_trace(cards, total_duration_ms=5, max_iterations=20)
+    args = trace["steps"][0]["arguments"]
+    assert set(args.keys()) == {"content"}
+    assert args["content"].endswith(_TRACE_TRUNCATION_SUFFIX)
+    assert len(args["content"]) == (
+        _MAX_TRACE_ARGUMENT_VALUE_BYTES + len(_TRACE_TRUNCATION_SUFFIX)
+    )
+    # No whole-trace truncation flag — the per-value cap is enough.
+    assert "arguments_truncated" not in trace
+
+
+def test_build_agent_trace_preserves_short_string_argument_values() -> None:
+    from sqllens.tools._format import _TRACE_TRUNCATION_SUFFIX
+
+    cards = make_tool_cards(
+        "search_saved_correct_tool_uses",
+        {"question": "how many orders?", "limit": 5},
+        ok=True,
+    )
+    trace = build_agent_trace(cards, total_duration_ms=5, max_iterations=20)
+    args = trace["steps"][0]["arguments"]
+    # Short strings and non-string scalars pass through unchanged.
+    assert args == {"question": "how many orders?", "limit": 5}
+    assert _TRACE_TRUNCATION_SUFFIX not in args["question"]
+
+
+def test_build_agent_trace_truncates_nested_string_values() -> None:
+    # Nested dicts/lists are recursed into so a deeply-buried oversize string
+    # still gets bounded.
+    from sqllens.tools._format import (
+        _MAX_TRACE_ARGUMENT_VALUE_BYTES,
+        _TRACE_TRUNCATION_SUFFIX,
+    )
+
+    long_text = "b" * (3 * 1024)
+    nested = {"outer": {"inner": long_text}, "items": ["short", long_text, 42]}
+    cards = make_tool_cards("complex_tool", nested, ok=True)
+    trace = build_agent_trace(cards, total_duration_ms=5, max_iterations=20)
+    args = trace["steps"][0]["arguments"]
+    assert args["outer"]["inner"].endswith(_TRACE_TRUNCATION_SUFFIX)
+    assert len(args["outer"]["inner"]) == (
+        _MAX_TRACE_ARGUMENT_VALUE_BYTES + len(_TRACE_TRUNCATION_SUFFIX)
+    )
+    assert args["items"][0] == "short"
+    assert args["items"][1].endswith(_TRACE_TRUNCATION_SUFFIX)
+    assert args["items"][2] == 42
