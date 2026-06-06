@@ -218,7 +218,13 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
         return {}
     extras = dict(extra)
     try:
-        serialized_len = len(json.dumps(extras, separators=(",", ":"), default=str))
+        # ``ensure_ascii=True`` is the stdlib default; we pass it explicitly so
+        # the byte-count invariant documented above (``len(serialized) == byte
+        # count of the on-wire form``) is robust against any future stdlib
+        # default change.
+        serialized_len = len(
+            json.dumps(extras, separators=(",", ":"), ensure_ascii=True, default=str)
+        )
     except Exception:
         # ``default=str`` covers most non-JSON-native values; the broad catch
         # backstops anything pathological — circular refs (``ValueError``),
