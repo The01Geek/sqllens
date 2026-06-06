@@ -61,7 +61,7 @@ Note: SQL Lens may run more than one query to answer a single question. When its
 
 Expected answer: 2 albums.
 
-On Claude Desktop or claude.ai, each `query_database` answer is also shown as an interactive widget alongside the same plain-text answer. A result that contains a table appears as an interactive grid you can sort, filter, page through, and export to CSV. A chart-shaped result appears as an interactive Apache ECharts widget (bar, line, area, scatter, pie, or heatmap) that follows the assistant's theme and resizes responsively. The widget reports its own size, so on hosts that support this a small result fits its frame with no surrounding empty space and no extra scrollbar, while larger results get the full height they need. Other assistants display the Markdown text answer only. No setup is required either way.
+On Claude Desktop or claude.ai, each `query_database` answer is also shown as an interactive widget alongside the same plain-text answer. The widget renders the answer as an ordered list of blocks — interactive tables you can sort, filter, page through, and export to CSV; interactive Apache ECharts charts (bar, line, area, scatter, pie, or heatmap) that follow the assistant's theme and resize responsively; and Markdown text the agent wrote to introduce or summarize the result. Each table has its own independent controls — sorting one table never affects another in the same answer. A single answer can include any combination of blocks in any order. The widget reports its own size, so on hosts that support this a small result fits its frame with no surrounding empty space and no extra scrollbar, while larger results get the full height they need. Other assistants display a Markdown rendering of the same blocks. No setup is required either way.
 
 ### Asking for a chart
 
@@ -69,7 +69,9 @@ To get an interactive chart, phrase the question so the result is aggregated or 
 
 > Using sqllens, chart total invoice revenue per billing country.
 
-The assistant calls `query_database`, runs the underlying SQL, and returns a chart inline — no separate tool call is needed. Plain lookups (for example, "What was Mary's last order?") are answered as a table or text, not forced into a chart.
+The assistant calls `query_database`, runs the underlying SQL, and returns the chart inline — no separate tool call is needed. Plain lookups (for example, "What was Mary's last order?") are answered as a table or text, not forced into a chart.
+
+A single answer can also include more than one chart, or interleave charts with tables and prose captions, when the question warrants it — for example, asking for revenue by region as a chart **with** a supporting per-region breakdown will return the chart, a one-line summary, and the supporting table in one answer.
 
 ### Multi-turn Conversations
 

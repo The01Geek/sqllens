@@ -134,7 +134,7 @@ query_database(question, ctx: Context)             (src/sqllens/server.py)
   ↓
 _request_metadata(ctx)                             (extracts ctx.request_context.meta.model_extra)
   ↓
-query_database_impl_with_table(cfg, question, metadata=…)
+query_database_impl_with_widgets(cfg, question, metadata=…)
   ↓
 strip _RESERVED_METADATA_KEYS                      ({"starter_ui_request", "ui_features_available"})
   ↓
@@ -191,7 +191,7 @@ The error contract mirrors [database-connectors/read-only-safety.md](read-only-s
 - `RlsGuardRunner.run_sql` catches `RlsError` and re-raises with a clear prefix: `"refusing to execute query: row-level security could not be applied: <inner message>"`.
 - Any other unexpected exception from the rewrite is logged with a traceback (`logger.warning`, `exc_info=True`) and converted to `RlsError` — fail-secure.
 - The vendored `RunSqlTool` swallows `RlsError` into a tool result the same way it does `UnsafeSqlError` today, so in practice the calling agent receives the rejection as a tool error and can re-plan (or surface a clean message).
-- [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) also has an explicit `except RlsError` branch in `query_database_impl_with_table` that re-raises the message verbatim as `RuntimeError(str(e))` — same defensive rationale as the `UnsafeSqlError` branch, for any future path that lets `RlsError` propagate out of `send_message`. Like the unsafe-SQL branch, RLS blocks are actionable safety feedback and must reach the client unsanitized, not collapsed into the `_INTERNAL_ERROR_MESSAGE` category.
+- [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) also has an explicit `except RlsError` branch in `query_database_impl_with_widgets` that re-raises the message verbatim as `RuntimeError(str(e))` — same defensive rationale as the `UnsafeSqlError` branch, for any future path that lets `RlsError` propagate out of `send_message`. Like the unsafe-SQL branch, RLS blocks are actionable safety feedback and must reach the client unsanitized, not collapsed into the `_INTERNAL_ERROR_MESSAGE` category.
 
 ## Static-only on stdio
 

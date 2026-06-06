@@ -19,6 +19,7 @@ from sqllens.agent.components import (
     StatusCardComponent,
     Task,
 )
+from sqllens.agent.markers import answer_marker_data
 from .config import AgentConfig
 from sqllens.agent.core.storage import ConversationStore
 from sqllens.agent.core.llm import LlmService
@@ -1038,9 +1039,16 @@ class Agent:
                     conversation.add_message(
                         Message(role="assistant", content=response.content)
                     )
+                    # Marker (sqllens.agent.markers.IS_ANSWER_MARKER_KEY) shared
+                    # with EmitTextTool: the MCP-layer block builder reads it to
+                    # include the terminal answer as a rendered TEXT block while
+                    # excluding the intermediate-reasoning TEXT yielded above
+                    # (gated on UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT).
                     yield UiComponent(
                         rich_component=RichTextComponent(
-                            content=response.content, markdown=True
+                            content=response.content,
+                            markdown=True,
+                            data=answer_marker_data(),
                         ),
                         simple_component=SimpleTextComponent(text=response.content),
                     )
@@ -1074,7 +1082,9 @@ You can:
 
             yield UiComponent(
                 rich_component=RichTextComponent(
-                    content=warning_message, markdown=True
+                    content=warning_message,
+                    markdown=True,
+                    data=answer_marker_data(),
                 ),
                 simple_component=SimpleTextComponent(
                     text=f"Tool limit reached after {tool_iterations} executions. Task may be incomplete."

@@ -24,7 +24,7 @@ from sqllens.agent import RequestContext
 from sqllens.config import RESERVED_METADATA_KEYS, Config
 from sqllens.safety import RlsError, UnsafeSqlError
 from sqllens.tools._agent import get_agent, prime_agent
-from sqllens.tools._format import build_agent_trace, components_to_widgets
+from sqllens.tools._format import build_agent_trace, components_to_blocks
 
 # ``prime_agent`` lives in ``tools/_agent.py`` but the transport-layer warmup
 # (``transport/http.py``) and several tests import it from here — keep it in
@@ -33,7 +33,6 @@ __all__ = [
     "AgentRunError",
     "prime_agent",
     "query_database_impl",
-    "query_database_impl_with_table",
     "query_database_impl_with_widgets",
 ]
 
@@ -150,29 +149,10 @@ async def query_database_impl(
     that drops the structured payloads. The error taxonomy, sanitization, and
     exact raised messages are identical — they live in the sibling below.
     """
-    markdown, _, _, _, _, _ = await query_database_impl_with_widgets(
+    markdown, _, _, _, _ = await query_database_impl_with_widgets(
         cfg, question, metadata=metadata, conversation_id=conversation_id
     )
     return markdown
-
-
-async def query_database_impl_with_table(
-    cfg: Config,
-    question: str,
-    *,
-    metadata: Mapping[str, Any] | None = None,
-    conversation_id: str | None = None,
-) -> tuple[str, dict | None, dict | None]:
-    """Translate ``question`` to SQL, execute, return ``(markdown, table, query_info)``.
-
-    Thin wrapper over :func:`query_database_impl_with_widgets` that drops the
-    chart and memory-info payloads. The agent path, error taxonomy, and exact
-    raised messages are identical — they live in the sibling below.
-    """
-    markdown, table, query_info, _, _, _ = await query_database_impl_with_widgets(
-        cfg, question, metadata=metadata, conversation_id=conversation_id
-    )
-    return markdown, table, query_info
 
 
 async def query_database_impl_with_widgets(
@@ -181,30 +161,30 @@ async def query_database_impl_with_widgets(
     *,
     metadata: Mapping[str, Any] | None = None,
     conversation_id: str | None = None,
-) -> tuple[str, dict | None, dict | None, dict | None, dict | None, dict | None]:
-    """Translate ``question`` to SQL, execute, return widgets + ``memory_info``.
+) -> tuple[str, list[dict], dict | None, dict | None, dict | None]:
+    """Translate ``question`` to SQL, execute, return ordered ``blocks`` + ``memory_info``.
 
-    Returns ``(markdown, table, query_info, chart, memory_info, agent_trace)``.
+    Returns ``(markdown, blocks, query_info, memory_info, agent_trace)``.
 
     The single agent path behind the consolidated ``query_database`` MCP tool.
     One ``agent.send_message`` run is buffered and collapsed in a single pass by
-    :func:`~sqllens.tools._format.components_to_widgets`, which yields the
-    Markdown answer (DataFrame tables + answer text, plus the fenced SQL block
-    when ``agent.show_details`` is on), the structured table payload, the
-    executed-SQL ``query_info``, and the structured chart payload when the
-    agent emitted a ``ChartComponent``.
+    :func:`~sqllens.tools._format.components_to_blocks`, which yields the
+    Markdown answer (interleaved DataFrame tables, deliberate prose, and chart
+    placeholders) and the ordered ``blocks`` array — one typed block per
+    DataFrame, chart, or answer-marked TEXT in stream order. The blocks array
+    is the single structured-data channel: apps-aware hosts render each block
+    in order, and ``server.py`` attaches it to ``_meta["sqllens/blocks"]``.
 
     Three error categories, unchanged: tool-internal failures raise
     ``_INTERNAL_ERROR_MESSAGE``, agent-reported SQL failures raise
     ``_SQL_EXECUTION_ERROR_PREFIX + answer`` (as an :class:`AgentRunError`),
-    and ``UnsafeSqlError`` is re-raised verbatim. ``table`` and ``chart`` are
-    ``None`` on the error path
-    or whenever the corresponding component is absent (apps-aware callers attach
-    whichever is present to ``_meta``; everyone else ignores them and reads the
-    Markdown). ``query_info`` carries the executed SQL when
-    ``agent.show_details`` is on, ``None`` otherwise — and when present, the
-    same SQL is also appended to ``markdown`` as a fenced ``sql`` block so
-    plain-text clients see it too.
+    and ``UnsafeSqlError`` is re-raised verbatim. ``blocks`` is an empty list
+    on the error path and on a turn that produced no structured artifacts;
+    callers attach it to ``_meta`` only when non-empty.
+
+    ``query_info`` carries the executed SQL when ``agent.show_details`` is on,
+    ``None`` otherwise — and when present, the same SQL is also appended to
+    ``markdown`` as a fenced ``sql`` block so plain-text clients see it too.
 
     ``memory_info`` carries the aggregate memory hit/miss signal whenever a
     memory search *completes* (a hit or a miss) this turn. It is ``None`` when
@@ -284,7 +264,7 @@ async def query_database_impl_with_widgets(
         raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
 
     total_duration_ms = int((time.monotonic() - started) * 1000)
-    answer, is_error, table, query_info, chart, memory_info = components_to_widgets(
+    answer, is_error, blocks, query_info, memory_info = components_to_blocks(
         components
     )
     # Built only for a trusted, details-on deployment (the same gate that admits
@@ -334,4 +314,4 @@ async def query_database_impl_with_widgets(
     markdown = _append_sql_block(answer, query_info)
     if cfg.agent.show_memory_details:
         markdown = _append_memory_footer(markdown, memory_info)
-    return markdown, table, query_info, chart, memory_info, agent_trace
+    return markdown, blocks, query_info, memory_info, agent_trace

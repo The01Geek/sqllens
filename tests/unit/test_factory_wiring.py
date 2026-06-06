@@ -22,6 +22,7 @@ from pydantic import SecretStr
 from sqllens.agent.factory import build_agent
 from sqllens.agent.tools import (
     EmitChartTool,
+    EmitTextTool,
     RunSqlTool,
     SaveQuestionToolArgsTool,
     SaveTextMemoryTool,
@@ -114,6 +115,24 @@ def test_emit_chart_tool_is_registered(tmp_path: Path) -> None:
     assert "emit_chart" in agent.tool_registry._tools
     emit_chart_tool = _unwrap(agent.tool_registry._tools["emit_chart"])
     assert isinstance(emit_chart_tool, EmitChartTool)
+
+
+def test_emit_text_tool_is_registered(tmp_path: Path) -> None:
+    """Without ``emit_text`` in the ToolRegistry the LLM never sees it and
+    the multi-block answer feature silently regresses to single-block:
+    intermediate-reasoning TEXT is dropped as chatter (no marker), only the
+    terminal answer surfaces, and the agent can no longer interleave
+    deliberate prose between artifacts. Pins that the registration added
+    alongside ``EmitChartTool`` does not silently disappear in a future
+    factory refactor — mirrors the precedent ``test_emit_chart_tool_is_
+    registered`` immediately above.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    agent = build_agent(cfg)
+
+    assert "emit_text" in agent.tool_registry._tools
+    emit_text_tool = _unwrap(agent.tool_registry._tools["emit_text"])
+    assert isinstance(emit_text_tool, EmitTextTool)
 
 
 def test_show_details_on_unlocks_only_tool_arguments(tmp_path: Path) -> None:
