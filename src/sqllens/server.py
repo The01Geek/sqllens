@@ -95,8 +95,10 @@ _CONVERSATION_META_KEY = "sqllens/conversation"
 # arbitrarily large blob (uvicorn/FastMCP impose no body-size limit by
 # default), and ``dict(extra)`` would then materialize the whole thing per
 # request — proportional memory/CPU per call. Bound both the key count and
-# the serialized size; overflow yields ``{}`` so dynamic RLS rules fail-secure
-# (the same documented behaviour as a missing or unreadable ``_meta``).
+# the serialized size of those extras; overflow yields ``{}`` so dynamic RLS
+# rules fail-secure (the same documented behaviour as a missing or unreadable
+# ``_meta``). 64 keys covers any realistic dynamic-RLS keyset (tenant_id,
+# user_id, role, region, …) with several decades of headroom.
 _MAX_META_KEYS = 64
 _MAX_META_BYTES = 16 * 1024
 
@@ -211,10 +213,9 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
             _MAX_META_KEYS,
         )
         return {}
+    extras = dict(extra)
     try:
-        serialized_len = len(
-            json.dumps(dict(extra), separators=(",", ":"), default=str)
-        )
+        serialized_len = len(json.dumps(extras, separators=(",", ":"), default=str))
     except (TypeError, ValueError):
         # default=str above covers most non-JSON-native values; this catches
         # anything pathological (e.g. circular refs raising ValueError). Same
@@ -232,7 +233,7 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
             _MAX_META_BYTES,
         )
         return {}
-    return dict(extra)
+    return extras
 
 
 def build_server(cfg: Config) -> FastMCP:
