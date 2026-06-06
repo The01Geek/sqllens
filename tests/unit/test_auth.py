@@ -17,6 +17,11 @@ from sqllens.auth import (
 )
 from sqllens.config import AuthConfig
 
+# 34-char fixtures keep individual lines under the 100-char ruff cap while
+# clearing the >=32 MIN_BEARER_TOKEN_LENGTH guard.
+_TOKEN = "secret-token-0123456789-0123456789"
+_OTHER_TOKEN = "bearer-token-0123456789-0123456789"
+
 
 class TestNoOpAuthenticator:
     async def test_allows_anything(self) -> None:
@@ -28,27 +33,27 @@ class TestNoOpAuthenticator:
 
 class TestBearerTokenAuthenticator:
     async def test_accepts_correct_token(self) -> None:
-        auth = BearerTokenAuthenticator("secret-token-1234567890")
-        ctx = await auth.authenticate({"Authorization": "Bearer secret-token-1234567890"})
+        auth = BearerTokenAuthenticator(_TOKEN)
+        ctx = await auth.authenticate({"Authorization": f"Bearer {_TOKEN}"})
         assert ctx.subject == "bearer"
 
     async def test_accepts_lowercase_header(self) -> None:
-        auth = BearerTokenAuthenticator("secret-token-1234567890")
-        ctx = await auth.authenticate({"authorization": "Bearer secret-token-1234567890"})
+        auth = BearerTokenAuthenticator(_TOKEN)
+        ctx = await auth.authenticate({"authorization": f"Bearer {_TOKEN}"})
         assert ctx.subject == "bearer"
 
     async def test_rejects_missing_header(self) -> None:
-        auth = BearerTokenAuthenticator("secret-token-1234567890")
+        auth = BearerTokenAuthenticator(_TOKEN)
         with pytest.raises(AuthError, match="missing"):
             await auth.authenticate({})
 
     async def test_rejects_wrong_token(self) -> None:
-        auth = BearerTokenAuthenticator("secret-token-1234567890")
+        auth = BearerTokenAuthenticator(_TOKEN)
         with pytest.raises(AuthError, match="invalid"):
             await auth.authenticate({"Authorization": "Bearer wrong-token"})
 
     async def test_rejects_non_bearer_scheme(self) -> None:
-        auth = BearerTokenAuthenticator("secret-token-1234567890")
+        auth = BearerTokenAuthenticator(_TOKEN)
         with pytest.raises(AuthError, match="missing"):
             await auth.authenticate({"Authorization": "Basic Zm9vOmJhcg=="})
 
@@ -65,8 +70,8 @@ class TestBearerTokenAuthenticator:
     async def test_strips_surrounding_whitespace_to_match_extracted_header(self) -> None:
         # Mirrors _extract_bearer's strip on the inbound side — otherwise a config
         # like bearer_token = "  secret  " would silently never match.
-        auth = BearerTokenAuthenticator("  secret-token-1234567890  ")
-        ctx = await auth.authenticate({"Authorization": "Bearer secret-token-1234567890"})
+        auth = BearerTokenAuthenticator(f"  {_TOKEN}  ")
+        ctx = await auth.authenticate({"Authorization": f"Bearer {_TOKEN}"})
         assert ctx.subject == "bearer"
 
 
@@ -85,7 +90,7 @@ class TestBuildAuthenticator:
         assert isinstance(build_authenticator(cfg), NoOpAuthenticator)
 
     def test_bearer_mode_with_token(self) -> None:
-        cfg = AuthConfig(mode="bearer", bearer_token=SecretStr("bearer-token-0123456789"))
+        cfg = AuthConfig(mode="bearer", bearer_token=SecretStr(_OTHER_TOKEN))
         assert isinstance(build_authenticator(cfg), BearerTokenAuthenticator)
 
     def test_jwt_mode_returns_scaffold(self) -> None:
@@ -119,9 +124,9 @@ class TestAuthConfigValidation:
         assert "bearer_token is set but" not in str(exc.value)
 
     def test_token_with_mode_bearer_accepted(self) -> None:
-        cfg = AuthConfig(mode="bearer", bearer_token=SecretStr("bearer-token-0123456789"))
+        cfg = AuthConfig(mode="bearer", bearer_token=SecretStr(_OTHER_TOKEN))
         assert cfg.bearer_token is not None
-        assert cfg.bearer_token.get_secret_value() == "bearer-token-0123456789"
+        assert cfg.bearer_token.get_secret_value() == _OTHER_TOKEN
 
     def test_no_token_with_mode_none_accepted(self) -> None:
         cfg = AuthConfig(mode="none")
@@ -180,38 +185,44 @@ class TestBearerTokenMinLength:
     """S-13: a too-short bearer token is trivially brute-forceable."""
 
     def test_short_token_rejected_at_construction(self) -> None:
-        # 15 chars — one below the floor.
-        with pytest.raises(ValueError, match="at least 16 characters"):
-            BearerTokenAuthenticator("123456789012345")
+        # 31 chars — one below the floor.
+        with pytest.raises(ValueError, match="at least 32 characters"):
+            BearerTokenAuthenticator("0123456789abcdef0123456789abcde")
 
     def test_short_token_rejected_after_strip(self) -> None:
         # Surrounding whitespace must not pad a short token past the floor.
-        with pytest.raises(ValueError, match="at least 16 characters"):
-            BearerTokenAuthenticator("   short-token   ")
+        with pytest.raises(ValueError, match="at least 32 characters"):
+            BearerTokenAuthenticator("   short-token-still-under-32   ")
 
-    def test_exactly_16_chars_accepted(self) -> None:
-        auth = BearerTokenAuthenticator("0123456789abcdef")
+    def test_exactly_32_chars_accepted(self) -> None:
+        auth = BearerTokenAuthenticator("0123456789abcdef0123456789abcdef")
         assert auth is not None
 
-    def test_authconfig_15_chars_rejected_16_accepted(self) -> None:
+    def test_authconfig_31_chars_rejected_32_accepted(self) -> None:
         # The AuthConfig validator and BearerTokenAuthenticator are independent
         # code paths sharing one constant; pin the boundary on the config path
         # too so an off-by-one (< vs <=) in only one path can't slip through.
-        with pytest.raises(ValidationError, match="at least 16 characters"):
-            AuthConfig(mode="bearer", bearer_token=SecretStr("123456789012345"))
-        cfg = AuthConfig(mode="bearer", bearer_token=SecretStr("0123456789abcdef"))
+        with pytest.raises(ValidationError, match="at least 32 characters"):
+            AuthConfig(
+                mode="bearer",
+                bearer_token=SecretStr("0123456789abcdef0123456789abcde"),
+            )
+        cfg = AuthConfig(
+            mode="bearer",
+            bearer_token=SecretStr("0123456789abcdef0123456789abcdef"),
+        )
         assert cfg.bearer_token is not None
 
     def test_short_token_rejected_via_authconfig(self) -> None:
-        with pytest.raises(ValidationError, match="at least 16 characters"):
+        with pytest.raises(ValidationError, match="at least 32 characters"):
             AuthConfig(mode="bearer", bearer_token=SecretStr("short"))
 
     def test_short_token_rejected_via_authconfig_after_strip(self) -> None:
-        with pytest.raises(ValidationError, match="at least 16 characters"):
+        with pytest.raises(ValidationError, match="at least 32 characters"):
             AuthConfig(mode="bearer", bearer_token=SecretStr("  also-short  "))
 
     def test_long_token_accepted_via_authconfig(self) -> None:
-        cfg = AuthConfig(mode="bearer", bearer_token=SecretStr("a-sufficiently-long-token"))
+        cfg = AuthConfig(mode="bearer", bearer_token=SecretStr("a-sufficiently-long-token-padding"))
         assert cfg.bearer_token is not None
 
 

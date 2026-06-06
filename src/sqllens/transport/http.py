@@ -60,9 +60,12 @@ HEALTHZ_PATH = "/healthz"
 
 Asserts only that the ASGI process is up and the event loop is serving
 requests — it does **not** check DB, ChromaDB, or LLM reachability. Handled
-in ``_PathNormalizer``, ahead of ``_AuthMiddleware``, so orchestrator probes
-never need (and are never gated by) an ``Authorization`` header. Liveness
-only — never gated on agent-warmup readiness (use ``/readyz`` for that)."""
+in ``_PathNormalizer``, ahead of ``_AuthMiddleware`` (no ``Authorization``
+required) but *behind* ``TrustedHostMiddleware`` — a probe carrying a
+disallowed ``Host`` is rejected by the host allowlist before reaching the
+short-circuit, denying drive-by fingerprinting via DNS rebinding from a
+browser-served page. Liveness only — never gated on agent-warmup readiness
+(use ``/readyz`` for that)."""
 
 READYZ_PATH = "/readyz"
 """Unauthenticated readiness probe path.
@@ -76,10 +79,10 @@ instead of paying cold start. Readiness latches after the warmup *attempt*
 regardless of outcome: a failed warmup is logged and the server still boots
 (the first query rebuilds), so ``/readyz=200`` attests "startup finished
 and the server can serve", not "warmup succeeded". Short-circuited in
-``_PathNormalizer`` next to
-``HEALTHZ_PATH`` — ahead of both ``TrustedHostMiddleware`` and
-``_AuthMiddleware`` — so orchestrators can gate traffic on warmup without
-an ``Authorization`` header and regardless of the request ``Host``."""
+``_PathNormalizer`` next to ``HEALTHZ_PATH`` — ahead of ``_AuthMiddleware``
+(orchestrators need no ``Authorization``) but *behind* ``TrustedHostMiddleware``
+so a disallowed ``Host`` cannot fingerprint readiness state from a
+DNS-rebound page."""
 
 
 class _Readiness:
@@ -235,22 +238,30 @@ def _build_asgi_app_bare(cfg: Config, readiness: _Readiness) -> tuple[ASGIApp, F
     at a single guarded site.
 
     Composition (outermost → innermost):
-    ``_PathNormalizer`` → ``TrustedHostMiddleware`` → ``_AuthMiddleware`` →
-    FastMCP. ``_PathNormalizer`` is deliberately the outermost layer so its
-    pre-everything short-circuits for ``/healthz`` and ``/readyz`` answer
-    *before* host validation and auth — probes must always answer regardless
-    of ``Host`` or ``Authorization``. ``TrustedHostMiddleware`` then rejects a
-    disallowed ``Host`` with 400 before the request can reach auth or the MCP
-    handler (DNS-rebinding defense, S-8).
+    ``TrustedHostMiddleware`` → ``_PathNormalizer`` → ``_AuthMiddleware`` →
+    FastMCP. ``TrustedHostMiddleware`` fronts the stack so a disallowed
+    ``Host`` is rejected with 400 before *anything* downstream sees the
+    request — including the ``/healthz`` / ``/readyz`` short-circuits in
+    ``_PathNormalizer``. This denies the DNS-rebinding fingerprint of a
+    browser-served page confirming a running SQL Lens and its readiness
+    state — *for non-wildcard binds*: when ``cfg.server.host`` is
+    ``0.0.0.0`` / ``::``, ``_allowed_hosts`` returns ``["*"]`` (the operator
+    has explicitly opted into accepting any ``Host``) and the rebinding
+    fingerprint remains possible by design. Probes still bypass
+    ``_AuthMiddleware`` so orchestrator probes never need an
+    ``Authorization`` header (loopback and the configured host are in the
+    default allowlist).
     """
     mcp = build_server(cfg)
     inner = mcp.streamable_http_app()
     authenticator = build_authenticator(cfg.auth)
-    host_guarded = TrustedHostMiddleware(
-        _AuthMiddleware(inner, authenticator),
-        allowed_hosts=_allowed_hosts(cfg),
+    normalized = _PathNormalizer(
+        _AuthMiddleware(inner, authenticator), readiness
     )
-    return _PathNormalizer(host_guarded, readiness), mcp
+    return (
+        TrustedHostMiddleware(normalized, allowed_hosts=_allowed_hosts(cfg)),
+        mcp,
+    )
 
 
 def run(cfg: Config) -> None:
@@ -277,15 +288,20 @@ class _PathNormalizer:
     - ``/mcp/``  → rewrite scope.path to ``/mcp`` so FastMCP's Route matches.
                    No redirect, so POST clients that don't follow 307 work.
     - ``/mcp``   → pass through unchanged (matches FastMCP directly).
-    - ``/healthz`` → 200 liveness JSON, short-circuited here (pre-host-check,
-                     pre-auth). Liveness only — never gated on readiness.
+    - ``/healthz`` → 200 liveness JSON, short-circuited here (pre-auth, but
+                     post-host-check — ``TrustedHostMiddleware`` fronts this
+                     layer and a disallowed ``Host`` is rejected before
+                     reaching the short-circuit). Liveness only — never
+                     gated on readiness.
     - ``/readyz``  → 200/503 readiness JSON from the shared ``_Readiness``
-                     holder, short-circuited here (pre-host-check, pre-auth).
+                     holder, short-circuited here (same pre-auth /
+                     post-host-check ordering as ``/healthz``).
 
-    Everything else passes through. The probe short-circuits sit ahead of
-    ``TrustedHostMiddleware`` and ``_AuthMiddleware`` (this is the outermost
-    layer of the bare stack) so, for ``http``-scoped requests, they always
-    answer regardless of ``Host`` or ``Authorization``. Non-``http`` scopes
+    Everything else passes through. The probe short-circuits sit behind
+    ``TrustedHostMiddleware`` and ahead of ``_AuthMiddleware`` so, for
+    ``http``-scoped requests with an allowed ``Host``, they answer without
+    ``Authorization`` (orchestrator-friendly) while denying a DNS-rebound
+    drive-by from fingerprinting the server (S-13). Non-``http`` scopes
     (e.g. ``lifespan``, ``websocket``) take the early pass-through above and
     are never short-circuited here.
     """

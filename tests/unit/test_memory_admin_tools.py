@@ -526,7 +526,7 @@ async def test_destructive_tools_allowed_with_bearer_auth(tmp_path, monkeypatch)
     cfg = build_test_config(
         tmp_path / "chroma",
         allow_admin_tools=True,
-        auth=AuthConfig(mode="bearer", bearer_token="s3cr3t-token-value"),
+        auth=AuthConfig(mode="bearer", bearer_token="s3cr3t-token-value-padding-xxxxxxx"),
     )
     mcp = build_server(cfg)
     added = _parse(

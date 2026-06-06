@@ -453,7 +453,9 @@ def test_serve_allows_non_loopback_with_bearer_auth(
     # Production happy path: 0.0.0.0 bind + bearer auth. Guard must not trip.
     monkeypatch.setenv("SQLLENS_LLM__API_KEY", "sk-ant-test")
     monkeypatch.setenv("SQLLENS_AUTH__MODE", "bearer")
-    monkeypatch.setenv("SQLLENS_AUTH__BEARER_TOKEN", "secret-token-123")
+    monkeypatch.setenv(
+        "SQLLENS_AUTH__BEARER_TOKEN", "secret-token-0123456789-0123456789"
+    )
     monkeypatch.delenv("SQLLENS_AUTH__INSECURE", raising=False)
     cfg_path = _write_serve_config(tmp_path, host="0.0.0.0")
 
@@ -644,7 +646,9 @@ def test_validate_allows_non_loopback_with_bearer_auth(
     # is configured, regardless of host. Mirrors the serve-side guard.
     monkeypatch.delenv("SQLLENS_LLM__API_KEY", raising=False)
     monkeypatch.setenv("SQLLENS_AUTH__MODE", "bearer")
-    monkeypatch.setenv("SQLLENS_AUTH__BEARER_TOKEN", "secret-token-123")
+    monkeypatch.setenv(
+        "SQLLENS_AUTH__BEARER_TOKEN", "secret-token-0123456789-0123456789"
+    )
     monkeypatch.delenv("SQLLENS_AUTH__INSECURE", raising=False)
     cfg_path = _write_serve_config(tmp_path, host="0.0.0.0")
 
@@ -809,7 +813,7 @@ def test_loopback_policy_violated_false_on_localhost_hostname() -> None:
 # ---------------------------------------------------------------------------
 
 
-_LEAK_CANARY_TOKEN = "LEAKCANARY123"  # 13 chars: triggers the >=16 bearer guard
+_LEAK_CANARY_TOKEN = "LEAKCANARY123"  # 13 chars: triggers the >=32 bearer guard
 
 
 def _write_full_config(
@@ -882,7 +886,7 @@ def test_validate_validation_error_does_not_leak_secret(
     assert _LEAK_CANARY_TOKEN not in result.stdout
     # rich wraps stderr at the console width; collapse whitespace before the
     # substring check so the assertion isn't sensitive to wrap position.
-    assert "at least 16 characters" in " ".join(result.stderr.split())
+    assert "at least 32 characters" in " ".join(result.stderr.split())
 
 
 def test_serve_validation_error_does_not_leak_secret(
@@ -901,7 +905,7 @@ def test_serve_validation_error_does_not_leak_secret(
     assert result.exit_code == 2, result.stdout
     assert _LEAK_CANARY_TOKEN not in result.stderr
     assert _LEAK_CANARY_TOKEN not in result.stdout
-    assert "at least 16 characters" in " ".join(result.stderr.split())
+    assert "at least 32 characters" in " ".join(result.stderr.split())
 
 
 def test_validate_exit_zero_when_genuinely_ok(

@@ -79,15 +79,20 @@ def test_prefixed_auth_mode_env_still_overrides_toml(
     fields exactly as it did before this fix.
     """
     monkeypatch.setenv("SQLLENS_AUTH__MODE", "bearer")
-    # >= 16 chars: the AuthConfig validator now rejects short bearer tokens.
-    monkeypatch.setenv("SQLLENS_AUTH__BEARER_TOKEN", "shh-but-long-enough-token")
+    # >= 32 chars: the AuthConfig validator rejects short bearer tokens.
+    monkeypatch.setenv(
+        "SQLLENS_AUTH__BEARER_TOKEN", "shh-but-long-enough-token-padding"
+    )
     cfg_path = _write_minimal_toml(tmp_path)
 
     cfg = Config.load(cfg_path)
 
     assert cfg.auth.mode == "bearer"
     assert cfg.auth.bearer_token is not None
-    assert cfg.auth.bearer_token.get_secret_value() == "shh-but-long-enough-token"
+    assert (
+        cfg.auth.bearer_token.get_secret_value()
+        == "shh-but-long-enough-token-padding"
+    )
 
 
 def test_prefixed_server_overrides_coexist_with_stray_unprefixed(

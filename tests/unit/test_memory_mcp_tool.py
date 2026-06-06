@@ -53,6 +53,23 @@ async def test_tool_errors_on_bad_input(tmp_path, monkeypatch) -> None:
     assert "Invalid memory bundle" in str(excinfo.value)
 
 
+async def test_tool_errors_on_oversize_bundle(tmp_path, monkeypatch) -> None:
+    """The DoS-cap BundleFormatError surfaces as isError:true at the MCP
+    boundary — never as an unguarded crash or a silent success."""
+    from sqllens.memory.schema import MAX_BUNDLE_BYTES
+
+    patch_fake_embeddings(monkeypatch)
+    mcp = build_server(_cfg(tmp_path, allow_import=True))
+    # Pad just past the byte cap with cheap ASCII so the size-cap branch fires
+    # (not the JSON-parse branch).
+    oversize = "x" * (MAX_BUNDLE_BYTES + 1)
+    with pytest.raises(Exception) as excinfo:
+        await mcp.call_tool("import_memory", {"bundle_json": oversize})
+    msg = str(excinfo.value)
+    assert "Invalid memory bundle" in msg
+    assert "exceeds" in msg
+
+
 async def test_tool_signals_error_when_every_item_fails(
     tmp_path, monkeypatch
 ) -> None:

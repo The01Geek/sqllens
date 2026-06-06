@@ -51,11 +51,13 @@ _SessionManagerLifespan   — starts/stops FastMCP's session manager via ASGI
                              lifespan; also runs the best-effort eager-agent
                              warmup hook (readiness latches after the attempt)
   ↓
-_PathNormalizer            — fixes "/" and "/mcp/" path mismatches; serves
-                             /healthz and /readyz (pre-host-check, pre-auth)
-  ↓
 TrustedHostMiddleware      — rejects a disallowed Host with 400 (DNS-rebinding
-                             defense); allowlist derived from server.host
+                             defense); allowlist derived from server.host.
+                             Fronts everything below, including the /healthz
+                             and /readyz short-circuits (issue #186 S-13).
+  ↓
+_PathNormalizer            — fixes "/" and "/mcp/" path mismatches; serves
+                             /healthz and /readyz (post-host-check, pre-auth)
   ↓
 _AuthMiddleware            — runs the configured Authenticator
   ↓
@@ -84,9 +86,9 @@ FastMCP registers its endpoint at the **bare** path `/mcp`. Every MCP client we 
 | `/` | 307 redirect to `/mcp/` — browser-friendly so opening the URL in a tab doesn't 404. |
 | `/mcp/` | **Rewrite** `scope["path"]` to `/mcp` and pass through. No redirect, because POST clients that don't follow 307 redirects would lose their request body otherwise. |
 | `/mcp` | Pass through unchanged. |
-| `/healthz` | **Short-circuit**: emit a 200 liveness JSON and return, *before* `TrustedHostMiddleware` and `_AuthMiddleware`. See "Liveness probe" below. |
-| `/readyz` | **Short-circuit**: emit a 200/503 readiness JSON and return, *before* `TrustedHostMiddleware` and `_AuthMiddleware`. See "Readiness probe" below. |
-| Anything else | Pass through (`TrustedHostMiddleware` then validates `Host`; FastMCP will 404 if the path is unrecognized). |
+| `/healthz` | **Short-circuit**: emit a 200 liveness JSON and return, *before* `_AuthMiddleware` (no `Authorization` required) but *after* `TrustedHostMiddleware` (a disallowed `Host` is rejected upstream — issue #186 S-13). See "Liveness probe" below. |
+| `/readyz` | **Short-circuit**: emit a 200/503 readiness JSON and return, with the same pre-auth / post-host-check ordering as `/healthz`. See "Readiness probe" below. |
+| Anything else | Pass through to `_AuthMiddleware`; FastMCP will 404 if the path is unrecognized. `TrustedHostMiddleware` has already validated `Host` upstream. |
 
 The reason this isn't done with a Starlette `Mount` is recorded in the docstring at the top of `transport/http.py`: `Mount` has surprising trailing-slash semantics, and the single-server SQL Lens transport doesn't need path-based dispatch.
 
@@ -96,7 +98,7 @@ The reason this isn't done with a Starlette `Mount` is recorded in the docstring
 
 Two properties are deliberate and pinned by tests:
 
-- **Pre-host-check, pre-auth.** The short-circuit lives in `_PathNormalizer`, which is the *outermost* layer of the bare stack — above both `TrustedHostMiddleware` and `_AuthMiddleware`. A probe to `/healthz` therefore needs no `Authorization` header even when `auth.mode = "bearer"`, and answers regardless of the request `Host`. Covered by `tests/integration/test_http_transport.py::TestHealthz::test_healthz_no_auth` and `::test_healthz_bypasses_bearer_auth`.
+- **Post-host-check, pre-auth (issue #186 S-13).** The short-circuit lives in `_PathNormalizer`, which sits **behind** `TrustedHostMiddleware` and **ahead** of `_AuthMiddleware`. A probe to `/healthz` therefore needs no `Authorization` header even when `auth.mode = "bearer"`, but a request whose `Host` is not on the allowlist is rejected with HTTP 400 before reaching the short-circuit — denying drive-by fingerprinting from a DNS-rebound page in a victim browser. Loopback and the configured `server.host` are in the default allowlist (so an orchestrator probing the bind address needs no extra config), and a wildcard bind (`0.0.0.0` / `::`) opts out by design (`_allowed_hosts` returns `["*"]`). Covered by `tests/integration/test_http_transport.py::TestHealthz::test_healthz_no_auth` and `::test_healthz_bypasses_bearer_auth`.
 - **Liveness only, not readiness.** It asserts solely that the ASGI process is up and the event loop is serving requests. It does **not** check database, ChromaDB, or LLM reachability, and is **never gated on agent-warmup readiness** — a server that answers `/healthz` 200 may still be warming up the agent or fail a `query_database` call. Use `GET /readyz` (below) for warmup-aware gating.
 
 `_send_health` shares the response writer with `_send_401` via the `_send_json(send, status, body, *, extra_headers=())` helper; only `_send_401` passes the `WWW-Authenticate` header through `extra_headers`.
@@ -112,7 +114,7 @@ The flag flips exactly once. A shared `_Readiness` holder object (a `__slots__` 
 
 Deliberate, test-pinned properties:
 
-- **Pre-host-check, pre-auth.** Same outermost-layer short-circuit as `/healthz` — no `Authorization` header required even under `auth.mode = "bearer"`, and answers regardless of the request `Host`.
+- **Post-host-check, pre-auth (issue #186 S-13).** Same `_PathNormalizer` short-circuit as `/healthz` — no `Authorization` header required even under `auth.mode = "bearer"`, but `TrustedHostMiddleware` first rejects a disallowed `Host` with HTTP 400 (loopback and the configured `server.host` are in the default allowlist; wildcard binds opt out via `["*"]`).
 - **Warmup is best-effort and runs *after* the startup `try`.** The eager warmup is the `on_startup` hook, awaited after `__aenter__` succeeds (`_started` is `True`). A warmup `Exception` is logged and startup still acks `lifespan.startup.complete`; readiness still latches. Only a *session-manager* `__aenter__` failure surfaces `lifespan.startup.failed` and keeps readiness at 503. See "Eager agent warmup (`on_startup` hook, issue #116)" below.
 - **First-query latency is eliminated (issue #116).** The warmup primes the *same* request-path `_AGENT_STATE` singleton via `prime_agent` (not a throwaway agent), so a successful warmup means the first real `query_database` call reuses the already-built agent and pays no ChromaDB / embedding-model cold start (the singleton lives in [`tools/_agent.py`](../../../src/sqllens/tools/_agent.py); see [mcp-server/tools.md](./tools.md#shared-agent-singleton-tools_agentpy)).
 
@@ -124,7 +126,7 @@ Regression coverage: `tests/integration/test_http_transport.py` exercises the li
 
 ## Host-header validation: `TrustedHostMiddleware` (S-8)
 
-SQL Lens wraps the auth/MCP stack in Starlette's `TrustedHostMiddleware` (added in issue #107, S-8) as a DNS-rebinding defense. A request whose `Host` is not on the allowlist is rejected with **HTTP 400** before it can reach `_AuthMiddleware` or the MCP handler. `_PathNormalizer` is deliberately the outermost layer, so `/healthz` and `/readyz` short-circuit *before* host validation and always answer regardless of `Host`.
+SQL Lens wraps the auth/MCP stack in Starlette's `TrustedHostMiddleware` (added in issue #107, S-8) as a DNS-rebinding defense. A request whose `Host` is not on the allowlist is rejected with **HTTP 400** before it can reach `_PathNormalizer`, `_AuthMiddleware`, or the MCP handler. **Issue #186 S-13** repositioned `TrustedHostMiddleware` to front `_PathNormalizer` so the `/healthz` and `/readyz` short-circuits also inherit the host allowlist — a DNS-rebound page in a victim browser can no longer fingerprint a SQL Lens server's liveness or readiness state. Loopback and the configured `server.host` are in the default allowlist so orchestrator probes that target the bind address need no extra configuration; wildcard binds (`0.0.0.0` / `::`) opt out by design (see the table below).
 
 The allowlist comes from `_allowed_hosts(cfg)`:
 
@@ -155,7 +157,7 @@ On success, the resulting `AuthContext` is stashed on `scope["state"]["auth"]` s
 
 On failure, `AuthError` becomes HTTP 401 with a JSON body `{"error": "unauthorized", "reason": <short>}` and a `WWW-Authenticate: Bearer realm="sqllens"` header. The reason is `e.reason` from the `AuthError`; the underlying credential is never echoed back. See [authentication/overview.md](../authentication/overview.md).
 
-Lifespan and websocket scopes bypass both `_AuthMiddleware` and `_PathNormalizer` — they only act on `scope["type"] == "http"`. `GET /healthz` and `GET /readyz` are also never seen by `_AuthMiddleware`: `_PathNormalizer` short-circuits them one layer earlier (see "Liveness probe" / "Readiness probe" above), so the auth check never runs for those paths.
+Lifespan and websocket scopes bypass both `_AuthMiddleware` and `_PathNormalizer` — they only act on `scope["type"] == "http"`. `GET /healthz` and `GET /readyz` are also never seen by `_AuthMiddleware`: `_PathNormalizer` short-circuits them one layer earlier (see "Liveness probe" / "Readiness probe" above), so the auth check never runs for those paths. Probes still pass through `TrustedHostMiddleware` upstream, so a disallowed `Host` is rejected with HTTP 400 before the short-circuit fires (issue #186 S-13).
 
 ### Header decoding: UTF-8 first, latin-1 fallback (C-6)
 
