@@ -31,7 +31,7 @@ import json
 import logging
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from sqllens._atomic import atomic_write_text
 from sqllens.config import Config
@@ -145,19 +145,29 @@ class ProfileStore:
                 continue
             try:
                 good[name] = Profile.model_validate(body)
-            except Exception as exc:
+            except (ValidationError, TypeError, ValueError) as exc:
+                # Narrow catch: a broader except would silently swallow truly
+                # unexpected failures (MemoryError, env-specific ImportError,
+                # asyncio.CancelledError) and report them as routine "malformed
+                # entry" warnings, violating CLAUDE.md's narrow-catch rule.
                 skipped.append(name)
                 logger.warning(
                     "profile store: skipping malformed entry %r (%s)", name, exc
                 )
         self._profiles = good
         if skipped:
+            # Log the aggregate alongside setting `_load_error` so an operator
+            # tailing the log sees a single headline like the whole-file
+            # corrupt path emits (via `_flag_corrupt`), not only per-entry
+            # lines that lose the count. Mirrors the discipline `_flag_corrupt`
+            # already follows: state-on-attribute + loud log line.
             self._load_error = (
                 f"Warning: profile store at {self._path} contained "
                 f"{len(skipped)} malformed entr{'y' if len(skipped) == 1 else 'ies'} "
                 f"that were skipped: {', '.join(repr(s) for s in skipped)}. "
                 "Inspect the file and re-upsert."
             )
+            logger.warning(self._load_error)
 
     async def _save(self) -> None:
         # Atomic replace via the shared helper. Run on a worker thread so the
@@ -186,10 +196,25 @@ class ProfileStore:
         return self._profiles.get(name)
 
     async def upsert(self, name: str, profile: Profile) -> Profile:
-        """Insert or replace the named profile and persist to disk."""
+        """Insert or replace the named profile and persist to disk.
+
+        Rolls back the in-memory cache if the disk write fails so the cache
+        and disk never diverge: a failed save would otherwise leave the new
+        value live in this process while disk still holds the prior state,
+        and a restart would silently "lose" what looked like a confirmed
+        upsert. Same rollback applies to :meth:`delete`.
+        """
         async with self._write_lock:
+            prior = self._profiles.get(name)
             self._profiles[name] = profile
-            await self._save()
+            try:
+                await self._save()
+            except BaseException:
+                if prior is None:
+                    self._profiles.pop(name, None)
+                else:
+                    self._profiles[name] = prior
+                raise
         return profile
 
     async def delete(self, name: str) -> None:
@@ -198,13 +223,19 @@ class ProfileStore:
         Callers gate ``default`` deletion before reaching this — the store
         itself does not special-case the name (a future operator-driven
         ``default`` customisation must be deletable to revert to inherit-
-        everything-from-base behaviour).
+        everything-from-base behaviour). Rolls back the in-memory cache on
+        a failed save (see :meth:`upsert`).
         """
         async with self._write_lock:
             if name not in self._profiles:
                 raise KeyError(name)
+            prior = self._profiles[name]
             del self._profiles[name]
-            await self._save()
+            try:
+                await self._save()
+            except BaseException:
+                self._profiles[name] = prior
+                raise
 
 
 def resolve_effective_settings(

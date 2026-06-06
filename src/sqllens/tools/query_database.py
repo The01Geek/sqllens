@@ -197,15 +197,19 @@ async def query_database_impl_with_widgets(
     on the error path and on a turn that produced no structured artifacts;
     callers attach it to ``_meta`` only when non-empty.
 
-    ``query_info`` carries the executed SQL when ``agent.show_details`` is on,
-    ``None`` otherwise — and when present, the same SQL is also appended to
-    ``markdown`` as a fenced ``sql`` block so plain-text clients see it too.
+    ``query_info`` carries the executed SQL when the **resolved profile's**
+    ``show_details`` is on, ``None`` otherwise — and when present, the same
+    SQL is also appended to ``markdown`` as a fenced ``sql`` block so
+    plain-text clients see it too. The gate is the per-request
+    ``effective.show_details``; a profile can flip it on for one request
+    without ``cfg.agent.show_details`` ever being true.
 
     ``memory_info`` carries the aggregate memory hit/miss signal whenever a
     memory search *completes* (a hit or a miss) this turn. It is ``None`` when
     only a search error occurred (no card emitted); on the agent error path the
     function raises before returning anything at all. It is surfaced regardless
-    of ``agent.show_details``; when ``agent.show_memory_details`` is on, a
+    of the resolved ``show_details``; when the resolved profile's
+    ``show_memory_details`` is on (``effective.show_memory_details``), a
     one-line memory footer is also appended to ``markdown`` for plain-text
     clients.
 
@@ -213,8 +217,10 @@ async def query_database_impl_with_widgets(
     per-tool name, arguments, status, duration, and on-failure error, plus the
     derived ``terminal_error`` — assembled by
     :func:`~sqllens.tools._format.build_agent_trace` from the same component
-    stream. It is built only when ``agent.show_details`` is on (``None``
-    otherwise), so a details-off deployment is byte-for-byte unchanged. On the
+    stream. It is built only when the resolved profile's ``show_details``
+    (``effective.show_details``) is on (``None`` otherwise), so a deployment
+    whose base config has ``show_details=False`` and whose callers do not
+    select a profile that turns it on is byte-for-byte unchanged. On the
     agent-error path the function raises :class:`AgentRunError`, carrying this
     same trace on ``.agent_trace`` so the server can attach it to the
     ``isError`` result; the three tool-failure / timeout / LLM-error terminal

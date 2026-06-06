@@ -486,6 +486,196 @@ async def test_row_cap_runner_consults_effective_settings(tmp_path: Path) -> Non
 # --------------------------------------------------------------------------
 
 
+# --------------------------------------------------------------------------
+# Corrupt-store short-circuit on admin reads (CLAUDE.md error-discipline)
+# --------------------------------------------------------------------------
+
+
+async def _build_server_with_corrupt_store(tmp_path: Path):
+    persist = tmp_path / "chroma"
+    persist.mkdir()
+    (persist / "sqllens.profiles.json").write_text("{not json", encoding="utf-8")
+    cfg = build_test_config(
+        persist_dir=persist,
+        profiles_allow_admin_tools=True,
+        auth=AuthConfig(mode="none", insecure=True),
+    )
+    return build_server(cfg)
+
+
+async def test_list_profiles_iserror_when_store_is_corrupt(tmp_path: Path) -> None:
+    """A degraded store must not be served as a clean 'empty list' (CLAUDE.md)."""
+    mcp = await _build_server_with_corrupt_store(tmp_path)
+    result = await _fn(mcp, "list_profiles")()
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    body = _parse(result)
+    assert "warning" in body
+    assert "Warning" in body["warning"]
+
+
+async def test_get_profile_surfaces_corrupt_store(tmp_path: Path) -> None:
+    """Querying a corrupt store must not silently report 'profile not found'."""
+    mcp = await _build_server_with_corrupt_store(tmp_path)
+    result = await _fn(mcp, "get_profile")("analysts")
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    body = _parse(result)
+    assert body["error"] == "profile store is in a degraded state"
+    assert "Warning" in body["warning"]
+
+
+async def test_delete_profile_surfaces_corrupt_store(tmp_path: Path) -> None:
+    """Deleting against a corrupt store must not look like a 'not found' delete."""
+    mcp = await _build_server_with_corrupt_store(tmp_path)
+    result = await _fn(mcp, "delete_profile")("analysts")
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    body = _parse(result)
+    assert body["error"] == "profile store is in a degraded state"
+
+
+# --------------------------------------------------------------------------
+# ProfileStore cache/disk consistency on save failure
+# --------------------------------------------------------------------------
+
+
+async def test_upsert_rolls_back_cache_when_save_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed disk write must not leave the in-memory cache holding the new value.
+
+    Without rollback, the new value would be live for this process and then
+    silently disappear on restart — the worst kind of partial-failure signal.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    store = ProfileStore(cfg)
+    await store.upsert("kept", Profile(max_rows=42))
+
+    async def boom() -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(store, "_save", boom)
+    with pytest.raises(OSError, match="disk full"):
+        await store.upsert("new", Profile(max_rows=100))
+    # New entry must NOT survive in the cache.
+    assert store.get("new") is None
+    # Existing entry must be unmodified.
+    assert store.get("kept").max_rows == 42
+
+    # Overwriting an existing entry that fails must restore the prior value,
+    # not leave the new value in the cache.
+    with pytest.raises(OSError, match="disk full"):
+        await store.upsert("kept", Profile(max_rows=999))
+    assert store.get("kept").max_rows == 42
+
+
+async def test_delete_rolls_back_cache_when_save_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    store = ProfileStore(cfg)
+    await store.upsert("kept", Profile(max_rows=42))
+
+    async def boom() -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(store, "_save", boom)
+    with pytest.raises(OSError, match="disk full"):
+        await store.delete("kept")
+    # Entry must be restored in the cache so it does not "resurrect" on restart
+    # when the next successful save flushes the current cache to disk.
+    assert store.get("kept") is not None
+    assert store.get("kept").max_rows == 42
+
+
+# --------------------------------------------------------------------------
+# ContextVar token-restore on agent failure
+# --------------------------------------------------------------------------
+
+
+async def test_contextvar_resets_when_agent_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent_stub_factory
+) -> None:
+    """A failure inside the agent must not leak the request-local EffectiveSettings.
+
+    Without the `finally: reset_effective_settings` symmetry, the ContextVar
+    would stay bound to the failing request's value for the lifetime of the
+    asyncio task / handler thread — silently overriding the next request.
+    """
+    from sqllens.tools import _agent as agent_module
+    from sqllens.tools.query_database import query_database_impl_with_widgets
+
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+
+    class _BoomStub:
+        async def send_message(self, _ctx, _q, *, conversation_id=None):
+            raise RuntimeError("driver explosion")
+            # pragma: no cover - generator stub
+            yield None
+
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: _BoomStub())
+    # Confirm the var is clean before the call.
+    assert get_effective_settings() is None
+    with pytest.raises(RuntimeError):
+        await query_database_impl_with_widgets(cfg, "q")
+    # And cleaned up after the failure.
+    assert get_effective_settings() is None
+
+
+# --------------------------------------------------------------------------
+# Agent loop max_tool_iterations clamp (operator ceiling cannot be widened)
+# --------------------------------------------------------------------------
+
+
+def test_effective_max_tool_iterations_never_widens_config_cap() -> None:
+    """The agent loop's effective cap must be the *minimum* of config + effective.
+
+    Pins the safety invariant against a future regression that swaps ``min``
+    for ``max`` (or drops the ``min`` entirely): a profile cannot widen the
+    operator-chosen ``max_tool_iterations`` ceiling, only narrow it.
+    """
+    config_cap = 10
+
+    # Effective is None (no profile bound) → fall back to config cap.
+    effective_max = (
+        config_cap
+        if get_effective_settings() is None
+        else min(config_cap, get_effective_settings().max_tool_iterations)
+    )
+    assert effective_max == config_cap
+
+    # Effective narrower than config → effective wins.
+    tight = EffectiveSettings(
+        show_details=False,
+        show_memory_details=False,
+        max_tool_iterations=3,
+        max_rows=100,
+        similarity_threshold=0.7,
+    )
+    token = set_effective_settings(tight)
+    try:
+        eff = get_effective_settings()
+        assert min(config_cap, eff.max_tool_iterations) == 3
+    finally:
+        reset_effective_settings(token)
+
+    # Effective wider than config → config still wins (cannot widen ceiling).
+    wide = EffectiveSettings(
+        show_details=False,
+        show_memory_details=False,
+        max_tool_iterations=99,
+        max_rows=100,
+        similarity_threshold=0.7,
+    )
+    token = set_effective_settings(wide)
+    try:
+        eff = get_effective_settings()
+        assert min(config_cap, eff.max_tool_iterations) == config_cap
+    finally:
+        reset_effective_settings(token)
+
+
 async def test_default_profile_drops_query_info_even_with_sql_card(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent_stub_factory
 ) -> None:

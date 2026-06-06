@@ -23,6 +23,7 @@ from typing import Any, get_args
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
+from pydantic import ValidationError
 
 from sqllens.config import Config
 from sqllens.profiles import DEFAULT_PROFILE_NAME, Profile, ProfileStore
@@ -294,8 +295,8 @@ def build_server(cfg: Config) -> FastMCP:
         ``similarity_threshold``). Omitting it (or passing an unknown name)
         resolves through the reserved ``default`` profile, which falls back
         to base config — existing callers see no change. Profiles are managed
-        through ``upsert_profile`` / ``list_profiles`` (gated on
-        ``profiles.allow_admin_tools``).
+        through ``list_profiles`` / ``get_profile`` / ``upsert_profile`` /
+        ``delete_profile`` (all gated on ``profiles.allow_admin_tools``).
 
         When the resolved profile's ``show_details`` is on and the agent
         successfully executed a SQL query, the answer also includes the
@@ -308,6 +309,8 @@ def build_server(cfg: Config) -> FastMCP:
         step-by-step agent trace under ``_meta["sqllens/agent_trace"]`` —
         per-tool name, arguments, status, duration, on-failure error, and the
         run's ``terminal_error`` — on both successful and failed responses.
+        The ``sqllens/agent_trace`` key is omitted entirely when the resolved
+        profile's ``show_details`` is off.
         """
         metadata = _request_metadata(ctx)
         # Mint a stable id when the caller did not supply one, so the resolved
@@ -694,9 +697,14 @@ def build_server(cfg: Config) -> FastMCP:
         def config_admin_widget() -> str:
             return load_widget_html("config_admin.html")
 
-        # Serialize profile-admin mutations; the underlying ProfileStore also
-        # holds its own write lock, but this lock guards the read-then-write
-        # pattern below (validation + upsert) atomically end-to-end.
+        # Serialize profile-admin mutations. The underlying ProfileStore
+        # already holds its own write lock per call; this lock is a thin
+        # outer guard around the *call* so the cache-mutation-plus-disk-write
+        # the store performs cannot be interleaved with a sibling write
+        # against the same shared store instance from a different admin tool.
+        # Body validation (``Profile.model_validate``) deliberately stays
+        # OUTSIDE this lock — it is a pure function on the request input and
+        # holds no reference to the store.
         profile_admin_lock = asyncio.Lock()
 
         def _profile_write_auth() -> None:
@@ -706,18 +714,26 @@ def build_server(cfg: Config) -> FastMCP:
 
         # Bounds derived from the live Profile pydantic model so the wire
         # shape (and the widget's bounded inputs) cannot drift from the
-        # validator the upsert path enforces. Adding a sixth knob updates
-        # `Profile` and this surface picks it up automatically.
+        # validator the upsert path enforces. Adding a sixth knob to
+        # ``Profile`` makes the bounds surface here pick it up automatically
+        # via ``_profile_field_bounds``; the sibling ``base`` dict in
+        # ``list_profiles`` below hardcodes the five field names and must be
+        # extended by hand.
         _PROFILE_BOUNDS = _profile_field_bounds()
 
         @mcp.tool(structured_output=False)
-        async def list_profiles() -> str:
+        async def list_profiles() -> str | CallToolResult:
             """List stored named profiles plus base-config values and per-knob bounds.
 
             Returns ``{"default_name": "default", "base": {...}, "bounds":
             {...}, "profiles": [{"name": ..., "knobs": {...}}, ...]}``. No
             secrets, no DB URL — the response is safe to render in a widget
-            and to log.
+            and to log. When the underlying store failed to load (corrupt
+            JSON, unreadable file, malformed entries), the same payload is
+            returned as an ``isError`` with a top-level ``"warning"`` so a
+            non-LLM client cannot mistake the empty / partial listing for a
+            clean state. Mirrors the discipline ``export_memories`` applies
+            to a lossy export.
             """
             store = profile_store
             profiles_view: list[dict[str, Any]] = []
@@ -739,6 +755,7 @@ def build_server(cfg: Config) -> FastMCP:
             }
             if store.load_error:
                 payload["warning"] = store.load_error
+                return _profile_error(payload)
             return json.dumps(payload)
 
         @mcp.tool(structured_output=False)
@@ -748,9 +765,20 @@ def build_server(cfg: Config) -> FastMCP:
             Returns the profile's JSON object, or an ``isError`` result with
             ``{"error": "profile not found", "name": ...}`` when no profile
             has that name. Per CLAUDE.md's isError discipline an unknown name
-            is a failed lookup, not a green ``null``.
+            is a failed lookup, not a green ``null``. When the underlying
+            store failed to load, a degraded-store ``isError`` is returned
+            instead — a plain "not found" against a corrupt store would
+            silently mask the real reason the profile is unreachable.
             """
             store = profile_store
+            if store.load_error:
+                return _profile_error(
+                    {
+                        "error": "profile store is in a degraded state",
+                        "warning": store.load_error,
+                        "name": name,
+                    }
+                )
             profile = store.get(name)
             if profile is None:
                 return _profile_error(
@@ -784,7 +812,16 @@ def build_server(cfg: Config) -> FastMCP:
                 )
             try:
                 profile = Profile.model_validate(knobs)
-            except Exception as exc:
+            except ValidationError as exc:
+                # Narrow catch: a broader `except Exception` would route
+                # genuinely unexpected failures (an environmental import
+                # error, a future pydantic refactor) through the
+                # "invalid profile body" message, sending operators on a
+                # phantom-validation chase. Pydantic raises ValidationError
+                # for body-shape problems; anything else is real signal and
+                # should reach the server log via the broad-except branch
+                # below on store.upsert (or surface through the FastMCP
+                # wrapper if it escapes here).
                 return _profile_error(
                     {"error": f"invalid profile body: {exc}"}
                 )
@@ -808,7 +845,9 @@ def build_server(cfg: Config) -> FastMCP:
             The reserved ``default`` name cannot be deleted; the call returns
             ``isError`` with a clear message. An unknown name also returns
             ``isError``. Refuses on an unauthenticated endpoint unless
-            ``auth.insecure`` is set.
+            ``auth.insecure`` is set. A degraded store (load failed) returns
+            ``isError`` rather than a misleading "not found" — see
+            ``get_profile`` for the same short-circuit rationale.
             """
             _profile_write_auth()
             if name == DEFAULT_PROFILE_NAME:
@@ -817,6 +856,14 @@ def build_server(cfg: Config) -> FastMCP:
                      "name": name}
                 )
             store = profile_store
+            if store.load_error:
+                return _profile_error(
+                    {
+                        "error": "profile store is in a degraded state",
+                        "warning": store.load_error,
+                        "name": name,
+                    }
+                )
             try:
                 async with profile_admin_lock:
                     await store.delete(name)

@@ -156,6 +156,14 @@ class ProfilesConfig(BaseModel):
     that opts a server into exposing the profile-admin MCP tools.
     """
 
+    # extra="forbid" so a misspelled key under [profiles] (e.g.
+    # ``allow_admintools``) fails loudly at load — via TOML or the
+    # SQLLENS_PROFILES__ env path — instead of silently reverting to the
+    # closed-by-default admin gate. Pydantic v2 does NOT cascade the top-level
+    # Config(extra="forbid") into nested BaseModels, so each nested section
+    # that wants strict admit-on-rename must set it itself.
+    model_config = ConfigDict(extra="forbid")
+
     allow_admin_tools: bool = Field(
         default=False,
         description=(
