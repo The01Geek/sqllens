@@ -802,6 +802,50 @@ class TestMetadataPlumbing:
             "request_id": "req-xyz",
         }
 
+    def test_request_metadata_accepts_exactly_max_keys(self) -> None:
+        # The cap uses a strict `>`, so exactly `_MAX_META_KEYS` keys must
+        # pass through. Pins the inclusive boundary so a future refactor to
+        # `>=` fails loudly instead of silently flipping the cap by one.
+        from sqllens.server import _MAX_META_KEYS, _request_metadata
+
+        class _Meta:
+            model_extra: dict = {f"k{i}": "v" for i in range(_MAX_META_KEYS)}  # noqa: RUF012
+
+        class _RC:
+            meta = _Meta()
+
+        class _Ctx:
+            request_context = _RC()
+
+        result = _request_metadata(_Ctx())
+        assert len(result) == _MAX_META_KEYS
+
+    def test_request_metadata_accepts_non_json_native_via_default_str(self) -> None:
+        # The size check passes `default=str` to `json.dumps` so non-JSON-native
+        # values like `datetime` round-trip through `str()` for measurement.
+        # Pins that the accept path holds for legitimate non-JSON metadata; if
+        # `default=str` is ever dropped, this test fails before the fail-secure
+        # `{}` regression reaches production.
+        from datetime import datetime
+
+        from sqllens.server import _request_metadata
+
+        created_at = datetime(2026, 1, 1, 12, 0, 0)
+
+        class _Meta:
+            model_extra: dict = {"tenant_id": "acme", "created_at": created_at}  # noqa: RUF012
+
+        class _RC:
+            meta = _Meta()
+
+        class _Ctx:
+            request_context = _RC()
+
+        assert _request_metadata(_Ctx()) == {
+            "tenant_id": "acme",
+            "created_at": created_at,
+        }
+
     def test_request_metadata_rejects_unserializable_extras(self) -> None:
         # Pathological extras (circular refs, non-JSON-serializable types not
         # covered by default=str) yield {} so the dynamic RLS rule blocks
@@ -813,6 +857,29 @@ class TestMetadataPlumbing:
 
         class _Meta:
             model_extra = circular
+
+        class _RC:
+            meta = _Meta()
+
+        class _Ctx:
+            request_context = _RC()
+
+        assert _request_metadata(_Ctx()) == {}
+
+    def test_request_metadata_rejects_deeply_nested_extras(self) -> None:
+        # `json.dumps` raises `RecursionError` (not `ValueError`) on extreme
+        # nesting; without the broad `except` this would propagate as an
+        # unstructured traceback to the MCP client, violating the docstring's
+        # "any failure yields {}" promise. Pins the broadened catch.
+        from sqllens.server import _request_metadata
+
+        nested: dict = {"v": 1}
+        for _ in range(15_000):
+            nested = {"k": nested}
+        deep_extras = {"deep": nested}
+
+        class _Meta:
+            model_extra = deep_extras
 
         class _RC:
             meta = _Meta()

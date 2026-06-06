@@ -62,8 +62,11 @@ _MAX_TRACE_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES
 # single 100 KB ``content`` still echoes verbatim every turn. This per-value cap
 # truncates each string in the arguments tree so the trace stays useful for
 # debugging (tool name + a bounded prefix of each arg) without echoing the full
-# payload of any single saved-memory write or query.
-_MAX_TRACE_ARGUMENT_VALUE_BYTES = 1024
+# payload of any single saved-memory write or query. The cap counts Python
+# code points (``len(str)`` and ``str[:n]`` slice), not UTF-8 bytes — a 1024-
+# char prefix of multi-byte content can exceed 1024 bytes once serialized;
+# the whole-trace ``_MAX_TRACE_PAYLOAD_BYTES`` budget catches that overflow.
+_MAX_TRACE_ARGUMENT_VALUE_CHARS = 1024
 _TRACE_TRUNCATION_SUFFIX = "…(truncated)"
 
 # Overall ceiling across the whole ``sqllens/blocks`` array. The per-block cap
@@ -747,16 +750,19 @@ def _truncate_trace_arguments(value: object) -> object:
     arbitrarily long. The whole-trace cap in :func:`_cap_trace_size` drops
     *all* arguments when over budget; this per-value cap preserves the
     structure (so a debugging client still sees what was called and the
-    leading bytes of each arg) while ensuring no single value can echo
+    leading characters of each arg) while ensuring no single value can echo
     unbounded content back to the client on every turn.
 
-    Strings over ``_MAX_TRACE_ARGUMENT_VALUE_BYTES`` are sliced and suffixed
-    with ``_TRACE_TRUNCATION_SUFFIX``; dicts and lists recurse; other scalars
-    (int/float/bool/None) pass through unchanged.
+    Strings over ``_MAX_TRACE_ARGUMENT_VALUE_CHARS`` are sliced (by code
+    point) and suffixed with ``_TRACE_TRUNCATION_SUFFIX``; dicts and lists
+    recurse; other scalars (int/float/bool/None) pass through unchanged.
+    The returned truncated string is ``_MAX_TRACE_ARGUMENT_VALUE_CHARS +
+    len(_TRACE_TRUNCATION_SUFFIX)`` characters long — intentionally one
+    suffix's worth over the per-value cap so the elision is self-flagging.
     """
     if isinstance(value, str):
-        if len(value) > _MAX_TRACE_ARGUMENT_VALUE_BYTES:
-            return value[:_MAX_TRACE_ARGUMENT_VALUE_BYTES] + _TRACE_TRUNCATION_SUFFIX
+        if len(value) > _MAX_TRACE_ARGUMENT_VALUE_CHARS:
+            return value[:_MAX_TRACE_ARGUMENT_VALUE_CHARS] + _TRACE_TRUNCATION_SUFFIX
         return value
     if isinstance(value, dict):
         return {k: _truncate_trace_arguments(v) for k, v in value.items()}

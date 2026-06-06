@@ -98,7 +98,10 @@ _CONVERSATION_META_KEY = "sqllens/conversation"
 # the serialized size of those extras; overflow yields ``{}`` so dynamic RLS
 # rules fail-secure (the same documented behaviour as a missing or unreadable
 # ``_meta``). 64 keys covers any realistic dynamic-RLS keyset (tenant_id,
-# user_id, role, region, …) with several decades of headroom.
+# user_id, role, region, …) with several decades of headroom. The byte cap is
+# measured via ``json.dumps`` with its default ``ensure_ascii=True``, which
+# emits pure ASCII (any non-ASCII codepoints escape to ``\uXXXX``), so
+# ``len(serialized) == byte count of the on-wire form``.
 _MAX_META_KEYS = 64
 _MAX_META_BYTES = 16 * 1024
 
@@ -216,10 +219,17 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
     extras = dict(extra)
     try:
         serialized_len = len(json.dumps(extras, separators=(",", ":"), default=str))
-    except (TypeError, ValueError):
-        # default=str above covers most non-JSON-native values; this catches
-        # anything pathological (e.g. circular refs raising ValueError). Same
-        # fail-secure: dynamic RLS rules see no metadata.
+    except Exception:
+        # ``default=str`` covers most non-JSON-native values; the broad catch
+        # backstops anything pathological — circular refs (``ValueError``),
+        # types ``default=str`` can't stringify or whose ``__str__`` raises
+        # (``TypeError`` / arbitrary), deeply-nested extras (``RecursionError``,
+        # which is *not* a ``ValueError`` subclass), or any future ``json``
+        # encoder failure. The docstring's "any failure to read the request
+        # context yields ``{}``" promise is the load-bearing contract here;
+        # narrower except clauses have repeatedly leaked unstructured
+        # tracebacks to MCP clients in this codebase. Same fail-secure:
+        # dynamic RLS rules see no metadata.
         logger.warning(
             "request _meta extras not JSON-serializable; discarding for fail-secure metadata",
             exc_info=True,

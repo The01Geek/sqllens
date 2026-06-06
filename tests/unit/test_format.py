@@ -1484,7 +1484,7 @@ def test_build_agent_trace_top_level_error_outranks_iteration_limit() -> None:
 
 def test_build_agent_trace_caps_oversized_arguments() -> None:
     # Per-value truncation (the new first-tier cap) bounds the single huge SQL
-    # arg to _MAX_TRACE_ARGUMENT_VALUE_BYTES, keeping the trace well under the
+    # arg to _MAX_TRACE_ARGUMENT_VALUE_CHARS, keeping the trace well under the
     # whole-trace budget. The whole-trace _cap_trace_size fallback is therefore
     # *not* triggered — the arguments key is preserved (truncated), not dropped.
     from sqllens.tools._format import _TRACE_TRUNCATION_SUFFIX
@@ -1519,7 +1519,7 @@ def test_build_agent_trace_truncates_long_string_argument_values() -> None:
     # arg structure is preserved (the tool name and key are still visible) but
     # the content cannot echo unbounded back to the client.
     from sqllens.tools._format import (
-        _MAX_TRACE_ARGUMENT_VALUE_BYTES,
+        _MAX_TRACE_ARGUMENT_VALUE_CHARS,
         _TRACE_TRUNCATION_SUFFIX,
     )
 
@@ -1530,7 +1530,7 @@ def test_build_agent_trace_truncates_long_string_argument_values() -> None:
     assert set(args.keys()) == {"content"}
     assert args["content"].endswith(_TRACE_TRUNCATION_SUFFIX)
     assert len(args["content"]) == (
-        _MAX_TRACE_ARGUMENT_VALUE_BYTES + len(_TRACE_TRUNCATION_SUFFIX)
+        _MAX_TRACE_ARGUMENT_VALUE_CHARS + len(_TRACE_TRUNCATION_SUFFIX)
     )
     # No whole-trace truncation flag — the per-value cap is enough.
     assert "arguments_truncated" not in trace
@@ -1555,7 +1555,7 @@ def test_build_agent_trace_truncates_nested_string_values() -> None:
     # Nested dicts/lists are recursed into so a deeply-buried oversize string
     # still gets bounded.
     from sqllens.tools._format import (
-        _MAX_TRACE_ARGUMENT_VALUE_BYTES,
+        _MAX_TRACE_ARGUMENT_VALUE_CHARS,
         _TRACE_TRUNCATION_SUFFIX,
     )
 
@@ -1566,7 +1566,7 @@ def test_build_agent_trace_truncates_nested_string_values() -> None:
     args = trace["steps"][0]["arguments"]
     assert args["outer"]["inner"].endswith(_TRACE_TRUNCATION_SUFFIX)
     assert len(args["outer"]["inner"]) == (
-        _MAX_TRACE_ARGUMENT_VALUE_BYTES + len(_TRACE_TRUNCATION_SUFFIX)
+        _MAX_TRACE_ARGUMENT_VALUE_CHARS + len(_TRACE_TRUNCATION_SUFFIX)
     )
     assert args["items"][0] == "short"
     assert args["items"][1].endswith(_TRACE_TRUNCATION_SUFFIX)
