@@ -97,6 +97,27 @@ _AGENT_TRACE_META_KEY = "sqllens/agent_trace"
 _CONVERSATION_META_KEY = "sqllens/conversation"
 
 
+def _profile_field_bounds() -> dict[str, dict[str, float]]:
+    """Derive the per-knob ``ge``/``le`` bounds from the ``Profile`` pydantic model.
+
+    Single source of truth: the bounds shipped over the wire (and into the
+    widget's bounded number inputs) come from the same pydantic Field
+    metadata the upsert path validates against, so a model change cannot
+    leave the widget admitting values the validator rejects.
+    """
+    bounds: dict[str, dict[str, float]] = {}
+    for name, info in Profile.model_fields.items():
+        knob: dict[str, float] = {}
+        for meta in info.metadata:
+            for attr in ("ge", "le"):
+                value = getattr(meta, attr, None)
+                if value is not None:
+                    knob[attr] = value
+        if knob:
+            bounds[name] = knob
+    return bounds
+
+
 def _conversation_result(
     markdown: str, conversation_id: str, extra_meta: dict[str, Any]
 ) -> CallToolResult:
@@ -213,21 +234,39 @@ def build_server(cfg: Config) -> FastMCP:
     def query_results_widget() -> str:
         return load_widget_html()
 
+    # Eager profile-store singleton shared between ``query_database`` and the
+    # profile-admin tools. Construction is one small JSON file read at boot —
+    # paying it here keeps the request path free of a first-request hitch and
+    # matches the eager construction of ``admin_store`` for memory-admin below.
+    profile_store = ProfileStore(cfg)
+
+    def _json_error_result(payload: dict[str, Any]) -> CallToolResult:
+        """Structured-body + ``isError: true`` CallToolResult.
+
+        Shared by every admin tool (memory + profile) so the wire shape stays
+        identical and the helper has exactly one home.
+        """
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(payload))],
+            isError=True,
+        )
+
+    def _require_write_auth(noun: str) -> None:
+        """Refuse to mutate a persisted store on an unauthenticated endpoint.
+
+        ``noun`` ("memory" / "profile") only changes the error string; the
+        gate is identical, so the policy lives in one place.
+        """
+        if cfg.auth.mode == "none" and not cfg.auth.insecure:
+            raise RuntimeError(
+                f"This tool mutates the {noun} store and is disabled on an "
+                "unauthenticated endpoint. Set auth.mode='bearer' (or "
+                "auth.insecure=true on a closed network) to enable it."
+            )
+
     # structured_output=False: the success path may return a CallToolResult
     # carrying _meta; an auto-derived outputSchema would make FastMCP validate
     # a (deliberately absent) structuredContent and reject it.
-    # Lazily-built profile store; the singleton is shared between the
-    # ``query_database`` tool and the profile-admin tools so both see the same
-    # in-memory cache and atomic-file-replace write path. Built only once on
-    # first use to avoid the disk read on stdio servers that never use
-    # profiles. Closure-local so it is rebuilt per ``build_server`` call.
-    _profile_store: list[ProfileStore | None] = [None]
-
-    def _get_profile_store() -> ProfileStore:
-        if _profile_store[0] is None:
-            _profile_store[0] = ProfileStore(cfg)
-        return _profile_store[0]
-
     @mcp.tool(meta={"ui": {"resourceUri": _WIDGET_URI}}, structured_output=False)
     async def query_database(
         question: str,
@@ -283,7 +322,7 @@ def build_server(cfg: Config) -> FastMCP:
                     metadata=metadata,
                     conversation_id=conversation_id,
                     profile=profile,
-                    profile_store=_get_profile_store(),
+                    profile_store=profile_store,
                 )
             )
         except AgentRunError as exc:
@@ -431,25 +470,10 @@ def build_server(cfg: Config) -> FastMCP:
                 )
             return value
 
-        def _require_write_auth() -> None:
-            # "Destructive tools require auth": refuse to mutate the store from an
-            # endpoint that authenticates nobody, unless the operator has
-            # explicitly acknowledged a closed network via auth.insecure.
-            if cfg.auth.mode == "none" and not cfg.auth.insecure:
-                raise RuntimeError(
-                    "This tool mutates the memory store and is disabled on an "
-                    "unauthenticated endpoint. Set auth.mode='bearer' (or "
-                    "auth.insecure=true on a closed network) to enable it."
-                )
+        def _memory_write_auth() -> None:
+            _require_write_auth("memory")
 
-        def _json_error(payload: dict[str, Any]) -> CallToolResult:
-            # Structured body AND isError:true — the calling client gets the
-            # per-row detail (e.g. add_memories.errors[]) instead of only a
-            # free-text message, while still seeing the failure signal.
-            return CallToolResult(
-                content=[TextContent(type="text", text=json.dumps(payload))],
-                isError=True,
-            )
+        _json_error = _json_error_result
 
         @mcp.tool(structured_output=False)
         async def list_memories(
@@ -510,7 +534,7 @@ def build_server(cfg: Config) -> FastMCP:
             is set. Returns ``{"deleted": true}``, or an ``isError`` result with
             ``{"deleted": false}`` when no memory has that id.
             """
-            _require_write_auth()
+            _memory_write_auth()
             try:
                 async with admin_write_lock:
                     result = memory_admin.delete_memory(admin_store, memory_id)
@@ -536,7 +560,7 @@ def build_server(cfg: Config) -> FastMCP:
             is set. ``memory_type`` is ``tool_usage``, ``text``, or omitted for
             all. Returns ``{"deleted_count": N}``.
             """
-            _require_write_auth()
+            _memory_write_auth()
             mtype = _parse_memory_type(memory_type)
             try:
                 async with admin_write_lock:
@@ -569,7 +593,7 @@ def build_server(cfg: Config) -> FastMCP:
             structured body is still returned so the caller sees which rows
             failed).
             """
-            _require_write_auth()
+            _memory_write_auth()
             try:
                 async with admin_write_lock:
                     result = await memory_admin.add_memories(
@@ -655,8 +679,8 @@ def build_server(cfg: Config) -> FastMCP:
     # block above: a read-only triple (list_profiles, get_profile) plus a
     # write-guarded pair (upsert_profile, delete_profile) that refuses to run
     # on an unauthenticated endpoint unless ``auth.insecure`` acknowledges a
-    # closed network. The lazy ``_get_profile_store()`` singleton above backs
-    # both the request-path and these admin tools so they share one in-memory
+    # closed network. The eager ``profile_store`` singleton above backs
+    # both the request path and these admin tools so they share one in-memory
     # cache and the atomic-file-replace write path.
     if cfg.profiles.allow_admin_tools:
         # Same widget/host advertisement contract as the memory-admin widget:
@@ -675,32 +699,16 @@ def build_server(cfg: Config) -> FastMCP:
         # pattern below (validation + upsert) atomically end-to-end.
         profile_admin_lock = asyncio.Lock()
 
-        def _require_profile_write_auth() -> None:
-            # Same gate as the memory-admin destructive subset: refuse to
-            # mutate the persisted store from an endpoint that authenticates
-            # nobody, unless the operator explicitly acknowledged a closed
-            # network via auth.insecure.
-            if cfg.auth.mode == "none" and not cfg.auth.insecure:
-                raise RuntimeError(
-                    "This tool mutates the profile store and is disabled on "
-                    "an unauthenticated endpoint. Set auth.mode='bearer' "
-                    "(or auth.insecure=true on a closed network) to enable it."
-                )
+        def _profile_write_auth() -> None:
+            _require_write_auth("profile")
 
-        def _profile_error(payload: dict[str, Any]) -> CallToolResult:
-            return CallToolResult(
-                content=[TextContent(type="text", text=json.dumps(payload))],
-                isError=True,
-            )
+        _profile_error = _json_error_result
 
-        # Bounds mirror the live config so a profile cannot bypass a ceiling
-        # that the operator chose for the base. Source of truth for the
-        # widget's bounded number inputs too.
-        _PROFILE_BOUNDS = {
-            "max_tool_iterations": {"ge": 1, "le": 100},
-            "max_rows": {"ge": 1, "le": 1_000_000},
-            "similarity_threshold": {"ge": 0.0, "le": 1.0},
-        }
+        # Bounds derived from the live Profile pydantic model so the wire
+        # shape (and the widget's bounded inputs) cannot drift from the
+        # validator the upsert path enforces. Adding a sixth knob updates
+        # `Profile` and this surface picks it up automatically.
+        _PROFILE_BOUNDS = _profile_field_bounds()
 
         @mcp.tool(structured_output=False)
         async def list_profiles() -> str:
@@ -711,7 +719,7 @@ def build_server(cfg: Config) -> FastMCP:
             secrets, no DB URL — the response is safe to render in a widget
             and to log.
             """
-            store = _get_profile_store()
+            store = profile_store
             profiles_view: list[dict[str, Any]] = []
             for name, p in sorted(store.list_profiles().items()):
                 profiles_view.append(
@@ -742,7 +750,7 @@ def build_server(cfg: Config) -> FastMCP:
             has that name. Per CLAUDE.md's isError discipline an unknown name
             is a failed lookup, not a green ``null``.
             """
-            store = _get_profile_store()
+            store = profile_store
             profile = store.get(name)
             if profile is None:
                 return _profile_error(
@@ -765,7 +773,7 @@ def build_server(cfg: Config) -> FastMCP:
             ``isError`` with a structured ``{"error": ...}`` body — never a
             success that merely reports the failure.
             """
-            _require_profile_write_auth()
+            _profile_write_auth()
             if not isinstance(name, str) or not name.strip():
                 return _profile_error(
                     {"error": "profile name must be a non-empty string"}
@@ -780,7 +788,7 @@ def build_server(cfg: Config) -> FastMCP:
                 return _profile_error(
                     {"error": f"invalid profile body: {exc}"}
                 )
-            store = _get_profile_store()
+            store = profile_store
             try:
                 async with profile_admin_lock:
                     saved = await store.upsert(name, profile)
@@ -802,13 +810,13 @@ def build_server(cfg: Config) -> FastMCP:
             ``isError``. Refuses on an unauthenticated endpoint unless
             ``auth.insecure`` is set.
             """
-            _require_profile_write_auth()
+            _profile_write_auth()
             if name == DEFAULT_PROFILE_NAME:
                 return _profile_error(
                     {"error": "cannot delete the reserved 'default' profile",
                      "name": name}
                 )
-            store = _get_profile_store()
+            store = profile_store
             try:
                 async with profile_admin_lock:
                     await store.delete(name)

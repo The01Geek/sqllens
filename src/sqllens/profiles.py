@@ -29,12 +29,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
-import tempfile
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from sqllens._atomic import atomic_write_text
 from sqllens.config import Config
 from sqllens.runtime import EffectiveSettings
 
@@ -109,35 +108,31 @@ class ProfileStore:
         """A loud diagnostic when the store file failed to load; ``None`` on clean load."""
         return self._load_error
 
+    def _flag_corrupt(self, reason: str) -> None:
+        """Set the loud-warning load_error and log it. Centralizes the fallback message."""
+        self._load_error = (
+            f"Warning: profile store at {self._path} {reason}. "
+            "Falling back to default-only profiles; new upserts will overwrite."
+        )
+        logger.warning(self._load_error)
+
     def _read_from_disk(self) -> None:
         if not self._path.exists():
             return
         try:
             raw = self._path.read_text(encoding="utf-8")
         except OSError as exc:
-            self._load_error = (
-                f"Warning: could not read profile store at {self._path}: {exc}. "
-                "Falling back to default-only profiles; new upserts will overwrite."
-            )
-            logger.warning(self._load_error)
+            self._flag_corrupt(f"could not be read: {exc}")
             return
         try:
             data = json.loads(raw)
         except json.JSONDecodeError as exc:
-            self._load_error = (
-                f"Warning: profile store at {self._path} is not valid JSON ({exc.msg} "
-                f"at line {exc.lineno} col {exc.colno}). "
-                "Falling back to default-only profiles; new upserts will overwrite."
+            self._flag_corrupt(
+                f"is not valid JSON ({exc.msg} at line {exc.lineno} col {exc.colno})"
             )
-            logger.warning(self._load_error)
             return
         if not isinstance(data, dict):
-            self._load_error = (
-                f"Warning: profile store at {self._path} top-level is not a JSON "
-                "object. Falling back to default-only profiles; new upserts will "
-                "overwrite."
-            )
-            logger.warning(self._load_error)
+            self._flag_corrupt("top-level is not a JSON object")
             return
         # Per-entry parse: a single bad entry must not poison the whole store.
         # We count skipped entries and surface them in the load_error so the
@@ -165,29 +160,16 @@ class ProfileStore:
             )
 
     async def _save(self) -> None:
-        # Atomic replace: write to a temp file in the same directory, then rename
-        # over the target. A partial write cannot leave a corrupt JSON on disk.
+        # Atomic replace via the shared helper. Run on a worker thread so the
+        # event loop stays responsive to concurrent requests (e.g. an
+        # in-flight ``query_database``) even when fsync stalls.
         self._path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(
             {name: p.model_dump(exclude_none=True) for name, p in self._profiles.items()},
             indent=2,
             sort_keys=True,
         )
-        fd, tmp_path = tempfile.mkstemp(
-            prefix=".profiles.", suffix=".tmp", dir=str(self._path.parent)
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(payload)
-            os.replace(tmp_path, self._path)
-        except Exception:
-            # Clean up the temp file on failure so a future run does not see
-            # stale .profiles.*.tmp turds.
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        await asyncio.to_thread(atomic_write_text, self._path, payload)
 
     def list_profiles(self) -> dict[str, Profile]:
         """Return all stored profiles, including ``default`` if present."""
@@ -240,14 +222,18 @@ def resolve_effective_settings(
       ``delete`` paths surface unknown-name as ``isError``.
     - ``None`` fields on the resolved profile inherit from base ``Config``.
 
-    ``store`` is optional: pass it in for hot paths where the caller already
-    holds the singleton, or omit it on cold paths (CLI ``validate``, tests)
-    where construction is cheap and we want a fresh disk read.
+    ``store`` is the cached singleton owned by the server (or any caller). When
+    it is ``None`` (CLI ``validate``, tests with no persisted profiles) the
+    function resolves through an empty in-memory view — no disk read, no
+    silent fallback to a misleading "every request gets a fresh ProfileStore"
+    foot-gun.
     """
-    store = store if store is not None else ProfileStore(cfg)
-    profile = store.get(profile_name) if profile_name else None
-    if profile is None and profile_name != DEFAULT_PROFILE_NAME:
-        profile = store.get(DEFAULT_PROFILE_NAME)
+    name = profile_name or DEFAULT_PROFILE_NAME
+    profile: Profile | None = None
+    if store is not None:
+        profile = store.get(name)
+        if profile is None and name != DEFAULT_PROFILE_NAME:
+            profile = store.get(DEFAULT_PROFILE_NAME)
     p = profile or Profile()
     return EffectiveSettings(
         show_details=p.show_details if p.show_details is not None else cfg.agent.show_details,

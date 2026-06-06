@@ -8,14 +8,11 @@ import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
-# Minimal documented dependency on sqllens.runtime (the request-local
-# EffectiveSettings ContextVar) so a named profile can narrow the streaming
-# row cap per request without rebuilding the agent. The vendored tree imports
-# sqllens.runtime in exactly three places (mysql/postgres/sqlite runners),
-# all to read max_rows; this is the only top-level sqllens.* import in the
-# integration tree.
-from sqllens.runtime import get_effective_settings
-from sqllens.safety.limits import rows_to_capped_df
+# Minimal documented dependency on sqllens.safety so a per-request profile
+# can narrow the streaming row cap without rebuilding the agent. The
+# integration runners (mysql/postgres/sqlite) each call this shared helper
+# in their fetchmany path — keeping the per-request policy in one place.
+from sqllens.safety.limits import effective_row_cap, rows_to_capped_df
 from sqllens.safety.readonly import is_read_shaped
 
 
@@ -122,16 +119,7 @@ class SqliteRunner(SqlRunner):
             cursor.execute(args.sql)
 
             if is_read_shaped(args.sql):
-                # Per-request profile may narrow the cap; never widen above the
-                # constructor cap (the operator's ceiling). The streaming cap
-                # and the truncation marker must agree, so we feed the same
-                # ``cap`` into both ``fetchmany`` and ``rows_to_capped_df``.
-                effective = get_effective_settings()
-                cap = (
-                    self._max_rows
-                    if effective is None
-                    else min(self._max_rows, effective.max_rows)
-                )
+                cap = effective_row_cap(self._max_rows)
                 rows = cursor.fetchmany(cap + 1)
                 return rows_to_capped_df(rows, cap)
 

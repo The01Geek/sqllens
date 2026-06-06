@@ -6,11 +6,8 @@ import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
-# Minimal documented dependency on sqllens.runtime (the request-local
-# EffectiveSettings ContextVar) so a named profile can narrow the streaming
-# row cap per request. See the sqlite runner for the rationale.
-from sqllens.runtime import get_effective_settings
-from sqllens.safety.limits import rows_to_capped_df
+# See the sqlite runner for the rationale on this shared helper.
+from sqllens.safety.limits import effective_row_cap, rows_to_capped_df
 from sqllens.safety.readonly import is_read_shaped
 
 
@@ -128,16 +125,7 @@ class MySQLRunner(SqlRunner):
                 # ``finally: conn.close()`` tears the socket down server-side.
                 cursor = conn.cursor(self.pymysql.cursors.SSDictCursor)
                 cursor.execute(args.sql)
-                # Per-request profile may narrow the cap; never widen above
-                # the constructor cap. Feed the same ``cap`` into both
-                # ``fetchmany`` and ``rows_to_capped_df`` so the streaming
-                # cap and the truncation marker agree.
-                effective = get_effective_settings()
-                cap = (
-                    self._max_rows
-                    if effective is None
-                    else min(self._max_rows, effective.max_rows)
-                )
+                cap = effective_row_cap(self._max_rows)
                 rows = cursor.fetchmany(cap + 1)
                 return rows_to_capped_df(rows, cap)
 

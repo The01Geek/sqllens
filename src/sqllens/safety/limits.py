@@ -33,6 +33,27 @@ def mark_truncation(df: pd.DataFrame, *, truncated: bool, max_rows: int) -> None
     df.attrs[MAX_ROWS_ATTR] = max_rows
 
 
+def effective_row_cap(constructor_cap: int) -> int:
+    """Narrowest row cap honoured by a per-call request — never wider than the constructor.
+
+    The constructor cap is the operator's ceiling (set on the integration
+    runner from ``cfg.database.max_rows``); per-request profiles overlay
+    a request-local :class:`~sqllens.runtime.EffectiveSettings` that can
+    *narrow* it. Returning ``min(constructor_cap, effective.max_rows)``
+    means a profile cannot raise the runaway-loop ceiling the operator
+    chose, but it can tighten it for one request. When no effective
+    settings are bound (boot warmup, CLI, tests), the constructor cap
+    stands.
+
+    Centralizing this avoids three identical copies inside the sqlite,
+    mysql, and postgres runners — see ``streaming_cap`` calls there.
+    """
+    effective = get_effective_settings()
+    if effective is None:
+        return constructor_cap
+    return min(constructor_cap, effective.max_rows)
+
+
 def rows_to_capped_df(rows: Iterable[Mapping], max_rows: int) -> pd.DataFrame:
     """Trim ``rows`` to ``max_rows``, build a DataFrame, stamp truncation attrs.
 
@@ -61,13 +82,7 @@ class RowCapRunner(SqlRunner):
         self._max_rows = max_rows
 
     async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
-        # Per-request profile overrides land on the runtime ContextVar before
-        # the agent is invoked; reading here lets a profile narrow the cap
-        # tighter than the build-time default. We never widen above the
-        # constructor cap (that bound is the operator's ceiling), so the
-        # effective cap is the *minimum* of the two.
-        effective = get_effective_settings()
-        cap = self._max_rows if effective is None else min(self._max_rows, effective.max_rows)
+        cap = effective_row_cap(self._max_rows)
         df = await self._inner.run_sql(args, context)
         already_truncated = bool(df.attrs.get(TRUNCATED_ATTR, False))
         if len(df) > cap:
