@@ -102,16 +102,25 @@ def test_read_failure_is_not_poison_cached(monkeypatch) -> None:
     assert calls["n"] == 2
 
 
-def test_widget_asset_wires_executed_sql_section() -> None:
-    # No JS test harness exists in the repo, so AC #4 (the widget renders a
-    # collapsible "Executed SQL" section from _meta["sqllens/query"] and
-    # degrades when absent) cannot be exercised behaviorally here. This
-    # structural guard at least fails loudly if a future re-lift or edit drops
-    # the SQL-section wiring: the meta key constant and the sqlHost container
-    # (painted once per ingest from the sqllens/query channel).
+def test_widget_does_not_paint_executed_sql_panel() -> None:
+    # Issue #202 removed the in-widget "Executed SQL" collapsible panel. The
+    # SQL still rides two other rails — the Markdown ``**Executed SQL:**``
+    # block (every client) and ``_meta["sqllens/query"]`` (apps-aware /
+    # programmatic consumers) — but the widget itself no longer paints it.
+    # No JS harness exists, so guard structurally that the panel wiring stays
+    # gone: a regression that re-introduces ``renderSqlSection``, the
+    # ``sqlHost`` container, the ``details.sql`` CSS, or the
+    # ``QUERY_META_KEY`` constant (whose only consumer was the panel renderer)
+    # fails the suite instead of silently re-shipping the removed panel. The
+    # raw string ``"sqllens/query"`` is intentionally NOT in the deny-list —
+    # the header doc comment documents that the meta channel still rides for
+    # apps-aware consumers, and that prose is the "claim matches the code"
+    # surface CLAUDE.md requires.
     html = ui.load_widget_html()
-    assert 'QUERY_META_KEY = "sqllens/query"' in html
-    assert "sqlHost" in html
+    assert "renderSqlSection" not in html
+    assert "sqlHost" not in html
+    assert "details.sql" not in html
+    assert "QUERY_META_KEY" not in html
 
 
 def test_widget_dispatch_renders_ordered_blocks_per_container() -> None:

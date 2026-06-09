@@ -13,8 +13,11 @@
     - {"type": "table", ...}  → its own data grid with isolated sort/filter/page state
     - {"type": "text",  ...}  → a Markdown paragraph
 
-  An optional collapsible "Executed SQL" panel at the top is sourced from
-  ``_meta["sqllens/query"].sql`` when present (show_details on).
+  The widget does not render the executed SQL: when ``agent.show_details`` is
+  on, the SQL is already surfaced via the Markdown ``**Executed SQL:**`` block
+  in the tool's text answer (every client sees it), and ``_meta["sqllens/query"]``
+  remains attached on the ``CallToolResult`` for apps-aware/programmatic
+  consumers — this widget just doesn't paint it.
 
   Empty/missing ``sqllens/blocks`` falls through to an empty-state notice (the
   plain text answer is rendered by the host outside the iframe).
@@ -104,18 +107,6 @@
   .pager { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
   .pager button[disabled] { opacity: 0.4; cursor: default; }
   .empty { color: var(--muted); padding: 16px; }
-  details.sql { margin-bottom: 8px; }
-  details.sql summary {
-    cursor: pointer; color: var(--muted); font-size: 12px;
-    user-select: none; padding: 4px 0;
-  }
-  details.sql pre {
-    margin: 4px 0 0; padding: 8px;
-    background: var(--control-bg); border: 1px solid var(--line);
-    border-radius: 6px; overflow: auto;
-    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    white-space: pre-wrap; word-break: break-word;
-  }
   /* Per-block chart container: a definite height so the document sizes to its
      content. The App SDK's autoResize measures content height by briefly
      forcing documentElement to `max-content`, but that does NOT collapse a
@@ -136,12 +127,11 @@ import { App } from "./vendor/app-with-deps.js";
 
 const PAGE_SIZE = 50;
 const BLOCKS_META_KEY = "sqllens/blocks";
-const QUERY_META_KEY = "sqllens/query";
 
-// Global widget-level state — only the host-theme and the SQL panel container
-// live here. Per-block state (sort/filter/page for tables, ECharts instance
-// for charts) hangs off the block's container DOM node so each block is
-// independent — sorting one table never touches another.
+// Global widget-level state — only the host-theme lives here. Per-block state
+// (sort/filter/page for tables, ECharts instance for charts) hangs off the
+// block's container DOM node so each block is independent — sorting one table
+// never touches another.
 const widgetState = {
   theme: "light",
 };
@@ -152,13 +142,12 @@ const chartRegistry = []; // [{el, instance, observer, spec}, ...]
 
 const root = document.getElementById("root");
 root.textContent = "";
-const sqlHost = document.createElement("div");
 const blocksHost = document.createElement("div");
 const _waiting = document.createElement("div");
 _waiting.className = "empty";
 _waiting.textContent = "Waiting for results…";
 blocksHost.appendChild(_waiting);
-root.append(sqlHost, blocksHost);
+root.appendChild(blocksHost);
 
 function applyHostContext(ctx) {
   if (!ctx) return;
@@ -184,25 +173,6 @@ function applyHostContext(ctx) {
       rebuildChartInto(entry);
     }
   }
-}
-
-// ───────────────────────────── SQL panel ────────────────────────────────────
-
-function renderSqlSection(sql) {
-  // Collapsed by default — executed SQL is QA detail, not the primary answer.
-  // Rendered once per ingest from the optional sqllens/query channel.
-  sqlHost.textContent = "";
-  if (!sql) return;
-  const details = document.createElement("details");
-  details.className = "sql";
-  const summary = document.createElement("summary");
-  summary.textContent = "Executed SQL";
-  const pre = document.createElement("pre");
-  const code = document.createElement("code");
-  code.textContent = sql;
-  pre.appendChild(code);
-  details.append(summary, pre);
-  sqlHost.appendChild(details);
 }
 
 // ───────────────────────────── table block ─────────────────────────────────
@@ -756,8 +726,6 @@ function teardownChartRegistry() {
 
 function renderBlocks(result) {
   const meta = (result && result._meta) || {};
-  const queryInfo = meta[QUERY_META_KEY];
-  renderSqlSection(queryInfo && typeof queryInfo.sql === "string" ? queryInfo.sql : "");
 
   teardownChartRegistry();
   blocksHost.textContent = "";
