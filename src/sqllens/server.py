@@ -38,11 +38,14 @@ logger = logging.getLogger("sqllens.server")
 # sandboxed iframe when a tool's ``_meta.ui.resourceUri`` points at it, then
 # pushes the CallToolResult in. A single widget backs the one ``query_database``
 # tool and renders the ordered ``_meta["sqllens/blocks"]`` array — one container
-# per block (chart, table, or text) in stream order. The widget also reads
-# ``_meta["sqllens/query"]`` for a collapsible "Executed SQL" panel. Non-apps
-# hosts ignore ``_meta`` entirely, so the plain Markdown text content (a
-# serialization of the same ordered blocks) keeps working byte-for-byte
-# everywhere else.
+# per block (chart, table, or text) in stream order. The widget does **not**
+# render ``_meta["sqllens/query"]``: that channel still rides on the
+# CallToolResult for apps-aware/programmatic consumers (#202 removed the
+# in-widget "Executed SQL" panel), and the executed SQL itself reaches users
+# via the Markdown rail (the ``**Executed SQL:**`` fenced block appended by
+# ``_append_sql_block`` in ``tools/query_database.py``). Non-apps hosts ignore
+# ``_meta`` entirely, so the plain Markdown text content (a serialization of
+# the same ordered blocks) keeps working byte-for-byte everywhere else.
 _WIDGET_URI = "ui://sqllens/query-results.html"
 # Self-driving memory-administration widget. Registered only inside the
 # allow_admin_tools block so a host never advertises a widget whose backing
@@ -67,8 +70,11 @@ _CONFIG_WIDGET_URI = "ui://sqllens/config-admin.html"
 _BLOCKS_META_KEY = "sqllens/blocks"
 # Sibling channel: the executed SQL + lightweight metadata ({"sql",
 # "query_type", "row_count"?}). Present only when ``agent.show_details`` is on
-# and SQL ran. The widget renders a collapsible section from it; plain-text
-# clients get the same SQL as a fenced block in the Markdown content.
+# and SQL ran. Apps-aware hosts and programmatic consumers (debuggers, audit
+# pipelines, observability tooling) can read the SQL off the CallToolResult
+# via this channel. The query-result widget does **not** consume it (#202
+# removed the in-widget "Executed SQL" panel) — users see the SQL via the
+# fenced ``**Executed SQL:**`` block in the Markdown text content instead.
 _QUERY_META_KEY = "sqllens/query"
 # Memory hit/miss channel. Present whenever a memory search completed (a hit or
 # a miss) this turn (a search that errored emits no signal). This channel is
