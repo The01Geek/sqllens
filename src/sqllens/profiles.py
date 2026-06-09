@@ -3,9 +3,9 @@
 
 """Named per-request config profiles.
 
-A *profile* names a set of the five result-shaping knobs (``show_details``,
-``show_memory_details``, ``max_tool_iterations``, ``max_rows``,
-``similarity_threshold``). Profiles are persisted to a JSON file under
+A *profile* names a set of the four result-shaping knobs (``show_details``,
+``max_tool_iterations``, ``max_rows``, ``similarity_threshold``). Profiles are
+persisted to a JSON file under
 ``cfg.memory.persist_dir`` and resolved per request via the ``profile``
 argument on ``query_database``. The resolved values become an
 :class:`~sqllens.runtime.EffectiveSettings` published on a ``ContextVar`` for
@@ -48,7 +48,7 @@ _PROFILES_FILENAME = "sqllens.profiles.json"
 
 
 class Profile(BaseModel):
-    """One named overlay over the five result-shaping knobs.
+    """One named overlay over the four result-shaping knobs.
 
     Every field is optional; ``None`` means inherit from base ``Config``.
     Bounds match the live config (``AgentRuntimeConfig.max_tool_iterations``
@@ -64,7 +64,6 @@ class Profile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     show_details: bool | None = None
-    show_memory_details: bool | None = None
     max_tool_iterations: int | None = Field(default=None, ge=1, le=100)
     max_rows: int | None = Field(default=None, ge=1, le=1_000_000)
     similarity_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -268,11 +267,6 @@ def resolve_effective_settings(
     p = profile or Profile()
     return EffectiveSettings(
         show_details=p.show_details if p.show_details is not None else cfg.agent.show_details,
-        show_memory_details=(
-            p.show_memory_details
-            if p.show_memory_details is not None
-            else cfg.agent.show_memory_details
-        ),
         max_tool_iterations=(
             p.max_tool_iterations
             if p.max_tool_iterations is not None
