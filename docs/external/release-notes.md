@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## June 9, 2026
+
+- **[Improvement] The in-widget "Executed SQL" panel is now removed** — On assistants that render inline app widgets (Claude Desktop and claude.ai), the `query_database` result widget previously painted a collapsible "Executed SQL" section above the result grid whenever `agent.show_details` was on. That collapsible section is now removed: the SQL still appears as a fenced ` ```sql ` block under "Executed SQL:" in the Markdown answer (visible in every MCP client, including the widget hosts above), and hosts that read tool-result metadata still receive it under the `sqllens/query` key for programmatic / apps-aware consumers. No information is lost — only the duplicate in-widget rendering is gone. No configuration change is required. (#202)
+
 ## June 5, 2026
 
 - **[Feature] Flexible multi-block responses for `query_database`** — `query_database` answers can now interleave any combination of tables, charts, and prose paragraphs in the order the agent produces them, instead of being limited to a single chart-or-table result. On Claude Desktop and claude.ai the inline widget renders one container per block in stream order, each table has its own independent sort, filter, page, and CSV-export controls, and the agent may include more than one chart in a single answer when the question warrants it. No configuration change is required; other assistants receive a Markdown rendering of the same ordered blocks. (#195)
