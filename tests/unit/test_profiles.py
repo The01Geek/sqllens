@@ -56,16 +56,13 @@ pytestmark = pytest.mark.asyncio
 
 
 def test_unset_profile_inherits_base_config(tmp_path: Path) -> None:
-    """Omitted profile name → default → base config, all five fields."""
+    """Omitted profile name → default → base config, all four fields."""
     cfg = build_test_config(
         persist_dir=tmp_path / "chroma",
-        agent=AgentRuntimeConfig(
-            show_details=True, show_memory_details=True, max_tool_iterations=42
-        ),
+        agent=AgentRuntimeConfig(show_details=True, max_tool_iterations=42),
     )
     effective = resolve_effective_settings(cfg, None)
     assert effective.show_details is True
-    assert effective.show_memory_details is True
     assert effective.max_tool_iterations == 42
     assert effective.max_rows == cfg.database.max_rows
     assert effective.similarity_threshold == cfg.memory.similarity_threshold
@@ -90,7 +87,6 @@ async def test_profile_overlay_overrides_only_set_fields(tmp_path: Path) -> None
     assert effective.show_details is True
     assert effective.max_rows == 500
     # Unset fields fall through to base config.
-    assert effective.show_memory_details == cfg.agent.show_memory_details
     assert effective.similarity_threshold == cfg.memory.similarity_threshold
 
 
@@ -278,15 +274,15 @@ async def test_list_profiles_returns_base_bounds_and_default(tmp_path: Path) -> 
     result = await _fn(mcp, "list_profiles")()
     payload = _parse(result)
     assert payload["default_name"] == DEFAULT_PROFILE_NAME
-    # All five knobs surface as base values; no secrets / DB URL leak.
+    # All four knobs surface as base values; no secrets / DB URL leak.
     for k in (
         "show_details",
-        "show_memory_details",
         "max_tool_iterations",
         "max_rows",
         "similarity_threshold",
     ):
         assert k in payload["base"]
+    assert "show_memory_details" not in payload["base"]
     assert "api_key" not in json.dumps(payload)
     assert "url" not in payload["base"]
     # Bounds present.
@@ -425,14 +421,12 @@ async def test_two_concurrent_requests_see_different_settings(tmp_path: Path) ->
 
     a = EffectiveSettings(
         show_details=True,
-        show_memory_details=False,
         max_tool_iterations=5,
         max_rows=100,
         similarity_threshold=0.5,
     )
     b = EffectiveSettings(
         show_details=False,
-        show_memory_details=True,
         max_tool_iterations=20,
         max_rows=5000,
         similarity_threshold=0.9,
@@ -467,7 +461,6 @@ async def test_row_cap_runner_consults_effective_settings(tmp_path: Path) -> Non
     token = set_effective_settings(
         EffectiveSettings(
             show_details=False,
-            show_memory_details=False,
             max_tool_iterations=20,
             max_rows=10,
             similarity_threshold=0.7,
@@ -483,7 +476,6 @@ async def test_row_cap_runner_consults_effective_settings(tmp_path: Path) -> Non
     token = set_effective_settings(
         EffectiveSettings(
             show_details=False,
-            show_memory_details=False,
             max_tool_iterations=20,
             max_rows=10_000,
             similarity_threshold=0.7,
@@ -663,7 +655,6 @@ def test_effective_max_tool_iterations_never_widens_config_cap() -> None:
     # Effective narrower than config → effective wins.
     tight = EffectiveSettings(
         show_details=False,
-        show_memory_details=False,
         max_tool_iterations=3,
         max_rows=100,
         similarity_threshold=0.7,
@@ -678,7 +669,6 @@ def test_effective_max_tool_iterations_never_widens_config_cap() -> None:
     # Effective wider than config → config still wins (cannot widen ceiling).
     wide = EffectiveSettings(
         show_details=False,
-        show_memory_details=False,
         max_tool_iterations=99,
         max_rows=100,
         similarity_threshold=0.7,

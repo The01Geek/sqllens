@@ -3,9 +3,9 @@
 
 """Request-local effective-settings store.
 
-Result-shaping knobs (``show_details``, ``show_memory_details``,
-``max_tool_iterations``, ``max_rows``, ``similarity_threshold``) are baked into
-the agent and the SQL runners at build time. With named config profiles
+Result-shaping knobs (``show_details``, ``max_tool_iterations``, ``max_rows``,
+``similarity_threshold``) are baked into the agent and the SQL runners at build
+time. With named config profiles
 (:mod:`sqllens.profiles`), the same singleton agent must serve concurrent
 requests at different effective values without rebuilding or mutating shared
 state. This module is the request-local bridge: the MCP tool boundary publishes
@@ -33,7 +33,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class EffectiveSettings:
-    """The five result-shaping knobs resolved for one request.
+    """The four result-shaping knobs resolved for one request.
 
     Built by :func:`sqllens.profiles.resolve_effective_settings` from the base
     :class:`~sqllens.config.Config` overlaid with a named profile (or the
@@ -46,7 +46,6 @@ class EffectiveSettings:
     """
 
     show_details: bool
-    show_memory_details: bool
     max_tool_iterations: int
     max_rows: int
     similarity_threshold: float

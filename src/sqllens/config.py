@@ -148,9 +148,9 @@ class ProfilesConfig(BaseModel):
     """Per-request named-profile settings.
 
     Named profiles overlay base ``Config`` knobs (``show_details``,
-    ``show_memory_details``, ``max_tool_iterations``, ``max_rows``,
-    ``similarity_threshold``) per request via the ``profile`` argument on
-    ``query_database``. The profile data itself is **not** part of ``Config``
+    ``max_tool_iterations``, ``max_rows``, ``similarity_threshold``) per request
+    via the ``profile`` argument on ``query_database``. The profile data itself
+    is **not** part of ``Config``
     — it lives in a JSON store under ``memory.persist_dir`` and is loaded by
     :mod:`sqllens.profiles`. This config section only carries the admin gate
     that opts a server into exposing the profile-admin MCP tools.
@@ -315,20 +315,6 @@ class AgentRuntimeConfig(BaseModel):
             "Append the executed SQL to query answers. OFF by default: exposing "
             "the generated SQL to MCP clients can leak schema details and query "
             "logic. Enable only for trusted, debugging-oriented deployments."
-        ),
-    )
-    # When true, query_database appends a one-line memory hit/miss footer to the
-    # Markdown answer (e.g. "_Memory: 2 hits (top similarity 0.83)_"). OFF by
-    # default to keep answers clean; the structured _meta["sqllens/memory_info"]
-    # channel carries the same signal regardless of this flag. Env override:
-    # SQLLENS_AGENT__SHOW_MEMORY_DETAILS.
-    show_memory_details: bool = Field(
-        default=False,
-        description=(
-            "Append a one-line memory hit/miss footer to query answers. OFF by "
-            "default. Only the aggregate fact of a hit/miss and counts/scores "
-            "are shown — never the matched memory contents. The structured "
-            "_meta channel surfaces the same signal independent of this flag."
         ),
     )
     # Hard cap on the in-process LRU conversation store that backs multi-turn

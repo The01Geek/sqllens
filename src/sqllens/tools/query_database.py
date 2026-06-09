@@ -121,27 +121,6 @@ def _append_sql_block(markdown: str, query_info: dict | None) -> str:
     return f"{markdown}\n\n**Executed SQL:**\n\n```sql\n{sql}\n```"
 
 
-def _append_memory_footer(markdown: str, memory_info: dict | None) -> str:
-    """Append the memory hit/miss signal as a one-line Markdown footer.
-
-    Structured ``memory_info`` in ``_meta`` is the source of truth; this is the
-    plain-text rendering for non-apps clients, gated by ``agent.show_memory
-    _details`` at the call site. A falsy ``memory_info`` (or one whose
-    ``searched`` flag is false) returns markdown unchanged. Only aggregate
-    counts/scores are rendered — never the matched memory contents.
-    """
-    if not memory_info or not memory_info.get("searched"):
-        return markdown
-    hit_count = memory_info.get("hit_count", 0)
-    if not hit_count:
-        return f"{markdown}\n\n_Memory: no matches_"
-    plural = "s" if hit_count != 1 else ""
-    top = memory_info.get("top_similarity")
-    if isinstance(top, (int, float)):
-        return f"{markdown}\n\n_Memory: {hit_count} hit{plural} (top similarity {top:.2f})_"
-    return f"{markdown}\n\n_Memory: {hit_count} hit{plural}_"
-
-
 async def query_database_impl(
     cfg: Config,
     question: str,
@@ -208,10 +187,9 @@ async def query_database_impl_with_widgets(
     memory search *completes* (a hit or a miss) this turn. It is ``None`` when
     only a search error occurred (no card emitted); on the agent error path the
     function raises before returning anything at all. It is surfaced regardless
-    of the resolved ``show_details``; when the resolved profile's
-    ``show_memory_details`` is on (``effective.show_memory_details``), a
-    one-line memory footer is also appended to ``markdown`` for plain-text
-    clients.
+    of the resolved ``show_details`` and flows to ``_meta["sqllens/memory_info"]``
+    via ``server.py`` — the structured channel is the single source of truth
+    for the hit/miss signal.
 
     ``agent_trace`` is the structured step-by-step trace of the agent loop —
     per-tool name, arguments, status, duration, and on-failure error, plus the
@@ -317,8 +295,6 @@ async def query_database_impl_with_widgets(
                 f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}", agent_trace=agent_trace
             )
         markdown = _append_sql_block(answer, query_info)
-        if effective.show_memory_details:
-            markdown = _append_memory_footer(markdown, memory_info)
         return markdown, blocks, query_info, memory_info, agent_trace
     finally:
         reset_effective_settings(_profile_token)

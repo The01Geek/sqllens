@@ -78,11 +78,10 @@ _BLOCKS_META_KEY = "sqllens/blocks"
 _QUERY_META_KEY = "sqllens/query"
 # Memory hit/miss channel. Present whenever a memory search completed (a hit or
 # a miss) this turn (a search that errored emits no signal). This channel is
-# independent of both ``agent.show_details`` and ``agent.show_memory_details``;
-# the latter gates only the plain-text footer (below), never this _meta blob.
-# Aggregate signal only — {"searched", "hit_count", "top_similarity",
-# "threshold"} — never the matched memory contents. Plain-text clients get the
-# same signal as a one-line footer when ``agent.show_memory_details`` is on.
+# independent of ``agent.show_details`` and is the single source of truth for
+# the hit/miss signal — apps-aware hosts render it directly. Aggregate signal
+# only — {"searched", "hit_count", "top_similarity", "threshold"} — never the
+# matched memory contents.
 _MEMORY_META_KEY = "sqllens/memory_info"
 # Step-by-step agent-trace channel. Present only when ``agent.show_details`` is
 # on (the same gate as the executed-SQL card, which already admits schema/SQL
@@ -297,8 +296,8 @@ def build_server(cfg: Config) -> FastMCP:
 
         ``profile`` selects a named config profile for this single request —
         the request-local overlay of result-shaping knobs (``show_details``,
-        ``show_memory_details``, ``max_tool_iterations``, ``max_rows``,
-        ``similarity_threshold``). Omitting it (or passing an unknown name)
+        ``max_tool_iterations``, ``max_rows``, ``similarity_threshold``).
+        Omitting it (or passing an unknown name)
         resolves through the reserved ``default`` profile, which falls back
         to base config — existing callers see no change. Profiles are managed
         through ``list_profiles`` / ``get_profile`` / ``upsert_profile`` /
@@ -720,10 +719,10 @@ def build_server(cfg: Config) -> FastMCP:
 
         # Bounds derived from the live Profile pydantic model so the wire
         # shape (and the widget's bounded inputs) cannot drift from the
-        # validator the upsert path enforces. Adding a sixth knob to
+        # validator the upsert path enforces. Adding a fifth knob to
         # ``Profile`` makes the bounds surface here pick it up automatically
         # via ``_profile_field_bounds``; the sibling ``base`` dict in
-        # ``list_profiles`` below hardcodes the five field names and must be
+        # ``list_profiles`` below hardcodes the four field names and must be
         # extended by hand.
         _PROFILE_BOUNDS = _profile_field_bounds()
 
@@ -751,7 +750,6 @@ def build_server(cfg: Config) -> FastMCP:
                 "default_name": DEFAULT_PROFILE_NAME,
                 "base": {
                     "show_details": cfg.agent.show_details,
-                    "show_memory_details": cfg.agent.show_memory_details,
                     "max_tool_iterations": cfg.agent.max_tool_iterations,
                     "max_rows": cfg.database.max_rows,
                     "similarity_threshold": cfg.memory.similarity_threshold,
@@ -800,7 +798,7 @@ def build_server(cfg: Config) -> FastMCP:
         ) -> str | CallToolResult:
             """Create or replace ``name`` with ``knobs`` (write-guarded).
 
-            ``knobs`` is a dict of the five profile fields; omit a field to
+            ``knobs`` is a dict of the four profile fields; omit a field to
             mean "inherit from base config". Refuses on an unauthenticated
             endpoint unless ``auth.insecure`` is set. Returns the saved
             profile; an out-of-bounds value or unknown field returns
