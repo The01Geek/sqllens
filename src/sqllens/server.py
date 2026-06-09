@@ -719,10 +719,10 @@ def build_server(cfg: Config) -> FastMCP:
 
         # Bounds derived from the live Profile pydantic model so the wire
         # shape (and the widget's bounded inputs) cannot drift from the
-        # validator the upsert path enforces. Adding a sixth knob to
+        # validator the upsert path enforces. Adding a fifth knob to
         # ``Profile`` makes the bounds surface here pick it up automatically
         # via ``_profile_field_bounds``; the sibling ``base`` dict in
-        # ``list_profiles`` below hardcodes the five field names and must be
+        # ``list_profiles`` below hardcodes the four field names and must be
         # extended by hand.
         _PROFILE_BOUNDS = _profile_field_bounds()
 
@@ -798,7 +798,7 @@ def build_server(cfg: Config) -> FastMCP:
         ) -> str | CallToolResult:
             """Create or replace ``name`` with ``knobs`` (write-guarded).
 
-            ``knobs`` is a dict of the five profile fields; omit a field to
+            ``knobs`` is a dict of the four profile fields; omit a field to
             mean "inherit from base config". Refuses on an unauthenticated
             endpoint unless ``auth.insecure`` is set. Returns the saved
             profile; an out-of-bounds value or unknown field returns
