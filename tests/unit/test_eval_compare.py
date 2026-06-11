@@ -103,6 +103,31 @@ def test_dialect_lookup_is_case_insensitive() -> None:
     assert compare("SELECT 1", "select 1", dialect="MSSQL") is Status.PASS
 
 
+def test_actual_unterminated_string_classifies_as_changed() -> None:
+    """``TokenError`` (lex-level garbage like an unterminated string literal)
+    must be treated the same as ``ParseError`` — actual unparseable → CHANGED,
+    not ERROR.
+
+    ``TokenError`` is a sibling of ``ParseError`` under ``SqlglotError``, not
+    a subclass. A narrow ``except ParseError`` was the iter-2 mistake; this
+    test pins the broader ``SqlglotError`` catch so future regressions don't
+    silently re-narrow it.
+    """
+    expected = "SELECT name FROM users"
+    actual = 'SELECT name FROM users WHERE name = "unterminated'  # lex error
+    assert compare(expected, actual, dialect="sqlite") is Status.CHANGED
+
+
+def test_expected_unterminated_string_classifies_as_error() -> None:
+    """The inverse: a tokenization error on the *expected* SQL is a golden-file
+    bug — must classify as ERROR, not CHANGED, even though ``TokenError`` is
+    not a ``ParseError`` subclass.
+    """
+    expected = 'SELECT * FROM users WHERE name = "unterminated'  # lex error
+    actual = "SELECT * FROM users"
+    assert compare(expected, actual, dialect="sqlite") is Status.ERROR
+
+
 def test_unknown_dialect_raises_not_swallowed() -> None:
     """A dialect name sqlglot does NOT recognise (e.g. an unsupported third-party
     SQLAlchemy driver) must surface as a real exception, not be silently

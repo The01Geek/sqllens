@@ -106,14 +106,19 @@ def compare(
     the case itself is well-formed; "the agent changed its output" is the
     correct read.
 
-    Only :class:`sqlglot.errors.ParseError` is caught here. Other exceptions
-    (notably ``ValueError("Unknown dialect '...'")`` from
-    :func:`sqlglot.parse_one` when the configured dialect is not in
-    :data:`_SQLGLOT_DIALECT_MAP` and not recognised by sqlglot directly) must
-    propagate to the runner's per-case ``except`` so the operator sees the
-    real cause in ``CaseResult.error`` rather than a misleading ERROR row
-    with no diagnostic — see CLAUDE.md "structured signal, never silent
-    success" and the iter-2 silent-failure review for the failure mode.
+    Only :class:`sqlglot.errors.SqlglotError` is caught here — that's the
+    documented base of sqlglot's parse-failure family (covers
+    :class:`~sqlglot.errors.ParseError` for grammar failures and
+    :class:`~sqlglot.errors.TokenError` for lex-level garbage like unterminated
+    string literals; ``TokenError`` is a *sibling* of ``ParseError``, not a
+    subclass, so a narrow ``except ParseError`` lets lex errors leak out and
+    misclassify CHANGED-actual as ERROR). Other exceptions — notably
+    ``ValueError("Unknown dialect '...'")`` from :func:`sqlglot.parse_one`
+    when the configured dialect is not in :data:`_SQLGLOT_DIALECT_MAP` and
+    not recognised by sqlglot directly — must propagate to the runner's
+    per-case ``except`` so the operator sees the real cause in
+    ``CaseResult.error`` rather than a misleading ERROR row with no
+    diagnostic. See CLAUDE.md "structured signal, never silent success".
 
     ``dialect`` should be the value of :attr:`sqllens.config.DatabaseConfig.dialect`
     (e.g. ``"sqlite"``, ``"postgresql"``) so two valid renderings under the
@@ -124,10 +129,10 @@ def compare(
     """
     try:
         expected_norm = normalize_sql(expected, dialect=dialect)
-    except sqlglot.errors.ParseError:
+    except sqlglot.errors.SqlglotError:
         return Status.ERROR
     try:
         actual_norm = normalize_sql(actual, dialect=dialect)
-    except sqlglot.errors.ParseError:
+    except sqlglot.errors.SqlglotError:
         return Status.CHANGED
     return Status.PASS if expected_norm == actual_norm else Status.CHANGED
