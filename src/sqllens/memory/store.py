@@ -179,14 +179,21 @@ class MemoryStore:
         """
         if not items:
             return
-        ids: list[str] = []
-        questions: list[str] = []
-        metadatas: list[dict[str, Any]] = []
+        # Collapse intra-batch id collisions before upserting. Two records
+        # whose normalized content hashes to the same ``sql_pair_id`` would
+        # otherwise reach ``collection.upsert`` as ``ids=[dup, dup, ...]``,
+        # which ChromaDB rejects with ``DuplicateIDError`` — failing the WHOLE
+        # batch (every row reported as errored, and under ``--clear`` leaving
+        # the store wiped-and-empty). Keying on the content-hash id de-dupes
+        # within the batch (last write wins), which is exactly the idempotent
+        # overwrite a re-import already gets across batches. ``report.saved``
+        # still counts records processed, not distinct rows — consistent with
+        # the bounded path's per-item counting.
         timestamp = datetime.now().isoformat()
+        by_id: dict[str, tuple[str, dict[str, Any]]] = {}
         for question, sql in items:
-            ids.append(sql_pair_id(question, sql))
-            questions.append(question)
-            metadatas.append(
+            by_id[sql_pair_id(question, sql)] = (
+                question,
                 {
                     "question": question,
                     "tool_name": RUN_SQL_TOOL_NAME,
@@ -194,8 +201,11 @@ class MemoryStore:
                     "timestamp": timestamp,
                     "success": True,
                     "metadata_json": json.dumps({"source": _IMPORT_SOURCE}),
-                }
+                },
             )
+        ids = list(by_id.keys())
+        questions = [doc for doc, _ in by_id.values()]
+        metadatas = [meta for _, meta in by_id.values()]
 
         def _save() -> None:
             collection = self._mem._get_collection()
@@ -212,20 +222,22 @@ class MemoryStore:
         """
         if not contents:
             return
-        ids: list[str] = []
-        documents: list[str] = []
-        metadatas: list[dict[str, Any]] = []
+        # Collapse intra-batch id collisions before upserting — see
+        # ``add_sql_pair_batch`` for the full rationale. Two schema docs whose
+        # normalized content hashes to the same ``schema_doc_id`` must not
+        # reach ``collection.upsert`` as duplicate ids (DuplicateIDError fails
+        # the whole batch); key on the content-hash id so the last one wins.
         timestamp = datetime.now().isoformat()
+        by_id: dict[str, dict[str, Any]] = {}
         for content in contents:
-            ids.append(schema_doc_id(content))
-            documents.append(content)
-            metadatas.append(
-                {
-                    "content": content,
-                    "timestamp": timestamp,
-                    "is_text_memory": True,
-                }
-            )
+            by_id[schema_doc_id(content)] = {
+                "content": content,
+                "timestamp": timestamp,
+                "is_text_memory": True,
+            }
+        ids = list(by_id.keys())
+        documents = [meta["content"] for meta in by_id.values()]
+        metadatas = list(by_id.values())
 
         def _save() -> None:
             collection = self._mem._get_collection()

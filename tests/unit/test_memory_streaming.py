@@ -246,6 +246,54 @@ async def test_stream_import_is_idempotent_upsert(
     assert len(final.schema_docs) == 1
 
 
+async def test_stream_import_intra_batch_id_collision_collapses(
+    store: MemoryStore, tmp_path
+) -> None:
+    """Two records in ONE batch that normalize to the same content-hash id
+    must collapse to a single ``upsert`` row, not crash the whole batch with
+    ChromaDB's ``DuplicateIDError``.
+
+    Regression for the PR #209 review finding: before the fix, a batch
+    containing ``ids=[dup, dup]`` raised ``DuplicateIDError``, which the
+    per-batch ``except`` flattened into "every item in the batch errored"
+    (``saved == 0``) — and under ``--clear`` could leave the store
+    wiped-and-empty. ``"How many?"/"SELECT 1"`` and ``"how   MANY?"/"select
+    1"`` normalize identically (whitespace-collapsed, lowercased).
+    """
+    path = _write(
+        tmp_path,
+        {
+            "sql_pairs": {
+                "pairs": [
+                    {"question": "How many?", "sql": "SELECT 1"},
+                    {"question": "how   MANY?", "sql": "select 1"},
+                ]
+            },
+            "schema_docs": [
+                {"content": "Status is open."},
+                {"content": "status   is OPEN."},
+            ],
+        },
+    )
+    # Large batch_size so both colliding records land in the SAME batch.
+    result = await import_bundle_stream(store, path, batch_size=100)
+
+    # The batch did not error out: no DuplicateIDError surfaced.
+    assert result.report.errors == []
+    assert result.aborted is False
+    # ``saved`` counts records processed (consistent with the bounded path's
+    # per-item counting), so both colliding records count even though they
+    # collapse to one stored row.
+    assert result.report.saved == 4
+
+    # The store holds exactly one row per collision group (last write wins).
+    final = store.iter_all()
+    assert final.sql_pairs is not None
+    assert len(final.sql_pairs.pairs) == 1
+    assert final.schema_docs is not None
+    assert len(final.schema_docs) == 1
+
+
 async def test_stream_import_id_scheme_matches_sql_pair_id_helper(
     store: MemoryStore, tmp_path
 ) -> None:
