@@ -202,16 +202,18 @@ async def add_memories(
     sql_pairs: list[dict[str, Any]] | None = None,
     schema_docs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Bulk-add curated SQL pairs and schema docs with server-side dedup.
+    """Bulk-add curated SQL pairs and schema docs (idempotent upsert).
 
     Per-item validation failures are collected into ``errors`` (with the
     original input index) rather than aborting the batch. Valid items go
-    through :func:`import_bundle`, which dedups exact ``(question, sql)`` /
-    ``content`` matches against the store and within the batch.
+    through :func:`import_bundle`, which writes each row under a
+    deterministic content-hash id: re-adding the same logical record
+    overwrites the existing row rather than duplicating it. There is no
+    separate "duplicate" count to surface.
 
-    Returns ``{saved_count, duplicate_count, skipped_count, errors}``. The
-    caller is responsible for treating a non-empty ``errors`` list as a tool
-    failure (partial failure is failure — see the server wiring).
+    Returns ``{saved_count, errors}``. The caller is responsible for
+    treating a non-empty ``errors`` list as a tool failure (partial failure
+    is failure — see the server wiring).
     """
     errors: list[dict[str, Any]] = []
 
@@ -263,8 +265,6 @@ async def add_memories(
 
     return {
         "saved_count": report.saved,
-        "duplicate_count": report.skipped_duplicate,
-        "skipped_count": 0,
         "errors": errors,
     }
 

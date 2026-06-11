@@ -1,11 +1,27 @@
 # SPDX-FileCopyrightText: 2026 Daniel Radman
 # SPDX-License-Identifier: Apache-2.0
 
-"""Export the store into a bundle file (JSON or CSV)."""
+"""Export the store into a bundle file (JSON or CSV).
+
+Two paths, sharing the same on-disk JSON bundle shape:
+
+- :func:`export_bundle` — bounded, in-memory. Calls
+  :meth:`MemoryStore.iter_all` and pretty-prints the result. Used by the
+  CLI default and the in-memory test fixtures; small stores only.
+- :func:`export_bundle_stream` — CLI-only, memory-bounded. Paginates the
+  collection via :meth:`MemoryStore.iter_paginated` and writes the bundle
+  incrementally to a file. Two passes (sql_pairs, then schema_docs) so the
+  output preserves the documented section order without buffering one
+  section in RAM. Memory is bounded to one page plus the open file handle
+  regardless of total store size. JSON only — CSV stays on the bounded
+  path because the entire CSV body is one ``csv.writer`` call.
+"""
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 from sqllens.memory.io import serialize_csv, serialize_json
@@ -58,3 +74,102 @@ def export_bundle(store: MemoryStore, fmt: Literal["json", "csv"]) -> ExportResu
 
     text = serialize_json(bundle) if fmt == "json" else serialize_csv(bundle)
     return ExportResult(text=text, warnings=warnings)
+
+
+@dataclass
+class StreamExportResult:
+    """Outcome of :func:`export_bundle_stream`.
+
+    Mirrors :class:`ExportResult`'s ``warnings`` semantics — a caller must
+    surface the empty-store and unrepresentable-row warnings loudly. The
+    streamed bytes are already on disk by the time this returns; the
+    counts let the caller include them in the user-facing summary.
+    """
+
+    sql_pairs_count: int
+    schema_docs_count: int
+    skipped_rows: int
+    warnings: list[str] = field(default_factory=list)
+
+
+def export_bundle_stream(
+    store: MemoryStore,
+    path: Path,
+    *,
+    page_size: int = 500,
+) -> StreamExportResult:
+    """Write the store to ``path`` as a streamed JSON bundle.
+
+    The on-disk shape matches :func:`export_bundle`'s JSON output:
+    ``{"sql_pairs":{"training_type":"sql_pairs","pairs":[...]},
+    "schema_docs":[...]}``. Records are written one at a time, separated
+    by commas — never materialized into one big ``json.dumps`` call. The
+    output is therefore parseable by both the streaming reader
+    (:mod:`sqllens.memory.streaming`) and the existing bounded
+    :func:`sqllens.memory.io.parse_json` (subject to that path's whole-
+    file cap, which the streaming reader bypasses by design).
+
+    Two passes through :meth:`MemoryStore.iter_paginated`: one filters
+    for sql_pair rows, the other for schema_doc rows. Each pass is
+    page-bounded — the entire collection is never resident in RAM.
+
+    Unlike :meth:`MemoryStore.iter_all`, the paginated path does NOT
+    raise on wholesale corruption — the cross-page skip ratio is not a
+    snapshot statistic. A non-zero ``skipped_rows`` count is surfaced as
+    a non-fatal warning instead so the operator sees the corruption
+    signal without a partial export silently succeeding on the rest.
+    """
+    sql_pairs_count = 0
+    schema_docs_count = 0
+    skipped_total = 0
+
+    with path.open("w", encoding="utf-8") as fp:
+        fp.write('{"sql_pairs":{"training_type":"sql_pairs","pairs":[')
+        first = True
+        for kind, model in store.iter_paginated(page_size=page_size):
+            if kind != "sql_pair":
+                continue
+            if not first:
+                fp.write(",")
+            json.dump(
+                {"question": model.question, "sql": model.sql},
+                fp,
+                ensure_ascii=False,
+            )
+            first = False
+            sql_pairs_count += 1
+        skipped_total += store.last_skipped_rows
+        fp.write(']},"schema_docs":[')
+
+        first = True
+        for kind, model in store.iter_paginated(page_size=page_size):
+            if kind != "schema_doc":
+                continue
+            if not first:
+                fp.write(",")
+            json.dump(
+                {"training_type": "schema_docs", "content": model.content},
+                fp,
+                ensure_ascii=False,
+            )
+            first = False
+            schema_docs_count += 1
+        # Don't double-count: only the doc-pass skips are new.
+        # iter_paginated resets last_skipped_rows on every call.
+        skipped_total += store.last_skipped_rows
+        fp.write("]}")
+
+    warnings: list[str] = []
+    if skipped_total:
+        warnings.append(
+            f"{skipped_total} stored row(s) were unrepresentable and are NOT in this export."
+        )
+    if sql_pairs_count == 0 and schema_docs_count == 0:
+        warnings.append("the memory store is empty — the export contains no data.")
+
+    return StreamExportResult(
+        sql_pairs_count=sql_pairs_count,
+        schema_docs_count=schema_docs_count,
+        skipped_rows=skipped_total,
+        warnings=warnings,
+    )

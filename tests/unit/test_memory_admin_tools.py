@@ -138,8 +138,9 @@ async def test_add_then_list(tmp_path, monkeypatch) -> None:
     )
     added = _parse(add)
     assert added["saved_count"] == 3
-    assert added["duplicate_count"] == 0
     assert added["errors"] == []
+    # The legacy ``duplicate_count`` key is gone — upsert is idempotent.
+    assert "duplicate_count" not in added
 
     listed = _parse(await _fn(mcp, "list_memories")(data_source_id=_DSID))
     assert listed["total"] == 3
@@ -205,18 +206,23 @@ async def test_add_partial_failure_is_error(tmp_path, monkeypatch) -> None:
 # --- get_memory / delete_memory -----------------------------------------------
 
 
-async def test_add_duplicate_dedup_reports_nonzero(tmp_path, monkeypatch) -> None:
-    """Re-adding the same (question, sql) is deduped: duplicate_count > 0,
-    saved_count == 0 on the second add (the dedup contract)."""
+async def test_add_duplicate_is_idempotent_upsert(tmp_path, monkeypatch) -> None:
+    """Re-adding the same (question, sql) overwrites the same row (content-hash
+    id + upsert). ``saved_count`` counts the upsert (the call DID write the
+    row), but the store still contains exactly one logical record."""
     patch_fake_embeddings(monkeypatch)
     mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))
     pair = [{"question": "dup q", "sql": "SELECT 42"}]
     first = _parse(await _fn(mcp, "add_memories")(data_source_id=_DSID, sql_pairs=pair))
     assert first["saved_count"] == 1
     second = _parse(await _fn(mcp, "add_memories")(data_source_id=_DSID, sql_pairs=pair))
-    assert second["saved_count"] == 0
-    assert second["duplicate_count"] == 1
+    assert second["saved_count"] == 1
     assert second["errors"] == []
+    # Final state: exactly one logical record persisted across both calls.
+    listed = _parse(
+        await _fn(mcp, "list_memories")(data_source_id=_DSID, memory_type="tool_usage")
+    )
+    assert listed["total"] == 1
 
 
 async def test_add_non_dict_item_is_clean_row_error(tmp_path, monkeypatch) -> None:

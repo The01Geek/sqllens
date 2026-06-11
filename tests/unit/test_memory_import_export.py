@@ -39,18 +39,32 @@ _BUNDLE = MemoryBundle.model_validate(
 )
 
 
-async def test_import_then_reimport_skips_all_duplicates(store: MemoryStore) -> None:
+async def test_reimport_is_idempotent_overwrite(store: MemoryStore) -> None:
+    """Content-hash ids + upsert: re-importing the same bundle overwrites the
+    same rows. ``saved`` counts upserts (the import did write each row), but
+    the final store still has exactly one row per logical record."""
     first = await import_bundle(store, _BUNDLE)
     assert first.saved == 3
-    assert first.skipped_duplicate == 0
     assert first.errors == []
 
     second = await import_bundle(store, _BUNDLE)
-    assert second.saved == 0
-    assert second.skipped_duplicate == 3
+    assert second.saved == 3
+    assert second.errors == []
+
+    # Idempotency is observable on the store, not on the report count.
+    again = store.iter_all()
+    assert again.sql_pairs is not None
+    assert len(again.sql_pairs.pairs) == 2
+    assert again.schema_docs is not None
+    assert len(again.schema_docs) == 1
 
 
-async def test_intra_batch_duplicate_skipped(store: MemoryStore) -> None:
+async def test_intra_batch_normalized_collisions_collapse(
+    store: MemoryStore,
+) -> None:
+    """Two near-identical pairs that normalize to the same content-hash id
+    upsert the same row. Both calls succeed (``saved == 2``) but only one row
+    persists, because the second upsert overwrites the first."""
     dup = MemoryBundle.model_validate(
         {
             "sql_pairs": {
@@ -62,8 +76,12 @@ async def test_intra_batch_duplicate_skipped(store: MemoryStore) -> None:
         }
     )
     report = await import_bundle(store, dup)
-    assert report.saved == 1
-    assert report.skipped_duplicate == 1
+    assert report.saved == 2
+    assert report.errors == []
+
+    persisted = store.iter_all()
+    assert persisted.sql_pairs is not None
+    assert len(persisted.sql_pairs.pairs) == 1
 
 
 async def test_round_trip_lossless(store: MemoryStore) -> None:
@@ -72,10 +90,17 @@ async def test_round_trip_lossless(store: MemoryStore) -> None:
     assert exported.warnings == []
     reparsed = parse_json(exported.text)
 
-    fresh_store = store
-    again = await import_bundle(fresh_store, reparsed)
-    assert again.saved == 0
-    assert again.skipped_duplicate == 3
+    again = await import_bundle(store, reparsed)
+    # Upsert: each record is rewritten under its content-hash id.
+    assert again.saved == 3
+    assert again.errors == []
+
+    # Final store still contains exactly the three original rows.
+    final = store.iter_all()
+    assert final.sql_pairs is not None
+    assert len(final.sql_pairs.pairs) == 2
+    assert final.schema_docs is not None
+    assert len(final.schema_docs) == 1
 
     assert reparsed.sql_pairs is not None
     assert {p.sql for p in reparsed.sql_pairs.pairs} == {
@@ -116,9 +141,10 @@ async def test_dry_run_with_clear_preserves_store(store: MemoryStore) -> None:
     await import_bundle(store, _BUNDLE)
     before = export_bundle(store, "json").text
     report = await import_bundle(store, _BUNDLE, dry_run=True, clear=True)
-    # clear is skipped on a dry-run, so existing memory is still the baseline
-    assert report.saved == 0
-    assert report.skipped_duplicate == 3
+    # clear is skipped on a dry-run; idempotent upsert reports what would
+    # have been saved (every record processed) without writing anything.
+    assert report.saved == 3
+    assert report.errors == []
     assert export_bundle(store, "json").text == before
 
 
@@ -148,7 +174,13 @@ async def test_iter_all_skips_unrepresentable_and_corrupt_rows(
 async def test_iter_all_raises_on_wholesale_corruption(
     store: MemoryStore,
 ) -> None:
-    """Every row unparseable (e.g. version skew) must fail loud, not return {}."""
+    """Every row unparseable (e.g. version skew) must fail loud, not return {}.
+
+    The import path no longer reads the store (no dedup baseline), so it
+    silently succeeds against a corrupt store — the corruption signal now
+    surfaces via the export path, which is the documented "before --clear"
+    backup gate where it matters most.
+    """
     collection = store._mem._get_collection()
     n = 8
     collection.upsert(
@@ -164,9 +196,6 @@ async def test_iter_all_raises_on_wholesale_corruption(
     # The export path must refuse too, not write an empty "successful" backup.
     with pytest.raises(MemoryCorruptionError):
         export_bundle(store, "json")
-    # And the import dedup baseline must abort rather than re-save duplicates.
-    with pytest.raises(MemoryCorruptionError):
-        await import_bundle(store, _BUNDLE)
 
 
 async def test_partial_skip_surfaces_export_warning(store: MemoryStore) -> None:
@@ -269,8 +298,9 @@ async def test_disk_full_aborts_import(store: MemoryStore, monkeypatch) -> None:
 
 async def test_incremental_import_then_export_union(store: MemoryStore) -> None:
     """import A, then non-overlapping B without --clear, export the union; the
-    dedup baseline is seeded from the live store, not just identical
-    re-imports."""
+    union is preserved without explicit baseline reads — content-hash ids
+    give a different row per logical pair, so non-overlapping imports never
+    collide."""
     a = MemoryBundle.model_validate(
         {"sql_pairs": {"pairs": [{"question": "qa", "sql": "SELECT 1"}]}}
     )
@@ -282,17 +312,18 @@ async def test_incremental_import_then_export_union(store: MemoryStore) -> None:
 
     second = await import_bundle(store, b)
     assert second.saved == 1
-    assert second.skipped_duplicate == 0
 
     exported = export_bundle(store, "json")
     reparsed = parse_json(exported.text)
     assert reparsed.sql_pairs is not None
     assert {p.sql for p in reparsed.sql_pairs.pairs} == {"SELECT 1", "SELECT 2"}
 
-    # Re-importing the union must now dedup entirely against the live store.
+    # Re-importing the union upserts every row again; final state still has 2.
     again = await import_bundle(store, reparsed)
-    assert again.saved == 0
-    assert again.skipped_duplicate == 2
+    assert again.saved == 2
+    final = store.iter_all()
+    assert final.sql_pairs is not None
+    assert len(final.sql_pairs.pairs) == 2
 
 
 async def test_clear_wipes_first(store: MemoryStore) -> None:
@@ -304,7 +335,7 @@ async def test_clear_wipes_first(store: MemoryStore) -> None:
     )
     report = await import_bundle(store, other, clear=True)
     assert report.saved == 1
-    assert report.skipped_duplicate == 0
+    assert report.errors == []
 
     remaining = store.iter_all()
     assert remaining.sql_pairs is not None

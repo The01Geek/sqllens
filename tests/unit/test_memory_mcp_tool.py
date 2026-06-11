@@ -41,8 +41,10 @@ async def test_tool_imports_and_reports(tmp_path, monkeypatch) -> None:
     )
     text = str(result)
     assert "| saved | 1 |" in text
-    assert "| skipped (duplicate) | 0 |" in text
     assert "| errors | 0 |" in text
+    # The "skipped (duplicate)" row is gone — content-hash + upsert means a
+    # re-import overwrites the same row; there is no separate skip count.
+    assert "skipped" not in text.lower()
 
 
 async def test_tool_errors_on_bad_input(tmp_path, monkeypatch) -> None:
