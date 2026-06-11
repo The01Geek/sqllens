@@ -144,6 +144,23 @@ def test_missing_query_info_classifies_as_error(tmp_path: Path) -> None:
     assert "did not produce a SQL" in (report.results[0].error or "")
 
 
+def test_non_dict_query_info_classifies_as_error(tmp_path: Path) -> None:
+    """A future upstream contract drift that returned a non-dict ``query_info``
+    (list, namedtuple, etc.) must classify the case as ERROR, not abort the
+    whole run with an ``AttributeError`` on ``.get`` propagating past the
+    runner's per-case fault-tolerance promise.
+    """
+    cfg = _config(tmp_path)
+    cases = [GoldenCase("q", "SELECT 1")]
+    # Return a list where a dict was expected — the runner must guard.
+    driver = _scripted_driver(
+        [("answer", [], ["unexpected", "shape"], None, None)]  # type: ignore[list-item]
+    )
+    report = asyncio.run(run_verification(cfg, cases, driver=driver))
+    assert report.errored == 1
+    assert report.results[0].status is Status.ERROR
+
+
 def test_empty_sql_string_classifies_as_error(tmp_path: Path) -> None:
     cfg = _config(tmp_path)
     cases = [GoldenCase("q", "SELECT 1")]

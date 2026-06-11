@@ -88,6 +88,14 @@ def test_sqlalchemy_dialect_name_mssql_normalises() -> None:
     assert compare("SELECT 1", "select 1", dialect="mssql") is Status.PASS
 
 
+def test_sqlalchemy_dialect_name_mariadb_normalises() -> None:
+    """`DatabaseConfig.dialect` returns 'mariadb' from mariadb:// — sqlglot
+    has no mariadb dialect, so the map translates to 'mysql'. Pins all three
+    explicit entries of ``_SQLGLOT_DIALECT_MAP``.
+    """
+    assert compare("SELECT 1", "select 1", dialect="mariadb") is Status.PASS
+
+
 def test_unmapped_dialect_passes_through() -> None:
     """A dialect name sqlglot already recognises must pass through unchanged."""
     assert compare("SELECT 1", "select 1", dialect="sqlite") is Status.PASS
@@ -134,10 +142,11 @@ def test_unknown_dialect_raises_not_swallowed() -> None:
     converted to ERROR — the operator needs the diagnostic, otherwise every
     case classifies as a misleading "golden file is malformed" ERROR.
 
-    Pins the iter-2 silent-failure fix: ``compare()`` catches only
-    :class:`sqlglot.errors.ParseError`; a ``ValueError("Unknown dialect ...")``
-    propagates to ``_run_one_case``'s catch where it lands in
-    :attr:`CaseResult.error`.
+    ``compare()`` catches only :class:`sqlglot.errors.SqlglotError`; a
+    ``ValueError("Unknown dialect ...")`` is not a subclass of that family
+    and propagates to ``_run_one_case``'s catch where it lands in
+    :attr:`CaseResult.error` — see the matching runner-level test in
+    ``test_eval_runner.py`` and the rationale in ``compare.py``'s docstring.
     """
     with pytest.raises(ValueError, match="Unknown dialect"):
         compare("SELECT 1", "select 1", dialect="cockroachdb_no_such")

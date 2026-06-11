@@ -171,8 +171,9 @@ async def _run_one_case(
                 "or show_details was filtered out upstream)"
             ),
         )
-    # ``compare()`` catches only ``sqlglot.errors.ParseError`` — a
-    # ``ValueError("Unknown dialect '...'")`` from a misconfigured /
+    # ``compare()`` catches only ``sqlglot.errors.SqlglotError`` (the
+    # parse/lex family base — covers both ``ParseError`` and ``TokenError``).
+    # A ``ValueError("Unknown dialect '...'")`` from a misconfigured /
     # unmapped SQLAlchemy URL scheme propagates here, where we capture it
     # with the SQL alongside so the operator's per-case detail shows both
     # the agent's actual SQL and the real diagnostic (CLAUDE.md
@@ -195,7 +196,7 @@ async def _run_one_case(
     )
 
 
-def _extract_sql(query_info: dict | None) -> str | None:
+def _extract_sql(query_info: object | None) -> str | None:
     """Pull the executed SQL out of ``query_info`` if present and non-empty.
 
     Matches the shape ``query_database_impl_with_widgets`` puts on the wire:
@@ -203,8 +204,14 @@ def _extract_sql(query_info: dict | None) -> str | None:
     runner forces it on, but a future filter could still null it) or a mapping
     with a ``"sql"`` key. An empty/whitespace string is treated as missing so
     the comparator never normalises an empty input.
+
+    Annotated as ``object | None`` rather than ``dict | None`` so the
+    isinstance guard is load-bearing: a future upstream contract drift that
+    returned a list, namedtuple, or other non-mapping shape would otherwise
+    raise ``AttributeError`` on ``.get`` and abort the entire run instead of
+    producing one ERROR row (the runner's per-case fault-tolerance promise).
     """
-    if query_info is None:
+    if not isinstance(query_info, dict):
         return None
     sql = query_info.get("sql")
     if not isinstance(sql, str) or not sql.strip():
