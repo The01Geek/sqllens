@@ -14,7 +14,7 @@ import pytest
 from sqllens.config import Config
 from sqllens.eval.compare import Status
 from sqllens.eval.golden import GoldenCase
-from sqllens.eval.runner import _force_show_details, run_verification
+from sqllens.eval.runner import run_verification
 
 
 def _config(tmp_path: Path) -> Config:
@@ -60,14 +60,25 @@ def _scripted_driver(
     return _driver
 
 
-def test_force_show_details_clones_without_mutating(tmp_path: Path) -> None:
+def test_runner_does_not_mutate_caller_cfg(tmp_path: Path) -> None:
+    """The original cfg instance must stay unchanged across the run.
+
+    Concurrent request paths may hold the same ``cfg`` reference; the runner
+    forces ``show_details`` on by cloning, never by mutating.
+    """
     cfg = _config(tmp_path)
     assert cfg.agent.show_details is False
-    forced = _force_show_details(cfg)
-    assert forced.agent.show_details is True
-    # The original config instance MUST stay unchanged — concurrent request
-    # paths may hold the same reference.
-    assert cfg.agent.show_details is False
+
+    forced_seen: list[bool] = []
+
+    async def _spy_driver(c: Config, q: str):
+        forced_seen.append(c.agent.show_details)
+        return ("ok", [], {"sql": "SELECT 1"}, None, None)
+
+    cases = [GoldenCase("q", "SELECT 1")]
+    asyncio.run(run_verification(cfg, cases, driver=_spy_driver))
+    assert forced_seen == [True]  # driver saw show_details=True
+    assert cfg.agent.show_details is False  # caller cfg untouched
 
 
 def test_all_pass_against_normalised_sql(tmp_path: Path) -> None:

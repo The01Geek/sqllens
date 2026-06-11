@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any
 
 from sqllens.config import Config
 from sqllens.eval.compare import Status, compare
@@ -87,30 +86,6 @@ AgentDriver = Callable[
 ]
 
 
-def _force_show_details(cfg: Config) -> Config:
-    """Return a copy of ``cfg`` with ``agent.show_details`` forced on.
-
-    The runner needs the agent's generated SQL — which
-    :func:`~sqllens.tools.query_database.query_database_impl_with_widgets`
-    only surfaces in ``query_info["sql"]`` when the resolved profile's
-    ``show_details`` is on. Cloning the config (rather than mutating it in
-    place) keeps the caller's ``Config`` instance untouched: any concurrent
-    request path that holds the same ``cfg`` reference sees no change.
-    """
-    return cfg.model_copy(
-        update={"agent": cfg.agent.model_copy(update={"show_details": True})}
-    )
-
-
-async def _default_driver(
-    cfg: Config, question: str
-) -> tuple[str, list[dict], dict | None, dict | None, dict | None]:
-    """Production driver: route through the same agent path the MCP tool uses."""
-    from sqllens.tools.query_database import query_database_impl_with_widgets
-
-    return await query_database_impl_with_widgets(cfg, question)
-
-
 async def run_verification(
     cfg: Config,
     cases: Iterable[GoldenCase],
@@ -133,11 +108,30 @@ async def run_verification(
     with a clear diagnostic message rather than being silently scored against
     an empty string.
 
+    The runner clones ``cfg`` with ``agent.show_details=True`` rather than
+    mutating it: a concurrent request path that holds the same ``cfg``
+    reference must see no change. This relies on the runner never passing a
+    ``profile=`` arg to the agent driver — if it ever did, the per-request
+    profile resolution would shadow the cloned base. The single call site
+    here makes that explicit; revisit if verify-memory grows profile awareness.
+
     ``driver`` is the injection seam for tests; production callers leave it
     ``None`` and the runner wires :func:`query_database_impl_with_widgets`.
     """
-    impl: AgentDriver = driver if driver is not None else _default_driver
-    forced_cfg = _force_show_details(cfg)
+    if driver is None:
+        from sqllens.tools.query_database import query_database_impl_with_widgets
+
+        async def _prod_driver(
+            forced: Config, question: str
+        ) -> tuple[str, list[dict], dict | None, dict | None, dict | None]:
+            return await query_database_impl_with_widgets(forced, question)
+
+        impl: AgentDriver = _prod_driver
+    else:
+        impl = driver
+    forced_cfg = cfg.model_copy(
+        update={"agent": cfg.agent.model_copy(update={"show_details": True})}
+    )
     dialect = forced_cfg.database.dialect
     results: list[CaseResult] = []
     for case in cases:
@@ -186,7 +180,7 @@ async def _run_one_case(
     )
 
 
-def _extract_sql(query_info: Any) -> str | None:
+def _extract_sql(query_info: dict | None) -> str | None:
     """Pull the executed SQL out of ``query_info`` if present and non-empty.
 
     Matches the shape ``query_database_impl_with_widgets`` puts on the wire:
@@ -195,7 +189,7 @@ def _extract_sql(query_info: Any) -> str | None:
     with a ``"sql"`` key. An empty/whitespace string is treated as missing so
     the comparator never normalises an empty input.
     """
-    if not isinstance(query_info, dict):
+    if query_info is None:
         return None
     sql = query_info.get("sql")
     if not isinstance(sql, str) or not sql.strip():

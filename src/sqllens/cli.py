@@ -620,6 +620,9 @@ def verify_memory(
     _exit_for_report(report, fail_under)
 
 
+_STATUS_COLOUR = {"PASS": "green", "CHANGED": "yellow", "ERROR": "red"}
+
+
 def _print_report(report: RunReport) -> None:
     """Render the per-case table, then the summary line plus non-PASS details."""
     from rich.table import Table
@@ -631,11 +634,7 @@ def _print_report(report: RunReport) -> None:
     table.add_column("status", no_wrap=True)
     table.add_column("question", overflow="fold")
     for idx, case in enumerate(report.results, start=1):
-        colour = {
-            Status.PASS: "green",
-            Status.CHANGED: "yellow",
-            Status.ERROR: "red",
-        }[case.status]
+        colour = _STATUS_COLOUR[case.status.value]
         table.add_row(
             str(idx),
             f"[{colour}]{case.status.value}[/{colour}]",
