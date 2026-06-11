@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: 2026 Daniel Radman
+# SPDX-License-Identifier: Apache-2.0
+
+"""Unit tests for :mod:`sqllens.eval.compare`."""
+
+from __future__ import annotations
+
+from sqllens.eval.compare import Status, compare, normalize_sql
+
+
+def test_normalize_collapses_whitespace_and_casing() -> None:
+    a = "select   *  FROM  users  WHERE  id=1"
+    b = "SELECT * FROM users WHERE id = 1"
+    assert normalize_sql(a, dialect="sqlite") == normalize_sql(b, dialect="sqlite")
+
+
+def test_pass_on_casing_only_diff() -> None:
+    expected = "SELECT count(*) FROM users"
+    actual = "select COUNT(*) from users"
+    assert compare(expected, actual, dialect="sqlite") is Status.PASS
+
+
+def test_pass_on_whitespace_only_diff() -> None:
+    expected = "SELECT id, name FROM users WHERE active = 1"
+    actual = "SELECT    id,name    FROM users WHERE  active=1"
+    assert compare(expected, actual, dialect="sqlite") is Status.PASS
+
+
+def test_changed_on_different_structure() -> None:
+    expected = "SELECT id FROM users WHERE active = 1"
+    actual = "SELECT id FROM users WHERE active = 1 AND deleted = 0"
+    assert compare(expected, actual, dialect="sqlite") is Status.CHANGED
+
+
+def test_changed_on_different_table() -> None:
+    expected = "SELECT id FROM users"
+    actual = "SELECT id FROM accounts"
+    assert compare(expected, actual, dialect="sqlite") is Status.CHANGED
+
+
+def test_error_when_expected_unparseable() -> None:
+    expected = "this is not sql ## ?? !!"
+    actual = "SELECT 1"
+    # The golden file is malformed — surface ERROR, not "every case CHANGED".
+    assert compare(expected, actual, dialect="sqlite") is Status.ERROR
+
+
+def test_actual_unparseable_classifies_as_changed() -> None:
+    """A garbled agent answer is a regression signal, not a golden-file bug."""
+    expected = "SELECT 1"
+    actual = "@@@ definitely not sql @@@"
+    assert compare(expected, actual, dialect="sqlite") is Status.CHANGED
+
+
+def test_dialect_none_still_classifies() -> None:
+    # ``None`` dialect must fall through to sqlglot's default without raising.
+    assert compare("SELECT 1", "select 1", dialect=None) is Status.PASS
+
+
+def test_quoted_identifiers_under_postgres_dialect() -> None:
+    expected = 'SELECT "id" FROM "users"'
+    actual = "SELECT id FROM users"
+    # Postgres lowercases unquoted identifiers; quoted ones preserve case.
+    # Both renderings refer to the same column/table here, but they are
+    # *structurally* different — CHANGED is the correct verdict, not PASS.
+    assert compare(expected, actual, dialect="postgres") is Status.CHANGED
