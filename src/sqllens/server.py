@@ -366,7 +366,7 @@ def build_server(cfg: Config) -> FastMCP:
     # Opt-in, default OFF: a client that can write memory can poison future
     # SQL generation. Only registered when an operator sets allow_import.
     if cfg.memory.allow_import:
-        from sqllens.memory import MemoryCorruptionError, MemoryStore, import_bundle
+        from sqllens.memory import MemoryStore, import_bundle
         from sqllens.memory.io import BundleFormatError, parse_json
 
         store = MemoryStore(cfg)
@@ -399,15 +399,6 @@ def build_server(cfg: Config) -> FastMCP:
             try:
                 async with import_lock:
                     report = await import_bundle(store, bundle)
-            except MemoryCorruptionError as exc:
-                # The dedup baseline could not be reconstructed — importing
-                # would re-save duplicates. Distinct, actionable signal; not
-                # the generic "write failed" message.
-                logger.error("import_memory aborted: corrupt store baseline")
-                raise RuntimeError(
-                    f"Memory store looks corrupt: {exc} Import aborted; "
-                    "nothing was written. Check the server logs."
-                ) from exc
             except Exception as exc:
                 # Per the CLAUDE.md isError contract: a Chroma/embedding/disk
                 # failure must reach the client as a clear message, never a

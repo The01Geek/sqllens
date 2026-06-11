@@ -20,6 +20,7 @@ Two paths, sharing the same on-disk JSON bundle shape:
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -143,30 +144,51 @@ def export_bundle_stream(
             json.dump(to_record(model), fp, ensure_ascii=False)
             first = False
             count += 1
-        # ``iter_paginated`` resets ``last_skipped_rows`` per call, so we
-        # accumulate explicitly across passes.
+        # Each ``iter_paginated`` call overwrites ``last_skipped_rows`` at
+        # the end of its drain; we accumulate explicitly across passes.
         skipped_total += store.last_skipped_rows
         return count
 
-    with path.open("w", encoding="utf-8") as fp:
-        fp.write('{"sql_pairs":{"training_type":"sql_pairs","pairs":[')
-        sql_pairs_count = _write_section(
-            fp,
-            kind="sql_pair",
-            where={"tool_name": "run_sql"},
-            to_record=lambda p: {"question": p.question, "sql": p.sql},
-        )
-        fp.write(']},"schema_docs":[')
-        schema_docs_count = _write_section(
-            fp,
-            kind="schema_doc",
-            where={"is_text_memory": True},
-            to_record=lambda d: {
-                "training_type": "schema_docs",
-                "content": d.content,
-            },
-        )
-        fp.write("]}")
+    # Atomic write: stream into a sibling temp file and rename only after
+    # the close-out write succeeds. ``path.open("w")`` would truncate the
+    # destination on entry, so a disk-full mid-stream would leave the
+    # operator's previous backup destroyed AND replaced with a truncated /
+    # unparseable file — exactly the data-loss trap the "export before
+    # ``--clear``" runbook is meant to prevent. ``os.replace`` is atomic
+    # on POSIX and on Windows (Python 3.3+), so a partial write never
+    # overwrites the prior file.
+    tmp_path = path.with_name(path.name + ".tmp")
+    try:
+        with tmp_path.open("w", encoding="utf-8") as fp:
+            fp.write('{"sql_pairs":{"training_type":"sql_pairs","pairs":[')
+            sql_pairs_count = _write_section(
+                fp,
+                kind="sql_pair",
+                where={"tool_name": "run_sql"},
+                to_record=lambda p: {"question": p.question, "sql": p.sql},
+            )
+            fp.write(']},"schema_docs":[')
+            schema_docs_count = _write_section(
+                fp,
+                kind="schema_doc",
+                where={"is_text_memory": True},
+                to_record=lambda d: {
+                    "training_type": "schema_docs",
+                    "content": d.content,
+                },
+            )
+            fp.write("]}")
+        os.replace(tmp_path, path)
+    except BaseException:
+        # Best-effort cleanup of the temp file so a failed run does not
+        # leave a stray ``<path>.tmp`` next to the operator's good backup.
+        # Use ``BaseException`` rather than ``Exception`` so a ``KeyboardInterrupt``
+        # during a long export still leaves the working tree tidy.
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
     warnings: list[str] = []
     if skipped_total:

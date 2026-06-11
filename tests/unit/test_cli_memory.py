@@ -260,6 +260,31 @@ def test_stream_import_clear_then_failure_warns_data_loss(
     assert "wiped" in r.output.lower() or "may now be empty" in r.output.lower()
 
 
+def test_stream_clear_with_empty_input_warns_and_exits_nonzero(
+    tmp_path, monkeypatch
+) -> None:
+    """``--clear`` + an empty (or near-empty, sub-threshold) input file is the
+    documented data-loss trap: the operator typed ``--clear`` expecting
+    wipe-and-replace but got wipe-and-empty. The CLI must surface a loud
+    warning and exit non-zero — never green output on a wiped store."""
+    patch_fake_embeddings(monkeypatch)
+    cfg = _config(tmp_path)
+    seed = tmp_path / "seed.json"
+    seed.write_text('{"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 0"}]}}')
+    runner.invoke(app, ["import-memory", str(seed), "-c", str(cfg)])
+
+    empty = tmp_path / "empty.json"
+    empty.write_text("{}")  # bundle-shaped but legitimately empty
+    r = runner.invoke(
+        app,
+        ["import-memory", str(empty), "--stream", "--clear", "-c", str(cfg)],
+        input="y\n",
+    )
+    assert r.exit_code == 1, r.output
+    assert "Warning" in r.output
+    assert "wiped" in r.output.lower() or "now empty" in r.output.lower()
+
+
 def test_stream_export_rejects_csv_format(tmp_path, monkeypatch) -> None:
     patch_fake_embeddings(monkeypatch)
     cfg = _config(tmp_path)

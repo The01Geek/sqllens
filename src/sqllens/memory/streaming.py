@@ -8,8 +8,9 @@ file and yields one record object at a time. Memory is bounded to roughly
 one record (plus the read buffer) regardless of total file size, so a
 100 MB bundle imports without loading the full document into RAM.
 
-The hand-rolled scanner is string- and escape-aware: a ``}``, ``]``, or ``"``
-inside a SQL string literal (e.g. ``WHERE name = '}'``) does not fool the
+The hand-rolled scanner is JSON-string- and escape-aware: a ``}``, ``]``,
+or ``"`` inside a JSON string value (such as the SQL literal
+``WHERE name = '}'`` embedded as ``"WHERE name = '}'"``) does not fool the
 depth counter that frames each record.
 
 This module is CLI-only (driven from the ``import-memory --stream`` path).
@@ -57,6 +58,14 @@ class _Scanner:
         self._buf = ""
         self._i = 0
         self._eof = False
+        # Compaction must NOT fire while ``read_value_raw`` is reading a
+        # single value — the caller captures ``self._i`` as ``start`` before
+        # the scan and slices ``self._buf[start : self._i]`` afterwards. A
+        # compaction mid-scan would shift the buffer underneath the saved
+        # ``start`` index and corrupt the returned slice. The pause is
+        # scoped to one value: between scans the consumed prefix is
+        # reclaimed normally.
+        self._compaction_paused = False
 
     def _ensure(self, n: int) -> None:
         """Try to make ``_buf[_i:_i+n]`` available, reading from ``fp`` as needed."""
@@ -66,8 +75,12 @@ class _Scanner:
                 self._eof = True
                 break
             self._buf += chunk
-        # Compact the consumed prefix when it grows large to keep memory bounded.
-        if self._i > self._chunk_size * 4:
+        # Compact the consumed prefix when it grows large to keep memory
+        # bounded — but never DURING a value scan (see __init__ note).
+        if (
+            not self._compaction_paused
+            and self._i > self._chunk_size * 4
+        ):
             self._buf = self._buf[self._i :]
             self._i = 0
 
@@ -109,30 +122,28 @@ class _Scanner:
         a valid standalone JSON value; the caller can pass it to ``json.loads``.
 
         Bounded memory: a single value larger than ``_MAX_VALUE_BYTES`` raises
-        ``BundleFormatError`` rather than growing the buffer without limit.
+        ``BundleFormatError`` from inside the scanner before the buffer is
+        grown past the cap. Buffer compaction is paused for the duration of
+        the scan so the ``start`` index captured here stays valid; between
+        values the consumed prefix is reclaimed normally.
         """
         self.skip_whitespace()
         c = self.peek()
         if not c:
             raise BundleFormatError("unexpected EOF where a value was expected")
 
-        start = self._i
-        if c in "{[":
-            self._scan_balanced(c)
-        elif c == '"':
-            self._scan_string()
-        else:
-            self._scan_primitive()
-
-        raw = self._buf[start : self._i]
-        # UTF-8 is at least one byte per code point, so a code-point check is
-        # a sufficient (lower-bound) rejection — and it skips the ``encode``
-        # of every returned value just to measure. ``_scan_balanced`` already
-        # enforces the same cap in-loop; this catches strings / primitives.
-        if len(raw) > _MAX_VALUE_BYTES:
-            raise BundleFormatError(
-                f"value exceeds the {_MAX_VALUE_BYTES}-byte streaming-record cap"
-            )
+        self._compaction_paused = True
+        try:
+            start = self._i
+            if c in "{[":
+                self._scan_balanced(c)
+            elif c == '"':
+                self._scan_string()
+            else:
+                self._scan_primitive()
+            raw = self._buf[start : self._i]
+        finally:
+            self._compaction_paused = False
         return raw
 
     def _scan_balanced(self, open_char: str) -> None:
@@ -143,29 +154,36 @@ class _Scanner:
         (``"..."``) every character including ``}``/``]`` is treated as
         literal — that is the escape-awareness that prevents SQL like
         ``WHERE name = '}'`` from being mis-framed.
+
+        Uses ``self._i`` directly (not a stale local) so the per-call
+        ``_ensure`` keeps growing the buffer as the scan crosses chunk
+        boundaries. The earlier local-``i`` version froze ``self._i`` at
+        ``scan_start`` for the duration of the scan, which made
+        ``_ensure`` think it already had enough buffer and EOF-trapped
+        any record larger than the initial chunk window.
         """
         close_char = "}" if open_char == "{" else "]"
         depth = 0
         in_string = False
         escape_next = False
-        i = self._i
-        # Track size to avoid growing the buffer past the per-value cap.
-        scan_start = i
+        scan_start = self._i
         while True:
-            # Refill in chunks rather than one char at a time.
+            # Refill in chunks rather than one char at a time; the
+            # condition inside ``_ensure`` is against ``self._i``, so we
+            # MUST update ``self._i`` (not a local) as we advance.
             self._ensure(self._chunk_size)
-            if i >= len(self._buf):
+            if self._i >= len(self._buf):
                 raise BundleFormatError(
                     f"unexpected EOF inside {open_char}…{close_char}"
                 )
             # Bound the byte length of an in-flight value. UTF-8 lower-bounds
             # at one byte per code point, so a code-point check is a cheap
             # over-approximation that protects against unbounded growth.
-            if (i - scan_start) > _MAX_VALUE_BYTES:
+            if (self._i - scan_start) > _MAX_VALUE_BYTES:
                 raise BundleFormatError(
                     f"value exceeds the {_MAX_VALUE_BYTES}-byte streaming-record cap"
                 )
-            ch = self._buf[i]
+            ch = self._buf[self._i]
             if in_string:
                 if escape_next:
                     escape_next = False
@@ -181,44 +199,67 @@ class _Scanner:
                 elif ch in "}]":
                     depth -= 1
                     if depth == 0:
-                        i += 1
+                        self._i += 1
                         break
-            i += 1
-        self._i = i
+            self._i += 1
 
     def _scan_string(self) -> None:
-        """Advance past a JSON string literal at the current position."""
-        i = self._i + 1  # skip opening quote
+        """Advance past a JSON string literal at the current position.
+
+        Enforces ``_MAX_VALUE_BYTES`` in-loop so a maliciously crafted
+        unterminated string (``"AAA...`` with no closing quote) cannot
+        grow the buffer without bound before EOF is detected. The
+        ``read_value_raw`` post-check is a defence-in-depth backstop;
+        this in-loop check is the load-bearing one. Uses ``self._i``
+        directly so ``_ensure``'s chunk-refill keeps pace with the scan
+        (see :meth:`_scan_balanced` for the same fix).
+        """
+        scan_start = self._i
+        self._i += 1  # skip opening quote
         escape_next = False
         while True:
             self._ensure(self._chunk_size)
-            if i >= len(self._buf):
+            if self._i >= len(self._buf):
                 raise BundleFormatError("unexpected EOF inside string literal")
-            ch = self._buf[i]
+            if (self._i - scan_start) > _MAX_VALUE_BYTES:
+                raise BundleFormatError(
+                    f"string literal exceeds the {_MAX_VALUE_BYTES}-byte "
+                    "streaming-record cap"
+                )
+            ch = self._buf[self._i]
             if escape_next:
                 escape_next = False
             elif ch == "\\":
                 escape_next = True
             elif ch == '"':
-                i += 1
+                self._i += 1
                 break
-            i += 1
-        self._i = i
+            self._i += 1
 
     def _scan_primitive(self) -> None:
-        """Advance past a number / ``true`` / ``false`` / ``null``."""
-        i = self._i
+        """Advance past a number / ``true`` / ``false`` / ``null``.
+
+        Same in-loop ``_MAX_VALUE_BYTES`` discipline as :meth:`_scan_string`:
+        a JSON number can in principle be arbitrarily long, and a bounded
+        scanner must refuse to grow the buffer past the per-value cap.
+        """
+        scan_start = self._i
+        start = self._i
         while True:
             self._ensure(1)
-            if i >= len(self._buf):
+            if self._i >= len(self._buf):
                 break
-            ch = self._buf[i]
+            if (self._i - scan_start) > _MAX_VALUE_BYTES:
+                raise BundleFormatError(
+                    f"primitive value exceeds the {_MAX_VALUE_BYTES}-byte "
+                    "streaming-record cap"
+                )
+            ch = self._buf[self._i]
             if ch in " \t\n\r,}]":
                 break
-            i += 1
-        if i == self._i:
+            self._i += 1
+        if self._i == start:
             raise BundleFormatError("expected a JSON value")
-        self._i = i
 
 
 def stream_records(fp: IO[str]) -> Iterator[tuple[RecordKind, dict]]:

@@ -408,6 +408,178 @@ def test_schema_doc_id_matches_documented_scheme() -> None:
     assert schema_doc_id("Hello   World") == expected
 
 
+async def test_stream_import_per_batch_upsert_failure(
+    store: MemoryStore, tmp_path, monkeypatch
+) -> None:
+    """A ``RuntimeError`` from ``add_sql_pair_batch`` must mark every member
+    of the batch as errored — never silently advance ``saved``. Covers the
+    batched-write failure path that bounded ``import_bundle`` already tests
+    on the per-item path."""
+    path = _write(
+        tmp_path,
+        {
+            "sql_pairs": {
+                "pairs": [
+                    {"question": "q0", "sql": "SELECT 0"},
+                    {"question": "q1", "sql": "SELECT 1"},
+                    {"question": "q2", "sql": "SELECT 2"},
+                ]
+            }
+        },
+    )
+
+    async def flaky_batch(items: list[tuple[str, str]]) -> None:
+        raise RuntimeError("batch-boom")
+
+    monkeypatch.setattr(store, "add_sql_pair_batch", flaky_batch)
+    result = await import_bundle_stream(store, path, batch_size=2)
+    assert result.report.saved == 0
+    assert len(result.report.errors) == 3
+    assert all(e.kind == "sql_pair" for e in result.report.errors)
+    assert {e.index for e in result.report.errors} == {0, 1, 2}
+    assert all("batch-boom" in e.message for e in result.report.errors)
+
+
+async def test_stream_export_paginates_across_pages(
+    store: MemoryStore, tmp_path
+) -> None:
+    """Multi-page iteration: seed more rows than ``page_size``, then assert
+    the streamed export captures every row. Without this test a regression
+    that returned only the first page would silently truncate large
+    exports."""
+    pairs = [{"question": f"q{i}", "sql": f"SELECT {i}"} for i in range(7)]
+    docs = [{"content": f"doc {i}"} for i in range(5)]
+    seed = _write(tmp_path, {"sql_pairs": {"pairs": pairs}, "schema_docs": docs})
+    await import_bundle_stream(store, seed)
+
+    out = tmp_path / "out.json"
+    result = export_bundle_stream(store, out, page_size=2)
+    assert result.sql_pairs_count == 7
+    assert result.schema_docs_count == 5
+
+    reparsed = parse_json(out.read_text())
+    assert reparsed.sql_pairs is not None
+    assert {p.sql for p in reparsed.sql_pairs.pairs} == {f"SELECT {i}" for i in range(7)}
+    assert reparsed.schema_docs is not None
+    assert {d.content for d in reparsed.schema_docs} == {f"doc {i}" for i in range(5)}
+
+
+async def test_stream_export_atomic_write_preserves_existing_on_failure(
+    store: MemoryStore, tmp_path, monkeypatch
+) -> None:
+    """A mid-stream OSError must NOT destroy a previously-good backup at
+    the destination path. The streaming exporter writes to a sibling
+    ``.tmp`` and ``os.replace``s only on full success — so a disk-full
+    mid-write leaves the prior file intact, satisfying CLAUDE.md's
+    'export before --clear' invariant."""
+    # First, produce a valid backup file.
+    seed = _write(
+        tmp_path,
+        {"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]}},
+    )
+    await import_bundle_stream(store, seed)
+    backup = tmp_path / "backup.json"
+    export_bundle_stream(store, backup)
+    good_bytes = backup.read_text()
+    assert "SELECT 1" in good_bytes
+
+    # Now simulate a mid-export failure on a second export to the same path.
+    real_paginated = store.iter_paginated
+
+    def flaky_iter(*, where=None, page_size=500):
+        for kind, model in real_paginated(where=where, page_size=page_size):
+            yield kind, model
+            raise OSError("disk full")
+
+    monkeypatch.setattr(store, "iter_paginated", flaky_iter)
+    with pytest.raises(OSError, match="disk full"):
+        export_bundle_stream(store, backup)
+
+    # The prior good backup must still be on disk, byte-identical.
+    assert backup.read_text() == good_bytes
+    # No stray .tmp file left behind.
+    assert not (tmp_path / "backup.json.tmp").exists()
+
+
+async def test_stream_import_dry_run_does_not_clear(
+    store: MemoryStore, tmp_path
+) -> None:
+    """``--dry-run --clear`` must NOT wipe the store; per the documented
+    contract dry-run is a no-op against the live store. Without this guard,
+    a regression that ran ``clear()`` on the dry-run path would silently
+    destroy data on what the operator believes is a preview."""
+    seed = _write(
+        tmp_path,
+        {"sql_pairs": {"pairs": [{"question": "seed", "sql": "SELECT 0"}]}},
+    )
+    await import_bundle_stream(store, seed)
+    before = store.iter_all()
+    assert before.sql_pairs is not None
+
+    other = _write(
+        tmp_path,
+        {"sql_pairs": {"pairs": [{"question": "new", "sql": "SELECT 1"}]}},
+        name="other.json",
+    )
+    result = await import_bundle_stream(store, other, dry_run=True, clear=True)
+    assert result.report.saved == 1
+    assert result.report.errors == []
+    # Store is unchanged: dry-run + clear must be a no-op.
+    after = store.iter_all()
+    assert after.sql_pairs is not None
+    assert {p.sql for p in after.sql_pairs.pairs} == {"SELECT 0"}
+
+
+async def test_stream_import_bypasses_whole_file_byte_cap(
+    store: MemoryStore, tmp_path
+) -> None:
+    """The headline feature: ``--stream`` lifts ``MAX_BUNDLE_BYTES`` for the
+    local operator. A bundle whose serialized byte length exceeds the
+    bounded path's 10 MiB cap must import successfully via streaming."""
+    from sqllens.memory.schema import MAX_BUNDLE_BYTES
+
+    # Construct a bundle whose UTF-8 size is comfortably above MAX_BUNDLE_BYTES.
+    # Each pair is roughly the per-item cap (~10 KB SQL), so a few thousand
+    # pairs push past 10 MiB without any single record exceeding per-item caps.
+    big_sql = "SELECT " + ("x" * 9000) + " -- pad"
+    pairs = [{"question": f"q{i}", "sql": big_sql} for i in range(1200)]
+    big_bundle = tmp_path / "big.json"
+    big_bundle.write_text(json.dumps({"sql_pairs": {"pairs": pairs}}))
+    assert big_bundle.stat().st_size > MAX_BUNDLE_BYTES, "bundle must exceed bounded cap"
+
+    result = await import_bundle_stream(store, big_bundle, batch_size=200)
+    # Idempotent upsert: all rows normalize to distinct sql_pair_ids because
+    # the question differs per row. saved counts the upserts.
+    assert result.report.saved == 1200
+    assert result.report.errors == []
+    assert result.aborted is False
+    assert result.likely_format_mismatch is False
+
+
+def test_stream_reader_eof_inside_string_literal_raises() -> None:
+    """An unterminated string literal must raise BundleFormatError, not
+    hang or grow the buffer without bound. The outer ``_scan_balanced``
+    catches the EOF first when the unterminated string sits inside a
+    record object, but the failure mode is the same: a clean structured
+    error rather than a hang."""
+    with pytest.raises(BundleFormatError, match="EOF inside"):
+        _stream('{"sql_pairs": {"pairs": [{"question": "unterminated')
+
+
+def test_stream_reader_per_value_byte_cap_fires_on_oversized_string() -> None:
+    """The 1 MiB per-value cap inside ``_scan_string`` must fire when a
+    single value would exceed the cap — defence-in-depth against an
+    adversarial unterminated literal."""
+    from sqllens.memory.streaming import _MAX_VALUE_BYTES
+
+    # Build an unterminated string just past the cap. The scanner must raise
+    # the cap-exceeded error rather than running until EOF (which would
+    # require the whole 1 MiB+ to be in the buffer).
+    oversized = '{"sql_pairs": {"pairs": [{"question": "' + ("x" * (_MAX_VALUE_BYTES + 8))
+    with pytest.raises(BundleFormatError, match="exceeds"):
+        _stream(oversized)
+
+
 def test_sql_pair_id_matches_documented_scheme() -> None:
     """Pin the AC contract: ``sha256("sql_pair\\x00" + _norm(q) + "\\x00" + _norm(sql))``."""
     import hashlib

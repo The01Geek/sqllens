@@ -604,6 +604,21 @@ def import_memory(
                     "imported — memory may now be empty.[/red]"
                 )
             raise typer.Exit(code=1)
+        # CLAUDE.md "lossy/empty success needs a loud warning" — a ``--clear``
+        # that wiped the store followed by an import that saved 0 records (no
+        # errors, no abort, file too small to trip the format-mismatch heuristic)
+        # is the documented data-loss trap: the operator typed ``--clear``
+        # expecting a wipe-and-replace and got a wipe-and-empty. The earlier
+        # ``--clear`` confirm dialog gates the wipe, so the operator did consent
+        # to the destruction; what they need now is a loud non-zero signal that
+        # nothing replaced what was wiped.
+        if clear and not dry_run and result.report.saved == 0 and not result.report.errors:
+            err_console.print(
+                "[yellow]Warning:[/yellow] --clear wiped the store and 0 records "
+                f"were imported from {escape(str(path))} (read {result.bytes_read} "
+                "bytes). The collection is now empty."
+            )
+            raise typer.Exit(code=1)
         if result.report.errors:
             raise typer.Exit(code=1)
         return
