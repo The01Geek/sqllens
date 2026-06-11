@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from sqllens.eval.compare import Status, compare, normalize_sql
 
 
@@ -90,3 +92,27 @@ def test_unmapped_dialect_passes_through() -> None:
     """A dialect name sqlglot already recognises must pass through unchanged."""
     assert compare("SELECT 1", "select 1", dialect="sqlite") is Status.PASS
     assert compare("SELECT 1", "select 1", dialect="mysql") is Status.PASS
+
+
+def test_dialect_lookup_is_case_insensitive() -> None:
+    """An upper-cased URL scheme (technically tolerated by SQLAlchemy) must
+    still hit the mapping so a Postgres deployment with a ``PostgreSQL://``
+    URL doesn't re-trigger the silent-ERROR mode the dialect map fixed.
+    """
+    assert compare("SELECT 1", "select 1", dialect="PostgreSQL") is Status.PASS
+    assert compare("SELECT 1", "select 1", dialect="MSSQL") is Status.PASS
+
+
+def test_unknown_dialect_raises_not_swallowed() -> None:
+    """A dialect name sqlglot does NOT recognise (e.g. an unsupported third-party
+    SQLAlchemy driver) must surface as a real exception, not be silently
+    converted to ERROR — the operator needs the diagnostic, otherwise every
+    case classifies as a misleading "golden file is malformed" ERROR.
+
+    Pins the iter-2 silent-failure fix: ``compare()`` catches only
+    :class:`sqlglot.errors.ParseError`; a ``ValueError("Unknown dialect ...")``
+    propagates to ``_run_one_case``'s catch where it lands in
+    :attr:`CaseResult.error`.
+    """
+    with pytest.raises(ValueError, match="Unknown dialect"):
+        compare("SELECT 1", "select 1", dialect="cockroachdb_no_such")

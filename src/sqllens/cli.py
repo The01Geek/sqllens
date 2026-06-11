@@ -674,6 +674,15 @@ def _exit_for_report(report: RunReport, fail_under: float | None) -> None:
     """
     from sqllens.eval import Status
 
+    # Defence-in-depth symmetry: ``verify_memory`` already refuses an empty
+    # golden file upstream, but ``_exit_for_report`` is the canonical exit
+    # policy and must remain self-sufficient — if a future caller bypassed
+    # the upstream guard, ``all([])`` would vacuously return success.
+    if report.total == 0:
+        err_console.print(
+            "[red]Refusing to exit 0:[/red] verification produced zero cases."
+        )
+        raise typer.Exit(code=1)
     if fail_under is None:
         if all(r.status is Status.PASS for r in report.results):
             return

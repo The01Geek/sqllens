@@ -171,7 +171,22 @@ async def _run_one_case(
                 "or show_details was filtered out upstream)"
             ),
         )
-    status = compare(case.expected_sql, actual_sql, dialect=dialect)
+    # ``compare()`` catches only ``sqlglot.errors.ParseError`` — a
+    # ``ValueError("Unknown dialect '...'")`` from a misconfigured /
+    # unmapped SQLAlchemy URL scheme propagates here, where we capture it
+    # with the SQL alongside so the operator's per-case detail shows both
+    # the agent's actual SQL and the real diagnostic (CLAUDE.md
+    # structured-signal rule).
+    try:
+        status = compare(case.expected_sql, actual_sql, dialect=dialect)
+    except Exception as exc:
+        return CaseResult(
+            question=case.question,
+            expected_sql=case.expected_sql,
+            actual_sql=actual_sql,
+            status=Status.ERROR,
+            error=f"{type(exc).__name__}: {exc}",
+        )
     return CaseResult(
         question=case.question,
         expected_sql=case.expected_sql,

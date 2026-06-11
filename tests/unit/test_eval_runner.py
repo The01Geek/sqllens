@@ -180,6 +180,46 @@ def test_dialect_threaded_from_config(tmp_path: Path, monkeypatch) -> None:
     assert seen == ["sqlite"]
 
 
+def test_unknown_dialect_surfaces_per_case_error(tmp_path: Path) -> None:
+    """An unknown sqlglot dialect must reach the operator as a clear
+    ``CaseResult.error``, not as a mysterious ERROR row with no diagnostic.
+
+    The runner forces ``cfg.database.dialect`` through ``compare()`` for every
+    case. Before the iter-2 fix, ``compare()`` swallowed the
+    ``ValueError("Unknown dialect '...'")`` into a bare ``Status.ERROR`` with
+    ``error=None`` — same Day-1 silent-failure mode the dialect map fixed for
+    Postgres but kept for any unmapped scheme. The narrow except in
+    ``compare()`` now lets the ``ValueError`` propagate to ``_run_one_case``'s
+    catch where it lands on ``CaseResult.error``.
+    """
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(
+        f"""
+[database]
+url = "cockroachdb_no_such://localhost/db"
+name = "primary"
+
+[llm]
+api_key = "sk-ant-test"
+
+[memory]
+persist_dir = "{tmp_path / 'chroma'}"
+
+[auth]
+mode = "none"
+"""
+    )
+    cfg = Config.load(cfg_path)
+    cases = [GoldenCase("q1", "SELECT 1")]
+    driver = _scripted_driver(
+        [("ok", [], {"sql": "SELECT 1"}, None, None)]
+    )
+    report = asyncio.run(run_verification(cfg, cases, driver=driver))
+    assert report.errored == 1
+    assert report.results[0].status is Status.ERROR
+    assert "Unknown dialect" in (report.results[0].error or "")
+
+
 @pytest.mark.parametrize(
     "scripted, expected_pass, expected_rate",
     [

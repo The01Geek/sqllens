@@ -65,7 +65,16 @@ def _patch_driver(monkeypatch, responses: list) -> None:
     iterator = iter(responses)
 
     async def _drv(cfg, question):
-        nxt = next(iterator)
+        try:
+            nxt = next(iterator)
+        except StopIteration as exc:
+            # PEP 479: a bare StopIteration in an async function would be
+            # converted to RuntimeError and silently captured by the runner's
+            # per-case except, producing an ERROR row that masks the test
+            # under-provisioning the responses iterator.
+            raise AssertionError(
+                f"test driver out of scripted responses on question {question!r}"
+            ) from exc
         if isinstance(nxt, Exception):
             raise nxt
         return nxt
