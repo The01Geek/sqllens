@@ -43,7 +43,7 @@ from pydantic import ValidationError
 from sqllens.agent.core.tool import ToolContext
 from sqllens.agent.core.user.models import User
 from sqllens.agent.integrations.chromadb.agent_memory import ChromaAgentMemory
-from sqllens.memory.schema import MemoryBundle, SchemaDoc, SqlPair, SqlPairsBlock
+from sqllens.memory.schema import MemoryBundle, SchemaDoc, SqlPair
 
 logger = logging.getLogger("sqllens.memory")
 
@@ -330,7 +330,7 @@ class MemoryStore:
             logger.warning("iter_all skipped %d unrepresentable memory row(s)", skipped)
 
         return MemoryBundle(
-            sql_pairs=SqlPairsBlock(pairs=pairs) if pairs else None,
+            sql_pairs=pairs or None,
             schema_docs=docs or None,
         )
 

@@ -34,7 +34,6 @@ from sqllens.memory.schema import (
     MemoryBundle,
     SchemaDoc,
     SqlPair,
-    SqlPairsBlock,
 )
 from sqllens.memory.store import MemoryRecord, MemoryStore
 
@@ -244,7 +243,7 @@ async def add_memories(
             )
 
     bundle = MemoryBundle(
-        sql_pairs=SqlPairsBlock(pairs=valid_pairs) if valid_pairs else None,
+        sql_pairs=valid_pairs or None,
         schema_docs=valid_docs or None,
     )
     report = await import_bundle(store, bundle)
@@ -287,7 +286,7 @@ def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str
     behaviour of the CLI ``export_bundle``.
     """
     bundle = store.iter_all()
-    pairs = list(bundle.sql_pairs.pairs) if bundle.sql_pairs else []
+    pairs = list(bundle.sql_pairs) if bundle.sql_pairs else []
     docs = list(bundle.schema_docs) if bundle.schema_docs else []
 
     warnings: list[str] = []

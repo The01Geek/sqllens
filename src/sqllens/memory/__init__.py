@@ -25,7 +25,6 @@ from sqllens.memory.schema import (
     MemoryBundle,
     SchemaDoc,
     SqlPair,
-    SqlPairsBlock,
 )
 from sqllens.memory.store import MemoryCorruptionError, MemoryStore
 
@@ -38,7 +37,6 @@ __all__ = [
     "MemoryStore",
     "SchemaDoc",
     "SqlPair",
-    "SqlPairsBlock",
     "StreamExportResult",
     "StreamImportResult",
     "export_bundle",

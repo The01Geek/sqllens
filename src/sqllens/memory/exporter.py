@@ -56,7 +56,7 @@ def export_bundle(store: MemoryStore, fmt: Literal["json", "csv"]) -> ExportResu
     """
     bundle = store.iter_all()
 
-    n_pairs = len(bundle.sql_pairs.pairs) if bundle.sql_pairs else 0
+    n_pairs = len(bundle.sql_pairs) if bundle.sql_pairs else 0
     n_docs = len(bundle.schema_docs) if bundle.schema_docs else 0
 
     warnings: list[str] = []
@@ -102,8 +102,9 @@ def export_bundle_stream(
     """Write the store to ``path`` as a streamed JSON bundle.
 
     The on-disk shape matches :func:`export_bundle`'s JSON output:
-    ``{"sql_pairs":{"training_type":"sql_pairs","pairs":[...]},
-    "schema_docs":[...]}``. Records are written one at a time, separated
+    ``{"sql_pairs":[...],"schema_docs":[...]}``, where ``sql_pairs`` is a
+    flat array of ``{question, sql}`` objects. Records are written one at a
+    time, separated
     by commas — never materialized into one big ``json.dumps`` call. The
     output is therefore parseable by both the streaming reader
     (:mod:`sqllens.memory.streaming`) and the existing bounded
@@ -160,14 +161,14 @@ def export_bundle_stream(
     tmp_path = path.with_name(path.name + ".tmp")
     try:
         with tmp_path.open("w", encoding="utf-8") as fp:
-            fp.write('{"sql_pairs":{"training_type":"sql_pairs","pairs":[')
+            fp.write('{"sql_pairs":[')
             sql_pairs_count = _write_section(
                 fp,
                 kind="sql_pair",
                 where={"tool_name": "run_sql"},
                 to_record=lambda p: {"question": p.question, "sql": p.sql},
             )
-            fp.write(']},"schema_docs":[')
+            fp.write('],"schema_docs":[')
             schema_docs_count = _write_section(
                 fp,
                 kind="schema_doc",

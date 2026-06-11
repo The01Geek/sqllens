@@ -120,8 +120,10 @@ Memory is normally grown one query at a time by the agent itself. The `src/sqlle
 
 JSON is canonical and round-trips losslessly. The root is a JSON object with two optional top-level blocks:
 
-- `sql_pairs` — an object with `training_type: "sql_pairs"` and `pairs`, a list of `{question, sql}` objects.
-- `schema_docs` — a list of `{training_type: "schema_docs", content}` objects (free-form domain notes).
+- `sql_pairs` — a flat list of `{question, sql}` objects.
+- `schema_docs` — a flat list of `{content}` objects (free-form domain notes). Export also emits a `training_type: "schema_docs"` key on each item; it is optional on import.
+
+Both blocks are flat arrays — the same shape the memory-admin `add_memories` tool accepts — so a bundle written by `export-memory` round-trips through every import surface (CLI `import-memory`, the MCP `import_memory` tool, and the in-app widget).
 
 CSV is a convenience for SQL pairs **only** — a 2-column sheet whose header must be exactly `question,sql`. CSV carries no schema docs; exporting a store that contains schema docs to CSV silently omits them. Use JSON for a lossless round-trip.
 

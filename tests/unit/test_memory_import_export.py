@@ -28,12 +28,10 @@ def store(tmp_path, monkeypatch) -> MemoryStore:
 
 _BUNDLE = MemoryBundle.model_validate(
     {
-        "sql_pairs": {
-            "pairs": [
-                {"question": "How many users?", "sql": "SELECT count(*) FROM users"},
-                {"question": "Active count", "sql": "SELECT count(*) FROM u WHERE active"},
-            ]
-        },
+        "sql_pairs": [
+            {"question": "How many users?", "sql": "SELECT count(*) FROM users"},
+            {"question": "Active count", "sql": "SELECT count(*) FROM u WHERE active"},
+        ],
         "schema_docs": [{"content": "Table users: one row per account."}],
     }
 )
@@ -54,7 +52,7 @@ async def test_reimport_is_idempotent_overwrite(store: MemoryStore) -> None:
     # Idempotency is observable on the store, not on the report count.
     again = store.iter_all()
     assert again.sql_pairs is not None
-    assert len(again.sql_pairs.pairs) == 2
+    assert len(again.sql_pairs) == 2
     assert again.schema_docs is not None
     assert len(again.schema_docs) == 1
 
@@ -67,12 +65,10 @@ async def test_intra_batch_normalized_collisions_collapse(
     persists, because the second upsert overwrites the first."""
     dup = MemoryBundle.model_validate(
         {
-            "sql_pairs": {
-                "pairs": [
-                    {"question": " How  MANY users? ", "sql": "select COUNT(*) from users"},
-                    {"question": "How many users?", "sql": "SELECT count(*) FROM users"},
-                ]
-            }
+            "sql_pairs": [
+                {"question": " How  MANY users? ", "sql": "select COUNT(*) from users"},
+                {"question": "How many users?", "sql": "SELECT count(*) FROM users"},
+            ]
         }
     )
     report = await import_bundle(store, dup)
@@ -81,7 +77,22 @@ async def test_intra_batch_normalized_collisions_collapse(
 
     persisted = store.iter_all()
     assert persisted.sql_pairs is not None
-    assert len(persisted.sql_pairs.pairs) == 1
+    assert len(persisted.sql_pairs) == 1
+
+
+async def test_export_emits_flat_sql_pairs_array(store: MemoryStore) -> None:
+    """The exported bundle's ``sql_pairs`` is a flat JSON array of
+    ``{question, sql}`` objects — the same shape the memory widget's
+    ``add_memories`` accepts — not the legacy ``{training_type, pairs}``
+    object. This lets a CLI export be re-imported through every surface."""
+    import json
+
+    await import_bundle(store, _BUNDLE)
+    exported = export_bundle(store, "json")
+    doc = json.loads(exported.text)
+
+    assert isinstance(doc["sql_pairs"], list)
+    assert {"question", "sql"} == set(doc["sql_pairs"][0].keys())
 
 
 async def test_round_trip_lossless(store: MemoryStore) -> None:
@@ -98,12 +109,12 @@ async def test_round_trip_lossless(store: MemoryStore) -> None:
     # Final store still contains exactly the three original rows.
     final = store.iter_all()
     assert final.sql_pairs is not None
-    assert len(final.sql_pairs.pairs) == 2
+    assert len(final.sql_pairs) == 2
     assert final.schema_docs is not None
     assert len(final.schema_docs) == 1
 
     assert reparsed.sql_pairs is not None
-    assert {p.sql for p in reparsed.sql_pairs.pairs} == {
+    assert {p.sql for p in reparsed.sql_pairs} == {
         "SELECT count(*) FROM users",
         "SELECT count(*) FROM u WHERE active",
     }
@@ -165,7 +176,7 @@ async def test_iter_all_skips_unrepresentable_and_corrupt_rows(
     )
     bundle = store.iter_all()
     assert bundle.sql_pairs is not None
-    assert {p.sql for p in bundle.sql_pairs.pairs} == {
+    assert {p.sql for p in bundle.sql_pairs} == {
         "SELECT count(*) FROM users",
         "SELECT count(*) FROM u WHERE active",
     }
@@ -302,10 +313,10 @@ async def test_incremental_import_then_export_union(store: MemoryStore) -> None:
     give a different row per logical pair, so non-overlapping imports never
     collide."""
     a = MemoryBundle.model_validate(
-        {"sql_pairs": {"pairs": [{"question": "qa", "sql": "SELECT 1"}]}}
+        {"sql_pairs": [{"question": "qa", "sql": "SELECT 1"}]}
     )
     b = MemoryBundle.model_validate(
-        {"sql_pairs": {"pairs": [{"question": "qb", "sql": "SELECT 2"}]}}
+        {"sql_pairs": [{"question": "qb", "sql": "SELECT 2"}]}
     )
     first = await import_bundle(store, a)
     assert first.saved == 1
@@ -316,14 +327,14 @@ async def test_incremental_import_then_export_union(store: MemoryStore) -> None:
     exported = export_bundle(store, "json")
     reparsed = parse_json(exported.text)
     assert reparsed.sql_pairs is not None
-    assert {p.sql for p in reparsed.sql_pairs.pairs} == {"SELECT 1", "SELECT 2"}
+    assert {p.sql for p in reparsed.sql_pairs} == {"SELECT 1", "SELECT 2"}
 
     # Re-importing the union upserts every row again; final state still has 2.
     again = await import_bundle(store, reparsed)
     assert again.saved == 2
     final = store.iter_all()
     assert final.sql_pairs is not None
-    assert len(final.sql_pairs.pairs) == 2
+    assert len(final.sql_pairs) == 2
 
 
 async def test_clear_wipes_first(store: MemoryStore) -> None:
@@ -331,7 +342,7 @@ async def test_clear_wipes_first(store: MemoryStore) -> None:
     assert store.iter_all().sql_pairs is not None
 
     other = MemoryBundle.model_validate(
-        {"sql_pairs": {"pairs": [{"question": "new q", "sql": "SELECT 2"}]}}
+        {"sql_pairs": [{"question": "new q", "sql": "SELECT 2"}]}
     )
     report = await import_bundle(store, other, clear=True)
     assert report.saved == 1
@@ -339,6 +350,6 @@ async def test_clear_wipes_first(store: MemoryStore) -> None:
 
     remaining = store.iter_all()
     assert remaining.sql_pairs is not None
-    assert len(remaining.sql_pairs.pairs) == 1
-    assert remaining.sql_pairs.pairs[0].sql == "SELECT 2"
+    assert len(remaining.sql_pairs) == 1
+    assert remaining.sql_pairs[0].sql == "SELECT 2"
     assert remaining.schema_docs is None

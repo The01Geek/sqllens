@@ -3,7 +3,7 @@
 
 """Memory-bounded streaming reader for the bundle JSON format.
 
-Walks the nested ``sql_pairs.pairs`` and ``schema_docs`` arrays of a bundle
+Walks the flat ``sql_pairs`` and ``schema_docs`` arrays of a bundle
 file and yields one record object at a time. Memory is bounded to roughly
 one record (plus the read buffer) regardless of total file size, so a
 100 MB bundle imports without loading the full document into RAM.
@@ -265,14 +265,14 @@ class _Scanner:
 def stream_records(fp: IO[str]) -> Iterator[tuple[RecordKind, dict]]:
     """Yield ``(kind, raw_obj)`` tuples for every record in a bundle file.
 
-    ``kind`` is ``"sql_pair"`` (from ``sql_pairs.pairs``) or ``"schema_doc"``
+    ``kind`` is ``"sql_pair"`` (from ``sql_pairs``) or ``"schema_doc"``
     (from ``schema_docs``). ``raw_obj`` is the ``json.loads`` of each record
     fragment; the caller validates it against ``SqlPair`` / ``SchemaDoc`` so
     the per-item caps (``QUESTION_MAX``, ``SQL_MAX``, ``CONTENT_MAX``) fire
     row by row.
 
-    Unknown top-level keys, ``training_type`` siblings, and any other
-    structural noise in the document are skipped. Malformed JSON anywhere in
+    Unknown top-level keys and any other structural noise in the document
+    are skipped. Malformed JSON anywhere in
     the stream raises ``BundleFormatError``: the streaming reader cannot
     recover by skipping to the next comma without risking record loss, so
     the caller (CLI) surfaces the error and exits non-zero.
@@ -316,52 +316,12 @@ def stream_records(fp: IO[str]) -> Iterator[tuple[RecordKind, dict]]:
         scanner.expect(":")
 
         if key == "sql_pairs":
-            yield from _stream_sql_pairs_block(scanner)
+            yield from _stream_array(scanner, "sql_pair")
         elif key == "schema_docs":
             yield from _stream_array(scanner, "schema_doc")
         else:
             # Skip an unknown value (forward compatibility — the bundle
             # format may grow optional top-level keys).
-            scanner.read_value_raw()
-
-
-def _stream_sql_pairs_block(scanner: _Scanner) -> Iterator[tuple[RecordKind, dict]]:
-    scanner.skip_whitespace()
-    if scanner.peek() == "n":
-        # JSON ``null`` — block is absent.
-        scanner.read_value_raw()
-        return
-    scanner.expect("{")
-
-    first = True
-    while True:
-        scanner.skip_whitespace()
-        c = scanner.peek()
-        if c == "}":
-            scanner.advance()
-            return
-        if not first:
-            if c != ",":
-                shown = repr(c) if c else "EOF"
-                raise BundleFormatError(
-                    f"expected ',' or '}}' inside sql_pairs, got {shown}"
-                )
-            scanner.advance()
-            scanner.skip_whitespace()
-        first = False
-
-        if scanner.peek() != '"':
-            raise BundleFormatError("expected a string key inside sql_pairs")
-        key_raw = scanner.read_value_raw()
-        try:
-            key = json.loads(key_raw)
-        except json.JSONDecodeError as exc:
-            raise BundleFormatError(f"invalid sql_pairs key: {exc}") from exc
-        scanner.expect(":")
-        if key == "pairs":
-            yield from _stream_array(scanner, "sql_pair")
-        else:
-            # ``training_type`` and any future siblings: consume + discard.
             scanner.read_value_raw()
 
 

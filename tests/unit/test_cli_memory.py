@@ -42,7 +42,7 @@ def test_import_then_export_round_trip(tmp_path, monkeypatch) -> None:
     cfg = _config(tmp_path)
     bundle = tmp_path / "in.json"
     bundle.write_text(
-        '{"sql_pairs": {"pairs": [{"question": "How many?", "sql": "SELECT 1"}]},'
+        '{"sql_pairs": [{"question": "How many?", "sql": "SELECT 1"}],'
         ' "schema_docs": [{"content": "users table"}]}'
     )
 
@@ -87,7 +87,7 @@ def test_dry_run_writes_nothing(tmp_path, monkeypatch) -> None:
     patch_fake_embeddings(monkeypatch)
     cfg = _config(tmp_path)
     bundle = tmp_path / "in.json"
-    bundle.write_text('{"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]}}')
+    bundle.write_text('{"sql_pairs": [{"question": "q", "sql": "SELECT 1"}]}')
 
     r = runner.invoke(
         app, ["import-memory", str(bundle), "--dry-run", "-c", str(cfg)]
@@ -105,7 +105,7 @@ def test_clear_then_import_failure_warns_data_loss(tmp_path, monkeypatch) -> Non
     patch_fake_embeddings(monkeypatch)
     cfg = _config(tmp_path)
     bundle = tmp_path / "in.json"
-    bundle.write_text('{"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]}}')
+    bundle.write_text('{"sql_pairs": [{"question": "q", "sql": "SELECT 1"}]}')
     runner.invoke(app, ["import-memory", str(bundle), "-c", str(cfg)])
 
     async def boom(*args, **kwargs):
@@ -139,7 +139,7 @@ def test_stream_import_then_export_round_trip(tmp_path, monkeypatch) -> None:
     cfg = _config(tmp_path)
     bundle = tmp_path / "in.json"
     bundle.write_text(
-        '{"sql_pairs": {"pairs": [{"question": "Q?", "sql": "SELECT 1"}]},'
+        '{"sql_pairs": [{"question": "Q?", "sql": "SELECT 1"}],'
         ' "schema_docs": [{"content": "doc"}]}'
     )
 
@@ -216,10 +216,10 @@ def test_stream_import_exits_non_zero_on_per_item_failure(
     bundle = tmp_path / "in.json"
     over = "q" * (QUESTION_MAX + 1)
     bundle.write_text(
-        '{"sql_pairs": {"pairs": ['
+        '{"sql_pairs": ['
         f'{{"question": {json.dumps(over)}, "sql": "SELECT 1"}},'
         '{"question": "ok", "sql": "SELECT 2"}'
-        "]}}"
+        "]}"
     )
     r = runner.invoke(
         app, ["import-memory", str(bundle), "--stream", "-c", str(cfg)]
@@ -238,11 +238,11 @@ def test_stream_import_clear_then_failure_warns_data_loss(
 
     # Seed with one record so --clear has something to wipe.
     seed = tmp_path / "seed.json"
-    seed.write_text('{"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 0"}]}}')
+    seed.write_text('{"sql_pairs": [{"question": "q", "sql": "SELECT 0"}]}')
     runner.invoke(app, ["import-memory", str(seed), "-c", str(cfg)])
 
     broken = tmp_path / "broken.json"
-    broken.write_text('{"sql_pairs": {"pairs": [{"question": "', encoding="utf-8")
+    broken.write_text('{"sql_pairs": [{"question": "', encoding="utf-8")
     r = runner.invoke(
         app,
         [
@@ -270,7 +270,7 @@ def test_stream_clear_with_empty_input_warns_and_exits_nonzero(
     patch_fake_embeddings(monkeypatch)
     cfg = _config(tmp_path)
     seed = tmp_path / "seed.json"
-    seed.write_text('{"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 0"}]}}')
+    seed.write_text('{"sql_pairs": [{"question": "q", "sql": "SELECT 0"}]}')
     runner.invoke(app, ["import-memory", str(seed), "-c", str(cfg)])
 
     empty = tmp_path / "empty.json"
@@ -308,7 +308,7 @@ def test_clear_requires_confirmation(tmp_path, monkeypatch) -> None:
     patch_fake_embeddings(monkeypatch)
     cfg = _config(tmp_path)
     bundle = tmp_path / "in.json"
-    bundle.write_text('{"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]}}')
+    bundle.write_text('{"sql_pairs": [{"question": "q", "sql": "SELECT 1"}]}')
     runner.invoke(app, ["import-memory", str(bundle), "-c", str(cfg)])
 
     declined = runner.invoke(

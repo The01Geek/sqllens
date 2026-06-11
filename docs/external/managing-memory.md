@@ -22,28 +22,24 @@ A JSON bundle looks like this:
 
 ```json
 {
-  "sql_pairs": {
-    "training_type": "sql_pairs",
-    "pairs": [
-      { "question": "How many albums did AC/DC release?",
-        "sql": "SELECT COUNT(*) FROM albums a JOIN artists r ON a.ArtistId = r.ArtistId WHERE r.Name = 'AC/DC'" }
-    ]
-  },
+  "sql_pairs": [
+    { "question": "How many albums did AC/DC release?",
+      "sql": "SELECT COUNT(*) FROM albums a JOIN artists r ON a.ArtistId = r.ArtistId WHERE r.Name = 'AC/DC'" }
+  ],
   "schema_docs": [
-    { "training_type": "schema_docs",
-      "content": "The artists table holds bands and solo performers; albums.ArtistId joins to it." }
+    { "content": "The artists table holds bands and solo performers; albums.ArtistId joins to it." }
   ]
 }
 ```
 
-Both top-level blocks are optional. Each question may be up to 1,000 characters, each SQL statement up to 10,000 characters, and each note up to 50,000 characters. Blank values are rejected.
+`sql_pairs` is a flat list of `{question, sql}` objects and `schema_docs` a flat list of `{content}` objects — the same shape the in-app memory widget accepts, so an exported bundle imports back through the command line, the `import_memory` tool, and the widget without reshaping. Both top-level blocks are optional. Each question may be up to 1,000 characters, each SQL statement up to 10,000 characters, and each note up to 50,000 characters. Blank values are rejected.
 
 ### Bundle size limits
 
 A complete bundle is also limited in size as a defense against a malformed or hostile file consuming server resources at parse time:
 
 - **10 MiB** (10,485,760 bytes, measured against the raw UTF-8 contents) per bundle file. Files larger than this are rejected with `Invalid memory bundle: bundle exceeds the 10485760-byte cap; split the bundle into smaller files.` before SQL Lens parses them.
-- **10,000 items** in each top-level block. A bundle whose `sql_pairs.pairs` list or `schema_docs` list exceeds 10,000 entries is rejected with `Invalid memory bundle: bundle '<block>' exceeds the 10000-item cap (got N); split the bundle.`
+- **10,000 items** in each top-level block. A bundle whose `sql_pairs` list or `schema_docs` list exceeds 10,000 entries is rejected with `Invalid memory bundle: bundle '<block>' exceeds the 10000-item cap (got N); split the bundle.`
 
 Realistic curated bundles fit comfortably under both limits. If you have more curated knowledge than fits in one bundle, split it into multiple files and import them sequentially. The limits apply to both the command-line `sqllens import-memory` and the optional `import_memory` MCP tool.
 

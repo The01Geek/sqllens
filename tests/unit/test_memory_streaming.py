@@ -50,13 +50,10 @@ def _stream(text: str) -> list[tuple[str, dict]]:
 def test_stream_yields_one_record_at_a_time() -> None:
     text = json.dumps(
         {
-            "sql_pairs": {
-                "training_type": "sql_pairs",
-                "pairs": [
-                    {"question": "Q1", "sql": "SELECT 1"},
-                    {"question": "Q2", "sql": "SELECT 2"},
-                ],
-            },
+            "sql_pairs": [
+                {"question": "Q1", "sql": "SELECT 1"},
+                {"question": "Q2", "sql": "SELECT 2"},
+            ],
             "schema_docs": [{"content": "doc one"}, {"content": "doc two"}],
         }
     )
@@ -78,12 +75,10 @@ def test_stream_handles_braces_inside_sql_string() -> None:
     sql = "SELECT * FROM t WHERE name = '}' AND tag = ']' AND alias = '\"hi\"'"
     text = json.dumps(
         {
-            "sql_pairs": {
-                "pairs": [
-                    {"question": "weird Q?", "sql": sql},
-                    {"question": "next Q", "sql": "SELECT 2"},
-                ]
-            }
+            "sql_pairs": [
+                {"question": "weird Q?", "sql": sql},
+                {"question": "next Q", "sql": "SELECT 2"},
+            ]
         }
     )
     records = _stream(text)
@@ -97,9 +92,9 @@ def test_stream_handles_escaped_quotes_inside_strings() -> None:
     """Backslash-escape sequences must keep the in-string flag set."""
     sql = 'SELECT \\"col\\" FROM t WHERE x = \'escaped \\\' quote\''
     text = (
-        '{"sql_pairs": {"pairs": ['
+        '{"sql_pairs": ['
         f'{{"question": "q", "sql": {json.dumps(sql)}}}'
-        "]}}"
+        "]}"
     )
     records = _stream(text)
     assert len(records) == 1
@@ -117,7 +112,7 @@ def test_stream_skips_unknown_top_level_keys() -> None:
     text = json.dumps(
         {
             "_meta": {"version": 1, "generated_at": "2026-01-01"},
-            "sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]},
+            "sql_pairs": [{"question": "q", "sql": "SELECT 1"}],
             "schema_docs": [],
         }
     )
@@ -136,17 +131,17 @@ def test_stream_empty_input_yields_nothing() -> None:
 
 def test_stream_rejects_malformed_json() -> None:
     with pytest.raises(BundleFormatError):
-        _stream('{"sql_pairs": {"pairs": [{"question": "q", "sql": broken')
+        _stream('{"sql_pairs": [{"question": "q", "sql": broken')
 
 
 def test_stream_rejects_non_object_record() -> None:
     with pytest.raises(BundleFormatError, match="must be a JSON object"):
-        _stream('{"sql_pairs": {"pairs": ["not an object"]}}')
+        _stream('{"sql_pairs": ["not an object"]}')
 
 
 def test_stream_rejects_unbalanced_braces() -> None:
     with pytest.raises(BundleFormatError):
-        _stream('{"sql_pairs": {"pairs": [{"q": "x", "sql": "SELECT 1"')
+        _stream('{"sql_pairs": [{"q": "x", "sql": "SELECT 1"')
 
 
 def test_stream_handles_large_chunk_boundaries(tmp_path) -> None:
@@ -159,7 +154,7 @@ def test_stream_handles_large_chunk_boundaries(tmp_path) -> None:
         {"question": f"q{i}", "sql": "SELECT " + "x" * 100 + f" -- pair{i}"}
         for i in range(300)
     ]
-    text = json.dumps({"sql_pairs": {"pairs": pairs}})
+    text = json.dumps({"sql_pairs": pairs})
     fp = io.StringIO(text)
     records = list(stream_records(fp))
     assert len(records) == 300
@@ -180,12 +175,10 @@ async def test_stream_import_basic(store: MemoryStore, tmp_path) -> None:
     path = _write(
         tmp_path,
         {
-            "sql_pairs": {
-                "pairs": [
-                    {"question": "Q?", "sql": "SELECT 1"},
-                    {"question": "R?", "sql": "SELECT 2"},
-                ]
-            },
+            "sql_pairs": [
+                {"question": "Q?", "sql": "SELECT 1"},
+                {"question": "R?", "sql": "SELECT 2"},
+            ],
             "schema_docs": [{"content": "doc"}],
         },
     )
@@ -208,13 +201,11 @@ async def test_stream_import_per_item_caps_apply(
     path = _write(
         tmp_path,
         {
-            "sql_pairs": {
-                "pairs": [
-                    {"question": over, "sql": "SELECT 1"},
-                    {"question": "ok", "sql": over_sql},
-                    {"question": "fine", "sql": "SELECT 3"},
-                ]
-            },
+            "sql_pairs": [
+                {"question": over, "sql": "SELECT 1"},
+                {"question": "ok", "sql": over_sql},
+                {"question": "fine", "sql": "SELECT 3"},
+            ],
             "schema_docs": [
                 {"content": over_content},
                 {"content": "real content"},
@@ -233,7 +224,7 @@ async def test_stream_import_is_idempotent_upsert(
     path = _write(
         tmp_path,
         {
-            "sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]},
+            "sql_pairs": [{"question": "q", "sql": "SELECT 1"}],
             "schema_docs": [{"content": "c"}],
         },
     )
@@ -241,7 +232,7 @@ async def test_stream_import_is_idempotent_upsert(
     await import_bundle_stream(store, path)
     final = store.iter_all()
     assert final.sql_pairs is not None
-    assert len(final.sql_pairs.pairs) == 1
+    assert len(final.sql_pairs) == 1
     assert final.schema_docs is not None
     assert len(final.schema_docs) == 1
 
@@ -263,12 +254,10 @@ async def test_stream_import_intra_batch_id_collision_collapses(
     path = _write(
         tmp_path,
         {
-            "sql_pairs": {
-                "pairs": [
-                    {"question": "How many?", "sql": "SELECT 1"},
-                    {"question": "how   MANY?", "sql": "select 1"},
-                ]
-            },
+            "sql_pairs": [
+                {"question": "How many?", "sql": "SELECT 1"},
+                {"question": "how   MANY?", "sql": "select 1"},
+            ],
             "schema_docs": [
                 {"content": "Status is open."},
                 {"content": "status   is OPEN."},
@@ -289,7 +278,7 @@ async def test_stream_import_intra_batch_id_collision_collapses(
     # The store holds exactly one row per collision group (last write wins).
     final = store.iter_all()
     assert final.sql_pairs is not None
-    assert len(final.sql_pairs.pairs) == 1
+    assert len(final.sql_pairs) == 1
     assert final.schema_docs is not None
     assert len(final.schema_docs) == 1
 
@@ -300,7 +289,7 @@ async def test_stream_import_id_scheme_matches_sql_pair_id_helper(
     """The Chroma row id must be the documented content-hash, not a uuid."""
     path = _write(
         tmp_path,
-        {"sql_pairs": {"pairs": [{"question": "How many?", "sql": "SELECT 1"}]}},
+        {"sql_pairs": [{"question": "How many?", "sql": "SELECT 1"}]},
     )
     await import_bundle_stream(store, path)
     collection = store._mem._get_collection()
@@ -315,7 +304,7 @@ async def test_stream_import_aborted_on_malformed_input(
     abort_reason; partial writes already in the store remain (no rollback)."""
     path = tmp_path / "bad.json"
     path.write_text(
-        '{"sql_pairs": {"pairs": ['
+        '{"sql_pairs": ['
         '{"question": "ok", "sql": "SELECT 1"},'
         '{"question": "broken'  # missing closing quote -> framing error
     )
@@ -333,7 +322,7 @@ async def test_stream_import_clear_then_failure_leaves_partial(
     data-loss path — the partial state is observable on the store."""
     seed = _write(
         tmp_path,
-        {"sql_pairs": {"pairs": [{"question": "seed", "sql": "SELECT 0"}]}},
+        {"sql_pairs": [{"question": "seed", "sql": "SELECT 0"}]},
         name="seed.json",
     )
     await import_bundle_stream(store, seed)
@@ -341,7 +330,7 @@ async def test_stream_import_clear_then_failure_leaves_partial(
 
     broken = tmp_path / "broken.json"
     broken.write_text(
-        '{"sql_pairs": {"pairs": [{"question": "', encoding="utf-8"
+        '{"sql_pairs": [{"question": "', encoding="utf-8"
     )
     result = await import_bundle_stream(store, broken, clear=True)
     assert result.aborted is True
@@ -362,12 +351,10 @@ async def test_stream_export_round_trip_via_bounded_parser(
     seed = _write(
         tmp_path,
         {
-            "sql_pairs": {
-                "pairs": [
-                    {"question": "Q?", "sql": "SELECT 1"},
-                    {"question": "R?", "sql": "SELECT 2"},
-                ]
-            },
+            "sql_pairs": [
+                {"question": "Q?", "sql": "SELECT 1"},
+                {"question": "R?", "sql": "SELECT 2"},
+            ],
             "schema_docs": [{"content": "doc one"}, {"content": "doc two"}],
         },
     )
@@ -382,7 +369,7 @@ async def test_stream_export_round_trip_via_bounded_parser(
 
     reparsed = parse_json(out.read_text())
     assert reparsed.sql_pairs is not None
-    assert {p.sql for p in reparsed.sql_pairs.pairs} == {"SELECT 1", "SELECT 2"}
+    assert {p.sql for p in reparsed.sql_pairs} == {"SELECT 1", "SELECT 2"}
     assert reparsed.schema_docs is not None
     assert {d.content for d in reparsed.schema_docs} == {"doc one", "doc two"}
 
@@ -393,7 +380,7 @@ async def test_stream_export_round_trip_via_streaming_reader(
     seed = _write(
         tmp_path,
         {
-            "sql_pairs": {"pairs": [{"question": "Q?", "sql": "SELECT 1"}]},
+            "sql_pairs": [{"question": "Q?", "sql": "SELECT 1"}],
             "schema_docs": [{"content": "doc"}],
         },
     )
@@ -418,7 +405,7 @@ async def test_stream_export_empty_store_emits_warning(
     assert any("empty" in w for w in result.warnings)
     # The file is still written; it parses as a valid (empty) bundle.
     reparsed = parse_json(out.read_text())
-    assert reparsed.sql_pairs is None or not reparsed.sql_pairs.pairs
+    assert reparsed.sql_pairs is None or not reparsed.sql_pairs
 
 
 async def test_stream_export_consistent_with_bounded_export(
@@ -428,12 +415,10 @@ async def test_stream_export_consistent_with_bounded_export(
     seed = _write(
         tmp_path,
         {
-            "sql_pairs": {
-                "pairs": [
-                    {"question": "qa", "sql": "SELECT 1"},
-                    {"question": "qb", "sql": "SELECT 2"},
-                ]
-            },
+            "sql_pairs": [
+                {"question": "qa", "sql": "SELECT 1"},
+                {"question": "qb", "sql": "SELECT 2"},
+            ],
             "schema_docs": [{"content": "doc"}],
         },
     )
@@ -466,13 +451,11 @@ async def test_stream_import_per_batch_upsert_failure(
     path = _write(
         tmp_path,
         {
-            "sql_pairs": {
-                "pairs": [
-                    {"question": "q0", "sql": "SELECT 0"},
-                    {"question": "q1", "sql": "SELECT 1"},
-                    {"question": "q2", "sql": "SELECT 2"},
-                ]
-            }
+            "sql_pairs": [
+                {"question": "q0", "sql": "SELECT 0"},
+                {"question": "q1", "sql": "SELECT 1"},
+                {"question": "q2", "sql": "SELECT 2"},
+            ]
         },
     )
 
@@ -497,7 +480,7 @@ async def test_stream_export_paginates_across_pages(
     exports."""
     pairs = [{"question": f"q{i}", "sql": f"SELECT {i}"} for i in range(7)]
     docs = [{"content": f"doc {i}"} for i in range(5)]
-    seed = _write(tmp_path, {"sql_pairs": {"pairs": pairs}, "schema_docs": docs})
+    seed = _write(tmp_path, {"sql_pairs": pairs, "schema_docs": docs})
     await import_bundle_stream(store, seed)
 
     out = tmp_path / "out.json"
@@ -507,7 +490,7 @@ async def test_stream_export_paginates_across_pages(
 
     reparsed = parse_json(out.read_text())
     assert reparsed.sql_pairs is not None
-    assert {p.sql for p in reparsed.sql_pairs.pairs} == {f"SELECT {i}" for i in range(7)}
+    assert {p.sql for p in reparsed.sql_pairs} == {f"SELECT {i}" for i in range(7)}
     assert reparsed.schema_docs is not None
     assert {d.content for d in reparsed.schema_docs} == {f"doc {i}" for i in range(5)}
 
@@ -523,7 +506,7 @@ async def test_stream_export_atomic_write_preserves_existing_on_failure(
     # First, produce a valid backup file.
     seed = _write(
         tmp_path,
-        {"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]}},
+        {"sql_pairs": [{"question": "q", "sql": "SELECT 1"}]},
     )
     await import_bundle_stream(store, seed)
     backup = tmp_path / "backup.json"
@@ -558,7 +541,7 @@ async def test_stream_import_dry_run_does_not_clear(
     destroy data on what the operator believes is a preview."""
     seed = _write(
         tmp_path,
-        {"sql_pairs": {"pairs": [{"question": "seed", "sql": "SELECT 0"}]}},
+        {"sql_pairs": [{"question": "seed", "sql": "SELECT 0"}]},
     )
     await import_bundle_stream(store, seed)
     before = store.iter_all()
@@ -566,7 +549,7 @@ async def test_stream_import_dry_run_does_not_clear(
 
     other = _write(
         tmp_path,
-        {"sql_pairs": {"pairs": [{"question": "new", "sql": "SELECT 1"}]}},
+        {"sql_pairs": [{"question": "new", "sql": "SELECT 1"}]},
         name="other.json",
     )
     result = await import_bundle_stream(store, other, dry_run=True, clear=True)
@@ -575,7 +558,7 @@ async def test_stream_import_dry_run_does_not_clear(
     # Store is unchanged: dry-run + clear must be a no-op.
     after = store.iter_all()
     assert after.sql_pairs is not None
-    assert {p.sql for p in after.sql_pairs.pairs} == {"SELECT 0"}
+    assert {p.sql for p in after.sql_pairs} == {"SELECT 0"}
 
 
 async def test_stream_import_bypasses_whole_file_byte_cap(
@@ -592,7 +575,7 @@ async def test_stream_import_bypasses_whole_file_byte_cap(
     big_sql = "SELECT " + ("x" * 9000) + " -- pad"
     pairs = [{"question": f"q{i}", "sql": big_sql} for i in range(1200)]
     big_bundle = tmp_path / "big.json"
-    big_bundle.write_text(json.dumps({"sql_pairs": {"pairs": pairs}}))
+    big_bundle.write_text(json.dumps({"sql_pairs": pairs}))
     assert big_bundle.stat().st_size > MAX_BUNDLE_BYTES, "bundle must exceed bounded cap"
 
     result = await import_bundle_stream(store, big_bundle, batch_size=200)
@@ -611,7 +594,7 @@ def test_stream_reader_eof_inside_string_literal_raises() -> None:
     record object, but the failure mode is the same: a clean structured
     error rather than a hang."""
     with pytest.raises(BundleFormatError, match="EOF inside"):
-        _stream('{"sql_pairs": {"pairs": [{"question": "unterminated')
+        _stream('{"sql_pairs": [{"question": "unterminated')
 
 
 def test_stream_reader_per_value_byte_cap_fires_on_oversized_string() -> None:
@@ -623,7 +606,7 @@ def test_stream_reader_per_value_byte_cap_fires_on_oversized_string() -> None:
     # Build an unterminated string just past the cap. The scanner must raise
     # the cap-exceeded error rather than running until EOF (which would
     # require the whole 1 MiB+ to be in the buffer).
-    oversized = '{"sql_pairs": {"pairs": [{"question": "' + ("x" * (_MAX_VALUE_BYTES + 8))
+    oversized = '{"sql_pairs": [{"question": "' + ("x" * (_MAX_VALUE_BYTES + 8))
     with pytest.raises(BundleFormatError, match="exceeds"):
         _stream(oversized)
 

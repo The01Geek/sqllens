@@ -115,7 +115,7 @@ async def import_bundle(
 
     pending = 0
 
-    sql_pairs = bundle.sql_pairs.pairs if bundle.sql_pairs else []
+    sql_pairs = bundle.sql_pairs or []
     for index, pair in enumerate(sql_pairs):
         if not dry_run:
             try:

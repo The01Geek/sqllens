@@ -75,15 +75,6 @@ class SqlPair(BaseModel):
         return _require_non_blank(v, "sql")
 
 
-class SqlPairsBlock(BaseModel):
-    """The ``sql_pairs`` top-level block."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    training_type: Literal["sql_pairs"] = "sql_pairs"
-    pairs: list[SqlPair] = Field(default_factory=list)
-
-
 class SchemaDoc(BaseModel):
     """A single free-form schema / documentation memory."""
 
@@ -99,11 +90,17 @@ class SchemaDoc(BaseModel):
 
 
 class MemoryBundle(BaseModel):
-    """The full importable/exportable bundle. Both blocks are optional."""
+    """The full importable/exportable bundle. Both blocks are optional.
+
+    ``sql_pairs`` is a flat array of ``{question, sql}`` objects — the same
+    shape the memory-admin ``add_memories`` tool accepts — so a bundle written
+    by ``export-memory`` round-trips through every import surface (CLI
+    ``import-memory``, the MCP ``import_memory`` tool, and the widget).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    sql_pairs: SqlPairsBlock | None = None
+    sql_pairs: list[SqlPair] | None = None
     schema_docs: list[SchemaDoc] | None = None
 
 
