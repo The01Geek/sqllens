@@ -201,7 +201,7 @@ class MemoryStore:
             collection = self._mem._get_collection()
             collection.upsert(ids=ids, documents=questions, metadatas=metadatas)
 
-        await asyncio.get_event_loop().run_in_executor(None, _save)
+        await asyncio.get_event_loop().run_in_executor(self._mem._executor, _save)
 
     async def add_schema_doc_batch(self, contents: list[str]) -> None:
         """Batch-upsert schema docs with content-hash ids.
@@ -231,7 +231,7 @@ class MemoryStore:
             collection = self._mem._get_collection()
             collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
 
-        await asyncio.get_event_loop().run_in_executor(None, _save)
+        await asyncio.get_event_loop().run_in_executor(self._mem._executor, _save)
 
     def iter_all(self) -> MemoryBundle:
         """Enumerate the collection into a bundle (bounded, single-shot).
@@ -323,7 +323,10 @@ class MemoryStore:
         )
 
     def iter_paginated(
-        self, *, page_size: int = 500
+        self,
+        *,
+        where: dict[str, Any] | None = None,
+        page_size: int = 500,
     ) -> Iterator[tuple[str, SqlPair | SchemaDoc]]:
         """Paginated, memory-bounded enumeration of the collection.
 
@@ -332,13 +335,23 @@ class MemoryStore:
         ``"sql_pair"`` or ``"schema_doc"``. The full store is never
         materialized; only one page of metadata is resident at a time.
 
+        ``where`` is forwarded to ``collection.get`` so callers can push
+        kind-filtering into ChromaDB rather than scanning the full
+        collection only to discard ~half the rows in Python. Pass
+        ``where={"tool_name": "run_sql"}`` for SQL pairs only or
+        ``where={"is_text_memory": True}`` for schema docs only. The
+        per-row classification in this loop still applies as a defensive
+        filter (a corrupt row with unexpected metadata cannot leak
+        through), but on a healthy store the where filter halves the work
+        per export pass.
+
         Skipping semantics match :meth:`iter_all` per row (non-dict
         metadata, non-``run_sql`` tool memories, unparseable ``args_json``
         are skipped), but :attr:`last_skipped_rows` records the running
         total across pages so a streaming export still reports the
         ``unrepresentable`` warning even when no single page tripped a
-        wholesale-corruption threshold. Wholesale corruption is NOT checked
-        here: pagination ratios drift page to page and the rule
+        wholesale-corruption threshold. Wholesale corruption is NOT
+        checked here: pagination ratios drift page to page and the rule
         ``iter_all`` enforces (≥ 5 rows, ≥ 90 % skipped) is a one-shot
         snapshot guarantee that does not translate cleanly to an
         incremental scan; the streaming export path documents this gap.
@@ -346,10 +359,14 @@ class MemoryStore:
         collection = self._mem._get_collection()
         offset = 0
         skipped_total = 0
+        get_kwargs: dict[str, Any] = {
+            "include": ["metadatas"],
+            "limit": page_size,
+        }
+        if where is not None:
+            get_kwargs["where"] = where
         while True:
-            page = collection.get(
-                include=["metadatas"], limit=page_size, offset=offset
-            )
+            page = collection.get(offset=offset, **get_kwargs)
             ids = page.get("ids") or []
             if not ids:
                 break

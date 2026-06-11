@@ -1,0 +1,2634 @@
+diff --git a/scripts/memory_admin_preview.html b/scripts/memory_admin_preview.html
+index 6b77e99..9868ed7 100644
+--- a/scripts/memory_admin_preview.html
++++ b/scripts/memory_admin_preview.html
+@@ -104,8 +104,6 @@ function handleCallTool(name, args) {
+       hint.textContent = "";
+       return jsonError({
+         saved_count: 1,
+-        duplicate_count: 0,
+-        skipped_count: 0,
+         errors: [
+           { kind: "sql_pair", index: 1, question: "bad row",
+             error: "embedding model unavailable while saving" },
+@@ -113,26 +111,41 @@ function handleCallTool(name, args) {
+       });
+     }
+     let saved = 0;
++    // Upsert semantics: a re-add of the same (question, sql) overwrites the
++    // existing in-memory row instead of duplicating it. ``saved`` counts the
++    // upserts the call performed (preview fidelity with the real tool).
+     for (const p of pairs) {
+-      if (STORE.memories.some((m) => m.question === p.question && m.sql === p.sql)) continue;
+-      STORE.memories.push({
+-        memory_id: "new-" + Math.random().toString(36).slice(2, 10),
+-        memory_type: "tool_usage", question: p.question, sql: p.sql,
+-        timestamp: new Date().toISOString(), hit_count: 0,
+-      });
++      const existing = STORE.memories.find(
++        (m) => m.memory_type === "tool_usage" && m.question === p.question && m.sql === p.sql
++      );
++      if (existing) {
++        existing.timestamp = new Date().toISOString();
++      } else {
++        STORE.memories.push({
++          memory_id: "new-" + Math.random().toString(36).slice(2, 10),
++          memory_type: "tool_usage", question: p.question, sql: p.sql,
++          timestamp: new Date().toISOString(), hit_count: 0,
++        });
++      }
+       saved += 1;
+     }
+     for (const d of docs) {
+-      STORE.memories.push({
+-        memory_id: "new-" + Math.random().toString(36).slice(2, 10),
+-        memory_type: "text", content: d.content,
+-        timestamp: new Date().toISOString(), hit_count: 0,
+-      });
++      const existing = STORE.memories.find(
++        (m) => m.memory_type === "text" && m.content === d.content
++      );
++      if (existing) {
++        existing.timestamp = new Date().toISOString();
++      } else {
++        STORE.memories.push({
++          memory_id: "new-" + Math.random().toString(36).slice(2, 10),
++          memory_type: "text", content: d.content,
++          timestamp: new Date().toISOString(), hit_count: 0,
++        });
++      }
+       saved += 1;
+     }
+     return jsonResult({
+-      saved_count: saved, duplicate_count: pairs.length + docs.length - saved,
+-      skipped_count: 0, errors: [],
++      saved_count: saved, errors: [],
+     });
+   }
+   if (name === "export_memories") {
+diff --git a/src/sqllens/cli.py b/src/sqllens/cli.py
+index 8d47528..95bc2d9 100644
+--- a/src/sqllens/cli.py
++++ b/src/sqllens/cli.py
+@@ -37,6 +37,15 @@ console = Console()
+ # errors to stderr keeps that channel clean. Other commands follow suit.
+ err_console = Console(stderr=True)
+ 
++# An empty bundle (``{}`` = 2 bytes, ``{"sql_pairs":{"pairs":[]}}`` ≈ 30 bytes)
++# can legitimately yield zero records and is not a format mismatch. A bundle
++# meaningfully larger than that whose stream-read produced zero records is
++# almost certainly a wrong-file / wrong-format mistake; surface it loudly per
++# the CLAUDE.md "lossy/empty success needs a loud warning" rule. The threshold
++# is generous because the cost of a false warning is one extra ``--force``-
++# style step, while a false silent-success deletes the operator's training set.
++_STREAMING_EMPTY_INPUT_THRESHOLD = 64
++
+ 
+ # Non-``ValidationError`` exception types whose ``str()`` is structurally
+ # incapable of carrying a config value, so echoing it cannot leak a secret:
+@@ -457,32 +466,70 @@ def import_memory(
+     batch_size: int = typer.Option(
+         100, "--batch-size", min=1, help="Writes issued before yielding."
+     ),
++    stream: bool = typer.Option(
++        False,
++        "--stream",
++        help=(
++            "Use the memory-bounded streaming reader (JSON only). Bypasses "
++            "the 10 MiB whole-bundle cap; per-item caps still apply row by "
++            "row. Incremental — a partial failure cannot be rolled back."
++        ),
++    ),
+ ) -> None:
+-    """Bulk-load a curated memory bundle into the configured store."""
++    """Bulk-load a curated memory bundle into the configured store.
++
++    The default path parses the whole bundle in-memory and rejects payloads
++    over ``MAX_BUNDLE_BYTES`` / ``MAX_BUNDLE_ITEMS`` (the same caps the MCP
++    ``import_memory`` tool enforces). ``--stream`` switches to a memory-
++    bounded reader that lifts the whole-file caps for local operators
++    backing up large stores; it cannot roll back, so any failure exits
++    non-zero with the data-loss warning.
++
++    Re-importing the same logical pair is idempotent: each row's id is a
++    content hash, so :py:meth:`collection.upsert` overwrites rather than
++    duplicating. There is no "skipped (duplicate)" count.
++    """
+     import asyncio
+ 
+     from sqllens.config import Config
+-    from sqllens.memory import MemoryStore, import_bundle
++    from sqllens.memory import MemoryStore, import_bundle, import_bundle_stream
+     from sqllens.memory.io import VALID_FORMATS, BundleFormatError, parse_csv, parse_json
+ 
+     if fmt not in VALID_FORMATS:
+         err_console.print(f"[red]Error:[/red] --format must be 'json' or 'csv' (got {escape(fmt)})")
+         raise typer.Exit(code=1)
++    if stream and fmt != "json":
++        err_console.print(
++            "[red]Error:[/red] --stream is JSON-only (CSV bundles always fit the "
++            "bounded path)."
++        )
++        raise typer.Exit(code=1)
+     try:
+         cfg = Config.load(config)
+     except Exception as e:
+         err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
+         raise typer.Exit(code=2) from e
+-    try:
+-        text = path.read_text(encoding="utf-8")
+-    except OSError as e:
+-        err_console.print(f"[red]Error:[/red] cannot read {escape(str(path))}: {escape(str(e))}")
+-        raise typer.Exit(code=1) from e
+-    try:
+-        bundle = parse_csv(text) if fmt == "csv" else parse_json(text)
+-    except BundleFormatError as e:
+-        err_console.print(f"[red]Invalid bundle:[/red] {escape(str(e))}")
+-        raise typer.Exit(code=1) from e
++
++    if not stream:
++        try:
++            text = path.read_text(encoding="utf-8")
++        except OSError as e:
++            err_console.print(
++                f"[red]Error:[/red] cannot read {escape(str(path))}: {escape(str(e))}"
++            )
++            raise typer.Exit(code=1) from e
++        try:
++            bundle = parse_csv(text) if fmt == "csv" else parse_json(text)
++        except BundleFormatError as e:
++            err_console.print(f"[red]Invalid bundle:[/red] {escape(str(e))}")
++            raise typer.Exit(code=1) from e
++    else:
++        # Streaming path: probe the file exists / is readable up front so we
++        # fail before constructing the store (which downloads the embedding
++        # model on first use).
++        if not path.exists():
++            err_console.print(f"[red]Error:[/red] cannot read {escape(str(path))}: not found")
++            raise typer.Exit(code=1)
+ 
+     if clear and not dry_run:
+         typer.confirm(
+@@ -500,6 +547,78 @@ def import_memory(
+             "is writable."
+         )
+         raise typer.Exit(code=1) from e
++
++    if stream:
++        try:
++            result = asyncio.run(
++                import_bundle_stream(
++                    store,
++                    path,
++                    dry_run=dry_run,
++                    clear=clear,
++                    batch_size=batch_size,
++                )
++            )
++        except Exception as e:
++            data_loss = (
++                "The collection was wiped (--clear) and the import did not "
++                "complete — memory may now be empty or partial.\n"
++                if clear and not dry_run
++                else ""
++            )
++            err_console.print(
++                f"[red]Memory import error ({type(e).__name__}):[/red] {escape(str(e))}\n"
++                f"{data_loss}"
++                "If this is a first-use or storage issue: the embedding model "
++                "downloads on first use (~80 MB); check the configured persist_dir "
++                "is writable."
++            )
++            raise typer.Exit(code=1) from e
++
++        prefix = "[yellow](dry-run)[/yellow] " if dry_run else ""
++        console.print(
++            f"{prefix}[stream] saved={result.report.saved} "
++            f"failed={len(result.report.errors)} "
++            f"bytes_read={result.bytes_read}"
++        )
++        for err in result.report.errors:
++            err_console.print(
++                f"  [red]{escape(err.kind)}[{err.index}]:[/red] {escape(err.message)}"
++            )
++        if result.aborted:
++            err_console.print(
++                f"[red]Stream import aborted:[/red] {escape(result.abort_reason or 'unknown')}"
++            )
++            if clear and not dry_run:
++                err_console.print(
++                    "[red]The collection was wiped (--clear) and the import did not "
++                    "complete — memory may now be empty or partial.[/red]"
++                )
++            raise typer.Exit(code=1)
++        # CLAUDE.md "lossy/empty success needs a loud warning" — a non-trivial
++        # input file that yielded zero records is almost always a format
++        # mismatch. Treat as an error so the operator notices.
++        if (
++            result.report.saved == 0
++            and not result.report.errors
++            and result.bytes_read > _STREAMING_EMPTY_INPUT_THRESHOLD
++        ):
++            err_console.print(
++                f"[yellow]Warning:[/yellow] read {result.bytes_read} bytes from "
++                f"{escape(str(path))} but imported 0 records — likely a format "
++                "mismatch (expected a bundle JSON with 'sql_pairs' and/or "
++                "'schema_docs' keys)."
++            )
++            if clear and not dry_run:
++                err_console.print(
++                    "[red]The collection was wiped (--clear) and 0 records were "
++                    "imported — memory may now be empty.[/red]"
++                )
++            raise typer.Exit(code=1)
++        if result.report.errors:
++            raise typer.Exit(code=1)
++        return
++
+     try:
+         report = asyncio.run(
+             import_bundle(
+@@ -527,7 +646,6 @@ def import_memory(
+     prefix = "[yellow](dry-run)[/yellow] " if dry_run else ""
+     console.print(
+         f"{prefix}saved={report.saved} "
+-        f"skipped_duplicate={report.skipped_duplicate} "
+         f"errors={len(report.errors)}"
+     )
+     for err in report.errors:
+@@ -545,21 +663,74 @@ def export_memory(
+         None, "--config", "-c", help="Path to sqllens.toml. Falls back to env / ./sqllens.toml."
+     ),
+     fmt: str = typer.Option("json", "--format", help="Bundle format."),
++    stream: bool = typer.Option(
++        False,
++        "--stream",
++        help=(
++            "Use the memory-bounded streaming exporter (JSON only). Paginates "
++            "ChromaDB and writes the bundle incrementally — does not load the "
++            "whole store into RAM."
++        ),
++    ),
+ ) -> None:
+-    """Export the configured memory store to a bundle file."""
++    """Export the configured memory store to a bundle file.
++
++    The default path enumerates the full store with
++    :meth:`MemoryStore.iter_all` and refuses to write on wholesale-
++    corruption. ``--stream`` paginates the collection so memory stays
++    bounded for large stores; the cross-page skip count is surfaced as a
++    non-fatal warning instead of a wholesale-corruption raise (the ratio
++    isn't a snapshot statistic across pages).
++    """
+     from sqllens.config import Config
+-    from sqllens.memory import MemoryCorruptionError, MemoryStore, export_bundle
++    from sqllens.memory import (
++        MemoryCorruptionError,
++        MemoryStore,
++        export_bundle,
++        export_bundle_stream,
++    )
+     from sqllens.memory.io import VALID_FORMATS
+ 
+     if fmt not in VALID_FORMATS:
+         err_console.print(f"[red]Error:[/red] --format must be 'json' or 'csv' (got {escape(fmt)})")
+         raise typer.Exit(code=1)
++    if stream and fmt != "json":
++        err_console.print(
++            "[red]Error:[/red] --stream is JSON-only (CSV always uses the bounded path)."
++        )
++        raise typer.Exit(code=1)
+     try:
+         cfg = Config.load(config)
+     except Exception as e:
+         err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
+         raise typer.Exit(code=2) from e
+ 
++    if stream:
++        try:
++            store = MemoryStore(cfg)
++            result = export_bundle_stream(store, path)
++        except OSError as e:
++            err_console.print(
++                f"[red]Error:[/red] cannot write {escape(str(path))}: {escape(str(e))}"
++            )
++            raise typer.Exit(code=1) from e
++        except Exception as e:
++            err_console.print(
++                f"[red]Memory store error ({type(e).__name__}):[/red] {escape(str(e))}\n"
++                "If this is a first-use or storage issue: the embedding model "
++                "downloads on first use (~80 MB); check the configured persist_dir "
++                "is readable."
++            )
++            raise typer.Exit(code=1) from e
++        for warning in result.warnings:
++            err_console.print(f"[yellow]Warning:[/yellow] {escape(warning)}")
++        console.print(
++            f"[green]Wrote {escape(str(path))}[/green] "
++            f"(sql_pairs={result.sql_pairs_count}, "
++            f"schema_docs={result.schema_docs_count})"
++        )
++        return
++
+     try:
+         store = MemoryStore(cfg)
+         result = export_bundle(store, fmt)
+diff --git a/src/sqllens/memory/__init__.py b/src/sqllens/memory/__init__.py
+index 7360886..c34a0a6 100644
+--- a/src/sqllens/memory/__init__.py
++++ b/src/sqllens/memory/__init__.py
+@@ -8,8 +8,17 @@ store, and export what has accumulated. Lives outside the vendored ``agent/``
+ tree so it is fully linted and SPDX-headed.
+ """
+ 
+-from sqllens.memory.exporter import ExportResult, export_bundle
+-from sqllens.memory.importer import import_bundle
++from sqllens.memory.exporter import (
++    ExportResult,
++    StreamExportResult,
++    export_bundle,
++    export_bundle_stream,
++)
++from sqllens.memory.importer import (
++    StreamImportResult,
++    import_bundle,
++    import_bundle_stream,
++)
+ from sqllens.memory.schema import (
+     ImportItemError,
+     ImportReport,
+@@ -30,6 +39,10 @@ __all__ = [
+     "SchemaDoc",
+     "SqlPair",
+     "SqlPairsBlock",
++    "StreamExportResult",
++    "StreamImportResult",
+     "export_bundle",
++    "export_bundle_stream",
+     "import_bundle",
++    "import_bundle_stream",
+ ]
+diff --git a/src/sqllens/memory/admin.py b/src/sqllens/memory/admin.py
+index 49b023d..4586763 100644
+--- a/src/sqllens/memory/admin.py
++++ b/src/sqllens/memory/admin.py
+@@ -202,16 +202,18 @@ async def add_memories(
+     sql_pairs: list[dict[str, Any]] | None = None,
+     schema_docs: list[dict[str, Any]] | None = None,
+ ) -> dict[str, Any]:
+-    """Bulk-add curated SQL pairs and schema docs with server-side dedup.
++    """Bulk-add curated SQL pairs and schema docs (idempotent upsert).
+ 
+     Per-item validation failures are collected into ``errors`` (with the
+     original input index) rather than aborting the batch. Valid items go
+-    through :func:`import_bundle`, which dedups exact ``(question, sql)`` /
+-    ``content`` matches against the store and within the batch.
+-
+-    Returns ``{saved_count, duplicate_count, skipped_count, errors}``. The
+-    caller is responsible for treating a non-empty ``errors`` list as a tool
+-    failure (partial failure is failure — see the server wiring).
++    through :func:`import_bundle`, which writes each row under a
++    deterministic content-hash id: re-adding the same logical record
++    overwrites the existing row rather than duplicating it. There is no
++    separate "duplicate" count to surface.
++
++    Returns ``{saved_count, errors}``. The caller is responsible for
++    treating a non-empty ``errors`` list as a tool failure (partial failure
++    is failure — see the server wiring).
+     """
+     errors: list[dict[str, Any]] = []
+ 
+@@ -263,8 +265,6 @@ async def add_memories(
+ 
+     return {
+         "saved_count": report.saved,
+-        "duplicate_count": report.skipped_duplicate,
+-        "skipped_count": 0,
+         "errors": errors,
+     }
+ 
+diff --git a/src/sqllens/memory/exporter.py b/src/sqllens/memory/exporter.py
+index cd1a9be..2bce2c4 100644
+--- a/src/sqllens/memory/exporter.py
++++ b/src/sqllens/memory/exporter.py
+@@ -1,11 +1,27 @@
+ # SPDX-FileCopyrightText: 2026 Daniel Radman
+ # SPDX-License-Identifier: Apache-2.0
+ 
+-"""Export the store into a bundle file (JSON or CSV)."""
++"""Export the store into a bundle file (JSON or CSV).
++
++Two paths, sharing the same on-disk JSON bundle shape:
++
++- :func:`export_bundle` — bounded, in-memory. Calls
++  :meth:`MemoryStore.iter_all` and pretty-prints the result. Used by the
++  CLI default and the in-memory test fixtures; small stores only.
++- :func:`export_bundle_stream` — CLI-only, memory-bounded. Paginates the
++  collection via :meth:`MemoryStore.iter_paginated` and writes the bundle
++  incrementally to a file. Two passes (sql_pairs, then schema_docs) so the
++  output preserves the documented section order without buffering one
++  section in RAM. Memory is bounded to one page plus the open file handle
++  regardless of total store size. JSON only — CSV stays on the bounded
++  path because the entire CSV body is one ``csv.writer`` call.
++"""
+ 
+ from __future__ import annotations
+ 
++import json
+ from dataclasses import dataclass, field
++from pathlib import Path
+ from typing import Literal
+ 
+ from sqllens.memory.io import serialize_csv, serialize_json
+@@ -58,3 +74,102 @@ def export_bundle(store: MemoryStore, fmt: Literal["json", "csv"]) -> ExportResu
+ 
+     text = serialize_json(bundle) if fmt == "json" else serialize_csv(bundle)
+     return ExportResult(text=text, warnings=warnings)
++
++
++@dataclass
++class StreamExportResult:
++    """Outcome of :func:`export_bundle_stream`.
++
++    Mirrors :class:`ExportResult`'s ``warnings`` semantics — a caller must
++    surface the empty-store and unrepresentable-row warnings loudly. The
++    streamed bytes are already on disk by the time this returns; the
++    counts let the caller include them in the user-facing summary.
++    """
++
++    sql_pairs_count: int
++    schema_docs_count: int
++    skipped_rows: int
++    warnings: list[str] = field(default_factory=list)
++
++
++def export_bundle_stream(
++    store: MemoryStore,
++    path: Path,
++    *,
++    page_size: int = 500,
++) -> StreamExportResult:
++    """Write the store to ``path`` as a streamed JSON bundle.
++
++    The on-disk shape matches :func:`export_bundle`'s JSON output:
++    ``{"sql_pairs":{"training_type":"sql_pairs","pairs":[...]},
++    "schema_docs":[...]}``. Records are written one at a time, separated
++    by commas — never materialized into one big ``json.dumps`` call. The
++    output is therefore parseable by both the streaming reader
++    (:mod:`sqllens.memory.streaming`) and the existing bounded
++    :func:`sqllens.memory.io.parse_json` (subject to that path's whole-
++    file cap, which the streaming reader bypasses by design).
++
++    Two passes through :meth:`MemoryStore.iter_paginated`: one filters
++    for sql_pair rows, the other for schema_doc rows. Each pass is
++    page-bounded — the entire collection is never resident in RAM.
++
++    Unlike :meth:`MemoryStore.iter_all`, the paginated path does NOT
++    raise on wholesale corruption — the cross-page skip ratio is not a
++    snapshot statistic. A non-zero ``skipped_rows`` count is surfaced as
++    a non-fatal warning instead so the operator sees the corruption
++    signal without a partial export silently succeeding on the rest.
++    """
++    sql_pairs_count = 0
++    schema_docs_count = 0
++    skipped_total = 0
++
++    with path.open("w", encoding="utf-8") as fp:
++        fp.write('{"sql_pairs":{"training_type":"sql_pairs","pairs":[')
++        first = True
++        for kind, model in store.iter_paginated(page_size=page_size):
++            if kind != "sql_pair":
++                continue
++            if not first:
++                fp.write(",")
++            json.dump(
++                {"question": model.question, "sql": model.sql},
++                fp,
++                ensure_ascii=False,
++            )
++            first = False
++            sql_pairs_count += 1
++        skipped_total += store.last_skipped_rows
++        fp.write(']},"schema_docs":[')
++
++        first = True
++        for kind, model in store.iter_paginated(page_size=page_size):
++            if kind != "schema_doc":
++                continue
++            if not first:
++                fp.write(",")
++            json.dump(
++                {"training_type": "schema_docs", "content": model.content},
++                fp,
++                ensure_ascii=False,
++            )
++            first = False
++            schema_docs_count += 1
++        # Don't double-count: only the doc-pass skips are new.
++        # iter_paginated resets last_skipped_rows on every call.
++        skipped_total += store.last_skipped_rows
++        fp.write("]}")
++
++    warnings: list[str] = []
++    if skipped_total:
++        warnings.append(
++            f"{skipped_total} stored row(s) were unrepresentable and are NOT in this export."
++        )
++    if sql_pairs_count == 0 and schema_docs_count == 0:
++        warnings.append("the memory store is empty — the export contains no data.")
++
++    return StreamExportResult(
++        sql_pairs_count=sql_pairs_count,
++        schema_docs_count=schema_docs_count,
++        skipped_rows=skipped_total,
++        warnings=warnings,
++    )
+diff --git a/src/sqllens/memory/importer.py b/src/sqllens/memory/importer.py
+index d56c128..553775a 100644
+--- a/src/sqllens/memory/importer.py
++++ b/src/sqllens/memory/importer.py
+@@ -1,22 +1,47 @@
+ # SPDX-FileCopyrightText: 2026 Daniel Radman
+ # SPDX-License-Identifier: Apache-2.0
+ 
+-"""Import a validated bundle into the store with exact-match dedup.
++"""Import a bundle into the store with idempotent content-hash upsert.
+ 
+-Dedup is v1 exact-match only: each side is normalized (strip, collapse internal
+-whitespace, lowercase) and an identical ``(question, sql)`` pair or identical
+-``content`` is skipped — checked both against what is already in the store and
+-within the incoming batch.
++Every imported record is written under a deterministic id derived from its
++normalized content (see :func:`sqllens.memory.store.sql_pair_id` /
++:func:`sqllens.memory.store.schema_doc_id`) via ``collection.upsert``.
++Re-importing the same logical pair targets the same id and overwrites the
++existing row rather than producing a duplicate — there is no separate
++"skipped duplicate" count to surface.
++
++Two entry points:
++
++- :func:`import_bundle` — the **bounded** path. The whole bundle is already
++  parsed (the caller validated against ``MAX_BUNDLE_BYTES`` /
++  ``MAX_BUNDLE_ITEMS`` at the ``parse_json``/``parse_csv`` seam). Used by
++  the MCP ``import_memory`` tool and the CLI default. Items are upserted
++  one at a time so per-item failures are isolated.
++- :func:`import_bundle_stream` — the **CLI-only streaming** path. Reads
++  the file with :mod:`sqllens.memory.streaming` and upserts in batches.
++  Bypasses the whole-file caps while keeping the per-item caps row by row.
++  Cannot roll back — any failure mid-stream leaves the store partial; the
++  caller (CLI) surfaces a non-zero exit and a data-loss warning.
+ """
+ 
+ from __future__ import annotations
+ 
+ import asyncio
+ import logging
+-from collections.abc import Callable
++from dataclasses import dataclass
++from pathlib import Path
++
++from pydantic import ValidationError
+ 
+-from sqllens.memory.schema import ImportItemError, ImportReport, MemoryBundle
++from sqllens.memory.schema import (
++    ImportItemError,
++    ImportReport,
++    MemoryBundle,
++    SchemaDoc,
++    SqlPair,
++)
+ from sqllens.memory.store import MemoryStore
++from sqllens.memory.streaming import stream_records
+ 
+ logger = logging.getLogger("sqllens.memory")
+ 
+@@ -29,8 +54,22 @@ logger = logging.getLogger("sqllens.memory")
+ _SYSTEMIC_ERRORS = (MemoryError, OSError, SystemError)
+ 
+ 
+-def _norm(text: str) -> str:
+-    return " ".join(text.split()).lower()
++@dataclass
++class StreamImportResult:
++    """Outcome of :func:`import_bundle_stream`.
++
++    ``report`` holds the per-item counts in the same shape as
++    :func:`import_bundle`. ``bytes_read`` is the input file size in bytes
++    (so the CLI can emit the "read N bytes but no records imported"
++    warning when a non-trivial input produced zero records). ``aborted``
++    is true if the stream was cut short by ``BundleFormatError`` mid-file
++    — distinct from "completed but with per-item errors".
++    """
++
++    report: ImportReport
++    bytes_read: int
++    aborted: bool = False
++    abort_reason: str | None = None
+ 
+ 
+ async def import_bundle(
+@@ -41,78 +80,252 @@ async def import_bundle(
+     clear: bool = False,
+     batch_size: int = 100,
+ ) -> ImportReport:
+-    """Load ``bundle`` into ``store``.
++    """Load a parsed ``bundle`` into ``store`` via idempotent upsert.
++
++    ``clear`` wipes the collection first (skipped on ``dry_run``).
++    ``batch_size`` bounds how many writes are issued before yielding the
++    event loop — large imports stay cooperative.
+ 
+-    ``clear`` wipes the collection first. ``dry_run`` validates and reports but
+-    writes nothing (and skips the clear). ``batch_size`` bounds how many writes
+-    are issued before yielding — large imports stay cooperative.
++    Items are written under deterministic content-hash ids. Re-importing
++    the same logical pair targets the same id and overwrites the existing
++    row, so no separate "skipped duplicate" count is tracked (compare a
++    ``saved == 0 && errors empty`` outcome against the input size to detect
++    a truly empty input).
+     """
+     report = ImportReport()
+ 
+     if clear and not dry_run:
+         store.clear()
+ 
+-    # Seed the seen-sets from what is already persisted (after an optional
+-    # clear) so a re-import of the same file saves zero duplicates. On a
+-    # dry-run the clear was skipped, so existing memory is still the baseline.
+-    existing = store.iter_all()
+-    seen_pairs: set[tuple[str, str]] = set()
+-    seen_docs: set[str] = set()
+-    if existing.sql_pairs:
+-        seen_pairs = {
+-            (_norm(p.question), _norm(p.sql)) for p in existing.sql_pairs.pairs
+-        }
+-    if existing.schema_docs:
+-        seen_docs = {_norm(d.content) for d in existing.schema_docs}
+-
+-    sections: list[tuple[str, list, set, Callable, Callable]] = [
+-        (
+-            "sql_pair",
+-            bundle.sql_pairs.pairs if bundle.sql_pairs else [],
+-            seen_pairs,
+-            lambda p: (_norm(p.question), _norm(p.sql)),
+-            lambda p: store.add_sql_pair(p.question, p.sql),
+-        ),
+-        (
+-            "schema_doc",
+-            bundle.schema_docs or [],
+-            seen_docs,
+-            lambda d: _norm(d.content),
+-            lambda d: store.add_schema_doc(d.content),
+-        ),
+-    ]
+-
+     pending = 0
+-    for kind, items, seen, key_fn, save in sections:
+-        for index, item in enumerate(items):
+-            dedup_key = key_fn(item)
+-            if dedup_key in seen:
+-                report.skipped_duplicate += 1
++
++    sql_pairs = bundle.sql_pairs.pairs if bundle.sql_pairs else []
++    for index, pair in enumerate(sql_pairs):
++        if not dry_run:
++            try:
++                await store.add_sql_pair(pair.question, pair.sql)
++            except _SYSTEMIC_ERRORS:
++                logger.exception(
++                    "import aborted: systemic failure saving sql_pair[%d]", index
++                )
++                raise
++            except Exception as exc:
++                report.errors.append(
++                    ImportItemError(kind="sql_pair", index=index, message=str(exc))
++                )
+                 continue
+-            seen.add(dedup_key)
+-            if not dry_run:
+-                try:
+-                    await save(item)
+-                except _SYSTEMIC_ERRORS:
+-                    # Environmental failure — abort the whole import rather
+-                    # than recording it as one of N per-item errors. Partial
+-                    # progress so far is intentionally lost; the caller must
+-                    # treat this as a hard failure (and re-run when fixed).
+-                    logger.exception(
+-                        "import aborted: systemic failure saving %s[%d]",
+-                        kind,
+-                        index,
+-                    )
+-                    raise
+-                except Exception as exc:
+-                    report.errors.append(
+-                        ImportItemError(kind=kind, index=index, message=str(exc))
+-                    )
+-                    continue
+-            report.saved += 1
+-            pending += 1
+-            if pending >= batch_size:
+-                pending = 0
+-                await asyncio.sleep(0)  # keep large imports cooperative
++        report.saved += 1
++        pending += 1
++        if pending >= batch_size:
++            pending = 0
++            await asyncio.sleep(0)  # keep large imports cooperative
++
++    schema_docs = bundle.schema_docs or []
++    for index, doc in enumerate(schema_docs):
++        if not dry_run:
++            try:
++                await store.add_schema_doc(doc.content)
++            except _SYSTEMIC_ERRORS:
++                logger.exception(
++                    "import aborted: systemic failure saving schema_doc[%d]", index
++                )
++                raise
++            except Exception as exc:
++                report.errors.append(
++                    ImportItemError(kind="schema_doc", index=index, message=str(exc))
++                )
++                continue
++        report.saved += 1
++        pending += 1
++        if pending >= batch_size:
++            pending = 0
++            await asyncio.sleep(0)
+ 
+     return report
++
++
++async def import_bundle_stream(
++    store: MemoryStore,
++    path: Path,
++    *,
++    dry_run: bool = False,
++    clear: bool = False,
++    batch_size: int = 100,
++) -> StreamImportResult:
++    """Stream-import a JSON bundle file into ``store``.
++
++    Reads ``path`` with the depth-tracking, escape-aware reader from
++    :mod:`sqllens.memory.streaming`, validates each record against
++    ``SqlPair`` / ``SchemaDoc`` (so per-item caps fire row by row), and
++    upserts in batches of ``batch_size`` records. Memory is bounded to one
++    batch plus the read buffer regardless of file size.
++
++    Failure model:
++
++    - A **per-item validation failure** is recorded in ``report.errors``
++      and the stream continues.
++    - A **batch upsert failure** records every item in the batch as
++      errored. Per the CLAUDE.md "partial failure is failure" rule the
++      caller must treat any non-empty ``report.errors`` as a non-zero exit.
++    - A **systemic failure** (``MemoryError`` / ``OSError`` /
++      ``SystemError``) aborts immediately, re-raising without flattening
++      into thousands of per-row errors. Partial writes already in the
++      store are not rolled back; the CLI surfaces this loudly.
++    - A **malformed JSON / framing failure** in the streaming reader sets
++      ``aborted=True`` on the returned result; counts reflect what landed
++      before the failure point.
++    """
++    report = ImportReport()
++    aborted = False
++    abort_reason: str | None = None
++
++    bytes_read = path.stat().st_size
++
++    if clear and not dry_run:
++        store.clear()
++
++    sql_pair_batch: list[tuple[str, str]] = []
++    schema_doc_batch: list[str] = []
++    sql_pair_indices: list[int] = []
++    schema_doc_indices: list[int] = []
++
++    async def flush_sql_pairs() -> None:
++        if not sql_pair_batch:
++            return
++        if dry_run:
++            report.saved += len(sql_pair_batch)
++            sql_pair_batch.clear()
++            sql_pair_indices.clear()
++            return
++        try:
++            await store.add_sql_pair_batch(sql_pair_batch)
++        except _SYSTEMIC_ERRORS:
++            logger.exception(
++                "stream import aborted: systemic failure on sql_pair batch"
++            )
++            raise
++        except Exception as exc:
++            # Whole batch failed. Record every item as errored; counts stay
++            # accurate (saved does NOT advance for the failed batch).
++            for idx in sql_pair_indices:
++                report.errors.append(
++                    ImportItemError(kind="sql_pair", index=idx, message=str(exc))
++                )
++        else:
++            report.saved += len(sql_pair_batch)
++        sql_pair_batch.clear()
++        sql_pair_indices.clear()
++
++    async def flush_schema_docs() -> None:
++        if not schema_doc_batch:
++            return
++        if dry_run:
++            report.saved += len(schema_doc_batch)
++            schema_doc_batch.clear()
++            schema_doc_indices.clear()
++            return
++        try:
++            await store.add_schema_doc_batch(schema_doc_batch)
++        except _SYSTEMIC_ERRORS:
++            logger.exception(
++                "stream import aborted: systemic failure on schema_doc batch"
++            )
++            raise
++        except Exception as exc:
++            for idx in schema_doc_indices:
++                report.errors.append(
++                    ImportItemError(kind="schema_doc", index=idx, message=str(exc))
++                )
++        else:
++            report.saved += len(schema_doc_batch)
++        schema_doc_batch.clear()
++        schema_doc_indices.clear()
++
++    pair_index = 0
++    doc_index = 0
++
++    with path.open("r", encoding="utf-8") as fp:
++        try:
++            for kind, raw_obj in stream_records(fp):
++                if kind == "sql_pair":
++                    try:
++                        pair = SqlPair.model_validate(raw_obj)
++                    except ValidationError as exc:
++                        report.errors.append(
++                            ImportItemError(
++                                kind="sql_pair",
++                                index=pair_index,
++                                message=_fmt_validation_error(exc),
++                            )
++                        )
++                        pair_index += 1
++                        continue
++                    sql_pair_batch.append((pair.question, pair.sql))
++                    sql_pair_indices.append(pair_index)
++                    pair_index += 1
++                    if len(sql_pair_batch) >= batch_size:
++                        await flush_sql_pairs()
++                else:
++                    # schema_doc
++                    try:
++                        doc = SchemaDoc.model_validate(raw_obj)
++                    except ValidationError as exc:
++                        report.errors.append(
++                            ImportItemError(
++                                kind="schema_doc",
++                                index=doc_index,
++                                message=_fmt_validation_error(exc),
++                            )
++                        )
++                        doc_index += 1
++                        continue
++                    schema_doc_batch.append(doc.content)
++                    schema_doc_indices.append(doc_index)
++                    doc_index += 1
++                    if len(schema_doc_batch) >= batch_size:
++                        await flush_schema_docs()
++
++            # End-of-stream flush.
++            await flush_sql_pairs()
++            await flush_schema_docs()
++        except _SYSTEMIC_ERRORS:
++            # Re-raise systemic failures unchanged; the CLI maps them onto
++            # the existing data-loss warning path.
++            raise
++        except Exception as exc:
++            # A malformed bundle (BundleFormatError) cut the stream short.
++            # Flush what we already have so the caller sees the partial
++            # progress in counts, then mark the result aborted.
++            aborted = True
++            abort_reason = str(exc)
++            logger.warning(
++                "stream import aborted at sql_pair[%d] / schema_doc[%d]: %s",
++                pair_index,
++                doc_index,
++                exc,
++            )
++            try:
++                await flush_sql_pairs()
++                await flush_schema_docs()
++            except Exception:
++                # A flush failure during the abort path is already covered
++                # by the per-batch error append above; never let it mask the
++                # original abort_reason.
++                logger.exception("flush failure during stream-import abort")
++
++    return StreamImportResult(
++        report=report,
++        bytes_read=bytes_read,
++        aborted=aborted,
++        abort_reason=abort_reason,
++    )
++
++
++def _fmt_validation_error(exc: ValidationError) -> str:
++    """Compact, single-line rendering of a per-item Pydantic error."""
++    parts = []
++    for err in exc.errors():
++        loc = ".".join(str(p) for p in err.get("loc", ()))
++        msg = err.get("msg", "validation error")
++        parts.append(f"{loc}: {msg}" if loc else msg)
++    return "; ".join(parts) or "validation error"
+diff --git a/src/sqllens/memory/schema.py b/src/sqllens/memory/schema.py
+index 45254ca..09362dd 100644
+--- a/src/sqllens/memory/schema.py
++++ b/src/sqllens/memory/schema.py
+@@ -20,16 +20,21 @@ CONTENT_MAX = 50000
+ 
+ # Defence-in-depth caps on the *outer* shape of a bundle. ``QUESTION_MAX`` /
+ # ``SQL_MAX`` / ``CONTENT_MAX`` bound the size of any single item; an
+-# authenticated client could still DoS the server by submitting millions of
+-# valid-but-cheap items inside one bundle (parsing the list, then writing each
+-# inside the held ``import_lock``). The two caps below — both enforced in
+-# ``memory.io`` at the parse boundary, *not* as model-level ``Field``
+-# constraints — reject such payloads on the way in while leaving in-process
+-# constructors (notably ``MemoryStore.iter_all``, which is the dedup baseline
+-# for ``import_bundle`` and the source for ``export_bundle``) unrestricted.
+-# Enforcing as a ``Field`` constraint would propagate the cap to every
+-# construction, breaking export and import-baseline reads on a healthy store
+-# that legitimately holds more than ``MAX_BUNDLE_ITEMS`` rows.
++# authenticated client could still DoS the MCP ``import_memory`` tool by
++# submitting millions of valid-but-cheap items inside one bundle (parsing the
++# list, then writing each inside the held ``import_lock``). The two caps below
++# are enforced in ``memory.io`` at the parse boundary (not as model-level
++# ``Field`` constraints) and apply to **the MCP path and the bounded CLI
++# default**. The CLI ``--stream`` path bypasses these whole-file caps
++# (memory-bounded streaming makes the DoS lever irrelevant for a local
++# operator) but keeps the per-item caps row by row. Leaving these as parse-
++# boundary checks rather than ``Field`` constraints means in-process
++# constructors (notably ``MemoryStore.iter_all`` and
++# ``MemoryStore.iter_paginated``, which back ``export_bundle`` /
++# ``export_bundle_stream``) stay unrestricted: enforcing as a ``Field``
++# constraint would propagate the cap to every construction, breaking exports
++# on a healthy store that legitimately holds more than ``MAX_BUNDLE_ITEMS``
++# rows.
+ MAX_BUNDLE_BYTES = 10 * 1024 * 1024
+ """Hard ceiling on the raw bundle text accepted by ``parse_json``/``parse_csv``.
+ 
+@@ -111,10 +116,20 @@ class ImportItemError(BaseModel):
+ 
+ 
+ class ImportReport(BaseModel):
+-    """Outcome of an import run."""
++    """Outcome of an import run.
++
++    ``saved`` counts items successfully upserted into the store. Because
++    import now writes rows under a content-hash id (see
++    :func:`sqllens.memory.store.sql_pair_id` /
++    :func:`sqllens.memory.store.schema_doc_id`) and ``collection.upsert``
++    is idempotent, a re-imported logical pair overwrites the same row
++    rather than reporting a "skipped duplicate" — there is no separate
++    skip count to surface. ``errors`` holds per-item validation /
++    save failures; the per-item-error count is what callers compare
++    against zero to decide whether an import succeeded.
++    """
+ 
+     saved: int = 0
+-    skipped_duplicate: int = 0
+     errors: list[ImportItemError] = Field(default_factory=list)
+ 
+     def to_markdown(self) -> str:
+@@ -123,7 +138,6 @@ class ImportReport(BaseModel):
+             "| metric | count |",
+             "| --- | --- |",
+             f"| saved | {self.saved} |",
+-            f"| skipped (duplicate) | {self.skipped_duplicate} |",
+             f"| errors | {len(self.errors)} |",
+         ]
+         if self.errors:
+diff --git a/src/sqllens/memory/store.py b/src/sqllens/memory/store.py
+index be971a6..7ab37d1 100644
+--- a/src/sqllens/memory/store.py
++++ b/src/sqllens/memory/store.py
+@@ -29,9 +29,13 @@ wipe. Both fallbacks are deliberately isolated to this module.
+ 
+ from __future__ import annotations
+ 
++import asyncio
++import hashlib
+ import json
+ import logging
++from collections.abc import Iterator
+ from dataclasses import dataclass
++from datetime import datetime
+ from typing import TYPE_CHECKING, Any
+ 
+ from pydantic import ValidationError
+@@ -49,6 +53,39 @@ if TYPE_CHECKING:
+ RUN_SQL_TOOL_NAME = "run_sql"
+ _IMPORT_SOURCE = "import"
+ 
++
++def _norm(text: str) -> str:
++    """Normalize text for content-hash ID derivation.
++
++    Strip leading/trailing whitespace, collapse internal whitespace, and
++    lowercase. Two near-identical inputs (different casing, trailing
++    whitespace, or repeated spaces) normalize to the same string and
++    therefore the same content-hash ID — re-importing such inputs upserts
++    the same row instead of duplicating it.
++    """
++    return " ".join(text.split()).lower()
++
++
++def sql_pair_id(question: str, sql: str) -> str:
++    """Deterministic Chroma row id for a ``(question, sql)`` import.
++
++    ``sha256("sql_pair" + "\\x00" + _norm(question) + "\\x00" + _norm(sql))``.
++    A re-import of the same logical pair targets the same id, so
++    ``collection.upsert`` overwrites rather than duplicates.
++    """
++    parts = b"sql_pair\x00" + _norm(question).encode("utf-8") + b"\x00" + _norm(sql).encode("utf-8")
++    return hashlib.sha256(parts).hexdigest()
++
++
++def schema_doc_id(content: str) -> str:
++    """Deterministic Chroma row id for a schema-doc import.
++
++    ``sha256("schema_doc" + "\\x00" + _norm(content))``. Mirrors
++    :func:`sql_pair_id` so a re-imported text memory upserts the same row.
++    """
++    parts = b"schema_doc\x00" + _norm(content).encode("utf-8")
++    return hashlib.sha256(parts).hexdigest()
++
+ # Wholesale-failure guard for ``iter_all``. One bad row is a tolerated skip;
+ # *every* row failing to reconstruct (e.g. a chromadb/schema version skew that
+ # makes every ``args_json`` unparseable) is systemic corruption, not noise.
+@@ -106,20 +143,98 @@ class MemoryStore:
+         self.last_skipped_rows = 0
+ 
+     async def add_sql_pair(self, question: str, sql: str) -> None:
+-        await self._mem.save_tool_usage(
+-            question=question,
+-            tool_name=RUN_SQL_TOOL_NAME,
+-            args={"sql": sql},
+-            context=self._ctx,
+-            success=True,
+-            metadata={"source": _IMPORT_SOURCE},
+-        )
++        """Upsert a single SQL pair using a deterministic content-hash id.
++
++        Bypasses the vendored ``save_tool_usage`` (which assigns a fresh
++        ``uuid4`` per write and so duplicates rows on re-import). The metadata
++        shape is byte-identical to ``save_tool_usage``'s writes so retrieval
++        at query time still matches imported pairs.
++        """
++        await self.add_sql_pair_batch([(question, sql)])
+ 
+     async def add_schema_doc(self, content: str) -> None:
+-        await self._mem.save_text_memory(content, self._ctx)
++        """Upsert a single schema doc using a deterministic content-hash id.
++
++        Bypasses ``save_text_memory`` for the same reason as
++        :meth:`add_sql_pair`. Metadata stays byte-identical to live-agent
++        writes so retrieval still matches.
++        """
++        await self.add_schema_doc_batch([content])
++
++    async def add_sql_pair_batch(self, items: list[tuple[str, str]]) -> None:
++        """Batch-upsert ``(question, sql)`` pairs with content-hash ids.
++
++        One ``collection.upsert`` per call writes the whole batch — far
++        cheaper than per-item round-trips on large imports. Ids are derived
++        via :func:`sql_pair_id`, so re-importing the same logical pairs is
++        idempotent.
++
++        Metadata is byte-identical to ``save_tool_usage``'s writes:
++
++        - ``tool_name`` = ``"run_sql"`` so the agent's retrieval filter
++          (``where={"tool_name": "run_sql"}``) matches the row.
++        - ``args_json`` = ``{"sql": ...}`` so the SQL is reconstructable.
++        - ``metadata_json`` = ``{"source": "import"}`` so curated imports are
++          distinguishable from live-agent writes.
++        """
++        if not items:
++            return
++        ids: list[str] = []
++        questions: list[str] = []
++        metadatas: list[dict[str, Any]] = []
++        timestamp = datetime.now().isoformat()
++        for question, sql in items:
++            ids.append(sql_pair_id(question, sql))
++            questions.append(question)
++            metadatas.append(
++                {
++                    "question": question,
++                    "tool_name": RUN_SQL_TOOL_NAME,
++                    "args_json": json.dumps({"sql": sql}),
++                    "timestamp": timestamp,
++                    "success": True,
++                    "metadata_json": json.dumps({"source": _IMPORT_SOURCE}),
++                }
++            )
++
++        def _save() -> None:
++            collection = self._mem._get_collection()
++            collection.upsert(ids=ids, documents=questions, metadatas=metadatas)
++
++        await asyncio.get_event_loop().run_in_executor(None, _save)
++
++    async def add_schema_doc_batch(self, contents: list[str]) -> None:
++        """Batch-upsert schema docs with content-hash ids.
++
++        Mirrors :meth:`add_sql_pair_batch` with the text-memory metadata
++        shape ``{"content": ..., "timestamp": ..., "is_text_memory": True}``
++        — byte-identical to ``save_text_memory``.
++        """
++        if not contents:
++            return
++        ids: list[str] = []
++        documents: list[str] = []
++        metadatas: list[dict[str, Any]] = []
++        timestamp = datetime.now().isoformat()
++        for content in contents:
++            ids.append(schema_doc_id(content))
++            documents.append(content)
++            metadatas.append(
++                {
++                    "content": content,
++                    "timestamp": timestamp,
++                    "is_text_memory": True,
++                }
++            )
++
++        def _save() -> None:
++            collection = self._mem._get_collection()
++            collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
++
++        await asyncio.get_event_loop().run_in_executor(None, _save)
+ 
+     def iter_all(self) -> MemoryBundle:
+-        """Enumerate the collection into a bundle.
++        """Enumerate the collection into a bundle (bounded, single-shot).
+ 
+         Only the two kinds this package can represent are exported: ``run_sql``
+         tool memories carrying a ``sql`` arg (→ SQL pairs) and text memories
+@@ -128,19 +243,21 @@ class MemoryStore:
+ 
+         A single corrupt or non-conforming row (unparseable ``args_json``, or a
+         value the bundle models reject — e.g. a live-agent memory longer than
+-        the import limits) is skipped, not fatal: ``iter_all`` is also the
+-        dedup baseline for ``import_bundle``, so one bad row must not abort
+-        every export and import.
++        the import limits) is skipped, not fatal — ``iter_all`` is the
++        source for the bounded ``export_bundle`` and must not abort the
++        whole export on one bad row.
+ 
+         Wholesale failure is *not* tolerated: if the collection has a
+         meaningful number of rows and (almost) none reconstruct, that is
+         systemic corruption / version skew, and a silent empty result would
+-        report a destroyed backup as success and re-save duplicates on the
+-        next import. In that case :class:`MemoryCorruptionError` is raised.
++        report a destroyed backup as success. In that case
++        :class:`MemoryCorruptionError` is raised. The streaming counterpart
++        (:meth:`iter_paginated`) does not enforce this rule — the skip-
++        ratio is not a single-snapshot statistic across pages.
+ 
+         ``last_skipped_rows`` records how many rows the most recent call
+-        skipped so callers (export / import) can surface a non-fatal
+-        partial-loss warning.
++        skipped so callers (export) can surface a non-fatal partial-loss
++        warning.
+         """
+         collection = self._mem._get_collection()
+         # Skip embedding vectors/documents (largest per-row payload, unused here).
+@@ -205,6 +322,77 @@ class MemoryStore:
+             schema_docs=docs or None,
+         )
+ 
++    def iter_paginated(
++        self, *, page_size: int = 500
++    ) -> Iterator[tuple[str, SqlPair | SchemaDoc]]:
++        """Paginated, memory-bounded enumeration of the collection.
++
++        Walks the collection via ``collection.get(limit=N, offset=M)`` and
++        yields one ``(kind, model)`` tuple at a time. ``kind`` is
++        ``"sql_pair"`` or ``"schema_doc"``. The full store is never
++        materialized; only one page of metadata is resident at a time.
++
++        Skipping semantics match :meth:`iter_all` per row (non-dict
++        metadata, non-``run_sql`` tool memories, unparseable ``args_json``
++        are skipped), but :attr:`last_skipped_rows` records the running
++        total across pages so a streaming export still reports the
++        ``unrepresentable`` warning even when no single page tripped a
++        wholesale-corruption threshold. Wholesale corruption is NOT checked
++        here: pagination ratios drift page to page and the rule
++        ``iter_all`` enforces (≥ 5 rows, ≥ 90 % skipped) is a one-shot
++        snapshot guarantee that does not translate cleanly to an
++        incremental scan; the streaming export path documents this gap.
++        """
++        collection = self._mem._get_collection()
++        offset = 0
++        skipped_total = 0
++        while True:
++            page = collection.get(
++                include=["metadatas"], limit=page_size, offset=offset
++            )
++            ids = page.get("ids") or []
++            if not ids:
++                break
++            metadatas = page.get("metadatas") or []
++            offset += len(ids)
++            for metadata in metadatas:
++                if not isinstance(metadata, dict):
++                    skipped_total += 1
++                    continue
++                try:
++                    if metadata.get("is_text_memory"):
++                        yield (
++                            "schema_doc",
++                            SchemaDoc(content=metadata.get("content", "")),
++                        )
++                        continue
++                    if metadata.get("tool_name") != RUN_SQL_TOOL_NAME:
++                        continue
++                    args = json.loads(metadata.get("args_json", "{}"))
++                    sql = args.get("sql")
++                    if not sql:
++                        continue
++                    yield (
++                        "sql_pair",
++                        SqlPair(question=metadata.get("question", ""), sql=sql),
++                    )
++                except (TypeError, ValueError, ValidationError) as exc:
++                    skipped_total += 1
++                    logger.debug(
++                        "skipping unrepresentable memory row in page: %s", exc
++                    )
++                    continue
++            if len(ids) < page_size:
++                # Last (partial) page reached; no more rows to fetch.
++                break
++
++        self.last_skipped_rows = skipped_total
++        if skipped_total:
++            logger.warning(
++                "iter_paginated skipped %d unrepresentable memory row(s)",
++                skipped_total,
++            )
++
+     def clear(self) -> int:
+         """Wipe every entry in the configured collection; return how many were deleted.
+ 
+diff --git a/src/sqllens/memory/streaming.py b/src/sqllens/memory/streaming.py
+new file mode 100644
+index 0000000..95ee76d
+--- /dev/null
++++ b/src/sqllens/memory/streaming.py
+@@ -0,0 +1,360 @@
++# SPDX-FileCopyrightText: 2026 Daniel Radman
++# SPDX-License-Identifier: Apache-2.0
++
++"""Memory-bounded streaming reader for the bundle JSON format.
++
++Walks the nested ``sql_pairs.pairs`` and ``schema_docs`` arrays of a bundle
++file and yields one record object at a time. Memory is bounded to roughly
++one record (plus the read buffer) regardless of total file size, so a
++100 MB bundle imports without loading the full document into RAM.
++
++The hand-rolled scanner is string- and escape-aware: a ``}``, ``]``, or ``"``
++inside a SQL string literal (e.g. ``WHERE name = '}'``) does not fool the
++depth counter that frames each record.
++
++This module is CLI-only (driven from the ``import-memory --stream`` path).
++The MCP ``import_memory`` tool keeps the existing bounded parse + cap
++guard in :mod:`sqllens.memory.io` to preserve the DoS contract.
++"""
++
++from __future__ import annotations
++
++import json
++from collections.abc import Iterator
++from typing import IO, Literal
++
++from sqllens.memory.io import BundleFormatError
++
++RecordKind = Literal["sql_pair", "schema_doc"]
++
++# Default chunk size for buffered reads. Sized to amortize Python-level
++# overhead per ``read()`` call while keeping the resident buffer well under
++# any reasonable per-record cap. The buffer is compacted as it is consumed.
++_DEFAULT_CHUNK = 64 * 1024
++
++# Hard cap on a single value's byte length, in addition to per-item Pydantic
++# validation in the caller. Defence-in-depth against a maliciously framed
++# value whose contents would otherwise grow the buffer without bound (e.g.
++# a single ``{`` followed by GBs of un-closed input). Per-item Pydantic caps
++# (``QUESTION_MAX`` + ``SQL_MAX`` + ``CONTENT_MAX``) bound the legitimate
++# upper limit at well under 100 KB even with serialization overhead; 1 MiB
++# leaves generous headroom for whitespace / nesting without admitting an
++# unbounded scan.
++_MAX_VALUE_BYTES = 1 * 1024 * 1024
++
++
++class _Scanner:
++    """Forward-only character scanner over a text stream.
++
++    Maintains an in-memory buffer that is refilled on demand and compacted
++    when the consumed prefix gets large. The buffer is never expected to
++    hold the entire file — only the current value being framed.
++    """
++
++    def __init__(self, fp: IO[str], chunk_size: int = _DEFAULT_CHUNK) -> None:
++        self._fp = fp
++        self._chunk_size = chunk_size
++        self._buf = ""
++        self._i = 0
++        self._eof = False
++
++    def _ensure(self, n: int) -> None:
++        """Try to make ``_buf[_i:_i+n]`` available, reading from ``fp`` as needed."""
++        while not self._eof and (len(self._buf) - self._i) < n:
++            chunk = self._fp.read(self._chunk_size)
++            if not chunk:
++                self._eof = True
++                break
++            self._buf += chunk
++        # Compact the consumed prefix when it grows large to keep memory bounded.
++        if self._i > self._chunk_size * 4:
++            self._buf = self._buf[self._i :]
++            self._i = 0
++
++    def peek(self) -> str:
++        """Return the next character without consuming, or ``""`` at EOF."""
++        self._ensure(1)
++        if self._i >= len(self._buf):
++            return ""
++        return self._buf[self._i]
++
++    def advance(self) -> str:
++        """Consume and return one character. Raises at EOF."""
++        c = self.peek()
++        if not c:
++            raise BundleFormatError("unexpected EOF while parsing bundle")
++        self._i += 1
++        return c
++
++    def skip_whitespace(self) -> None:
++        while True:
++            c = self.peek()
++            if not c or c not in " \t\n\r":
++                return
++            self._i += 1
++
++    def expect(self, c: str) -> None:
++        self.skip_whitespace()
++        got = self.peek()
++        if got != c:
++            shown = repr(got) if got else "EOF"
++            raise BundleFormatError(f"expected {c!r}, got {shown}")
++        self._i += 1
++
++    def read_value_raw(self) -> str:
++        """Consume a complete JSON value and return its raw text.
++
++        Frames ``{...}``, ``[...]``, strings, numbers, booleans, and ``null``
++        by depth-tracked, string/escape-aware scanning. The returned text is
++        a valid standalone JSON value; the caller can pass it to ``json.loads``.
++
++        Bounded memory: a single value larger than ``_MAX_VALUE_BYTES`` raises
++        ``BundleFormatError`` rather than growing the buffer without limit.
++        """
++        self.skip_whitespace()
++        c = self.peek()
++        if not c:
++            raise BundleFormatError("unexpected EOF where a value was expected")
++
++        start = self._i
++        if c in "{[":
++            self._scan_balanced(c)
++        elif c == '"':
++            self._scan_string()
++        else:
++            self._scan_primitive()
++
++        raw = self._buf[start : self._i]
++        if len(raw.encode("utf-8")) > _MAX_VALUE_BYTES:
++            raise BundleFormatError(
++                f"value exceeds the {_MAX_VALUE_BYTES}-byte streaming-record cap"
++            )
++        return raw
++
++    def _scan_balanced(self, open_char: str) -> None:
++        """Advance past a balanced ``{...}`` or ``[...]`` value.
++
++        Tracks depth across both ``{}`` and ``[]`` since a SQL pair record
++        may contain nested objects (``args`` etc.). Inside string literals
++        (``"..."``) every character including ``}``/``]`` is treated as
++        literal — that is the escape-awareness that prevents SQL like
++        ``WHERE name = '}'`` from being mis-framed.
++        """
++        close_char = "}" if open_char == "{" else "]"
++        depth = 0
++        in_string = False
++        escape_next = False
++        i = self._i
++        # Track size to avoid growing the buffer past the per-value cap.
++        scan_start = i
++        while True:
++            # Refill in chunks rather than one char at a time.
++            self._ensure(self._chunk_size)
++            if i >= len(self._buf):
++                raise BundleFormatError(
++                    f"unexpected EOF inside {open_char}…{close_char}"
++                )
++            # Bound the byte length of an in-flight value. UTF-8 lower-bounds
++            # at one byte per code point, so a code-point check is a cheap
++            # over-approximation that protects against unbounded growth.
++            if (i - scan_start) > _MAX_VALUE_BYTES:
++                raise BundleFormatError(
++                    f"value exceeds the {_MAX_VALUE_BYTES}-byte streaming-record cap"
++                )
++            ch = self._buf[i]
++            if in_string:
++                if escape_next:
++                    escape_next = False
++                elif ch == "\\":
++                    escape_next = True
++                elif ch == '"':
++                    in_string = False
++            else:
++                if ch == '"':
++                    in_string = True
++                elif ch in "{[":
++                    depth += 1
++                elif ch in "}]":
++                    depth -= 1
++                    if depth == 0:
++                        i += 1
++                        break
++            i += 1
++        self._i = i
++
++    def _scan_string(self) -> None:
++        """Advance past a JSON string literal at the current position."""
++        i = self._i + 1  # skip opening quote
++        escape_next = False
++        while True:
++            self._ensure(self._chunk_size)
++            if i >= len(self._buf):
++                raise BundleFormatError("unexpected EOF inside string literal")
++            ch = self._buf[i]
++            if escape_next:
++                escape_next = False
++            elif ch == "\\":
++                escape_next = True
++            elif ch == '"':
++                i += 1
++                break
++            i += 1
++        self._i = i
++
++    def _scan_primitive(self) -> None:
++        """Advance past a number / ``true`` / ``false`` / ``null``."""
++        i = self._i
++        while True:
++            self._ensure(1)
++            if i >= len(self._buf):
++                break
++            ch = self._buf[i]
++            if ch in " \t\n\r,}]":
++                break
++            i += 1
++        if i == self._i:
++            raise BundleFormatError("expected a JSON value")
++        self._i = i
++
++
++def stream_records(fp: IO[str]) -> Iterator[tuple[RecordKind, dict]]:
++    """Yield ``(kind, raw_obj)`` tuples for every record in a bundle file.
++
++    ``kind`` is ``"sql_pair"`` (from ``sql_pairs.pairs``) or ``"schema_doc"``
++    (from ``schema_docs``). ``raw_obj`` is the ``json.loads`` of each record
++    fragment; the caller validates it against ``SqlPair`` / ``SchemaDoc`` so
++    the per-item caps (``QUESTION_MAX``, ``SQL_MAX``, ``CONTENT_MAX``) fire
++    row by row.
++
++    Unknown top-level keys, ``training_type`` siblings, and any other
++    structural noise in the document are skipped. Malformed JSON anywhere in
++    the stream raises ``BundleFormatError``: the streaming reader cannot
++    recover by skipping to the next comma without risking record loss, so
++    the caller (CLI) surfaces the error and exits non-zero.
++    """
++    scanner = _Scanner(fp)
++    scanner.skip_whitespace()
++    if scanner.peek() == "":
++        # An empty file is technically not a valid bundle, but ``{}`` is — the
++        # caller (CLI) emits the "no records imported" warning when nothing
++        # was yielded. Don't raise here: let the CLI decide what an empty
++        # input means in context (it has the file size + dry-run knowledge).
++        return
++    scanner.expect("{")
++
++    first = True
++    while True:
++        scanner.skip_whitespace()
++        c = scanner.peek()
++        if c == "}":
++            scanner.advance()
++            return
++        if not first:
++            if c != ",":
++                shown = repr(c) if c else "EOF"
++                raise BundleFormatError(
++                    f"expected ',' or '}}' between bundle keys, got {shown}"
++                )
++            scanner.advance()
++            scanner.skip_whitespace()
++        first = False
++
++        if scanner.peek() != '"':
++            raise BundleFormatError("expected a string key at the bundle root")
++        key_raw = scanner.read_value_raw()
++        try:
++            key = json.loads(key_raw)
++        except json.JSONDecodeError as exc:
++            raise BundleFormatError(f"invalid bundle key: {exc}") from exc
++        if not isinstance(key, str):
++            raise BundleFormatError("bundle root keys must be strings")
++        scanner.expect(":")
++
++        if key == "sql_pairs":
++            yield from _stream_sql_pairs_block(scanner)
++        elif key == "schema_docs":
++            yield from _stream_array(scanner, "schema_doc")
++        else:
++            # Skip an unknown value (forward compatibility — the bundle
++            # format may grow optional top-level keys).
++            scanner.read_value_raw()
++
++
++def _stream_sql_pairs_block(scanner: _Scanner) -> Iterator[tuple[RecordKind, dict]]:
++    scanner.skip_whitespace()
++    if scanner.peek() == "n":
++        # JSON ``null`` — block is absent.
++        scanner.read_value_raw()
++        return
++    scanner.expect("{")
++
++    first = True
++    while True:
++        scanner.skip_whitespace()
++        c = scanner.peek()
++        if c == "}":
++            scanner.advance()
++            return
++        if not first:
++            if c != ",":
++                shown = repr(c) if c else "EOF"
++                raise BundleFormatError(
++                    f"expected ',' or '}}' inside sql_pairs, got {shown}"
++                )
++            scanner.advance()
++            scanner.skip_whitespace()
++        first = False
++
++        if scanner.peek() != '"':
++            raise BundleFormatError("expected a string key inside sql_pairs")
++        key_raw = scanner.read_value_raw()
++        try:
++            key = json.loads(key_raw)
++        except json.JSONDecodeError as exc:
++            raise BundleFormatError(f"invalid sql_pairs key: {exc}") from exc
++        scanner.expect(":")
++        if key == "pairs":
++            yield from _stream_array(scanner, "sql_pair")
++        else:
++            # ``training_type`` and any future siblings: consume + discard.
++            scanner.read_value_raw()
++
++
++def _stream_array(
++    scanner: _Scanner, kind: RecordKind
++) -> Iterator[tuple[RecordKind, dict]]:
++    scanner.skip_whitespace()
++    if scanner.peek() == "n":
++        scanner.read_value_raw()
++        return
++    scanner.expect("[")
++
++    first = True
++    while True:
++        scanner.skip_whitespace()
++        c = scanner.peek()
++        if c == "]":
++            scanner.advance()
++            return
++        if not first:
++            if c != ",":
++                shown = repr(c) if c else "EOF"
++                raise BundleFormatError(
++                    f"expected ',' or ']' inside {kind} array, got {shown}"
++                )
++            scanner.advance()
++            scanner.skip_whitespace()
++        first = False
++
++        raw = scanner.read_value_raw()
++        try:
++            obj = json.loads(raw)
++        except json.JSONDecodeError as exc:
++            raise BundleFormatError(
++                f"invalid {kind} record: {exc}"
++            ) from exc
++        if not isinstance(obj, dict):
++            raise BundleFormatError(
++                f"{kind} record must be a JSON object, got {type(obj).__name__}"
++            )
++        yield (kind, obj)
+diff --git a/src/sqllens/server.py b/src/sqllens/server.py
+index 77a78ce..f244b04 100644
+--- a/src/sqllens/server.py
++++ b/src/sqllens/server.py
+@@ -371,9 +371,12 @@ def build_server(cfg: Config) -> FastMCP:
+ 
+         store = MemoryStore(cfg)
+         # Concurrent import_memory calls share this one closure-bound store.
+-        # Without serialization both would snapshot the dedup baseline before
+-        # either writes and double-save identical pairs, breaking the
+-        # documented "re-import is safe" guarantee. Single-writer it is.
++        # Items are now upserted under content-hash ids, so two concurrent
++        # imports of the same logical pair would race on the same row and
++        # produce undefined "last write wins" ordering. Keep the single-
++        # writer lock so the tool retains predictable semantics under
++        # concurrent calls — the lift is per-row cheap, the queue is short,
++        # and a streaming-write into ChromaDB still serializes well below it.
+         import_lock = asyncio.Lock()
+ 
+         @mcp.tool()
+@@ -381,8 +384,13 @@ def build_server(cfg: Config) -> FastMCP:
+             """Bulk-load a curated memory bundle (JSON) into the store.
+ 
+             The bundle has optional ``sql_pairs`` and ``schema_docs`` blocks.
+-            Exact-match duplicates (already stored or repeated in the bundle)
+-            are skipped. Returns a Markdown summary of saved / skipped / errors.
++            Each row is upserted under a content-hash id, so re-importing
++            the same logical pair overwrites the existing row rather than
++            duplicating it — there is no "skipped duplicate" count to
++            surface. Returns a Markdown summary of saved / errors. The
++            whole-bundle ``MAX_BUNDLE_BYTES`` / ``MAX_BUNDLE_ITEMS`` caps
++            still apply on this path (DoS guard for the remote client);
++            the CLI ``--stream`` mode lifts them for local operators.
+             """
+             try:
+                 bundle = parse_json(bundle_json)
+@@ -421,17 +429,16 @@ def build_server(cfg: Config) -> FastMCP:
+                 # on-disk persist path / driver internals; the full detail goes
+                 # to the server log, the client gets sanitized counts only.
+                 logger.error(
+-                    "import_memory: %d item(s) failed (%d saved, %d skipped): %s",
++                    "import_memory: %d item(s) failed (%d saved): %s",
+                     len(report.errors),
+                     report.saved,
+-                    report.skipped_duplicate,
+                     "; ".join(
+                         f"{e.kind}[{e.index}]: {e.message}" for e in report.errors
+                     ),
+                 )
+                 raise RuntimeError(
+                     f"Memory import failed: {len(report.errors)} item(s) errored "
+-                    f"({report.saved} saved, {report.skipped_duplicate} skipped). "
++                    f"({report.saved} saved). "
+                     "A partial import is a failure; check the server logs."
+                 )
+             return report.to_markdown()
+@@ -588,18 +595,18 @@ def build_server(cfg: Config) -> FastMCP:
+             sql_pairs: list[dict[str, Any]] | None = None,
+             schema_docs: list[dict[str, Any]] | None = None,
+         ) -> str | CallToolResult:
+-            """Bulk-add curated SQL pairs and schema docs, with server-side dedup.
++            """Bulk-add curated SQL pairs and schema docs (idempotent upsert).
+ 
+             ``sql_pairs`` items are ``{"question", "sql"}``; ``schema_docs`` items
+-            are ``{"content"}``. Exact ``(question, sql)`` / ``content`` matches
+-            (already stored or repeated in the batch) are skipped. Write-guarded:
+-            refuses on an unauthenticated endpoint unless auth.insecure is set.
+-
+-            Returns ``{"saved_count", "duplicate_count", "skipped_count",
+-            "errors": [{"index", "question", "error"}]}``. Per the partial-failure
+-            contract, any per-item error makes this an ``isError`` result (the
+-            structured body is still returned so the caller sees which rows
+-            failed).
++            are ``{"content"}``. Each row is written under a content-hash id, so
++            re-adding the same logical record overwrites the existing row rather
++            than producing a duplicate. Write-guarded: refuses on an
++            unauthenticated endpoint unless auth.insecure is set.
++
++            Returns ``{"saved_count", "errors": [{"index", "question",
++            "error"}]}``. Per the partial-failure contract, any per-item error
++            makes this an ``isError`` result (the structured body is still
++            returned so the caller sees which rows failed).
+             """
+             _memory_write_auth()
+             try:
+@@ -617,10 +624,9 @@ def build_server(cfg: Config) -> FastMCP:
+             # the client as isError, even though some rows may have saved.
+             if result["errors"]:
+                 logger.error(
+-                    "add_memories: %d item(s) failed (%d saved, %d duplicate)",
++                    "add_memories: %d item(s) failed (%d saved)",
+                     len(result["errors"]),
+                     result["saved_count"],
+-                    result["duplicate_count"],
+                 )
+                 return _json_error(result)
+             return json.dumps(result)
+diff --git a/src/sqllens/ui/memory_admin.html b/src/sqllens/ui/memory_admin.html
+index 2a9b93d..7b13136 100644
+--- a/src/sqllens/ui/memory_admin.html
++++ b/src/sqllens/ui/memory_admin.html
+@@ -930,8 +930,6 @@ document.getElementById("doImport").addEventListener("click", async () => {
+     const d = res.data || {};
+     const summary =
+       "saved=" + (d.saved_count ?? 0) +
+-      " duplicate=" + (d.duplicate_count ?? 0) +
+-      " skipped=" + (d.skipped_count ?? 0) +
+       " errors=" + (Array.isArray(d.errors) ? d.errors.length : "?");
+     showError("Import failed — " + res.message, summary,
+       Array.isArray(d.errors) && d.errors.length ? d.errors : null);
+@@ -946,10 +944,7 @@ document.getElementById("doImport").addEventListener("click", async () => {
+     return;
+   }
+   const d = res.data || {};
+-  importMeta.textContent =
+-    "saved " + (d.saved_count ?? 0) +
+-    ", duplicate " + (d.duplicate_count ?? 0) +
+-    ", skipped " + (d.skipped_count ?? 0);
++  importMeta.textContent = "saved " + (d.saved_count ?? 0);
+   showOk("Imported " + (d.saved_count ?? 0) + " memorie(s).");
+   // Counts and top-hit list change on import; invalidate stats too.
+   state.stats = null;
+@@ -969,8 +964,6 @@ function renderImportSummary(host, d, hadError) {
+   cards.className = "cards";
+   const counters = [
+     ["Saved", d.saved_count ?? 0],
+-    ["Duplicate", d.duplicate_count ?? 0],
+-    ["Skipped", d.skipped_count ?? 0],
+     ["Errors", Array.isArray(d.errors) ? d.errors.length : 0],
+   ];
+   for (const [label, value] of counters) cards.appendChild(makeCard(label, value));
+diff --git a/tests/unit/test_cli_memory.py b/tests/unit/test_cli_memory.py
+index e484820..f13d042 100644
+--- a/tests/unit/test_cli_memory.py
++++ b/tests/unit/test_cli_memory.py
+@@ -5,6 +5,7 @@
+ 
+ from __future__ import annotations
+ 
++import json
+ from pathlib import Path
+ 
+ from typer.testing import CliRunner
+@@ -48,11 +49,16 @@ def test_import_then_export_round_trip(tmp_path, monkeypatch) -> None:
+     r1 = runner.invoke(app, ["import-memory", str(bundle), "-c", str(cfg)])
+     assert r1.exit_code == 0, r1.output
+     assert "saved=2" in r1.output
++    assert "errors=0" in r1.output
+ 
++    # Re-import is idempotent: ``saved`` counts upserts (every row was
++    # written again under the same content-hash id), and no separate
++    # ``skipped_duplicate`` count is emitted.
+     r2 = runner.invoke(app, ["import-memory", str(bundle), "-c", str(cfg)])
+     assert r2.exit_code == 0, r2.output
+-    assert "saved=0" in r2.output
+-    assert "skipped_duplicate=2" in r2.output
++    assert "saved=2" in r2.output
++    assert "errors=0" in r2.output
++    assert "skipped_duplicate" not in r2.output
+ 
+     out = tmp_path / "out.json"
+     r3 = runner.invoke(app, ["export-memory", str(out), "-c", str(cfg)])
+@@ -61,8 +67,7 @@ def test_import_then_export_round_trip(tmp_path, monkeypatch) -> None:
+ 
+     r4 = runner.invoke(app, ["import-memory", str(out), "-c", str(cfg)])
+     assert r4.exit_code == 0, r4.output
+-    assert "saved=0" in r4.output
+-    assert "skipped_duplicate=2" in r4.output
++    assert "saved=2" in r4.output
+ 
+ 
+ def test_csv_import(tmp_path, monkeypatch) -> None:
+@@ -127,6 +132,153 @@ def test_export_empty_store_warns(tmp_path, monkeypatch) -> None:
+     assert out.exists()
+ 
+ 
++def test_stream_import_then_export_round_trip(tmp_path, monkeypatch) -> None:
++    """``--stream`` works on both directions; bytes_read is surfaced; output
++    file from a streaming export re-imports cleanly via the streaming path."""
++    patch_fake_embeddings(monkeypatch)
++    cfg = _config(tmp_path)
++    bundle = tmp_path / "in.json"
++    bundle.write_text(
++        '{"sql_pairs": {"pairs": [{"question": "Q?", "sql": "SELECT 1"}]},'
++        ' "schema_docs": [{"content": "doc"}]}'
++    )
++
++    r1 = runner.invoke(
++        app, ["import-memory", str(bundle), "--stream", "-c", str(cfg)]
++    )
++    assert r1.exit_code == 0, r1.output
++    assert "saved=2" in r1.output
++    assert "failed=0" in r1.output
++    assert "bytes_read=" in r1.output
++
++    out = tmp_path / "out.json"
++    r2 = runner.invoke(
++        app, ["export-memory", str(out), "--stream", "-c", str(cfg)]
++    )
++    assert r2.exit_code == 0, r2.output
++    assert out.exists()
++
++    r3 = runner.invoke(
++        app, ["import-memory", str(out), "--stream", "-c", str(cfg)]
++    )
++    assert r3.exit_code == 0, r3.output
++    assert "saved=2" in r3.output
++
++
++def test_stream_import_rejects_csv_format(tmp_path, monkeypatch) -> None:
++    patch_fake_embeddings(monkeypatch)
++    cfg = _config(tmp_path)
++    bundle = tmp_path / "in.csv"
++    bundle.write_text("question,sql\nq,SELECT 1\n")
++    r = runner.invoke(
++        app,
++        [
++            "import-memory",
++            str(bundle),
++            "--stream",
++            "--format",
++            "csv",
++            "-c",
++            str(cfg),
++        ],
++    )
++    assert r.exit_code == 1, r.output
++    assert "JSON-only" in r.output or "JSON only" in r.output
++
++
++def test_stream_import_loud_warning_on_zero_records(tmp_path, monkeypatch) -> None:
++    """A non-trivial input that yields zero records is almost always a
++    format mismatch — surface loudly and exit non-zero, per CLAUDE.md's
++    'lossy/empty success needs a loud warning' rule."""
++    patch_fake_embeddings(monkeypatch)
++    cfg = _config(tmp_path)
++    bundle = tmp_path / "in.json"
++    bundle.write_text(
++        '{"meta": {"version": 1, "note": "this is not a bundle"}}'
++        + (" " * 100)  # pad past the empty-input threshold
++    )
++    r = runner.invoke(
++        app, ["import-memory", str(bundle), "--stream", "-c", str(cfg)]
++    )
++    assert r.exit_code == 1, r.output
++    assert "Warning" in r.output
++    assert "0 records" in r.output
++
++
++def test_stream_import_exits_non_zero_on_per_item_failure(
++    tmp_path, monkeypatch
++) -> None:
++    """Per-item validation failure on the streaming path is a non-zero exit."""
++    patch_fake_embeddings(monkeypatch)
++    cfg = _config(tmp_path)
++    from sqllens.memory.schema import QUESTION_MAX
++
++    bundle = tmp_path / "in.json"
++    over = "q" * (QUESTION_MAX + 1)
++    bundle.write_text(
++        '{"sql_pairs": {"pairs": ['
++        f'{{"question": {json.dumps(over)}, "sql": "SELECT 1"}},'
++        '{"question": "ok", "sql": "SELECT 2"}'
++        "]}}"
++    )
++    r = runner.invoke(
++        app, ["import-memory", str(bundle), "--stream", "-c", str(cfg)]
++    )
++    assert r.exit_code == 1, r.output
++    assert "failed=1" in r.output
++
++
++def test_stream_import_clear_then_failure_warns_data_loss(
++    tmp_path, monkeypatch
++) -> None:
++    """``--clear`` + a stream-import that fails partway is the documented
++    data-loss path — must exit non-zero AND surface the wiped warning."""
++    patch_fake_embeddings(monkeypatch)
++    cfg = _config(tmp_path)
++
++    # Seed with one record so --clear has something to wipe.
++    seed = tmp_path / "seed.json"
++    seed.write_text('{"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 0"}]}}')
++    runner.invoke(app, ["import-memory", str(seed), "-c", str(cfg)])
++
++    broken = tmp_path / "broken.json"
++    broken.write_text('{"sql_pairs": {"pairs": [{"question": "', encoding="utf-8")
++    r = runner.invoke(
++        app,
++        [
++            "import-memory",
++            str(broken),
++            "--stream",
++            "--clear",
++            "-c",
++            str(cfg),
++        ],
++        input="y\n",
++    )
++    assert r.exit_code == 1, r.output
++    assert "aborted" in r.output.lower()
++    assert "wiped" in r.output.lower() or "may now be empty" in r.output.lower()
++
++
++def test_stream_export_rejects_csv_format(tmp_path, monkeypatch) -> None:
++    patch_fake_embeddings(monkeypatch)
++    cfg = _config(tmp_path)
++    out = tmp_path / "out.csv"
++    r = runner.invoke(
++        app,
++        [
++            "export-memory",
++            str(out),
++            "--stream",
++            "--format",
++            "csv",
++            "-c",
++            str(cfg),
++        ],
++    )
++    assert r.exit_code == 1, r.output
++
++
+ def test_clear_requires_confirmation(tmp_path, monkeypatch) -> None:
+     patch_fake_embeddings(monkeypatch)
+     cfg = _config(tmp_path)
+@@ -143,4 +295,5 @@ def test_clear_requires_confirmation(tmp_path, monkeypatch) -> None:
+         app, ["import-memory", str(bundle), "--clear", "-c", str(cfg)], input="y\n"
+     )
+     assert confirmed.exit_code == 0, confirmed.output
+-    assert "skipped_duplicate=0" in confirmed.output
++    assert "saved=1" in confirmed.output
++    assert "errors=0" in confirmed.output
+diff --git a/tests/unit/test_memory_admin_tools.py b/tests/unit/test_memory_admin_tools.py
+index f8ed643..36c5c59 100644
+--- a/tests/unit/test_memory_admin_tools.py
++++ b/tests/unit/test_memory_admin_tools.py
+@@ -138,8 +138,9 @@ async def test_add_then_list(tmp_path, monkeypatch) -> None:
+     )
+     added = _parse(add)
+     assert added["saved_count"] == 3
+-    assert added["duplicate_count"] == 0
+     assert added["errors"] == []
++    # The legacy ``duplicate_count`` key is gone — upsert is idempotent.
++    assert "duplicate_count" not in added
+ 
+     listed = _parse(await _fn(mcp, "list_memories")(data_source_id=_DSID))
+     assert listed["total"] == 3
+@@ -205,18 +206,23 @@ async def test_add_partial_failure_is_error(tmp_path, monkeypatch) -> None:
+ # --- get_memory / delete_memory -----------------------------------------------
+ 
+ 
+-async def test_add_duplicate_dedup_reports_nonzero(tmp_path, monkeypatch) -> None:
+-    """Re-adding the same (question, sql) is deduped: duplicate_count > 0,
+-    saved_count == 0 on the second add (the dedup contract)."""
++async def test_add_duplicate_is_idempotent_upsert(tmp_path, monkeypatch) -> None:
++    """Re-adding the same (question, sql) overwrites the same row (content-hash
++    id + upsert). ``saved_count`` counts the upsert (the call DID write the
++    row), but the store still contains exactly one logical record."""
+     patch_fake_embeddings(monkeypatch)
+     mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))
+     pair = [{"question": "dup q", "sql": "SELECT 42"}]
+     first = _parse(await _fn(mcp, "add_memories")(data_source_id=_DSID, sql_pairs=pair))
+     assert first["saved_count"] == 1
+     second = _parse(await _fn(mcp, "add_memories")(data_source_id=_DSID, sql_pairs=pair))
+-    assert second["saved_count"] == 0
+-    assert second["duplicate_count"] == 1
++    assert second["saved_count"] == 1
+     assert second["errors"] == []
++    # Final state: exactly one logical record persisted across both calls.
++    listed = _parse(
++        await _fn(mcp, "list_memories")(data_source_id=_DSID, memory_type="tool_usage")
++    )
++    assert listed["total"] == 1
+ 
+ 
+ async def test_add_non_dict_item_is_clean_row_error(tmp_path, monkeypatch) -> None:
+diff --git a/tests/unit/test_memory_import_export.py b/tests/unit/test_memory_import_export.py
+index 710dd26..af6e42b 100644
+--- a/tests/unit/test_memory_import_export.py
++++ b/tests/unit/test_memory_import_export.py
+@@ -39,18 +39,32 @@ _BUNDLE = MemoryBundle.model_validate(
+ )
+ 
+ 
+-async def test_import_then_reimport_skips_all_duplicates(store: MemoryStore) -> None:
++async def test_reimport_is_idempotent_overwrite(store: MemoryStore) -> None:
++    """Content-hash ids + upsert: re-importing the same bundle overwrites the
++    same rows. ``saved`` counts upserts (the import did write each row), but
++    the final store still has exactly one row per logical record."""
+     first = await import_bundle(store, _BUNDLE)
+     assert first.saved == 3
+-    assert first.skipped_duplicate == 0
+     assert first.errors == []
+ 
+     second = await import_bundle(store, _BUNDLE)
+-    assert second.saved == 0
+-    assert second.skipped_duplicate == 3
++    assert second.saved == 3
++    assert second.errors == []
+ 
++    # Idempotency is observable on the store, not on the report count.
++    again = store.iter_all()
++    assert again.sql_pairs is not None
++    assert len(again.sql_pairs.pairs) == 2
++    assert again.schema_docs is not None
++    assert len(again.schema_docs) == 1
+ 
+-async def test_intra_batch_duplicate_skipped(store: MemoryStore) -> None:
++
++async def test_intra_batch_normalized_collisions_collapse(
++    store: MemoryStore,
++) -> None:
++    """Two near-identical pairs that normalize to the same content-hash id
++    upsert the same row. Both calls succeed (``saved == 2``) but only one row
++    persists, because the second upsert overwrites the first."""
+     dup = MemoryBundle.model_validate(
+         {
+             "sql_pairs": {
+@@ -62,8 +76,12 @@ async def test_intra_batch_duplicate_skipped(store: MemoryStore) -> None:
+         }
+     )
+     report = await import_bundle(store, dup)
+-    assert report.saved == 1
+-    assert report.skipped_duplicate == 1
++    assert report.saved == 2
++    assert report.errors == []
++
++    persisted = store.iter_all()
++    assert persisted.sql_pairs is not None
++    assert len(persisted.sql_pairs.pairs) == 1
+ 
+ 
+ async def test_round_trip_lossless(store: MemoryStore) -> None:
+@@ -72,10 +90,17 @@ async def test_round_trip_lossless(store: MemoryStore) -> None:
+     assert exported.warnings == []
+     reparsed = parse_json(exported.text)
+ 
+-    fresh_store = store
+-    again = await import_bundle(fresh_store, reparsed)
+-    assert again.saved == 0
+-    assert again.skipped_duplicate == 3
++    again = await import_bundle(store, reparsed)
++    # Upsert: each record is rewritten under its content-hash id.
++    assert again.saved == 3
++    assert again.errors == []
++
++    # Final store still contains exactly the three original rows.
++    final = store.iter_all()
++    assert final.sql_pairs is not None
++    assert len(final.sql_pairs.pairs) == 2
++    assert final.schema_docs is not None
++    assert len(final.schema_docs) == 1
+ 
+     assert reparsed.sql_pairs is not None
+     assert {p.sql for p in reparsed.sql_pairs.pairs} == {
+@@ -116,9 +141,10 @@ async def test_dry_run_with_clear_preserves_store(store: MemoryStore) -> None:
+     await import_bundle(store, _BUNDLE)
+     before = export_bundle(store, "json").text
+     report = await import_bundle(store, _BUNDLE, dry_run=True, clear=True)
+-    # clear is skipped on a dry-run, so existing memory is still the baseline
+-    assert report.saved == 0
+-    assert report.skipped_duplicate == 3
++    # clear is skipped on a dry-run; idempotent upsert reports what would
++    # have been saved (every record processed) without writing anything.
++    assert report.saved == 3
++    assert report.errors == []
+     assert export_bundle(store, "json").text == before
+ 
+ 
+@@ -148,7 +174,13 @@ async def test_iter_all_skips_unrepresentable_and_corrupt_rows(
+ async def test_iter_all_raises_on_wholesale_corruption(
+     store: MemoryStore,
+ ) -> None:
+-    """Every row unparseable (e.g. version skew) must fail loud, not return {}."""
++    """Every row unparseable (e.g. version skew) must fail loud, not return {}.
++
++    The import path no longer reads the store (no dedup baseline), so it
++    silently succeeds against a corrupt store — the corruption signal now
++    surfaces via the export path, which is the documented "before --clear"
++    backup gate where it matters most.
++    """
+     collection = store._mem._get_collection()
+     n = 8
+     collection.upsert(
+@@ -164,9 +196,6 @@ async def test_iter_all_raises_on_wholesale_corruption(
+     # The export path must refuse too, not write an empty "successful" backup.
+     with pytest.raises(MemoryCorruptionError):
+         export_bundle(store, "json")
+-    # And the import dedup baseline must abort rather than re-save duplicates.
+-    with pytest.raises(MemoryCorruptionError):
+-        await import_bundle(store, _BUNDLE)
+ 
+ 
+ async def test_partial_skip_surfaces_export_warning(store: MemoryStore) -> None:
+@@ -269,8 +298,9 @@ async def test_disk_full_aborts_import(store: MemoryStore, monkeypatch) -> None:
+ 
+ async def test_incremental_import_then_export_union(store: MemoryStore) -> None:
+     """import A, then non-overlapping B without --clear, export the union; the
+-    dedup baseline is seeded from the live store, not just identical
+-    re-imports."""
++    union is preserved without explicit baseline reads — content-hash ids
++    give a different row per logical pair, so non-overlapping imports never
++    collide."""
+     a = MemoryBundle.model_validate(
+         {"sql_pairs": {"pairs": [{"question": "qa", "sql": "SELECT 1"}]}}
+     )
+@@ -282,17 +312,18 @@ async def test_incremental_import_then_export_union(store: MemoryStore) -> None:
+ 
+     second = await import_bundle(store, b)
+     assert second.saved == 1
+-    assert second.skipped_duplicate == 0
+ 
+     exported = export_bundle(store, "json")
+     reparsed = parse_json(exported.text)
+     assert reparsed.sql_pairs is not None
+     assert {p.sql for p in reparsed.sql_pairs.pairs} == {"SELECT 1", "SELECT 2"}
+ 
+-    # Re-importing the union must now dedup entirely against the live store.
++    # Re-importing the union upserts every row again; final state still has 2.
+     again = await import_bundle(store, reparsed)
+-    assert again.saved == 0
+-    assert again.skipped_duplicate == 2
++    assert again.saved == 2
++    final = store.iter_all()
++    assert final.sql_pairs is not None
++    assert len(final.sql_pairs.pairs) == 2
+ 
+ 
+ async def test_clear_wipes_first(store: MemoryStore) -> None:
+@@ -304,7 +335,7 @@ async def test_clear_wipes_first(store: MemoryStore) -> None:
+     )
+     report = await import_bundle(store, other, clear=True)
+     assert report.saved == 1
+-    assert report.skipped_duplicate == 0
++    assert report.errors == []
+ 
+     remaining = store.iter_all()
+     assert remaining.sql_pairs is not None
+diff --git a/tests/unit/test_memory_mcp_tool.py b/tests/unit/test_memory_mcp_tool.py
+index 446b083..9bea06f 100644
+--- a/tests/unit/test_memory_mcp_tool.py
++++ b/tests/unit/test_memory_mcp_tool.py
+@@ -41,8 +41,10 @@ async def test_tool_imports_and_reports(tmp_path, monkeypatch) -> None:
+     )
+     text = str(result)
+     assert "| saved | 1 |" in text
+-    assert "| skipped (duplicate) | 0 |" in text
+     assert "| errors | 0 |" in text
++    # The "skipped (duplicate)" row is gone — content-hash + upsert means a
++    # re-import overwrites the same row; there is no separate skip count.
++    assert "skipped" not in text.lower()
+ 
+ 
+ async def test_tool_errors_on_bad_input(tmp_path, monkeypatch) -> None:
+diff --git a/tests/unit/test_memory_streaming.py b/tests/unit/test_memory_streaming.py
+new file mode 100644
+index 0000000..80be0be
+--- /dev/null
++++ b/tests/unit/test_memory_streaming.py
+@@ -0,0 +1,420 @@
++# SPDX-FileCopyrightText: 2026 Daniel Radman
++# SPDX-License-Identifier: Apache-2.0
++
++"""Streaming bundle reader + streaming import/export (CLI-only path).
++
++The streaming reader is the highest-risk piece of issue #207 because the
++hand-rolled framing must stay string- and escape-aware: a ``}``, ``]``, or
++``"`` inside a SQL string literal must not break record boundaries. Cover
++that with adversarial fixtures alongside the happy-path round-trips.
++"""
++
++from __future__ import annotations
++
++import io
++import json
++from pathlib import Path
++
++import pytest
++
++from sqllens.memory import (
++    MemoryStore,
++    StreamExportResult,
++    StreamImportResult,
++    export_bundle,
++    export_bundle_stream,
++    import_bundle_stream,
++)
++from sqllens.memory.io import BundleFormatError, parse_json
++from sqllens.memory.schema import CONTENT_MAX, QUESTION_MAX, SQL_MAX
++from sqllens.memory.store import schema_doc_id, sql_pair_id
++from sqllens.memory.streaming import stream_records
++from tests.unit._config_builders import build_test_config
++from tests.unit._memory_helpers import patch_fake_embeddings
++
++
++@pytest.fixture
++def store(tmp_path, monkeypatch) -> MemoryStore:
++    patch_fake_embeddings(monkeypatch)
++    cfg = build_test_config(tmp_path / "chroma")
++    return MemoryStore(cfg)
++
++
++# --- Reader unit tests ----------------------------------------------------
++
++
++def _stream(text: str) -> list[tuple[str, dict]]:
++    return list(stream_records(io.StringIO(text)))
++
++
++def test_stream_yields_one_record_at_a_time() -> None:
++    text = json.dumps(
++        {
++            "sql_pairs": {
++                "training_type": "sql_pairs",
++                "pairs": [
++                    {"question": "Q1", "sql": "SELECT 1"},
++                    {"question": "Q2", "sql": "SELECT 2"},
++                ],
++            },
++            "schema_docs": [{"content": "doc one"}, {"content": "doc two"}],
++        }
++    )
++    records = _stream(text)
++    assert [(k, r) for (k, r) in records] == [
++        ("sql_pair", {"question": "Q1", "sql": "SELECT 1"}),
++        ("sql_pair", {"question": "Q2", "sql": "SELECT 2"}),
++        ("schema_doc", {"content": "doc one"}),
++        ("schema_doc", {"content": "doc two"}),
++    ]
++
++
++def test_stream_handles_braces_inside_sql_string() -> None:
++    """A `}`, `]`, or `"` inside a SQL string literal must NOT break framing.
++
++    Without escape-aware scanning the depth tracker would close the record
++    early and emit a syntactically broken fragment.
++    """
++    sql = "SELECT * FROM t WHERE name = '}' AND tag = ']' AND alias = '\"hi\"'"
++    text = json.dumps(
++        {
++            "sql_pairs": {
++                "pairs": [
++                    {"question": "weird Q?", "sql": sql},
++                    {"question": "next Q", "sql": "SELECT 2"},
++                ]
++            }
++        }
++    )
++    records = _stream(text)
++    assert records == [
++        ("sql_pair", {"question": "weird Q?", "sql": sql}),
++        ("sql_pair", {"question": "next Q", "sql": "SELECT 2"}),
++    ]
++
++
++def test_stream_handles_escaped_quotes_inside_strings() -> None:
++    """Backslash-escape sequences must keep the in-string flag set."""
++    sql = 'SELECT \\"col\\" FROM t WHERE x = \'escaped \\\' quote\''
++    text = (
++        '{"sql_pairs": {"pairs": ['
++        f'{{"question": "q", "sql": {json.dumps(sql)}}}'
++        "]}}"
++    )
++    records = _stream(text)
++    assert len(records) == 1
++    assert records[0][1]["sql"] == sql
++
++
++def test_stream_handles_unicode_multibyte_content() -> None:
++    content = "schéma — 🚀 ñ"
++    text = json.dumps({"schema_docs": [{"content": content}]})
++    records = _stream(text)
++    assert records == [("schema_doc", {"content": content})]
++
++
++def test_stream_skips_unknown_top_level_keys() -> None:
++    text = json.dumps(
++        {
++            "_meta": {"version": 1, "generated_at": "2026-01-01"},
++            "sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]},
++            "schema_docs": [],
++        }
++    )
++    records = _stream(text)
++    assert records == [("sql_pair", {"question": "q", "sql": "SELECT 1"})]
++
++
++def test_stream_empty_object_yields_nothing() -> None:
++    assert _stream("{}") == []
++
++
++def test_stream_empty_input_yields_nothing() -> None:
++    assert _stream("") == []
++    assert _stream("   \n\n   ") == []
++
++
++def test_stream_rejects_malformed_json() -> None:
++    with pytest.raises(BundleFormatError):
++        _stream('{"sql_pairs": {"pairs": [{"question": "q", "sql": broken')
++
++
++def test_stream_rejects_non_object_record() -> None:
++    with pytest.raises(BundleFormatError, match="must be a JSON object"):
++        _stream('{"sql_pairs": {"pairs": ["not an object"]}}')
++
++
++def test_stream_rejects_unbalanced_braces() -> None:
++    with pytest.raises(BundleFormatError):
++        _stream('{"sql_pairs": {"pairs": [{"q": "x", "sql": "SELECT 1"')
++
++
++def test_stream_handles_large_chunk_boundaries(tmp_path) -> None:
++    """Records that straddle the default chunked read boundary must reassemble.
++
++    300 pairs of ~120 bytes each well exceeds the 64 KiB default chunk, so
++    the depth-tracked refill is exercised across many element boundaries.
++    """
++    pairs = [
++        {"question": f"q{i}", "sql": "SELECT " + "x" * 100 + f" -- pair{i}"}
++        for i in range(300)
++    ]
++    text = json.dumps({"sql_pairs": {"pairs": pairs}})
++    fp = io.StringIO(text)
++    records = list(stream_records(fp))
++    assert len(records) == 300
++    assert records[0] == ("sql_pair", pairs[0])
++    assert records[-1] == ("sql_pair", pairs[-1])
++
++
++# --- Streaming import (against a real store) ------------------------------
++
++
++def _write(tmp_path: Path, payload: dict, name: str = "in.json") -> Path:
++    p = tmp_path / name
++    p.write_text(json.dumps(payload), encoding="utf-8")
++    return p
++
++
++async def test_stream_import_basic(store: MemoryStore, tmp_path) -> None:
++    path = _write(
++        tmp_path,
++        {
++            "sql_pairs": {
++                "pairs": [
++                    {"question": "Q?", "sql": "SELECT 1"},
++                    {"question": "R?", "sql": "SELECT 2"},
++                ]
++            },
++            "schema_docs": [{"content": "doc"}],
++        },
++    )
++    result = await import_bundle_stream(store, path)
++    assert isinstance(result, StreamImportResult)
++    assert result.report.saved == 3
++    assert result.report.errors == []
++    assert result.aborted is False
++    assert result.bytes_read == path.stat().st_size
++
++
++async def test_stream_import_per_item_caps_apply(
++    store: MemoryStore, tmp_path
++) -> None:
++    """Per-item caps (``QUESTION_MAX`` / ``SQL_MAX`` / ``CONTENT_MAX``) still
++    fire on the streaming path — only the whole-file caps are lifted."""
++    over = "q" * (QUESTION_MAX + 1)
++    over_sql = "s" * (SQL_MAX + 1)
++    over_content = "c" * (CONTENT_MAX + 1)
++    path = _write(
++        tmp_path,
++        {
++            "sql_pairs": {
++                "pairs": [
++                    {"question": over, "sql": "SELECT 1"},
++                    {"question": "ok", "sql": over_sql},
++                    {"question": "fine", "sql": "SELECT 3"},
++                ]
++            },
++            "schema_docs": [
++                {"content": over_content},
++                {"content": "real content"},
++            ],
++        },
++    )
++    result = await import_bundle_stream(store, path)
++    assert result.report.saved == 2  # one valid pair + one valid doc
++    assert len(result.report.errors) == 3
++    assert {e.kind for e in result.report.errors} == {"sql_pair", "schema_doc"}
++
++
++async def test_stream_import_is_idempotent_upsert(
++    store: MemoryStore, tmp_path
++) -> None:
++    path = _write(
++        tmp_path,
++        {
++            "sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]},
++            "schema_docs": [{"content": "c"}],
++        },
++    )
++    await import_bundle_stream(store, path)
++    await import_bundle_stream(store, path)
++    final = store.iter_all()
++    assert final.sql_pairs is not None
++    assert len(final.sql_pairs.pairs) == 1
++    assert final.schema_docs is not None
++    assert len(final.schema_docs) == 1
++
++
++async def test_stream_import_id_scheme_matches_sql_pair_id_helper(
++    store: MemoryStore, tmp_path
++) -> None:
++    """The Chroma row id must be the documented content-hash, not a uuid."""
++    path = _write(
++        tmp_path,
++        {"sql_pairs": {"pairs": [{"question": "How many?", "sql": "SELECT 1"}]}},
++    )
++    await import_bundle_stream(store, path)
++    collection = store._mem._get_collection()
++    ids = collection.get()["ids"]
++    assert sql_pair_id("How many?", "SELECT 1") in ids
++
++
++async def test_stream_import_aborted_on_malformed_input(
++    store: MemoryStore, tmp_path
++) -> None:
++    """A framing error mid-file aborts cleanly with counts so far + non-empty
++    abort_reason; partial writes already in the store remain (no rollback)."""
++    path = tmp_path / "bad.json"
++    path.write_text(
++        '{"sql_pairs": {"pairs": ['
++        '{"question": "ok", "sql": "SELECT 1"},'
++        '{"question": "broken'  # missing closing quote -> framing error
++    )
++    result = await import_bundle_stream(store, path)
++    assert result.aborted is True
++    assert result.abort_reason
++    # Pre-failure record landed.
++    assert result.report.saved == 1
++
++
++async def test_stream_import_clear_then_failure_leaves_partial(
++    store: MemoryStore, tmp_path
++) -> None:
++    """``--clear`` followed by a failed stream-import is the documented
++    data-loss path — the partial state is observable on the store."""
++    seed = _write(
++        tmp_path,
++        {"sql_pairs": {"pairs": [{"question": "seed", "sql": "SELECT 0"}]}},
++        name="seed.json",
++    )
++    await import_bundle_stream(store, seed)
++    assert store.iter_all().sql_pairs is not None
++
++    broken = tmp_path / "broken.json"
++    broken.write_text(
++        '{"sql_pairs": {"pairs": [{"question": "', encoding="utf-8"
++    )
++    result = await import_bundle_stream(store, broken, clear=True)
++    assert result.aborted is True
++    # Clear ran, broken file yielded zero — store is now empty.
++    final = store.iter_all()
++    assert final.sql_pairs is None
++    assert final.schema_docs is None
++
++
++# --- Streaming export (against a real store) ------------------------------
++
++
++async def test_stream_export_round_trip_via_bounded_parser(
++    store: MemoryStore, tmp_path
++) -> None:
++    """Streamed export must round-trip through the bounded parse_json — the
++    streamed bytes are valid bundle JSON."""
++    seed = _write(
++        tmp_path,
++        {
++            "sql_pairs": {
++                "pairs": [
++                    {"question": "Q?", "sql": "SELECT 1"},
++                    {"question": "R?", "sql": "SELECT 2"},
++                ]
++            },
++            "schema_docs": [{"content": "doc one"}, {"content": "doc two"}],
++        },
++    )
++    await import_bundle_stream(store, seed)
++
++    out = tmp_path / "out.json"
++    result = export_bundle_stream(store, out)
++    assert isinstance(result, StreamExportResult)
++    assert result.sql_pairs_count == 2
++    assert result.schema_docs_count == 2
++    assert result.skipped_rows == 0
++
++    reparsed = parse_json(out.read_text())
++    assert reparsed.sql_pairs is not None
++    assert {p.sql for p in reparsed.sql_pairs.pairs} == {"SELECT 1", "SELECT 2"}
++    assert reparsed.schema_docs is not None
++    assert {d.content for d in reparsed.schema_docs} == {"doc one", "doc two"}
++
++
++async def test_stream_export_round_trip_via_streaming_reader(
++    store: MemoryStore, tmp_path
++) -> None:
++    seed = _write(
++        tmp_path,
++        {
++            "sql_pairs": {"pairs": [{"question": "Q?", "sql": "SELECT 1"}]},
++            "schema_docs": [{"content": "doc"}],
++        },
++    )
++    await import_bundle_stream(store, seed)
++
++    out = tmp_path / "out.json"
++    export_bundle_stream(store, out)
++
++    with out.open() as fp:
++        records = list(stream_records(fp))
++    kinds = [k for k, _ in records]
++    assert kinds == ["sql_pair", "schema_doc"]
++
++
++async def test_stream_export_empty_store_emits_warning(
++    store: MemoryStore, tmp_path
++) -> None:
++    out = tmp_path / "out.json"
++    result = export_bundle_stream(store, out)
++    assert result.sql_pairs_count == 0
++    assert result.schema_docs_count == 0
++    assert any("empty" in w for w in result.warnings)
++    # The file is still written; it parses as a valid (empty) bundle.
++    reparsed = parse_json(out.read_text())
++    assert reparsed.sql_pairs is None or not reparsed.sql_pairs.pairs
++
++
++async def test_stream_export_consistent_with_bounded_export(
++    store: MemoryStore, tmp_path
++) -> None:
++    """Streamed export and bounded export must produce equivalent bundles."""
++    seed = _write(
++        tmp_path,
++        {
++            "sql_pairs": {
++                "pairs": [
++                    {"question": "qa", "sql": "SELECT 1"},
++                    {"question": "qb", "sql": "SELECT 2"},
++                ]
++            },
++            "schema_docs": [{"content": "doc"}],
++        },
++    )
++    await import_bundle_stream(store, seed)
++
++    streamed = tmp_path / "streamed.json"
++    export_bundle_stream(store, streamed)
++    bounded = export_bundle(store, "json").text
++
++    streamed_bundle = parse_json(streamed.read_text())
++    bounded_bundle = parse_json(bounded)
++    assert streamed_bundle == bounded_bundle
++
++
++def test_schema_doc_id_matches_documented_scheme() -> None:
++    """Pin the AC contract: ``sha256("schema_doc\\x00" + _norm(content))``."""
++    import hashlib
++
++    expected = hashlib.sha256(b"schema_doc\x00hello world").hexdigest()
++    assert schema_doc_id("Hello   World") == expected
++
++
++def test_sql_pair_id_matches_documented_scheme() -> None:
++    """Pin the AC contract: ``sha256("sql_pair\\x00" + _norm(q) + "\\x00" + _norm(sql))``."""
++    import hashlib
++
++    expected = hashlib.sha256(
++        b"sql_pair\x00how many users?\x00select count(*) from users"
++    ).hexdigest()
++    assert (
++        sql_pair_id(" How  MANY users? ", "select COUNT(*) from users") == expected
++    )

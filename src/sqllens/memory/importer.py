@@ -33,6 +33,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from sqllens._errors import validation_error_lines
 from sqllens.memory.schema import (
     ImportItemError,
     ImportReport,
@@ -53,23 +54,38 @@ logger = logging.getLogger("sqllens.memory")
 # MCP tool) surfaces one clear, actionable failure.
 _SYSTEMIC_ERRORS = (MemoryError, OSError, SystemError)
 
+# An empty bundle (``{}`` = 2 bytes, ``{"sql_pairs":{"pairs":[]}}`` ≈ 30 bytes)
+# can legitimately yield zero records and is not a format mismatch. A bundle
+# meaningfully larger than that whose stream-read produced zero records is
+# almost certainly a wrong-file / wrong-format mistake; the streaming result
+# flags that case so the CLI (or any other caller) can refuse to report a
+# silent success per CLAUDE.md's "lossy/empty success needs a loud warning"
+# rule. The threshold is generous because the cost of a false flag is one
+# extra ``--force``-style step, while a false silent-success deletes the
+# operator's training set.
+_LIKELY_FORMAT_MISMATCH_THRESHOLD = 64
+
 
 @dataclass
 class StreamImportResult:
     """Outcome of :func:`import_bundle_stream`.
 
     ``report`` holds the per-item counts in the same shape as
-    :func:`import_bundle`. ``bytes_read`` is the input file size in bytes
-    (so the CLI can emit the "read N bytes but no records imported"
-    warning when a non-trivial input produced zero records). ``aborted``
-    is true if the stream was cut short by ``BundleFormatError`` mid-file
-    — distinct from "completed but with per-item errors".
+    :func:`import_bundle`. ``bytes_read`` is the input file size in bytes.
+    ``aborted`` is true if the stream was cut short by
+    ``BundleFormatError`` mid-file — distinct from "completed but with
+    per-item errors". ``likely_format_mismatch`` is true when the input
+    was meaningfully non-empty but produced zero records — almost always
+    a wrong-file / wrong-format mistake; the CLI surfaces it as a loud
+    warning + non-zero exit so a silent success can't destroy a training
+    set ("export-before-clear" backup invariant).
     """
 
     report: ImportReport
     bytes_read: int
     aborted: bool = False
     abort_reason: str | None = None
+    likely_format_mismatch: bool = False
 
 
 async def import_bundle(
@@ -189,57 +205,56 @@ async def import_bundle_stream(
     sql_pair_indices: list[int] = []
     schema_doc_indices: list[int] = []
 
-    async def flush_sql_pairs() -> None:
-        if not sql_pair_batch:
+    async def _flush(
+        kind: str,
+        batch: list,
+        indices: list[int],
+        save_fn,
+    ) -> None:
+        """Flush one batch into the store.
+
+        On systemic failure: re-raise (caller surfaces data-loss).
+        On per-batch failure: record every item in the batch as errored;
+        ``report.saved`` does NOT advance, so counts stay accurate.
+        On success: advance ``report.saved`` by the batch length.
+        Always clears the batch + indices buffers.
+        """
+        if not batch:
             return
         if dry_run:
-            report.saved += len(sql_pair_batch)
-            sql_pair_batch.clear()
-            sql_pair_indices.clear()
+            report.saved += len(batch)
+            batch.clear()
+            indices.clear()
             return
         try:
-            await store.add_sql_pair_batch(sql_pair_batch)
+            await save_fn(batch)
         except _SYSTEMIC_ERRORS:
             logger.exception(
-                "stream import aborted: systemic failure on sql_pair batch"
+                "stream import aborted: systemic failure on %s batch", kind
             )
             raise
         except Exception as exc:
-            # Whole batch failed. Record every item as errored; counts stay
-            # accurate (saved does NOT advance for the failed batch).
-            for idx in sql_pair_indices:
+            for idx in indices:
                 report.errors.append(
-                    ImportItemError(kind="sql_pair", index=idx, message=str(exc))
+                    ImportItemError(kind=kind, index=idx, message=str(exc))
                 )
         else:
-            report.saved += len(sql_pair_batch)
-        sql_pair_batch.clear()
-        sql_pair_indices.clear()
+            report.saved += len(batch)
+        batch.clear()
+        indices.clear()
+
+    async def flush_sql_pairs() -> None:
+        await _flush(
+            "sql_pair", sql_pair_batch, sql_pair_indices, store.add_sql_pair_batch
+        )
 
     async def flush_schema_docs() -> None:
-        if not schema_doc_batch:
-            return
-        if dry_run:
-            report.saved += len(schema_doc_batch)
-            schema_doc_batch.clear()
-            schema_doc_indices.clear()
-            return
-        try:
-            await store.add_schema_doc_batch(schema_doc_batch)
-        except _SYSTEMIC_ERRORS:
-            logger.exception(
-                "stream import aborted: systemic failure on schema_doc batch"
-            )
-            raise
-        except Exception as exc:
-            for idx in schema_doc_indices:
-                report.errors.append(
-                    ImportItemError(kind="schema_doc", index=idx, message=str(exc))
-                )
-        else:
-            report.saved += len(schema_doc_batch)
-        schema_doc_batch.clear()
-        schema_doc_indices.clear()
+        await _flush(
+            "schema_doc",
+            schema_doc_batch,
+            schema_doc_indices,
+            store.add_schema_doc_batch,
+        )
 
     pair_index = 0
     doc_index = 0
@@ -304,28 +319,32 @@ async def import_bundle_stream(
                 doc_index,
                 exc,
             )
-            try:
-                await flush_sql_pairs()
-                await flush_schema_docs()
-            except Exception:
-                # A flush failure during the abort path is already covered
-                # by the per-batch error append above; never let it mask the
-                # original abort_reason.
-                logger.exception("flush failure during stream-import abort")
+            # ``_flush`` already catches per-batch failures and records them
+            # as errors; only ``_SYSTEMIC_ERRORS`` re-raises out — which we
+            # WANT to propagate even on the abort path, so don't wrap.
+            await flush_sql_pairs()
+            await flush_schema_docs()
+
+    likely_format_mismatch = (
+        not aborted
+        and report.saved == 0
+        and not report.errors
+        and bytes_read > _LIKELY_FORMAT_MISMATCH_THRESHOLD
+    )
 
     return StreamImportResult(
         report=report,
         bytes_read=bytes_read,
         aborted=aborted,
         abort_reason=abort_reason,
+        likely_format_mismatch=likely_format_mismatch,
     )
 
 
 def _fmt_validation_error(exc: ValidationError) -> str:
-    """Compact, single-line rendering of a per-item Pydantic error."""
-    parts = []
-    for err in exc.errors():
-        loc = ".".join(str(p) for p in err.get("loc", ()))
-        msg = err.get("msg", "validation error")
-        parts.append(f"{loc}: {msg}" if loc else msg)
-    return "; ".join(parts) or "validation error"
+    """Compact, single-line rendering of a per-item Pydantic error.
+
+    Delegates to the shared ``validation_error_lines`` helper so the
+    streaming path inherits its secret-safe rendering (no schema URLs).
+    """
+    return "; ".join(validation_error_lines(exc, with_type=False)) or "validation error"

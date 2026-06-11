@@ -119,44 +119,53 @@ def export_bundle_stream(
     a non-fatal warning instead so the operator sees the corruption
     signal without a partial export silently succeeding on the rest.
     """
-    sql_pairs_count = 0
-    schema_docs_count = 0
     skipped_total = 0
+
+    def _write_section(fp, *, kind: str, where: dict, to_record) -> int:
+        """Stream one paginated section to ``fp``. Returns the row count.
+
+        ``where`` is pushed into the ChromaDB ``get`` call so the page only
+        contains rows of this kind. ``to_record(model)`` converts each
+        ``SqlPair`` / ``SchemaDoc`` into the per-record JSON payload.
+        """
+        nonlocal skipped_total
+        count = 0
+        first = True
+        for page_kind, model in store.iter_paginated(where=where, page_size=page_size):
+            if page_kind != kind:
+                # Defensive: a row that matched the ``where`` filter but
+                # whose Python-side classification disagrees (e.g. a row
+                # with both ``is_text_memory`` and ``tool_name`` set) is
+                # already counted as skipped inside iter_paginated.
+                continue
+            if not first:
+                fp.write(",")
+            json.dump(to_record(model), fp, ensure_ascii=False)
+            first = False
+            count += 1
+        # ``iter_paginated`` resets ``last_skipped_rows`` per call, so we
+        # accumulate explicitly across passes.
+        skipped_total += store.last_skipped_rows
+        return count
 
     with path.open("w", encoding="utf-8") as fp:
         fp.write('{"sql_pairs":{"training_type":"sql_pairs","pairs":[')
-        first = True
-        for kind, model in store.iter_paginated(page_size=page_size):
-            if kind != "sql_pair":
-                continue
-            if not first:
-                fp.write(",")
-            json.dump(
-                {"question": model.question, "sql": model.sql},
-                fp,
-                ensure_ascii=False,
-            )
-            first = False
-            sql_pairs_count += 1
-        skipped_total += store.last_skipped_rows
+        sql_pairs_count = _write_section(
+            fp,
+            kind="sql_pair",
+            where={"tool_name": "run_sql"},
+            to_record=lambda p: {"question": p.question, "sql": p.sql},
+        )
         fp.write(']},"schema_docs":[')
-
-        first = True
-        for kind, model in store.iter_paginated(page_size=page_size):
-            if kind != "schema_doc":
-                continue
-            if not first:
-                fp.write(",")
-            json.dump(
-                {"training_type": "schema_docs", "content": model.content},
-                fp,
-                ensure_ascii=False,
-            )
-            first = False
-            schema_docs_count += 1
-        # Don't double-count: only the doc-pass skips are new.
-        # iter_paginated resets last_skipped_rows on every call.
-        skipped_total += store.last_skipped_rows
+        schema_docs_count = _write_section(
+            fp,
+            kind="schema_doc",
+            where={"is_text_memory": True},
+            to_record=lambda d: {
+                "training_type": "schema_docs",
+                "content": d.content,
+            },
+        )
         fp.write("]}")
 
     warnings: list[str] = []

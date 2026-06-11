@@ -125,7 +125,11 @@ class _Scanner:
             self._scan_primitive()
 
         raw = self._buf[start : self._i]
-        if len(raw.encode("utf-8")) > _MAX_VALUE_BYTES:
+        # UTF-8 is at least one byte per code point, so a code-point check is
+        # a sufficient (lower-bound) rejection — and it skips the ``encode``
+        # of every returned value just to measure. ``_scan_balanced`` already
+        # enforces the same cap in-loop; this catches strings / primitives.
+        if len(raw) > _MAX_VALUE_BYTES:
             raise BundleFormatError(
                 f"value exceeds the {_MAX_VALUE_BYTES}-byte streaming-record cap"
             )

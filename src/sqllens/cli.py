@@ -37,15 +37,6 @@ console = Console()
 # errors to stderr keeps that channel clean. Other commands follow suit.
 err_console = Console(stderr=True)
 
-# An empty bundle (``{}`` = 2 bytes, ``{"sql_pairs":{"pairs":[]}}`` ≈ 30 bytes)
-# can legitimately yield zero records and is not a format mismatch. A bundle
-# meaningfully larger than that whose stream-read produced zero records is
-# almost certainly a wrong-file / wrong-format mistake; surface it loudly per
-# the CLAUDE.md "lossy/empty success needs a loud warning" rule. The threshold
-# is generous because the cost of a false warning is one extra ``--force``-
-# style step, while a false silent-success deletes the operator's training set.
-_STREAMING_EMPTY_INPUT_THRESHOLD = 64
-
 
 # Non-``ValidationError`` exception types whose ``str()`` is structurally
 # incapable of carrying a config value, so echoing it cannot leak a secret:
@@ -595,14 +586,12 @@ def import_memory(
                     "complete — memory may now be empty or partial.[/red]"
                 )
             raise typer.Exit(code=1)
-        # CLAUDE.md "lossy/empty success needs a loud warning" — a non-trivial
-        # input file that yielded zero records is almost always a format
-        # mismatch. Treat as an error so the operator notices.
-        if (
-            result.report.saved == 0
-            and not result.report.errors
-            and result.bytes_read > _STREAMING_EMPTY_INPUT_THRESHOLD
-        ):
+        # CLAUDE.md "lossy/empty success needs a loud warning" — the streaming
+        # path computes ``likely_format_mismatch`` (non-trivial input, zero
+        # records, no per-item errors) and the CLI surfaces it as a non-zero
+        # exit so a silent success can't quietly delete an operator's training
+        # set after an ``--clear``.
+        if result.likely_format_mismatch:
             err_console.print(
                 f"[yellow]Warning:[/yellow] read {result.bytes_read} bytes from "
                 f"{escape(str(path))} but imported 0 records — likely a format "
