@@ -64,3 +64,29 @@ def test_quoted_identifiers_under_postgres_dialect() -> None:
     # Both renderings refer to the same column/table here, but they are
     # *structurally* different — CHANGED is the correct verdict, not PASS.
     assert compare(expected, actual, dialect="postgres") is Status.CHANGED
+
+
+def test_sqlalchemy_dialect_name_postgresql_normalises() -> None:
+    """`DatabaseConfig.dialect` returns 'postgresql' from a postgresql:// URL.
+
+    Without dialect-name mapping, sqlglot raises ``Unknown dialect 'postgresql'``
+    and every Postgres case silently classifies as ERROR.
+    """
+    # PASS path — the mapping must be applied.
+    assert compare("SELECT 1", "select 1", dialect="postgresql") is Status.PASS
+    # CHANGED path — the mapping must still apply (otherwise both sides ERROR).
+    assert (
+        compare("SELECT id FROM users", "SELECT id FROM accounts", dialect="postgresql")
+        is Status.CHANGED
+    )
+
+
+def test_sqlalchemy_dialect_name_mssql_normalises() -> None:
+    """`DatabaseConfig.dialect` returns 'mssql' from mssql:// — sqlglot wants 'tsql'."""
+    assert compare("SELECT 1", "select 1", dialect="mssql") is Status.PASS
+
+
+def test_unmapped_dialect_passes_through() -> None:
+    """A dialect name sqlglot already recognises must pass through unchanged."""
+    assert compare("SELECT 1", "select 1", dialect="sqlite") is Status.PASS
+    assert compare("SELECT 1", "select 1", dialect="mysql") is Status.PASS

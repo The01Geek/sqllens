@@ -30,6 +30,26 @@ from enum import StrEnum
 
 import sqlglot
 
+# Map ``DatabaseConfig.dialect`` (the SQLAlchemy URL scheme) to the name
+# ``sqlglot`` accepts. Mismatched names raise ``ValueError("Unknown dialect
+# 'postgresql'. Did you mean postgres?")`` from ``sqlglot.parse_one``, which
+# the comparator would otherwise silently classify as ERROR for every case
+# on the affected database — a Day-1 silent failure on Postgres. Unmapped
+# schemes are passed through unchanged (e.g. ``sqlite``, ``mysql``,
+# ``snowflake``, ``duckdb``, ``bigquery``, ``oracle`` all match).
+_SQLGLOT_DIALECT_MAP: dict[str, str] = {
+    "postgresql": "postgres",
+    "mssql": "tsql",
+    "mariadb": "mysql",
+}
+
+
+def _resolve_sqlglot_dialect(dialect: str | None) -> str | None:
+    """Translate a ``DatabaseConfig.dialect`` value to the sqlglot-recognised name."""
+    if dialect is None:
+        return None
+    return _SQLGLOT_DIALECT_MAP.get(dialect, dialect)
+
 
 class Status(StrEnum):
     """Per-case verdict.
@@ -54,9 +74,16 @@ def normalize_sql(sql: str, *, dialect: str | None = None) -> str:
     Raises :class:`sqlglot.errors.ParseError` (and other ``sqlglot`` errors)
     on un-parseable input. Callers handle the failure rather than this helper
     swallowing it — see :func:`compare`.
+
+    ``dialect`` is translated through :data:`_SQLGLOT_DIALECT_MAP` because
+    ``DatabaseConfig.dialect`` (the SQLAlchemy URL scheme) uses names
+    ``sqlglot`` does not all recognise (e.g. ``postgresql`` vs sqlglot's
+    ``postgres``). Without the translation, every comparison against a
+    Postgres-shaped config silently classifies as ERROR.
     """
-    parsed = sqlglot.parse_one(sql, read=dialect)
-    return parsed.sql(dialect=dialect, normalize=True, pretty=False)
+    resolved = _resolve_sqlglot_dialect(dialect)
+    parsed = sqlglot.parse_one(sql, read=resolved)
+    return parsed.sql(dialect=resolved, normalize=True, pretty=False)
 
 
 def compare(
@@ -74,8 +101,10 @@ def compare(
 
     ``dialect`` should be the value of :attr:`sqllens.config.DatabaseConfig.dialect`
     (e.g. ``"sqlite"``, ``"postgresql"``) so two valid renderings under the
-    configured database compare equal. ``None`` is accepted and falls through
-    to ``sqlglot``'s default behaviour.
+    configured database compare equal. The name is translated through
+    :data:`_SQLGLOT_DIALECT_MAP` before reaching ``sqlglot`` — see
+    :func:`normalize_sql`. ``None`` is accepted and falls through to
+    ``sqlglot``'s default behaviour.
     """
     try:
         expected_norm = normalize_sql(expected, dialect=dialect)

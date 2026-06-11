@@ -666,14 +666,23 @@ def _exit_for_report(report: RunReport, fail_under: float | None) -> None:
     interpretation, matching the issue's "regression guard" framing.
 
     With ``--fail-under``: exits 0 iff the PASS rate (in percent) is greater
-    than or equal to the threshold. An all-ERROR run still fails — pass rate
-    is 0% and no real threshold meets it.
+    than or equal to the threshold, **and** at least one case PASSed. An
+    all-non-PASS run (every case CHANGED or ERROR) always exits non-zero
+    regardless of threshold — the CLAUDE.md "structured signal, never silent
+    success" rule overrides ``--fail-under 0``, which would otherwise score
+    ``0% >= 0%`` as a green result on a fully-broken agent.
     """
     from sqllens.eval import Status
 
     if fail_under is None:
         if all(r.status is Status.PASS for r in report.results):
             return
+        raise typer.Exit(code=1)
+    if report.passed == 0:
+        err_console.print(
+            "[red]Refusing to exit 0:[/red] no case PASSed. "
+            "All-non-PASS runs always fail regardless of --fail-under."
+        )
         raise typer.Exit(code=1)
     pct = report.pass_rate * 100
     if pct >= fail_under:
