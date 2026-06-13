@@ -233,6 +233,9 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
 # persisted as JSON dict keys and surfaced verbatim in the widget, so an
 # unbounded / control-character / path-shaped name is a disk-bloat vector.
 # Dots and hyphens are permitted so ``team.analysts`` and ``read-only`` work.
+# Whole-string anchoring is provided by ``.fullmatch`` at the call site —
+# the pattern itself is unanchored, so a switch to ``.match`` / ``.search``
+# would silently accept substring matches. Keep the call site on fullmatch.
 _PROFILE_NAME_RE = re.compile(r"[A-Za-z0-9_.\-]{1,64}")
 
 
