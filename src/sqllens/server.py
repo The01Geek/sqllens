@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from typing import Any, get_args
 
@@ -226,6 +227,17 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
         )
         return {}
     return dict(extra) if extra else {}
+
+
+# Bounded identifier-style allowlist for profile names. The store persists each
+# name as a JSON dict key in ``sqllens.profiles.json`` and the widget surfaces
+# it verbatim, so an unbounded / control-character / path-shaped name is a
+# disk-bloat and log-noise vector against an authenticated admin endpoint
+# (see #211). 1-64 ASCII chars from the conservative set: letters, digits,
+# underscore, dot, hyphen. Matches the posture of the RLS identifier guard in
+# ``config.py`` while staying user-friendly (dots and hyphens permitted so
+# names like ``team.analysts`` and ``read-only`` remain expressible).
+_PROFILE_NAME_RE = re.compile(r"[A-Za-z0-9_.\-]{1,64}")
 
 
 def build_server(cfg: Config) -> FastMCP:
@@ -809,6 +821,21 @@ def build_server(cfg: Config) -> FastMCP:
             if not isinstance(name, str) or not name.strip():
                 return _profile_error(
                     {"error": "profile name must be a non-empty string"}
+                )
+            if not _PROFILE_NAME_RE.fullmatch(name):
+                # Name shape is fixed at the boundary so a multi-megabyte
+                # name, control characters, newlines, NUL bytes, or path
+                # separators cannot reach the on-disk dict-key surface. The
+                # message echoes the allowed character set so the widget can
+                # show the constraint to operators without a second lookup.
+                return _profile_error(
+                    {
+                        "error": (
+                            "profile name must be 1-64 chars from the set "
+                            "[A-Za-z0-9_.-]"
+                        ),
+                        "name": name,
+                    }
                 )
             if not isinstance(knobs, dict):
                 return _profile_error(
