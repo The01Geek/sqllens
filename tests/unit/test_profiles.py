@@ -416,7 +416,7 @@ async def test_upsert_rejects_non_identifier_name(
 async def test_upsert_accepts_identifier_style_name(
     tmp_path: Path, good_name: str
 ) -> None:
-    """Names that match the 1-64 char [A-Za-z0-9_.-] allowlist still round-trip."""
+    """Names matching the 1-64 char [A-Za-z0-9_.-] allowlist pass upsert validation."""
     cfg = build_test_config(
         persist_dir=tmp_path / "chroma",
         profiles_allow_admin_tools=True,
