@@ -229,14 +229,10 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
     return dict(extra) if extra else {}
 
 
-# Bounded identifier-style allowlist for profile names. The store persists each
-# name as a JSON dict key in ``sqllens.profiles.json`` and the widget surfaces
-# it verbatim, so an unbounded / control-character / path-shaped name is a
-# disk-bloat and log-noise vector against an authenticated admin endpoint
-# (see #211). 1-64 ASCII chars from the conservative set: letters, digits,
-# underscore, dot, hyphen. Matches the posture of the RLS identifier guard in
-# ``config.py`` while staying user-friendly (dots and hyphens permitted so
-# names like ``team.analysts`` and ``read-only`` remain expressible).
+# Bounded identifier-style allowlist for profile names (#211). Names are
+# persisted as JSON dict keys and surfaced verbatim in the widget, so an
+# unbounded / control-character / path-shaped name is a disk-bloat vector.
+# Dots and hyphens are permitted so ``team.analysts`` and ``read-only`` work.
 _PROFILE_NAME_RE = re.compile(r"[A-Za-z0-9_.\-]{1,64}")
 
 
@@ -823,11 +819,6 @@ def build_server(cfg: Config) -> FastMCP:
                     {"error": "profile name must be a non-empty string"}
                 )
             if not _PROFILE_NAME_RE.fullmatch(name):
-                # Name shape is fixed at the boundary so a multi-megabyte
-                # name, control characters, newlines, NUL bytes, or path
-                # separators cannot reach the on-disk dict-key surface. The
-                # message echoes the allowed character set so the widget can
-                # show the constraint to operators without a second lookup.
                 return _profile_error(
                     {
                         "error": (
