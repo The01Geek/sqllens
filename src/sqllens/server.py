@@ -784,7 +784,27 @@ def build_server(cfg: Config) -> FastMCP:
             store failed to load, a degraded-store ``isError`` is returned
             instead — a plain "not found" against a corrupt store would
             silently mask the real reason the profile is unreachable.
+
+            The same ``_PROFILE_NAME_RE`` shape guard the write surface uses
+            runs first so a multi-megabyte, control-character, or path-shaped
+            ``name`` is rejected on shape grounds before reaching ``store.get``
+            or the ``isError`` body that would otherwise echo the raw value
+            into MCP responses and logger frames (#214).
             """
+            if not isinstance(name, str) or not name.strip():
+                return _profile_error(
+                    {"error": "profile name must be a non-empty string"}
+                )
+            if not _PROFILE_NAME_RE.fullmatch(name):
+                return _profile_error(
+                    {
+                        "error": (
+                            "profile name must be 1-64 chars from the set "
+                            "[A-Za-z0-9_.-]"
+                        ),
+                        "name": name,
+                    }
+                )
             store = profile_store
             if store.load_error:
                 return _profile_error(
@@ -873,8 +893,29 @@ def build_server(cfg: Config) -> FastMCP:
             ``auth.insecure`` is set. A degraded store (load failed) returns
             ``isError`` rather than a misleading "not found" — see
             ``get_profile`` for the same short-circuit rationale.
+
+            The ``_PROFILE_NAME_RE`` shape guard runs before the
+            ``DEFAULT_PROFILE_NAME`` short-circuit so an obviously-malformed
+            name (oversize, control characters, path shape) is rejected on
+            shape grounds first — never reaching ``store.delete`` or the
+            ``logger.exception`` frame that would otherwise echo the raw
+            value (#214).
             """
             _profile_write_auth()
+            if not isinstance(name, str) or not name.strip():
+                return _profile_error(
+                    {"error": "profile name must be a non-empty string"}
+                )
+            if not _PROFILE_NAME_RE.fullmatch(name):
+                return _profile_error(
+                    {
+                        "error": (
+                            "profile name must be 1-64 chars from the set "
+                            "[A-Za-z0-9_.-]"
+                        ),
+                        "name": name,
+                    }
+                )
             if name == DEFAULT_PROFILE_NAME:
                 return _profile_error(
                     {"error": "cannot delete the reserved 'default' profile",
