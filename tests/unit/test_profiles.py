@@ -376,19 +376,30 @@ async def test_upsert_unknown_field_is_iserror(tmp_path: Path) -> None:
     assert result.isError is True
 
 
-@pytest.mark.parametrize(
-    "bad_name",
-    [
-        "x" * 65,  # over the 64-char cap
-        "has space",
-        "with/slash",
-        "with\\backslash",
-        "trailing\n",
-        "embedded\x00nul",
-        "héllo",  # non-ASCII
-        "team:analysts",
-    ],
-)
+# Shared fixtures for the _PROFILE_NAME_RE shape check — exercised against
+# every profile-admin surface that takes a ``name`` (upsert, get, delete).
+# Originally introduced for upsert in #211, extended to get/delete in #214.
+_BAD_PROFILE_NAMES = [
+    "x" * 65,  # over the 64-char cap
+    "has space",
+    "with/slash",
+    "with\\backslash",
+    "trailing\n",
+    "embedded\x00nul",
+    "héllo",  # non-ASCII
+    "team:analysts",
+]
+_GOOD_PROFILE_NAMES = [
+    "analysts",
+    "team.analysts",
+    "read-only",
+    "x",
+    "a" * 64,
+    "p1_2.3-4",
+]
+
+
+@pytest.mark.parametrize("bad_name", _BAD_PROFILE_NAMES)
 async def test_upsert_rejects_non_identifier_name(
     tmp_path: Path, bad_name: str
 ) -> None:
@@ -409,10 +420,7 @@ async def test_upsert_rejects_non_identifier_name(
     assert all(p["name"] != bad_name for p in listed["profiles"])
 
 
-@pytest.mark.parametrize(
-    "good_name",
-    ["analysts", "team.analysts", "read-only", "x", "a" * 64, "p1_2.3-4"],
-)
+@pytest.mark.parametrize("good_name", _GOOD_PROFILE_NAMES)
 async def test_upsert_accepts_identifier_style_name(
     tmp_path: Path, good_name: str
 ) -> None:
@@ -427,6 +435,99 @@ async def test_upsert_accepts_identifier_style_name(
         await _fn(mcp, "upsert_profile")(good_name, {"max_rows": 100})
     )
     assert saved["name"] == good_name
+
+
+@pytest.mark.parametrize("bad_name", _BAD_PROFILE_NAMES)
+async def test_get_profile_rejects_non_identifier_name(
+    tmp_path: Path, bad_name: str
+) -> None:
+    """``get_profile`` rejects a malformed name on shape grounds before dict lookup (#214).
+
+    The validator runs ahead of the corrupt-store check, so a malformed name
+    against a degraded store still surfaces as a name-shape error — not as a
+    confusing degraded-store message that would mask the real bug.
+    """
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        profiles_allow_admin_tools=True,
+        auth=AuthConfig(mode="none", insecure=True),
+    )
+    mcp = build_server(cfg)
+    result = await _fn(mcp, "get_profile")(bad_name)
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    body = _parse(result)
+    assert body["error"].startswith("profile name must be 1-64 chars")
+
+
+@pytest.mark.parametrize("good_name", _GOOD_PROFILE_NAMES)
+async def test_get_profile_accepts_identifier_style_name(
+    tmp_path: Path, good_name: str
+) -> None:
+    """Names matching the allowlist pass shape validation in ``get_profile`` (#214).
+
+    The shape check must not falsely reject any name the upsert path accepts —
+    otherwise a profile created via upsert would be unreadable via get.
+    """
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        profiles_allow_admin_tools=True,
+        auth=AuthConfig(mode="none", insecure=True),
+    )
+    mcp = build_server(cfg)
+    # Unknown but well-formed → ``profile not found``, NOT a shape error.
+    result = await _fn(mcp, "get_profile")(good_name)
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    body = _parse(result)
+    assert body["error"] == "profile not found"
+
+
+@pytest.mark.parametrize("bad_name", _BAD_PROFILE_NAMES)
+async def test_delete_profile_rejects_non_identifier_name(
+    tmp_path: Path, bad_name: str
+) -> None:
+    """``delete_profile`` rejects a malformed name on shape grounds first (#214).
+
+    Placement matters: the shape check runs before the ``DEFAULT_PROFILE_NAME``
+    short-circuit and before any ``store.delete`` call, so an obviously-bad
+    name never reaches the ``logger.exception`` frame that would echo its
+    raw value.
+    """
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        profiles_allow_admin_tools=True,
+        auth=AuthConfig(mode="none", insecure=True),
+    )
+    mcp = build_server(cfg)
+    result = await _fn(mcp, "delete_profile")(bad_name)
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    body = _parse(result)
+    assert body["error"].startswith("profile name must be 1-64 chars")
+
+
+@pytest.mark.parametrize("good_name", _GOOD_PROFILE_NAMES)
+async def test_delete_profile_accepts_identifier_style_name(
+    tmp_path: Path, good_name: str
+) -> None:
+    """Names matching the allowlist pass shape validation in ``delete_profile`` (#214).
+
+    Symmetric with ``test_get_profile_accepts_identifier_style_name`` — an
+    unknown but well-formed name reaches the not-found path, not the shape
+    error path.
+    """
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        profiles_allow_admin_tools=True,
+        auth=AuthConfig(mode="none", insecure=True),
+    )
+    mcp = build_server(cfg)
+    result = await _fn(mcp, "delete_profile")(good_name)
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    body = _parse(result)
+    assert body["error"] == "profile not found"
 
 
 async def test_write_tools_blocked_without_auth(tmp_path: Path) -> None:
