@@ -40,10 +40,13 @@ from sqllens.config import (
     ServerConfig,
 )
 from sqllens.transport.http import (
+    _INSECURE_AUTH_REMINDER_EVERY,
     _allowed_hosts,
     _AuthMiddleware,
     _build_asgi_app_bare,
     _decode_headers,
+    _InsecureAuthMarker,
+    _is_insecure_loopback_override,
     _is_loopback_host,
     _PathNormalizer,
     _Readiness,
@@ -1465,22 +1468,22 @@ def test_build_asgi_app_warmup_primes_singleton_with_closed_over_cfg(
 
 
 class _RespondingInner:
-    """ASGI inner app that emits a fixed http.response.start + body."""
-
-    def __init__(self, status: int = 200) -> None:
-        self._status = status
-        self.calls = 0
+    """ASGI inner app that emits a fixed 200 + body so the marker has a
+    real ``http.response.start`` to mutate."""
 
     async def __call__(self, scope, receive, send):  # type: ignore[no-untyped-def]
-        self.calls += 1
         await send(
             {
                 "type": "http.response.start",
-                "status": self._status,
+                "status": 200,
                 "headers": [(b"content-type", b"text/plain")],
             }
         )
         await send({"type": "http.response.body", "body": b"ok"})
+
+
+def _marker_scope() -> Scope:
+    return {"type": "http", "path": "/mcp", "headers": []}
 
 
 def test_insecure_auth_marker_stamps_response_header() -> None:
@@ -1493,24 +1496,12 @@ def test_insecure_auth_marker_stamps_response_header() -> None:
     ``SQLLENS_AUTH__INSECURE=1`` opt-out was set. The one-shot
     ``cli.serve`` startup banner is invisible to ``tail -f``.
     """
-    from sqllens.transport.http import (
-        INSECURE_AUTH_HEADER_NAME,
-        INSECURE_AUTH_HEADER_VALUE,
-        _InsecureAuthMarker,
-    )
-
-    inner = _RespondingInner()
-    mw = _InsecureAuthMarker(inner, host="10.0.0.5")
+    mw = _InsecureAuthMarker(_RespondingInner(), host="10.0.0.5")
     send, sent = _collect_send()
-    scope = {"type": "http", "path": "/mcp", "headers": []}
-    asyncio.run(mw(scope, _empty_receive, send))
+    asyncio.run(mw(_marker_scope(), _empty_receive, send))
 
     start = next(m for m in sent if m["type"] == "http.response.start")
-    header = (
-        INSECURE_AUTH_HEADER_NAME.lower().encode("ascii"),
-        INSECURE_AUTH_HEADER_VALUE.encode("ascii"),
-    )
-    assert header in start["headers"]
+    assert _InsecureAuthMarker._HEADER_PAIR in start["headers"]
     # The marker must not displace pre-existing headers set by the inner app.
     assert (b"content-type", b"text/plain") in start["headers"]
     # Body is forwarded untouched.
@@ -1525,8 +1516,6 @@ def test_insecure_auth_marker_passes_through_lifespan() -> None:
     Lifespan and websocket scopes have no header surface to stamp; touching
     the ``send`` callable there could only break the protocol.
     """
-    from sqllens.transport.http import _InsecureAuthMarker
-
     inner = _SpyInner()
     mw = _InsecureAuthMarker(inner, host="10.0.0.5")
     send, _sent = _collect_send()
@@ -1544,14 +1533,10 @@ def test_insecure_auth_marker_periodic_log_first_request(
     one-shot ``cli.serve`` banner has long scrolled past by then; the
     periodic log is the only post-boot trace.
     """
-    from sqllens.transport.http import _InsecureAuthMarker
-
-    inner = _RespondingInner()
-    mw = _InsecureAuthMarker(inner, host="10.0.0.5")
+    mw = _InsecureAuthMarker(_RespondingInner(), host="10.0.0.5")
     send, _sent = _collect_send()
-    scope = {"type": "http", "path": "/mcp", "headers": []}
     with caplog.at_level(logging.WARNING, logger=_WARN_LOGGER):
-        asyncio.run(mw(scope, _empty_receive, send))
+        asyncio.run(mw(_marker_scope(), _empty_receive, send))
 
     msgs = _warn_records(caplog)
     assert any("auth.mode=none with auth.insecure=1" in m for m in msgs)
@@ -1562,21 +1547,18 @@ def test_insecure_auth_marker_periodic_log_throttles(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Only every Nth request re-emits the warning — the marker must not
-    flood logs on a busy server.
+    flood logs on a busy server. Runs ``N+1`` requests inside a single
+    event loop (one ``asyncio.run``) to keep test wall time bounded.
     """
-    from sqllens.transport.http import (
-        _INSECURE_AUTH_REMINDER_EVERY,
-        _InsecureAuthMarker,
-    )
+    mw = _InsecureAuthMarker(_RespondingInner(), host="10.0.0.5")
 
-    inner = _RespondingInner()
-    mw = _InsecureAuthMarker(inner, host="10.0.0.5")
-    scope = {"type": "http", "path": "/mcp", "headers": []}
-
-    with caplog.at_level(logging.WARNING, logger=_WARN_LOGGER):
+    async def drive() -> None:
         for _ in range(_INSECURE_AUTH_REMINDER_EVERY + 1):
             send, _sent = _collect_send()
-            asyncio.run(mw(scope, _empty_receive, send))
+            await mw(_marker_scope(), _empty_receive, send)
+
+    with caplog.at_level(logging.WARNING, logger=_WARN_LOGGER):
+        asyncio.run(drive())
 
     msgs = _warn_records(caplog)
     # Exactly two warnings: the first request, and request N+1.
@@ -1594,8 +1576,6 @@ def test_is_insecure_loopback_override_predicate(tmp_path: Path) -> None:
     non-loopback host + ``auth.insecure=True``. Any one missing → no
     marker; all four → marker.
     """
-    from sqllens.transport.http import _is_insecure_loopback_override
-
     # All four active → override engaged.
     cfg = _cfg_with(
         tmp_path,
@@ -1643,8 +1623,6 @@ def test_build_asgi_app_bare_wraps_marker_only_when_override_active(
     zero-cost. Only the four-way intersection from the predicate test wraps
     the middleware in.
     """
-    from sqllens.transport.http import _InsecureAuthMarker
-
     # Healthy: loopback. _PathNormalizer sits directly inside
     # TrustedHostMiddleware.
     healthy = _cfg_with(

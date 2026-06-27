@@ -184,17 +184,6 @@ def _warn_if_plaintext_credentials(cfg: Config) -> None:
         )
 
 
-INSECURE_AUTH_HEADER_NAME = "X-SQLLens-Auth"
-INSECURE_AUTH_HEADER_VALUE = "insecure-loopback-override"
-"""Response-header marker stamped on every response when the server is
-running unauthenticated on a non-loopback host with the
-``SQLLENS_AUTH__INSECURE=1`` opt-out. A reverse proxy / observability stack
-can key off ``X-SQLLens-Auth: insecure-loopback-override`` to alert that the
-deployment is still accepting unauthenticated traffic — the only continuous
-posture signal an operator gets six months after the override was set. The
-``cli.py`` startup banner is one-shot; this header lets the posture be
-greppable in production traffic. See issue #218."""
-
 # Re-emit the startup banner every Nth request so the posture stays visible in
 # ``tail -f`` long after boot, not just the one-shot at startup. Periodic, not
 # per-request, to avoid log-volume blowup on a busy server while still keeping
@@ -403,11 +392,19 @@ class _InsecureAuthMarker:
     Instances are only ever created by ``_build_asgi_app_bare`` when
     ``_is_insecure_loopback_override(cfg)`` returns True; the healthy modes
     skip wrapping entirely so the no-marker path stays zero-cost.
+
+    A reverse proxy / observability stack can key off ``X-SQLLens-Auth:
+    insecure-loopback-override`` to alert that the deployment is still
+    accepting unauthenticated traffic — the only continuous posture signal
+    an operator gets six months after the override was set. The ``cli.py``
+    startup banner is one-shot; this header is the greppable counterpart.
     """
 
+    HEADER_NAME = "X-SQLLens-Auth"
+    HEADER_VALUE = "insecure-loopback-override"
     _HEADER_PAIR: tuple[bytes, bytes] = (
-        INSECURE_AUTH_HEADER_NAME.lower().encode("ascii"),
-        INSECURE_AUTH_HEADER_VALUE.encode("ascii"),
+        HEADER_NAME.lower().encode("ascii"),
+        HEADER_VALUE.encode("ascii"),
     )
 
     def __init__(self, inner: ASGIApp, host: str) -> None:
@@ -436,10 +433,13 @@ class _InsecureAuthMarker:
 
         async def _send_with_marker(message: dict) -> None:
             if message.get("type") == "http.response.start":
-                # Mutate a copy so we never alter caller-owned header lists.
-                headers = list(message.get("headers", []))
-                headers.append(self._HEADER_PAIR)
-                message = {**message, "headers": headers}
+                # Copy the headers list (not the message dict) so callers that
+                # retain their own headers reference are unaffected — the
+                # FastMCP / Starlette response builders we wrap do retain it.
+                message["headers"] = [
+                    *message.get("headers", ()),
+                    self._HEADER_PAIR,
+                ]
             await send(message)
 
         await self.inner(scope, receive, _send_with_marker)
