@@ -114,7 +114,7 @@ _ALLOWED_ROOT_TYPES: tuple[type[exp.Expression], ...] = (
 
 # Structural ``SHOW`` commands the agent uses for schema discovery on a fresh
 # database (no ChromaDB memory yet). These are read-only and disclose only the
-# database's *structure* — the same information the agent already needs
+# *connected schema*'s structure — the same information the agent already needs
 # internally to write queries. Matched (fail-closed) against ``exp.Show``'s
 # ``this`` subkind, uppercased. Anything not in this allowlist is rejected,
 # notably the info-leaking variants ``SHOW GRANTS`` (permission disclosure),
@@ -127,11 +127,24 @@ _ALLOWED_ROOT_TYPES: tuple[type[exp.Expression], ...] = (
 # KEYS`` / ``SHOW FIELDS`` / ``SHOW INDEXES`` fall back to ``exp.Command`` and
 # stay blocked — use the equivalent ``SHOW INDEX`` / ``SHOW COLUMNS``, which
 # parse cleanly to ``exp.Show``.
+#
+# ``DATABASES`` is intentionally NOT in the allowlist (issue #218): ``SHOW
+# DATABASES`` / ``SHOW SCHEMAS`` returns every schema visible to the configured
+# MySQL role, not just the one named in ``database.url``. CLAUDE.md asserts
+# the contract is "one database per running instance"; an allowlisted
+# ``SHOW DATABASES`` would let a client (and through prompt-injection, an
+# attacker via row content) enumerate sibling schemas the DSN never named,
+# breaching the trust boundary the read-only guard otherwise plugs. The agent
+# learns the active schema from ``information_schema.tables`` (a plain
+# ``SELECT`` over the catalog) and from ``list_data_sources`` — neither
+# disclosure-widens beyond the connected schema. Every other allowlisted
+# subkind (``TABLES`` / ``COLUMNS`` / ``INDEX`` / ``CREATE TABLE`` /
+# ``CREATE VIEW``) is naturally scoped to the connected schema and stays
+# aligned with the one-database-per-instance contract.
 _SAFE_SHOW_SUBKINDS: frozenset[str] = frozenset(
     {
         "TABLES",  # SHOW TABLES / SHOW FULL TABLES / SHOW TABLES LIKE ...
         "COLUMNS",  # SHOW COLUMNS / SHOW FULL COLUMNS FROM ...
-        "DATABASES",  # SHOW DATABASES / SHOW SCHEMAS
         "INDEX",  # SHOW INDEX FROM ...
         "CREATE TABLE",  # SHOW CREATE TABLE ...
         "CREATE VIEW",  # SHOW CREATE VIEW ...

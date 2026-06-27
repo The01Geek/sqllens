@@ -32,7 +32,15 @@ VALID_FORMATS = ("json", "csv")
 # prefix such cells with a single apostrophe at both the parse and serialize
 # boundaries so a planted bundle cannot survive a round-trip and detonate in a
 # spreadsheet later.
-_CSV_FORMULA_TRIGGERS = frozenset({"=", "+", "-", "@", "\t", "\r"})
+#
+# ``\n`` is included alongside ``\t``/``\r`` (issue #218): several spreadsheet
+# importers treat ``\n`` as an embedded row terminator and lift the
+# post-newline content into its own cell, which then begins with a real formula
+# character (``=``/``+``/``-``/``@``). Without defanging the leading newline,
+# a cell like ``\n=HYPERLINK(...)`` would slip the parse-time check (its first
+# character is not in the trigger set) and re-emerge as an active formula in
+# the importing spreadsheet.
+_CSV_FORMULA_TRIGGERS = frozenset({"=", "+", "-", "@", "\t", "\r", "\n"})
 
 
 class BundleFormatError(ValueError):

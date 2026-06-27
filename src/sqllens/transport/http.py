@@ -184,6 +184,44 @@ def _warn_if_plaintext_credentials(cfg: Config) -> None:
         )
 
 
+INSECURE_AUTH_HEADER_NAME = "X-SQLLens-Auth"
+INSECURE_AUTH_HEADER_VALUE = "insecure-loopback-override"
+"""Response-header marker stamped on every response when the server is
+running unauthenticated on a non-loopback host with the
+``SQLLENS_AUTH__INSECURE=1`` opt-out. A reverse proxy / observability stack
+can key off ``X-SQLLens-Auth: insecure-loopback-override`` to alert that the
+deployment is still accepting unauthenticated traffic — the only continuous
+posture signal an operator gets six months after the override was set. The
+``cli.py`` startup banner is one-shot; this header lets the posture be
+greppable in production traffic. See issue #218."""
+
+# Re-emit the startup banner every Nth request so the posture stays visible in
+# ``tail -f`` long after boot, not just the one-shot at startup. Periodic, not
+# per-request, to avoid log-volume blowup on a busy server while still keeping
+# the posture greppable. 1000 is a balance — at one request/sec it logs ~24x
+# per day; at higher rates it scales with traffic.
+_INSECURE_AUTH_REMINDER_EVERY = 1000
+
+
+def _is_insecure_loopback_override(cfg: Config) -> bool:
+    """True when the unauthenticated-non-loopback policy is being overridden.
+
+    Mirrors the ``cli._loopback_policy_violated`` + ``cfg.auth.insecure``
+    combination that the ``serve`` CLI emits its one-shot startup banner for.
+    ``cli`` is off-limits to import from here (the two modules each carry a
+    local ``_is_loopback_host`` copy by design — see that helper's docstring),
+    so the condition is restated rather than imported. Only ``http`` transport
+    is checked: stdio is process-local and has no header surface for the
+    marker to live on.
+    """
+    return (
+        cfg.server.transport == "http"
+        and cfg.auth.mode == "none"
+        and not _is_loopback_host(cfg.server.host)
+        and cfg.auth.insecure
+    )
+
+
 def build_asgi_app(cfg: Config) -> ASGIApp:
     """Build the fully wrapped, mount-ready Streamable HTTP ASGI app for ``cfg``.
 
@@ -238,19 +276,21 @@ def _build_asgi_app_bare(cfg: Config, readiness: _Readiness) -> tuple[ASGIApp, F
     at a single guarded site.
 
     Composition (outermost → innermost):
-    ``TrustedHostMiddleware`` → ``_PathNormalizer`` → ``_AuthMiddleware`` →
-    FastMCP. ``TrustedHostMiddleware`` fronts the stack so a disallowed
-    ``Host`` is rejected with 400 before *anything* downstream sees the
-    request — including the ``/healthz`` / ``/readyz`` short-circuits in
-    ``_PathNormalizer``. This denies the DNS-rebinding fingerprint of a
-    browser-served page confirming a running SQL Lens and its readiness
-    state — *for non-wildcard binds*: when ``cfg.server.host`` is
-    ``0.0.0.0`` / ``::``, ``_allowed_hosts`` returns ``["*"]`` (the operator
-    has explicitly opted into accepting any ``Host``) and the rebinding
-    fingerprint remains possible by design. Probes still bypass
-    ``_AuthMiddleware`` so orchestrator probes never need an
-    ``Authorization`` header (loopback and the configured host are in the
-    default allowlist).
+    ``TrustedHostMiddleware`` → (optional ``_InsecureAuthMarker``) →
+    ``_PathNormalizer`` → ``_AuthMiddleware`` → FastMCP.
+    ``TrustedHostMiddleware`` fronts the stack so a disallowed ``Host`` is
+    rejected with 400 before *anything* downstream sees the request — including
+    the ``/healthz`` / ``/readyz`` short-circuits in ``_PathNormalizer`` and the
+    ``X-SQLLens-Auth`` marker. This denies the DNS-rebinding fingerprint of a
+    browser-served page confirming a running SQL Lens and its readiness state —
+    *for non-wildcard binds*: when ``cfg.server.host`` is ``0.0.0.0`` / ``::``,
+    ``_allowed_hosts`` returns ``["*"]`` (the operator has explicitly opted into
+    accepting any ``Host``) and the rebinding fingerprint remains possible by
+    design. ``_InsecureAuthMarker`` is wrapped only when
+    ``_is_insecure_loopback_override(cfg)`` holds — the healthy modes skip the
+    middleware entirely. Probes still bypass ``_AuthMiddleware`` so orchestrator
+    probes never need an ``Authorization`` header (loopback and the configured
+    host are in the default allowlist).
     """
     mcp = build_server(cfg)
     inner = mcp.streamable_http_app()
@@ -258,6 +298,14 @@ def _build_asgi_app_bare(cfg: Config, readiness: _Readiness) -> tuple[ASGIApp, F
     normalized = _PathNormalizer(
         _AuthMiddleware(inner, authenticator), readiness
     )
+    # _InsecureAuthMarker sits between TrustedHostMiddleware and
+    # _PathNormalizer: a disallowed Host is rejected upstream and never gets
+    # the marker, while every other response (including the /healthz and
+    # /readyz short-circuits inside _PathNormalizer) carries the marker so
+    # the posture is visible on probe traffic too. No-op when the override
+    # isn't active — the no-marker fast path stays zero-cost.
+    if _is_insecure_loopback_override(cfg):
+        normalized = _InsecureAuthMarker(normalized, cfg.server.host)
     return (
         TrustedHostMiddleware(normalized, allowed_hosts=_allowed_hosts(cfg)),
         mcp,
@@ -331,6 +379,70 @@ class _PathNormalizer:
             scope["path"] = _INTERNAL_PATH
             scope["raw_path"] = _INTERNAL_PATH.encode()
         await self.inner(scope, receive, send)
+
+
+class _InsecureAuthMarker:
+    """Stamp every response with ``X-SQLLens-Auth: insecure-loopback-override``
+    while the unauthenticated-non-loopback posture is overridden via
+    ``SQLLENS_AUTH__INSECURE=1``.
+
+    Boundary: the marker reaches every HTTP response — including the
+    ``/healthz`` / ``/readyz`` short-circuits inside ``_PathNormalizer`` and
+    ``_AuthMiddleware``'s 401 — because this middleware composes outside both
+    of them. ``TrustedHostMiddleware`` still fronts the stack, so a request
+    with a disallowed ``Host`` is rejected upstream and never carries the
+    marker; that is by design (a DNS-rebind probe must not be able to confirm
+    the posture without an allowed Host).
+
+    Posture log: every ``_INSECURE_AUTH_REMINDER_EVERY``-th HTTP request also
+    re-emits the startup banner so the posture stays observable in ``tail -f``
+    long after boot. The first request triggers the reminder so it isn't
+    silently delayed by 999 hits. Lifespan / websocket scopes pass through
+    untouched and do not increment the counter — only ``http`` traffic counts.
+
+    Instances are only ever created by ``_build_asgi_app_bare`` when
+    ``_is_insecure_loopback_override(cfg)`` returns True; the healthy modes
+    skip wrapping entirely so the no-marker path stays zero-cost.
+    """
+
+    _HEADER_PAIR: tuple[bytes, bytes] = (
+        INSECURE_AUTH_HEADER_NAME.lower().encode("ascii"),
+        INSECURE_AUTH_HEADER_VALUE.encode("ascii"),
+    )
+
+    def __init__(self, inner: ASGIApp, host: str) -> None:
+        self.inner = inner
+        self._host = host
+        # Plain int is fine: uvicorn drives the ASGI app on a single event
+        # loop, so this counter is touched serially. A future multi-worker
+        # split would each see its own counter — which is still acceptable
+        # for an observability signal, not a hard count.
+        self._n = 0
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.inner(scope, receive, send)
+            return
+
+        self._n += 1
+        if (self._n - 1) % _INSECURE_AUTH_REMINDER_EVERY == 0:
+            logger.warning(
+                "auth.mode=none with auth.insecure=1 on non-loopback host %r: "
+                "%d unauthenticated request(s) served so far. Confirm the "
+                "deployment is on a closed network.",
+                self._host,
+                self._n,
+            )
+
+        async def _send_with_marker(message: dict) -> None:
+            if message.get("type") == "http.response.start":
+                # Mutate a copy so we never alter caller-owned header lists.
+                headers = list(message.get("headers", []))
+                headers.append(self._HEADER_PAIR)
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.inner(scope, receive, _send_with_marker)
 
 
 class _AuthMiddleware:

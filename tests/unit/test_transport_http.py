@@ -1459,3 +1459,208 @@ def test_build_asgi_app_warmup_primes_singleton_with_closed_over_cfg(
     # The boot-time warm step ran against the primed singleton's memory.
     primed_agent = agent_module._AGENT_STATE[0]
     assert len(primed_agent.agent_memory.get_recent_memories_calls) == 1
+
+
+# ───────────── #218: insecure-loopback-override observability ────────────────
+
+
+class _RespondingInner:
+    """ASGI inner app that emits a fixed http.response.start + body."""
+
+    def __init__(self, status: int = 200) -> None:
+        self._status = status
+        self.calls = 0
+
+    async def __call__(self, scope, receive, send):  # type: ignore[no-untyped-def]
+        self.calls += 1
+        await send(
+            {
+                "type": "http.response.start",
+                "status": self._status,
+                "headers": [(b"content-type", b"text/plain")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"ok"})
+
+
+def test_insecure_auth_marker_stamps_response_header() -> None:
+    """Issue #218: when the unauthenticated-non-loopback override is active,
+    every HTTP response carries ``X-SQLLens-Auth: insecure-loopback-override``.
+
+    A reverse proxy / observability stack uses this header to alert that the
+    deployment is still accepting unauthenticated traffic — the only
+    continuous posture signal an operator gets six months after the
+    ``SQLLENS_AUTH__INSECURE=1`` opt-out was set. The one-shot
+    ``cli.serve`` startup banner is invisible to ``tail -f``.
+    """
+    from sqllens.transport.http import (
+        INSECURE_AUTH_HEADER_NAME,
+        INSECURE_AUTH_HEADER_VALUE,
+        _InsecureAuthMarker,
+    )
+
+    inner = _RespondingInner()
+    mw = _InsecureAuthMarker(inner, host="10.0.0.5")
+    send, sent = _collect_send()
+    scope = {"type": "http", "path": "/mcp", "headers": []}
+    asyncio.run(mw(scope, _empty_receive, send))
+
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    header = (
+        INSECURE_AUTH_HEADER_NAME.lower().encode("ascii"),
+        INSECURE_AUTH_HEADER_VALUE.encode("ascii"),
+    )
+    assert header in start["headers"]
+    # The marker must not displace pre-existing headers set by the inner app.
+    assert (b"content-type", b"text/plain") in start["headers"]
+    # Body is forwarded untouched.
+    assert any(
+        m["type"] == "http.response.body" and m["body"] == b"ok" for m in sent
+    )
+
+
+def test_insecure_auth_marker_passes_through_lifespan() -> None:
+    """A ``lifespan`` scope must not be wrapped — only ``http`` traffic counts.
+
+    Lifespan and websocket scopes have no header surface to stamp; touching
+    the ``send`` callable there could only break the protocol.
+    """
+    from sqllens.transport.http import _InsecureAuthMarker
+
+    inner = _SpyInner()
+    mw = _InsecureAuthMarker(inner, host="10.0.0.5")
+    send, _sent = _collect_send()
+    asyncio.run(mw({"type": "lifespan"}, _empty_receive, send))
+    assert inner.calls == 1
+    # No HTTP traffic counted → no periodic warning emitted on next http call.
+    assert mw._n == 0
+
+
+def test_insecure_auth_marker_periodic_log_first_request(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The first HTTP request must emit the periodic posture warning so the
+    operator gets a ``tail -f`` signal even on a low-traffic server. The
+    one-shot ``cli.serve`` banner has long scrolled past by then; the
+    periodic log is the only post-boot trace.
+    """
+    from sqllens.transport.http import _InsecureAuthMarker
+
+    inner = _RespondingInner()
+    mw = _InsecureAuthMarker(inner, host="10.0.0.5")
+    send, _sent = _collect_send()
+    scope = {"type": "http", "path": "/mcp", "headers": []}
+    with caplog.at_level(logging.WARNING, logger=_WARN_LOGGER):
+        asyncio.run(mw(scope, _empty_receive, send))
+
+    msgs = _warn_records(caplog)
+    assert any("auth.mode=none with auth.insecure=1" in m for m in msgs)
+    assert any("10.0.0.5" in m for m in msgs)
+
+
+def test_insecure_auth_marker_periodic_log_throttles(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Only every Nth request re-emits the warning — the marker must not
+    flood logs on a busy server.
+    """
+    from sqllens.transport.http import (
+        _INSECURE_AUTH_REMINDER_EVERY,
+        _InsecureAuthMarker,
+    )
+
+    inner = _RespondingInner()
+    mw = _InsecureAuthMarker(inner, host="10.0.0.5")
+    scope = {"type": "http", "path": "/mcp", "headers": []}
+
+    with caplog.at_level(logging.WARNING, logger=_WARN_LOGGER):
+        for _ in range(_INSECURE_AUTH_REMINDER_EVERY + 1):
+            send, _sent = _collect_send()
+            asyncio.run(mw(scope, _empty_receive, send))
+
+    msgs = _warn_records(caplog)
+    # Exactly two warnings: the first request, and request N+1.
+    posture_msgs = [m for m in msgs if "auth.mode=none with auth.insecure=1" in m]
+    assert len(posture_msgs) == 2, (
+        f"expected 2 throttled warnings over {_INSECURE_AUTH_REMINDER_EVERY + 1} "
+        f"requests, got {len(posture_msgs)}"
+    )
+
+
+def test_is_insecure_loopback_override_predicate(tmp_path: Path) -> None:
+    """The predicate drives whether ``_InsecureAuthMarker`` wraps the stack.
+
+    Pins the four-way intersection: http transport + auth.mode=none +
+    non-loopback host + ``auth.insecure=True``. Any one missing → no
+    marker; all four → marker.
+    """
+    from sqllens.transport.http import _is_insecure_loopback_override
+
+    # All four active → override engaged.
+    cfg = _cfg_with(
+        tmp_path,
+        auth=AuthConfig(mode="none", insecure=True),
+        host="10.0.0.5",
+    )
+    assert _is_insecure_loopback_override(cfg) is True
+
+    # Loopback host → predicate False (operator banner not needed; loopback
+    # is the documented safe surface for mode=none).
+    cfg_lo = _cfg_with(
+        tmp_path,
+        auth=AuthConfig(mode="none", insecure=True),
+        host="127.0.0.1",
+    )
+    assert _is_insecure_loopback_override(cfg_lo) is False
+
+    # auth.insecure not set → predicate False (cli.serve would have refused
+    # to start, so the marker is dead weight).
+    cfg_no_opt = _cfg_with(
+        tmp_path,
+        auth=AuthConfig(mode="none", insecure=False),
+        host="10.0.0.5",
+    )
+    assert _is_insecure_loopback_override(cfg_no_opt) is False
+
+    # auth.mode=bearer → predicate False (no posture to surface).
+    cfg_bearer = _cfg_with(
+        tmp_path,
+        auth=AuthConfig(
+            mode="bearer",
+            bearer_token=SecretStr("a-real-token-0123456789-padding-x"),
+            insecure=True,
+        ),
+        host="10.0.0.5",
+    )
+    assert _is_insecure_loopback_override(cfg_bearer) is False
+
+
+def test_build_asgi_app_bare_wraps_marker_only_when_override_active(
+    tmp_path: Path,
+) -> None:
+    """Healthy modes (loopback host, or bearer auth, or auth.insecure=False)
+    skip ``_InsecureAuthMarker`` entirely — the no-marker fast path stays
+    zero-cost. Only the four-way intersection from the predicate test wraps
+    the middleware in.
+    """
+    from sqllens.transport.http import _InsecureAuthMarker
+
+    # Healthy: loopback. _PathNormalizer sits directly inside
+    # TrustedHostMiddleware.
+    healthy = _cfg_with(
+        tmp_path, auth=AuthConfig(mode="none"), host="127.0.0.1"
+    )
+    bare, _mcp = _build_asgi_app_bare(healthy, _Readiness())
+    assert isinstance(bare, TrustedHostMiddleware)
+    assert isinstance(bare.app, _PathNormalizer)
+
+    # Override engaged: marker wraps _PathNormalizer.
+    override = _cfg_with(
+        tmp_path,
+        auth=AuthConfig(mode="none", insecure=True),
+        host="10.0.0.5",
+    )
+    bare, _mcp = _build_asgi_app_bare(override, _Readiness())
+    assert isinstance(bare, TrustedHostMiddleware)
+    assert isinstance(bare.app, _InsecureAuthMarker)
+    assert isinstance(bare.app.inner, _PathNormalizer)
