@@ -999,7 +999,7 @@ def test_query_info_row_count_attributed_to_last_run_sql_when_empty() -> None:
     # Multi-run_sql turn where the LAST run_sql returned no rows but an
     # earlier run_sql had a 5-row table. The walker must NOT misattribute the
     # earlier table's row count to the later SQL — that was the corroborated
-    # silent-failure-hunter / general-purpose finding from /devflow:review on
+    # silent-failure-hunter / general-purpose finding from /prflow:review on
     # the first pass of #194. Pin row_count: 0 against the LATER SQL.
     stream = [
         _sql_card("SELECT * FROM big_table", status="running"),
