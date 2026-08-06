@@ -25,6 +25,7 @@ from sqllens.config import API_KEY_MISSING_MESSAGE, ConfigBomError
 
 if TYPE_CHECKING:
     from sqllens.config import Config
+    from sqllens.eval import RunReport
 
 app = typer.Typer(
     name="sqllens",
@@ -536,6 +537,169 @@ def import_memory(
         )
     if report.errors:
         raise typer.Exit(code=1)
+
+
+@app.command(name="verify-memory")
+def verify_memory(
+    path: Path = typer.Argument(..., help="Golden file (JSON or CSV) of question -> expected SQL."),
+    config: Path | None = typer.Option(
+        None, "--config", "-c", help="Path to sqllens.toml. Falls back to env / ./sqllens.toml."
+    ),
+    fmt: str = typer.Option("json", "--format", help="Golden-file format (json or csv)."),
+    fail_under: float | None = typer.Option(
+        None,
+        "--fail-under",
+        min=0.0,
+        max=100.0,
+        help=(
+            "PASS-rate percentage tolerance (0-100). When set, the command exits "
+            "0 if PASS rate >= this threshold and non-zero otherwise. Without it, "
+            "any non-PASS case exits non-zero. Use this when occasional CHANGED "
+            "noise from LLM non-determinism is expected."
+        ),
+    ),
+) -> None:
+    """Verify the agent still produces expected SQL for a curated golden set.
+
+    Runs each ``(question, expected_sql)`` pair through the live agent and
+    classifies the result as PASS, CHANGED, or ERROR by normalised-SQL
+    comparison against the configured database dialect. CHANGED means the
+    agent's SQL changed and needs review — normalised-SQL comparison cannot
+    prove semantic equivalence, so a different-but-correct query (different
+    JOIN order, ``IN`` vs ``EXISTS``) registers as CHANGED, not PASS.
+
+    Exits non-zero on any non-PASS case (or, with ``--fail-under``, when the
+    PASS rate is below the threshold). An empty golden file is itself an
+    error — there is nothing to verify, so the command refuses to exit 0.
+    """
+    import asyncio
+
+    from sqllens.config import Config
+    from sqllens.eval import load_golden, run_verification
+    from sqllens.memory.io import VALID_FORMATS, BundleFormatError
+
+    if fmt not in VALID_FORMATS:
+        err_console.print(f"[red]Error:[/red] --format must be 'json' or 'csv' (got {escape(fmt)})")
+        raise typer.Exit(code=1)
+    try:
+        cfg = Config.load(config)
+    except Exception as e:
+        err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
+        raise typer.Exit(code=2) from e
+    if cfg.llm.api_key is None:
+        err_console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
+        raise typer.Exit(code=2)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        err_console.print(f"[red]Error:[/red] cannot read {escape(str(path))}: {escape(str(e))}")
+        raise typer.Exit(code=1) from e
+    try:
+        cases = load_golden(text, fmt)
+    except BundleFormatError as e:
+        err_console.print(f"[red]Invalid golden file:[/red] {escape(str(e))}")
+        raise typer.Exit(code=1) from e
+    if not cases:
+        # Empty golden set — per CLAUDE.md "structured signal, never silent
+        # success" — refuse to exit 0 on a vacuous run.
+        err_console.print(
+            "[red]Error:[/red] golden file is empty (no sql_pairs). "
+            "There is nothing to verify."
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        report = asyncio.run(run_verification(cfg, cases))
+    except Exception as e:
+        err_console.print(
+            f"[red]Verification run failed ({type(e).__name__}):[/red] {escape(str(e))}"
+        )
+        raise typer.Exit(code=1) from e
+
+    _print_report(report)
+    _exit_for_report(report, fail_under)
+
+
+_STATUS_COLOUR = {"PASS": "green", "CHANGED": "yellow", "ERROR": "red"}
+
+
+def _print_report(report: RunReport) -> None:
+    """Render the per-case table, then the summary line plus non-PASS details."""
+    from rich.table import Table
+
+    from sqllens.eval import Status
+
+    table = Table(title="verify-memory results", show_lines=False)
+    table.add_column("#", justify="right", no_wrap=True)
+    table.add_column("status", no_wrap=True)
+    table.add_column("question", overflow="fold")
+    for idx, case in enumerate(report.results, start=1):
+        colour = _STATUS_COLOUR[case.status.value]
+        table.add_row(
+            str(idx),
+            f"[{colour}]{case.status.value}[/{colour}]",
+            escape(case.question),
+        )
+    console.print(table)
+    console.print(
+        f"PASS {report.passed} | CHANGED {report.changed} | ERROR {report.errored} "
+        f"(total {report.total}, pass-rate {report.pass_rate * 100:.1f}%)"
+    )
+    # Per-case detail for every non-PASS row — operator needs the diff to
+    # decide whether CHANGED is real regression or LLM noise.
+    for idx, case in enumerate(report.results, start=1):
+        if case.status is Status.PASS:
+            continue
+        console.print()
+        console.print(f"[bold]Case {idx}:[/bold] {escape(case.question)}")
+        console.print(f"  [bold]Expected SQL:[/bold] {escape(case.expected_sql)}")
+        if case.actual_sql is not None:
+            console.print(f"  [bold]Actual SQL:[/bold]   {escape(case.actual_sql)}")
+        if case.error is not None:
+            console.print(f"  [bold red]Error:[/bold red] {escape(case.error)}")
+
+
+def _exit_for_report(report: RunReport, fail_under: float | None) -> None:
+    """Apply the exit-code policy.
+
+    Without ``--fail-under``: any non-PASS case exits non-zero — the strict
+    interpretation, matching the issue's "regression guard" framing.
+
+    With ``--fail-under``: exits 0 iff the PASS rate (in percent) is greater
+    than or equal to the threshold, **and** at least one case PASSed. An
+    all-non-PASS run (every case CHANGED or ERROR) always exits non-zero
+    regardless of threshold — the CLAUDE.md "structured signal, never silent
+    success" rule overrides ``--fail-under 0``, which would otherwise score
+    ``0% >= 0%`` as a green result on a fully-broken agent.
+    """
+    from sqllens.eval import Status
+
+    # Defence-in-depth symmetry: ``verify_memory`` already refuses an empty
+    # golden file upstream, but ``_exit_for_report`` is the canonical exit
+    # policy and must remain self-sufficient — if a future caller bypassed
+    # the upstream guard, ``all([])`` would vacuously return success.
+    if report.total == 0:
+        err_console.print(
+            "[red]Refusing to exit 0:[/red] verification produced zero cases."
+        )
+        raise typer.Exit(code=1)
+    if fail_under is None:
+        if all(r.status is Status.PASS for r in report.results):
+            return
+        raise typer.Exit(code=1)
+    if report.passed == 0:
+        err_console.print(
+            "[red]Refusing to exit 0:[/red] no case PASSed. "
+            "All-non-PASS runs always fail regardless of --fail-under."
+        )
+        raise typer.Exit(code=1)
+    pct = report.pass_rate * 100
+    if pct >= fail_under:
+        return
+    err_console.print(
+        f"[red]Pass rate {pct:.1f}% below threshold {fail_under:.1f}%.[/red]"
+    )
+    raise typer.Exit(code=1)
 
 
 @app.command(name="export-memory")

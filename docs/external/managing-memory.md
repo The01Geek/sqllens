@@ -1,6 +1,6 @@
 # Managing Memory
 
-SQL Lens keeps a local memory of helpful context so it answers similar questions better over time. You can seed it with curated knowledge up front, and export what it has accumulated, using two command-line commands.
+SQL Lens keeps a local memory of helpful context so it answers similar questions better over time. You can seed it with curated knowledge up front, export what it has accumulated, and verify that the assistant still produces the SQL you expect for a curated set of reference questions, using three command-line commands.
 
 ## What Is Stored
 
@@ -92,6 +92,53 @@ sqllens export-memory PATH [--format json|csv] [-c CONFIG]
 Use `--format json` (the default) for a complete, lossless backup. Use `--format csv` only when you want a simple `question,sql` spreadsheet and do not need the free-form notes.
 
 `export-memory` prints a yellow `Warning:` line (and still writes the file) when the export is not a complete picture: the store is empty, some stored rows could not be represented, or `--format csv` dropped schema docs. If the store looks corrupt or was written by an incompatible version, `export-memory` refuses to write a misleading "successful" backup and exits non-zero with no file written — investigate before relying on a backup or running `--clear`.
+
+## Verifying Memory After an Import
+
+`import-memory` writes curated question-and-answer pairs straight into the memory the assistant uses at query time, with no safety net of its own. `verify-memory` is the post-import regression guard: it runs a curated **golden file** of reference questions through the live assistant and reports, per question, whether SQL Lens still produces the SQL you expected.
+
+```bash
+sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]
+```
+
+| Option | Effect |
+|---|---|
+| `--format` | `json` (default) or `csv`. The golden file uses the same shape as a memory bundle's question-and-answer pairs (the `sql_pairs` block in JSON, or a `question,sql` CSV), so any tool that can write a bundle can write a golden file. |
+| `--fail-under PCT` | Pass-rate percentage tolerance from 0 to 100. When set, the command exits 0 if the pass rate is at or above the threshold and non-zero otherwise. Without it, any non-PASS result exits non-zero. Use this when occasional flaky results from the assistant's natural variability are expected. |
+| `-c CONFIG` | Path to `sqllens.toml`. Falls back to the environment or `./sqllens.toml`. |
+
+A golden file is structurally a memory bundle's question-and-answer block — the same 10 MiB and 10,000-item limits apply, the same CSV-injection defang is applied to CSV golden files, and the same blank-value and length rules are enforced. The free-form notes block, if present, is ignored: only question-and-answer pairs are reference cases.
+
+A typical workflow is to import an updated bundle, then immediately verify it:
+
+```bash
+sqllens import-memory new-bundle.json
+sqllens verify-memory golden.json
+```
+
+For each case, `verify-memory` classifies the assistant's answer as one of:
+
+- **PASS**: The assistant's SQL, after normalization, matches the expected SQL.
+- **CHANGED**: Both the expected and actual SQL parsed cleanly, but the normalized forms differ. The assistant's SQL changed and needs review. CHANGED does not always mean the answer is wrong — two correct queries with different JOIN order, or `IN` versus `EXISTS`, both register as CHANGED — so the per-case detail shows both queries side by side for inspection.
+- **ERROR**: The expected SQL in the golden file itself could not be parsed, or the assistant failed to produce a SQL statement (the language model errored, an internal tool failed, and so on).
+
+When the command finishes it prints a table of results and a summary line, for example:
+
+```
+PASS 7 | CHANGED 2 | ERROR 1 (total 10, pass-rate 70.0%)
+```
+
+Per-case details follow the summary for any non-PASS result, showing the expected SQL, the actual SQL the assistant produced (when one was produced), and the underlying error message (when one was raised).
+
+The normalization step uses the dialect of the configured database, so two equally valid renderings for that dialect — for example, quoted versus unquoted identifiers where case-sensitivity allows — compare equal.
+
+**Exit codes** follow SQL Lens's strict "never silent success" rule:
+
+- An **empty golden file** (no question-and-answer pairs) exits non-zero with an explicit error. There is nothing to verify, so a clean exit would be misleading.
+- **Any non-PASS case** exits non-zero by default. Use `--fail-under` to relax this when occasional variability is expected.
+- An **all-non-PASS run** always exits non-zero, even with `--fail-under 0`, so a completely broken assistant cannot pass an unrestricted threshold.
+
+**Note:** The assistant's answers are not perfectly deterministic. A single CHANGED result on a re-run is not necessarily a real regression — re-running may produce a PASS. If you expect some noise in normal operation, set `--fail-under` to the pass rate you require (for example, `--fail-under 90` to pass when at least 90 percent of cases PASS).
 
 ## Letting the Assistant Import Memory
 

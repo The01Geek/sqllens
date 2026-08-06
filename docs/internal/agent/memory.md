@@ -165,14 +165,53 @@ The defang trigger set (`_CSV_FORMULA_TRIGGERS`) is a module-level `frozenset` s
 
 ### CLI commands
 
-Two Typer commands in [src/sqllens/cli.py](../../../src/sqllens/cli.py):
+Three Typer commands in [src/sqllens/cli.py](../../../src/sqllens/cli.py):
 
 ```bash
 sqllens import-memory PATH [--format json|csv] [--clear] [--dry-run] [--batch-size N] [-c CONFIG]
 sqllens export-memory PATH [--format json|csv] [-c CONFIG]
+sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]
 ```
 
 `import-memory` exit codes: `2` for a config-load error (consistent with `serve`/`validate`), `1` for a bad `--format`, an unreadable file, an invalid bundle, a store/import failure, or any per-item import error in the report. `--clear` prompts for confirmation (`typer.confirm(..., abort=True)`) unless combined with `--dry-run`. If a `--clear` import fails *after* the store was constructed, the error message states the collection may now be empty/partial (the wipe already ran). Store/import errors carry the standard "embedding model downloads on first use (~80 MB); check persist_dir" hint. **The CLI commands work regardless of `allow_import`** — that flag only gates the MCP tool.
+
+### Verifying an import (`verify-memory`)
+
+`import-memory` writes curated pairs straight into the live retrieval path with no safety net — the same memory the agent recalls at query time. `verify-memory` is the post-import regression guard: it runs a curated **golden set** (operator-authored question → expected-SQL pairs) through the live agent and reports, per case, whether the agent still produces the expected SQL.
+
+```bash
+sqllens import-memory new-bundle.json
+sqllens verify-memory golden.json
+#  per-case table + summary: PASS 7 | CHANGED 2 | ERROR 1
+#  non-zero exit on any non-PASS case
+```
+
+Implementation lives outside the vendored agent tree in [src/sqllens/eval/](../../../src/sqllens/eval/):
+
+| Module | Responsibility |
+|---|---|
+| `eval/golden.py` | Loads the golden file via the *existing* `parse_json` / `parse_csv` bundle parser. No new file format — a golden file is structurally a memory bundle's `sql_pairs` block. Inherits every safety cap (`MAX_BUNDLE_BYTES`, `MAX_BUNDLE_ITEMS`, JSON-recursion guard, CSV-injection defang). |
+| `eval/compare.py` | `Status` enum (`PASS` / `CHANGED` / `ERROR`), `normalize_sql(sql, *, dialect)` (parse → re-render with consistent casing/whitespace via `sqlglot`), and `compare(expected, actual, *, dialect)` — the only place that knows the PASS/CHANGED/ERROR taxonomy. Isolated so a future "execute and compare rows" comparator drops in without changes to the runner. |
+| `eval/runner.py` | Clones the loaded `Config` with `agent.show_details=True` so [`query_database_impl_with_widgets`](../../../src/sqllens/tools/query_database.py) returns the agent's generated SQL on `query_info["sql"]` (the explicit `query_info = None` branch in that function only fires when effective `show_details` is off). Loops cases through the agent, extracts the SQL, hands it to the comparator. Tests inject a stub driver via the `driver=` parameter. |
+
+**Status semantics** (and what each one means for the operator):
+
+- **PASS** — the normalised generated SQL `==` the normalised expected SQL.
+- **CHANGED** — both sides parsed cleanly but the normalised forms differ. CHANGED means "the agent's SQL changed — review it," **not** "definitely wrong." Normalised-SQL comparison cannot prove semantic equivalence: two valid queries with different JOIN order, or `IN` vs `EXISTS`, register as CHANGED. The accepted trade-off (#208) is that this lets the verifier run without a database. If `actual` SQL is unparseable, the case is CHANGED — the well-formed golden side stands, the agent's output regressed.
+- **ERROR** — the **expected** SQL failed to parse (the golden file itself is malformed) or the agent path raised (LLM down, sanitized tool-internal failure, etc.). Surfaced separately so a single bad golden row doesn't silently change every case to CHANGED.
+
+**Structured-signal contract** (CLAUDE.md "never silent success"). The CLI's `_exit_for_report` explicitly refuses to exit 0 in four vacuous-success traps:
+
+- **Empty golden file** — `{}` or an empty `sql_pairs.pairs` list exits 1 with `golden file is empty (no sql_pairs). There is nothing to verify.` `_exit_for_report` re-asserts the same `report.total == 0` guard so a future caller that bypassed the upstream check still fails closed rather than letting `all([])` vacuously succeed.
+- **Any non-PASS case** — without `--fail-under`, any CHANGED or ERROR row exits 1.
+- **All-non-PASS run, regardless of threshold** — when `report.passed == 0`, the run exits 1 **even with `--fail-under 0`**, which would otherwise score `0% >= 0%` as a green result on a fully-broken agent. This guard sits *before* the percentage compare so an explicitly-permissive threshold cannot mask a fully-failed verification.
+- **Below-threshold PASS rate** — with `--fail-under PCT` and at least one PASS, exits 1 when `passed / total * 100 < PCT`.
+
+**Dialect.** Normalisation runs against `cfg.database.dialect` — the SQLAlchemy URL scheme with any `+driver` suffix stripped. The runner translates that scheme through `_SQLGLOT_DIALECT_MAP` in `eval/compare.py` (`postgresql → postgres`, `mssql → tsql`, `mariadb → mysql`) before handing it to `sqlglot.parse_one`. Without the translation, every comparison against a Postgres-shaped config would silently classify as ERROR — `sqlglot` raises `ValueError("Unknown dialect 'postgresql'. Did you mean postgres?")` on the SQLAlchemy spelling. Unmapped schemes (e.g. `sqlite`, `mysql`, `snowflake`, `duckdb`, `bigquery`, `oracle`) pass through unchanged. Two valid renderings under the configured database (e.g. SQLite-quoted vs unquoted identifiers when no case-sensitivity hazard exists) therefore compare equal where the dialect permits.
+
+**Parse-error scope.** `compare()` catches only `sqlglot.errors.SqlglotError` — the documented base of sqlglot's parse-failure family. That base covers both `ParseError` (grammar failures) and `TokenError` (lex-level garbage like unterminated string literals). The two are *siblings*, not subclasses, so a narrow `except ParseError` would let `TokenError` leak out and misclassify an unparseable-actual case as ERROR instead of CHANGED. Other exceptions — notably the `ValueError("Unknown dialect '...'")` from a misconfigured / unmapped scheme — must propagate to the runner's per-case `except` so the operator sees the real cause in `CaseResult.error` rather than a misleading ERROR row with no diagnostic.
+
+**Determinism caveat.** LLM output is non-deterministic. CHANGED on a re-run does not necessarily indicate a real regression — a flaky cell may have re-rolled. Operators expecting noise should use `--fail-under` (e.g. `--fail-under 90` to pass if ≥90% of cases PASS).
 
 ### The `import_memory` MCP tool (opt-in, default OFF)
 
