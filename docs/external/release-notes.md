@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## June 13, 2026
+
+- **[Improvement] Profile names are now validated against a bounded character set** — When the profile-admin tools are enabled (`profiles.allow_admin_tools = true`), `upsert_profile` now rejects a profile name that is empty, longer than 64 characters, or contains any character outside the set `[A-Za-z0-9_.-]`. Names like `team.analysts` and `read-only` continue to work; names with spaces, slashes, control characters, or non-ASCII letters are refused with a structured error instead of being persisted to the profile store. No configuration change is required. (#212)
+
 ## June 9, 2026
 
 - **[Improvement] The redundant `agent.show_memory_details` setting is now removed** — The `agent.show_memory_details` setting (environment variable `SQLLENS_AGENT__SHOW_MEMORY_DETAILS`) and the one-line `_Memory: ..._` footer it appended to `query_database` answers are now removed. The structured memory hit/miss summary that apps-aware hosts already render — attached to every response that completed a memory search under the `sqllens/memory_info` key, gated by no flag — is unchanged, so no signal is lost. Only the duplicated plain-text footer is gone. **Action required if you set this setting:** remove `show_memory_details` from the `[agent]` section of your `sqllens.toml`, and unset `SQLLENS_AGENT__SHOW_MEMORY_DETAILS` if you exported it; both are now silently ignored. If you persisted the field on any named profile through the profile-admin UI, also remove it from that profile (use `upsert_profile` with the remaining knobs) — the profile store rejects unknown fields and will skip the affected entry on startup with a loud `Warning:` line until it is cleaned up. (#204)

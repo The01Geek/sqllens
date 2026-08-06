@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from typing import Any, get_args
 
@@ -226,6 +227,16 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
         )
         return {}
     return dict(extra) if extra else {}
+
+
+# Bounded identifier-style allowlist for profile names (#211). Names are
+# persisted as JSON dict keys and surfaced verbatim in the widget, so an
+# unbounded / control-character / path-shaped name is a disk-bloat vector.
+# Dots and hyphens are permitted so ``team.analysts`` and ``read-only`` work.
+# Whole-string anchoring is provided by ``.fullmatch`` at the call site —
+# the pattern itself is unanchored, so a switch to ``.match`` / ``.search``
+# would silently accept substring matches. Keep the call site on fullmatch.
+_PROFILE_NAME_RE = re.compile(r"[A-Za-z0-9_.\-]{1,64}")
 
 
 def build_server(cfg: Config) -> FastMCP:
@@ -809,6 +820,16 @@ def build_server(cfg: Config) -> FastMCP:
             if not isinstance(name, str) or not name.strip():
                 return _profile_error(
                     {"error": "profile name must be a non-empty string"}
+                )
+            if not _PROFILE_NAME_RE.fullmatch(name):
+                return _profile_error(
+                    {
+                        "error": (
+                            "profile name must be 1-64 chars from the set "
+                            "[A-Za-z0-9_.-]"
+                        ),
+                        "name": name,
+                    }
                 )
             if not isinstance(knobs, dict):
                 return _profile_error(

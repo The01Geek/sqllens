@@ -376,6 +376,59 @@ async def test_upsert_unknown_field_is_iserror(tmp_path: Path) -> None:
     assert result.isError is True
 
 
+@pytest.mark.parametrize(
+    "bad_name",
+    [
+        "x" * 65,  # over the 64-char cap
+        "has space",
+        "with/slash",
+        "with\\backslash",
+        "trailing\n",
+        "embedded\x00nul",
+        "héllo",  # non-ASCII
+        "team:analysts",
+    ],
+)
+async def test_upsert_rejects_non_identifier_name(
+    tmp_path: Path, bad_name: str
+) -> None:
+    """Name validation rejects oversize / non-identifier / control-char names (#211)."""
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        profiles_allow_admin_tools=True,
+        auth=AuthConfig(mode="none", insecure=True),
+    )
+    mcp = build_server(cfg)
+    result = await _fn(mcp, "upsert_profile")(bad_name, {"max_rows": 100})
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    body = _parse(result)
+    assert body["error"].startswith("profile name must be 1-64 chars")
+    # Bad name MUST NOT have been persisted.
+    listed = _parse(await _fn(mcp, "list_profiles")())
+    assert all(p["name"] != bad_name for p in listed["profiles"])
+
+
+@pytest.mark.parametrize(
+    "good_name",
+    ["analysts", "team.analysts", "read-only", "x", "a" * 64, "p1_2.3-4"],
+)
+async def test_upsert_accepts_identifier_style_name(
+    tmp_path: Path, good_name: str
+) -> None:
+    """Names matching the 1-64 char [A-Za-z0-9_.-] allowlist pass upsert validation."""
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        profiles_allow_admin_tools=True,
+        auth=AuthConfig(mode="none", insecure=True),
+    )
+    mcp = build_server(cfg)
+    saved = _parse(
+        await _fn(mcp, "upsert_profile")(good_name, {"max_rows": 100})
+    )
+    assert saved["name"] == good_name
+
+
 async def test_write_tools_blocked_without_auth(tmp_path: Path) -> None:
     """Mirrors the memory-admin write-guard: auth.mode='none' without insecure refuses."""
     cfg = build_test_config(
