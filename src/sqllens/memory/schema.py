@@ -20,16 +20,21 @@ CONTENT_MAX = 50000
 
 # Defence-in-depth caps on the *outer* shape of a bundle. ``QUESTION_MAX`` /
 # ``SQL_MAX`` / ``CONTENT_MAX`` bound the size of any single item; an
-# authenticated client could still DoS the server by submitting millions of
-# valid-but-cheap items inside one bundle (parsing the list, then writing each
-# inside the held ``import_lock``). The two caps below — both enforced in
-# ``memory.io`` at the parse boundary, *not* as model-level ``Field``
-# constraints — reject such payloads on the way in while leaving in-process
-# constructors (notably ``MemoryStore.iter_all``, which is the dedup baseline
-# for ``import_bundle`` and the source for ``export_bundle``) unrestricted.
-# Enforcing as a ``Field`` constraint would propagate the cap to every
-# construction, breaking export and import-baseline reads on a healthy store
-# that legitimately holds more than ``MAX_BUNDLE_ITEMS`` rows.
+# authenticated client could still DoS the MCP ``import_memory`` tool by
+# submitting millions of valid-but-cheap items inside one bundle (parsing the
+# list, then writing each inside the held ``import_lock``). The two caps below
+# are enforced in ``memory.io`` at the parse boundary (not as model-level
+# ``Field`` constraints) and apply to **the MCP path and the bounded CLI
+# default**. The CLI ``--stream`` path bypasses these whole-file caps
+# (memory-bounded streaming makes the DoS lever irrelevant for a local
+# operator) but keeps the per-item caps row by row. Leaving these as parse-
+# boundary checks rather than ``Field`` constraints means in-process
+# constructors (notably ``MemoryStore.iter_all`` and
+# ``MemoryStore.iter_paginated``, which back ``export_bundle`` /
+# ``export_bundle_stream``) stay unrestricted: enforcing as a ``Field``
+# constraint would propagate the cap to every construction, breaking exports
+# on a healthy store that legitimately holds more than ``MAX_BUNDLE_ITEMS``
+# rows.
 MAX_BUNDLE_BYTES = 10 * 1024 * 1024
 """Hard ceiling on the raw bundle text accepted by ``parse_json``/``parse_csv``.
 
@@ -70,15 +75,6 @@ class SqlPair(BaseModel):
         return _require_non_blank(v, "sql")
 
 
-class SqlPairsBlock(BaseModel):
-    """The ``sql_pairs`` top-level block."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    training_type: Literal["sql_pairs"] = "sql_pairs"
-    pairs: list[SqlPair] = Field(default_factory=list)
-
-
 class SchemaDoc(BaseModel):
     """A single free-form schema / documentation memory."""
 
@@ -94,11 +90,17 @@ class SchemaDoc(BaseModel):
 
 
 class MemoryBundle(BaseModel):
-    """The full importable/exportable bundle. Both blocks are optional."""
+    """The full importable/exportable bundle. Both blocks are optional.
+
+    ``sql_pairs`` is a flat array of ``{question, sql}`` objects — the same
+    shape the memory-admin ``add_memories`` tool accepts — so a bundle written
+    by ``export-memory`` round-trips through every import surface (CLI
+    ``import-memory``, the MCP ``import_memory`` tool, and the widget).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    sql_pairs: SqlPairsBlock | None = None
+    sql_pairs: list[SqlPair] | None = None
     schema_docs: list[SchemaDoc] | None = None
 
 
@@ -111,10 +113,20 @@ class ImportItemError(BaseModel):
 
 
 class ImportReport(BaseModel):
-    """Outcome of an import run."""
+    """Outcome of an import run.
+
+    ``saved`` counts items successfully upserted into the store. Because
+    import now writes rows under a content-hash id (see
+    :func:`sqllens.memory.store.sql_pair_id` /
+    :func:`sqllens.memory.store.schema_doc_id`) and ``collection.upsert``
+    is idempotent, a re-imported logical pair overwrites the same row
+    rather than reporting a "skipped duplicate" — there is no separate
+    skip count to surface. ``errors`` holds per-item validation /
+    save failures; the per-item-error count is what callers compare
+    against zero to decide whether an import succeeded.
+    """
 
     saved: int = 0
-    skipped_duplicate: int = 0
     errors: list[ImportItemError] = Field(default_factory=list)
 
     def to_markdown(self) -> str:
@@ -123,7 +135,6 @@ class ImportReport(BaseModel):
             "| metric | count |",
             "| --- | --- |",
             f"| saved | {self.saved} |",
-            f"| skipped (duplicate) | {self.skipped_duplicate} |",
             f"| errors | {len(self.errors)} |",
         ]
         if self.errors:

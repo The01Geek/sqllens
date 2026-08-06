@@ -457,32 +457,70 @@ def import_memory(
     batch_size: int = typer.Option(
         100, "--batch-size", min=1, help="Writes issued before yielding."
     ),
+    stream: bool = typer.Option(
+        False,
+        "--stream",
+        help=(
+            "Use the memory-bounded streaming reader (JSON only). Bypasses "
+            "the 10 MiB whole-bundle cap; per-item caps still apply row by "
+            "row. Incremental — a partial failure cannot be rolled back."
+        ),
+    ),
 ) -> None:
-    """Bulk-load a curated memory bundle into the configured store."""
+    """Bulk-load a curated memory bundle into the configured store.
+
+    The default path parses the whole bundle in-memory and rejects payloads
+    over ``MAX_BUNDLE_BYTES`` / ``MAX_BUNDLE_ITEMS`` (the same caps the MCP
+    ``import_memory`` tool enforces). ``--stream`` switches to a memory-
+    bounded reader that lifts the whole-file caps for local operators
+    backing up large stores; it cannot roll back, so any failure exits
+    non-zero with the data-loss warning.
+
+    Re-importing the same logical pair is idempotent: each row's id is a
+    content hash, so :py:meth:`collection.upsert` overwrites rather than
+    duplicating. There is no "skipped (duplicate)" count.
+    """
     import asyncio
 
     from sqllens.config import Config
-    from sqllens.memory import MemoryStore, import_bundle
+    from sqllens.memory import MemoryStore, import_bundle, import_bundle_stream
     from sqllens.memory.io import VALID_FORMATS, BundleFormatError, parse_csv, parse_json
 
     if fmt not in VALID_FORMATS:
         err_console.print(f"[red]Error:[/red] --format must be 'json' or 'csv' (got {escape(fmt)})")
+        raise typer.Exit(code=1)
+    if stream and fmt != "json":
+        err_console.print(
+            "[red]Error:[/red] --stream is JSON-only (CSV bundles always fit the "
+            "bounded path)."
+        )
         raise typer.Exit(code=1)
     try:
         cfg = Config.load(config)
     except Exception as e:
         err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
         raise typer.Exit(code=2) from e
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as e:
-        err_console.print(f"[red]Error:[/red] cannot read {escape(str(path))}: {escape(str(e))}")
-        raise typer.Exit(code=1) from e
-    try:
-        bundle = parse_csv(text) if fmt == "csv" else parse_json(text)
-    except BundleFormatError as e:
-        err_console.print(f"[red]Invalid bundle:[/red] {escape(str(e))}")
-        raise typer.Exit(code=1) from e
+
+    if not stream:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as e:
+            err_console.print(
+                f"[red]Error:[/red] cannot read {escape(str(path))}: {escape(str(e))}"
+            )
+            raise typer.Exit(code=1) from e
+        try:
+            bundle = parse_csv(text) if fmt == "csv" else parse_json(text)
+        except BundleFormatError as e:
+            err_console.print(f"[red]Invalid bundle:[/red] {escape(str(e))}")
+            raise typer.Exit(code=1) from e
+    else:
+        # Streaming path: probe the file exists / is readable up front so we
+        # fail before constructing the store (which downloads the embedding
+        # model on first use).
+        if not path.exists():
+            err_console.print(f"[red]Error:[/red] cannot read {escape(str(path))}: not found")
+            raise typer.Exit(code=1)
 
     if clear and not dry_run:
         typer.confirm(
@@ -500,6 +538,91 @@ def import_memory(
             "is writable."
         )
         raise typer.Exit(code=1) from e
+
+    if stream:
+        try:
+            result = asyncio.run(
+                import_bundle_stream(
+                    store,
+                    path,
+                    dry_run=dry_run,
+                    clear=clear,
+                    batch_size=batch_size,
+                )
+            )
+        except Exception as e:
+            data_loss = (
+                "The collection was wiped (--clear) and the import did not "
+                "complete — memory may now be empty or partial.\n"
+                if clear and not dry_run
+                else ""
+            )
+            err_console.print(
+                f"[red]Memory import error ({type(e).__name__}):[/red] {escape(str(e))}\n"
+                f"{data_loss}"
+                "If this is a first-use or storage issue: the embedding model "
+                "downloads on first use (~80 MB); check the configured persist_dir "
+                "is writable."
+            )
+            raise typer.Exit(code=1) from e
+
+        prefix = "[yellow](dry-run)[/yellow] " if dry_run else ""
+        console.print(
+            f"{prefix}[stream] saved={result.report.saved} "
+            f"failed={len(result.report.errors)} "
+            f"bytes_read={result.bytes_read}"
+        )
+        for err in result.report.errors:
+            err_console.print(
+                f"  [red]{escape(err.kind)}[{err.index}]:[/red] {escape(err.message)}"
+            )
+        if result.aborted:
+            err_console.print(
+                f"[red]Stream import aborted:[/red] {escape(result.abort_reason or 'unknown')}"
+            )
+            if clear and not dry_run:
+                err_console.print(
+                    "[red]The collection was wiped (--clear) and the import did not "
+                    "complete — memory may now be empty or partial.[/red]"
+                )
+            raise typer.Exit(code=1)
+        # CLAUDE.md "lossy/empty success needs a loud warning" — the streaming
+        # path computes ``likely_format_mismatch`` (non-trivial input, zero
+        # records, no per-item errors) and the CLI surfaces it as a non-zero
+        # exit so a silent success can't quietly delete an operator's training
+        # set after an ``--clear``.
+        if result.likely_format_mismatch:
+            err_console.print(
+                f"[yellow]Warning:[/yellow] read {result.bytes_read} bytes from "
+                f"{escape(str(path))} but imported 0 records — likely a format "
+                "mismatch (expected a bundle JSON with 'sql_pairs' and/or "
+                "'schema_docs' keys)."
+            )
+            if clear and not dry_run:
+                err_console.print(
+                    "[red]The collection was wiped (--clear) and 0 records were "
+                    "imported — memory may now be empty.[/red]"
+                )
+            raise typer.Exit(code=1)
+        # CLAUDE.md "lossy/empty success needs a loud warning" — a ``--clear``
+        # that wiped the store followed by an import that saved 0 records (no
+        # errors, no abort, file too small to trip the format-mismatch heuristic)
+        # is the documented data-loss trap: the operator typed ``--clear``
+        # expecting a wipe-and-replace and got a wipe-and-empty. The earlier
+        # ``--clear`` confirm dialog gates the wipe, so the operator did consent
+        # to the destruction; what they need now is a loud non-zero signal that
+        # nothing replaced what was wiped.
+        if clear and not dry_run and result.report.saved == 0 and not result.report.errors:
+            err_console.print(
+                "[yellow]Warning:[/yellow] --clear wiped the store and 0 records "
+                f"were imported from {escape(str(path))} (read {result.bytes_read} "
+                "bytes). The collection is now empty."
+            )
+            raise typer.Exit(code=1)
+        if result.report.errors:
+            raise typer.Exit(code=1)
+        return
+
     try:
         report = asyncio.run(
             import_bundle(
@@ -527,7 +650,6 @@ def import_memory(
     prefix = "[yellow](dry-run)[/yellow] " if dry_run else ""
     console.print(
         f"{prefix}saved={report.saved} "
-        f"skipped_duplicate={report.skipped_duplicate} "
         f"errors={len(report.errors)}"
     )
     for err in report.errors:
@@ -545,20 +667,73 @@ def export_memory(
         None, "--config", "-c", help="Path to sqllens.toml. Falls back to env / ./sqllens.toml."
     ),
     fmt: str = typer.Option("json", "--format", help="Bundle format."),
+    stream: bool = typer.Option(
+        False,
+        "--stream",
+        help=(
+            "Use the memory-bounded streaming exporter (JSON only). Paginates "
+            "ChromaDB and writes the bundle incrementally — does not load the "
+            "whole store into RAM."
+        ),
+    ),
 ) -> None:
-    """Export the configured memory store to a bundle file."""
+    """Export the configured memory store to a bundle file.
+
+    The default path enumerates the full store with
+    :meth:`MemoryStore.iter_all` and refuses to write on wholesale-
+    corruption. ``--stream`` paginates the collection so memory stays
+    bounded for large stores; the cross-page skip count is surfaced as a
+    non-fatal warning instead of a wholesale-corruption raise (the ratio
+    isn't a snapshot statistic across pages).
+    """
     from sqllens.config import Config
-    from sqllens.memory import MemoryCorruptionError, MemoryStore, export_bundle
+    from sqllens.memory import (
+        MemoryCorruptionError,
+        MemoryStore,
+        export_bundle,
+        export_bundle_stream,
+    )
     from sqllens.memory.io import VALID_FORMATS
 
     if fmt not in VALID_FORMATS:
         err_console.print(f"[red]Error:[/red] --format must be 'json' or 'csv' (got {escape(fmt)})")
+        raise typer.Exit(code=1)
+    if stream and fmt != "json":
+        err_console.print(
+            "[red]Error:[/red] --stream is JSON-only (CSV always uses the bounded path)."
+        )
         raise typer.Exit(code=1)
     try:
         cfg = Config.load(config)
     except Exception as e:
         err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
         raise typer.Exit(code=2) from e
+
+    if stream:
+        try:
+            store = MemoryStore(cfg)
+            result = export_bundle_stream(store, path)
+        except OSError as e:
+            err_console.print(
+                f"[red]Error:[/red] cannot write {escape(str(path))}: {escape(str(e))}"
+            )
+            raise typer.Exit(code=1) from e
+        except Exception as e:
+            err_console.print(
+                f"[red]Memory store error ({type(e).__name__}):[/red] {escape(str(e))}\n"
+                "If this is a first-use or storage issue: the embedding model "
+                "downloads on first use (~80 MB); check the configured persist_dir "
+                "is readable."
+            )
+            raise typer.Exit(code=1) from e
+        for warning in result.warnings:
+            err_console.print(f"[yellow]Warning:[/yellow] {escape(warning)}")
+        console.print(
+            f"[green]Wrote {escape(str(path))}[/green] "
+            f"(sql_pairs={result.sql_pairs_count}, "
+            f"schema_docs={result.schema_docs_count})"
+        )
+        return
 
     try:
         store = MemoryStore(cfg)

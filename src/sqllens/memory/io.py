@@ -21,7 +21,6 @@ from sqllens.memory.schema import (
     MAX_BUNDLE_ITEMS,
     MemoryBundle,
     SqlPair,
-    SqlPairsBlock,
 )
 
 CSV_HEADER = ["question", "sql"]
@@ -76,10 +75,10 @@ def _enforce_item_caps(bundle: MemoryBundle) -> None:
     and a Pydantic ``ValidationError`` would escape ``export_bundle`` /
     ``import_bundle`` as an unstructured crash on healthy data.
     """
-    if bundle.sql_pairs and len(bundle.sql_pairs.pairs) > MAX_BUNDLE_ITEMS:
+    if bundle.sql_pairs and len(bundle.sql_pairs) > MAX_BUNDLE_ITEMS:
         raise BundleFormatError(
-            f"bundle 'sql_pairs.pairs' exceeds the {MAX_BUNDLE_ITEMS}-item "
-            f"cap (got {len(bundle.sql_pairs.pairs)}); split the bundle."
+            f"bundle 'sql_pairs' exceeds the {MAX_BUNDLE_ITEMS}-item "
+            f"cap (got {len(bundle.sql_pairs)}); split the bundle."
         )
     if bundle.schema_docs and len(bundle.schema_docs) > MAX_BUNDLE_ITEMS:
         raise BundleFormatError(
@@ -166,7 +165,7 @@ def parse_csv(text: str) -> MemoryBundle:
             raise BundleFormatError(
                 f"CSV line {lineno}: {_fmt_err(exc)}"
             ) from exc
-    bundle = MemoryBundle(sql_pairs=SqlPairsBlock(pairs=pairs) if pairs else None)
+    bundle = MemoryBundle(sql_pairs=pairs or None)
     _enforce_item_caps(bundle)
     return bundle
 
@@ -182,7 +181,7 @@ def serialize_csv(bundle: MemoryBundle) -> str:
     writer = csv.writer(buf)
     writer.writerow(CSV_HEADER)
     if bundle.sql_pairs:
-        for pair in bundle.sql_pairs.pairs:
+        for pair in bundle.sql_pairs:
             writer.writerow(
                 [_defang_csv_cell(pair.question), _defang_csv_cell(pair.sql)]
             )

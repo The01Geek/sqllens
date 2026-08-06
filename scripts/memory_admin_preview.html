@@ -104,8 +104,6 @@ function handleCallTool(name, args) {
       hint.textContent = "";
       return jsonError({
         saved_count: 1,
-        duplicate_count: 0,
-        skipped_count: 0,
         errors: [
           { kind: "sql_pair", index: 1, question: "bad row",
             error: "embedding model unavailable while saving" },
@@ -113,26 +111,41 @@ function handleCallTool(name, args) {
       });
     }
     let saved = 0;
+    // Upsert semantics: a re-add of the same (question, sql) overwrites the
+    // existing in-memory row instead of duplicating it. ``saved`` counts the
+    // upserts the call performed (preview fidelity with the real tool).
     for (const p of pairs) {
-      if (STORE.memories.some((m) => m.question === p.question && m.sql === p.sql)) continue;
-      STORE.memories.push({
-        memory_id: "new-" + Math.random().toString(36).slice(2, 10),
-        memory_type: "tool_usage", question: p.question, sql: p.sql,
-        timestamp: new Date().toISOString(), hit_count: 0,
-      });
+      const existing = STORE.memories.find(
+        (m) => m.memory_type === "tool_usage" && m.question === p.question && m.sql === p.sql
+      );
+      if (existing) {
+        existing.timestamp = new Date().toISOString();
+      } else {
+        STORE.memories.push({
+          memory_id: "new-" + Math.random().toString(36).slice(2, 10),
+          memory_type: "tool_usage", question: p.question, sql: p.sql,
+          timestamp: new Date().toISOString(), hit_count: 0,
+        });
+      }
       saved += 1;
     }
     for (const d of docs) {
-      STORE.memories.push({
-        memory_id: "new-" + Math.random().toString(36).slice(2, 10),
-        memory_type: "text", content: d.content,
-        timestamp: new Date().toISOString(), hit_count: 0,
-      });
+      const existing = STORE.memories.find(
+        (m) => m.memory_type === "text" && m.content === d.content
+      );
+      if (existing) {
+        existing.timestamp = new Date().toISOString();
+      } else {
+        STORE.memories.push({
+          memory_id: "new-" + Math.random().toString(36).slice(2, 10),
+          memory_type: "text", content: d.content,
+          timestamp: new Date().toISOString(), hit_count: 0,
+        });
+      }
       saved += 1;
     }
     return jsonResult({
-      saved_count: saved, duplicate_count: pairs.length + docs.length - saved,
-      skipped_count: 0, errors: [],
+      saved_count: saved, errors: [],
     });
   }
   if (name === "export_memories") {

@@ -26,7 +26,6 @@ from sqllens.memory.schema import (
     MemoryBundle,
     SchemaDoc,
     SqlPair,
-    SqlPairsBlock,
 )
 
 
@@ -60,13 +59,13 @@ def test_parse_json_rejects_non_object() -> None:
 
 def test_parse_json_rejects_unknown_keys() -> None:
     with pytest.raises(BundleFormatError):
-        parse_json('{"sql_pairs": {"pairs": []}, "bogus": 1}')
+        parse_json('{"sql_pairs": [], "bogus": 1}')
 
 
 def test_json_round_trip() -> None:
     src = MemoryBundle.model_validate(
         {
-            "sql_pairs": {"pairs": [{"question": "How many?", "sql": "SELECT 1"}]},
+            "sql_pairs": [{"question": "How many?", "sql": "SELECT 1"}],
             "schema_docs": [{"content": "users table"}],
         }
     )
@@ -77,7 +76,7 @@ def test_json_round_trip() -> None:
 def test_csv_well_formed() -> None:
     bundle = parse_csv("question,sql\nHow many users?,SELECT count(*) FROM users\n")
     assert bundle.sql_pairs is not None
-    assert bundle.sql_pairs.pairs[0].sql == "SELECT count(*) FROM users"
+    assert bundle.sql_pairs[0].sql == "SELECT count(*) FROM users"
 
 
 def test_csv_missing_column() -> None:
@@ -98,7 +97,7 @@ def test_csv_oversized_field() -> None:
 def test_csv_serialize_pairs_only() -> None:
     bundle = MemoryBundle.model_validate(
         {
-            "sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]},
+            "sql_pairs": [{"question": "q", "sql": "SELECT 1"}],
             "schema_docs": [{"content": "ignored in csv"}],
         }
     )
@@ -154,8 +153,8 @@ def test_parse_json_rejects_too_many_pairs() -> None:
     # Per-block item cap defends against a structurally-valid JSON whose pairs
     # list, alone, is large enough to dominate the import_lock window.
     too_many = [{"question": "q", "sql": "SELECT 1"}] * (MAX_BUNDLE_ITEMS + 1)
-    payload = '{"sql_pairs": {"pairs": ' + json.dumps(too_many) + "}}"
-    with pytest.raises(BundleFormatError, match=r"sql_pairs\.pairs.*exceeds"):
+    payload = '{"sql_pairs": ' + json.dumps(too_many) + "}"
+    with pytest.raises(BundleFormatError, match=r"sql_pairs.*exceeds"):
         parse_json(payload)
 
 
@@ -173,8 +172,9 @@ def test_models_accept_more_than_bundle_item_cap_via_construction() -> None:
     # healthy data with > MAX_BUNDLE_ITEMS rows.
     overflow = [SqlPair(question=f"q{i}", sql="SELECT 1") for i in range(3)]
     pairs = overflow * (MAX_BUNDLE_ITEMS // len(overflow) + 1)
-    block = SqlPairsBlock(pairs=pairs)
-    assert len(block.pairs) > MAX_BUNDLE_ITEMS
+    bundle = MemoryBundle(sql_pairs=pairs)
+    assert bundle.sql_pairs is not None
+    assert len(bundle.sql_pairs) > MAX_BUNDLE_ITEMS
 
 
 def test_parse_csv_defangs_formula_triggers() -> None:
@@ -190,7 +190,7 @@ def test_parse_csv_defangs_formula_triggers() -> None:
     )
     bundle = parse_csv(text)
     assert bundle.sql_pairs is not None
-    pairs = bundle.sql_pairs.pairs
+    pairs = bundle.sql_pairs
     assert pairs[0].question.startswith("'=")
     assert pairs[1].question.startswith("'+")
     assert pairs[2].question.startswith("'-")
@@ -201,12 +201,10 @@ def test_serialize_csv_defangs_formula_triggers() -> None:
     # Symmetric guard: a poisoned in-store value cannot escape via export.
     bundle = MemoryBundle.model_validate(
         {
-            "sql_pairs": {
-                "pairs": [
-                    {"question": "=DANGER()", "sql": "SELECT 1"},
-                    {"question": "ok", "sql": "@evil"},
-                ]
-            }
+            "sql_pairs": [
+                {"question": "=DANGER()", "sql": "SELECT 1"},
+                {"question": "ok", "sql": "@evil"},
+            ]
         }
     )
     text = serialize_csv(bundle)

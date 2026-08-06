@@ -29,9 +29,13 @@ wipe. Both fallbacks are deliberately isolated to this module.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
@@ -39,7 +43,7 @@ from pydantic import ValidationError
 from sqllens.agent.core.tool import ToolContext
 from sqllens.agent.core.user.models import User
 from sqllens.agent.integrations.chromadb.agent_memory import ChromaAgentMemory
-from sqllens.memory.schema import MemoryBundle, SchemaDoc, SqlPair, SqlPairsBlock
+from sqllens.memory.schema import MemoryBundle, SchemaDoc, SqlPair
 
 logger = logging.getLogger("sqllens.memory")
 
@@ -48,6 +52,39 @@ if TYPE_CHECKING:
 
 RUN_SQL_TOOL_NAME = "run_sql"
 _IMPORT_SOURCE = "import"
+
+
+def _norm(text: str) -> str:
+    """Normalize text for content-hash ID derivation.
+
+    Strip leading/trailing whitespace, collapse internal whitespace, and
+    lowercase. Two near-identical inputs (different casing, trailing
+    whitespace, or repeated spaces) normalize to the same string and
+    therefore the same content-hash ID — re-importing such inputs upserts
+    the same row instead of duplicating it.
+    """
+    return " ".join(text.split()).lower()
+
+
+def sql_pair_id(question: str, sql: str) -> str:
+    """Deterministic Chroma row id for a ``(question, sql)`` import.
+
+    ``sha256("sql_pair" + "\\x00" + _norm(question) + "\\x00" + _norm(sql))``.
+    A re-import of the same logical pair targets the same id, so
+    ``collection.upsert`` overwrites rather than duplicates.
+    """
+    parts = b"sql_pair\x00" + _norm(question).encode("utf-8") + b"\x00" + _norm(sql).encode("utf-8")
+    return hashlib.sha256(parts).hexdigest()
+
+
+def schema_doc_id(content: str) -> str:
+    """Deterministic Chroma row id for a schema-doc import.
+
+    ``sha256("schema_doc" + "\\x00" + _norm(content))``. Mirrors
+    :func:`sql_pair_id` so a re-imported text memory upserts the same row.
+    """
+    parts = b"schema_doc\x00" + _norm(content).encode("utf-8")
+    return hashlib.sha256(parts).hexdigest()
 
 # Wholesale-failure guard for ``iter_all``. One bad row is a tolerated skip;
 # *every* row failing to reconstruct (e.g. a chromadb/schema version skew that
@@ -106,20 +143,110 @@ class MemoryStore:
         self.last_skipped_rows = 0
 
     async def add_sql_pair(self, question: str, sql: str) -> None:
-        await self._mem.save_tool_usage(
-            question=question,
-            tool_name=RUN_SQL_TOOL_NAME,
-            args={"sql": sql},
-            context=self._ctx,
-            success=True,
-            metadata={"source": _IMPORT_SOURCE},
-        )
+        """Upsert a single SQL pair using a deterministic content-hash id.
+
+        Bypasses the vendored ``save_tool_usage`` (which assigns a fresh
+        ``uuid4`` per write and so duplicates rows on re-import). The metadata
+        shape is byte-identical to ``save_tool_usage``'s writes so retrieval
+        at query time still matches imported pairs.
+        """
+        await self.add_sql_pair_batch([(question, sql)])
 
     async def add_schema_doc(self, content: str) -> None:
-        await self._mem.save_text_memory(content, self._ctx)
+        """Upsert a single schema doc using a deterministic content-hash id.
+
+        Bypasses ``save_text_memory`` for the same reason as
+        :meth:`add_sql_pair`. Metadata stays byte-identical to live-agent
+        writes so retrieval still matches.
+        """
+        await self.add_schema_doc_batch([content])
+
+    async def add_sql_pair_batch(self, items: list[tuple[str, str]]) -> None:
+        """Batch-upsert ``(question, sql)`` pairs with content-hash ids.
+
+        One ``collection.upsert`` per call writes the whole batch — far
+        cheaper than per-item round-trips on large imports. Ids are derived
+        via :func:`sql_pair_id`, so re-importing the same logical pairs is
+        idempotent.
+
+        Metadata is byte-identical to ``save_tool_usage``'s writes:
+
+        - ``tool_name`` = ``"run_sql"`` so the agent's retrieval filter
+          (``where={"tool_name": "run_sql"}``) matches the row.
+        - ``args_json`` = ``{"sql": ...}`` so the SQL is reconstructable.
+        - ``metadata_json`` = ``{"source": "import"}`` so curated imports are
+          distinguishable from live-agent writes.
+        """
+        if not items:
+            return
+        # Collapse intra-batch id collisions before upserting. Two records
+        # whose normalized content hashes to the same ``sql_pair_id`` would
+        # otherwise reach ``collection.upsert`` as ``ids=[dup, dup, ...]``,
+        # which ChromaDB rejects with ``DuplicateIDError`` — failing the WHOLE
+        # batch (every row reported as errored, and under ``--clear`` leaving
+        # the store wiped-and-empty). Keying on the content-hash id de-dupes
+        # within the batch (last write wins), which is exactly the idempotent
+        # overwrite a re-import already gets across batches. ``report.saved``
+        # still counts records processed, not distinct rows — consistent with
+        # the bounded path's per-item counting.
+        timestamp = datetime.now().isoformat()
+        by_id: dict[str, tuple[str, dict[str, Any]]] = {}
+        for question, sql in items:
+            by_id[sql_pair_id(question, sql)] = (
+                question,
+                {
+                    "question": question,
+                    "tool_name": RUN_SQL_TOOL_NAME,
+                    "args_json": json.dumps({"sql": sql}),
+                    "timestamp": timestamp,
+                    "success": True,
+                    "metadata_json": json.dumps({"source": _IMPORT_SOURCE}),
+                },
+            )
+        ids = list(by_id.keys())
+        questions = [doc for doc, _ in by_id.values()]
+        metadatas = [meta for _, meta in by_id.values()]
+
+        def _save() -> None:
+            collection = self._mem._get_collection()
+            collection.upsert(ids=ids, documents=questions, metadatas=metadatas)
+
+        await asyncio.get_event_loop().run_in_executor(self._mem._executor, _save)
+
+    async def add_schema_doc_batch(self, contents: list[str]) -> None:
+        """Batch-upsert schema docs with content-hash ids.
+
+        Mirrors :meth:`add_sql_pair_batch` with the text-memory metadata
+        shape ``{"content": ..., "timestamp": ..., "is_text_memory": True}``
+        — byte-identical to ``save_text_memory``.
+        """
+        if not contents:
+            return
+        # Collapse intra-batch id collisions before upserting — see
+        # ``add_sql_pair_batch`` for the full rationale. Two schema docs whose
+        # normalized content hashes to the same ``schema_doc_id`` must not
+        # reach ``collection.upsert`` as duplicate ids (DuplicateIDError fails
+        # the whole batch); key on the content-hash id so the last one wins.
+        timestamp = datetime.now().isoformat()
+        by_id: dict[str, dict[str, Any]] = {}
+        for content in contents:
+            by_id[schema_doc_id(content)] = {
+                "content": content,
+                "timestamp": timestamp,
+                "is_text_memory": True,
+            }
+        ids = list(by_id.keys())
+        documents = [meta["content"] for meta in by_id.values()]
+        metadatas = list(by_id.values())
+
+        def _save() -> None:
+            collection = self._mem._get_collection()
+            collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+
+        await asyncio.get_event_loop().run_in_executor(self._mem._executor, _save)
 
     def iter_all(self) -> MemoryBundle:
-        """Enumerate the collection into a bundle.
+        """Enumerate the collection into a bundle (bounded, single-shot).
 
         Only the two kinds this package can represent are exported: ``run_sql``
         tool memories carrying a ``sql`` arg (→ SQL pairs) and text memories
@@ -128,19 +255,21 @@ class MemoryStore:
 
         A single corrupt or non-conforming row (unparseable ``args_json``, or a
         value the bundle models reject — e.g. a live-agent memory longer than
-        the import limits) is skipped, not fatal: ``iter_all`` is also the
-        dedup baseline for ``import_bundle``, so one bad row must not abort
-        every export and import.
+        the import limits) is skipped, not fatal — ``iter_all`` is the
+        source for the bounded ``export_bundle`` and must not abort the
+        whole export on one bad row.
 
         Wholesale failure is *not* tolerated: if the collection has a
         meaningful number of rows and (almost) none reconstruct, that is
         systemic corruption / version skew, and a silent empty result would
-        report a destroyed backup as success and re-save duplicates on the
-        next import. In that case :class:`MemoryCorruptionError` is raised.
+        report a destroyed backup as success. In that case
+        :class:`MemoryCorruptionError` is raised. The streaming counterpart
+        (:meth:`iter_paginated`) does not enforce this rule — the skip-
+        ratio is not a single-snapshot statistic across pages.
 
         ``last_skipped_rows`` records how many rows the most recent call
-        skipped so callers (export / import) can surface a non-fatal
-        partial-loss warning.
+        skipped so callers (export) can surface a non-fatal partial-loss
+        warning.
         """
         collection = self._mem._get_collection()
         # Skip embedding vectors/documents (largest per-row payload, unused here).
@@ -201,9 +330,97 @@ class MemoryStore:
             logger.warning("iter_all skipped %d unrepresentable memory row(s)", skipped)
 
         return MemoryBundle(
-            sql_pairs=SqlPairsBlock(pairs=pairs) if pairs else None,
+            sql_pairs=pairs or None,
             schema_docs=docs or None,
         )
+
+    def iter_paginated(
+        self,
+        *,
+        where: dict[str, Any] | None = None,
+        page_size: int = 500,
+    ) -> Iterator[tuple[str, SqlPair | SchemaDoc]]:
+        """Paginated, memory-bounded enumeration of the collection.
+
+        Walks the collection via ``collection.get(limit=N, offset=M)`` and
+        yields one ``(kind, model)`` tuple at a time. ``kind`` is
+        ``"sql_pair"`` or ``"schema_doc"``. The full store is never
+        materialized; only one page of metadata is resident at a time.
+
+        ``where`` is forwarded to ``collection.get`` so callers can push
+        kind-filtering into ChromaDB rather than scanning the full
+        collection only to discard ~half the rows in Python. Pass
+        ``where={"tool_name": "run_sql"}`` for SQL pairs only or
+        ``where={"is_text_memory": True}`` for schema docs only. The
+        per-row classification in this loop still applies as a defensive
+        filter (a corrupt row with unexpected metadata cannot leak
+        through), but on a healthy store the where filter halves the work
+        per export pass.
+
+        Skipping semantics match :meth:`iter_all` per row (non-dict
+        metadata, non-``run_sql`` tool memories, unparseable ``args_json``
+        are skipped), but :attr:`last_skipped_rows` records the running
+        total across pages so a streaming export still reports the
+        ``unrepresentable`` warning even when no single page tripped a
+        wholesale-corruption threshold. Wholesale corruption is NOT
+        checked here: pagination ratios drift page to page and the rule
+        ``iter_all`` enforces (≥ 5 rows, ≥ 90 % skipped) is a one-shot
+        snapshot guarantee that does not translate cleanly to an
+        incremental scan; the streaming export path documents this gap.
+        """
+        collection = self._mem._get_collection()
+        offset = 0
+        skipped_total = 0
+        get_kwargs: dict[str, Any] = {
+            "include": ["metadatas"],
+            "limit": page_size,
+        }
+        if where is not None:
+            get_kwargs["where"] = where
+        while True:
+            page = collection.get(offset=offset, **get_kwargs)
+            ids = page.get("ids") or []
+            if not ids:
+                break
+            metadatas = page.get("metadatas") or []
+            offset += len(ids)
+            for metadata in metadatas:
+                if not isinstance(metadata, dict):
+                    skipped_total += 1
+                    continue
+                try:
+                    if metadata.get("is_text_memory"):
+                        yield (
+                            "schema_doc",
+                            SchemaDoc(content=metadata.get("content", "")),
+                        )
+                        continue
+                    if metadata.get("tool_name") != RUN_SQL_TOOL_NAME:
+                        continue
+                    args = json.loads(metadata.get("args_json", "{}"))
+                    sql = args.get("sql")
+                    if not sql:
+                        continue
+                    yield (
+                        "sql_pair",
+                        SqlPair(question=metadata.get("question", ""), sql=sql),
+                    )
+                except (TypeError, ValueError, ValidationError) as exc:
+                    skipped_total += 1
+                    logger.debug(
+                        "skipping unrepresentable memory row in page: %s", exc
+                    )
+                    continue
+            if len(ids) < page_size:
+                # Last (partial) page reached; no more rows to fetch.
+                break
+
+        self.last_skipped_rows = skipped_total
+        if skipped_total:
+            logger.warning(
+                "iter_paginated skipped %d unrepresentable memory row(s)",
+                skipped_total,
+            )
 
     def clear(self) -> int:
         """Wipe every entry in the configured collection; return how many were deleted.

@@ -34,7 +34,6 @@ from sqllens.memory.schema import (
     MemoryBundle,
     SchemaDoc,
     SqlPair,
-    SqlPairsBlock,
 )
 from sqllens.memory.store import MemoryRecord, MemoryStore
 
@@ -202,16 +201,18 @@ async def add_memories(
     sql_pairs: list[dict[str, Any]] | None = None,
     schema_docs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Bulk-add curated SQL pairs and schema docs with server-side dedup.
+    """Bulk-add curated SQL pairs and schema docs (idempotent upsert).
 
     Per-item validation failures are collected into ``errors`` (with the
     original input index) rather than aborting the batch. Valid items go
-    through :func:`import_bundle`, which dedups exact ``(question, sql)`` /
-    ``content`` matches against the store and within the batch.
+    through :func:`import_bundle`, which writes each row under a
+    deterministic content-hash id: re-adding the same logical record
+    overwrites the existing row rather than duplicating it. There is no
+    separate "duplicate" count to surface.
 
-    Returns ``{saved_count, duplicate_count, skipped_count, errors}``. The
-    caller is responsible for treating a non-empty ``errors`` list as a tool
-    failure (partial failure is failure — see the server wiring).
+    Returns ``{saved_count, errors}``. The caller is responsible for
+    treating a non-empty ``errors`` list as a tool failure (partial failure
+    is failure — see the server wiring).
     """
     errors: list[dict[str, Any]] = []
 
@@ -242,7 +243,7 @@ async def add_memories(
             )
 
     bundle = MemoryBundle(
-        sql_pairs=SqlPairsBlock(pairs=valid_pairs) if valid_pairs else None,
+        sql_pairs=valid_pairs or None,
         schema_docs=valid_docs or None,
     )
     report = await import_bundle(store, bundle)
@@ -263,8 +264,6 @@ async def add_memories(
 
     return {
         "saved_count": report.saved,
-        "duplicate_count": report.skipped_duplicate,
-        "skipped_count": 0,
         "errors": errors,
     }
 
@@ -287,7 +286,7 @@ def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str
     behaviour of the CLI ``export_bundle``.
     """
     bundle = store.iter_all()
-    pairs = list(bundle.sql_pairs.pairs) if bundle.sql_pairs else []
+    pairs = list(bundle.sql_pairs) if bundle.sql_pairs else []
     docs = list(bundle.schema_docs) if bundle.schema_docs else []
 
     warnings: list[str] = []

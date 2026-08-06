@@ -366,14 +366,17 @@ def build_server(cfg: Config) -> FastMCP:
     # Opt-in, default OFF: a client that can write memory can poison future
     # SQL generation. Only registered when an operator sets allow_import.
     if cfg.memory.allow_import:
-        from sqllens.memory import MemoryCorruptionError, MemoryStore, import_bundle
+        from sqllens.memory import MemoryStore, import_bundle
         from sqllens.memory.io import BundleFormatError, parse_json
 
         store = MemoryStore(cfg)
         # Concurrent import_memory calls share this one closure-bound store.
-        # Without serialization both would snapshot the dedup baseline before
-        # either writes and double-save identical pairs, breaking the
-        # documented "re-import is safe" guarantee. Single-writer it is.
+        # Items are now upserted under content-hash ids, so two concurrent
+        # imports of the same logical pair would race on the same row and
+        # produce undefined "last write wins" ordering. Keep the single-
+        # writer lock so the tool retains predictable semantics under
+        # concurrent calls — the lift is per-row cheap, the queue is short,
+        # and a streaming-write into ChromaDB still serializes well below it.
         import_lock = asyncio.Lock()
 
         @mcp.tool()
@@ -381,8 +384,13 @@ def build_server(cfg: Config) -> FastMCP:
             """Bulk-load a curated memory bundle (JSON) into the store.
 
             The bundle has optional ``sql_pairs`` and ``schema_docs`` blocks.
-            Exact-match duplicates (already stored or repeated in the bundle)
-            are skipped. Returns a Markdown summary of saved / skipped / errors.
+            Each row is upserted under a content-hash id, so re-importing
+            the same logical pair overwrites the existing row rather than
+            duplicating it — there is no "skipped duplicate" count to
+            surface. Returns a Markdown summary of saved / errors. The
+            whole-bundle ``MAX_BUNDLE_BYTES`` / ``MAX_BUNDLE_ITEMS`` caps
+            still apply on this path (DoS guard for the remote client);
+            the CLI ``--stream`` mode lifts them for local operators.
             """
             try:
                 bundle = parse_json(bundle_json)
@@ -391,15 +399,6 @@ def build_server(cfg: Config) -> FastMCP:
             try:
                 async with import_lock:
                     report = await import_bundle(store, bundle)
-            except MemoryCorruptionError as exc:
-                # The dedup baseline could not be reconstructed — importing
-                # would re-save duplicates. Distinct, actionable signal; not
-                # the generic "write failed" message.
-                logger.error("import_memory aborted: corrupt store baseline")
-                raise RuntimeError(
-                    f"Memory store looks corrupt: {exc} Import aborted; "
-                    "nothing was written. Check the server logs."
-                ) from exc
             except Exception as exc:
                 # Per the CLAUDE.md isError contract: a Chroma/embedding/disk
                 # failure must reach the client as a clear message, never a
@@ -421,17 +420,16 @@ def build_server(cfg: Config) -> FastMCP:
                 # on-disk persist path / driver internals; the full detail goes
                 # to the server log, the client gets sanitized counts only.
                 logger.error(
-                    "import_memory: %d item(s) failed (%d saved, %d skipped): %s",
+                    "import_memory: %d item(s) failed (%d saved): %s",
                     len(report.errors),
                     report.saved,
-                    report.skipped_duplicate,
                     "; ".join(
                         f"{e.kind}[{e.index}]: {e.message}" for e in report.errors
                     ),
                 )
                 raise RuntimeError(
                     f"Memory import failed: {len(report.errors)} item(s) errored "
-                    f"({report.saved} saved, {report.skipped_duplicate} skipped). "
+                    f"({report.saved} saved). "
                     "A partial import is a failure; check the server logs."
                 )
             return report.to_markdown()
@@ -588,18 +586,18 @@ def build_server(cfg: Config) -> FastMCP:
             sql_pairs: list[dict[str, Any]] | None = None,
             schema_docs: list[dict[str, Any]] | None = None,
         ) -> str | CallToolResult:
-            """Bulk-add curated SQL pairs and schema docs, with server-side dedup.
+            """Bulk-add curated SQL pairs and schema docs (idempotent upsert).
 
             ``sql_pairs`` items are ``{"question", "sql"}``; ``schema_docs`` items
-            are ``{"content"}``. Exact ``(question, sql)`` / ``content`` matches
-            (already stored or repeated in the batch) are skipped. Write-guarded:
-            refuses on an unauthenticated endpoint unless auth.insecure is set.
+            are ``{"content"}``. Each row is written under a content-hash id, so
+            re-adding the same logical record overwrites the existing row rather
+            than producing a duplicate. Write-guarded: refuses on an
+            unauthenticated endpoint unless auth.insecure is set.
 
-            Returns ``{"saved_count", "duplicate_count", "skipped_count",
-            "errors": [{"index", "question", "error"}]}``. Per the partial-failure
-            contract, any per-item error makes this an ``isError`` result (the
-            structured body is still returned so the caller sees which rows
-            failed).
+            Returns ``{"saved_count", "errors": [{"index", "question",
+            "error"}]}``. Per the partial-failure contract, any per-item error
+            makes this an ``isError`` result (the structured body is still
+            returned so the caller sees which rows failed).
             """
             _memory_write_auth()
             try:
@@ -617,10 +615,9 @@ def build_server(cfg: Config) -> FastMCP:
             # the client as isError, even though some rows may have saved.
             if result["errors"]:
                 logger.error(
-                    "add_memories: %d item(s) failed (%d saved, %d duplicate)",
+                    "add_memories: %d item(s) failed (%d saved)",
                     len(result["errors"]),
                     result["saved_count"],
-                    result["duplicate_count"],
                 )
                 return _json_error(result)
             return json.dumps(result)
