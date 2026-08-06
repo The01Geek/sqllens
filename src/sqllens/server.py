@@ -102,6 +102,22 @@ _AGENT_TRACE_META_KEY = "sqllens/agent_trace"
 # prior turn's history (e.g. to answer its own clarifying question).
 _CONVERSATION_META_KEY = "sqllens/conversation"
 
+# Soft caps on the inbound ``_meta`` payload an authenticated MCP client can
+# attach to a request. The MCP SDK materializes unknown ``_meta`` keys onto
+# ``RequestParams.Meta.model_extra``; without bounds a client can ship an
+# arbitrarily large blob (uvicorn/FastMCP impose no body-size limit by
+# default), and ``dict(extra)`` would then materialize the whole thing per
+# request — proportional memory/CPU per call. Bound both the key count and
+# the serialized size of those extras; overflow yields ``{}`` so dynamic RLS
+# rules fail-secure (the same documented behaviour as a missing or unreadable
+# ``_meta``). 64 keys covers any realistic dynamic-RLS keyset (tenant_id,
+# user_id, role, region, …) with several decades of headroom. The byte cap is
+# measured via ``json.dumps`` with its default ``ensure_ascii=True``, which
+# emits pure ASCII (any non-ASCII codepoints escape to ``\uXXXX``), so
+# ``len(serialized) == byte count of the on-wire form``.
+_MAX_META_KEYS = 64
+_MAX_META_BYTES = 16 * 1024
+
 
 def _profile_field_bounds() -> dict[str, dict[str, float]]:
     """Derive the per-knob ``ge``/``le`` bounds from the ``Profile`` pydantic model.
@@ -225,7 +241,49 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
             "dynamic RLS rules will see no metadata"
         )
         return {}
-    return dict(extra) if extra else {}
+    if not extra:
+        return {}
+    if len(extra) > _MAX_META_KEYS:
+        logger.warning(
+            "request _meta has %d extra keys (cap %d); discarding for fail-secure metadata",
+            len(extra),
+            _MAX_META_KEYS,
+        )
+        return {}
+    extras = dict(extra)
+    try:
+        # ``ensure_ascii=True`` is the stdlib default; we pass it explicitly so
+        # the byte-count invariant documented above (``len(serialized) == byte
+        # count of the on-wire form``) is robust against any future stdlib
+        # default change.
+        serialized_len = len(
+            json.dumps(extras, separators=(",", ":"), ensure_ascii=True, default=str)
+        )
+    except Exception:
+        # ``default=str`` covers most non-JSON-native values; the broad catch
+        # backstops anything pathological — circular refs (``ValueError``),
+        # types ``default=str`` can't stringify or whose ``__str__`` raises
+        # (``TypeError`` / arbitrary), deeply-nested extras (``RecursionError``,
+        # which is *not* a ``ValueError`` subclass), or any future ``json``
+        # encoder failure. The docstring's "any failure to read the request
+        # context yields ``{}``" promise is the load-bearing contract here;
+        # narrower except clauses have repeatedly leaked unstructured
+        # tracebacks to MCP clients in this codebase. Same fail-secure:
+        # dynamic RLS rules see no metadata.
+        logger.warning(
+            "request _meta extras not JSON-serializable; discarding for fail-secure metadata",
+            exc_info=True,
+        )
+        return {}
+    if serialized_len > _MAX_META_BYTES:
+        logger.warning(
+            "request _meta extras serialize to %d bytes (cap %d); "
+            "discarding for fail-secure metadata",
+            serialized_len,
+            _MAX_META_BYTES,
+        )
+        return {}
+    return extras
 
 
 def build_server(cfg: Config) -> FastMCP:

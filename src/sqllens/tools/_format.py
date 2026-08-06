@@ -53,6 +53,22 @@ _MAX_CHART_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES
 # ceiling. Aliased to the table budget so all three _meta blobs share one cap.
 _MAX_TRACE_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES
 
+# Per-string-value cap for arguments embedded in the agent trace. Each step's
+# ``arguments`` is the raw ``tool_call.arguments`` dict — ``save_text_memory``
+# carries the whole free-form ``content``, ``save_question_tool_args`` carries
+# the user question + tool args (including SQL), ``search_saved_correct_tool_uses``
+# carries the verbatim user question. The whole-trace ``_MAX_TRACE_PAYLOAD_BYTES``
+# cap (see ``_cap_trace_size``) catches blow-ups, but on a normal-length run a
+# single 100 KB ``content`` still echoes verbatim every turn. This per-value cap
+# truncates each string in the arguments tree so the trace stays useful for
+# debugging (tool name + a bounded prefix of each arg) without echoing the full
+# payload of any single saved-memory write or query. The cap counts Python
+# code points (``len(str)`` and ``str[:n]`` slice), not UTF-8 bytes — a 1024-
+# char prefix of multi-byte content can exceed 1024 bytes once serialized;
+# the whole-trace ``_MAX_TRACE_PAYLOAD_BYTES`` budget catches that overflow.
+_MAX_TRACE_ARGUMENT_VALUE_CHARS = 1024
+_TRACE_TRUNCATION_SUFFIX = "…(truncated)"
+
 # Overall ceiling across the whole ``sqllens/blocks`` array. The per-block cap
 # above bounds each individual block; this caps the *sum* so a long stream of
 # in-budget blocks still cannot blow the iframe ceiling. Set well above the
@@ -639,7 +655,9 @@ def build_agent_trace(
         tool = title[len(_TOOL_CARD_PREFIX):]
         timestamp = getattr(rich, "timestamp", None)
         metadata = getattr(rich, "metadata", None)
-        arguments = metadata if isinstance(metadata, dict) else {}
+        arguments = _truncate_trace_arguments(
+            metadata if isinstance(metadata, dict) else {}
+        )
 
         step = by_id.get(card_id) if isinstance(card_id, str) else None
         if step is None:
@@ -720,6 +738,37 @@ def build_agent_trace(
             "terminal_error": terminal_error,
         }
     )
+
+
+def _truncate_trace_arguments(value: object) -> object:
+    """Bound every string in a trace ``arguments`` value at the per-value cap.
+
+    The agent's STATUS_CARD ``metadata`` passes through ``build_agent_trace``
+    verbatim, but for tools like ``save_text_memory`` (free-form ``content``),
+    ``save_question_tool_args`` (full SQL + saved question), and
+    ``search_saved_correct_tool_uses`` (verbatim user question) it can be
+    arbitrarily long. The whole-trace cap in :func:`_cap_trace_size` drops
+    *all* arguments when over budget; this per-value cap preserves the
+    structure (so a debugging client still sees what was called and the
+    leading characters of each arg) while ensuring no single value can echo
+    unbounded content back to the client on every turn.
+
+    Strings over ``_MAX_TRACE_ARGUMENT_VALUE_CHARS`` are sliced (by code
+    point) and suffixed with ``_TRACE_TRUNCATION_SUFFIX``; dicts and lists
+    recurse; other scalars (int/float/bool/None) pass through unchanged.
+    The returned truncated string is ``_MAX_TRACE_ARGUMENT_VALUE_CHARS +
+    len(_TRACE_TRUNCATION_SUFFIX)`` characters long — intentionally one
+    suffix's worth over the per-value cap so the elision is self-flagging.
+    """
+    if isinstance(value, str):
+        if len(value) > _MAX_TRACE_ARGUMENT_VALUE_CHARS:
+            return value[:_MAX_TRACE_ARGUMENT_VALUE_CHARS] + _TRACE_TRUNCATION_SUFFIX
+        return value
+    if isinstance(value, dict):
+        return {k: _truncate_trace_arguments(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_truncate_trace_arguments(v) for v in value]
+    return value
 
 
 def _cap_trace_size(trace: dict) -> dict:
