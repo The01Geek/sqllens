@@ -224,6 +224,24 @@ def test_csv_defang_preserves_blank_rejection_semantics() -> None:
         parse_csv(text)
 
 
+def test_csv_defang_covers_leading_newline() -> None:
+    # Issue #218: ``\n``-leading cells must defang too. Several spreadsheet
+    # importers treat ``\n`` as an embedded row terminator and lift the
+    # post-newline content into its own cell, which then begins with a real
+    # formula trigger (``=``/``+``/``-``/``@``). Without defanging the
+    # leading newline, ``\n=HYPERLINK(...)`` slips the parse-time check (its
+    # first character is not in the trigger set) and re-emerges as an active
+    # formula in the importing spreadsheet. The direct-call check below
+    # mirrors what parse_csv / serialize_csv invoke at the boundaries.
+    from sqllens.memory.io import _defang_csv_cell
+
+    assert _defang_csv_cell("\n=HYPERLINK('http://evil', 'A')") == (
+        "'\n=HYPERLINK('http://evil', 'A')"
+    )
+    assert _defang_csv_cell("\n+1+1") == "'\n+1+1"
+    assert _defang_csv_cell("normal\n=cmd()") == "normal\n=cmd()"
+
+
 def test_csv_defang_is_idempotent() -> None:
     # An already-defanged cell (leading apostrophe) must not accumulate
     # apostrophes when re-imported then re-exported.

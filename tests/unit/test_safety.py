@@ -530,8 +530,6 @@ class TestStructuralShowAllowed:
             "SHOW TABLES LIKE '%user%'",
             "SHOW COLUMNS FROM orders",
             "SHOW FULL COLUMNS FROM orders",
-            "SHOW DATABASES",
-            "SHOW SCHEMAS",
             "SHOW INDEX FROM orders",
             "SHOW CREATE TABLE orders",
             "SHOW CREATE VIEW order_summary",
@@ -560,6 +558,11 @@ class TestUnsafeShowRejected:
             "SHOW EVENTS",
             "SHOW TABLE STATUS",
             "SHOW COLLATION",
+            # SHOW DATABASES / SHOW SCHEMAS were removed from the allowlist in
+            # issue #218: they disclose every schema the MySQL role can see,
+            # breaching the one-database-per-instance contract.
+            "SHOW DATABASES",
+            "SHOW SCHEMAS",
         ],
     )
     def test_unsafe_show_rejected(self, sql: str) -> None:

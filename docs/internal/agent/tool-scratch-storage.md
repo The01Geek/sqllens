@@ -15,9 +15,9 @@ Non-`SELECT` queries don't write anything; they return a row-count summary only.
 
 ## The `FileSystem` capability
 
-The abstract interface is in [src/sqllens/agent/capabilities/file_system/base.py](../../../src/sqllens/agent/capabilities/file_system/base.py): seven async methods covering `list_files`, `read_file`, `write_file`, `exists`, `is_directory`, `search_files`, `run_bash`.
+The abstract interface is in [src/sqllens/agent/capabilities/file_system/base.py](../../../src/sqllens/agent/capabilities/file_system/base.py): six async methods covering `list_files`, `read_file`, `write_file`, `exists`, `is_directory`, `search_files`.
 
-`RunSqlTool` only uses `write_file`. The wider interface is honored because the upstream framework expects the capability to be substitutable (e.g. a sandboxed or S3-backed implementation), and we kept the contract intact.
+`RunSqlTool` only uses `write_file`. The wider interface is honored because the upstream framework expects the capability to be substitutable (e.g. a sandboxed or S3-backed implementation), and we kept the contract intact. The upstream `run_bash` method (which shelled out via `asyncio.create_subprocess_shell`) was pruned in #218 — no tool registered a bash capability, but the method rode on the same `LocalFileSystem` instance the registered `RunSqlTool` already holds, so a future tool reusing the same FS object would have inherited an LLM-driven RCE seam.
 
 ## `LocalFileSystem` semantics
 
@@ -26,7 +26,6 @@ The on-disk implementation is at [src/sqllens/agent/integrations/local/file_syst
 - Constructor: `LocalFileSystem(working_directory: str = ".")`. The default is **a literal dot**, resolved relative to the process CWD at every call — but in SQL Lens we never use the default; see [How `RunSqlTool` gets wired](#how-runsqltool-gets-wired) below.
 - For every operation, `_get_user_directory(context)` derives a subfolder from `sha256(context.user.id)[:16]` (16 hex chars), creates it via `mkdir(parents=True, exist_ok=True)`, and returns it.
 - All read/write paths are sandboxed beneath that user-derived folder via `_resolve_path()`, which uses `Path.resolve().relative_to()` to reject directory-traversal attempts.
-- `run_bash()` uses the same user folder as `cwd=`.
 
 So a single `write_file("foo.csv", ...)` from `RunSqlTool` lands at:
 
