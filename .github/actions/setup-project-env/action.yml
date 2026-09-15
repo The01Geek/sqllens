@@ -1,0 +1,307 @@
+name: 'Set up project runtime (Python / Node / PHP / services / deps)'
+description: |
+  Provision the GitHub Actions runner from `.prflow/config.json`'s `setup`
+  block BEFORE Claude runs, rather than hardcoding the toolchain (see that file
+  / https://prflow.ai/docs/runs/cloud/setup for the rationale). In order: optional Python, Node
+  (with npm/yarn/pnpm download caching when a lockfile is present), and PHP;
+  then optional service containers (`docker run`); then the configured
+  dependency-install lines.
+
+  The multi-line install command stays a jq-extracted string we exec directly,
+  never interpolated into a `run:` (injection-safe). Python/Node/PHP setup are
+  `uses:` actions — they must be static steps, so they are gated on a configured
+  version rather than data-looped over.
+
+  Service containers use `docker run` rather than GitHub Actions `services:`:
+  service containers cannot be created inside a composite action, and a static
+  reusable workflow cannot define a `services:` map from config. `docker run`
+  keeps it config-driven and reachable on 127.0.0.1:<host-port>.
+
+  Single source of truth: devflow.yml (command + runner jobs) and
+  devflow-implement.yml all call this action, so the provisioning logic lives in
+  exactly one place.
+
+inputs:
+  config_json:
+    description: '.prflow/config.json contents, as emitted by the read-project-config action (steps.<id>.outputs.json). The automated reviewer (devflow-runner.yml, provision_env path) instead passes the TRUSTED base-ref config it reads directly via git show + `jq -c` — a different provenance but the same shape (a JSON object with a `.setup` block), so this action consumes it identically.'
+    required: true
+  lint_mode:
+    description: >-
+      Lint-tool provisioning mode. Closed set: "provision" installs the
+      manifest's bounded ShellCheck/Ruff toolchain (run-local, no sudo, digest
+      and version verified) before the Claude action; "none" does no lint-tool
+      work and validates no manifest. Any other value is refused.
+    required: false
+    default: 'none'
+
+outputs:
+  health_summary:
+    description: |
+      Empty string when every started service container is running/healthy (or
+      when no services are configured). Otherwise a multiline string with one
+      line per degraded service, naming the service and its failure reason (not
+      running, or unhealthy after the readiness timeout with its last status).
+      Provisioning stays warning-only — a degraded service populates this output
+      but never fails the step. Consumed by devflow-runner.yml to prepend an
+      infra-status note to the reviewer prompt so build/test failures tracing to
+      a service that never came up are attributed to infrastructure, not the PR.
+    value: ${{ steps.services.outputs.health_summary }}
+
+runs:
+  using: composite
+  steps:
+    - id: setupcfg
+      shell: bash
+      env:
+        CONFIG_JSON: ${{ inputs.config_json }}
+      run: |
+        set -euo pipefail
+        # Assignment form (not echo "k=$(…)"): a command-substitution failure
+        # inside `echo "k=$(…)"` is swallowed (echo still exits 0), so a missing
+        # jq or malformed CONFIG_JSON would silently write an empty version and
+        # skip the toolchain. Capturing into a var lets `set -e` abort instead.
+        # The `if type=="string"` guard maps a non-scalar value (a config typo
+        # like an object/array) to "" rather than letting multi-line JSON
+        # corrupt the GITHUB_OUTPUT line.
+        py_ver=$(echo "$CONFIG_JSON" | jq -r '.setup.python_version // "" | if type=="string" then . else "" end')
+        node_ver=$(echo "$CONFIG_JSON" | jq -r '.setup.node_version // "" | if type=="string" then . else "" end')
+        node_wd=$(echo "$CONFIG_JSON" | jq -r '.setup.node_working_directory // "" | if type=="string" then . else "" end')
+        php_ver=$(echo "$CONFIG_JSON" | jq -r '.setup.php_version // "" | if type=="string" then . else "" end')
+        php_ext=$(echo "$CONFIG_JSON" | jq -r '.setup.php_extensions // "" | if type=="string" then . else "" end')
+        php_tools=$(echo "$CONFIG_JSON" | jq -r '.setup.php_tools // "" | if type=="string" then . else "" end')
+
+        # Node download caching errors out in setup-node when `cache` is set but
+        # no lockfile exists, so only enable it when a lockfile is present — and
+        # pick the package manager that matches it. The lockfile is resolved
+        # under node_working_directory (empty = repo root, the historical case),
+        # so a subdirectory/monorepo JS build gets cached too. Extracted into a
+        # sibling script (travels with the action, unit-tested in lib/test/) and
+        # captured assignment-form: a failure aborts under set -e rather than
+        # silently writing empty cache outputs.
+        node_cache_lines=$(bash "$GITHUB_ACTION_PATH/resolve-node-cache.sh" "$node_ver" "$node_wd")
+        {
+          echo "python_version=$py_ver"
+          echo "node_version=$node_ver"
+          echo "$node_cache_lines"
+          echo "php_version=$php_ver"
+          echo "php_extensions=$php_ext"
+          echo "php_tools=$php_tools"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Set up Python
+      if: steps.setupcfg.outputs.python_version != ''
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ steps.setupcfg.outputs.python_version }}
+
+    - name: Set up Node
+      if: steps.setupcfg.outputs.node_version != ''
+      uses: actions/setup-node@v6
+      with:
+        node-version: ${{ steps.setupcfg.outputs.node_version }}
+        # Empty `cache` disables caching (the no-lockfile case computed above),
+        # so this never trips setup-node's "lock file is not found" error.
+        cache: ${{ steps.setupcfg.outputs.node_cache }}
+        cache-dependency-path: ${{ steps.setupcfg.outputs.node_cache_path }}
+
+    - name: Set up PHP
+      if: steps.setupcfg.outputs.php_version != ''
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ steps.setupcfg.outputs.php_version }}
+        extensions: ${{ steps.setupcfg.outputs.php_extensions }}
+        tools: ${{ steps.setupcfg.outputs.php_tools }}
+
+    # Restore pip's wheel cache when Python is provisioned. setup-python's
+    # built-in `cache: pip` is deliberately NOT used: it ERRORS when no
+    # requirements/pyproject file exists (the common case for non-package
+    # repos). This generic cache degrades to a stable key when no dep file is
+    # present, so it never errors and still saves heavy adopters
+    # (`pip install -e .[…]`) the repeated PyPI download on every run.
+    - name: Cache pip downloads
+      if: steps.setupcfg.outputs.python_version != ''
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/pip
+        key: pip-${{ runner.os }}-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml', '**/setup.cfg', '**/setup.py') }}
+        restore-keys: |
+          pip-${{ runner.os }}-
+
+    - name: Start service containers
+      id: services
+      shell: bash
+      env:
+        CONFIG_JSON: ${{ inputs.config_json }}
+      run: |
+        set -euo pipefail
+        # Service containers (db/cache/queue) from `setup.services`, started via
+        # `docker run -d` so they work inside this composite action and stay
+        # config-driven. Values come from the TRUSTED base config (never the PR
+        # head), so a PR cannot inject a service or its env. Reachable from the
+        # runner and from build steps on 127.0.0.1:<host-port>.
+        SERVICES=$(echo "$CONFIG_JSON" | jq -c '.setup.services // [] | if type=="array" then . else [] end')
+        count=$(echo "$SERVICES" | jq 'length')
+        if [ "$count" -eq 0 ]; then
+          echo "No setup.services configured; skipping service containers."
+          exit 0
+        fi
+        if ! command -v docker >/dev/null 2>&1; then
+          echo "::warning::setup.services is configured but docker is unavailable on this runner; skipping service startup."
+          exit 0
+        fi
+
+        started=()
+        while IFS= read -r svc; do
+          [ -n "$svc" ] || continue
+          name=$(echo "$svc" | jq -r '.name')
+          image=$(echo "$svc" | jq -r '.image')
+          if [ -z "$name" ] || [ "$name" = "null" ] || [ -z "$image" ] || [ "$image" = "null" ]; then
+            echo "::warning::Skipping a setup.services entry missing name or image."
+            continue
+          fi
+          # Build argv as an array — env values and ports are never word-split,
+          # so a value containing spaces/metacharacters is passed safely.
+          args=(run -d --name "$name")
+          while IFS= read -r p; do [ -n "$p" ] && args+=(-p "$p"); done \
+            < <(echo "$svc" | jq -r '.ports[]? // empty')
+          while IFS= read -r kv; do [ -n "$kv" ] && args+=(-e "$kv"); done \
+            < <(echo "$svc" | jq -r '.env // {} | to_entries[] | "\(.key)=\(.value)"')
+          # `options` is an ARRAY of complete docker-run args (each element one
+          # argv token), so a flag whose value contains spaces — e.g.
+          # "--health-cmd=mysqladmin ping -h 127.0.0.1" — survives intact. A
+          # single space-separated string would word-split on the spaces inside
+          # the health command and break it, so the schema requires an array.
+          while IFS= read -r o; do [ -n "$o" ] && args+=("$o"); done \
+            < <(echo "$svc" | jq -r '.options[]? // empty')
+          args+=("$image")
+          echo "::group::Starting service '$name' ($image)"
+          docker "${args[@]}"
+          echo "::endgroup::"
+          started+=("$name")
+        done < <(echo "$SERVICES" | jq -c '.[]')
+
+        # Readiness: for containers that declare a health check (via `options`),
+        # wait until healthy; otherwise just confirm they're still running. Best
+        # effort — a timeout warns rather than failing the job, so the real test
+        # failure (if any) surfaces with a clearer message downstream.
+        #
+        # Each degraded service ALSO accumulates a one-line entry in `degraded`,
+        # emitted below as the `health_summary` output so the calling workflow can
+        # tell the reviewer which dependency never came up. This is purely
+        # additive to the existing warning-only behavior — nothing here fails the
+        # step.
+        degraded=()
+        for name in "${started[@]}"; do
+          health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$name" 2>/dev/null || echo "")
+          if [ -z "$health" ]; then
+            running=$(docker inspect --format '{{.State.Running}}' "$name" 2>/dev/null || echo "false")
+            if [ "$running" = "true" ]; then
+              echo "Service '$name' running (no health check declared)."
+            else
+              echo "::warning::Service '$name' is not running."
+              degraded+=("- $name: not running")
+            fi
+            continue
+          fi
+          echo "Waiting for service '$name' to become healthy…"
+          for _ in $(seq 1 60); do
+            health=$(docker inspect --format '{{.State.Health.Status}}' "$name" 2>/dev/null || echo "")
+            [ "$health" = "healthy" ] && break
+            sleep 2
+          done
+          if [ "$health" = "healthy" ]; then
+            echo "Service '$name' healthy."
+          else
+            echo "::warning::Service '$name' not healthy after ~120s (status: ${health:-unknown}); continuing."
+            degraded+=("- $name: not healthy after ~120s (status: ${health:-unknown})")
+          fi
+        done
+
+        # Emit the degraded-service summary as a multiline step output. When every
+        # service is healthy `degraded` is empty and we write nothing, so the
+        # output resolves to the empty string (the all-healthy contract). A unique,
+        # timestamped heredoc delimiter avoids any collision with the summary's own
+        # content, mirroring the heredoc transport used elsewhere in the runner.
+        if [ ${#degraded[@]} -gt 0 ]; then
+          delim="HEALTH_EOF_$(date +%s%N)_$$"
+          {
+            printf 'health_summary<<%s\n' "$delim"
+            printf '%s\n' "${degraded[@]}"
+            printf '%s\n' "$delim"
+          } >> "$GITHUB_OUTPUT"
+        fi
+
+    # The hashFiles(manifest, marker) key covers the whole AC5 tuple transitively —
+    # do not add tuple components to it by hand. A restored $DEST_BIN is still
+    # re-verified by the provisioning step: a cache hit is never verification.
+    - name: Cache the provisioned lint toolchain
+      if: inputs.lint_mode == 'provision'
+      uses: actions/cache@v5
+      with:
+        path: ${{ runner.temp }}/prflow-lint-bin
+        key: lintprov-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.prflow/lint-manifest.json', '.prflow/install-state.json') }}
+
+    # Must stay ordered BEFORE the Claude action (provisioning after model start
+    # defeats #1388), and the os/arch → artifact/URL mapping stays in the trusted
+    # Python helpers — never manifest-supplied strings (#1276 trust model).
+    - name: Provision lint toolchain (before model)
+      shell: bash
+      env:
+        LINT_MODE: ${{ inputs.lint_mode }}
+      run: |
+        set -euo pipefail
+        case "$LINT_MODE" in
+          none)
+            echo "lint_mode=none: no lint-tool provisioning and no manifest validation."
+            exit 0
+            ;;
+          provision) ;;
+          *)
+            echo "::error::setup-project-env: unknown lint_mode '$LINT_MODE' (closed set: provision | none)."
+            exit 1
+            ;;
+        esac
+        # Resolve the trusted bundled helpers from the vendored slice the plugin vendor
+        # step materializes (every workflow that calls this action vendors first). Probe
+        # BOTH helpers the provisioning step invokes: probing only lint_provision.py let
+        # a failed vendor materialization fall through and surface as a marker-readiness
+        # refusal, sending the operator to re-run an installer that was never the problem.
+        SCRIPTS_DIR=".prflow/vendor/prflow/scripts"
+        if [ ! -f "$SCRIPTS_DIR/lint_provision.py" ] || [ ! -f "$SCRIPTS_DIR/install_state.py" ]; then
+          echo "::error::setup-project-env: .prflow/vendor/prflow/scripts/ does not carry both lint_provision.py and install_state.py — the plugin vendor step did not materialize the bundled helpers."
+          exit 1
+        fi
+        case "${RUNNER_OS:-}" in
+          Linux) TARGET_OS=linux ;;
+          macOS) TARGET_OS=macos ;;
+          Windows) TARGET_OS=windows ;;
+          *) echo "::error::setup-project-env: unsupported RUNNER_OS '${RUNNER_OS:-}'"; exit 1 ;;
+        esac
+        case "${RUNNER_ARCH:-}" in
+          X64) TARGET_ARCH=x86_64 ;;
+          ARM64) TARGET_ARCH=arm64 ;;
+          *) echo "::error::setup-project-env: unsupported RUNNER_ARCH '${RUNNER_ARCH:-}'"; exit 1 ;;
+        esac
+        export LINT_MANIFEST=".prflow/lint-manifest.json"
+        export INSTALL_STATE=".prflow/install-state.json"
+        export DEST_BIN="${RUNNER_TEMP:-/tmp}/prflow-lint-bin"
+        export TARGET_OS TARGET_ARCH SCRIPTS_DIR
+        bash "$GITHUB_ACTION_PATH/provision-lint-tools.sh"
+
+    - name: Provision project dependencies
+      shell: bash
+      env:
+        CONFIG_JSON: ${{ inputs.config_json }}
+      run: |
+        set -euo pipefail
+        INSTALL=$(echo "$CONFIG_JSON" | jq -r '.setup.install | if type=="array" then join("\n") elif type=="string" then . else "" end')
+        if [ -n "$INSTALL" ]; then
+          echo "::group::Installing project dependencies"
+          # bash -euo pipefail (not a bare `bash -c`): the outer shell's
+          # set -e does NOT propagate into the child, so a multi-line install
+          # whose early line fails would otherwise continue and exit green.
+          bash -euo pipefail -c "$INSTALL"
+          echo "::endgroup::"
+        else
+          echo "No setup.install configured; skipping dependency install."
+        fi
