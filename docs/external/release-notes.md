@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## September 16, 2026
+
+- **[Feature] Opt-in near-match memory context for near-miss questions** — A new `memory.context_similarity_threshold` setting (environment variable `SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD`) lets SQL Lens automatically feed related past work to the assistant as background context when a question nearly, but not quite, matches something in memory. Set it below `similarity_threshold` to turn the tier on: near-match saved question-and-answer pairs and free-form notes then reach the assistant as related context, so a rephrased or slightly different question can still benefit from what SQL Lens has learned. Leaving it at its default (`0.7`, the same as `similarity_threshold`) keeps the tier off and behavior unchanged. See [Managing memory](managing-memory.md#near-match-background-context). ([#251](https://github.com/The01Geek/sqllens/issues/251))
+
 ## June 9, 2026
 
 - **[Improvement] The redundant `agent.show_memory_details` setting is now removed** — The `agent.show_memory_details` setting (environment variable `SQLLENS_AGENT__SHOW_MEMORY_DETAILS`) and the one-line `_Memory: ..._` footer it appended to `query_database` answers are now removed. The structured memory hit/miss summary that apps-aware hosts already render — attached to every response that completed a memory search under the `sqllens/memory_info` key, gated by no flag — is unchanged, so no signal is lost. Only the duplicated plain-text footer is gone. **Action required if you set this setting:** remove `show_memory_details` from the `[agent]` section of your `sqllens.toml`, and unset `SQLLENS_AGENT__SHOW_MEMORY_DETAILS` if you exported it; both are now silently ignored. If you persisted the field on any named profile through the profile-admin UI, also remove it from that profile (use `upsert_profile` with the remaining knobs) — the profile store rejects unknown fields and will skip the affected entry on startup with a loud `Warning:` line until it is cleaned up. (#204)

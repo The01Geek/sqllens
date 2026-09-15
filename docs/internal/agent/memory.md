@@ -1,5 +1,7 @@
 # Agent memory (ChromaDB-backed vector store)
 
+<!-- verified-against: 2f12727 2026-09-16 -->
+
 How the agent recalls prior successful tool uses, and what tunables affect retrieval quality. Source-of-truth reference for [src/sqllens/agent/integrations/chromadb/agent_memory.py](../../../src/sqllens/agent/integrations/chromadb/agent_memory.py), [src/sqllens/agent/capabilities/agent_memory/](../../../src/sqllens/agent/capabilities/agent_memory/), and [src/sqllens/agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py).
 
 ## What the memory feature actually does
@@ -21,7 +23,30 @@ The question is the embedded text; the tool name and args ride along as Chroma m
 
 **Text memory (free-form).** The agent can also call `SaveTextMemoryTool` to record free-form notes — domain vocabulary, semantic hints, "column X actually means Y in this schema", etc. These are stored in the same Chroma collection but as text-memory entries rather than tool-arg recordings. The default system prompt (`src/sqllens/agent/core/system_prompt/default.py`) gates its text-memory instructions on `has_text_memory = "save_text_memory" in tool_names`, so the tool must be registered for the LLM to be told about it.
 
-`cfg.memory.similarity_threshold` controls both: results with a similarity score below the threshold are filtered out before the agent sees them.
+There are two separate ways a memory reaches the model, and they use different thresholds:
+
+- **On-demand tool-use search.** The agent explicitly calls `SearchSavedCorrectToolUsesTool` to look up prior question → SQL pairs. Its cosine-similarity floor is `cfg.memory.similarity_threshold` (the server-configured default; the LLM may override it per call). Hits below the floor are dropped before the agent sees them.
+- **Automatic system-prompt injection.** Before the agent runs, the context enhancer searches memory on its own and folds any relevant text memories — and, when opted in, near-match question → SQL pairs — into the system prompt. This path is governed by *both* `similarity_threshold` and the new `context_similarity_threshold`. See [System-prompt context injection](#system-prompt-context-injection) below.
+
+## System-prompt context injection
+
+Separately from the on-demand `SearchSavedCorrectToolUsesTool` path, the agent runs a **context enhancer** before it starts answering. `DefaultLlmContextEnhancer.enhance_system_prompt` ([src/sqllens/agent/core/enhancer/default.py](../../../src/sqllens/agent/core/enhancer/default.py)) searches memory using the user's message and, when it finds anything relevant, appends a `## Relevant Context from Memory` block to the system prompt. The LLM never decides to run this search — it happens automatically on every request that has an `agent_memory` wired in.
+
+The enhancer holds two thresholds, both passed in by `build_agent` from `MemoryConfig`:
+
+- `similarity_threshold` — the **strict hit bar**. Text memories scoring at or above it are always injected.
+- `context_similarity_threshold` — the **opt-in near-match floor**. It defaults to the same value as `similarity_threshold`, which leaves the near-match band empty.
+
+**The permissive near-match band (opt-in).** When `context_similarity_threshold` is set *below* `similarity_threshold`, the enhancer injects memories whose similarity score falls in the half-open band `[context_similarity_threshold, similarity_threshold)` — memories that are relevant but not close enough to clear the strict bar. The band draws from two sources under the same `## Relevant Context from Memory` heading:
+
+- **Text / schema-doc memories.** The text search runs at `min(context_similarity_threshold, similarity_threshold)`, so it returns everything from the band floor upward; each hit is rendered as a bullet of its stored content.
+- **Saved question → SQL pairs.** Only when the band is enabled, the enhancer additionally runs `search_similar_usage` at the band floor and keeps only pairs that score *below* the strict bar and carry a non-empty `sql` arg. These render as related-example prose — `Related prior question — "<question>" — was answered with this SQL: <sql>` — deliberately **not** as a tool call. Pairs at or above the strict bar are left out of this block because the agent can already reach them through `SearchSavedCorrectToolUsesTool`, so injecting them here would duplicate them.
+
+When `context_similarity_threshold >= similarity_threshold` (the default), the band is empty: no extra `search_similar_usage` call is issued, text memories are searched at the strict bar, and prompt injection behaves exactly as it did before this feature. This makes the near-match tier strictly opt-in — a deployment that leaves the field at its default sees no change in behavior or in the number of memory searches per request.
+
+**Graceful degrade.** The whole enhancement runs inside a `try/except`. If any memory search raises, the enhancer logs the failure at `WARNING` and returns the **unmodified** system prompt — a memory-search failure degrades to "no injected context" and never fails the request. When memory yields nothing relevant (no text hits and no band pairs), the enhancer likewise returns the prompt untouched.
+
+Before this feature landed, `similarity_threshold` did not reach the text-memory injection path at all: the framework's fallback enhancer froze its text-search floor at a hardcoded `0.7`. Wiring the enhancer explicitly in `build_agent` (see below) is what first brings the configured `similarity_threshold` to that floor.
 
 ## Wiring
 
@@ -33,6 +58,18 @@ memory = ChromaAgentMemory(
     collection_name=cfg.memory.collection,
 )
 ```
+
+It then builds the context enhancer explicitly, threading both memory thresholds into it, and passes it to the `Agent` constructor as `llm_context_enhancer`:
+
+```python
+context_enhancer = DefaultLlmContextEnhancer(
+    memory,
+    similarity_threshold=cfg.memory.similarity_threshold,
+    context_similarity_threshold=cfg.memory.context_similarity_threshold,
+)
+```
+
+This explicit wiring matters: if `llm_context_enhancer` is left unset, `Agent` falls back to a `DefaultLlmContextEnhancer` built with only `agent_memory`, which cannot see either configured threshold and therefore leaves the text-search floor at the enhancer's own `0.7` default and the near-match band permanently off. See [System-prompt context injection](#system-prompt-context-injection) above.
 
 The memory tools are then registered alongside `RunSqlTool` inside `build_agent` ([factory.py](../../../src/sqllens/agent/factory.py)). The structured-save tool is gated on `cfg.memory.save_queries`; the search and text-memory tools are always registered:
 
@@ -64,7 +101,8 @@ These live under `[memory]` in `sqllens.toml` (or `SQLLENS_MEMORY__*` env vars).
 |---|---|---|---|
 | `persist_dir` | `./chroma` (relative to CWD) | `SQLLENS_MEMORY__PERSIST_DIR` | Directory on disk for the Chroma collection. Created on first use. |
 | `collection` | `sqllens` | `SQLLENS_MEMORY__COLLECTION` | Logical collection name inside the persisted store. Letting two processes share a `persist_dir` with different collections is supported but rarely useful. |
-| `similarity_threshold` | `0.7` | `SQLLENS_MEMORY__SIMILARITY_THRESHOLD` | Cosine similarity floor in `[0.0, 1.0]`. Hits below this are dropped. Used as the *server-configured default*: the LLM may override it per call via the `similarity_threshold` parameter on `search_saved_correct_tool_uses`, including the legitimate value `0.0` (return everything) which is preserved exactly — not coerced. |
+| `similarity_threshold` | `0.7` | `SQLLENS_MEMORY__SIMILARITY_THRESHOLD` | Cosine similarity floor in `[0.0, 1.0]`. Hits below this are dropped. Used as the *server-configured default* for the on-demand tool-use search: the LLM may override it per call via the `similarity_threshold` parameter on `search_saved_correct_tool_uses`, including the legitimate value `0.0` (return everything) which is preserved exactly — not coerced. It is also the strict hit bar for [system-prompt context injection](#system-prompt-context-injection). |
+| `context_similarity_threshold` | `0.7` | `SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD` | Lower, opt-in floor in `[0.0, 1.0]` for the permissive near-match band used **only** by [system-prompt context injection](#system-prompt-context-injection). Set it *below* `similarity_threshold` to inject memories scoring in `[context_similarity_threshold, similarity_threshold)` (both saved question → SQL pairs and text/schema-doc memories) as related context. Defaults to the same value as `similarity_threshold`, so left at the default the band is empty and injection behaves exactly as before. |
 | `save_queries` | `false` | `SQLLENS_MEMORY__SAVE_QUERIES` | Registers `SaveQuestionToolArgsTool` so the agent can persist successful question → SQL pairs into tool-use memory. Off by default; when off the tool is not registered and the system prompt drops its save instructions. Reading saved memory is unaffected. |
 | `allow_import` | `false` | `SQLLENS_MEMORY__ALLOW_IMPORT` | Registers the single `import_memory` MCP tool. Off by default — a remote writer can poison future SQL generation. The CLI import/export commands are unaffected. |
 | `allow_admin_tools` | `false` | `SQLLENS_MEMORY__ALLOW_ADMIN_TOOLS` | Registers the seven memory-administration MCP tools (`list_memories`, `get_memory`, `delete_memory`, `clear_memories`, `add_memories`, `export_memories`, `get_memory_stats`) for curating the training set. Off by default — they enumerate and mutate the store. The destructive subset (`delete_memory` / `clear_memories` / `add_memories`) additionally refuses to run on an unauthenticated endpoint (`auth.mode='none'`) unless `auth.insecure` acknowledges a closed network. See [Memory-administration tools](#memory-administration-tools-opt-in-default-off) below. |
@@ -89,6 +127,8 @@ This is the single knob most worth tuning per-database.
 
 The configured value is the *server-side default*. The LLM may pass a per-call `similarity_threshold` argument to `search_saved_correct_tool_uses` to override it for one search; in particular, `0.0` is a legitimate value meaning "return all neighbours" and is preserved (not coerced to the default) thanks to the explicit `is not None` check in `SearchSavedCorrectToolUsesTool.execute()`. Restart the process to change the *default* once the LLM stops overriding it.
 
+**Opening the near-match band.** `context_similarity_threshold` is a second lever, and it applies only to the automatic [system-prompt injection](#system-prompt-context-injection), not to the tool-use search. Lower it below `similarity_threshold` when near-miss rephrasings still miss the strict bar but would benefit from seeing related prior work as context. The wider the gap, the more near-match text memories and question → SQL pairs get folded into the prompt — which helps recall but spends prompt budget and can surface loosely-related examples, so widen it gradually. Leaving it at its default (equal to `similarity_threshold`) keeps the band closed.
+
 ## Async-over-thread pattern
 
 `ChromaAgentMemory` exposes async methods (`save_tool_usage`, `search_similar_usage`, `get_recent_memories`, `delete_by_id`, `save_text_memory`, `search_text_memories`), all of which are reachable from the agent: the first two via `SaveQuestionToolArgsTool` / `SearchSavedCorrectToolUsesTool`, `save_text_memory` via the now-registered `SaveTextMemoryTool`, and the rest via internal code paths on `agent_memory` itself. ChromaDB's Python client is synchronous, so each method defines a sync inner function and runs it on a `ThreadPoolExecutor` so the agent's async loop doesn't block.
@@ -99,7 +139,7 @@ If you're profiling and see Chroma operations blocking, check that the executor 
 
 The upstream framework also defined memory backends other than Chroma; those were dropped during the lift. `ChromaAgentMemory` is the only concrete `AgentMemory` implementation in SQL Lens. The abstract `AgentMemory` interface lives at [src/sqllens/agent/capabilities/agent_memory/base.py](../../../src/sqllens/agent/capabilities/agent_memory/base.py) — if a second backend is ever needed, that's the contract to implement.
 
-All three memory tool classes defined in [agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py) — `SaveQuestionToolArgsTool`, `SearchSavedCorrectToolUsesTool`, and `SaveTextMemoryTool` — are now registered in `factory.py`. There is no dedicated search tool for text memories on the LLM surface today; text memories saved via `save_text_memory` are read back through the agent's internal code paths over `agent_memory.search_text_memories`.
+All three memory tool classes defined in [agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py) — `SaveQuestionToolArgsTool`, `SearchSavedCorrectToolUsesTool`, and `SaveTextMemoryTool` — are now registered in `factory.py`. There is no dedicated search tool for text memories on the LLM surface today; text memories saved via `save_text_memory` are read back through the agent's internal code paths over `agent_memory.search_text_memories` — chiefly the context enhancer's automatic [system-prompt injection](#system-prompt-context-injection).
 
 ## First-party import/export (`src/sqllens/memory/`)
 

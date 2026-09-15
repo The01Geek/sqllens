@@ -11,6 +11,24 @@ SQL Lens remembers two kinds of entries:
 
 Both kinds live in the local vector store configured by the `[memory]` section. See the [Configuration reference](configuration.md#section-memory).
 
+## Near-Match Background Context
+
+By default, SQL Lens reaches into its memory in two ways: the assistant can search saved question-and-answer pairs on demand, and SQL Lens automatically adds any closely matching free-form notes to the assistant's background context before it answers. Both use the `similarity_threshold` setting as the bar a memory must clear.
+
+You can optionally widen the automatic background context with a second, more permissive bar. Set `context_similarity_threshold` **below** `similarity_threshold` in the `[memory]` section, and SQL Lens will also fold in *near-match* memories — ones that score in between the two values — as related context. This near-match tier draws on both saved question-and-answer pairs and free-form notes. A near-match pair is offered to the assistant as a related example ("a similar earlier question was answered with this SQL"), not as an answer to copy.
+
+For example, to keep the strict bar at the default `0.7` but also surface anything scoring `0.55` or higher as related context:
+
+```toml
+[memory]
+similarity_threshold = 0.7
+context_similarity_threshold = 0.55
+```
+
+Leaving `context_similarity_threshold` at its default (`0.7`, equal to `similarity_threshold`) turns the near-match tier off, and SQL Lens behaves exactly as before. Widen the gap gradually: the more you lower `context_similarity_threshold`, the more loosely-related memories SQL Lens includes, which can help on questions that never quite match but also adds length and noise to what the assistant reads.
+
+If SQL Lens cannot reach its memory while assembling this context, it quietly proceeds without the extra context rather than failing the question.
+
 ## The Bundle File Format
 
 Import and export use a portable bundle file in one of two formats:
