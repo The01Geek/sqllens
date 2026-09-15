@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr
 
+from sqllens.agent.core import DefaultLlmContextEnhancer
 from sqllens.agent.factory import build_agent
 from sqllens.agent.tools import (
     EmitChartTool,
@@ -284,6 +285,35 @@ def test_memory_similarity_threshold_flows_into_search_tool(tmp_path: Path) -> N
     search_tool = _unwrap(agent.tool_registry._tools["search_saved_correct_tool_uses"])
     assert isinstance(search_tool, SearchSavedCorrectToolUsesTool)
     assert search_tool._default_similarity_threshold == 0.42
+
+
+def test_memory_thresholds_flow_into_context_enhancer(tmp_path: Path) -> None:
+    """Both ``cfg.memory.similarity_threshold`` and the new
+    ``cfg.memory.context_similarity_threshold`` must reach the wired
+    ``DefaultLlmContextEnhancer`` (issue #251) — otherwise the permissive
+    near-match band is dead config, exactly as the tool-path knob was before
+    issue #76. Today ``factory.build_agent`` does not construct the enhancer at
+    all (it rides ``Agent``'s 0.7/0.7 fallback), so this pins the wiring.
+    """
+    cfg = Config(
+        database=DatabaseConfig(url="sqlite:///:memory:"),
+        llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
+        memory=MemoryConfig(
+            persist_dir=tmp_path / "chroma",
+            similarity_threshold=0.6,
+            context_similarity_threshold=0.3,
+        ),
+        auth=AuthConfig(mode="none"),
+        agent=AgentRuntimeConfig(),
+    )
+    agent = build_agent(cfg)
+
+    enhancer = agent.llm_context_enhancer
+    assert isinstance(enhancer, DefaultLlmContextEnhancer)
+    assert enhancer.similarity_threshold == 0.6
+    assert enhancer.context_similarity_threshold == 0.3
+    # The enhancer must share the agent's ChromaAgentMemory, not a second store.
+    assert enhancer.agent_memory is agent.agent_memory
 
 
 def test_database_timeout_and_cap_flow_through_to_runner(tmp_path: Path) -> None:

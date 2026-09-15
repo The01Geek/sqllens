@@ -11,7 +11,11 @@ from .base import LlmContextEnhancer
 if TYPE_CHECKING:
     from ..user.models import User
     from ..llm.models import LlmMessage
-    from ...capabilities.agent_memory import AgentMemory, TextMemorySearchResult
+    from ...capabilities.agent_memory import (
+        AgentMemory,
+        TextMemorySearchResult,
+        ToolMemorySearchResult,
+    )
 
 
 class DefaultLlmContextEnhancer(LlmContextEnhancer):
@@ -29,14 +33,31 @@ class DefaultLlmContextEnhancer(LlmContextEnhancer):
         )
     """
 
-    def __init__(self, agent_memory: Optional["AgentMemory"] = None):
-        """Initialize with optional agent memory.
+    def __init__(
+        self,
+        agent_memory: Optional["AgentMemory"] = None,
+        *,
+        similarity_threshold: float = 0.7,
+        context_similarity_threshold: float = 0.7,
+    ):
+        """Initialize with optional agent memory and injection thresholds.
 
         Args:
             agent_memory: Optional AgentMemory instance. If not provided,
                          enhancement will be skipped.
+            similarity_threshold: The strict hit bar. Text memories at or above
+                         this score are injected, and it is the upper (excluded)
+                         bound of the permissive near-match band.
+            context_similarity_threshold: The lower, opt-in band floor. When it
+                         is below similarity_threshold, memories scoring in
+                         [context_similarity_threshold, similarity_threshold) are
+                         injected as related context (both question->SQL pairs and
+                         text/schema-doc memories). When it is >= similarity_threshold
+                         (the default) the band is empty and injection is unchanged.
         """
         self.agent_memory = agent_memory
+        self.similarity_threshold = similarity_threshold
+        self.context_similarity_threshold = context_similarity_threshold
 
     async def enhance_system_prompt(
         self, system_prompt: str, user_message: str, user: "User"
@@ -70,14 +91,46 @@ class DefaultLlmContextEnhancer(LlmContextEnhancer):
                 agent_memory=self.agent_memory,
             )
 
-            # Search for relevant text memories based on user message
+            # The band sits strictly below the strict hit bar; when the opt-in
+            # floor is not below it, the band is empty.
+            strict = self.similarity_threshold
+            context_floor = self.context_similarity_threshold
+            band_enabled = context_floor < strict
+            # Band-disabled searches text at the strict floor (the value
+            # similarity_threshold now controls) — don't restore the old
+            # hard-coded 0.7; band-enabled searches from the lower floor.
+            text_search_floor = context_floor if band_enabled else strict
+
+            # Search for relevant text memories based on user message. Text
+            # memories at or above the strict bar keep being injected; the band
+            # extends this down to the context floor when enabled.
             memories: List[
                 "TextMemorySearchResult"
             ] = await self.agent_memory.search_text_memories(
-                query=user_message, context=context, limit=5
+                query=user_message, context=context, limit=5,
+                similarity_threshold=text_search_floor,
             )
 
-            if not memories:
+            # Gather near-match question->SQL pairs, but only the band: pairs at
+            # or above the strict bar stay reusable through the search tool and
+            # must not be duplicated here. Only run this extra search when the
+            # band is enabled, so a non-opted-in deployment issues no extra
+            # memory search, as before.
+            band_pairs: List["ToolMemorySearchResult"] = []
+            if band_enabled:
+                tool_hits = await self.agent_memory.search_similar_usage(
+                    question=user_message, context=context, limit=5,
+                    similarity_threshold=context_floor,
+                )
+                band_pairs = [
+                    r
+                    for r in tool_hits
+                    if r.similarity_score < strict
+                    and isinstance(r.memory.args, dict)
+                    and r.memory.args.get("sql")
+                ]
+
+            if not memories and not band_pairs:
                 return system_prompt
 
             # Format memories as context snippets to add to system prompt
@@ -87,6 +140,15 @@ class DefaultLlmContextEnhancer(LlmContextEnhancer):
             for result in memories:
                 memory = result.memory
                 examples_section += f"• {memory.content}\n"
+
+            # Near-match pairs render as related example text (prior question and
+            # its SQL) — as context the model weighs, not a pre-decided tool call.
+            for result in band_pairs:
+                pair = result.memory
+                examples_section += (
+                    f'• Related prior question — "{pair.question}" — '
+                    f"was answered with this SQL: {pair.args['sql']}\n"
+                )
 
             # Append examples to system prompt
             return system_prompt + examples_section

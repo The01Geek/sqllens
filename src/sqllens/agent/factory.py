@@ -15,7 +15,7 @@ from urllib.parse import unquote, urlparse
 
 from sqllens.agent import Agent, RequestContext, ToolRegistry, User, UserResolver
 from sqllens.agent.capabilities.sql_runner import SqlRunner
-from sqllens.agent.core import AgentConfig
+from sqllens.agent.core import AgentConfig, DefaultLlmContextEnhancer
 from sqllens.agent.core.agent.config import UiFeature, UiFeatures
 from sqllens.agent.integrations import (
     AnthropicLlmService,
@@ -88,6 +88,15 @@ def build_agent(cfg: Config) -> Agent:
         collection_name=cfg.memory.collection,
     )
 
+    # Wire the system-prompt context enhancer explicitly so both memory
+    # thresholds reach it. Agent() otherwise falls back to a DefaultLlmContextEnhancer
+    # built with only agent_memory, which cannot see either configured threshold.
+    context_enhancer = DefaultLlmContextEnhancer(
+        memory,
+        similarity_threshold=cfg.memory.similarity_threshold,
+        context_similarity_threshold=cfg.memory.context_similarity_threshold,
+    )
+
     # Anchor RunSqlTool's scratch CSV writes to an absolute, user-writable temp
     # directory. The default LocalFileSystem() resolves "." against process CWD,
     # which is non-writable under some MCP launchers (e.g. Claude Desktop on
@@ -150,6 +159,7 @@ def build_agent(cfg: Config) -> Agent:
         tool_registry=tools,
         user_resolver=_StaticUserResolver(),
         agent_memory=memory,
+        llm_context_enhancer=context_enhancer,
         # Bounded LRU store backing multi-turn conversations. The framework
         # default (MemoryConversationStore) is unbounded; this caps in-process
         # memory so a long-running server does not leak conversations. Ephemeral

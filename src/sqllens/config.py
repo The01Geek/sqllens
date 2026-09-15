@@ -111,6 +111,20 @@ class MemoryConfig(BaseModel):
     similarity_threshold: float = Field(
         default=0.7, ge=0.0, le=1.0, description="Minimum cosine similarity for memory hits"
     )
+    context_similarity_threshold: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Lower, opt-in floor for a permissive near-match band used only by "
+            "system-prompt context injection. Memories scoring in "
+            "[context_similarity_threshold, similarity_threshold) are injected as "
+            "related context (both saved question->SQL pairs and text/schema-doc "
+            "memories). Set below similarity_threshold to enable; when it is >= "
+            "similarity_threshold (the default) the band is empty and injection "
+            "behaves exactly as before."
+        ),
+    )
     save_queries: bool = Field(
         default=False,
         description=(
