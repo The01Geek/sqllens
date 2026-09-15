@@ -100,12 +100,14 @@ class LLMConfig(BaseModel):
     model: str = Field(default="claude-sonnet-4-5-20250929", description="Anthropic model id")
 
 
-# Single source of truth for the two memory thresholds' default. Both
+# Shared default for MemoryConfig's two similarity thresholds. Both
 # similarity_threshold and context_similarity_threshold default to this one
 # value, so the "band is empty by default" invariant (near-match injection is
-# opt-in) is expressed once rather than as two independently-written literals
-# that a future edit could silently desynchronise — raising this default alone
-# would otherwise open the band for deployments that never opted in.
+# opt-in) is expressed once here rather than as two independently-written
+# literals that a future edit could silently desynchronise — raising this
+# default alone would otherwise open the band for deployments that never opted
+# in. (The enhancer seam keeps its own parallel constant; see
+# sqllens.agent.core.enhancer.default._DEFAULT_SIMILARITY_THRESHOLD.)
 _DEFAULT_SIMILARITY_THRESHOLD = 0.7
 
 

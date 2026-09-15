@@ -8,12 +8,14 @@ based on the user's initial message.
 from typing import TYPE_CHECKING, List, Optional
 from .base import LlmContextEnhancer
 
-# Single source of truth for both threshold defaults on this seam (mirrors
-# MemoryConfig._DEFAULT_SIMILARITY_THRESHOLD in sqllens.config). Sharing one
-# constant keeps the near-match band empty by default: a caller who constructs
-# the enhancer directly gets similarity_threshold == context_similarity_threshold
-# unless it opts in, and bumping the default moves both together rather than
-# desynchronising two independently-written literals.
+# Default shared by both thresholds on this enhancer seam, so the near-match
+# band is empty unless a caller opts in: a direct DefaultLlmContextEnhancer(...)
+# gets similarity_threshold == context_similarity_threshold by default, and
+# bumping this default moves both together. This parallels the module-level
+# _DEFAULT_SIMILARITY_THRESHOLD in sqllens.config (which the factory feeds in
+# from MemoryConfig). The two constants are defined per module — config must not
+# import the vendored agent tree, nor the tree config — so each independently
+# keeps its own pair of field defaults coupled; they are not one global constant.
 _DEFAULT_SIMILARITY_THRESHOLD = 0.7
 
 if TYPE_CHECKING:

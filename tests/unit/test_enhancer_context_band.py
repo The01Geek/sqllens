@@ -253,6 +253,29 @@ async def test_band_excludes_strict_tier_pairs() -> None:
 
 
 @pytest.mark.asyncio
+async def test_band_excludes_pair_scoring_exactly_at_strict() -> None:
+    """Boundary: the band filter is ``similarity_score < strict`` (exclusive
+    upper bound), so a pair scoring EXACTLY at the strict bar is a strict-tier
+    hit and must NOT be injected — it stays tool-only. Pins the endpoint so a
+    ``<`` -> ``<=`` mutation (which would duplicate a strict hit into the prose
+    section) is caught."""
+    mem = _StubAgentMemory(
+        tool_results=[
+            _pair("exactly strict question", "SELECT 1", 0.7),  # == strict → tool-only
+            _pair("just below strict question", "SELECT 2", 0.69),  # in band → injected
+        ],
+    )
+    enhancer = DefaultLlmContextEnhancer(
+        mem, similarity_threshold=0.7, context_similarity_threshold=0.3
+    )
+
+    out = await enhancer.enhance_system_prompt(_BASE_PROMPT, "q", _USER)
+
+    assert "just below strict question" in out
+    assert "exactly strict question" not in out
+
+
+@pytest.mark.asyncio
 async def test_band_excludes_pairs_without_sql_arg() -> None:
     """A tool-use pair with no ``sql`` arg (e.g. an emit_chart pair) is silently
     excluded from the band section — AC 4 is about the prior question AND its SQL."""
