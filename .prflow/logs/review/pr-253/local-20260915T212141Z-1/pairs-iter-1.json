@@ -1,0 +1,310 @@
+{
+  "pairs": [
+    {
+      "item": {
+        "id": "VC-1",
+        "category": "dependency_interaction",
+        "claim": "AgentMemory.search_text_memories accepts a keyword-only `similarity_threshold` parameter, which the enhancer now passes as `similarity_threshold=text_search_floor`.",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/agent/core/enhancer/default.py",
+        "source_line": 109,
+        "source_line_end": 112,
+        "verify_against": "The `search_text_memories` signature on the AgentMemory ABC and its ChromaDB implementation",
+        "verify_hint": "Check `search_text_memories` in src/sqllens/agent/capabilities/agent_memory/base.py and src/sqllens/agent/integrations/chromadb/agent_memory.py \u2014 confirm `similarity_threshold` is keyword-only (after `*`)",
+        "verification_mode": "agent",
+        "claim_signature": "dependency_interaction:default.py:search-text-memories-threshold-kwarg"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-1-68bdfc67fce29d1c.json",
+      "response_text": "{\"id\":\"VC-1\",\"verdict\":\"PASS\",\"evidence\":\"src/sqllens/agent/capabilities/agent_memory/base.py:60-67 declares the abstract `search_text_memories(self, query, context, *, limit=10, similarity_threshold=0.7)` with `similarity_threshold` after the bare `*`, making it keyword-only. src/sqllens/agent/integrations/chromadb/agent_memory.py:392-399 implements the same keyword-only signature. src/sqllens/agent/core/enhancer/default.py:109-112 calls `await self.agent_memory.search_text_memories(query=user_message, context=context, limit=5, similarity_threshold=text_search_floor)`, matching the keyword-only parameter and passing text_search_floor (computed at line 102 as min(context_floor, strict)) as claimed.\",\"file_checked\":\"src/sqllens/agent/capabilities/agent_memory/base.py:60\",\"property_proven\":true,\"inaccuracy_scope\":\"none\"}"
+    },
+    {
+      "item": {
+        "id": "VC-2",
+        "category": "dependency_interaction",
+        "claim": "AgentMemory.search_similar_usage accepts a keyword-only `similarity_threshold` parameter and returns objects with `.similarity_score` and `.memory`, which the enhancer's band search relies on.",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/agent/core/enhancer/default.py",
+        "source_line": 121,
+        "source_line_end": 131,
+        "verify_against": "The `search_similar_usage` signature and return type on the AgentMemory ABC and its ChromaDB implementation",
+        "verify_hint": "Check `search_similar_usage` in src/sqllens/agent/capabilities/agent_memory/base.py and integrations/chromadb/agent_memory.py \u2014 confirm keyword-only `similarity_threshold` and List[ToolMemorySearchResult] return",
+        "verification_mode": "agent",
+        "claim_signature": "dependency_interaction:default.py:search-similar-usage-threshold-kwarg"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-2-a218c24a652a0b0b.json",
+      "response_text": "{\"id\":\"VC-2\",\"verdict\":\"PASS\",\"evidence\":\"AgentMemory.search_similar_usage is declared keyword-only for similarity_threshold in both the ABC and ChromaDB impl: src/sqllens/agent/capabilities/agent_memory/base.py:47-57 (`async def search_similar_usage(self, question, context, *, limit=10, similarity_threshold=0.7, tool_name_filter=None) -> List[ToolMemorySearchResult]`) and src/sqllens/agent/integrations/chromadb/agent_memory.py:204-212 with the same signature. The impl builds ToolMemorySearchResult(memory=memory, similarity_score=similarity_score, rank=i+1) at agent_memory.py:267-273, giving `.memory` and `.similarity_score` attributes. The enhancer's band search at src/sqllens/agent/core/enhancer/default.py:121-131 calls `await self.agent_memory.search_similar_usage(question=..., context=..., limit=5, similarity_threshold=context_floor)` and then filters with `r.similarity_score < strict` and `r.memory.args`, exactly matching this contract.\",\"file_checked\":\"src/sqllens/agent/integrations/chromadb/agent_memory.py:204-273\",\"property_proven\":true,\"inaccuracy_scope\":\"none\"}"
+    },
+    {
+      "item": {
+        "id": "VC-3",
+        "category": "data_format_assumption",
+        "claim": "The enhancer assumes ToolMemorySearchResult has `.similarity_score` and `.memory`, and ToolMemory has `.args` (dict) and `.question`; it reads `r.memory.args.get('sql')` and `pair.question`.",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/agent/core/enhancer/default.py",
+        "source_line": 125,
+        "source_line_end": 151,
+        "verify_against": "Model definitions for ToolMemory and ToolMemorySearchResult",
+        "verify_hint": "Check ToolMemory and ToolMemorySearchResult in src/sqllens/agent/capabilities/agent_memory/models.py \u2014 confirm `args: Dict`, `question: str`, `similarity_score: float`",
+        "verification_mode": "agent",
+        "claim_signature": "data_format_assumption:models.py:toolmemory-args-question-score"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-3-30f5dc88a3c1694f.json",
+      "response_text": "{\"id\":\"VC-3\",\"verdict\":\"PASS\",\"evidence\":\"src/sqllens/agent/capabilities/agent_memory/models.py:30-35 defines ToolMemorySearchResult with `memory: ToolMemory` and `similarity_score: float`; models.py:10-19 defines ToolMemory with `args: Dict[str, Any]` and `question: str`. src/sqllens/agent/core/enhancer/default.py:128-130 reads `r.similarity_score`, `isinstance(r.memory.args, dict)`, `r.memory.args.get(\\\"sql\\\")`; lines 146-150 do `pair = result.memory` then use `pair.question` and `pair.args['sql']`. All attribute accesses match the model definitions exactly.\",\"file_checked\":\"src/sqllens/agent/capabilities/agent_memory/models.py:10-35\",\"property_proven\":true,\"inaccuracy_scope\":\"none\"}"
+    },
+    {
+      "item": {
+        "id": "VC-4",
+        "category": "dependency_interaction",
+        "claim": "The ChromaDB memory backends apply a lower-bound `score >= similarity_threshold` filter, so passing a lower floor widens (not replaces) the returned candidate set as the band logic assumes.",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/agent/core/enhancer/default.py",
+        "source_line": 94,
+        "source_line_end": 131,
+        "verify_against": "The threshold-filtering behavior inside search_text_memories / search_similar_usage",
+        "verify_hint": "Check the `similarity_score >= similarity_threshold` filter in src/sqllens/agent/integrations/chromadb/agent_memory.py (around lines 251 and 423)",
+        "verification_mode": "agent",
+        "claim_signature": "dependency_interaction:agent_memory.py:threshold-lower-bound-filter"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-4-cf9a5f5557dbee43.json",
+      "response_text": "{\n  \"id\": \"VC-4\",\n  \"verdict\": \"PASS\",\n  \"evidence\": \"Both ChromaDB memory search methods apply an inclusive lower-bound filter: search_similar_usage has `if similarity_score >= similarity_threshold:` at src/sqllens/agent/integrations/chromadb/agent_memory.py:251, and search_text_memories has the identical pattern `if similarity_score >= similarity_threshold:` at agent_memory.py:423. This is a widen-not-replace filter (score at or above the bar passes). The caller in src/sqllens/agent/core/enhancer/default.py:94-131 relies exactly on this: it computes `text_search_floor = min(context_floor, strict)` (line 102) and passes it to search_text_memories (line 111), and passes the lower `context_floor` to search_similar_usage (line 123), then client-side filters `r.similarity_score < strict` (line 128) to carve out just the new lower band from the widened candidate set. This only works because the backend threshold is a lower bound that returns a superset when given a lower floor, confirming the claim.\",\n  \"file_checked\": \"src/sqllens/agent/integrations/chromadb/agent_memory.py:251,423\",\n  \"property_proven\": true,\n  \"inaccuracy_scope\": \"none\"\n}"
+    },
+    {
+      "item": {
+        "id": "VC-5",
+        "category": "test_mock_alignment",
+        "claim": "The `_StubAgentMemory.search_text_memories`/`search_similar_usage` signatures (keyword-only `similarity_threshold`, `limit`, param names) match the real AgentMemory ABC methods.",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "tests/unit/test_enhancer_context_band.py",
+        "source_line": 327,
+        "source_line_end": 350,
+        "verify_against": "The AgentMemory ABC method signatures the stub overrides",
+        "verify_hint": "Compare stub search methods in tests/unit/test_enhancer_context_band.py against abstract methods in src/sqllens/agent/capabilities/agent_memory/base.py",
+        "verification_mode": "agent",
+        "claim_signature": "test_mock_alignment:test_enhancer_context_band.py:stub-search-signatures-match"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-5-3a28e8ff5533d84b.json",
+      "response_text": "{\"id\":\"VC-5\",\"verdict\":\"PASS\",\"evidence\":\"Stub in tests/unit/test_enhancer_context_band.py lines 79-102 defines search_similar_usage(self, question, context, *, limit=10, similarity_threshold=0.7, tool_name_filter=None) and search_text_memories(self, query, context, *, limit=10, similarity_threshold=0.7). The AgentMemory ABC in src/sqllens/agent/capabilities/agent_memory/base.py lines 46-69 defines the identical abstract signatures: search_similar_usage(self, question, context, *, limit=10, similarity_threshold=0.7, tool_name_filter=None) and search_text_memories(self, query, context, *, limit=10, similarity_threshold=0.7). Parameter names, keyword-only markers (after context), and defaults match exactly.\",\"file_checked\":\"src/sqllens/agent/capabilities/agent_memory/base.py:46-69\",\"property_proven\":true,\"inaccuracy_scope\":\"none\"}"
+    },
+    {
+      "item": {
+        "id": "VC-6",
+        "category": "test_mock_alignment",
+        "claim": "The stub implements every abstract method of AgentMemory so it is instantiable as a concrete subclass.",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "tests/unit/test_enhancer_context_band.py",
+        "source_line": 291,
+        "source_line_end": 374,
+        "verify_against": "The complete set of @abstractmethod declarations on AgentMemory",
+        "verify_hint": "Check that every @abstractmethod in src/sqllens/agent/capabilities/agent_memory/base.py is overridden in `_StubAgentMemory`",
+        "verification_mode": "agent",
+        "claim_signature": "test_mock_alignment:test_enhancer_context_band.py:stub-implements-all-abstracts"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-6-43e61eace63924a2.json",
+      "response_text": "{\"id\":\"VC-6\",\"verdict\":\"PASS\",\"evidence\":\"AgentMemory (src/sqllens/agent/capabilities/agent_memory/base.py) declares exactly 9 @abstractmethod members: save_tool_usage (L26-37), save_text_memory (L39-44), search_similar_usage (L46-57), search_text_memories (L59-69), get_recent_memories (L71-76), get_recent_text_memories (L78-83), delete_by_id (L85-88), delete_text_memory (L90-93), clear_memories (L95-103). _StubAgentMemory in tests/unit/test_enhancer_context_band.py (class at L43) overrides all 9 with matching signatures: save_tool_usage L65-74, save_text_memory L76-77, search_similar_usage L79-89, search_text_memories L91-102, get_recent_memories L104-107, get_recent_text_memories L109-112, delete_by_id L114-115, delete_text_memory L117-118, clear_memories L120-126. No abstract method is left unimplemented, so the class is instantiable (the test file constructs it directly, e.g. L165, L180, L272).\",\"file_checked\":\"src/sqllens/agent/capabilities/agent_memory/base.py:23-103\",\"property_proven\":true,\"inaccuracy_scope\":\"none\"}"
+    },
+    {
+      "item": {
+        "id": "VC-7",
+        "category": "test_mock_alignment",
+        "claim": "The test's `_render_text_only` helper reproduces the exact pre-change text-only rendering (heading, intro line, bullet format) the enhancer produces.",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "tests/unit/test_enhancer_context_band.py",
+        "source_line": 394,
+        "source_line_end": 405,
+        "verify_against": "The `examples_section` construction in the enhancer",
+        "verify_hint": "Compare `_render_text_only` string literals against `examples_section` heading/intro/bullet in src/sqllens/agent/core/enhancer/default.py (lines 137-142)",
+        "verification_mode": "agent",
+        "claim_signature": "test_mock_alignment:test_enhancer_context_band.py:render-text-only-matches-code"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-7-122630d9813c9e11.json",
+      "response_text": "{\n  \"id\": \"VC-7\",\n  \"verdict\": \"PASS\",\n  \"evidence\": \"tests/unit/test_enhancer_context_band.py:150-157 defines _render_text_only: heading '\\\\n\\\\n## Relevant Context from Memory\\\\n\\\\n', intro 'The following domain knowledge and context from prior interactions may be relevant:\\\\n\\\\n', per-memory bullet f'\u2022 {result.memory.content}\\\\n', return prompt + section. This matches src/sqllens/agent/core/enhancer/default.py:137-154 exactly for the text-only (no band pairs) path: same heading string (line 137), same intro string (line 138), same bullet format f'\u2022 {memory.content}\\\\n' (line 142), same concatenation system_prompt + examples_section (line 154). The helper is used in test_equal_default_thresholds_are_noop (line 172) where band_pairs is empty (mem.tool_search_calls == [] asserted at line 170), so the band_pairs loop (default.py:146-151) never executes and the two renderings are byte-identical in that scenario, matching the claim's scope.\",\n  \"file_checked\": \"src/sqllens/agent/core/enhancer/default.py:137-154\",\n  \"property_proven\": true,\n  \"inaccuracy_scope\": \"none\"\n}"
+    },
+    {
+      "item": {
+        "id": "VC-8",
+        "category": "api_contract",
+        "claim": "The wired Agent exposes `.llm_context_enhancer` and `.agent_memory` attributes asserted by the factory-wiring test.",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "tests/unit/test_factory_wiring.py",
+        "source_line": 567,
+        "source_line_end": 572,
+        "verify_against": "The Agent constructor's stored attributes",
+        "verify_hint": "Check src/sqllens/agent/core/agent/agent.py \u2014 `self.llm_context_enhancer` (line 135) and agent_memory set as public attrs",
+        "verification_mode": "agent",
+        "claim_signature": "api_contract:agent.py:public-enhancer-and-memory-attrs"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-8-5e3e829b1f1fd0df.json",
+      "response_text": "{\"id\":\"VC-8\",\"verdict\":\"PASS\",\"evidence\":\"tests/unit/test_factory_wiring.py:311 does `enhancer = agent.llm_context_enhancer` and line 316 does `assert enhancer.agent_memory is agent.agent_memory`, both accessing attributes directly on the built Agent. src/sqllens/agent/core/agent/agent.py's Agent.__init__ sets `self.agent_memory = agent_memory` at line 110 and `self.llm_context_enhancer = llm_context_enhancer` at line 135 (defaulting to `DefaultLlmContextEnhancer(agent_memory)` when not supplied, line 133-134). Both are plain public instance attributes, matching the claim exactly. Note: the claim's source_line 567-572 does not match the actual file (423 lines total); the real assertions are at lines 311 and 316 of the same test file, found via grep for the identifiers.\",\"file_checked\":\"src/sqllens/agent/core/agent/agent.py:110,135\",\"property_proven\":true,\"inaccuracy_scope\":\"generated_claim_text\"}"
+    },
+    {
+      "item": {
+        "id": "VC-10",
+        "category": "data_format_assumption",
+        "claim": "`MemoryConfig.context_similarity_threshold` is a Field with default 0.7 and bounds ge=0.0, le=1.0.",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/config.py",
+        "source_line": 114,
+        "source_line_end": 128,
+        "verify_against": "The config test expectations for the new field",
+        "verify_hint": "Confirm Field(default=0.7, ge=0.0, le=1.0) matches assertions in tests/unit/test_config_schema.py",
+        "verification_mode": "agent",
+        "claim_signature": "data_format_assumption:config.py:context-threshold-field-bounds"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-10-ae90528347d94a42.json",
+      "response_text": "{\"id\":\"VC-10\",\"verdict\":\"PASS\",\"evidence\":\"src/sqllens/config.py:114-118 defines `context_similarity_threshold: float = Field(default=0.7, ge=0.0, le=1.0, description=...)`, matching the claim exactly.\",\"file_checked\":\"src/sqllens/config.py:114\",\"property_proven\":true,\"inaccuracy_scope\":\"none\"}"
+    },
+    {
+      "item": {
+        "id": "VC-11",
+        "category": "data_format_assumption",
+        "claim": "Env var `SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD` and TOML `[memory] context_similarity_threshold` map to `cfg.memory.context_similarity_threshold`, env winning over TOML.",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "tests/unit/test_config_schema.py",
+        "source_line": 214,
+        "source_line_end": 242,
+        "verify_against": "The pydantic-settings nested env config on MemoryConfig / Config",
+        "verify_hint": "Verify env-nesting delimiter and [memory] binding in src/sqllens/config.py",
+        "verification_mode": "agent",
+        "claim_signature": "data_format_assumption:config.py:context-threshold-env-toml-binding"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-11-88ae320965a94ce2.json",
+      "response_text": "{\n  \"id\": \"VC-11\",\n  \"verdict\": \"PASS\",\n  \"evidence\": \"src/sqllens/config.py:114-127 declares MemoryConfig.context_similarity_threshold (default 0.7, ge=0.0, le=1.0). Config (config.py:521-528) sets env_prefix='SQLLENS_' and env_nested_delimiter='__', so SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD maps to memory.context_similarity_threshold; the TOML [memory] table's context_similarity_threshold key binds to the same field via TomlConfigSettingsSource. settings_customise_sources (config.py:566-571) orders sources as [init_settings, env_settings, toml_source, file_secret_settings], so env wins over TOML per pydantic-settings precedence (earlier source wins). This is exercised by tests/unit/test_config_schema.py:459-465 (env sets the field), :468-476 (toml sets the field when env absent), and :479-487 test_context_similarity_threshold_env_beats_toml (env value 0.3 wins over toml value 0.6, asserted cfg.memory.context_similarity_threshold == 0.3). The claim's cited source_line 214-242 range does not contain this test (that range covers config_version/BOM tests); the actual test block is at lines 443-487, located via grep on the identifier as instructed.\",\n  \"file_checked\": \"src/sqllens/config.py:521-572\",\n  \"property_proven\": true,\n  \"inaccuracy_scope\": \"none\"\n}"
+    },
+    {
+      "item": {
+        "id": "VC-12",
+        "category": "issue_acceptance",
+        "claim": "Degrade path (try/except Exception returning unmodified system_prompt) must wrap the new band search.",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/agent/core/enhancer/default.py",
+        "source_line": 81,
+        "source_line_end": 163,
+        "verify_against": "The enhancer's try/except structure around both search calls",
+        "verify_hint": "Confirm both search calls are inside the try block whose except returns system_prompt and logs a warning",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:default.py:degrade-path-wraps-band-search"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-12-ddef17a51fc3c58e.json",
+      "response_text": "{\"id\":\"VC-12\",\"verdict\":\"PASS\",\"evidence\":\"src/sqllens/agent/core/enhancer/default.py: try block opens at line 81. Both search calls are inside it \u2014 search_text_memories at line 109 and search_similar_usage at line 121 (guarded by band_enabled but still inside the try). except Exception as e: at line 156 logs a warning via logger.warning(...) at line 161 and returns the unmodified system_prompt at line 163 (return statement identical to the original parameter, no mutation before it in the except branch).\",\"file_checked\":\"src/sqllens/agent/core/enhancer/default.py:81-163\",\"property_proven\":true,\"inaccuracy_scope\":\"none\"}"
+    },
+    {
+      "item": {
+        "id": "VC-13",
+        "category": "issue_acceptance",
+        "claim": "Default behavior unchanged when context_similarity_threshold >= similarity_threshold (band empty, no extra search_similar_usage call).",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/agent/core/enhancer/default.py",
+        "source_line": 98,
+        "source_line_end": 124,
+        "verify_against": "The `band_enabled = context_floor < strict` gate",
+        "verify_hint": "Confirm search_similar_usage runs only under `if band_enabled`; cross-check test_equal_default_thresholds_are_noop",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:default.py:noop-when-context-ge-strict"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-13-c409417d78c0dab3.json",
+      "response_text": "{\"id\":\"VC-13\",\"verdict\":\"PASS\",\"evidence\":\"src/sqllens/agent/core/enhancer/default.py:96-98 computes `strict = self.similarity_threshold`, `context_floor = self.context_similarity_threshold`, `band_enabled = context_floor < strict`. `search_similar_usage` is only invoked inside `if band_enabled:` (lines 120-124); when context_similarity_threshold >= similarity_threshold, band_enabled is False, band_pairs stays [], and no extra search_similar_usage call is made. text_search_floor = min(context_floor, strict) also collapses to strict in this case, so text-memory search behavior (floor=strict) is unchanged from the pre-change hard-coded 0.7 default. This is corroborated by tests/unit/test_enhancer_context_band.py:161-172 `test_equal_default_thresholds_are_noop`, which asserts `mem.tool_search_calls == []` and `mem.text_search_calls == [0.7]` with both thresholds at their 0.7 default, and by test_equal_nondefault_thresholds_band_empty_floor_tracks_strict (lines 175-188) confirming the same no-op property holds generally whenever context_floor >= strict, not just at the 0.7/0.7 default.\",\"file_checked\":\"src/sqllens/agent/core/enhancer/default.py:98-124\",\"property_proven\":true,\"inaccuracy_scope\":\"none\"}"
+    },
+    {
+      "item": {
+        "id": "VC-14",
+        "category": "issue_acceptance",
+        "claim": "Strict-tier question->SQL pairs (score >= strict) excluded from injected band to avoid duplication with tool-reuse path.",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/agent/core/enhancer/default.py",
+        "source_line": 125,
+        "source_line_end": 131,
+        "verify_against": "The band_pairs filter `r.similarity_score < strict`",
+        "verify_hint": "Construct a pair at exactly `strict` and one above; verify neither is injected while an in-band pair is",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:default.py:strict-tier-pairs-excluded"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-14-8ebbf176ce8a25a1.json",
+      "response_text": "{\n  \"id\": \"VC-14\",\n  \"verdict\": \"PASS\",\n  \"evidence\": \"src/sqllens/agent/core/enhancer/default.py:119-131 shows band_pairs is only populated when band_enabled (line 120), and the list comprehension at lines 125-131 filters tool_hits with `if r.similarity_score < strict and isinstance(r.memory.args, dict) and r.memory.args.get(\\\"sql\\\")`. The strict `<` comparison means any pair with similarity_score == strict or > strict is excluded from band_pairs, matching the claim that strict-tier pairs (score >= strict) are excluded from the injected band. Comments at lines 114-118 confirm the intent: pairs at or above the strict bar 'stay reusable through the search tool and must not be duplicated here.'\",\n  \"file_checked\": \"src/sqllens/agent/core/enhancer/default.py:125-131\",\n  \"property_proven\": true,\n  \"inaccuracy_scope\": \"none\"\n}"
+    },
+    {
+      "item": {
+        "id": "VC-15",
+        "category": "issue_acceptance",
+        "claim": "Both thresholds wired through factory.build_agent into the DefaultLlmContextEnhancer sharing the agent's ChromaAgentMemory.",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/agent/factory.py",
+        "source_line": 138,
+        "source_line_end": 162,
+        "verify_against": "The context_enhancer construction and Agent() wiring",
+        "verify_hint": "Confirm both thresholds passed from cfg.memory, same `memory` object, and `llm_context_enhancer=context_enhancer` to Agent()",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:factory.py:thresholds-wired-shared-memory"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-15-1b7bbe3a7e040909.json",
+      "response_text": "{\n  \"id\": \"VC-15\",\n  \"verdict\": \"PASS\",\n  \"evidence\": \"src/sqllens/agent/factory.py:86-89 constructs `memory = ChromaAgentMemory(...)`. Lines 94-98 build `context_enhancer = DefaultLlmContextEnhancer(memory, similarity_threshold=cfg.memory.similarity_threshold, context_similarity_threshold=cfg.memory.context_similarity_threshold)` \u2014 both cfg.memory thresholds wired, same `memory` object used. Lines 157-162 construct `Agent(..., agent_memory=memory, llm_context_enhancer=context_enhancer, ...)`, passing the identical `memory` object to the Agent and the enhancer instance as `llm_context_enhancer`. Cross-checked src/sqllens/agent/core/enhancer/default.py:36-42, whose `__init__(agent_memory=None, *, similarity_threshold=0.7, context_similarity_threshold=0.7)` signature matches the call-site kwargs exactly.\",\n  \"file_checked\": \"src/sqllens/agent/factory.py:86-162\",\n  \"property_proven\": true,\n  \"inaccuracy_scope\": \"none\"\n}"
+    },
+    {
+      "item": {
+        "id": "VC-16",
+        "category": "string_presence",
+        "claim": "No upstream brand-name string leaks into the changed files.",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/agent/core/enhancer/default.py",
+        "verify_against": "The upstream brand name; scan changed docstrings/comments/strings",
+        "verify_hint": "Scan default.py, factory.py, config.py, and the two test files for any upstream package namespace or brand-name reference outside sqllens.agent.*",
+        "verification_mode": "agent",
+        "claim_signature": "string_presence:changed-files:no-upstream-brand-leak"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-16-edcc824a27f48030.json",
+      "response_text": "{\n  \"id\": \"VC-16\",\n  \"verdict\": \"PASS\",\n  \"evidence\": \"Read all six changed files in full and scanned imports, docstrings, comments, and string literals for any upstream brand name or foreign (non-sqllens) first-party package namespace. src/sqllens/agent/core/enhancer/default.py:1-181 \u2014 imports only from relative sibling modules (.base, ..user.models, ..llm.models, ...capabilities.agent_memory, ..tool) inside the sqllens.agent package; no brand strings. src/sqllens/agent/factory.py:1-248 \u2014 all imports are `sqllens.agent.*` / `sqllens.config` / `sqllens.conversation_store` / `sqllens.safety`; stdlib (tempfile, pathlib, urllib.parse) only otherwise; comment at line 103 mentions 'Claude Desktop on Windows installs under Program Files / Local\\\\\\\\AnthropicClaude' but this refers to Anthropic's Claude Desktop MCP client (an explicitly supported client per CLAUDE.md: 'Cursor, Claude Desktop, Windsurf'), not the forked upstream OSS project's brand/namespace \u2014 not a leak of the protected upstream name. src/sqllens/config.py:1-766 \u2014 imports only stdlib + pydantic/pydantic_settings; no brand references anywhere in docstrings/comments/error-message strings. tests/unit/test_enhancer_context_band.py:1-282 \u2014 imports only `sqllens.agent.*` plus pytest/stdlib; no brand strings. tests/unit/test_config_schema.py:1-488 \u2014 imports only `sqllens.config` plus pytest/pydantic/stdlib. tests/unit/test_factory_wiring.py:1-423 \u2014 imports only `sqllens.agent.*` / `sqllens.config` / `sqllens.conversation_store` plus pytest/pydantic/stdlib; same 'AnthropicClaude' Windows-path reference in the module docstring (lines 7-9) referring to the Claude Desktop client install path, not the upstream fork's brand. No occurrence of the upstream package namespace or brand name found in any of the six files outside the permitted LICENSES/THIRD-PARTY.txt scope.\",\n  \"file_checked\": \"src/sqllens/agent/factory.py, src/sqllens/agent/core/enhancer/default.py, src/sqllens/config.py, tests/unit/test_enhancer_context_band.py, tests/unit/test_config_schema.py, tests/unit/test_factory_wiring.py\",\n  \"property_proven\": true,\n  \"inaccuracy_scope\": \"none\"\n}"
+    },
+    {
+      "item": {
+        "id": "VC-18",
+        "category": "absolute_claim",
+        "claim": "Docstring asserts that when context_similarity_threshold >= similarity_threshold 'the band is empty and injection is unchanged' \u2014 universal over all such threshold pairs, incl. non-default equal pairs where the text-search floor must track similarity_threshold not hard-coded 0.7.",
+        "claim_provenance": "source_authored",
+        "source_excerpt": "When it is >= similarity_threshold (the default) the band is empty and injection is unchanged.",
+        "source_file": "src/sqllens/agent/core/enhancer/default.py",
+        "source_line": 55,
+        "source_line_end": 56,
+        "verify_against": "The `min(context_floor, strict)` text_search_floor and band_enabled gate",
+        "verify_hint": "Falsifying case: set both thresholds to 0.5 and verify search_text_memories called with 0.5 (not 0.7) and search_similar_usage never called; then 0.9/0.9. Confirm no context>=strict pair alters injection vs pre-change text-only path.",
+        "verification_mode": "agent",
+        "claim_signature": "absolute_claim:default.py:band-empty-when-context-ge-strict"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-18-e55d0e2a65c71c6b.json",
+      "response_text": "{\"id\":\"VC-18\",\"verdict\":\"PASS\",\"evidence\":\"src/sqllens/agent/core/enhancer/default.py:96-131. band_enabled = context_floor < strict (line 98); text_search_floor = min(context_floor, strict) (line 102); search_similar_usage is only called if band_enabled (line 120-124). For any pair with context_similarity_threshold >= similarity_threshold, band_enabled is always False (so search_similar_usage never runs) and text_search_floor = min(context_floor, strict) = strict, i.e. it tracks similarity_threshold's actual value (not hard-coded 0.7) for any equal/non-default pair, e.g. both=0.5 gives text_search_floor=0.5 and band_enabled=False. This matches the docstring's universal claim at lines 51-56.\",\"file_checked\":\"src/sqllens/agent/core/enhancer/default.py:96-131\",\"property_proven\":true,\"inaccuracy_scope\":\"none\"}"
+    },
+    {
+      "item": {
+        "id": "VC-19",
+        "category": "absolute_claim",
+        "claim": "Comment asserts pairs 'at or above the strict bar stay reusable through the search tool and must not be duplicated here' \u2014 universal that no strict-tier pair is ever injected into the band.",
+        "claim_provenance": "source_authored",
+        "source_excerpt": "pairs at or above the strict bar stay reusable through the search tool and must not be duplicated here.",
+        "source_file": "src/sqllens/agent/core/enhancer/default.py",
+        "source_line": 114,
+        "source_line_end": 116,
+        "verify_against": "The band_pairs filter and search_similar_usage floor",
+        "verify_hint": "Build tool_results mixing scores at/above strict and inside band; confirm every pair with score >= strict is filtered out even though search_similar_usage was called at the lower context_floor and returns them.",
+        "verification_mode": "agent",
+        "claim_signature": "absolute_claim:default.py:strict-pairs-never-duplicated"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-19-3fa74c1d48f5def5.json",
+      "response_text": "{\"id\":\"VC-19\",\"verdict\":\"PASS\",\"evidence\":\"src/sqllens/agent/core/enhancer/default.py:121-131: search_similar_usage is called with similarity_threshold=context_floor (the lower band floor), and its implementation (src/sqllens/agent/integrations/chromadb/agent_memory.py:251) returns any hit with similarity_score >= similarity_threshold \u2014 no upper bound \u2014 so tool_hits can legitimately include pairs whose similarity_score >= strict. However, band_pairs (the only tool-pair list actually rendered, at default.py:146-151) is built via the comprehension `[r for r in tool_hits if r.similarity_score < strict and isinstance(r.memory.args, dict) and r.memory.args.get('sql')]` (default.py:125-131), which strictly excludes every result with similarity_score >= strict (using < strict, so scores exactly equal to strict are also excluded). tool_hits itself is never rendered or used elsewhere. Therefore no pair scoring at or above the strict bar can reach the injected band section, matching the comment's claim exactly.\",\"file_checked\":\"src/sqllens/agent/core/enhancer/default.py:114-131\",\"property_proven\":true,\"inaccuracy_scope\":\"none\"}"
+    },
+    {
+      "item": {
+        "id": "VC-20",
+        "category": "data_format_assumption",
+        "claim": "Band rendering reads `pair.args['sql']` via subscript after guarding `args.get('sql')` truthy; a passing pair is assumed to always have a non-empty 'sql' key.",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/agent/core/enhancer/default.py",
+        "source_line": 146,
+        "source_line_end": 151,
+        "verify_against": "The band_pairs filter gating on args.get('sql')",
+        "verify_hint": "Confirm filter (lines 129-131) guarantees args.get('sql') truthy before the `pair.args['sql']` subscript at line 150; cross-check test_band_excludes_pairs_without_sql_arg",
+        "verification_mode": "agent",
+        "claim_signature": "data_format_assumption:default.py:pair-sql-key-guarded-before-subscript"
+      },
+      "verdict_path": ".prflow/tmp/review/pr-253/local-20260915T212141Z-1/verdicts/iter-1/VC-20-c94ab2d08a0f0a53.json",
+      "response_text": "{\"id\":\"VC-20\",\"verdict\":\"PASS\",\"evidence\":\"src/sqllens/agent/core/enhancer/default.py:125-131 builds band_pairs with a list comprehension that requires `isinstance(r.memory.args, dict) and r.memory.args.get(\\\"sql\\\")` truthy before a ToolMemorySearchResult is included. The render loop at lines 146-151 then iterates only over band_pairs and subscripts `pair.args['sql']` at line 150, which is safe because every element already passed the truthy-sql filter. Cross-checked against tests/unit/test_enhancer_context_band.py:234-246 `test_band_excludes_pairs_without_sql_arg`, which constructs a pair via `_pair(\\\"chart question\\\", None, 0.4)` (test_enhancer_context_band.py:137-138: `args: dict[str, Any] = {} if sql is None else {\\\"sql\\\": sql}`, so sql=None yields args={}) and asserts the resulting prompt is unchanged, i.e. the pair never reaches the subscript in the render loop.\",\"file_checked\":\"src/sqllens/agent/core/enhancer/default.py:130,150\",\"property_proven\":true,\"inaccuracy_scope\":\"none\"}"
+    }
+  ]
+}

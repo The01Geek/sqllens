@@ -1,0 +1,160 @@
+{
+  "entry": "shadow",
+  "iteration": 3,
+  "pr": 253,
+  "dispatch_mode": "fanned-out",
+  "root_completeness": "established",
+  "verdict": "APPROVE with notes",
+  "diff_produced_at_head": "2f127272ceb8fa2d313da31f260081730f47b4ae",
+  "diff_profile": {
+    "files_changed": 6,
+    "src_files": [
+      "src/sqllens/agent/core/enhancer/default.py",
+      "src/sqllens/agent/factory.py",
+      "src/sqllens/config.py"
+    ],
+    "test_files": [
+      "tests/unit/test_config_schema.py",
+      "tests/unit/test_enhancer_context_band.py",
+      "tests/unit/test_factory_wiring.py"
+    ],
+    "insertions": 523,
+    "deletions": 8,
+    "small_diff": false,
+    "config_only": false,
+    "docs_only": false,
+    "has_new_types": true,
+    "tests": true,
+    "detect_all_audit": false
+  },
+  "reviewers_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer",
+    "prflow:requesting-code-review"
+  ],
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer",
+    "prflow:requesting-code-review"
+  ],
+  "per_reviewer_assessment": [
+    {"agent": "prflow:code-reviewer", "returned": true},
+    {"agent": "prflow:silent-failure-hunter", "returned": true},
+    {"agent": "prflow:comment-analyzer", "returned": true},
+    {"agent": "prflow:type-design-analyzer", "returned": true},
+    {"agent": "prflow:pr-test-analyzer", "returned": true},
+    {"agent": "prflow:requesting-code-review", "returned": true}
+  ],
+  "phase3_failed_agents": [],
+  "phase2_fails": [],
+  "phase3_findings": [
+    {
+      "agent": "prflow:comment-analyzer",
+      "severity": "Suggestion",
+      "original_severity": "Important",
+      "cap_applied": "phase-4.1.5 behavior-inert prose cap (first-conjunct=held limb-one=held limb-two=held) — test docstring, no tool reads it for behavior, ships to no external consumer; capped from Important to Suggestion, drives no REJECT at critical threshold",
+      "description": "Test docstring of test_memory_thresholds_flow_into_context_enhancer states in present tense 'Today factory.build_agent does not construct the enhancer at all (it rides Agent's 0.7/0.7 fallback)'. The same PR adds the explicit DefaultLlmContextEnhancer construction to factory.build_agent, so the claim is false against HEAD and self-contradicted by the diff that introduced it (the 'known limitation the same diff already fixed' shape).",
+      "defect_signature": {"file": "tests/unit/test_factory_wiring.py", "line_range": [295, 296], "kind": "documented_falsehood"},
+      "corroboration_count": 1,
+      "contributed_to_verdict": true
+    },
+    {
+      "agent": "prflow:comment-analyzer",
+      "severity": "Suggestion",
+      "description": "Module-constant comment on _DEFAULT_SIMILARITY_THRESHOLD (default.py:11-18) mixes the load-bearing warning with extended provenance/derivation, running longer than naming the specific wrong change and its consequence.",
+      "defect_signature": {"file": "src/sqllens/agent/core/enhancer/default.py", "line_range": [11, 18], "kind": "style"},
+      "corroboration_count": 1,
+      "contributed_to_verdict": true
+    },
+    {
+      "agent": "prflow:comment-analyzer",
+      "severity": "Suggestion",
+      "description": "Shared-default comment in config.py:176-183 names the wrong change well but restates the desync derivation and cross-references the parallel constant at length beyond what prevention requires.",
+      "defect_signature": {"file": "src/sqllens/config.py", "line_range": [176, 183], "kind": "style"},
+      "corroboration_count": 1,
+      "contributed_to_verdict": true
+    },
+    {
+      "agent": "prflow:type-design-analyzer",
+      "severity": "Suggestion",
+      "description": "Enhancer's two threshold __init__ params are bare float with no [0.0,1.0] bound that MemoryConfig enforces; a direct DefaultLlmContextEnhancer(mem, similarity_threshold=1.5, context_similarity_threshold=-0.2) is silently accepted. Factory path is safe (feeds validated cfg.memory.*), so real deployments are covered; the type itself does not encode the invariant.",
+      "defect_signature": {"file": "src/sqllens/agent/core/enhancer/default.py", "line_range": [46, 70], "kind": "type_design"},
+      "corroboration_count": 1,
+      "contributed_to_verdict": true
+    },
+    {
+      "agent": "prflow:type-design-analyzer",
+      "severity": "Suggestion",
+      "description": "The 'both defaults equal -> band empty' opt-in invariant depends on two independent module-level _DEFAULT_SIMILARITY_THRESHOLD=0.7 literals (config.py and enhancer default.py) staying numerically equal, enforced only by prose. Suggest a one-line cross-reference test so a future desync fails loudly. Duplication itself is a deliberate, well-documented layering choice (not flagged).",
+      "defect_signature": {"file": "src/sqllens/agent/core/enhancer/default.py", "line_range": [11, 19], "kind": "type_design"},
+      "corroboration_count": 1,
+      "contributed_to_verdict": true,
+      "thematic_overlap": "Same constant-comment region as comment-analyzer Suggestion default.py:11-18 (different kind: type_design vs style; not mechanical corroboration)."
+    },
+    {
+      "agent": "prflow:requesting-code-review",
+      "severity": "Suggestion",
+      "description": "limit=5 cap on search_text_memories and search_similar_usage vs AC4's 'every' in-band memory: if >5 in-band candidates exist the lowest-scoring are silently dropped. Faithful continuation of pre-change behavior (text already used limit=5); strict-tier hits rank first so no AC3/AC6 regression. Defensible prompt-size interpretation.",
+      "defect_signature": {"file": "src/sqllens/agent/core/enhancer/default.py", "line_range": [120, 134], "kind": "logic_error"},
+      "corroboration_count": 1,
+      "contributed_to_verdict": true
+    },
+    {
+      "agent": "prflow:requesting-code-review",
+      "severity": "Suggestion",
+      "description": "Non-sql pairs consume top-5 slots before the args.get('sql') filter, so a non-SQL pair (e.g. emit_chart) in the top 5 can displace a valid in-band question->SQL pair ranked 6th. Edge case, low impact; exclusion of non-sql pairs is correctly covered by test_band_excludes_pairs_without_sql_arg.",
+      "defect_signature": {"file": "src/sqllens/agent/core/enhancer/default.py", "line_range": [131, 141], "kind": "logic_error"},
+      "corroboration_count": 1,
+      "contributed_to_verdict": true
+    },
+    {
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "Suggestion",
+      "description": "Text memory scoring >= strict in a band-enabled deployment is not explicitly asserted as still-injected (covered indirectly). An explicit assertion would harden AC6's text half against a future refactor. Rated 3/10.",
+      "defect_signature": {"file": "tests/unit/test_enhancer_context_band.py", "line_range": [499, 517], "kind": "test_gap"},
+      "corroboration_count": 1,
+      "contributed_to_verdict": true
+    },
+    {
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "Suggestion",
+      "description": "Output ordering (text bullets before pair bullets) is not pinned; substring/in checks would not catch a reordering of the two render loops. Low value since order is not part of the contract. Rated 2/10.",
+      "defect_signature": {"file": "tests/unit/test_enhancer_context_band.py", "line_range": [513, 517], "kind": "test_gap"},
+      "corroboration_count": 1,
+      "contributed_to_verdict": true
+    },
+    {
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "Suggestion",
+      "description": "The isinstance(r.memory.args, dict) guard (default.py:139) is only exercised with a dict; a non-dict args is never fed. Guard is defensive against a shape the model type forbids. Near-zero value. Rated 2/10.",
+      "defect_signature": {"file": "src/sqllens/agent/core/enhancer/default.py", "line_range": [139, 139], "kind": "test_gap"},
+      "corroboration_count": 1,
+      "contributed_to_verdict": true
+    },
+    {
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "Suggestion",
+      "description": "Advisory confirmation (not a defect): the new near-match logic (search_similar_usage call and pair.args['sql'] subscript) sits inside the single try block whose except Exception logs a warning and returns the unmodified system_prompt, satisfying the CLAUDE.md degrade-path rule. The pair.args['sql'] subscript cannot KeyError/TypeError because the filter gates on isinstance(args, dict) and args.get('sql'). Noting the safe partial-degrade nuance only; no action needed.",
+      "defect_signature": {"file": "src/sqllens/agent/core/enhancer/default.py", "line_range": [130, 173], "kind": "other"},
+      "corroboration_count": 1,
+      "contributed_to_verdict": false
+    }
+  ],
+  "checklist": {
+    "source": "checklist-iter-3.json (not overwritten by shadow entry; snapshotted via --entry shadow)",
+    "verification_artifact": "verification-iter-3.json",
+    "verifier_verdicts_dir": "verdicts/iter-3 (16 VC nonce files present)",
+    "coverage_shortfall": {"dropped_count": 0, "criteria": []},
+    "phase2_fails": [],
+    "phase2_inconclusive": [],
+    "note": "Iteration-3 checklist and verifier verdicts already exist; shadow entry did not overwrite them and dispatched no new checklist-verifier (no agent-mode items lacked a nonce file). No test suite was run."
+  },
+  "acceptance_criteria_source": "issue-body (#251), $ISSUE_OVERRIDE=251",
+  "report": "## Verdict: APPROVE with notes (shadow re-review converges with the primary pass — no blocking findings)\n\n## Issue Compliance\nReviewed against issue #251: add an opt-in permissive near-match context tier — criteria from the issue body's `## Acceptance Criteria` section; scope unchanged. Requirement-based checklist items are included in the verification results below.\nThis PR has no workpad criteria to use, so the issue body's `## Acceptance Criteria` section supplied them.\n- AC1 (config field context_similarity_threshold: float, ge=0.0/le=1.0, default 0.7): SATISFIED (config.py, single-sourced via _DEFAULT_SIMILARITY_THRESHOLD).\n- AC2 (env SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD + [memory] TOML key, env wins): SATISFIED (four new test_config_schema.py tests pin it).\n- AC3 (context>=strict -> band empty, behavior unchanged): SATISFIED (band_enabled = context_floor < strict; text_search_floor = min(context,strict); transposed case handled by min()).\n- AC4 (context<strict -> inject in-band memories from both pairs and text under existing heading): SATISFIED.\n- AC5 (pairs render as related-example prose, not a tool call): SATISFIED.\n- AC6 (pairs>=strict stay tool-only via exclusive < strict; text>=strict still injected; search tool untouched): SATISFIED.\n- AC7 (docs/internal/agent/memory.md): INTENTIONALLY DEFERRED to a later docs pass by prior project decision — not flagged.\n\n## Verification Checklist Results\nCarried from the iteration-3 verification artifact (verification-iter-3.json): no FAIL, no INCONCLUSIVE. Coverage-shortfall artifact reports dropped_count=0. No suite was executed (settled by reading source).\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor\n1. Test docstring at tests/unit/test_factory_wiring.py:295-296 claims (present tense) that `build_agent` does not construct the enhancer, which the same PR falsifies by adding the wiring (raised by 1/6 agents). [inertness: first-conjunct=held limb-one=held limb-two=held; evidence: subject is the test docstring sentence itself, not a functional coverage gap — the wiring it describes IS present and tested; pytest does not parse the docstring to decide behavior and it carries no lint/type directive; the test file ships to no external consumer / published doc]. Filed by comment-analyzer as documented_falsehood/Important; the Phase 4.1.5 behavior-inert prose cap caps it to Suggestion, so it drives no REJECT at the critical threshold. A one-line reword to past tense (\"Before this change build_agent did not construct the enhancer\") resolves it — recommended non-blocking follow-up.\n2. Enhancer's two threshold __init__ params are unbounded floats, unlike the [0,1]-bounded MemoryConfig fields; a direct construction with out-of-range values is silently accepted (raised by 1/6 agents). Factory path feeds validated cfg.memory.*, so deployments are safe.\n3. The opt-in \"band empty by default\" invariant relies on two independent _DEFAULT_SIMILARITY_THRESHOLD=0.7 literals staying equal, enforced only by prose; a cross-reference equality test would make a future desync fail loudly (raised by 1/6 agents; same constant-comment region as finding 4, different kind).\n4. _DEFAULT_SIMILARITY_THRESHOLD comment (default.py:11-18) and the config.py:176-183 shared-default comment carry provenance/derivation beyond naming the wrong change (raised by 1/6 agents; style).\n5. limit=5 cap vs AC4's literal \"every\" in-band memory: >5 in-band candidates would drop the lowest-scoring; faithful to pre-change behavior, strict-tier hits rank first, no AC3/AC6 regression (raised by 1/6 agents).\n6. Non-sql pairs can consume top-5 slots before the sql filter, displacing a valid in-band pair ranked 6th; edge case, low impact (raised by 1/6 agents).\n7. Three low-value test-hardening gaps (band-enabled text>=strict injection not explicitly asserted; render ordering not pinned; non-dict args guard not exercised) (raised by 1/6 agents; each rated <=3/10 by the analyzer).\n\nover-grade annotation: one finding flagged and capped (finding 1 — behavior-inert prose cap, Important -> Suggestion).\nintra-diff contradiction scan: no contradiction found (the diff's absolute claims about the default band being empty are true against HEAD; no limitation note contradicts them for the same symbol).\ntruthfulness sweep: no finding promoted (the one demonstrated diff-added falsehood is behavior-inert test-docstring prose the Phase 4.1.5 cap covers, so it is not routed into the self-contradicting-diff carve-out).\n\n## Verdict Criteria\n- No verification FAIL or INCONCLUSIVE.\n- No decided acceptance criterion dropped (coverage shortfall dropped_count=0); AC7 deferred by recorded project decision.\n- No unmet-decided-criterion finding (all in-scope ACs demonstrated satisfied).\n- The single documented_falsehood candidate is behavior-inert test-docstring prose, capped to Suggestion by Phase 4.1.5 — no self-contradicting-diff carve-out REJECT.\n- No review-agent finding at or above the critical threshold.\n- Only findings below threshold present -> APPROVE with notes.\n\nShadow independence: this pass reviewed from scratch (no prior findings, no fix decisions, full six-agent roster). Its verdict converges with an APPROVE."
+}

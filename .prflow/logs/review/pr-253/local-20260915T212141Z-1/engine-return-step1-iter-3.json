@@ -1,0 +1,306 @@
+{
+  "dispatch_mode": "fanned-out",
+  "root_completeness": "established",
+  "verdict": "APPROVE WITH ADVISORY NOTES",
+  "report": "## Verdict: APPROVE WITH ADVISORY NOTES (iteration 3 \u2014 fix delta is correct; the two prior Important findings are resolved; no new blockers)\n\n## Issue Compliance\nReviewed against issue #251: Add an opt-in permissive near-match context tier \u2014 criteria from issue-body; scope unchanged. Requirement-based checklist items are included in the verification results below. This PR has no workpad criteria to use, so the issue body's `## Acceptance Criteria` section supplied them. AC1-AC6 are implemented and verified; AC7 (docs/internal/agent/memory.md) is intentionally DEFERRED for this PR by a recorded prior decision and is not graded a defect.\n\n## Verification Checklist Results\n16 passed, 0 failed, 0 inconclusive \u2014 0 via lite probe, 16 via agent.\n\n<details><summary>\u2705 Passed items (16 of 16) \u2014 click to expand</summary>\n\n- VC-1: AC1 MemoryConfig.context_similarity_threshold float, ge=0.0/le=1.0, default 0.7 via _DEFAULT_SIMILARITY_THRESHOLD [src/sqllens/config.py:126-129]\n- VC-2: AC2 env SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD + [memory] TOML key, env-beats-toml [tests/unit/test_config_schema.py:459-487]\n- VC-3: AC3 band empty when context>=strict; search_similar_usage skipped; 0.7/0.7 == pre-change [default.py:104-132]\n- VC-4: AC4 band injects both kinds under the heading when context<strict [default.py:104-162]\n- VC-5: AC5 pairs render as related-prose, not a tool-call shape [default.py:152-159]\n- VC-6: AC6 pairs>=strict excluded (<strict filter); text floor = min never exceeds strict [default.py:104-139]\n- VC-7: AC7 docs intentionally deferred \u2014 memory.md untouched, no false doc line added [docs/internal/agent/memory.md]\n- VC-8: search_text_memories keyword-only similarity_threshold call is signature-valid [base.py:60-69]\n- VC-9: search_similar_usage keyword-only call matches ABC + ChromaAgentMemory [base.py:47-57]\n- VC-10: pair.args['sql']/pair.question guarded, not unguarded derefs [default.py:133-158]\n- VC-11: factory wires DefaultLlmContextEnhancer with both thresholds into Agent(llm_context_enhancer=...) [factory.py:88-162]\n- VC-12: stub search methods mirror real signatures + reproduce the >= gate [test_enhancer_context_band.py:79-102]\n- VC-13: stub implements all 9 AgentMemory abstract methods, instantiable [test_enhancer_context_band.py:43-126]\n- VC-14: _render_text_only reproduces byte-identical pre-change section text [test_enhancer_context_band.py:146-157]\n- VC-15: factory-wiring test asserts enhancer attrs 0.6/0.3 and shared memory store [test_factory_wiring.py:290-316]\n- VC-16: _DEFAULT_SIMILARITY_THRESHOLD is two independent 0.7 module literals across the vendored boundary [config.py:109, default.py:17]\n\n</details>\n\nCoverage: checklist not capped (16 of 16 kept); coverage shortfall dropped_count=0.\n\n## Code Review Findings\n\n### \ud83d\udfe0 Important / Major\n1. MemoryConfig does not enforce the cross-field ordering invariant context_similarity_threshold <= similarity_threshold; a transposed pair is silently coerced (band off; text floor collapses to the lower value), injecting text far more permissively than intended. A @model_validator rejecting context>strict would make the illegal state unrepresentable. (raised by 1/7 agents) \u2014 advisory at the 'critical' threshold; not an AC violation (AC3 band-empty holds).\n2. DefaultLlmContextEnhancer.__init__ accepts the two thresholds as unvalidated public mutable floats on a public construction seam (factory constructs it directly); no bounds or ordering check on this type. (raised by 1/7 agents) \u2014 advisory at 'critical'.\n3. The strict-tier exclusion boundary (r.similarity_score < strict) is not pinned at the exact endpoint \u2014 the exclusion test uses 0.9, so a '<'\u2192'<=' mutation escapes; a pair at score == similarity_threshold is never tested. (raised by 1/7 agents) \u2014 advisory at 'critical'.\n\n### \ud83d\udfe1 Suggestion / Minor\n1. Comment cross-reference default.py:11-12 names MemoryConfig._DEFAULT_SIMILARITY_THRESHOLD, but the symbol is the module-level sqllens.config._DEFAULT_SIMILARITY_THRESHOLD (not a class attribute). Behavior-inert prose (no tool reads it; not shipped), so capped at Suggestion under the 4.1.5 inertness cap and non-blocking. (raised by 3/7 agents)\n2. The band relationship is derived inline three times rather than captured as a small immutable value object (ContextBand). (raised by 1/7 agents)\n3. 'single source of truth' wording overstates the reality \u2014 two independently-written 0.7 literals exist across the config/agent boundary; soften the wording or add an equality test. (raised by 1/7 agents)\n4. _StubAgentMemory re-implements the real '>=' gate, duplicating the inclusivity contract untested against ChromaAgentMemory. (raised by 1/7 agents)\n5. Band pair filter uses truthiness (args.get('sql')); a present-but-empty '' sql is dropped like a missing key \u2014 intentional and pinned, not a silent-drop defect. (raised by 1/7 agents)\n6. Test hardening: band-search degrade path, falsy-but-present sql arg, AC5 no-tool-call assertion, and the score==context_floor lower boundary are each unpinned. (raised by 1/7 agents)\n\nover-grade annotation: no finding flagged\ntruthfulness sweep: no finding promoted \u2014 the default.py:11-12 comment inaccuracy is behavior-inert prose covered by the 4.1.5 cap, so it is excluded from the self-contradicting-diff carve-out and stays a Suggestion.\nintra-diff contradiction scan: no contradiction found \u2014 the 'single source of truth' claims are scoped 'within each module' and are behavior-inert; no absolute-claim/limitation-note pair about the same symbol.\n\n## Verdict Criteria\n- Verification checklist: 16 PASS, 0 FAIL, 0 INCONCLUSIVE \u2192 no REJECT from rules 1/2.\n- Coverage shortfall: dropped_count=0 \u2192 contributes nothing (rule 2a).\n- Unmet-decided-criterion carve-out: none \u2014 AC1-AC6 verified, AC7 deferred by design.\n- Self-contradicting-diff carve-out: none \u2014 the only diff-added prose inaccuracy (default.py:11-12) is behavior-inert (both 4.1.5 limbs hold) and capped at Suggestion.\n- Findings at/above the 'critical' threshold: none (3 Important + several Suggestions, all below 'critical').\n- All 7 Phase-3 agents returned (no partial-coverage note).\n- Prior-iteration status: the two previously-Important findings \u2014 (a) single-sourcing the band-empty-by-default 0.7 default via _DEFAULT_SIMILARITY_THRESHOLD, and (b) the min(context_floor, strict) text-floor regression test \u2014 are both confirmed RESOLVED with no regressions (corroborated by code-reviewer, requesting-code-review, and the fresh checklist verification of VC-3/VC-6/VC-16).\n\nResult: only findings below the verdict threshold present \u2192 APPROVE WITH ADVISORY NOTES.",
+  "phase3_findings": [
+    {
+      "agent": "prflow:type-design-analyzer",
+      "severity": "Important",
+      "description": "MemoryConfig does not express or enforce the cross-field ordering invariant context_similarity_threshold <= similarity_threshold. A transposed pair (e.g. similarity_threshold=0.3, context_similarity_threshold=0.7) passes each field's independent [0,1] bound but is silently coerced: band disabled and text_search_floor=min(0.7,0.3)=0.3, injecting text at a far more permissive bar than the operator intends. A @model_validator(mode='after') rejecting context>strict (mirroring AuthConfig._bearer_requires_token in the same file) would make the illegal state unrepresentable. Advisory at the default 'critical' threshold; not an AC violation (AC3 band-empty holds).",
+      "defect_signature": {
+        "file": "src/sqllens/config.py",
+        "line_range": [
+          118,
+          140
+        ],
+        "kind": "type_design"
+      },
+      "corroboration_count": 1
+    },
+    {
+      "agent": "prflow:type-design-analyzer",
+      "severity": "Important",
+      "description": "DefaultLlmContextEnhancer.__init__ accepts the two thresholds as unvalidated public mutable floats. factory.build_agent constructs it directly (a public seam), so it is not reached only through the bounds-checked MemoryConfig; a direct caller can pass out-of-range or incoherent (context>strict) values and they are stored verbatim. The invariant lives nowhere on this type. Advisory at 'critical'.",
+      "defect_signature": {
+        "file": "src/sqllens/agent/core/enhancer/default.py",
+        "line_range": [
+          44,
+          68
+        ],
+        "kind": "type_design"
+      },
+      "corroboration_count": 1
+    },
+    {
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "Important",
+      "description": "The strict-tier pair exclusion boundary (band filter r.similarity_score < strict) is not pinned at the exact endpoint. The only exclusion test (test_band_excludes_strict_tier_pairs) uses a pair at 0.9 with strict=0.7, so a mutation of '<' to '<=' survives the suite; a pair scoring exactly == similarity_threshold (the reuse-vs-inject boundary AC5/AC6 no-duplication invariant depends on) is never tested. Add a pair at score == strict asserting it is NOT injected. Advisory at 'critical'.",
+      "defect_signature": {
+        "file": "tests/unit/test_enhancer_context_band.py",
+        "line_range": [
+          236,
+          252
+        ],
+        "kind": "test_gap"
+      },
+      "corroboration_count": 1
+    },
+    {
+      "agent": "prflow:code-reviewer / prflow:comment-analyzer / prflow:requesting-code-review",
+      "severity": "Suggestion",
+      "description": "Comment cross-reference names a symbol that does not resolve: default.py:11-12 says the constant 'mirrors MemoryConfig._DEFAULT_SIMILARITY_THRESHOLD in sqllens.config', but _DEFAULT_SIMILARITY_THRESHOLD is a MODULE-LEVEL constant (sqllens.config._DEFAULT_SIMILARITY_THRESHOLD), not a MemoryConfig class attribute \u2014 the qualified name would AttributeError. Behavior-inert prose (no tool reads it, not shipped to consumers) so it is capped at Suggestion under the 4.1.5 inertness cap and does not drive REJECT; the constant genuinely exists in that module and the mirroring intent is correct.",
+      "defect_signature": {
+        "file": "src/sqllens/agent/core/enhancer/default.py",
+        "line_range": [
+          11,
+          12
+        ],
+        "kind": "comment_drift"
+      },
+      "corroboration_count": 3
+    },
+    {
+      "agent": "prflow:type-design-analyzer",
+      "severity": "Suggestion",
+      "description": "The band relationship (band_enabled=context<strict, text_search_floor=min(context,strict), re-filter r.similarity_score<strict) is derived inline in enhance_system_prompt three times rather than captured as a value object; a small immutable ContextBand type would carry the invariant and remove the standing risk a future edit re-derives text_search_floor as a bare context_floor (the exact regression the min() guard test exists for).",
+      "defect_signature": {
+        "file": "src/sqllens/agent/core/enhancer/default.py",
+        "line_range": [
+          102,
+          139
+        ],
+        "kind": "type_design"
+      },
+      "corroboration_count": 1
+    },
+    {
+      "agent": "prflow:type-design-analyzer",
+      "severity": "Suggestion",
+      "description": "'single source of truth' wording overstates the reality across the config/agent module boundary: there are two independently-written 0.7 literals (config.py and enhancer/default.py), kept in sync only by the enhancer's 'mirrors' comment. Defensible (the vendored agent/ package cannot import sqllens.config, and factory always passes explicit config values) but either soften the wording or add a test asserting the two constants are equal so a desync fails loudly.",
+      "defect_signature": {
+        "file": "src/sqllens/agent/core/enhancer/default.py",
+        "line_range": [
+          11,
+          17
+        ],
+        "kind": "type_design"
+      },
+      "corroboration_count": 1
+    },
+    {
+      "agent": "prflow:type-design-analyzer",
+      "severity": "Suggestion",
+      "description": "_StubAgentMemory re-implements the real store's '>= similarity_threshold' gate, so the inclusive lower-bound / exclusive upper-bound boundary semantics live in two places; if ChromaAgentMemory ever switched to '>' the band tests would keep passing green. Worth a note that the inclusivity contract is duplicated and untested against the real implementation.",
+      "defect_signature": {
+        "file": "tests/unit/test_enhancer_context_band.py",
+        "line_range": [
+          324,
+          383
+        ],
+        "kind": "type_design"
+      },
+      "corroboration_count": 1
+    },
+    {
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "Suggestion",
+      "description": "The band pair filter r.memory.args.get('sql') is truthiness-based, so a present-but-empty sql ('') is dropped identically to a missing key. Intentional and pinned by test_band_excludes_pairs_without_sql_arg; NOT a CLAUDE.md silent-drop defect (that rule targets bulk export/import completeness, whereas prompt enrichment is best-effort). Use 'sql' in args if empty-string SQL ever becomes meaningful.",
+      "defect_signature": {
+        "file": "src/sqllens/agent/core/enhancer/default.py",
+        "line_range": [
+          133,
+          139
+        ],
+        "kind": "logic_error"
+      },
+      "corroboration_count": 1
+    },
+    {
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "Suggestion",
+      "description": "Band-search degrade path is untested: test_search_failure_degrades_to_original_prompt raises only from search_text_memories (awaited first, short-circuiting before search_similar_usage). Same except handler, so low value, but a regression moving the band search outside the try would go uncaught. Also: falsy-but-present sql arg, AC5 prose-marker absence-of-tool-call assertion, and the score==context_floor lower-boundary inclusion are each unpinned. All advisory.",
+      "defect_signature": {
+        "file": "tests/unit/test_enhancer_context_band.py",
+        "line_range": [
+          255,
+          303
+        ],
+        "kind": "test_gap"
+      },
+      "corroboration_count": 1
+    }
+  ],
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:pr-test-analyzer",
+    "prflow:type-design-analyzer",
+    "prflow:requesting-code-review"
+  ],
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:pr-test-analyzer",
+    "prflow:type-design-analyzer",
+    "prflow:requesting-code-review"
+  ],
+  "phase3_failed_agents": [],
+  "diff_profile": {
+    "files_changed": 6,
+    "insertions": 496,
+    "deletions": 8,
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": true,
+    "test_relevant": true,
+    "checklist_skipped": null,
+    "detect_all_audit": false
+  },
+  "cap_drops": {
+    "count": 0,
+    "by_category": {}
+  },
+  "diff_produced_at_head": "331f06ac85403f7a03f1b1203248d21fd8bbf6de",
+  "checklist": [
+    {
+      "id": "VC-1",
+      "category": "issue_acceptance",
+      "claim": "AC1: MemoryConfig in src/sqllens/config.py carries a new float field context_similarity_threshold with pydantic Field bounds ge=0.0, le=1.0, defaulting to 0.7 (via _DEFAULT_SIMILARITY_THRESHOLD).",
+      "source_file": "src/sqllens/config.py",
+      "verification_mode": "agent",
+      "claim_signature": "config-context-threshold-field-bounds-default"
+    },
+    {
+      "id": "VC-2",
+      "category": "issue_acceptance",
+      "claim": "AC2: context_similarity_threshold is settable via env SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD and via the [memory] TOML key, with env winning over TOML.",
+      "source_file": "tests/unit/test_config_schema.py",
+      "verification_mode": "agent",
+      "claim_signature": "config-context-threshold-env-toml-precedence"
+    },
+    {
+      "id": "VC-3",
+      "category": "issue_acceptance",
+      "claim": "AC3: when context_similarity_threshold >= similarity_threshold the band is empty (band_enabled = context_floor < strict is False) and no extra memory is injected on account of the band; at the default 0.7/0.7 output is byte-identical to pre-change.",
+      "source_file": "src/sqllens/agent/core/enhancer/default.py",
+      "verification_mode": "agent",
+      "claim_signature": "enhancer-band-empty-when-context-ge-strict"
+    },
+    {
+      "id": "VC-4",
+      "category": "issue_acceptance",
+      "claim": "AC4: when context_similarity_threshold < similarity_threshold the enhancer injects memories scoring in [context_floor, strict) from both question->SQL pairs and text/schema-doc memories under the existing '## Relevant Context from Memory' heading.",
+      "source_file": "src/sqllens/agent/core/enhancer/default.py",
+      "verification_mode": "agent",
+      "claim_signature": "enhancer-band-injects-both-kinds"
+    },
+    {
+      "id": "VC-5",
+      "category": "issue_acceptance",
+      "claim": "AC5: injected near-match question->SQL pairs render as related example prose (prior question and its SQL), not as a pre-decided tool call.",
+      "source_file": "src/sqllens/agent/core/enhancer/default.py",
+      "verification_mode": "agent",
+      "claim_signature": "enhancer-pairs-render-as-prose"
+    },
+    {
+      "id": "VC-6",
+      "category": "issue_acceptance",
+      "claim": "AC6: question->SQL pairs with score >= similarity_threshold are excluded from the band (r.similarity_score < strict filter) and stay tool-only; text memories at or above strict remain injected as before.",
+      "source_file": "src/sqllens/agent/core/enhancer/default.py",
+      "verification_mode": "agent",
+      "claim_signature": "enhancer-strict-tier-untouched"
+    },
+    {
+      "id": "VC-7",
+      "category": "issue_acceptance",
+      "claim": "AC7 (INTENTIONALLY DEFERRED): docs/internal/agent/memory.md updated to describe the injection path and context_similarity_threshold. Per this run's prior decision AC7 is deferred; missing docs must NOT be graded a code defect.",
+      "source_file": "docs/internal/agent/memory.md",
+      "verification_mode": "agent",
+      "claim_signature": "docs-memory-md-updated-deferred"
+    },
+    {
+      "id": "VC-8",
+      "category": "dependency_interaction",
+      "claim": "The enhancer calls search_text_memories with keyword-only similarity_threshold; the AgentMemory ABC declares that keyword-only parameter, so the call is signature-valid.",
+      "source_file": "src/sqllens/agent/core/enhancer/default.py",
+      "verification_mode": "agent",
+      "claim_signature": "dep-search-text-memories-kwarg"
+    },
+    {
+      "id": "VC-9",
+      "category": "dependency_interaction",
+      "claim": "The enhancer calls search_similar_usage(question=..., context=..., limit=5, similarity_threshold=context_floor) with keyword-only args matching the AgentMemory ABC / ChromaAgentMemory signature.",
+      "source_file": "src/sqllens/agent/core/enhancer/default.py",
+      "verification_mode": "agent",
+      "claim_signature": "dep-search-similar-usage-kwarg"
+    },
+    {
+      "id": "VC-10",
+      "category": "data_format_assumption",
+      "claim": "The band render reads pair.args['sql'] guarded by isinstance(r.memory.args, dict) and r.memory.args.get('sql'); ToolMemory.args is typed Dict[str, Any] and question is str, so no unguarded deref.",
+      "source_file": "src/sqllens/agent/core/enhancer/default.py",
+      "verification_mode": "agent",
+      "claim_signature": "data-toolmemory-args-sql-shape"
+    },
+    {
+      "id": "VC-11",
+      "category": "dependency_interaction",
+      "claim": "factory.build_agent constructs DefaultLlmContextEnhancer(memory, similarity_threshold=cfg.memory.similarity_threshold, context_similarity_threshold=cfg.memory.context_similarity_threshold) and passes it to Agent(..., llm_context_enhancer=context_enhancer); Agent accepts that kwarg.",
+      "source_file": "src/sqllens/agent/factory.py",
+      "verification_mode": "agent",
+      "claim_signature": "dep-factory-wires-enhancer"
+    },
+    {
+      "id": "VC-12",
+      "category": "test_mock_alignment",
+      "claim": "_StubAgentMemory's search_text_memories/search_similar_usage mirror the real AgentMemory keyword-only signatures and reproduce the real ChromaAgentMemory '>= similarity_threshold' lower-bound gate.",
+      "source_file": "tests/unit/test_enhancer_context_band.py",
+      "verification_mode": "agent",
+      "claim_signature": "test-stub-mirrors-real-search"
+    },
+    {
+      "id": "VC-13",
+      "category": "test_mock_alignment",
+      "claim": "_StubAgentMemory implements all abstract AgentMemory methods (save_tool_usage, save_text_memory, get_recent_memories, etc.) so it instantiates, with signatures matching the ABC.",
+      "source_file": "tests/unit/test_enhancer_context_band.py",
+      "verification_mode": "agent",
+      "claim_signature": "test-stub-implements-abc"
+    },
+    {
+      "id": "VC-14",
+      "category": "test_mock_alignment",
+      "claim": "_render_text_only reproduces the exact pre-change text-only '## Relevant Context from Memory' section string, so the no-op assertions pin byte-identical output rather than self-referencing the code under test.",
+      "source_file": "tests/unit/test_enhancer_context_band.py",
+      "verification_mode": "agent",
+      "claim_signature": "test-render-text-only-fixed-expected"
+    },
+    {
+      "id": "VC-15",
+      "category": "test_mock_alignment",
+      "claim": "test_memory_thresholds_flow_into_context_enhancer asserts agent.llm_context_enhancer is a DefaultLlmContextEnhancer with similarity_threshold==0.6, context_similarity_threshold==0.3, and shares agent.agent_memory.",
+      "source_file": "tests/unit/test_factory_wiring.py",
+      "verification_mode": "agent",
+      "claim_signature": "test-factory-wiring-asserts-attrs"
+    },
+    {
+      "id": "VC-16",
+      "category": "data_format_assumption",
+      "claim": "_DEFAULT_SIMILARITY_THRESHOLD is defined as 0.7 in BOTH src/sqllens/config.py and src/sqllens/agent/core/enhancer/default.py (two independent literals across the vendored-agent boundary); each module's comment calls it a 'single source of truth' within that module.",
+      "source_file": "src/sqllens/agent/core/enhancer/default.py",
+      "verification_mode": "agent",
+      "claim_signature": "data-default-threshold-two-literals"
+    }
+  ],
+  "prior_important_findings_resolved": true,
+  "verification_summary": {
+    "pass": 16,
+    "fail": 0,
+    "inconclusive": 0,
+    "via_lite": 0,
+    "via_agent": 16,
+    "normalized": 0
+  }
+}

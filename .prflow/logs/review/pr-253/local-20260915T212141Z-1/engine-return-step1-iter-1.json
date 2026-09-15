@@ -1,0 +1,117 @@
+{
+  "dispatch_mode": "fanned-out",
+  "root_completeness": "established",
+  "verdict": "APPROVE with notes",
+  "diff_produced_at_head": "3ef1b7e25fe79791528fe88392311a1d02ed811f",
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": true,
+    "checklist_skipped": false
+  },
+  "cap_drops": { "count": 0, "by_category": {} },
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "phase3_failed_agents": [],
+  "phase3_findings": [
+    {
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "Suggestion",
+      "description": "On the opt-in band path, search_similar_usage runs after search_text_memories has already returned; if only the band (SQL-pair) search raises, the already-fetched text memories are dropped too and the prompt degrades to unmodified. Fail-toward-no-change and warned (within the intended degrade contract), but a slight behavioral widening vs pre-change where only text search could fail. No action required unless preserving partial text-memory injection on a band-search failure is desired.",
+      "defect_signature": { "file": "src/sqllens/agent/core/enhancer/default.py", "line_range": [119, 131], "kind": "other" },
+      "corroboration_count": 1,
+      "fix_decision": "no-fix (advisory; below verdict threshold; consistent with required degrade contract)"
+    },
+    {
+      "agent": "prflow:requesting-code-review",
+      "severity": "Suggestion",
+      "description": "Band can be starved by strict-tier crowding under the shared limit=5. search_similar_usage(limit=5) maps to Chroma n_results=5 and the score<strict exclusion is applied after retrieval, so when the 5 nearest neighbours are all strict-tier hits, band_pairs collapses to empty even though in-band pairs exist just outside the top-5. AC4 ('every saved memory in band') is thus best-effort, capped at 5. Practically benign (strict hits stay reusable via the search tool) and mirrors the pre-existing text limit=5. Consider a note or a larger band candidate set.",
+      "defect_signature": { "file": "src/sqllens/agent/core/enhancer/default.py", "line_range": [121, 131], "kind": "logic_error" },
+      "corroboration_count": 1,
+      "fix_decision": "no-fix (advisory; below verdict threshold; pre-existing limit=5 tradeoff, not a regression)"
+    },
+    {
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "Suggestion",
+      "description": "Band-enabled text floor is asserted only indirectly. test_band_injects_both_memory_kinds_as_prose asserts tool_search_calls == [0.3] but not text_search_calls; a one-line assert mem.text_search_calls == [0.3] would pin text_search_floor = min(context_floor, strict) directly for the band-enabled path.",
+      "defect_signature": { "file": "tests/unit/test_enhancer_context_band.py", "line_range": [440, 458], "kind": "test_gap" },
+      "corroboration_count": 1,
+      "fix_decision": "no-fix (advisory test hardening; below verdict threshold)"
+    },
+    {
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "Suggestion",
+      "description": "Inverted/above-strict context_similarity_threshold (e.g. 0.9/0.7) is valid input but untested. Source handles it correctly (band_enabled False; text_search_floor = min(0.9,0.7)=0.7) but no test pins that min() never lets the text floor rise above strict. Degenerate config; optional.",
+      "defect_signature": { "file": "src/sqllens/agent/core/enhancer/default.py", "line_range": [98, 102], "kind": "test_gap" },
+      "corroboration_count": 1,
+      "fix_decision": "no-fix (advisory; below verdict threshold)"
+    },
+    {
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "Suggestion",
+      "description": "Degrade path test only exercises search_text_memories raising, not search_similar_usage. Both calls sit inside the same try, so the second raise is covered by symmetry; an explicit case would be belt-and-suspenders.",
+      "defect_signature": { "file": "tests/unit/test_enhancer_context_band.py", "line_range": [514, 529], "kind": "test_gap" },
+      "corroboration_count": 1,
+      "fix_decision": "no-fix (advisory; below verdict threshold)"
+    },
+    {
+      "agent": "prflow:type-design-analyzer",
+      "severity": "Suggestion",
+      "description": "No cross-field validator ties context_similarity_threshold to similarity_threshold. Because both defaults are independently 0.7, a user who lowers only similarity_threshold (e.g. to 0.5) leaves context_similarity_threshold at 0.7 (>= strict), silently disabling the near-match band with no warning. Behaviour is well-defined and the enhancer degrades safely, but the relational invariant lives only in prose. Usability foot-gun, not a bug.",
+      "defect_signature": { "file": "src/sqllens/config.py", "line_range": [114, 127], "kind": "type_design" },
+      "corroboration_count": 1,
+      "fix_decision": "no-fix (advisory; below verdict threshold; optional warning-only model_validator)"
+    },
+    {
+      "agent": "prflow:type-design-analyzer",
+      "severity": "Suggestion",
+      "description": "_StubAgentMemory duplicates production's >= similarity_threshold lower-bound filtering inline in two methods. If the real ChromaAgentMemory gate ever changes, the stub keeps encoding the old behaviour and tests stay green while diverging from production. Test-fidelity/drift risk, not a correctness bug in this PR.",
+      "defect_signature": { "file": "tests/unit/test_enhancer_context_band.py", "line_range": [291, 350], "kind": "test_gap" },
+      "corroboration_count": 1,
+      "fix_decision": "no-fix (advisory; below verdict threshold)"
+    },
+    {
+      "agent": "prflow:type-design-analyzer",
+      "severity": "Suggestion",
+      "description": "DefaultLlmContextEnhancer.__init__ stores similarity_threshold/context_similarity_threshold as plain public floats with no range re-validation at this layer. Acceptable because factory.build_agent feeds already-validated MemoryConfig values, but a programmatic caller constructing the enhancer directly could pass out-of-range values that bypass the [0,1] invariant.",
+      "defect_signature": { "file": "src/sqllens/agent/core/enhancer/default.py", "line_range": [36, 60], "kind": "type_design" },
+      "corroboration_count": 1,
+      "fix_decision": "no-fix (advisory; below verdict threshold; invariant enforced at config boundary)"
+    }
+  ],
+  "checklist": [
+    {"id": "VC-1", "category": "issue_acceptance", "verification_mode": "agent", "verdict": "PASS", "evidence": "config.py context_similarity_threshold = Field(default=0.7, ge=0.0, le=1.0)."},
+    {"id": "VC-2", "category": "issue_acceptance", "verification_mode": "agent", "verdict": "PASS", "evidence": "env_prefix SQLLENS_, env_nested_delimiter __, memory nested; env-over-TOML default; 4 tests confirm."},
+    {"id": "VC-3", "category": "issue_acceptance", "verification_mode": "agent", "verdict": "PASS", "evidence": "band_enabled=context_floor<strict; text_search_floor=min→strict; SQL-pair search gated by band_enabled."},
+    {"id": "VC-4", "category": "issue_acceptance", "verification_mode": "agent", "verdict": "PASS", "evidence": "both kinds injected in [floor,strict) under the heading."},
+    {"id": "VC-5", "category": "issue_acceptance", "verification_mode": "agent", "verdict": "PASS", "evidence": "band_pairs rendered as prose, not a tool call."},
+    {"id": "VC-6", "category": "issue_acceptance", "verification_mode": "agent", "verdict": "PASS", "evidence": "filter <strict excludes strict-tier pairs; search tool path unchanged; text>=strict still injected."},
+    {"id": "VC-7", "category": "dependency_interaction", "verification_mode": "agent", "verdict": "PASS", "evidence": "kwargs match search_similar_usage base+chroma signature."},
+    {"id": "VC-8", "category": "dependency_interaction", "verification_mode": "agent", "verdict": "PASS", "evidence": "kwargs match search_text_memories base signature."},
+    {"id": "VC-9", "category": "data_format_assumption", "verification_mode": "agent", "verdict": "PASS", "evidence": "RunSqlToolArgs.sql:str; saved args dict carries 'sql' key."},
+    {"id": "VC-10", "category": "data_format_assumption", "verification_mode": "agent", "verdict": "PASS", "evidence": "success:True filter narrows to successful pairs — pre-existing, sound; AC4 met for successful-pair population."},
+    {"id": "VC-11", "category": "dependency_interaction", "verification_mode": "agent", "verdict": "PASS", "evidence": "factory passes both thresholds and wires llm_context_enhancer; Agent accepts/stores it."},
+    {"id": "VC-12", "category": "api_contract", "verification_mode": "lite", "verdict": "PASS", "evidence": "lite probe: DefaultLlmContextEnhancer present in core/__init__.py (import + __all__)."},
+    {"id": "VC-13", "category": "test_mock_alignment", "verification_mode": "agent", "verdict": "PASS", "evidence": "stub search signatures match base.py keyword-only params incl tool_name_filter."},
+    {"id": "VC-14", "category": "test_mock_alignment", "verification_mode": "agent", "verdict": "PASS", "evidence": "stub overrides all 9 abstract methods; ABC enforces at construction."},
+    {"id": "VC-15", "category": "test_mock_alignment", "verification_mode": "agent", "verdict": "PASS", "evidence": "_text/_pair constructor fields match models.py."},
+    {"id": "VC-16", "category": "test_mock_alignment", "verification_mode": "agent", "verdict": "PASS", "evidence": "_render_text_only byte-identical to default.py examples_section."},
+    {"id": "VC-17", "category": "absolute_claim", "verification_mode": "agent", "verdict": "PASS", "evidence": "universal holds and is scoped '(the default)'; 0.5/0.5 falsifying case handled and tested."},
+    {"id": "VC-18", "category": "absolute_claim", "verification_mode": "agent", "verdict": "PASS", "evidence": "filter <strict excludes equality; no strict-tier pair duplicated into injection."}
+  ],
+  "report": "## Verdict: APPROVE with notes (all 6 in-scope acceptance criteria met; 18/18 checklist items PASS; only below-threshold Suggestions found)\n\n## Issue Compliance\nReviewed against issue #251: Add an opt-in permissive near-match context tier — criteria from issue-body; scope not-established (no workpad compared this run). Requirement-based checklist items are included in the verification results below.\nThis PR has no workpad criteria to use, so the issue body's `## Acceptance Criteria` section supplied them.\nAC1–AC6 (the code criteria) are all met and trace to implementing lines. AC7 (docs/internal/agent/memory.md correction + context_similarity_threshold documentation) is intentionally DEFERRED to a Phase 4.1 documentation pass and is correctly absent from this diff — not penalized, per the recorded prior decision.\n\n## Verification Checklist Results\n18 passed, 0 failed, 0 inconclusive — 1 via lite probe, 17 via agent (settled by source reads under the no-suite-launch rule).\n\n<details><summary>✅ Passed items (18 of 18) — click to expand</summary>\n\n- VC-1: MemoryConfig.context_similarity_threshold = Field(default=0.7, ge=0.0, le=1.0) [src/sqllens/config.py:163]\n- VC-2: env SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD + [memory] TOML key, env wins (env_prefix/env_nested_delimiter) [src/sqllens/config.py:524]\n- VC-3: no-op when context_floor >= strict (band_enabled + min() text floor) [src/sqllens/agent/core/enhancer/default.py:96]\n- VC-4: band injects both memory kinds in [floor,strict) under the existing heading [src/sqllens/agent/core/enhancer/default.py:104]\n- VC-5: near-match pairs rendered as prose, not a tool call [src/sqllens/agent/core/enhancer/default.py:146]\n- VC-6: strict-tier pairs excluded from injection (<strict); search tool + text>=strict paths unchanged [src/sqllens/agent/core/enhancer/default.py:125]\n- VC-7: search_similar_usage kwargs match the AgentMemory contract [src/sqllens/agent/capabilities/agent_memory/base.py:47]\n- VC-8: search_text_memories kwargs match the AgentMemory contract [src/sqllens/agent/capabilities/agent_memory/base.py:60]\n- VC-9: saved run_sql pairs carry the 'sql' arg key (RunSqlToolArgs.sql) [src/sqllens/agent/capabilities/sql_runner/models.py:13]\n- VC-10: search_similar_usage success:True narrowing is pre-existing and sound; AC4 met for successful pairs [src/sqllens/agent/integrations/chromadb/agent_memory.py:224]\n- VC-11: factory wires both thresholds into the enhancer (not dead config) [src/sqllens/agent/factory.py:138]\n- VC-12: DefaultLlmContextEnhancer exported from sqllens.agent.core [src/sqllens/agent/core/__init__.py:129]\n- VC-13: _StubAgentMemory search signatures match the ABC [tests/unit/test_enhancer_context_band.py:327]\n- VC-14: stub implements all 9 abstract methods [tests/unit/test_enhancer_context_band.py:291]\n- VC-15: _text/_pair constructor fields match the real models [tests/unit/test_enhancer_context_band.py:377]\n- VC-16: _render_text_only is byte-identical to the enhancer's text-only rendering [tests/unit/test_enhancer_context_band.py:394]\n- VC-17: 'band empty / unchanged when floor>=strict' universal holds (scoped to the default) [src/sqllens/config.py:123]\n- VC-18: 'strict-tier pairs not duplicated' universal holds (<strict excludes equality) [src/sqllens/agent/core/enhancer/default.py:114]\n\n</details>\n\n## Code Review Findings\n### 🟡 Suggestion / Minor\n1. Band can be starved by strict-tier crowding under the shared limit=5: search_similar_usage(limit=5) → Chroma n_results=5, and the score<strict exclusion is applied post-retrieval, so when the 5 nearest neighbours are all strict-tier hits band_pairs collapses to empty even though in-band pairs exist just outside the top-5. AC4 ('every saved memory in band') is best-effort; practically benign (strict hits stay reusable via the search tool) and mirrors the pre-existing text limit=5. (raised by 1/6 agents)\n2. On the opt-in band path, if search_similar_usage raises after search_text_memories succeeded, the already-fetched text memories are dropped too and the prompt degrades to unmodified — a slight fail-toward-no-change widening vs pre-change (warned; within the intended degrade contract). (raised by 1/6 agents)\n3. No cross-field validator ties context_similarity_threshold to similarity_threshold; because both defaults are 0.7, lowering only similarity_threshold silently disables the near-match band with no warning — a usability foot-gun, not a bug (enhancer degrades safely). (raised by 1/6 agents)\n4. DefaultLlmContextEnhancer.__init__ does not re-validate the thresholds' [0,1] range; safe via the factory (already-validated MemoryConfig) but a direct programmatic caller could bypass it. (raised by 1/6 agents)\n5. Test hardening: band-enabled text floor asserted only indirectly (add assert mem.text_search_calls == [0.3]); inverted/above-strict config (0.9/0.7) untested; degrade-path test only raises search_text_memories, not search_similar_usage; _StubAgentMemory duplicates production's >= filter inline (drift risk). (raised by 1/6 agents)\n\nNo Critical and no Important findings. No self-contradicting-diff finding: every new/edited docstring and comment traces to an implementing line (comment-analyzer and the final-pass reviewer confirmed no comment drift; the 'behaves exactly as before' claim is correctly scoped '(the default)' and backed by test_equal_nondefault_thresholds_band_empty_floor_tracks_strict). No upstream brand-name leak. SPDX header present on the new test file. Type hints present on all new public signatures. The required degrade path (catch → warn → return unmodified prompt) is preserved.\n\nover-grade annotation: no finding flagged\ntruthfulness sweep: no finding promoted\nintra-diff contradiction scan: no contradiction found\n\n## Phase 0.6 Stale-prose lint\nDegraded-check note: the vendored stale-prose-lint.py helper is not present on this thin checkout (.prflow/vendor absent), so the deterministic stale-prose pre-pass did not run. This does not gate the verdict; no stale counted-prose was observed by manual review of the diff.\n\n## Verdict Criteria\n- No FAIL / INCONCLUSIVE checklist items → no REJECT on rules 1/2.\n- No coverage shortfall (18 items < 100 cap; sub-cap did not fire) → rule 2a contributes nothing.\n- No finding at or above the default `critical` verdict threshold → no REJECT on rule 3.\n- No unmet-decided-criterion finding; no self-contradicting-diff finding.\n- Only below-threshold Suggestions present → APPROVE with notes (rule 6).\n\nAll 6 in-scope acceptance criteria are met and the change preserves the required degrade contract, brand cleanliness, SPDX and type-hint conventions. The Suggestions above are advisory follow-ups for the author/fix loop; none blocks merge. AC7 documentation remains a tracked follow-up (deferred by prior decision)."
+}

@@ -1,0 +1,299 @@
+{
+  "entry": "shadow",
+  "iteration": 1,
+  "dispatch_mode": "fanned-out",
+  "root_completeness": "established",
+  "verdict": "APPROVE WITH CAVEAT",
+  "diff_produced_at_head": "3ef1b7e25fe79791528fe88392311a1d02ed811f",
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": true,
+    "detect_all_audit": false,
+    "checklist_skipped": false
+  },
+  "reviewers_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:pr-test-analyzer",
+    "prflow:type-design-analyzer",
+    "prflow:requesting-code-review"
+  ],
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:pr-test-analyzer",
+    "prflow:type-design-analyzer",
+    "prflow:requesting-code-review"
+  ],
+  "per_reviewer_assessment": [
+    {
+      "agent": "prflow:code-reviewer",
+      "returned": true,
+      "assessment": "Well-scoped, correct against all 7 ACs (AC7 deferred). Thresholds flow config->factory->enhancer; band math matches ChromaAgentMemory lower-bound filter; no-op default byte-identical. No CLAUDE.md violations, no bugs at/above threshold. Only one cosmetic redundancy. Ship-ready. (0 Critical, 0 Important, 1 Suggestion)"
+    },
+    {
+      "agent": "prflow:silent-failure-hunter",
+      "returned": true,
+      "assessment": "Change well-guarded on error handling. Mandated degrade path preserved and now covers the new band search; the only new dict index pair.args['sql'] is provably safe behind the band filter; new search calls use keyword-only similarity_threshold correctly. No silent failures. One stylistic log-discoverability suggestion. No blocking findings. (0 Critical, 0 Important, 1 Suggestion)"
+    },
+    {
+      "agent": "prflow:comment-analyzer",
+      "returned": true,
+      "assessment": "Every behavioral claim in added docstrings/comments traces to an implementing line on HEAD. No upstream brand leakage. No documented falsehoods. The factory 'Agent() falls back to DefaultLlmContextEnhancer(agent_memory)' comment verified true at agent.py:134. No changes required. (0 findings)"
+    },
+    {
+      "agent": "prflow:pr-test-analyzer",
+      "returned": true,
+      "assessment": "Coverage strong and well-targeted; stub faithfully mirrors the real >= threshold gate so tests are genuine not tautologies. One Important test gap: context_similarity_threshold > similarity_threshold (the exact case min() guards) untested \u2014 all no-op tests use EQUAL thresholds. Two optional hardening suggestions (== strict boundary; prose-framing assertion). (0 Critical, 1 Important, 2 Suggestions)"
+    },
+    {
+      "agent": "prflow:type-design-analyzer",
+      "returned": true,
+      "assessment": "Type work mostly sound; band logic correct and defensive. One Important type-design weakness: the 'no behavior change by default' guarantee is encoded as two independently-defaulted 0.7 literals across config.py and default.py, one default-bump away from silently enabling the band. Two suggestions (no self-validation of float bounds in enhancer __init__; redundant isinstance guard). No critical/blocking issues. (0 Critical, 1 Important, 2 Suggestions)"
+    },
+    {
+      "agent": "prflow:requesting-code-review",
+      "returned": true,
+      "assessment": "Ready to merge: Yes. Satisfies every AC traced to implementing lines; degrade path preserved; no brand name; SPDX present; keyword-only type-hinted params; f-string nested quotes safe on 3.11+; wiring on shared Agent so both query_database and visualize_data get the band (no sibling gap). One low-probability Suggestion (limit=5 band starvation in the opposite of the target scenario; degrades gracefully). (0 Critical, 0 Important, 1 Suggestion)"
+    }
+  ],
+  "phase3_failed_agents": [],
+  "phase2_fails": [],
+  "phase3_findings": [
+    {
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "Important",
+      "description": "The context_similarity_threshold > similarity_threshold misconfiguration is untested. text_search_floor = min(context_floor, strict) exists precisely for this case, but every no-op test uses EQUAL thresholds (0.7/0.7, 0.5/0.5) where min(x,x) is trivial. A regression replacing min(context_floor, strict) with a bare context_floor would pass all current tests yet, in a context>strict deployment, raise the text floor above strict and silently drop legitimate strict-tier text memories that should still be injected \u2014 violating AC3 (which formally includes the strictly-greater case). Recommend a test with similarity_threshold=0.7, context_similarity_threshold=0.9 asserting text_search_calls==[0.7], tool_search_calls==[], and that an in-band (0.75) text memory is still injected. Non-blocking: shipped code is correct; this is a coverage/regression-guard gap.",
+      "defect_signature": {
+        "file": "tests/unit/test_enhancer_context_band.py",
+        "line_range": null,
+        "kind": "test_gap"
+      },
+      "corroboration_count": 1
+    },
+    {
+      "agent": "prflow:type-design-analyzer",
+      "severity": "Important",
+      "description": "The feature's headline guarantee ('unchanged behavior by default') is an unexpressed cross-field invariant: it rests on MemoryConfig.similarity_threshold and MemoryConfig.context_similarity_threshold sharing the literal default 0.7, but the two Field(default=0.7) declarations are independent literals (config.py) and DefaultLlmContextEnhancer.__init__ hard-codes 0.7 twice more (default.py:40-41). A future bump of similarity_threshold's default (e.g. to 0.8) without touching the context floor silently flips band_enabled to true for every never-opted-in deployment. Recommend deriving the no-op from a single source of truth (sentinel default meaning 'track strict', or a model-level validator). Non-blocking: current shipped behavior is correct; this is a latent maintainability/drift risk.",
+      "defect_signature": {
+        "file": "src/sqllens/config.py",
+        "line_range": [
+          111,
+          127
+        ],
+        "kind": "type_design"
+      },
+      "corroboration_count": 1
+    },
+    {
+      "agent": "prflow:requesting-code-review",
+      "severity": "Suggestion",
+      "description": "limit=5 on the near-match pair search can starve the band: search_similar_usage(limit=5, similarity_threshold=context_floor) returns nearest-neighbours top-k first, so strict-tier pairs (>=strict) can consume the budget before any band pair is seen; if 5+ pairs clear the strict bar every returned row is dropped by the < strict filter and the band injects no pairs, partially undercutting AC4's 'every saved memory in [context_floor, strict)'. Low probability \u2014 the target scenario is a near-miss question unlikely to also produce 5 strict hits \u2014 and it degrades to fewer/zero injections, not an error. Optional: request limit headroom above the expected strict-tier count.",
+      "defect_signature": {
+        "file": "src/sqllens/agent/core/enhancer/default.py",
+        "line_range": [
+          120,
+          131
+        ],
+        "kind": "logic_error"
+      },
+      "corroboration_count": 1
+    },
+    {
+      "agent": "prflow:code-reviewer + prflow:type-design-analyzer",
+      "severity": "Suggestion",
+      "description": "Redundant guard isinstance(r.memory.args, dict) in the band filter: ToolMemory.args is typed Dict[str, Any] (non-optional, pydantic-validated at models.py:16), so the isinstance can never be false for a constructed ToolMemory. Harmless/defensive; the truthy args.get('sql') check is the meaningful one. Pure style/clarity.",
+      "defect_signature": {
+        "file": "src/sqllens/agent/core/enhancer/default.py",
+        "line_range": [
+          125,
+          131
+        ],
+        "kind": "style"
+      },
+      "corroboration_count": 2
+    },
+    {
+      "agent": "prflow:type-design-analyzer",
+      "severity": "Suggestion",
+      "description": "DefaultLlmContextEnhancer does not enforce its own [0.0,1.0] threshold bounds; that invariant lives only on MemoryConfig. The enhancer is a public seam (exported from sqllens.agent.core, constructed by factory.build_agent and tests), so a programmatic caller bypassing MemoryConfig can pass e.g. similarity_threshold=5.0 with no signal. Impact bounded (degrades to 'band always off'/'everything in band', never crashes). A cheap 'if not 0.0 <= x <= 1.0: raise ValueError' in __init__ would make the type self-protecting.",
+      "defect_signature": {
+        "file": "src/sqllens/agent/core/enhancer/default.py",
+        "line_range": [
+          36,
+          60
+        ],
+        "kind": "type_design"
+      },
+      "corroboration_count": 1
+    },
+    {
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "Suggestion",
+      "description": "The band boundary at exactly similarity_score == strict is not pinned. The exclusion filter is r.similarity_score < strict, so a pair scoring exactly strict must stay tool-only; test_band_excludes_strict_tier_pairs uses 0.9 and 0.4, leaving the ==0.7 boundary (the one a <=/< mistake would flip) untested. A one-line pair at exactly strict asserting its absence would harden the boundary.",
+      "defect_signature": {
+        "file": "tests/unit/test_enhancer_context_band.py",
+        "line_range": [
+          462,
+          478
+        ],
+        "kind": "test_gap"
+      },
+      "corroboration_count": 1
+    },
+    {
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "Suggestion",
+      "description": "The 'renders as prose, not a tool call' contract (AC4/AC5) is asserted only by substring presence of the question + SQL text, not by the distinguishing prose framing vs a tool-call shape. Low risk (only one rendering path exists); a stronger assertion that the SQL appears as inline text alongside the question (not a serialized tool-call object) would make the test resilient to a future structured-rendering branch.",
+      "defect_signature": {
+        "file": "tests/unit/test_enhancer_context_band.py",
+        "line_range": [
+          440,
+          458
+        ],
+        "kind": "test_gap"
+      },
+      "corroboration_count": 1
+    },
+    {
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "Suggestion",
+      "description": "The degrade except Exception (default.py:156-163) intentionally swallows any memory-search error as a WARNING and returns the unmodified prompt \u2014 correct per the mandated fail-open enhancer contract and NOT a swallowed-error defect. The only note is log discoverability: including a stable marker or the operation name in the warning would make silent context-injection degradations findable in logs later. Breadth of the catch is correct and should not change.",
+      "defect_signature": {
+        "file": "src/sqllens/agent/core/enhancer/default.py",
+        "line_range": [
+          156,
+          163
+        ],
+        "kind": "style"
+      },
+      "corroboration_count": 1
+    }
+  ],
+  "checklist": [
+    {
+      "id": "VC-1",
+      "claim": "MemoryConfig gains context_similarity_threshold: float Field(default=0.7, ge=0.0, le=1.0)",
+      "status": "PASS",
+      "evidence": "config.py:163-176"
+    },
+    {
+      "id": "VC-2",
+      "claim": "Field description documents the opt-in near-match band and the empty-when->=strict default",
+      "status": "PASS",
+      "evidence": "config.py:167-175"
+    },
+    {
+      "id": "VC-3",
+      "claim": "Field settable via env SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD (nested __ delimiter, SQLLENS_ prefix)",
+      "status": "PASS",
+      "evidence": "config.py:524-537 SettingsConfigDict env_nested_delimiter='__'; test_context_similarity_threshold_env_override"
+    },
+    {
+      "id": "VC-4",
+      "claim": "Field settable via [memory] TOML key; env wins over TOML",
+      "status": "PASS",
+      "evidence": "tests test_..._toml_override + _env_beats_toml"
+    },
+    {
+      "id": "VC-5",
+      "claim": "DefaultLlmContextEnhancer.__init__ gains keyword-only similarity_threshold=0.7 and context_similarity_threshold=0.7",
+      "status": "PASS",
+      "evidence": "default.py:36-60"
+    },
+    {
+      "id": "VC-6",
+      "claim": "band_enabled = context_floor < strict",
+      "status": "PASS",
+      "evidence": "default.py:98"
+    },
+    {
+      "id": "VC-7",
+      "claim": "text_search_floor = min(context_floor, strict) passed to search_text_memories as similarity_threshold",
+      "status": "PASS",
+      "evidence": "default.py:102,109-112"
+    },
+    {
+      "id": "VC-8",
+      "claim": "search_similar_usage only runs when band_enabled (no extra search for non-opted-in deployments)",
+      "status": "PASS",
+      "evidence": "default.py:120-124"
+    },
+    {
+      "id": "VC-9",
+      "claim": "band_pairs filtered to similarity_score < strict AND args is dict AND args.get('sql') truthy",
+      "status": "PASS",
+      "evidence": "default.py:125-131"
+    },
+    {
+      "id": "VC-10",
+      "claim": "if not memories and not band_pairs: return system_prompt (no section emitted)",
+      "status": "PASS",
+      "evidence": "default.py:133-134"
+    },
+    {
+      "id": "VC-11",
+      "claim": "text memories rendered as '\u2022 {content}' under the existing heading",
+      "status": "PASS",
+      "evidence": "default.py:137-142"
+    },
+    {
+      "id": "VC-12",
+      "claim": "band pairs rendered as related example prose (prior question + its SQL), not a tool call",
+      "status": "PASS",
+      "evidence": "default.py:144-151"
+    },
+    {
+      "id": "VC-13",
+      "claim": "degrade path: except Exception logs a warning and returns the unmodified system_prompt",
+      "status": "PASS",
+      "evidence": "default.py:156-163; test_search_failure_degrades_to_original_prompt"
+    },
+    {
+      "id": "VC-14",
+      "claim": "factory.build_agent constructs DefaultLlmContextEnhancer with both cfg.memory thresholds and the shared memory",
+      "status": "PASS",
+      "evidence": "factory.py:138-142"
+    },
+    {
+      "id": "VC-15",
+      "claim": "factory passes llm_context_enhancer=context_enhancer into Agent()",
+      "status": "PASS",
+      "evidence": "factory.py:162; agent.py:102 accepts kwarg"
+    },
+    {
+      "id": "VC-16",
+      "claim": "DefaultLlmContextEnhancer imported into factory from sqllens.agent.core (exported)",
+      "status": "PASS",
+      "evidence": "factory.py:127; core/__init__.py:20,129"
+    },
+    {
+      "id": "VC-17",
+      "claim": "new test file tests/unit/test_enhancer_context_band.py carries the SPDX header (first-party)",
+      "status": "PASS",
+      "evidence": "diff lines 249-250"
+    },
+    {
+      "id": "VC-18",
+      "claim": "factory comment 'Agent() otherwise falls back to DefaultLlmContextEnhancer built with only agent_memory' is true",
+      "status": "PASS",
+      "evidence": "agent.py:133-134 constructs DefaultLlmContextEnhancer(agent_memory)"
+    },
+    {
+      "id": "VC-19",
+      "claim": "no upstream NL-to-SQL engine brand name introduced anywhere in the diff",
+      "status": "PASS",
+      "evidence": "brand scan of src/ and docs/ clean"
+    },
+    {
+      "id": "VC-20",
+      "claim": "public new signatures carry type hints (float thresholds; keyword-only)",
+      "status": "PASS",
+      "evidence": "default.py:36-41; config.py float field"
+    }
+  ],
+  "report": "# Shadow Review \u2014 PR #253 (issue #251: opt-in permissive near-match context tier)\n\n**Verdict: APPROVE WITH CAVEAT** \u2014 reviewed at HEAD `3ef1b7e` (diff `git diff main...HEAD`, head_override=local). Independent, blinded shadow pass; no prior findings consulted.\n\n## What the PR does\nAdds an opt-in second, lower memory threshold `memory.context_similarity_threshold` (default 0.7) that governs a permissive near-match band strictly below the strict hit bar `memory.similarity_threshold`. When a deployment lowers it below the strict bar, the system-prompt context enhancer injects near-match memories \u2014 both text/schema-doc memories and question\u2192SQL pairs (rendered as prose, not tool calls) \u2014 scoring in `[context_floor, strict)`. When it is `>=` the strict bar (the default) the band is empty and behavior is byte-identical to before. Also wires the enhancer explicitly in `factory.build_agent` so both configured thresholds actually reach it (closing a dead-config gap: `Agent`'s fallback built the enhancer with hard-coded 0.7/0.7).\n\n## Diff classification\nFull engine. `small_diff=false`, `config_only=false`, `has_new_types=true` (added `class _StubAgentMemory(AgentMemory)` in the new test), `detect_all_audit=false`. Full Phase-1/2 checklist ran; Phase-3 roster of six.\n\n## Phase 1/2 \u2014 checklist\n20 verifiable claims enumerated and verified against source (VC-1\u2026VC-20), all **PASS**. Highlights independently confirmed by reading source: the config field bounds/default (config.py:163-176); env/TOML/env-wins wiring (SettingsConfigDict `env_nested_delimiter='__'`); `band_enabled = context_floor < strict`; `text_search_floor = min(context_floor, strict)`; the extra `search_similar_usage` runs only when the band is enabled; band pairs filtered `< strict` + truthy `sql`; the `if not memories and not band_pairs: return system_prompt` no-op; the prose rendering of pairs; the degrade path (`except Exception` \u2192 warning \u2192 unmodified prompt); factory wiring on the shared `Agent`; SPDX header on the new test file; and no upstream brand-name leakage (scan of src/ and docs/ clean). No Phase-2 FAILs or INCONCLUSIVEs.\n\n## Phase 3 \u2014 six reviewers (all returned)\n- **code-reviewer** \u2014 0 Critical, 0 Important, 1 Suggestion (redundant isinstance guard). Ship-ready.\n- **silent-failure-hunter** \u2014 0 Critical, 0 Important, 1 Suggestion (log discoverability). Degrade path preserved and now covers the new band search; only new dict index `pair.args['sql']` is provably safe behind the band filter.\n- **comment-analyzer** \u2014 0 findings. Every added docstring/comment claim traces to an implementing line; no documented falsehoods; no brand leak.\n- **pr-test-analyzer** \u2014 0 Critical, **1 Important** (test gap: `context > strict` misconfiguration untested \u2014 the exact case `min()` guards), 2 Suggestions (== strict boundary; prose-framing assertion).\n- **type-design-analyzer** \u2014 0 Critical, **1 Important** (unexpressed cross-field no-op invariant: two independent `0.7` literals), 2 Suggestions (no self-validation of float bounds; redundant isinstance).\n- **requesting-code-review (final pass)** \u2014 0 Critical, 0 Important, 1 Suggestion (`limit=5` band starvation, low probability). \"Ready to merge: Yes.\"\n\n### Corroboration\nOnly one finding corroborated across agents: the redundant `isinstance(r.memory.args, dict)` guard (default.py:125-131), raised by both code-reviewer and type-design-analyzer (count=2). All others single-source.\n\n## Findings by severity\n- **Critical: 0**\n- **Important: 2** (both non-blocking advisories on a correct, opt-in, non-bug feature):\n  1. *Test gap (pr-test-analyzer)* \u2014 `context_similarity_threshold > similarity_threshold` is untested; all no-op tests use equal thresholds, so a regression swapping `min(context_floor, strict)` for a bare `context_floor` would slip through and, in a `context>strict` deployment, drop legitimate strict-tier text memories (AC3 formally covers the strictly-greater case). The shipped code is correct; this is a regression-guard gap.\n  2. *Type design (type-design-analyzer)* \u2014 the \"unchanged by default\" guarantee is encoded as two coincidentally-equal `0.7` literals across config.py and default.py rather than a single enforced invariant; one innocent default-bump to `similarity_threshold` would silently enable the band for every never-opted-in deployment. Current behavior is correct; this is a latent drift risk.\n- **Suggestions: 6** \u2014 redundant isinstance guard (x2 corroborated); `limit=5` band starvation; no float-bound self-validation in the enhancer seam; == strict boundary test; prose-framing assertion; degrade-log discoverability.\n\n## Acceptance criteria (issue #251)\nAC1\u2013AC6 all satisfied and traced to implementing lines (config field + bounds; env/TOML/env-wins; no-op when `>=`; band injection of both memory kinds in `[floor, strict)`; pairs as prose; strict-tier pairs stay tool-only and strict text stays injected). **AC7 (docs/internal/agent/memory.md)** is intentionally DEFERRED to a later docs pass per the recorded prior decision and is not flagged. No documented_falsehood, no brand leak, degrade path preserved, SPDX present, type hints present, sibling surfaces (`query_database` + `visualize_data`) both covered via the shared `Agent`.\n\n## Verdict rationale\nThe change is correct, well-scoped, and meets every in-scope acceptance criterion; the test suite meaningfully pins each AC including the strict-floor tracking and strict-tier exclusion. No Critical findings and no current-behavior defects. The two Important findings are a regression-guard test gap and a latent maintainability/drift risk, not merge blockers \u2014 hence **APPROVE WITH CAVEAT**: the maintainer should weigh (a) adding a `context>strict` no-op test and (b) collapsing the no-op default to a single source of truth (sentinel default or a model-level validator) before or shortly after merge. Both are cheap; neither blocks correctness today.\n"
+}

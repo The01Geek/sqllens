@@ -1,0 +1,201 @@
+{
+  "results": [
+    {
+      "id": "VC-1",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "src/sqllens/config.py:109 defines _DEFAULT_SIMILARITY_THRESHOLD = 0.7. Lines 126-129 define MemoryConfig.context_similarity_threshold: float = Field(default=_DEFAULT_SIMILARITY_THRESHOLD, ge=0.0, le=1.0, description=...). This exactly matches the claim: a new float field with pydantic Field bounds ge=0.0, le=1.0, defaulting to 0.7 via _DEFAULT_SIMILARITY_THRESHOLD.",
+      "file_checked": "src/sqllens/config.py:109,112,126-129",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-2",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "tests/unit/test_config_schema.py:459-487 has three tests exactly as claimed: test_context_similarity_threshold_env_override (line 459) sets SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD=0.3 via monkeypatch and asserts cfg.memory.context_similarity_threshold == 0.3; test_context_similarity_threshold_toml_override (line 468) clears the env var and asserts a [memory] TOML key sets the field (0.25); test_context_similarity_threshold_env_beats_toml (line 479) sets both env (0.3) and toml (0.6) and asserts env wins (0.3). src/sqllens/config.py:126-140 declares MemoryConfig.context_similarity_threshold as a pydantic Field (ge=0.0, le=1.0, default 0.7). src/sqllens/config.py:537-541 sets Config.model_config = SettingsConfigDict(env_prefix='SQLLENS_', env_nested_delimiter='__', extra='forbid'), and settings_customise_sources (line 558-585) returns sources in order [init_settings, env_settings, TomlConfigSettingsSource, file_secret_settings] -- pydantic-settings gives earlier sources priority, so env wins over toml, matching AC2 and the tests.",
+      "file_checked": "tests/unit/test_config_schema.py:459-487; src/sqllens/config.py:126-140,537-585",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-3",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "src/sqllens/agent/core/enhancer/default.py:104-110 \u2014 strict = similarity_threshold, context_floor = context_similarity_threshold, band_enabled = context_floor < strict (line 106); when context_similarity_threshold >= similarity_threshold this evaluates False. text_search_floor = min(context_floor, strict) at line 110, exactly matching the claim. Line 128 `if band_enabled: tool_hits = await self.agent_memory.search_similar_usage(...)` \u2014 search_similar_usage is only called when band_enabled is True, so it is skipped when the band is empty. At defaults similarity_threshold=0.7, context_similarity_threshold=0.7 (constructor defaults at lines 48-49, both bound to _DEFAULT_SIMILARITY_THRESHOLD=0.7): band_enabled=False, text_search_floor=min(0.7,0.7)=0.7, band_pairs stays []. Confirmed against pre-change code via `git show d794d2a -- src/sqllens/agent/core/enhancer/default.py`: before this feature, search_text_memories was called with no explicit similarity_threshold argument, relying on the abstract method's own default of 0.7 (src/sqllens/agent/capabilities/agent_memory/base.py:66), and search_similar_usage was not called at all in enhance_system_prompt. So at 0.7/0.7 the post-change call (explicit similarity_threshold=0.7, no band search) produces the same text-memory search and no near-match pairs, matching pre-change output.",
+      "file_checked": "src/sqllens/agent/core/enhancer/default.py:104-132",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-4",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "src/sqllens/agent/core/enhancer/default.py:104-142 confirms every element of the claim. band_enabled = context_floor < strict (line 106) implements 'context_similarity_threshold < similarity_threshold'. text_search_floor = min(context_floor, strict) (line 110), used as similarity_threshold in the search_text_memories call (lines 117-120) \u2014 when band_enabled this equals context_floor, so text memories in [context_floor, strict) are retrieved. When band_enabled, search_similar_usage is called with similarity_threshold=context_floor (lines 128-132) and results are post-filtered to r.similarity_score < strict (line 136), matching 'search_similar_usage at context_floor, post-filtered r.similarity_score < strict'. Both memories (text) and band_pairs (question->SQL) are then rendered into the same examples_section under the heading '## Relevant Context from Memory' (line 145) appended to the system prompt (lines 148-162).",
+      "file_checked": "src/sqllens/agent/core/enhancer/default.py:104-162",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-5",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "src/sqllens/agent/core/enhancer/default.py lines 152-159: band_pairs are rendered via string concatenation into examples_section as plain prose: 'Related prior question \u2014 \"{pair.question}\" \u2014 was answered with this SQL: {pair.args[\"sql\"]}\\n' (line 156-158), matching the claim's quoted format exactly. This text is appended to the system_prompt string (line 162) and never constructed as a tool_use / tool-call dict or Anthropic content block anywhere in this file \u2014 there is no ToolUseBlock, no {'type': 'tool_use', ...} structure, and no pre-decided tool invocation. The band pairs are purely descriptive context text the model reads in the system prompt, consistent with the comment at lines 152-153 ('Near-match pairs render as related example text ... as context the model weighs, not a pre-decided tool call').",
+      "file_checked": "src/sqllens/agent/core/enhancer/default.py:152-159",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-6",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "src/sqllens/agent/core/enhancer/default.py:104-110,127-139 confirm both parts of AC6. Lines 133-139: band_pairs = [r for r in tool_hits if r.similarity_score < strict and isinstance(r.memory.args, dict) and r.memory.args.get('sql')] \u2014 pairs with similarity_score >= strict (== similarity_threshold) are excluded from band_pairs, i.e. excluded from injection, remaining reusable only through the tool-search path (search_similar_usage), matching the claim. Lines 104-110: strict = self.similarity_threshold; context_floor = self.context_similarity_threshold; text_search_floor = min(context_floor, strict) \u2014 a min() can never exceed strict, so the floor passed to search_text_memories (line 119) never rises above strict; text memories scoring >= strict continue to pass the similarity_threshold=text_search_floor filter exactly as they did when the floor was strict, preserving prior injection behavior for those at/above strict.",
+      "file_checked": "src/sqllens/agent/core/enhancer/default.py:104-139",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-7",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "git diff main...HEAD --stat shows only src/sqllens/agent/core/enhancer/default.py, src/sqllens/agent/factory.py, src/sqllens/config.py, and three test files changed; docs/internal/agent/memory.md is untouched by this PR (git diff main...HEAD -- docs/internal/agent/memory.md is empty). Per the explicit prior run decision, AC7 (docs) is intentionally deferred, so an unchanged doc is the expected outcome, not a defect. Since no doc content was added or modified in this diff, there is no false doc claim to find.",
+      "file_checked": "docs/internal/agent/memory.md",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-8",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "src/sqllens/agent/core/enhancer/default.py:117-120 calls `await self.agent_memory.search_text_memories(query=user_message, context=context, limit=5, similarity_threshold=text_search_floor,)`. The AgentMemory ABC in src/sqllens/agent/capabilities/agent_memory/base.py:60-69 declares `async def search_text_memories(self, query: str, context: \"ToolContext\", *, limit: int = 10, similarity_threshold: float = 0.7) -> List[\"TextMemorySearchResult\"]:` \u2014 the bare `*` at line 64 makes limit and similarity_threshold keyword-only, and the call supplies all four arguments (query, context, limit, similarity_threshold) as keyword arguments, so the call matches the declared signature exactly.",
+      "file_checked": "src/sqllens/agent/capabilities/agent_memory/base.py:60-69",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-9",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "default.py:129-132 calls `await self.agent_memory.search_similar_usage(question=user_message, context=context, limit=5, similarity_threshold=context_floor)` exactly as claimed. The AgentMemory ABC (base.py:47-57) declares `search_similar_usage(self, question, context, *, limit=10, similarity_threshold=0.7, tool_name_filter=None)` with `limit` and `similarity_threshold` keyword-only after the `*` marker. ChromaAgentMemory.search_similar_usage (integrations/chromadb/agent_memory.py:204-212) has the identical signature. The call site's keyword args match both the ABC and the concrete implementation.",
+      "file_checked": "src/sqllens/agent/capabilities/agent_memory/base.py:47-57",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-10",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "src/sqllens/agent/core/enhancer/default.py:133-139 builds band_pairs via a list comprehension that filters tool_hits to only rows where isinstance(r.memory.args, dict) and r.memory.args.get('sql') is truthy. The render loop at lines 154-158 iterates only over this pre-filtered band_pairs list, so pair.args['sql'] at line 158 is only ever evaluated on rows already confirmed to have a truthy 'sql' key. pair.question (also used at line 157) is a required, non-Optional str field on ToolMemory (src/sqllens/agent/capabilities/agent_memory/models.py:14: 'question: str'), so it cannot be None/missing on a validated model instance. ToolMemory.args is declared as 'args: Dict[str, Any]' (models.py:16), consistent with the isinstance(dict) guard being a defensive check on an already-typed field. Both pair.args['sql'] and pair.question are therefore not unguarded derefs.",
+      "file_checked": "src/sqllens/agent/core/enhancer/default.py:133-158; src/sqllens/agent/capabilities/agent_memory/models.py:10-19",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-11",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "src/sqllens/agent/factory.py:94-98 constructs `context_enhancer = DefaultLlmContextEnhancer(memory, similarity_threshold=cfg.memory.similarity_threshold, context_similarity_threshold=cfg.memory.context_similarity_threshold)` and factory.py:157-162 passes it into `Agent(..., llm_context_enhancer=context_enhancer, ...)`. Agent.__init__ (src/sqllens/agent/core/agent/agent.py:88-102) declares `llm_context_enhancer: Optional[LlmContextEnhancer] = None` as a parameter and stores it at line 135 (`self.llm_context_enhancer = llm_context_enhancer`). DefaultLlmContextEnhancer.__init__ (src/sqllens/agent/core/enhancer/default.py:44-50) accepts `agent_memory`, `similarity_threshold`, and `context_similarity_threshold` keyword args matching the call signature exactly.",
+      "file_checked": "src/sqllens/agent/factory.py:94-162; src/sqllens/agent/core/agent/agent.py:88-135; src/sqllens/agent/core/enhancer/default.py:44-50",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-12",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "tests/unit/test_enhancer_context_band.py:79-102 defines _StubAgentMemory.search_similar_usage(self, question, context, *, limit=10, similarity_threshold=0.7, tool_name_filter=None) and search_text_memories(self, query, context, *, limit=10, similarity_threshold=0.7), which exactly match the AgentMemory ABC's abstract signatures in src/sqllens/agent/capabilities/agent_memory/base.py:46-57 (search_similar_usage) and base.py:59-69 (search_text_memories) -- same param names (question/query, context), same keyword-only limit/similarity_threshold/tool_name_filter with identical defaults. The real ChromaAgentMemory implementation (src/sqllens/agent/integrations/chromadb/agent_memory.py:204-212 and 392-399) has the identical signature and applies a '>= similarity_threshold' lower-bound gate at line 251 (search_similar_usage: 'if similarity_score >= similarity_threshold:') and line 423 (search_text_memories: 'if similarity_score >= similarity_threshold:'). The stub reproduces this gate by filtering its preset lists with 'score >= similarity_threshold' at test_enhancer_context_band.py:89 (tool results) and :102 (text results).",
+      "file_checked": "src/sqllens/agent/integrations/chromadb/agent_memory.py:251,423",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-13",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "tests/unit/test_enhancer_context_band.py:43-126 defines _StubAgentMemory(AgentMemory) implementing all 9 abstract methods declared in src/sqllens/agent/capabilities/agent_memory/base.py:26-103 (save_tool_usage, save_text_memory, search_similar_usage, search_text_memories, get_recent_memories, get_recent_text_memories, delete_by_id, delete_text_memory, clear_memories). Signatures match the ABC's parameter names, positional/keyword-only markers, and defaults (e.g. search_similar_usage keeps `*, limit: int = 10, similarity_threshold: float = 0.7, tool_name_filter: ... = None` at lines 79-89; clear_memories keeps `tool_name`/`before_date` optional params at lines 120-126). The class is instantiated directly (e.g. line 165 `_StubAgentMemory(text_results=text)`) without any TypeError-triggering abstract-method gap, confirming it is concretely instantiable.",
+      "file_checked": "src/sqllens/agent/capabilities/agent_memory/base.py:23-103",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-14",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "default.py:145-150 builds examples_section = '\\n\\n## Relevant Context from Memory\\n\\n' + 'The following domain knowledge and context from prior interactions may be relevant:\\n\\n' + for each text memory 'f\"\\u2022 {memory.content}\\n\"', then returns system_prompt + examples_section. test_enhancer_context_band.py:146-157 _render_text_only builds section = '\\n\\n## Relevant Context from Memory\\n\\n' + ('The following domain knowledge and context from prior ' 'interactions may be relevant:\\n\\n') (adjacent string literals, which Python concatenates at compile time to the identical string as default.py's single-line literal) + for each memory 'f\"\\u2022 {result.memory.content}\\n\"', then returns prompt + section. Verified via direct string extraction from both files (python repr comparison) that the literal text, whitespace, bullet character, and newlines are byte-identical. The tests using this helper (test_equal_default_thresholds_are_noop at line 172 and test_context_above_strict_band_empty_floor_stays_at_strict at line 210) both exercise band-disabled/empty-band_pairs scenarios matching the text-only code path, so the comparison is apples-to-apples. The claim, including that this makes the no-op tests assert against a fixed expected string rather than the code under test's own formatting function, is accurate and matches the test file's own docstring at lines 147-149.",
+      "file_checked": "src/sqllens/agent/core/enhancer/default.py:145-150",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-15",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "tests/unit/test_factory_wiring.py:290-316 test_memory_thresholds_flow_into_context_enhancer builds a Config with MemoryConfig(similarity_threshold=0.6, context_similarity_threshold=0.3) (lines 301-305), calls build_agent(cfg) (line 309), then asserts isinstance(agent.llm_context_enhancer, DefaultLlmContextEnhancer) (line 312), enhancer.similarity_threshold == 0.6 (313), enhancer.context_similarity_threshold == 0.3 (314), and enhancer.agent_memory is agent.agent_memory (316). This exactly matches the claim.",
+      "file_checked": "tests/unit/test_factory_wiring.py:290-316",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-16",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "Two independent module-level literals confirmed, both equal to 0.7: src/sqllens/config.py:109 `_DEFAULT_SIMILARITY_THRESHOLD = 0.7` and src/sqllens/agent/core/enhancer/default.py:17 `_DEFAULT_SIMILARITY_THRESHOLD = 0.7`. default.py imports only `from .base import LlmContextEnhancer` and stdlib typing (lines 8-9) \u2014 no import of sqllens.config, consistent with the vendored agent/ package not importing sqllens.config. Each module's own comment block (config.py:103-108, default.py:11-16) frames its literal as the single source of truth for that module's two threshold fields (similarity_threshold / context_similarity_threshold in config.py; similarity_threshold / context_similarity_threshold params in default.py), matching the claim's description exactly.",
+      "file_checked": "src/sqllens/agent/core/enhancer/default.py:17",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    }
+  ],
+  "needs_retry": [],
+  "counts": {
+    "normalized_count": 0,
+    "field_defect_fail_count": 0
+  }
+}
