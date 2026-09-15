@@ -96,10 +96,10 @@ class DefaultLlmContextEnhancer(LlmContextEnhancer):
             strict = self.similarity_threshold
             context_floor = self.context_similarity_threshold
             band_enabled = context_floor < strict
-            # Band-disabled searches text at the strict floor (the value
-            # similarity_threshold now controls) — don't restore the old
-            # hard-coded 0.7; band-enabled searches from the lower floor.
-            text_search_floor = context_floor if band_enabled else strict
+            # Search text at the lower of the two bars: the band floor when the
+            # band is enabled, else the strict bar (the value similarity_threshold
+            # now controls — don't restore the old hard-coded 0.7).
+            text_search_floor = min(context_floor, strict)
 
             # Search for relevant text memories based on user message. Text
             # memories at or above the strict bar keep being injected; the band
