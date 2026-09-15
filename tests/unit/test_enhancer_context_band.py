@@ -189,6 +189,28 @@ async def test_equal_nondefault_thresholds_band_empty_floor_tracks_strict() -> N
 
 
 @pytest.mark.asyncio
+async def test_context_above_strict_band_empty_floor_stays_at_strict() -> None:
+    """A misconfigured context floor ABOVE the strict bar (0.9 > 0.7) must not
+    raise the text-search floor above strict. This pins ``text_search_floor =
+    min(context_floor, strict)``: a regression to a bare ``context_floor`` would
+    search text at 0.9 and silently drop legitimate strict-tier memories in
+    [0.7, 0.9). Band stays disabled (nothing is strictly below strict), so the
+    SQL-pair search never runs and the text floor holds at 0.7."""
+    text = [_text("orders live in the sales schema", 0.85)]
+    mem = _StubAgentMemory(text_results=text)
+    enhancer = DefaultLlmContextEnhancer(
+        mem, similarity_threshold=0.7, context_similarity_threshold=0.9
+    )
+
+    out = await enhancer.enhance_system_prompt(_BASE_PROMPT, "how many orders?", _USER)
+
+    assert mem.tool_search_calls == []  # context >= strict → band disabled
+    assert mem.text_search_calls == [0.7]  # min(0.9, 0.7) — floor never rises above strict
+    # The 0.85 memory is a strict-tier hit and is still injected, unchanged.
+    assert out == _render_text_only(_BASE_PROMPT, text)
+
+
+@pytest.mark.asyncio
 async def test_band_injects_both_memory_kinds_as_prose() -> None:
     """AC 4: band enabled (0.3 < 0.7); one text memory and one question->SQL
     pair both inside the band → both injected under the heading, the pair as

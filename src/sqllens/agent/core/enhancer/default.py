@@ -8,6 +8,14 @@ based on the user's initial message.
 from typing import TYPE_CHECKING, List, Optional
 from .base import LlmContextEnhancer
 
+# Single source of truth for both threshold defaults on this seam (mirrors
+# MemoryConfig._DEFAULT_SIMILARITY_THRESHOLD in sqllens.config). Sharing one
+# constant keeps the near-match band empty by default: a caller who constructs
+# the enhancer directly gets similarity_threshold == context_similarity_threshold
+# unless it opts in, and bumping the default moves both together rather than
+# desynchronising two independently-written literals.
+_DEFAULT_SIMILARITY_THRESHOLD = 0.7
+
 if TYPE_CHECKING:
     from ..user.models import User
     from ..llm.models import LlmMessage
@@ -37,8 +45,8 @@ class DefaultLlmContextEnhancer(LlmContextEnhancer):
         self,
         agent_memory: Optional["AgentMemory"] = None,
         *,
-        similarity_threshold: float = 0.7,
-        context_similarity_threshold: float = 0.7,
+        similarity_threshold: float = _DEFAULT_SIMILARITY_THRESHOLD,
+        context_similarity_threshold: float = _DEFAULT_SIMILARITY_THRESHOLD,
     ):
         """Initialize with optional agent memory and injection thresholds.
 

@@ -100,6 +100,15 @@ class LLMConfig(BaseModel):
     model: str = Field(default="claude-sonnet-4-5-20250929", description="Anthropic model id")
 
 
+# Single source of truth for the two memory thresholds' default. Both
+# similarity_threshold and context_similarity_threshold default to this one
+# value, so the "band is empty by default" invariant (near-match injection is
+# opt-in) is expressed once rather than as two independently-written literals
+# that a future edit could silently desynchronise — raising this default alone
+# would otherwise open the band for deployments that never opted in.
+_DEFAULT_SIMILARITY_THRESHOLD = 0.7
+
+
 class MemoryConfig(BaseModel):
     """Vector memory (ChromaDB) settings."""
 
@@ -109,10 +118,13 @@ class MemoryConfig(BaseModel):
     )
     collection: str = Field(default="sqllens", description="ChromaDB collection name")
     similarity_threshold: float = Field(
-        default=0.7, ge=0.0, le=1.0, description="Minimum cosine similarity for memory hits"
+        default=_DEFAULT_SIMILARITY_THRESHOLD,
+        ge=0.0,
+        le=1.0,
+        description="Minimum cosine similarity for memory hits",
     )
     context_similarity_threshold: float = Field(
-        default=0.7,
+        default=_DEFAULT_SIMILARITY_THRESHOLD,
         ge=0.0,
         le=1.0,
         description=(
@@ -120,9 +132,10 @@ class MemoryConfig(BaseModel):
             "system-prompt context injection. Memories scoring in "
             "[context_similarity_threshold, similarity_threshold) are injected as "
             "related context (both saved question->SQL pairs and text/schema-doc "
-            "memories). Set below similarity_threshold to enable; when it is >= "
-            "similarity_threshold (the default) the band is empty and injection "
-            "behaves exactly as before."
+            "memories). Set below similarity_threshold to enable; it shares "
+            "similarity_threshold's default (see _DEFAULT_SIMILARITY_THRESHOLD), so "
+            "when left at the default the band is empty and injection behaves "
+            "exactly as before."
         ),
     )
     save_queries: bool = Field(
