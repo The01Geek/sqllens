@@ -72,7 +72,8 @@ def get_effective_settings() -> EffectiveSettings | None:
     """Return the request-local :class:`EffectiveSettings`, or ``None`` when unset.
 
     Call sites that have a base-config fallback (the integration runners,
-    ``RowCapRunner``, the agent run-loop, the search-memory threshold) use
+    ``RowCapRunner``, the agent run-loop, the search-memory threshold, the
+    system-prompt context enhancer) use
     ``get_effective_settings()`` and substitute their own default when the
     return is ``None``. This keeps every site safe even on non-request code
     paths (boot warmup, CLI, tests) without forcing them to construct a fake

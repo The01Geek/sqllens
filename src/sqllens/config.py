@@ -112,6 +112,9 @@ class LLMConfig(BaseModel):
     )
 
 
+_DEFAULT_SIMILARITY_THRESHOLD = 0.7
+
+
 class MemoryConfig(BaseModel):
     """Vector memory (ChromaDB) settings."""
 
@@ -121,7 +124,21 @@ class MemoryConfig(BaseModel):
     )
     collection: str = Field(default="sqllens", description="ChromaDB collection name")
     similarity_threshold: float = Field(
-        default=0.7, ge=0.0, le=1.0, description="Minimum cosine similarity for memory hits"
+        default=_DEFAULT_SIMILARITY_THRESHOLD,
+        ge=0.0,
+        le=1.0,
+        description="Minimum cosine similarity for memory hits",
+    )
+    context_similarity_threshold: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Opt-in floor for system-prompt context injection only. Unset (the "
+            "default) keeps the context tier off. When set below the effective "
+            "similarity_threshold, text memories and saved question->SQL pairs "
+            "scoring at or above it are injected as related context."
+        ),
     )
     save_queries: bool = Field(
         default=False,

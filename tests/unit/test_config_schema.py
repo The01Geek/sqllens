@@ -24,6 +24,7 @@ from sqllens.config import (
     AuditConfig,
     Config,
     DatabaseConfig,
+    MemoryConfig,
     ServerConfig,
 )
 
@@ -437,3 +438,51 @@ def test_invalid_config_version_env_rejected(
     monkeypatch.setenv("SQLLENS_CONFIG_VERSION", "not-an-int")
     with pytest.raises(ValidationError):
         Config.load(_minimal_toml(tmp_path))
+
+
+# --- MemoryConfig.context_similarity_threshold (issue #251) -----------------
+
+
+def test_context_similarity_threshold_default_is_unset() -> None:
+    # Unset means "context tier off", independent of similarity_threshold, so
+    # raising the strict bar alone never opens the tier.
+    assert MemoryConfig().context_similarity_threshold is None
+    assert MemoryConfig(similarity_threshold=0.9).context_similarity_threshold is None
+
+
+@pytest.mark.parametrize("bad", [-0.1, 1.5])
+def test_context_similarity_threshold_rejects_out_of_range(bad: float) -> None:
+    # AC 1: constrained by pydantic Field bounds ge=0.0, le=1.0.
+    with pytest.raises(ValidationError):
+        MemoryConfig(context_similarity_threshold=bad)
+
+
+def test_context_similarity_threshold_env_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # AC 2: SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD sets the field.
+    monkeypatch.setenv("SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD", "0.3")
+    cfg = Config.load(_minimal_toml(tmp_path))
+    assert cfg.memory.context_similarity_threshold == 0.3
+
+
+def test_context_similarity_threshold_toml_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # AC 2: the [memory] table key sets the field when env is absent.
+    monkeypatch.delenv("SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD", raising=False)
+    cfg = Config.load(
+        _minimal_toml(tmp_path, "\n[memory]\ncontext_similarity_threshold = 0.25\n")
+    )
+    assert cfg.memory.context_similarity_threshold == 0.25
+
+
+def test_context_similarity_threshold_env_beats_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # AC 2: the environment value wins over the TOML value.
+    monkeypatch.setenv("SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD", "0.3")
+    cfg = Config.load(
+        _minimal_toml(tmp_path, "\n[memory]\ncontext_similarity_threshold = 0.6\n")
+    )
+    assert cfg.memory.context_similarity_threshold == 0.3
