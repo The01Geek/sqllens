@@ -41,7 +41,7 @@ ToolRegistry    →  RunSqlTool                          (executes generated SQL
                                                           ↓
                                                         Agent(llm, tool_registry, user_resolver,
                                                               agent_memory, conversation_store,
-                                                              AgentConfig(max_tool_iterations))
+                                                              AgentConfig(max_tool_iterations, max_tokens))
 ```
 
 `EmitChartTool` carries no SQL runner or file-system capability — the agent runs `run_sql` first to get aggregated rows, then hands them to `emit_chart`, which only validates the DSL (`bar | line | area | scatter | pie | heatmap`, ≤ 200 rows, pie/heatmap series-shape rules) and wraps the result in a `ChartComponent`. The MCP-layer `query_database` tool reads that component off the agent stream and surfaces it as a `{"type": "chart", ...}` block in the ordered `_meta["sqllens/blocks"]` array; the widget draws each chart block in stream order, alongside any sibling table or text blocks (no chart-vs-table precedence). `emit_chart` may be called more than once per request (#194) when the answer warrants multiple distinct charts. See [mcp-server/tools.md](../mcp-server/tools.md#chart-blocks-the-emitcharttool-seam) for the wider picture and [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py) for the DSL source.
@@ -74,6 +74,18 @@ See [agent/tool-scratch-storage.md](tool-scratch-storage.md) for the full story,
 ## Why `max_tool_iterations` is a config knob
 
 The upstream `AgentConfig` defaults `max_tool_iterations=10`. That's enough for a trained DB but too low for untrained schemas where the agent needs separate iterations for catalog lookups, memory searches, and the final query. Surfacing the knob via `AgentRuntimeConfig.max_tool_iterations` in [config.py](../../../src/sqllens/config.py) (and `SQLLENS_AGENT__MAX_TOOL_ITERATIONS`) lets operators raise it without patching the lifted code.
+
+## `max_tokens` and truncated tool calls (#247)
+
+`build_agent` passes `AgentConfig(max_tokens=cfg.llm.max_tokens)` (`LLMConfig.max_tokens`, default `8192`, env `SQLLENS_LLM__MAX_TOKENS`). Before this, `AgentConfig.max_tokens` was left `None` and `AnthropicLlmService._build_payload` fell back to `512` output tokens per call — too small for a `run_sql` call carrying a long statement (for example a multi-month CASE pivot).
+
+When a response still hits the cap, three layers keep the run from looping:
+
+1. **Parsing** — `AnthropicLlmService._parse_message_content` marks the *last* `tool_use` block of a `stop_reason == "max_tokens"` response as `ToolCall(truncated=True)` with `arguments={}`, even if the SDK returned a partially parsed dict (it may hold half a SQL statement). A `tool_use` block with no input becomes `{}`, never the old `{"_raw": None}` placeholder: that placeholder was replayed to the model in the conversation history, and the model copied it on every following turn.
+2. **Registry** — `ToolRegistry.execute` returns a failed `ToolResult` with `TRUNCATED_TOOL_CALL_MESSAGE` for a truncated call before argument validation, so the tool never runs and the model is told to retry with shorter arguments.
+3. **Agent loop** — `Agent` counts consecutive tool-call rounds in which *every* call failed argument validation (`Invalid arguments…`) or was truncated. After `MAX_CONSECUTIVE_ARGUMENT_FAILURES` (3) such rounds it stops, yields a `StatusBarUpdateComponent(status="error", message=ARGUMENT_FAILURE_STOP_MESSAGE)`, and skips the iteration-limit warning. Any round with a call that passes validation resets the count. The failed tool status cards remain the last cards in the stream, so `components_to_blocks` reports `is_error` and `query_database` returns `isError`.
+
+The streaming path now also keeps the response `finish_reason` on the `LlmResponse` it builds (it was dropped before).
 
 ## `max_conversations` — the bounded conversation store
 

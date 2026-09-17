@@ -16,6 +16,15 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 
+# Returned (not raised) for a tool call whose arguments were cut off by the LLM
+# output-token limit, so the model learns why the call did not run.
+TRUNCATED_TOOL_CALL_MESSAGE = (
+    "Your call to '{tool}' was not executed: your response reached the output "
+    "token limit before the call's arguments were complete. Retry with shorter "
+    "arguments (for example a more compact SQL statement), and keep any text "
+    "before the tool call brief."
+)
+
 
 class _LocalToolWrapper(Tool[T]):
     """Wrapper for tools with configurable access groups."""
@@ -176,6 +185,18 @@ class ToolRegistry:
                     reason=msg,
                 )
 
+            return ToolResult(
+                success=False,
+                result_for_llm=msg,
+                ui_component=None,
+                error=msg,
+            )
+
+        # A call cut off by the LLM output-token limit has incomplete arguments.
+        # Validation would only report a "missing field", which the model cannot
+        # act on (it retried the same broken call until max_tool_iterations, #247).
+        if tool_call.truncated:
+            msg = TRUNCATED_TOOL_CALL_MESSAGE.format(tool=tool_call.name)
             return ToolResult(
                 success=False,
                 result_for_llm=msg,
