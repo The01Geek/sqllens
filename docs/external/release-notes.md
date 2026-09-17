@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## September 17, 2026
+
+- **[Fix] Complex questions no longer end in a long "tool limit reached" failure** — Each step of the SQL Lens assistant was limited to 512 output tokens, so a large query (for example a sales pivot with one column per month) could be cut off in the middle. The incomplete step was then retried again and again until the tool-call limit was reached, and the answer failed after several minutes. The per-step limit is now a setting, `llm.max_tokens` (environment variable `SQLLENS_LLM__MAX_TOKENS`), with a default of `8192`. If a step is still cut off, SQL Lens does not run the incomplete query; it tells the assistant to retry with a shorter one. If the assistant sends an invalid or incomplete tool call three times in a row, SQL Lens now stops and returns an error right away instead of retrying until the limit. No configuration change is required. See [Configuration](configuration.md#section-llm). (#247)
+
 ## September 16, 2026
 
 - **[Feature] Opt-in near-match memory context for near-miss questions** — A new `memory.context_similarity_threshold` setting (environment variable `SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD`) lets SQL Lens automatically feed related past work to the assistant as background context when a question nearly, but not quite, matches something in memory. Set it below `similarity_threshold` to turn the tier on: near-match saved question-and-answer pairs and free-form notes then reach the assistant as related context, so a rephrased or slightly different question can still benefit from what SQL Lens has learned. Leaving it at its default (`0.7`, the same as `similarity_threshold`) keeps the tier off and behavior unchanged. See [Managing memory](managing-memory.md#near-match-background-context). ([#251](https://github.com/The01Geek/sqllens/issues/251))

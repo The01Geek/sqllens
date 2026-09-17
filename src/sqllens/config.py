@@ -98,6 +98,18 @@ class LLMConfig(BaseModel):
     # with the same message.
     api_key: SecretStr | None = Field(default=None, description="Anthropic API key")
     model: str = Field(default="claude-sonnet-4-5-20250929", description="Anthropic model id")
+    # Output-token cap for every agent LLM call. The framework fallback was 512,
+    # which cuts off a tool call carrying a long SQL statement mid-arguments
+    # (#247). Env override: SQLLENS_LLM__MAX_TOKENS.
+    max_tokens: int = Field(
+        default=8192,
+        ge=1,
+        le=128_000,
+        description=(
+            "Maximum output tokens per agent LLM call. Too low truncates long SQL "
+            "tool calls; the model's own output limit still applies."
+        ),
+    )
 
 
 # Shared default for MemoryConfig's two similarity thresholds. Both

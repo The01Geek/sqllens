@@ -172,6 +172,7 @@ def build_agent(cfg: Config) -> Agent:
         # operators can raise it without patching code.
         config=AgentConfig(
             max_tool_iterations=cfg.agent.max_tool_iterations,
+            max_tokens=cfg.llm.max_tokens,
             ui_features=ui_features,
         ),
     )

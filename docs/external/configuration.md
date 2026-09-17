@@ -54,6 +54,7 @@ Defines the language model SQL Lens uses to translate questions into SQL.
 |---|---|---|
 | `provider` | String | Only `anthropic` is supported at present. |
 | `model` | String | A Claude model identifier, for example `claude-sonnet-4-5-20250929`. |
+| `max_tokens` | Integer | Between `1` and `128000`. Defaults to `8192`. The largest reply SQL Lens lets the model write in one step, measured in tokens. If a reply reaches this limit while the model is writing a query, SQL Lens does not run the incomplete query and asks the model to try again with a shorter one. Raise it if you see answers stop with a "repeated invalid tool calls" error on very large queries; the model's own output limit still applies. The environment override is `SQLLENS_LLM__MAX_TOKENS`. |
 | `api_key` | String | Your Anthropic API key. Prefer setting this with the `SQLLENS_LLM__API_KEY` environment variable so the key stays out of the file. Optional during `sqllens validate`; required by `sqllens serve`. |
 
 ## Section: `[memory]`
