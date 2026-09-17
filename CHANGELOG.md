@@ -5,6 +5,9 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Added
+- `llm.max_tokens` (`SQLLENS_LLM__MAX_TOKENS`, default `8192`, range 1–128000):
+  output-token cap for every agent LLM call, wired into `AgentConfig.max_tokens`
+  by `build_agent`. Previously unset, so each call fell back to 512 tokens. (#247)
 - Self-driving MCP App widget at `ui://sqllens/memory-admin.html` that
   renders the memory-administration surface (Browse / Import / Stats /
   Danger zone) and drives the seven backing tools (`list_memories`,
@@ -42,6 +45,15 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
 - Renamed `examples/mcp-clients/claude_desktop.json` →
   `claude_desktop_http.json` to disambiguate the HTTP and stdio
   transports now that both example shapes ship.
+
+### Fixed
+- Agent looped on tool calls cut off by the output-token cap until
+  `max_tool_iterations` (#247). A `tool_use` block in a `max_tokens` response is
+  now marked `truncated` and refused by `ToolRegistry.execute` with an
+  explanatory error instead of running; missing tool input is parsed as `{}`
+  instead of the `{"_raw": None}` placeholder the model kept copying; and the
+  agent stops after 3 consecutive rounds of invalid or truncated tool calls,
+  reported as an error.
 
 ## [0.0.2] - 2026-04-28
 

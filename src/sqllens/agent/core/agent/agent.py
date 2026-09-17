@@ -55,6 +55,14 @@ logger = logging.getLogger(__name__)
 
 logger.info("Loaded sqllens.agent.core.agent.agent module")
 
+# Stop the tool loop after this many consecutive iterations in which every tool
+# call failed for a reason a retry of the same call cannot fix: the arguments were
+# invalid, or the call was cut off by the output-token limit. Without this the
+# model can repeat the same broken call until max_tool_iterations (#247).
+MAX_CONSECUTIVE_ARGUMENT_FAILURES = 3
+_INVALID_ARGUMENTS_PREFIX = "Invalid arguments"
+ARGUMENT_FAILURE_STOP_MESSAGE = "Stopped: repeated invalid tool calls"
+
 if TYPE_CHECKING:
     pass
 
@@ -653,6 +661,8 @@ class Agent:
 
         # Process with tool loop
         tool_iterations = 0
+        consecutive_argument_failures = 0
+        stopped_on_argument_failures = False
 
         # Per-request profile may narrow the iteration cap; never widen above
         # the constructor cap (the operator's ceiling). The effective cap is
@@ -723,6 +733,7 @@ class Agent:
 
                 # Collect all tool results first
                 tool_results = []
+                argument_failures: List[bool] = []
                 for i, tool_call in enumerate(response.tool_calls or []):
                     # Add task for this tool execution
                     tool_task = Task(
@@ -847,6 +858,13 @@ class Agent:
                         )
 
                     result = await self.tool_registry.execute(tool_call, context)
+                    argument_failures.append(
+                        not result.success
+                        and (
+                            tool_call.truncated
+                            or (result.error or "").startswith(_INVALID_ARGUMENTS_PREFIX)
+                        )
+                    )
 
                     if self.observability_provider and tool_exec_span:
                         tool_exec_span.set_attribute("success", result.success)
@@ -1028,6 +1046,37 @@ class Agent:
                     )
                     conversation.add_message(tool_response_message)
 
+                if argument_failures and all(argument_failures):
+                    consecutive_argument_failures += 1
+                else:
+                    consecutive_argument_failures = 0
+                if consecutive_argument_failures >= MAX_CONSECUTIVE_ARGUMENT_FAILURES:
+                    # The tool results are already in the conversation, so a
+                    # follow-up message sees why the run stopped.
+                    stopped_on_argument_failures = True
+                    logger.warning(
+                        "Stopping tool loop: %d consecutive iterations of invalid or "
+                        "truncated tool calls",
+                        consecutive_argument_failures,
+                    )
+                    yield UiComponent(  # type: ignore
+                        rich_component=StatusBarUpdateComponent(
+                            status="error",
+                            message=ARGUMENT_FAILURE_STOP_MESSAGE,
+                            detail=(
+                                f"{consecutive_argument_failures} tool-call rounds in a row "
+                                "had invalid or incomplete arguments."
+                            ),
+                        )
+                    )
+                    yield UiComponent(  # type: ignore
+                        rich_component=ChatInputUpdateComponent(
+                            placeholder="Try rephrasing or narrowing the question...",
+                            disabled=False,
+                        )
+                    )
+                    break
+
                 # Rebuild request with tool responses
                 request = await self._build_llm_request(
                     conversation, tool_schemas, user, system_prompt
@@ -1071,7 +1120,7 @@ class Agent:
                 break
 
         # Check if we hit the tool iteration limit
-        if tool_iterations >= _max_iterations:
+        if tool_iterations >= _max_iterations and not stopped_on_argument_failures:
             # The loop exited due to hitting the limit, not due to a natural completion
             logger.warning(
                 f"Tool iteration limit reached: {tool_iterations}/{_max_iterations}"
@@ -1375,6 +1424,7 @@ You can:
 
         accumulated_content = ""
         accumulated_tool_calls = []
+        finish_reason = None
 
         # Create span for streaming
         stream_span = None
@@ -1391,6 +1441,8 @@ You can:
 
             if chunk.tool_calls:
                 accumulated_tool_calls.extend(chunk.tool_calls)
+            if chunk.finish_reason:
+                finish_reason = chunk.finish_reason
 
         # End streaming span
         if self.observability_provider and stream_span:
@@ -1405,6 +1457,7 @@ You can:
         response = LlmResponse(
             content=accumulated_content if accumulated_content else None,
             tool_calls=accumulated_tool_calls if accumulated_tool_calls else None,
+            finish_reason=finish_reason,
         )
 
         # Apply after_llm_response middlewares with observability
