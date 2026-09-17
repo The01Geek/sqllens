@@ -291,7 +291,7 @@ def test_memory_thresholds_flow_into_context_enhancer(tmp_path: Path) -> None:
     """Both ``cfg.memory.similarity_threshold`` and the new
     ``cfg.memory.context_similarity_threshold`` must reach the wired
     ``DefaultLlmContextEnhancer`` (issue #251) — otherwise the permissive
-    near-match band is dead config, exactly as the tool-path knob was before
+    context tier is dead config, exactly as the tool-path knob was before
     issue #76. Today ``factory.build_agent`` does not construct the enhancer at
     all (it rides ``Agent``'s 0.7/0.7 fallback), so this pins the wiring.
     """

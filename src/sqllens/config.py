@@ -112,14 +112,6 @@ class LLMConfig(BaseModel):
     )
 
 
-# Shared default for MemoryConfig's two similarity thresholds. Both
-# similarity_threshold and context_similarity_threshold default to this one
-# value, so the "band is empty by default" invariant (near-match injection is
-# opt-in) is expressed once here rather than as two independently-written
-# literals that a future edit could silently desynchronise — raising this
-# default alone would otherwise open the band for deployments that never opted
-# in. (The enhancer seam keeps its own parallel constant; see
-# sqllens.agent.core.enhancer.default._DEFAULT_SIMILARITY_THRESHOLD.)
 _DEFAULT_SIMILARITY_THRESHOLD = 0.7
 
 
@@ -137,19 +129,15 @@ class MemoryConfig(BaseModel):
         le=1.0,
         description="Minimum cosine similarity for memory hits",
     )
-    context_similarity_threshold: float = Field(
-        default=_DEFAULT_SIMILARITY_THRESHOLD,
+    context_similarity_threshold: float | None = Field(
+        default=None,
         ge=0.0,
         le=1.0,
         description=(
-            "Lower, opt-in floor for a permissive near-match band used only by "
-            "system-prompt context injection. Memories scoring in "
-            "[context_similarity_threshold, similarity_threshold) are injected as "
-            "related context (both saved question->SQL pairs and text/schema-doc "
-            "memories). Set below similarity_threshold to enable; it shares "
-            "similarity_threshold's default (see _DEFAULT_SIMILARITY_THRESHOLD), so "
-            "when left at the default the band is empty and injection behaves "
-            "exactly as before."
+            "Opt-in floor for system-prompt context injection only. Unset (the "
+            "default) keeps the context tier off. When set below the effective "
+            "similarity_threshold, text memories and saved question->SQL pairs "
+            "scoring at or above it are injected as related context."
         ),
     )
     save_queries: bool = Field(

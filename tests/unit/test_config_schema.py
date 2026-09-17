@@ -443,10 +443,11 @@ def test_invalid_config_version_env_rejected(
 # --- MemoryConfig.context_similarity_threshold (issue #251) -----------------
 
 
-def test_context_similarity_threshold_default_is_0_7() -> None:
-    # AC 1: new field defaults to 0.7 (same as similarity_threshold), so the
-    # permissive band is empty by default and behavior is unchanged.
-    assert MemoryConfig().context_similarity_threshold == 0.7
+def test_context_similarity_threshold_default_is_unset() -> None:
+    # Unset means "context tier off", independent of similarity_threshold, so
+    # raising the strict bar alone never opens the tier.
+    assert MemoryConfig().context_similarity_threshold is None
+    assert MemoryConfig(similarity_threshold=0.9).context_similarity_threshold is None
 
 
 @pytest.mark.parametrize("bad", [-0.1, 1.5])

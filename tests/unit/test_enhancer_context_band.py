@@ -1,21 +1,22 @@
 # SPDX-FileCopyrightText: 2026 Daniel Radman
 # SPDX-License-Identifier: Apache-2.0
 
-"""Behavioural tests for ``DefaultLlmContextEnhancer``'s permissive near-match band.
+"""Behavioural tests for ``DefaultLlmContextEnhancer``'s opt-in context tier.
 
-Issue #251 gives the context enhancer a second, lower, opt-in threshold
-(``context_similarity_threshold``) that governs a band strictly below the
-strict hit bar (``similarity_threshold``). These tests pin:
+Issue #251 gives the context enhancer a second, opt-in threshold
+(``context_similarity_threshold``). These tests pin:
 
-- the no-op default (equal thresholds → band empty → output byte-identical to
-  the pre-change text-only rendering), including at a non-default equal pair
-  (proving the text-injection floor now tracks ``similarity_threshold`` rather
-  than the old hard-coded 0.7);
-- the band injecting both memory kinds (text and question->SQL pairs) as prose;
-- the band excluding strict-tier question->SQL pairs (they stay tool-only) and
-  pairs with no ``sql`` arg;
-- the empty-band case producing no injected section;
-- the degrade path (a search failure returns the unmodified prompt + a warning).
+- the off-by-default tier: unset floor → no SQL-pair search, text searched at the
+  strict bar, output byte-identical to the text-only rendering — also when the
+  strict bar is raised above 0.7 (no silent opt-in);
+- the text-injection floor tracking ``similarity_threshold`` (not a frozen 0.7);
+- the enabled tier injecting text memories and question->SQL pairs scoring at or
+  above the floor — including strong pairs at or above the strict bar;
+- the pair search being limited to ``run_sql`` and skipping pairs with no SQL;
+- the SQL rendering (fenced, length-capped);
+- per-request profile overrides of the strict bar;
+- the degrade paths (text-search failure → original prompt; pair-search failure →
+  text hits still injected).
 """
 
 from __future__ import annotations
@@ -33,8 +34,14 @@ from sqllens.agent.capabilities.agent_memory.models import (
     ToolMemorySearchResult,
 )
 from sqllens.agent.core.enhancer import DefaultLlmContextEnhancer
+from sqllens.agent.core.enhancer.default import _CONTEXT_PAIR_MAX_SQL_CHARS
 from sqllens.agent.core.tool import ToolContext
 from sqllens.agent.core.user.models import User
+from sqllens.runtime import (
+    EffectiveSettings,
+    reset_effective_settings,
+    set_effective_settings,
+)
 
 _USER = User(id="test-user")
 _BASE_PROMPT = "You are a helpful SQL assistant."
@@ -55,10 +62,13 @@ class _StubAgentMemory(AgentMemory):
         text_results: list[TextMemorySearchResult] | None = None,
         tool_results: list[ToolMemorySearchResult] | None = None,
         text_search_raises: bool = False,
+        tool_search_raises: bool = False,
     ) -> None:
         self._text_results = text_results or []
         self._tool_results = tool_results or []
         self._text_search_raises = text_search_raises
+        self._tool_search_raises = tool_search_raises
+        self.tool_name_filters: list[str | None] = []
         self.text_search_calls: list[float] = []
         self.tool_search_calls: list[float] = []
 
@@ -86,6 +96,9 @@ class _StubAgentMemory(AgentMemory):
         tool_name_filter: str | None = None,
     ) -> list[ToolMemorySearchResult]:
         self.tool_search_calls.append(similarity_threshold)
+        self.tool_name_filters.append(tool_name_filter)
+        if self._tool_search_raises:
+            raise RuntimeError("chromadb unavailable")
         return [r for r in self._tool_results if r.similarity_score >= similarity_threshold]
 
     async def search_text_memories(
@@ -158,29 +171,41 @@ def _render_text_only(prompt: str, memories: list[TextMemorySearchResult]) -> st
 
 
 @pytest.mark.asyncio
-async def test_equal_default_thresholds_are_noop() -> None:
-    """AC 3: default (0.7/0.7) → band empty, search_similar_usage never called,
-    output byte-identical to the pre-change text-only rendering."""
+async def test_unset_floor_is_noop() -> None:
+    """Default: floor unset → tier off, no SQL-pair search, text at the strict bar,
+    output byte-identical to the text-only rendering."""
     text = [_text("orders live in the sales schema", 0.85)]
     mem = _StubAgentMemory(text_results=text)
-    enhancer = DefaultLlmContextEnhancer(mem)  # both thresholds default to 0.7
+    enhancer = DefaultLlmContextEnhancer(mem)
 
     out = await enhancer.enhance_system_prompt(_BASE_PROMPT, "how many orders?", _USER)
 
-    assert mem.tool_search_calls == []  # band disabled → SQL-pair search skipped
-    assert mem.text_search_calls == [0.7]  # strict floor, == old hard-coded 0.7
+    assert mem.tool_search_calls == []
+    assert mem.text_search_calls == [0.7]
     assert out == _render_text_only(_BASE_PROMPT, text)
 
 
 @pytest.mark.asyncio
-async def test_equal_nondefault_thresholds_band_empty_floor_tracks_strict() -> None:
-    """AC 6: with both thresholds at a non-default 0.5, the band is still empty
-    but the text-injection floor now tracks similarity_threshold (0.5), not the
-    old frozen 0.7 — proving the strict floor is live-configured."""
-    mem = _StubAgentMemory(text_results=[_text("note", 0.6)])
-    enhancer = DefaultLlmContextEnhancer(
-        mem, similarity_threshold=0.5, context_similarity_threshold=0.5
+async def test_raised_strict_bar_does_not_enable_tier_silently() -> None:
+    """Regression: raising only similarity_threshold (0.8) must not open a tier."""
+    mem = _StubAgentMemory(
+        text_results=[_text("note", 0.75)],
+        tool_results=[_pair("pair", "SELECT 1", 0.75)],
     )
+    enhancer = DefaultLlmContextEnhancer(mem, similarity_threshold=0.8)
+
+    out = await enhancer.enhance_system_prompt(_BASE_PROMPT, "q", _USER)
+
+    assert mem.tool_search_calls == []
+    assert mem.text_search_calls == [0.8]
+    assert out == _BASE_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_text_floor_tracks_configured_strict_bar() -> None:
+    """The text-injection floor follows similarity_threshold, not a frozen 0.7."""
+    mem = _StubAgentMemory(text_results=[_text("note", 0.6)])
+    enhancer = DefaultLlmContextEnhancer(mem, similarity_threshold=0.5)
 
     await enhancer.enhance_system_prompt(_BASE_PROMPT, "q", _USER)
 
@@ -188,33 +213,28 @@ async def test_equal_nondefault_thresholds_band_empty_floor_tracks_strict() -> N
     assert mem.text_search_calls == [0.5]
 
 
+@pytest.mark.parametrize("floor", [0.7, 0.9])
 @pytest.mark.asyncio
-async def test_context_above_strict_band_empty_floor_stays_at_strict() -> None:
-    """A misconfigured context floor ABOVE the strict bar (0.9 > 0.7) must not
-    raise the text-search floor above strict. This pins ``text_search_floor =
-    min(context_floor, strict)``: a regression to a bare ``context_floor`` would
-    search text at 0.9 and silently drop legitimate strict-tier memories in
-    [0.7, 0.9). Band stays disabled (nothing is strictly below strict), so the
-    SQL-pair search never runs and the text floor holds at 0.7."""
+async def test_floor_not_below_strict_keeps_tier_off(floor: float) -> None:
+    """A floor equal to or above the strict bar keeps the tier off and never raises
+    the text floor above strict."""
     text = [_text("orders live in the sales schema", 0.85)]
     mem = _StubAgentMemory(text_results=text)
     enhancer = DefaultLlmContextEnhancer(
-        mem, similarity_threshold=0.7, context_similarity_threshold=0.9
+        mem, similarity_threshold=0.7, context_similarity_threshold=floor
     )
 
     out = await enhancer.enhance_system_prompt(_BASE_PROMPT, "how many orders?", _USER)
 
-    assert mem.tool_search_calls == []  # context >= strict → band disabled
-    assert mem.text_search_calls == [0.7]  # min(0.9, 0.7) — floor never rises above strict
-    # The 0.85 memory is a strict-tier hit and is still injected, unchanged.
+    assert mem.tool_search_calls == []
+    assert mem.text_search_calls == [0.7]
     assert out == _render_text_only(_BASE_PROMPT, text)
 
 
 @pytest.mark.asyncio
-async def test_band_injects_both_memory_kinds_as_prose() -> None:
-    """AC 4: band enabled (0.3 < 0.7); one text memory and one question->SQL
-    pair both inside the band → both injected under the heading, the pair as
-    related example prose (its question + SQL), not a tool-call shape."""
+async def test_tier_injects_both_memory_kinds() -> None:
+    """Tier on (0.3 < 0.7): text memory and question->SQL pair above the floor are
+    both injected; the pair as a related example, searched for run_sql only."""
     mem = _StubAgentMemory(
         text_results=[_text("cancelled orders are excluded by convention", 0.5)],
         tool_results=[_pair("how many orders last 10 days", "SELECT count(*) FROM orders", 0.4)],
@@ -227,19 +247,23 @@ async def test_band_injects_both_memory_kinds_as_prose() -> None:
 
     assert "## Relevant Context from Memory" in out
     assert "cancelled orders are excluded by convention" in out
-    assert "how many orders last 10 days" in out
-    assert "SELECT count(*) FROM orders" in out
-    assert mem.tool_search_calls == [0.3]  # SQL-pair search runs at the band floor
+    assert 'Related prior question: "how many orders last 10 days"' in out
+    assert "```sql\nSELECT count(*) FROM orders\n```" in out
+    assert mem.text_search_calls == [0.3]
+    assert mem.tool_search_calls == [0.3]
+    assert mem.tool_name_filters == ["run_sql"]
 
 
 @pytest.mark.asyncio
-async def test_band_excludes_strict_tier_pairs() -> None:
-    """AC 5: a question->SQL pair scoring >= strict stays tool-only and must NOT
-    also appear in the injected section; only the in-band pair is injected."""
+async def test_tier_includes_strong_pairs() -> None:
+    """Pairs at or above the strict bar are injected too: the search tool runs on
+    the agent's rewording of the question and can miss the best match."""
     mem = _StubAgentMemory(
         tool_results=[
-            _pair("strict hit question", "SELECT 1", 0.9),  # >= strict → tool-only
-            _pair("in band question", "SELECT 2", 0.4),  # in band → injected
+            _pair("strong question", "SELECT 1", 0.96),
+            _pair("exactly strict question", "SELECT 2", 0.7),
+            _pair("near question", "SELECT 3", 0.4),
+            _pair("too weak question", "SELECT 4", 0.2),
         ],
     )
     enhancer = DefaultLlmContextEnhancer(
@@ -248,52 +272,44 @@ async def test_band_excludes_strict_tier_pairs() -> None:
 
     out = await enhancer.enhance_system_prompt(_BASE_PROMPT, "q", _USER)
 
-    assert "in band question" in out
-    assert "strict hit question" not in out
+    assert "strong question" in out
+    assert "exactly strict question" in out
+    assert "near question" in out
+    assert "too weak question" not in out
 
 
+@pytest.mark.parametrize("args_sql", [None, "", "   ", 42])
 @pytest.mark.asyncio
-async def test_band_excludes_pair_scoring_exactly_at_strict() -> None:
-    """Boundary: the band filter is ``similarity_score < strict`` (exclusive
-    upper bound), so a pair scoring EXACTLY at the strict bar is a strict-tier
-    hit and must NOT be injected — it stays tool-only. Pins the endpoint so a
-    ``<`` -> ``<=`` mutation (which would duplicate a strict hit into the prose
-    section) is caught."""
-    mem = _StubAgentMemory(
-        tool_results=[
-            _pair("exactly strict question", "SELECT 1", 0.7),  # == strict → tool-only
-            _pair("just below strict question", "SELECT 2", 0.69),  # in band → injected
-        ],
-    )
+async def test_tier_skips_pairs_without_usable_sql(args_sql: Any) -> None:
+    mem = _StubAgentMemory(tool_results=[_pair("q1", None, 0.5)])
+    if args_sql is not None:
+        mem._tool_results[0].memory.args = {"sql": args_sql}
     enhancer = DefaultLlmContextEnhancer(
         mem, similarity_threshold=0.7, context_similarity_threshold=0.3
     )
 
     out = await enhancer.enhance_system_prompt(_BASE_PROMPT, "q", _USER)
 
-    assert "just below strict question" in out
-    assert "exactly strict question" not in out
+    assert out == _BASE_PROMPT
 
 
 @pytest.mark.asyncio
-async def test_band_excludes_pairs_without_sql_arg() -> None:
-    """A tool-use pair with no ``sql`` arg (e.g. an emit_chart pair) is silently
-    excluded from the band section — AC 4 is about the prior question AND its SQL."""
-    mem = _StubAgentMemory(
-        tool_results=[_pair("chart question", None, 0.4)],
-    )
+async def test_long_pair_sql_is_capped() -> None:
+    long_sql = "SELECT " + "x, " * _CONTEXT_PAIR_MAX_SQL_CHARS
+    mem = _StubAgentMemory(tool_results=[_pair("big pivot", long_sql, 0.9)])
     enhancer = DefaultLlmContextEnhancer(
         mem, similarity_threshold=0.7, context_similarity_threshold=0.3
     )
 
     out = await enhancer.enhance_system_prompt(_BASE_PROMPT, "q", _USER)
 
-    assert out == _BASE_PROMPT  # nothing to inject → prompt unchanged
+    assert "-- (SQL truncated)" in out
+    assert long_sql not in out
+    assert len(out) < len(_BASE_PROMPT) + _CONTEXT_PAIR_MAX_SQL_CHARS + 500
 
 
 @pytest.mark.asyncio
-async def test_empty_band_produces_no_section() -> None:
-    """AC 4/3: band enabled but nothing scores inside it → no injected heading."""
+async def test_empty_tier_produces_no_section() -> None:
     mem = _StubAgentMemory(
         text_results=[_text("too weak", 0.1)],
         tool_results=[_pair("too weak pair", "SELECT 1", 0.1)],
@@ -305,15 +321,58 @@ async def test_empty_band_produces_no_section() -> None:
     out = await enhancer.enhance_system_prompt(_BASE_PROMPT, "q", _USER)
 
     assert out == _BASE_PROMPT
-    assert "## Relevant Context from Memory" not in out
 
 
 @pytest.mark.asyncio
-async def test_search_failure_degrades_to_original_prompt(
+async def test_profile_strict_bar_overrides_constructor_value() -> None:
+    """A per-request profile's similarity_threshold is the strict bar, as it is for
+    the search tool: 0.2 is below the 0.3 floor, so the tier is off."""
+    mem = _StubAgentMemory(tool_results=[_pair("pair", "SELECT 1", 0.5)])
+    enhancer = DefaultLlmContextEnhancer(
+        mem, similarity_threshold=0.7, context_similarity_threshold=0.3
+    )
+    token = set_effective_settings(
+        EffectiveSettings(
+            show_details=False, max_tool_iterations=20, max_rows=100, similarity_threshold=0.2
+        )
+    )
+    try:
+        out = await enhancer.enhance_system_prompt(_BASE_PROMPT, "q", _USER)
+    finally:
+        reset_effective_settings(token)
+
+    assert mem.tool_search_calls == []
+    assert mem.text_search_calls == [0.2]
+    assert out == _BASE_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_profile_strict_bar_can_enable_tier() -> None:
+    """Constructor strict 0.3 equals the floor (tier off); a profile raising the
+    strict bar to 0.9 turns the tier on for that request."""
+    mem = _StubAgentMemory(tool_results=[_pair("pair", "SELECT 1", 0.5)])
+    enhancer = DefaultLlmContextEnhancer(
+        mem, similarity_threshold=0.3, context_similarity_threshold=0.3
+    )
+    token = set_effective_settings(
+        EffectiveSettings(
+            show_details=False, max_tool_iterations=20, max_rows=100, similarity_threshold=0.9
+        )
+    )
+    try:
+        out = await enhancer.enhance_system_prompt(_BASE_PROMPT, "q", _USER)
+    finally:
+        reset_effective_settings(token)
+
+    assert mem.tool_search_calls == [0.3]
+    assert 'Related prior question: "pair"' in out
+
+
+@pytest.mark.asyncio
+async def test_text_search_failure_degrades_to_original_prompt(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Degrade path (audit prior-decision #4): a memory-search exception logs a
-    warning and returns the unmodified system prompt — never a hard failure."""
+    """A text-search exception logs a warning and returns the unmodified prompt."""
     mem = _StubAgentMemory(text_search_raises=True)
     enhancer = DefaultLlmContextEnhancer(
         mem, similarity_threshold=0.7, context_similarity_threshold=0.3
@@ -324,3 +383,21 @@ async def test_search_failure_degrades_to_original_prompt(
 
     assert out == _BASE_PROMPT
     assert any(record.levelno == logging.WARNING for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_pair_search_failure_keeps_text_hits(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A pair-search exception is logged; text hits already found are still injected."""
+    text = [_text("orders live in the sales schema", 0.5)]
+    mem = _StubAgentMemory(text_results=text, tool_search_raises=True)
+    enhancer = DefaultLlmContextEnhancer(
+        mem, similarity_threshold=0.7, context_similarity_threshold=0.3
+    )
+
+    with caplog.at_level(logging.WARNING):
+        out = await enhancer.enhance_system_prompt(_BASE_PROMPT, "q", _USER)
+
+    assert out == _render_text_only(_BASE_PROMPT, text)
+    assert any("Context pair search failed" in r.getMessage() for r in caplog.records)

@@ -13,9 +13,9 @@ Both kinds live in the local vector store configured by the `[memory]` section. 
 
 ## Near-Match Background Context
 
-By default, SQL Lens reaches into its memory in two ways: the assistant can search saved question-and-answer pairs on demand, and SQL Lens automatically adds any closely matching free-form notes to the assistant's background context before it answers. Both use the `similarity_threshold` setting as the bar a memory must clear.
+By default, SQL Lens reaches into its memory in two ways: the assistant can search saved question-and-answer pairs on demand, and SQL Lens automatically adds any closely matching free-form notes to the assistant's background context before it answers. Both use the `similarity_threshold` setting as the bar a memory must clear. The assistant's on-demand search uses its own wording of the question, so it can miss a saved answer that matches the original question closely.
 
-You can optionally widen the automatic background context with a second, more permissive bar. Set `context_similarity_threshold` **below** `similarity_threshold` in the `[memory]` section, and SQL Lens will also fold in *near-match* memories — ones that score in between the two values — as related context. This near-match tier draws on both saved question-and-answer pairs and free-form notes. A near-match pair is offered to the assistant as a related example ("a similar earlier question was answered with this SQL"), not as an answer to copy.
+You can optionally turn on a wider automatic background context. Set `context_similarity_threshold` **below** `similarity_threshold` in the `[memory]` section. SQL Lens then searches memory with the user's exact question and adds, as related context, up to five saved question-and-answer pairs and up to five free-form notes that score at or above `context_similarity_threshold` — including very close matches. A pair is shown to the assistant as a related example ("a similar earlier question was answered with this SQL"), not as an answer to copy. Very long SQL is shortened.
 
 For example, to keep the strict bar at the default `0.7` but also surface anything scoring `0.55` or higher as related context:
 
@@ -25,7 +25,9 @@ similarity_threshold = 0.7
 context_similarity_threshold = 0.55
 ```
 
-Leaving `context_similarity_threshold` at its default (`0.7`, equal to `similarity_threshold`) turns the near-match tier off, and SQL Lens behaves exactly as before. Widen the gap gradually: the more you lower `context_similarity_threshold`, the more loosely-related memories SQL Lens includes, which can help on questions that never quite match but also adds length and noise to what the assistant reads.
+`context_similarity_threshold` is not set by default, which keeps this tier off. Lower it gradually: the lower the value, the more loosely related memories SQL Lens includes, which can help on questions that never quite match but also adds length and noise to what the assistant reads. Question-and-answer pairs added this way count as retrieved in the memory statistics.
+
+If a request uses a named profile with its own `similarity_threshold`, that value is used as the strict bar for this tier too.
 
 If SQL Lens cannot reach its memory while assembling this context, it quietly proceeds without the extra context rather than failing the question.
 
