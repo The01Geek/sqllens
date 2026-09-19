@@ -314,7 +314,7 @@ async def test_happy_path_returns_markdown(
 
     assert "Here are the results:" in result
     assert "Alice" in result
-    assert "| name | age |" in result
+    assert "| Name | Age |" in result
 
 
 @pytest.mark.asyncio
@@ -334,7 +334,7 @@ async def test_with_widgets_returns_table_block_on_dataframe(
         await query_database_impl_with_widgets(cfg, "list users")
     )
 
-    assert "| name | age |" in markdown
+    assert "| Name | Age |" in markdown
     assert len(blocks) == 1
     assert blocks[0]["type"] == "table"
     assert blocks[0]["columns"] == ["name", "age"]
@@ -362,7 +362,7 @@ async def test_with_widgets_one_row_dataframe_becomes_text_block(
         await query_database_impl_with_widgets(cfg, "who is the oldest user")
     )
 
-    expected = "| name | age |\n| --- | --- |\n| Alice | 30 |"
+    expected = "| Name | Age |\n| --- | --- |\n| Alice | 30 |"
     assert blocks == [{"type": "text", "text": expected}]
     assert expected in markdown
 
@@ -440,7 +440,7 @@ async def test_with_widgets_surfaces_executed_sql(
     # Table block was emitted (from the DataFrame component).
     assert any(b["type"] == "table" for b in blocks)
     assert f"```sql\n{sql}\n```" in markdown
-    assert markdown.startswith("| name | age |")
+    assert markdown.startswith("| Name | Age |")
 
 
 @pytest.mark.asyncio
@@ -551,7 +551,7 @@ async def test_with_widgets_chart_and_dataframe_yield_ordered_blocks(
     )
 
     # Markdown (the non-apps fallback) still carries the data table + answer.
-    assert "| city | sales |" in markdown
+    assert "| City | Sales |" in markdown
     assert "revenue by genre" in markdown
     # Stream order preserved: table → chart → text (the text block is the
     # last-text-fallback for the unmarked RichTextComponent).

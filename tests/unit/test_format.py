@@ -37,6 +37,7 @@ from sqllens.tools._format import (
     _MAX_BLOCKS_TOTAL_BYTES,
     _MAX_ROWS_RENDERED,
     _MAX_TABLE_PAYLOAD_BYTES,
+    _humanize_label,
     _render_dataframe,
     _serialized_len,
     append_conversation_footer,
@@ -390,7 +391,7 @@ def test_dataframe_then_text_renders_table_before_summary() -> None:
     ]
     msg, is_error = components_to_markdown(stream)
     assert is_error is False
-    assert msg.startswith("| id | name |")
+    assert msg.startswith("| ID | Name |")
     assert msg.endswith("two rows returned")
     assert "\n\ntwo rows returned" in msg
 
@@ -652,6 +653,7 @@ def test_blocks_within_budget_emit_no_truncation_notice() -> None:
         {
             "type": "table",
             "columns": ["a"],
+            "column_labels": ["A"],
             "rows": [["1"], ["2"]],
             "column_types": {"a": "number"},
             "row_count": 2,
@@ -667,7 +669,7 @@ def test_blocks_within_budget_emit_no_truncation_notice() -> None:
 def test_dataframe_columns_fallback_from_first_row() -> None:
     rendered = _render_dataframe(_df(columns=[], rows=[{"id": 1, "name": "alpha"}]))
     header = rendered.splitlines()[0]
-    assert header == "| id | name |"
+    assert header == "| ID | Name |"
 
 
 def test_dataframe_truncation_footer_at_500() -> None:
@@ -696,7 +698,7 @@ def test_dataframe_empty_columns_and_rows_renders_nothing() -> None:
 def test_explicit_columns_override_row_keys_and_drop_extras() -> None:
     rendered = _render_dataframe(_df(columns=["b", "a"], rows=[{"a": 1, "b": 2, "c": 3}]))
     header = rendered.splitlines()[0]
-    assert header == "| b | a |"
+    assert header == "| B | A |"
     body_line = rendered.splitlines()[-1]
     assert body_line == "| 2 | 1 |"
     assert "3" not in rendered
@@ -739,12 +741,13 @@ def test_table_small_dataframe_exact_block_payload() -> None:
     )
     markdown, is_error, blocks, _qi, _mi = components_to_blocks([_ui(df)])
     assert is_error is False
-    assert markdown.startswith("| name | age |")
+    assert markdown.startswith("| Name | Age |")
     table_blocks = [b for b in blocks if b["type"] == "table"]
     assert table_blocks == [
         {
             "type": "table",
             "columns": ["name", "age"],
+            "column_labels": ["Name", "Age"],
             "rows": [["Alice", "30"], ["Bob", "25"]],
             "column_types": {"age": "number", "name": "string"},
             "row_count": 2,
@@ -1518,8 +1521,8 @@ def test_one_row_one_column_becomes_single_text_line() -> None:
         [_one_row({"total_orders": 1234})]
     )
     assert is_error is False
-    assert blocks == [{"type": "text", "text": "**total\\_orders:** 1234"}]
-    assert markdown == "**total\\_orders:** 1234"
+    assert blocks == [{"type": "text", "text": "**Total Orders:** 1234"}]
+    assert markdown == "**Total Orders:** 1234"
 
 
 @pytest.mark.parametrize("ncols", [2, 3, 4])
@@ -1527,9 +1530,10 @@ def test_one_row_two_to_four_columns_becomes_markdown_table(ncols: int) -> None:
     cols = [f"c{i}" for i in range(ncols)]
     row = {c: i for i, c in enumerate(cols)}
     _, _, blocks, _qi, _mi = components_to_blocks([_one_row(row, cols)])
+    labels = [_humanize_label(c) for c in cols]
     expected = "\n".join(
         [
-            "| " + " | ".join(cols) + " |",
+            "| " + " | ".join(labels) + " |",
             "|" + " --- |" * ncols,
             "| " + " | ".join(str(i) for i in range(ncols)) + " |",
         ]
@@ -1572,7 +1576,7 @@ def test_one_row_text_block_keeps_stream_position() -> None:
     ]
     _, _, blocks, _qi, _mi = components_to_blocks(comps)
     assert [b["type"] for b in blocks] == ["text", "chart", "text", "text"]
-    assert blocks[2] == {"type": "text", "text": "**n:** 7"}
+    assert blocks[2] == {"type": "text", "text": "**N:** 7"}
     assert blocks[0]["text"] == "intro"
     assert blocks[3]["text"] == "outro"
 
@@ -1589,10 +1593,10 @@ def test_one_row_text_block_with_unmarked_fallback_summary() -> None:
     markdown, is_error, blocks, _qi, _mi = components_to_blocks(comps)
     assert is_error is False
     assert blocks == [
-        {"type": "text", "text": "**n:** 7"},
+        {"type": "text", "text": "**N:** 7"},
         {"type": "text", "text": "There are 7 orders."},
     ]
-    assert markdown == "**n:** 7\n\nThere are 7 orders."
+    assert markdown == "**N:** 7\n\nThere are 7 orders."
 
 
 def test_one_row_values_use_table_cell_coercion() -> None:
@@ -1606,7 +1610,7 @@ def test_one_row_values_use_table_cell_coercion() -> None:
         {
             "type": "text",
             "text": (
-                "| null\\_cell | decimal\\_cell | datetime\\_cell |\n"
+                "| Null Cell | Decimal Cell | Datetime Cell |\n"
                 "| --- | --- | --- |\n"
                 "| None | 1.50 | 2026-01-02 03:04:05 |"
             ),
@@ -1635,7 +1639,7 @@ def test_one_row_table_escapes_pipes_so_cells_do_not_split() -> None:
     assert blocks == [
         {
             "type": "text",
-            "text": "| a\\|b | c |\n| --- | --- |\n| x\\|y | line1 line2 |",
+            "text": "| a\\|b | C |\n| --- | --- |\n| x\\|y | line1 line2 |",
         }
     ]
 
@@ -1648,9 +1652,9 @@ def test_two_one_row_results_each_get_own_text_block() -> None:
     ]
     _, _, blocks, _qi, _mi = components_to_blocks(comps)
     assert blocks == [
-        {"type": "text", "text": "**a:** 1"},
+        {"type": "text", "text": "**A:** 1"},
         {"type": "text", "text": "between"},
-        {"type": "text", "text": "**b:** 2"},
+        {"type": "text", "text": "**B:** 2"},
     ]
 
 
@@ -1658,7 +1662,7 @@ def test_one_row_markdown_answer_is_compact_table() -> None:
     markdown, _, _blocks, _qi, _mi = components_to_blocks(
         [_one_row({"name": "Alice", "age": 30})]
     )
-    assert markdown == "| name | age |\n| --- | --- |\n| Alice | 30 |"
+    assert markdown == "| Name | Age |\n| --- | --- |\n| Alice | 30 |"
 
 
 def test_one_row_result_query_info_row_count_is_one() -> None:
@@ -1670,3 +1674,123 @@ def test_one_row_result_query_info_row_count_is_one() -> None:
     _, _, blocks, qi, _mi = components_to_blocks(stream)
     assert blocks[0]["type"] == "text"
     assert qi is not None and qi["row_count"] == 1
+
+
+# ───────────────────────── humanized display labels (#259) ─────────────────
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # Happy path: snake_case → title-cased words, acronyms upper-cased.
+        ("customer_id", "Customer ID"),
+        ("total_amount_usd", "Total Amount USD"),
+        ("api_key", "API Key"),
+        ("order_date", "Order Date"),
+        ("url", "URL"),
+        ("id", "ID"),
+        # Single word and digit-bearing words.
+        ("total", "Total"),
+        ("q1_2024", "Q1 2024"),
+        # Degenerate underscore placement is NOT a snake_case identifier →
+        # returned unchanged.
+        ("_id", "_id"),
+        ("id_", "id_"),
+        ("a__b", "a__b"),
+        ("", ""),
+        # Passthrough: already reader-friendly or not a lowercase identifier.
+        ("Total Revenue", "Total Revenue"),
+        ("Revenue (USD)", "Revenue (USD)"),
+        ("customerId", "customerId"),
+        ("count(*)", "count(*)"),
+        ("sum(amount)", "sum(amount)"),
+        # Non-ASCII is not an ASCII snake_case identifier → unchanged, no error.
+        ("naïve_col", "naïve_col"),
+    ],
+)
+def test_humanize_label_mappings(raw: str, expected: str) -> None:
+    assert _humanize_label(raw) == expected
+
+
+def test_humanize_label_is_idempotent() -> None:
+    # Feeding an already-humanized label back through returns it unchanged
+    # (AC #8): the humanized form has a space/uppercase, so it is not a
+    # lowercase snake_case identifier and takes the passthrough branch.
+    for raw in ("customer_id", "total_amount_usd", "url", "q1_2024", "id"):
+        once = _humanize_label(raw)
+        assert _humanize_label(once) == once
+
+
+def test_humanize_label_long_name_returns_without_error() -> None:
+    raw = "_".join(["seg"] * 50)
+    out = _humanize_label(raw)
+    assert out == " ".join(["Seg"] * 50)
+
+
+def test_table_payload_carries_humanized_column_labels() -> None:
+    # More than one row keeps this a table block (a single row would take the
+    # one-row small-result text path instead).
+    df = DataFrameComponent(
+        rows=[
+            {"customer_id": 1, "total_amount_usd": "9.50"},
+            {"customer_id": 2, "total_amount_usd": "3.25"},
+        ],
+        columns=["customer_id", "total_amount_usd"],
+    )
+    _, _, blocks, _qi, _mi = components_to_blocks([_ui(df)])
+    table = next(b for b in blocks if b["type"] == "table")
+    assert table["column_labels"] == ["Customer ID", "Total Amount USD"]
+    # Raw column names and their type keys are unchanged (AC #6).
+    assert table["columns"] == ["customer_id", "total_amount_usd"]
+    assert set(table["column_types"]) <= {"customer_id", "total_amount_usd"}
+
+
+def test_table_markdown_header_uses_humanized_labels() -> None:
+    # Non-Apps Markdown fallback shows the humanized header (AC #2).
+    df = DataFrameComponent(
+        rows=[{"customer_id": 1}, {"customer_id": 2}],
+        columns=["customer_id"],
+    )
+    markdown, _is_error, _blocks, _qi, _mi = components_to_blocks([_ui(df)])
+    assert markdown.splitlines()[0] == "| Customer ID |"
+
+
+def test_render_dataframe_header_matches_production_humanized() -> None:
+    # _render_dataframe is pinned to stay byte-identical to the production
+    # Markdown path — so it must humanize the header too.
+    rendered = _render_dataframe(_df(["customer_id", "name"], [{"customer_id": 1, "name": "a"}]))
+    assert rendered.splitlines()[0] == "| Customer ID | Name |"
+
+
+def test_table_markdown_header_falls_back_to_raw_when_labels_absent() -> None:
+    # A table block lacking column_labels (a producer/future shape) still
+    # renders using the raw column names.
+    from sqllens.tools._format import _table_block_to_markdown
+
+    block = {
+        "type": "table",
+        "columns": ["customer_id", "name"],
+        "rows": [["1", "a"]],
+        "row_count": 1,
+        "truncated": 0,
+    }
+    assert _table_block_to_markdown(block).splitlines()[0] == "| customer_id | name |"
+
+
+def test_small_result_one_column_uses_humanized_label() -> None:
+    # The one-row ≤4-column text path is the third sibling surface (#257); it
+    # must agree with the table header (CLAUDE.md sibling-surfaces rule).
+    df = DataFrameComponent(rows=[{"customer_id": 42}], columns=["customer_id"])
+    markdown, _is_error, blocks, _qi, _mi = components_to_blocks([_ui(df)])
+    assert blocks == [{"type": "text", "text": "**Customer ID:** 42"}]
+    assert markdown == "**Customer ID:** 42"
+
+
+def test_small_result_multi_column_table_uses_humanized_labels() -> None:
+    df = DataFrameComponent(
+        rows=[{"customer_id": 1, "order_date": "2026-01-02"}],
+        columns=["customer_id", "order_date"],
+    )
+    _, _, blocks, _qi, _mi = components_to_blocks([_ui(df)])
+    assert blocks[0]["type"] == "text"
+    assert blocks[0]["text"].splitlines()[0] == "| Customer ID | Order Date |"
