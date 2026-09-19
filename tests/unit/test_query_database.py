@@ -345,6 +345,29 @@ async def test_with_widgets_returns_table_block_on_dataframe(
 
 
 @pytest.mark.asyncio
+async def test_with_widgets_one_row_dataframe_becomes_text_block(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """Issue #257: a one-row, narrow DataFrame reaches the tool result as a
+    public ``text`` block (never the internal ``result_text`` type) and the
+    Markdown answer carries the same ``**column:** value`` lines, not a table.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    stub = agent_stub_factory([make_dataframe([{"name": "Alice", "age": 30}])])
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    markdown, blocks, _query_info, _memory, _trace = (
+        await query_database_impl_with_widgets(cfg, "who is the oldest user")
+    )
+
+    assert blocks == [{"type": "text", "text": "- **name:** Alice\n- **age:** 30"}]
+    assert "- **name:** Alice\n- **age:** 30" in markdown
+    assert "| name | age |" not in markdown
+
+
+@pytest.mark.asyncio
 async def test_with_widgets_returns_single_text_block_on_text_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

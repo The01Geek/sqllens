@@ -1201,8 +1201,8 @@ def _small_result_to_markdown(payload: dict) -> str | None:
     """Render a one-row table payload as ``**column:** value`` Markdown.
 
     Returns ``None`` when the payload is not a small result (more or fewer than
-    one row, more than :data:`_SMALL_RESULT_MAX_COLUMNS` columns, or rows
-    dropped by the size budget) — the caller then keeps the table block. One
+    one row, zero columns or more than :data:`_SMALL_RESULT_MAX_COLUMNS`
+    columns, or rows dropped by the size budget) — the caller then keeps the table block. One
     column renders as a single line; two or more as a bullet list in column
     order. Values are the payload's already-coerced cell strings.
     """
@@ -1253,7 +1253,10 @@ def _render_dataframe(rich) -> str:  # type: ignore[no-untyped-def]
     calling this directly. The production path goes through
     :func:`components_to_blocks` → :func:`_serialize_blocks_to_markdown`, which
     invokes :func:`_table_block_to_markdown` — the same function this helper
-    delegates to, so the two paths emit byte-identical Markdown.
+    delegates to, so the two paths emit byte-identical Markdown for any result
+    the production path keeps as a table. A one-row result of at most
+    :data:`_SMALL_RESULT_MAX_COLUMNS` columns takes the text-block path there
+    instead, so this helper's table no longer matches production for it.
     """
     columns, rows = _columns_and_rows(rich)
     if not columns and not rows:
