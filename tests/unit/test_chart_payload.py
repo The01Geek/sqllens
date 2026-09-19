@@ -156,7 +156,7 @@ def test_chart_dataframe_table_rendered_into_markdown() -> None:
     ]
     markdown, is_error, blocks, _qi, _mi = components_to_blocks(stream)
     assert is_error is False
-    assert markdown.startswith("| x | y |")
+    assert markdown.startswith("| X | Y |")
     assert markdown.endswith("here is your chart")
     # Stream-ordered: table → chart → text.
     assert [b["type"] for b in blocks] == ["table", "chart", "text"]
@@ -288,3 +288,69 @@ def test_chart_decimal_non_finite_degrades_to_none() -> None:
     payload = _only_chart(blocks)
     assert payload["data"][0]["y"] is None
     assert payload["data"][1]["y"] is None
+
+
+# ─────────────────── axis-label humanization defaulting (#259) ──────────────
+
+
+def _spec_axis(*, x_field, x_label, y_field, y_label, series=None, chart_type="bar"):
+    # The shared make_chart_spec always sets x/y labels; build a spec inline so
+    # a label can be left empty (None) to exercise the server-side default fill.
+    return {
+        "chart_type": chart_type,
+        "title": "T",
+        "x": {"field": x_field, "label": x_label, "type": "category"},
+        "y": {"field": y_field, "label": y_label, "type": "value"},
+        "series": series,
+        "data": [{x_field: "a", y_field: 1}, {x_field: "b", y_field: 2}],
+        "row_count": 2,
+        "truncated": 0,
+    }
+
+
+def test_chart_axis_label_defaults_to_humanized_field_when_unset() -> None:
+    # AC #3: an axis whose label the LLM did not set shows the humanized field.
+    spec = _spec_axis(
+        x_field="order_date", x_label=None, y_field="total_amount_usd", y_label=None
+    )
+    _, _, blocks, _qi, _mi = components_to_blocks([make_chart(spec)])
+    payload = _only_chart(blocks)
+    assert payload["x"]["label"] == "Order Date"
+    assert payload["y"]["label"] == "Total Amount USD"
+    # The raw field keys are untouched.
+    assert payload["x"]["field"] == "order_date"
+    assert payload["y"]["field"] == "total_amount_usd"
+
+
+def test_chart_axis_label_set_by_llm_is_preserved() -> None:
+    # AC #4: a label the LLM set on purpose is shown exactly as written.
+    spec = _spec_axis(
+        x_field="order_date", x_label="When", y_field="revenue_usd", y_label="Revenue (USD)"
+    )
+    _, _, blocks, _qi, _mi = components_to_blocks([make_chart(spec)])
+    payload = _only_chart(blocks)
+    assert payload["x"]["label"] == "When"
+    assert payload["y"]["label"] == "Revenue (USD)"
+
+
+def test_chart_axis_empty_string_label_defaults_to_humanized_field() -> None:
+    # An empty-string label is not a real label — treat it as unset.
+    spec = _spec_axis(x_field="customer_id", x_label="", y_field="amount", y_label="   ")
+    _, _, blocks, _qi, _mi = components_to_blocks([make_chart(spec)])
+    payload = _only_chart(blocks)
+    assert payload["x"]["label"] == "Customer ID"
+    assert payload["y"]["label"] == "Amount"
+
+
+def test_chart_series_is_untouched_by_axis_humanization() -> None:
+    # AC #7: legend/series entries are unchanged.
+    spec = _spec_axis(
+        x_field="order_date",
+        x_label=None,
+        y_field="amount",
+        y_label=None,
+        series="region_code",
+    )
+    _, _, blocks, _qi, _mi = components_to_blocks([make_chart(spec)])
+    payload = _only_chart(blocks)
+    assert payload["series"] == "region_code"

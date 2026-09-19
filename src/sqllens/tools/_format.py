@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 from collections.abc import Iterable
 from datetime import datetime
 from decimal import Decimal
@@ -66,6 +67,43 @@ _MAX_TRACE_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES
 # in-budget blocks still cannot blow the iframe ceiling. Set well above the
 # per-block cap so a handful of full-budget blocks fit comfortably.
 _MAX_BLOCKS_TOTAL_BYTES = 512 * 1024
+
+
+# Words humanization fully upper-cases instead of title-casing. The issue's
+# acceptance criteria fix a minimum set (id/url/api/db/sql/ip/uuid); ``usd`` is
+# added because the same issue's worked example requires
+# ``total_amount_usd`` → "Total Amount USD". Compared lowercase, so a word
+# matches regardless of the identifier's (always-lowercase) casing.
+_ACRONYMS = frozenset({"id", "url", "api", "db", "sql", "ip", "uuid", "usd"})
+
+# A lowercase snake_case identifier: only lowercase ASCII letters and digits,
+# single underscores *between* words, no leading/trailing/doubled underscore.
+# Anything else (an uppercase letter, a space, punctuation, a non-ASCII
+# character, `_id`, `id_`, `a__b`) fails to match and is returned verbatim.
+_SNAKE_CASE_IDENTIFIER = re.compile(r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
+
+
+def _humanize_label(name: str) -> str:
+    """Turn a lowercase snake_case identifier into a readable display label.
+
+    ``customer_id`` → "Customer ID", ``total_amount_usd`` → "Total Amount USD",
+    ``q1_2024`` → "Q1 2024". Splits on underscores, capitalizes each word, and
+    fully upper-cases a word in :data:`_ACRONYMS`.
+
+    Any string that is *not* a lowercase snake_case identifier — one already
+    carrying a space or an uppercase letter (a SQL alias like ``Total Revenue``
+    or a deliberately-set chart label), or any other shape (``count(*)``, a
+    non-ASCII name, a leading/trailing/doubled underscore) — is returned
+    unchanged and never re-processed. That passthrough makes the transform
+    idempotent: a humanized label always contains a space or an uppercase
+    letter, so feeding it back returns it as-is.
+    """
+    if not _SNAKE_CASE_IDENTIFIER.match(name):
+        return name
+    words = name.split("_")
+    return " ".join(
+        word.upper() if word in _ACRONYMS else word.capitalize() for word in words
+    )
 
 
 def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
@@ -918,8 +956,16 @@ def _compute_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     column_types = _infer_column_types(str_columns, coerced_rows)
     column_types.update(_safe_column_types(rich))
 
+    # Additive, display-only labels parallel to ``columns`` (issue #259). The
+    # raw ``columns`` strings stay the payload's identity keys — ``column_types``
+    # and the widget's typed sort both key off them — so humanization NEVER
+    # rewrites ``columns``; it rides alongside as a separate list the renderers
+    # read for header text and fall back off when it is absent.
+    column_labels = [_humanize_label(c) for c in str_columns]
+
     payload: dict = {
         "columns": str_columns,
+        "column_labels": column_labels,
         "rows": coerced_rows,
         "column_types": column_types,
         "row_count": len(coerced_rows),
@@ -941,7 +987,13 @@ def _compute_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     lo, hi = 0, total
     while lo < hi:
         mid = (lo + hi + 1) // 2
+        # Measure the candidate with the row_count/truncated values it will
+        # ACTUALLY carry — their digit widths change with the kept-row count, so
+        # measuring the pre-trim shape (row_count=total, truncated=0) could let
+        # the returned block sit a couple of bytes over the ceiling.
         payload["rows"] = coerced_rows[:mid]
+        payload["row_count"] = mid
+        payload["truncated"] = total - mid
         if _serialized_len(payload) <= _MAX_TABLE_PAYLOAD_BYTES:
             lo = mid
         else:
@@ -1000,6 +1052,25 @@ def _build_chart_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
         return None
 
 
+def _default_axis_label(axis: object) -> object:
+    # Fill a chart axis's display label from its humanized field name only when
+    # the producer (the LLM via emit_chart) left the label empty (issue #259) —
+    # a label the LLM set on purpose is preserved exactly. Returns the axis
+    # unchanged when it is not a well-formed axis dict, or when the field is not
+    # a non-empty string. The humanizer is a passthrough for a non-snake_case
+    # field, so this matches the widget's existing fallback-to-raw-field while
+    # deriving the value server-side (consistent across every MCP client);
+    # idempotent, since a filled snake_case label is already humanized.
+    if not isinstance(axis, dict):
+        return axis
+    field = axis.get("field")
+    label = axis.get("label")
+    label_is_empty = label is None or (isinstance(label, str) and not label.strip())
+    if isinstance(field, str) and field and label_is_empty:
+        return {**axis, "label": _humanize_label(field)}
+    return axis
+
+
 def _compute_chart_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     # Returns the chart payload WITHOUT the ``"type": "chart"`` discriminator —
     # the wrapping is done by ``components_to_blocks``. The per-block size cap
@@ -1036,8 +1107,8 @@ def _compute_chart_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     payload: dict = {
         "chart_type": spec.get("chart_type"),
         "title": spec.get("title"),
-        "x": spec.get("x"),
-        "y": spec.get("y"),
+        "x": _default_axis_label(spec.get("x")),
+        "y": _default_axis_label(spec.get("y")),
         "series": spec.get("series"),
         "data": coerced_rows,
         "row_count": total,
@@ -1218,7 +1289,8 @@ def _small_result_to_markdown(payload: dict) -> str | None:
         or not 1 <= len(columns) <= _SMALL_RESULT_MAX_COLUMNS
     ):
         return None
-    names = [_escape_small_result_text(col) for col in columns]
+    labels = _display_labels(payload, columns)
+    names = [_escape_small_result_text(str(col)) for col in labels]
     values = [_escape_small_result_text(val) for val in rows[0]]
     if len(names) == 1:
         return f"**{names[0]}:** {values[0]}"
@@ -1231,6 +1303,21 @@ def _small_result_to_markdown(payload: dict) -> str | None:
     )
 
 
+def _display_labels(payload: dict, columns: list) -> list:
+    """Return the humanized display labels for a table payload's header.
+
+    Reads the additive ``column_labels`` (issue #259) when it is a list of the
+    same length as ``columns``; otherwise falls back to the raw ``columns`` so a
+    payload that predates — or omits — the field still renders. Shared by the
+    Markdown table serializer and the one-row small-result path so the two
+    surfaces cannot drift in how they resolve the label.
+    """
+    labels = payload.get("column_labels")
+    if isinstance(labels, list) and len(labels) == len(columns):
+        return labels
+    return columns
+
+
 def _table_block_to_markdown(block: dict) -> str:
     """Render one table block as a Markdown table (mirrors :func:`_render_dataframe`)."""
     columns = block.get("columns") or []
@@ -1238,7 +1325,8 @@ def _table_block_to_markdown(block: dict) -> str:
     if not columns and not rows:
         return ""
 
-    header = "| " + " | ".join(str(c) for c in columns) + " |"
+    labels = _display_labels(block, columns)
+    header = "| " + " | ".join(str(c) for c in labels) + " |"
     separator = "|" + "|".join(["---"] * len(columns)) + "|"
     body_rows = []
     for row in rows[:_MAX_ROWS_RENDERED]:
@@ -1270,8 +1358,10 @@ def _render_dataframe(rich) -> str:  # type: ignore[no-untyped-def]
     columns, rows = _columns_and_rows(rich)
     if not columns and not rows:
         return ""
+    str_columns = [_coerce_cell(c) for c in columns]
     block = {
-        "columns": [_coerce_cell(c) for c in columns],
+        "columns": str_columns,
+        "column_labels": [_humanize_label(c) for c in str_columns],
         "rows": [[_coerce_cell(row.get(c, "")) for c in columns] for row in rows],
         "row_count": len(rows),
         "truncated": 0,
