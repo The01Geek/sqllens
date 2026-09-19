@@ -1,0 +1,45 @@
+{
+  "dispatch_mode": "fanned-out",
+  "root_completeness": "complete",
+  "verdict": "APPROVE",
+  "diff_produced_at_head": "fecba5193d35439786a02b28bec33d7ad5eac17f",
+  "report": "# Shadow Review — PR #260 (issue #259: humanize table column headers and chart axis titles)\n\n## Verdict: APPROVE\n\nBlinded, independent shadow re-review of the full diff (5 files, +314/-27): `src/sqllens/tools/_format.py`, `src/sqllens/ui/query_results.html`, and three test files. Full Phase 3 roster fanned out (4 always-on + pr-test-analyzer; type-design-analyzer gated out, has_new_types=false; completeness-critic skipped, detect_all_audit=false). No CI evidence handed in — test evidence settled by reading source (suite not run per run policy). No suite/lint pass observed in-env, so test evidence is reported as not independently established here; the diff's own tests were verified by reading them, not executing them.\n\n## Phase 1/2 checklist verification\n13 verifiable claims enumerated and all verified PASS against HEAD source:\n- _humanize_label transform (split/capitalize/acronym-upper), acronym set superset of AC minimum (+usd), snake_case regex rejects non-conforming names -> verbatim passthrough, idempotence.\n- Additive column_labels parallel to raw columns; column_types + typed sort key off raw names (AC #6).\n- Binary-search row-trim now measures each candidate with the row_count/truncated it will carry, final values set from lo; row_count+truncated==total invariant preserved.\n- _default_axis_label fills axis label from humanized field only when label empty; LLM-set label preserved; non-dict/missing-field returned unchanged (AC #3,#4). Chart series carried through untouched (AC #7).\n- _display_labels length-guarded fallback shared by markdown table + one-row surfaces; _render_dataframe parity; widget header uses label with raw fallback (AC #1,#2).\n- Tests pin ACs #2,#3,#4,#6,#7,#8.\n\n## Phase 3 findings (all Suggestion severity; none blocking)\n1. comment-analyzer (style, low-confidence): _ACRONYMS provenance comment (_format.py:17-21) is largely derivation/worked-example rather than naming a specific wrong change; load-bearing status arguably undecidable (carve-out).\n2. pr-test-analyzer (test_gap): _default_axis_label defensive branches (non-dict axis; missing/non-string field) untested (_format.py:1057-1073).\n3. pr-test-analyzer (test_gap): _display_labels length-mismatch fallback branch untested (_format.py:1308-1320).\n4. pr-test-analyzer (test_gap): incidental binary-search size-budget change (_format.py:989-1007) has no near-ceiling test.\n5. final-pass (other): CSV export header stays raw snake_case while visible widget header is humanized (query_results.html:282-286) — intentional, outside ACs; UX judgment call, not a defect.\n\n## Assessment\nClean, additive, display-only change. All 8 acceptance criteria trace to shipped code. Raw payload identity keys intact; labels degrade gracefully to raw names when absent/mismatched. No Critical or Important findings from any of the 5 reviewers. Dirty-tree backstop: tree clean before dispatch (snapshot OID e69de29 = empty), no agent modified the tree. APPROVE.",
+  "phase3_findings": [
+    {"agent": "prflow:comment-analyzer", "severity": "Suggestion", "description": "_ACRONYMS provenance comment (_format.py:17-21) is mostly derivation/worked-example rather than naming the specific wrong change a future editor would make; low-confidence, load-bearing status arguably undecidable (carve-out).", "defect_signature": {"file": "src/sqllens/tools/_format.py", "line_range": [17, 21], "kind": "style"}},
+    {"agent": "prflow:pr-test-analyzer", "severity": "Suggestion", "description": "_default_axis_label defensive branches (non-dict axis; missing/non-string field) are untested; the malformed-axis-returned-verbatim contract is unverified.", "defect_signature": {"file": "src/sqllens/tools/_format.py", "line_range": [1057, 1073], "kind": "test_gap"}},
+    {"agent": "prflow:pr-test-analyzer", "severity": "Suggestion", "description": "_display_labels length-mismatch fallback branch (column_labels present but wrong length) is untested; only the absent-field fallback is covered.", "defect_signature": {"file": "src/sqllens/tools/_format.py", "line_range": [1308, 1320], "kind": "test_gap"}},
+    {"agent": "prflow:pr-test-analyzer", "severity": "Suggestion", "description": "Incidental binary-search size-budget change (row_count/truncated set during measurement loop) has no near-_MAX_TABLE_PAYLOAD_BYTES test.", "defect_signature": {"file": "src/sqllens/tools/_format.py", "line_range": [989, 1007], "kind": "test_gap"}},
+    {"agent": "prflow:requesting-code-review", "severity": "Suggestion", "description": "CSV export header (buildCsvText) stays raw snake_case while visible widget header is humanized — intentional and outside the ACs; flagged so the divergence is a conscious UX choice.", "defect_signature": {"file": "src/sqllens/ui/query_results.html", "line_range": [282, 286], "kind": "other"}}
+  ],
+  "reviewers_dispatched": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:pr-test-analyzer", "prflow:requesting-code-review"],
+  "expected_reviewers": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:pr-test-analyzer", "prflow:requesting-code-review"],
+  "phase3_failed_agents": [],
+  "diff_profile": {
+    "files_changed": 5,
+    "insertions": 314,
+    "deletions": 27,
+    "config_only": false,
+    "has_new_types": false,
+    "detect_all_audit": false,
+    "pr_test_relevant": true,
+    "type_design_relevant": false,
+    "languages": ["python", "html"]
+  },
+  "cap_drops": ["prflow:type-design-analyzer (has_new_types=false)"],
+  "checklist": [
+    {"id": "C1", "category": "behavior", "verification_mode": "agent"},
+    {"id": "C2", "category": "behavior", "verification_mode": "agent"},
+    {"id": "C3", "category": "behavior", "verification_mode": "agent"},
+    {"id": "C4", "category": "behavior", "verification_mode": "agent"},
+    {"id": "C5", "category": "behavior", "verification_mode": "agent"},
+    {"id": "C6", "category": "behavior", "verification_mode": "agent"},
+    {"id": "C7", "category": "behavior", "verification_mode": "agent"},
+    {"id": "C8", "category": "behavior", "verification_mode": "agent"},
+    {"id": "C9", "category": "behavior", "verification_mode": "agent"},
+    {"id": "C10", "category": "behavior", "verification_mode": "agent"},
+    {"id": "C11", "category": "behavior", "verification_mode": "agent"},
+    {"id": "C12", "category": "behavior", "verification_mode": "agent"},
+    {"id": "C13", "category": "test", "verification_mode": "agent"}
+  ],
+  "phase2_fails": []
+}

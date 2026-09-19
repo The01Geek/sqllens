@@ -1,0 +1,92 @@
+{
+  "dispatch_mode": "fanned-out",
+  "root_completeness": "established",
+  "verdict": "REJECT",
+  "diff_produced_at_head": "4c550b502a0268213ab9fbe4afed0168ca6bf7d4",
+  "diff_profile": {"small_diff": false, "config_only": false, "has_new_types": false, "checklist_skipped": null},
+  "cap_drops": {"count": 0, "by_category": {}},
+  "phase3_dispatched": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:pr-test-analyzer", "prflow:requesting-code-review"],
+  "expected_reviewers": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:pr-test-analyzer", "prflow:requesting-code-review"],
+  "plan_eligible": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:pr-test-analyzer", "prflow:requesting-code-review"],
+  "plan_exclusions": [{"agent": "prflow:type-design-analyzer", "reason": "has_new_types is false — no new types/classes/enums in the diff"}],
+  "phase3_failed_agents": [],
+  "checklist": [
+    {"id": "VC-1", "category": "issue_acceptance", "verification_mode": "agent", "verdict": "PASS", "source_file": "src/sqllens/ui/query_results.html"},
+    {"id": "VC-2", "category": "issue_acceptance", "verification_mode": "agent", "verdict": "PASS", "source_file": "src/sqllens/tools/_format.py"},
+    {"id": "VC-3", "category": "issue_acceptance", "verification_mode": "agent", "verdict": "PASS", "source_file": "src/sqllens/tools/_format.py"},
+    {"id": "VC-4", "category": "issue_acceptance", "verification_mode": "agent", "verdict": "PASS", "source_file": "src/sqllens/tools/_format.py"},
+    {"id": "VC-5", "category": "issue_acceptance", "verification_mode": "agent", "verdict": "PASS", "source_file": "src/sqllens/tools/_format.py"},
+    {"id": "VC-6", "category": "issue_acceptance", "verification_mode": "agent", "verdict": "PASS", "source_file": "src/sqllens/tools/_format.py"},
+    {"id": "VC-7", "category": "issue_acceptance", "verification_mode": "agent", "verdict": "PASS", "source_file": "src/sqllens/tools/_format.py"},
+    {"id": "VC-8", "category": "issue_acceptance", "verification_mode": "agent", "verdict": "PASS", "source_file": "src/sqllens/tools/_format.py"},
+    {"id": "VC-9", "category": "absolute_claim", "verification_mode": "agent", "verdict": "FAIL", "raw_verdict": "FAIL", "normalized": false, "inaccuracy_scope": "source_authored_text", "property_proven": false, "source_file": "src/sqllens/tools/_format.py", "note": "not normalizable — source_authored_text, not generated_claim_text"},
+    {"id": "VC-10", "category": "absolute_claim", "verification_mode": "agent", "verdict": "PASS", "source_file": "src/sqllens/tools/_format.py"},
+    {"id": "VC-11", "category": "data_format_assumption", "verification_mode": "agent", "verdict": "PASS", "source_file": "src/sqllens/tools/_format.py"},
+    {"id": "VC-12", "category": "api_contract", "verification_mode": "agent", "verdict": "PASS", "source_file": "src/sqllens/ui/query_results.html"},
+    {"id": "VC-13", "category": "test_mock_alignment", "verification_mode": "agent", "verdict": "PASS", "source_file": "tests/unit/test_chart_payload.py"},
+    {"id": "VC-14", "category": "dependency_interaction", "verification_mode": "agent", "verdict": "PASS", "source_file": "src/sqllens/tools/_format.py"},
+    {"id": "VC-15", "category": "data_format_assumption", "verification_mode": "agent", "verdict": "PASS", "source_file": "src/sqllens/tools/_format.py"},
+    {"id": "VC-16", "category": "test_mock_alignment", "verification_mode": "agent", "verdict": "PASS", "source_file": "tests/unit/test_format.py"}
+  ],
+  "phase3_findings": [
+    {
+      "agent": "prflow:requesting-code-review",
+      "severity": "Suggestion",
+      "description": "The `_humanize_label` docstring states the universal 'a humanized label always contains a space or an uppercase letter, so feeding it back returns it as-is.' This is false for a pure-digit / digit-led single word (e.g. `_humanize_label(\"2024\") == \"2024\"`, which has neither a space nor an uppercase letter). The idempotence conclusion (AC #8) still holds, but the stated justification is over-broad. Filed as documented_falsehood; behavior-inert prose cap applies (internal private-function docstring, no tool reads it, no external consumer) so it is capped at Suggestion as a Phase-3 finding — but the SAME defect independently drives the checklist FAIL VC-9 (rule 1 REJECT).",
+      "defect_signature": {"file": "src/sqllens/tools/_format.py", "line_range": [42, 44], "kind": "documented_falsehood"},
+      "corroboration_count": 1,
+      "step25_classification": "shape 2 / behavior-inert prose cap (both limbs held: internal docstring, no tool reads it, no external consumer) -> capped at Suggestion; inertness first-conjunct=held limb-one=held limb-two=held (subject is the sentence, not a mechanism coverage gap; idempotence conclusion is correct)",
+      "fix_decision": "fix",
+      "corroboration_note": "Mechanically corroborated by verification-checklist FAIL VC-9 (source_authored_text) and noted sub-threshold by prflow:code-reviewer; this is the REJECT driver via Phase 4.2 rule 1 (checklist FAIL), not via the carve-out."
+    },
+    {
+      "agent": "prflow:comment-analyzer",
+      "severity": "Suggestion",
+      "description": "The `_ACRONYMS` comment (lines 17-21) is provenance/worked-example content ('usd is added because the same issue's worked example requires total_amount_usd -> Total Amount USD') — derivation rather than naming the specific wrong change a competent agent would otherwise make, and longer than stating the consequence. Prevention-only comment standard.",
+      "defect_signature": {"file": "src/sqllens/tools/_format.py", "line_range": [17, 21], "kind": "style"},
+      "corroboration_count": 1,
+      "step25_classification": "not an over-grade shape; genuine Suggestion below critical threshold",
+      "fix_decision": "defer"
+    },
+    {
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "Suggestion",
+      "description": "`_default_axis_label` guarded early-return branches are untested: (1) axis is not a dict (e.g. None or a bare string when the LLM omits an axis); (2) axis dict with missing/empty field while label is empty. A one-line assertion that _default_axis_label(None) is None and a fieldless axis is returned unchanged would pin both.",
+      "defect_signature": {"file": "src/sqllens/tools/_format.py", "line_range": [101, 108], "kind": "test_gap"},
+      "corroboration_count": 1,
+      "step25_classification": "not an over-grade shape; genuine Suggestion (severity 5, below critical threshold)",
+      "fix_decision": "defer"
+    },
+    {
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "Suggestion",
+      "description": "Truncation binary-search path with `column_labels` present is untested: no test drives a payload over _MAX_TABLE_PAYLOAD_BYTES to confirm the returned block stays within budget with the added labels list and that row_count + truncated == total. Low risk (invariant reset is straightforward) but the added label bytes shift the budget boundary.",
+      "defect_signature": {"file": "src/sqllens/tools/_format.py", "line_range": [987, 1005], "kind": "test_gap"},
+      "corroboration_count": 1,
+      "step25_classification": "not an over-grade shape; genuine Suggestion (severity 4, below critical threshold)",
+      "fix_decision": "defer"
+    },
+    {
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "Suggestion",
+      "description": "HTML widget header-label fallback (state.labels[i] || raw name) is unverified — JS with no test harness in the repo. Acceptable given no JS test infrastructure; the widget path is exercised only manually.",
+      "defect_signature": {"file": "src/sqllens/ui/query_results.html", "line_range": [467, 470], "kind": "test_gap"},
+      "corroboration_count": 1,
+      "step25_classification": "not an over-grade shape; genuine Suggestion (severity 3, below critical threshold)",
+      "fix_decision": "defer"
+    },
+    {
+      "agent": "prflow:requesting-code-review",
+      "severity": "Suggestion",
+      "description": "CSV export header (buildCsvText) stays raw while the on-screen table header is humanized — by design (raw identifiers preserve round-trip fidelity, consistent with AC #6). Not covered by any acceptance criterion; noted only for intent confirmation. No change required.",
+      "defect_signature": {"file": "src/sqllens/ui/query_results.html", "line_range": [284, 284], "kind": "other"},
+      "corroboration_count": 1,
+      "step25_classification": "not an over-grade shape; by-design, no change required",
+      "fix_decision": "no-action"
+    }
+  ],
+  "verification_tally": {"pass": 15, "fail": 1, "inconclusive": 0, "lite": 0, "agent": 16, "normalized": 0},
+  "acceptance_criteria_source": "issue-body",
+  "stale_prose": {"enabled": true, "exit_code": 0, "stale_rows": 0, "note": "no STALE rows; helper emitted a fail-open coverage note for the .html file type (no comment/prose scoping rule for .html)"},
+  "report": "## Verdict: REJECT (one verification-checklist FAIL — a diff-added docstring makes a universally-false idempotence claim; all 8 acceptance criteria are functionally met and every reviewer rates the code correct, so the block is a single trivial-to-fix prose defect)\n\n## Issue Compliance\nReviewed against issue #259: Humanize table column headers and chart axis titles in query result widgets — criteria from the issue body's Acceptance Criteria; scope unchanged. Requirement-based checklist items are included in the verification results below. This PR has no workpad criteria to use, so the issue body's `## Acceptance Criteria` section supplied them. All 8 acceptance criteria (VC-1..VC-8) are functionally satisfied by the shipped code and covered by tests.\n\n## Verification Checklist Results\n15 passed, 1 failed, 0 inconclusive — 0 via lite probe, 16 via agent.\n- VC-9: FAIL — the `_humanize_label` docstring's universal claim \"a humanized label always contains a space or an uppercase letter, so feeding it back returns it as-is\" is false against HEAD. `_humanize_label(\"2024\") == \"2024\"` (a pure-digit word matches `_SNAKE_CASE_IDENTIFIER` and `str.capitalize()` is a no-op on it), so the output has neither a space nor an uppercase letter. The idempotence conclusion (AC #8) still holds — but not via the stated mechanism. inaccuracy_scope=source_authored_text, so it is NOT wording-only-normalizable and stands as a FAIL. [src/sqllens/tools/_format.py:42-44 / 84]\n\n<details><summary>✅ Passed items (15 of 16) — click to expand</summary>\n\n- VC-1: widget header reads humanized column_labels with raw-name fallback [src/sqllens/ui/query_results.html]\n- VC-2: Markdown fallback header uses the same column_labels via _display_labels [src/sqllens/tools/_format.py]\n- VC-3: chart axis defaults to humanized field when LLM label empty (total_amount_usd -> \"Total Amount USD\") [src/sqllens/tools/_format.py]\n- VC-4: non-snake_case names preserved verbatim; LLM-set axis label preserved [src/sqllens/tools/_format.py]\n- VC-5: acronym set is a superset of the required minimum {id,url,api,db,sql,ip,uuid} [src/sqllens/tools/_format.py]\n- VC-6: raw `columns` untouched; column_types + sort/CSV keying stay on raw names [src/sqllens/tools/_format.py]\n- VC-7: chart series passed through unchanged [src/sqllens/tools/_format.py]\n- VC-8: humanizer is idempotent for all tested inputs (AC #8 property holds) [src/sqllens/tools/_format.py]\n- VC-10: regex rejects _id/id_/a__b/non-ASCII/uppercase/spaced, returns each verbatim [src/sqllens/tools/_format.py]\n- VC-11: _default_axis_label guards non-dict / non-string-empty field; emit_chart FieldSpec matches assumed shape [src/sqllens/tools/_format.py]\n- VC-12: column_labels built as a parallel array of same order/length as columns [src/sqllens/ui/query_results.html]\n- VC-13: _spec_axis test helper shape matches _compute_chart_payload consumption [tests/unit/test_chart_payload.py]\n- VC-14: truncation loop measures actual row_count/truncated; row_count+truncated==total holds [src/sqllens/tools/_format.py]\n- VC-15: _display_labels falls back to raw columns on absent/short labels [src/sqllens/tools/_format.py]\n- VC-16: exact-block-payload test includes column_labels between columns and rows [tests/unit/test_format.py]\n\n</details>\n\n## Code Review Findings\n### 🟡 Suggestion / Minor\n1. `_humanize_label` docstring makes an over-broad universal claim: \"a humanized label always contains a space or an uppercase letter.\" False for pure-digit / digit-led single words (e.g. `\"2024\"` -> `\"2024\"`). Idempotence still holds, but the stated reasoning does not. (raised by 1/5 agents) [inertness: first-conjunct=held limb-one=held limb-two=held; evidence: internal private-function docstring in src/sqllens/tools/_format.py, no tool parses it, not shipped to any external consumer] — behavior-inert prose cap capped this Phase-3 finding at Suggestion; the same defect drives the REJECT through the verification-checklist FAIL VC-9, not through the self-contradicting-diff carve-out.\n2. `_ACRONYMS` comment (lines 17-21) is provenance/worked-example content rather than naming the specific wrong change to prevent (prevention-only comment standard). (raised by 1/5 agents)\n3. `_default_axis_label` non-dict and missing/empty-field early-return branches are untested. (raised by 1/5 agents)\n4. Truncation binary-search path with `column_labels` present (payload over the byte ceiling) is untested. (raised by 1/5 agents)\n5. HTML widget header-label fallback is unverified — no JS test harness in the repo. (raised by 1/5 agents)\n6. CSV export header stays raw while the on-screen header is humanized — by design (round-trip fidelity, consistent with AC #6); noted for intent confirmation, no change required. (raised by 1/5 agents)\n\n## Verdict Criteria\n- Any FAIL in verification checklist -> REJECT. VC-9 is a FAIL (source_authored_text, non-normalizable), so Phase 4.2 rule 1 fires: REJECT.\n- No review-agent finding at or above the `critical` threshold (all six findings are Suggestion). The docstring documented_falsehood is behavior-inert (internal docstring, no tool/consumer reads it), so the behavior-inert prose cap caps it at Suggestion and it does not drive a threshold-independent self-contradicting-diff-carve-out REJECT.\n- Net: the sole blocker is VC-9. Recommended fix: soften the `_humanize_label` docstring's idempotence justification (e.g. \"...contains a space or an uppercase letter, or maps to itself, so feeding it back returns it as-is\") so the stated reason is true for pure-digit tokens. This clears VC-9 with no code change. The remaining five findings are optional follow-ups (no functional impact).\n\n## Notes\n- Diff classification: full engine (small_diff=false, config_only=false, has_new_types=false, detect_all_audit=false). type-design-analyzer gated out (no new types).\n- Phase 0.6 stale-prose lint: enabled, exit 0, 0 STALE rows (fail-open coverage note only for the .html file type).\n- Phase 3 roster: code-reviewer, silent-failure-hunter, comment-analyzer, pr-test-analyzer, requesting-code-review — all 5 returned. code-reviewer and silent-failure-hunter reported no findings.\n- requesting-code-review extension load status: loaded-empty resolved-root=unset (local tier; hop-one resolved no trusted root, so nothing to cross-check)."
+}

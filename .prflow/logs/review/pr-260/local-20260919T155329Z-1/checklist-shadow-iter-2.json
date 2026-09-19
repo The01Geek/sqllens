@@ -1,0 +1,132 @@
+[
+  {
+    "id": "C1",
+    "category": "behavior",
+    "claim": "_humanize_label turns a lowercase snake_case identifier into a readable label by splitting on underscores, capitalizing each word, and fully upper-casing words in _ACRONYMS (customer_id -> 'Customer ID', total_amount_usd -> 'Total Amount USD', q1_2024 -> 'Q1 2024').",
+    "claim_provenance": "docstring+code",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 79,
+    "verification_mode": "agent",
+    "claim_signature": "humanize_label-transform"
+  },
+  {
+    "id": "C2",
+    "category": "behavior",
+    "claim": "_ACRONYMS = {id,url,api,db,sql,ip,uuid,usd} satisfies the AC-required minimum acronym set (id,url,api,db,sql,ip,uuid) plus usd for the total_amount_usd worked example.",
+    "claim_provenance": "code+comment",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 74,
+    "verification_mode": "agent",
+    "claim_signature": "acronym-set"
+  },
+  {
+    "id": "C3",
+    "category": "behavior",
+    "claim": "_SNAKE_CASE_IDENTIFIER regex ^[a-z0-9]+(?:_[a-z0-9]+)*$ matches only lowercase snake_case identifiers; anything with uppercase, space, punctuation, non-ASCII, or leading/trailing/doubled underscore fails to match and is returned verbatim by _humanize_label.",
+    "claim_provenance": "code+comment",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 76,
+    "verification_mode": "agent",
+    "claim_signature": "snake-regex"
+  },
+  {
+    "id": "C4",
+    "category": "behavior",
+    "claim": "_humanize_label is idempotent: a humanized label (containing a space or uppercase, or a pure-digit word) passes back through unchanged.",
+    "claim_provenance": "docstring",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 43,
+    "verification_mode": "agent",
+    "claim_signature": "idempotent"
+  },
+  {
+    "id": "C5",
+    "category": "behavior",
+    "claim": "_compute_table_payload adds an additive column_labels list (humanized) parallel to columns; the raw columns list stays the identity key and column_types keys off raw str_columns, so raw names are unchanged (AC #6).",
+    "claim_provenance": "code+comment",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 966,
+    "verification_mode": "agent",
+    "claim_signature": "table-payload-labels-additive"
+  },
+  {
+    "id": "C6",
+    "category": "behavior",
+    "claim": "The binary-search row-trim loop now sets payload row_count=mid and truncated=total-mid before measuring each candidate, and sets final row_count=lo, truncated=total-lo after the loop, keeping row_count+truncated==total.",
+    "claim_provenance": "code+comment",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 990,
+    "verification_mode": "agent",
+    "claim_signature": "binsearch-rowcount"
+  },
+  {
+    "id": "C7",
+    "category": "behavior",
+    "claim": "_default_axis_label fills a chart axis's label from the humanized field only when the axis is a dict with a non-empty string field and an empty/None/whitespace label; an LLM-set non-empty label is preserved exactly; a non-dict axis or missing field is returned unchanged (AC #3, #4).",
+    "claim_provenance": "code+comment",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 1057,
+    "verification_mode": "agent",
+    "claim_signature": "default-axis-label"
+  },
+  {
+    "id": "C8",
+    "category": "behavior",
+    "claim": "_compute_chart_payload applies _default_axis_label to spec x and y only; series is carried through unchanged (spec.get('series')), so legend/series names are unchanged (AC #7).",
+    "claim_provenance": "code",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 1122,
+    "verification_mode": "agent",
+    "claim_signature": "chart-series-untouched"
+  },
+  {
+    "id": "C9",
+    "category": "behavior",
+    "claim": "_display_labels returns column_labels when it is a list of the same length as columns, otherwise falls back to raw columns; shared by the Markdown table serializer and one-row small-result path so the two surfaces cannot drift.",
+    "claim_provenance": "code+docstring",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 1308,
+    "verification_mode": "agent",
+    "claim_signature": "display-labels-fallback"
+  },
+  {
+    "id": "C10",
+    "category": "behavior",
+    "claim": "_table_block_to_markdown and _small_result_to_markdown render the header from _display_labels (humanized when present), giving the Markdown fallback the same header as the widget (AC #2); the separator/keying still use raw columns.",
+    "claim_provenance": "code",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 1327,
+    "verification_mode": "agent",
+    "claim_signature": "markdown-header-humanized"
+  },
+  {
+    "id": "C11",
+    "category": "behavior",
+    "claim": "_render_dataframe emits a column_labels field (humanized from str_columns) so its block stays byte-identical to the production Markdown table path.",
+    "claim_provenance": "code",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 1363,
+    "verification_mode": "agent",
+    "claim_signature": "render-dataframe-labels"
+  },
+  {
+    "id": "C12",
+    "category": "behavior",
+    "claim": "The widget (query_results.html) reads block.column_labels into state.labels (parallel to columns), renders each header as label when present and non-empty else the raw name, and keeps sort/type/CSV keying on raw columns (AC #1, #6).",
+    "claim_provenance": "code+comment",
+    "source_file": "src/sqllens/ui/query_results.html",
+    "source_line": 222,
+    "verification_mode": "agent",
+    "claim_signature": "widget-header-label"
+  },
+  {
+    "id": "C13",
+    "category": "test",
+    "claim": "Tests assert the mapping table (customer_id->Customer ID, api_key->API Key, url->URL, etc.), idempotency, passthrough of non-snake_case/degenerate/non-ASCII names, humanized Markdown headers, additive column_labels with unchanged raw columns/column_types, chart axis default fill vs LLM-set preservation, empty-string label handling, and series untouched.",
+    "claim_provenance": "test-code",
+    "source_file": "tests/unit/test_format.py",
+    "source_line": 444,
+    "verification_mode": "agent",
+    "claim_signature": "test-coverage"
+  }
+]
