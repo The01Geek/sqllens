@@ -44,8 +44,9 @@ _MAX_TABLE_PAYLOAD_BYTES = 130 * 1024
 # A one-row result with at most this many columns renders as a text block of
 # ``**column:** value`` lines instead of a table block (issue #257).
 _SMALL_RESULT_MAX_COLUMNS = 4
-# Characters backslash-escaped in those lines so database values render as
-# literal text rather than Markdown formatting.
+# Characters backslash-escaped in those lines so a database value cannot open
+# Markdown emphasis, code spans, bracketed links, tables or raw HTML. Bare URLs
+# are not neutralized: a renderer with autolinking may still link them.
 _SMALL_RESULT_ESCAPED_CHARS = frozenset("\\`*_[]<>~|&")
 
 # Same budget, same reason, for one chart block. Aliased to the table budget so

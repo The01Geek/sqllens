@@ -1571,6 +1571,24 @@ def test_one_row_text_block_keeps_stream_position() -> None:
     assert blocks[3]["text"] == "outro"
 
 
+def test_one_row_text_block_with_unmarked_fallback_summary() -> None:
+    """With no answer-marked TEXT in the stream, the last unmarked TEXT is kept
+    as the fallback summary; the one-row result block is kept alongside it and
+    both surface as public ``text`` blocks in stream order.
+    """
+    comps = [
+        _one_row({"n": 7}),
+        _ui(RichTextComponent(content="There are 7 orders.")),
+    ]
+    markdown, is_error, blocks, _qi, _mi = components_to_blocks(comps)
+    assert is_error is False
+    assert blocks == [
+        {"type": "text", "text": "**n:** 7"},
+        {"type": "text", "text": "There are 7 orders."},
+    ]
+    assert markdown == "**n:** 7\n\nThere are 7 orders."
+
+
 def test_one_row_values_use_table_cell_coercion() -> None:
     row = {
         "null_cell": None,
