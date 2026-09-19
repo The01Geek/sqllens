@@ -305,9 +305,9 @@ def components_to_blocks(
     # ``test_query_info_row_count_recovered_from_raw_rows_on_payload_reject``.
     last_sql_row_count: int | None = None
     # Candidate blocks. Prose text blocks carry a private "_is_answer" tag and
-    # one-row result text blocks a private "_from_result" tag; both are
-    # stripped before emitting — never expose internal bookkeeping fields in
-    # the public ``sqllens/blocks`` wire shape.
+    # one-row results use the private "result_text" type; both are normalized
+    # to the public ``text`` shape before emitting — never expose internal
+    # bookkeeping in the public ``sqllens/blocks`` wire shape.
     candidates: list[dict] = []
     any_marked_text = False
 
@@ -332,9 +332,7 @@ def components_to_blocks(
             if payload is not None:
                 small = _small_result_to_markdown(payload)
                 if small is not None:
-                    candidates.append(
-                        {"type": "text", "text": small, "_from_result": True}
-                    )
+                    candidates.append({"type": "result_text", "text": small})
                 else:
                     candidates.append({"type": "table", **payload})
                 # The size-capped payload may have dropped a tail; row_count
@@ -439,20 +437,20 @@ def components_to_blocks(
     blocks: list[dict] = []
     last_unmarked_text_idx: int | None = None
     for i, cand in enumerate(candidates):
-        if cand["type"] != "text" or cand.get("_from_result"):
+        if cand["type"] != "text":
             continue
         if not cand["_is_answer"]:
             last_unmarked_text_idx = i
     for i, cand in enumerate(candidates):
-        if cand.get("_from_result"):
-            # A one-row query result is data, not prose: it must never be
-            # filtered by the answer marker or counted as the fallback text.
-            blocks.append({"type": "text", "text": cand["text"]})
-        elif cand["type"] == "text":
+        if cand["type"] == "text":
             if cand["_is_answer"]:
                 blocks.append({"type": "text", "text": cand["text"]})
             elif not any_marked_text and i == last_unmarked_text_idx:
                 blocks.append({"type": "text", "text": cand["text"]})
+        elif cand["type"] == "result_text":
+            # A one-row query result is data, not prose: it is emitted as a
+            # public text block, never filtered by the answer marker.
+            blocks.append({"type": "text", "text": cand["text"]})
         else:
             blocks.append(cand)
     # The agent's production terminal-answer / iteration-limit-warning yields
