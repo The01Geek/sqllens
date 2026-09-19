@@ -13,9 +13,9 @@ fail loudly, not silently render a blank iframe):
   cached and rendered as a blank iframe,
 - ``@cache`` must not poison-cache a read failure — a transient/packaging
   fault must re-attempt (and succeed) on the next fetch,
-- the unified widget inlines BOTH vendored JS bundles (ext-apps SDK + echarts)
-  so MCP App hosts (which ``document.write`` the HTML into an about:blank-base
-  iframe) can run the scripts without a 404 on relative paths.
+- the unified widget inlines ALL vendored JS bundles (ext-apps SDK, echarts,
+  markdown-it) so MCP App hosts (which ``document.write`` the HTML into an
+  about:blank-base iframe) can run the scripts without a 404 on relative paths.
 """
 
 from __future__ import annotations
@@ -205,18 +205,21 @@ def test_successful_read_is_cached(monkeypatch) -> None:
 # suite instead of only failing at MCP-host render time.
 
 
-def test_widget_inlines_app_sdk_and_echarts() -> None:
-    # The unified widget renders either a chart or a grid, so it inlines BOTH
-    # vendored bundles. No relative references should survive — either would
-    # 404 in an MCP App sandbox iframe.
+def test_widget_inlines_app_sdk_echarts_and_markdown_it() -> None:
+    # The unified widget renders charts, grids and Markdown text, so it inlines
+    # ALL three vendored bundles. No relative references should survive — any
+    # would 404 in an MCP App sandbox iframe.
     html = ui.load_widget_html("query_results.html")
     assert 'import { App } from "./vendor/app-with-deps.js"' not in html
     assert '<script src="./vendor/echarts.min.js">' not in html
-    # Sentinels for both inlined bundles.
+    assert '<script src="./vendor/markdown-it.min.js">' not in html
+    # Sentinels for every inlined bundle.
     assert "var App = " in html
     assert "ui/notifications/tool-result" in html  # ext-apps SDK
     assert "Apache Software Foundation" in html  # echarts license header
     assert "echarts.init" in html  # widget call into the inlined global
+    assert "/*! markdown-it " in html  # markdown-it license header
+    assert "createMarkdownRenderer(window.markdownit)" in html  # widget call into the global
 
 
 def test_app_sdk_bundle_missing_export_raises(monkeypatch) -> None:
@@ -232,11 +235,12 @@ def test_app_sdk_bundle_missing_export_raises(monkeypatch) -> None:
             return self.html if self._target == "html" else self.bundle
 
     # The unified widget's recipe inlines echarts first, then the app SDK, so
-    # the minimal HTML must carry both relative refs for the loader to reach
+    # the minimal HTML must carry every relative ref for the loader to reach
     # the app-SDK splice that these tests exercise.
     html = (
         "<html>"
         + ui._ECHARTS_SCRIPT_TAG
+        + ui._MARKDOWN_IT_SCRIPT_TAG
         + '<script type="module">'
         + ui._APP_SDK_IMPORT
         + "</script></html>"
@@ -260,11 +264,12 @@ def test_app_sdk_bundle_without_app_export_raises(monkeypatch) -> None:
             return self.html if self._target == "html" else self.bundle
 
     # The unified widget's recipe inlines echarts first, then the app SDK, so
-    # the minimal HTML must carry both relative refs for the loader to reach
+    # the minimal HTML must carry every relative ref for the loader to reach
     # the app-SDK splice that these tests exercise.
     html = (
         "<html>"
         + ui._ECHARTS_SCRIPT_TAG
+        + ui._MARKDOWN_IT_SCRIPT_TAG
         + '<script type="module">'
         + ui._APP_SDK_IMPORT
         + "</script></html>"

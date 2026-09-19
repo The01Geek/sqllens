@@ -11,7 +11,7 @@
   stream order:
     - {"type": "chart", ...}  → its own ECharts canvas
     - {"type": "table", ...}  → its own data grid with isolated sort/filter/page state
-    - {"type": "text",  ...}  → rendered Markdown (DOM-built, never innerHTML)
+    - {"type": "text",  ...}  → Markdown rendered by the vendored markdown-it (raw HTML escaped)
 
   The widget does not render the executed SQL: when ``agent.show_details`` is
   on, the SQL is already surfaced via the Markdown ``**Executed SQL:**`` block
@@ -22,9 +22,10 @@
   Empty/missing ``sqllens/blocks`` falls through to an empty-state notice (the
   plain text answer is rendered by the host outside the iframe).
 
-  No external origins: this file plus its two vendored bundles
-  (./vendor/echarts.min.js, ./vendor/app-with-deps.js) form the entire widget.
-  Both bundles are *inlined* into this HTML at serve time by
+  No external origins: this file plus its three vendored bundles
+  (./vendor/echarts.min.js, ./vendor/markdown-it.min.js,
+  ./vendor/app-with-deps.js) form the entire widget.
+  All bundles are *inlined* into this HTML at serve time by
   sqllens.ui.load_widget_html() — MCP App hosts ``document.write`` the HTML
   into an about:blank-base iframe with no access to sibling files on the MCP
   server, so any relative <script src=…> or `import "./vendor/…"` would 404 and
@@ -38,6 +39,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Query results</title>
 <script src="./vendor/echarts.min.js"></script>
+<script src="./vendor/markdown-it.min.js"></script>
 <style>
   :root {
     color-scheme: light dark;
@@ -735,214 +737,48 @@ function renderChartBlock(block) {
 // ───────────────────────────── text block ──────────────────────────────────
 
 /* md-renderer:start */
-// Minimal Markdown renderer for agent-authored text blocks. Covers what the
-// agent actually emits — ATX headings, paragraphs, bold / italic / inline
-// code, links, (nested) bullet + numbered lists, fenced code, blockquotes,
-// horizontal rules and GFM pipe tables. Every node is built with
-// createElement / createTextNode and NEVER via innerHTML, so model output
-// cannot inject markup into the widget.
-
-const MD_FENCE_RE = /^\s{0,3}(`{3,}|~{3,})\s*([\w+#.-]*)\s*$/;
-const MD_HEADING_RE = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
-const MD_HR_RE = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
-const MD_QUOTE_RE = /^\s{0,3}>\s?/;
-const MD_LIST_RE = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
-const MD_TABLE_SEP_RE = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
-// Inline tokens, first match wins: code span, strong (** / __), emphasis
-// (* / _), link. Underscore emphasis needs non-word neighbours so snake_case
-// column names (total_gross_revenue) stay literal.
-const MD_INLINE_RE =
-  /(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)|\*\*(?=\S)([\s\S]*?\S)\*\*|(?<![\w])__(?=\S)([\s\S]*?\S)__(?![\w])|\*(?=[^\s*])([\s\S]*?[^\s*])\*|(?<![\w])_(?=[^\s_])([\s\S]*?[^\s_])_(?![\w])|\[([^\]]+)\]\(\s*([^)\s]+)\s*\)/g;
-// Only navigable, non-script schemes become anchors; anything else
-// (javascript:, data:, relative paths) renders as plain text.
-const MD_SAFE_HREF_RE = /^(?:https?:|mailto:)/i;
-
-function mdEl(tag, parent) {
-  const node = document.createElement(tag);
-  if (parent) parent.appendChild(node);
-  return node;
-}
-
-function mdAppendInline(parent, text) {
-  const re = new RegExp(MD_INLINE_RE.source, "g"); // fresh lastIndex per call (recursive)
-  let last = 0;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) parent.appendChild(document.createTextNode(text.slice(last, m.index)));
-    last = re.lastIndex;
-    if (m[1] !== undefined) {
-      // Code span content is literal — no nested formatting.
-      mdEl("code", parent).textContent = m[2].replace(/^ (.+) $/, "$1");
-    } else if (m[3] !== undefined || m[4] !== undefined) {
-      mdAppendInline(mdEl("strong", parent), m[3] ?? m[4]);
-    } else if (m[5] !== undefined || m[6] !== undefined) {
-      mdAppendInline(mdEl("em", parent), m[5] ?? m[6]);
-    } else if (MD_SAFE_HREF_RE.test(m[8])) {
-      const a = mdEl("a", parent);
-      a.setAttribute("href", m[8]);
-      a.setAttribute("target", "_blank");
-      a.setAttribute("rel", "noopener noreferrer");
-      mdAppendInline(a, m[7]);
-    } else {
-      parent.appendChild(document.createTextNode(m[0]));
-    }
-  }
-  if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
-}
-
-// Soft line breaks inside a paragraph stay visible (<br>) — the agent uses
-// single newlines for layout, and the previous pre-wrap rendering kept them.
-function mdAppendLines(parent, lines) {
-  lines.forEach((line, i) => {
-    if (i > 0) mdEl("br", parent);
-    mdAppendInline(parent, line.trim());
-  });
-}
-
-function mdSplitRow(line) {
-  let s = line.trim();
-  if (s.startsWith("|")) s = s.slice(1);
-  if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
-  return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|"));
-}
-
-function mdIsTableStart(lines, i) {
-  return lines[i].includes("|") && i + 1 < lines.length
-    && lines[i + 1].includes("-") && MD_TABLE_SEP_RE.test(lines[i + 1]);
-}
-
-// A line that begins a non-paragraph block ends the running paragraph.
-function mdStartsBlock(lines, i) {
-  const line = lines[i];
-  return MD_FENCE_RE.test(line) || MD_HEADING_RE.test(line) || MD_HR_RE.test(line)
-    || MD_QUOTE_RE.test(line) || MD_LIST_RE.test(line) || mdIsTableStart(lines, i);
-}
-
-function mdIndentWidth(ws) {
-  return ws.replace(/\t/g, "    ").length;
-}
-
-// Build nested <ul>/<ol> from list items keyed by indentation: an item
-// indented deeper than the current list's items opens a sub-list; switching
-// between bullets and numbers at the same depth starts a fresh list.
-function mdRenderList(parent, items) {
-  const stack = []; // [{indent, ordered, list, lastLi}]
-  for (const item of items) {
-    while (stack.length && item.indent < stack[stack.length - 1].indent) stack.pop();
-    let top = stack[stack.length - 1];
-    if (top && item.indent === top.indent && item.ordered !== top.ordered) {
-      stack.pop();
-      top = stack[stack.length - 1];
-    }
-    if (!top || item.indent > top.indent) {
-      const host = top && top.lastLi ? top.lastLi : parent;
-      const list = mdEl(item.ordered ? "ol" : "ul", host);
-      if (item.ordered && item.start !== 1) list.setAttribute("start", String(item.start));
-      top = { indent: item.indent, ordered: item.ordered, list, lastLi: null };
-      stack.push(top);
-    }
-    const li = mdEl("li", top.list);
-    mdAppendLines(li, item.lines);
-    top.lastLi = li;
-  }
-}
-
-function renderMarkdown(src, parent) {
-  const lines = src.replace(/\r\n?/g, "\n").split("\n");
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (!line.trim()) { i++; continue; }
-
-    const fence = line.match(MD_FENCE_RE);
-    if (fence) {
-      const body = [];
-      i++;
-      // Closing fence: same character, at least as long as the opener.
-      const closeRe = new RegExp("^\\s{0,3}" + fence[1][0] + "{" + fence[1].length + ",}\\s*$");
-      while (i < lines.length && !closeRe.test(lines[i])) body.push(lines[i++]);
-      i++; // skip the closing fence (or run off the end of an unterminated one)
-      const code = mdEl("code", mdEl("pre", parent));
-      if (fence[2]) code.className = "lang-" + fence[2];
-      code.textContent = body.join("\n");
-      continue;
-    }
-
-    const heading = line.match(MD_HEADING_RE);
-    if (heading) {
-      mdAppendInline(mdEl("h" + heading[1].length, parent), heading[2]);
-      i++;
-      continue;
-    }
-
-    // Checked before lists so "- - -" / "***" read as a rule, not a bullet.
-    if (MD_HR_RE.test(line)) { mdEl("hr", parent); i++; continue; }
-
-    if (MD_QUOTE_RE.test(line)) {
-      const body = [];
-      while (i < lines.length && MD_QUOTE_RE.test(lines[i])) body.push(lines[i++].replace(MD_QUOTE_RE, ""));
-      renderMarkdown(body.join("\n"), mdEl("blockquote", parent));
-      continue;
-    }
-
-    if (mdIsTableStart(lines, i)) {
-      const header = mdSplitRow(line);
-      i += 2; // header + separator
-      const wrap = mdEl("div", parent);
-      wrap.className = "wrap";
-      const table = mdEl("table", wrap);
-      const htr = mdEl("tr", mdEl("thead", table));
-      for (const cell of header) mdAppendInline(mdEl("th", htr), cell);
-      const tbody = mdEl("tbody", table);
-      while (i < lines.length && lines[i].trim() && lines[i].includes("|")) {
-        const tr = mdEl("tr", tbody);
-        const cells = mdSplitRow(lines[i++]);
-        // Pad / trim to the header width so ragged rows keep columns aligned.
-        for (let c = 0; c < header.length; c++) mdAppendInline(mdEl("td", tr), cells[c] ?? "");
-      }
-      continue;
-    }
-
-    if (MD_LIST_RE.test(line)) {
-      const items = [];
-      while (i < lines.length) {
-        const m = lines[i].match(MD_LIST_RE);
-        if (m && !MD_HR_RE.test(lines[i])) {
-          const ordered = /\d/.test(m[2]);
-          items.push({
-            indent: mdIndentWidth(m[1]), ordered,
-            start: ordered ? parseInt(m[2], 10) : 1, lines: [m[3]],
-          });
-          i++;
-        } else if (lines[i].trim() && /^\s+/.test(lines[i]) && !mdStartsBlock(lines, i)) {
-          // Indented continuation line folds into the previous item.
-          items[items.length - 1].lines.push(lines[i++]);
-        } else if (!lines[i].trim() && i + 1 < lines.length && MD_LIST_RE.test(lines[i + 1])) {
-          i++; // blank line between items keeps the list going ("loose" list)
-        } else {
-          break;
-        }
-      }
-      mdRenderList(parent, items);
-      continue;
-    }
-
-    // Paragraph: the first line is always consumed, so the loop can't stall.
-    const para = [];
-    while (i < lines.length && lines[i].trim() && (para.length === 0 || !mdStartsBlock(lines, i))) {
-      para.push(lines[i++]);
-    }
-    mdAppendLines(mdEl("p", parent), para);
-  }
+// Text blocks are agent-authored Markdown, rendered with the vendored
+// markdown-it (UMD global `markdownit`, inlined from
+// ./vendor/markdown-it.min.js). The options are the security boundary:
+//   - html: false  → raw HTML in the text is escaped, never passed through,
+//                    so the rendered string is safe to assign to innerHTML.
+//   - validateLink → markdown-it's default drops javascript: / vbscript: /
+//                    file: / data: link targets (they stay literal text).
+//   - no images    → the widget makes no remote requests; ![alt](url)
+//                    degrades to "!" + a plain link instead of fetching the URL.
+//   - breaks: true → single newlines stay visible; the agent uses them for layout.
+function createMarkdownRenderer(markdownit) {
+  const md = markdownit({ html: false, linkify: false, typographer: false, breaks: true });
+  md.disable("image");
+  // Open links in a new browsing context instead of navigating the iframe away.
+  const defaultLinkOpen = md.renderer.rules.link_open
+    || ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+  md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+    tokens[idx].attrSet("target", "_blank");
+    tokens[idx].attrSet("rel", "noopener noreferrer");
+    return defaultLinkOpen(tokens, idx, options, env, self);
+  };
+  // Wrap tables in the scroll container so wide ones don't stretch the widget.
+  md.renderer.rules.table_open = () => '<div class="wrap"><table>\n';
+  md.renderer.rules.table_close = () => "</table></div>\n";
+  return md;
 }
 /* md-renderer:end */
 
+let markdownRenderer = null; // built on first text block
+
 function renderTextBlock(block) {
-  // Text blocks carry agent-authored Markdown; render it (DOM-built, never
-  // innerHTML) so headings / bold / lists don't show up as raw syntax.
   const container = document.createElement("div");
   container.className = "block textblock";
-  renderMarkdown(typeof block.text === "string" ? block.text : "", container);
+  const text = typeof block.text === "string" ? block.text : "";
+  if (typeof window.markdownit !== "function") {
+    // Bundle missing (inliner regression): degrade to raw text rather than
+    // breaking the whole widget — tables and charts still render.
+    container.textContent = text;
+    return container;
+  }
+  markdownRenderer ??= createMarkdownRenderer(window.markdownit);
+  container.innerHTML = markdownRenderer.render(text); // safe: html: false (see above)
   return container;
 }
 
