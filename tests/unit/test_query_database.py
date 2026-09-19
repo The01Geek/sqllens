@@ -352,7 +352,7 @@ async def test_with_widgets_one_row_dataframe_becomes_text_block(
 ) -> None:
     """Issue #257: a one-row, narrow DataFrame reaches the tool result as a
     public ``text`` block (never the internal ``result_text`` type) and the
-    Markdown answer carries the same ``**column:** value`` lines, not a table.
+    Markdown answer carries the same compact one-row Markdown table.
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     stub = agent_stub_factory([make_dataframe([{"name": "Alice", "age": 30}])])
@@ -362,9 +362,9 @@ async def test_with_widgets_one_row_dataframe_becomes_text_block(
         await query_database_impl_with_widgets(cfg, "who is the oldest user")
     )
 
-    assert blocks == [{"type": "text", "text": "- **name:** Alice\n- **age:** 30"}]
-    assert "- **name:** Alice\n- **age:** 30" in markdown
-    assert "| name | age |" not in markdown
+    expected = "| name | age |\n| --- | --- |\n| Alice | 30 |"
+    assert blocks == [{"type": "text", "text": expected}]
+    assert expected in markdown
 
 
 @pytest.mark.asyncio

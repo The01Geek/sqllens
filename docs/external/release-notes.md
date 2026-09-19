@@ -4,7 +4,7 @@ This page lists user-visible changes in each released version of SQL Lens. For t
 
 ## Unreleased
 
-- **[Improvement] One-row answers are shown as short text instead of a table** — When a `query_database` result has a single row and at most four columns, such as a count or a total, SQL Lens now shows it as a bold column name followed by its value (one line for a single column, a bulleted list for two to four) instead of a one-row table. This applies both in the Claude Desktop and claude.ai widget and in the plain-text answer other assistants receive. Results with more rows or columns, are still shown as a table; a row too large to display is shown as a table of its column names only. No configuration change is required. (#257)
+- **[Improvement] One-row answers are shown as short text instead of a table** — When a `query_database` result has a single row and at most four columns, such as a count or a total, SQL Lens now shows it as compact text instead of an interactive table: a bold column name followed by its value for a single column, or a simple one-row Markdown table for two to four columns. This applies both in the Claude Desktop and claude.ai widget and in the plain-text answer other assistants receive. Results with more rows or columns, are still shown as a table; a row too large to display is shown as a table of its column names only. No configuration change is required. (#257)
 
 ## September 17, 2026
 

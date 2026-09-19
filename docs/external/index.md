@@ -19,7 +19,7 @@ On assistants that support inline app widgets — currently Claude Desktop and c
 
 - **Table blocks** display as an interactive grid you can sort by column, filter with a search box, page through, and export to CSV. Each table has its own independent controls — sorting, filtering, paging, and CSV export on one table never affect another in the same answer.
 - **Chart blocks** display as an interactive chart (bar, line, area, scatter, pie, or heatmap) rendered with Apache ECharts. Each chart honors the assistant's light or dark theme and resizes responsively.
-- **Text blocks** display the agent's introduction or summary as formatted text — headings, bold and italic, lists, code, links, and simple tables. A query result with a single row and at most four columns is also shown, unless the row is too large to display, as a text block, as a bold column name followed by its value (one line for a single column, a bulleted list for two to four), instead of a one-row table.
+- **Text blocks** display the agent's introduction or summary as formatted text — headings, bold and italic, lists, code, links, and simple tables. A query result with a single row and at most four columns is also shown, unless the row is too large to display, as a text block instead of an interactive table: a bold column name followed by its value for a single column, or a simple one-row table for two to four columns.
 
 An answer can mix any combination of these in any order — for example, a brief introduction, a chart of an aggregate, a one-line summary, then a supporting per-row table. The assistant decides what to include based on your question.
 

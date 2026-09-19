@@ -41,8 +41,9 @@ _MAX_ROWS_RENDERED = 500
 # the only thing that actually breaks rendering, so size — not row count — is
 # the cap. Measured against ``json.dumps(payload, separators=(",", ":"))``.
 _MAX_TABLE_PAYLOAD_BYTES = 130 * 1024
-# A one-row result with at most this many columns renders as a text block of
-# ``**column:** value`` lines instead of a table block (issue #257).
+# A one-row result with at most this many columns renders as a text block (a
+# ``**column:** value`` line, or a one-row Markdown table for 2+ columns)
+# instead of a table block (issue #257).
 _SMALL_RESULT_MAX_COLUMNS = 4
 # Characters backslash-escaped in those lines so a database value cannot open
 # Markdown emphasis, code spans, bracketed links, tables or raw HTML. Bare URLs
@@ -219,7 +220,8 @@ def components_to_blocks(
       block at its stream position — except a result whose table payload holds
       exactly one row, at most :data:`_SMALL_RESULT_MAX_COLUMNS` columns and
       nothing truncated, which becomes a ``{"type": "text", "text": ...}``
-      block of escaped ``**column:** value`` lines instead
+      block instead — one ``**column:** value`` line for a single column,
+      otherwise a one-row Markdown table
       (:func:`_small_result_to_markdown`).
     - Every ``CHART`` becomes a ``{"type": "chart", ...chart payload...}``
       block at its stream position.
@@ -1199,13 +1201,14 @@ def _escape_small_result_text(value: str) -> str:
 
 
 def _small_result_to_markdown(payload: dict) -> str | None:
-    """Render a one-row table payload as ``**column:** value`` Markdown.
+    """Render a one-row table payload as compact Markdown for a text block.
 
     Returns ``None`` when the payload is not a small result (more or fewer than
     one row, zero columns or more than :data:`_SMALL_RESULT_MAX_COLUMNS`
     columns, or rows dropped by the size budget) — the caller then keeps the
-    table block. One column renders as a single line; two or more as a bullet
-    list in column order. Values are the payload's already-coerced cell strings.
+    table block. One column renders as a single ``**column:** value`` line; two
+    or more as a one-row Markdown table in column order. Values are the
+    payload's already-coerced cell strings, escaped so ``|`` cannot split a cell.
     """
     columns = payload.get("columns") or []
     rows = payload.get("rows") or []
@@ -1215,13 +1218,17 @@ def _small_result_to_markdown(payload: dict) -> str | None:
         or not 1 <= len(columns) <= _SMALL_RESULT_MAX_COLUMNS
     ):
         return None
-    lines = [
-        f"**{_escape_small_result_text(col)}:** {_escape_small_result_text(val)}"
-        for col, val in zip(columns, rows[0], strict=True)
-    ]
-    if len(lines) == 1:
-        return lines[0]
-    return "\n".join(f"- {line}" for line in lines)
+    names = [_escape_small_result_text(col) for col in columns]
+    values = [_escape_small_result_text(val) for val in rows[0]]
+    if len(names) == 1:
+        return f"**{names[0]}:** {values[0]}"
+    return "\n".join(
+        [
+            "| " + " | ".join(names) + " |",
+            "|" + " --- |" * len(names),
+            "| " + " | ".join(values) + " |",
+        ]
+    )
 
 
 def _table_block_to_markdown(block: dict) -> str:

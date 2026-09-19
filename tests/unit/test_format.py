@@ -1523,11 +1523,17 @@ def test_one_row_one_column_becomes_single_text_line() -> None:
 
 
 @pytest.mark.parametrize("ncols", [2, 3, 4])
-def test_one_row_two_to_four_columns_becomes_bullet_list(ncols: int) -> None:
+def test_one_row_two_to_four_columns_becomes_markdown_table(ncols: int) -> None:
     cols = [f"c{i}" for i in range(ncols)]
     row = {c: i for i, c in enumerate(cols)}
     _, _, blocks, _qi, _mi = components_to_blocks([_one_row(row, cols)])
-    expected = "\n".join(f"- **c{i}:** {i}" for i in range(ncols))
+    expected = "\n".join(
+        [
+            "| " + " | ".join(cols) + " |",
+            "|" + " --- |" * ncols,
+            "| " + " | ".join(str(i) for i in range(ncols)) + " |",
+        ]
+    )
     assert blocks == [{"type": "text", "text": expected}]
 
 
@@ -1600,9 +1606,9 @@ def test_one_row_values_use_table_cell_coercion() -> None:
         {
             "type": "text",
             "text": (
-                "- **null\\_cell:** None\n"
-                "- **decimal\\_cell:** 1.50\n"
-                "- **datetime\\_cell:** 2026-01-02 03:04:05"
+                "| null\\_cell | decimal\\_cell | datetime\\_cell |\n"
+                "| --- | --- | --- |\n"
+                "| None | 1.50 | 2026-01-02 03:04:05 |"
             ),
         }
     ]
@@ -1622,6 +1628,18 @@ def test_one_row_escapes_markdown_and_flattens_newlines() -> None:
     ]
 
 
+def test_one_row_table_escapes_pipes_so_cells_do_not_split() -> None:
+    _, _, blocks, _qi, _mi = components_to_blocks(
+        [_one_row({"a|b": "x|y", "c": "line1\nline2"})]
+    )
+    assert blocks == [
+        {
+            "type": "text",
+            "text": "| a\\|b | c |\n| --- | --- |\n| x\\|y | line1 line2 |",
+        }
+    ]
+
+
 def test_two_one_row_results_each_get_own_text_block() -> None:
     comps = [
         _one_row({"a": 1}),
@@ -1636,12 +1654,11 @@ def test_two_one_row_results_each_get_own_text_block() -> None:
     ]
 
 
-def test_one_row_markdown_answer_has_lines_and_no_table() -> None:
+def test_one_row_markdown_answer_is_compact_table() -> None:
     markdown, _, _blocks, _qi, _mi = components_to_blocks(
         [_one_row({"name": "Alice", "age": 30})]
     )
-    assert markdown == "- **name:** Alice\n- **age:** 30"
-    assert "|" not in markdown
+    assert markdown == "| name | age |\n| --- | --- |\n| Alice | 30 |"
 
 
 def test_one_row_result_query_info_row_count_is_one() -> None:
