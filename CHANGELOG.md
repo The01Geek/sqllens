@@ -54,6 +54,13 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
   instead of the `{"_raw": None}` placeholder the model kept copying; and the
   agent stops after 3 consecutive rounds of invalid or truncated tool calls,
   reported as an error.
+- The `query_database` result widget painted text blocks as raw Markdown
+  source (`#`, `**`, `-` visible in the host). Text blocks are now rendered
+  with a vendored markdown-it 14.3.2 (`src/sqllens/ui/vendor/markdown-it.min.js`,
+  inlined like the other bundles) configured with `html: false` (raw HTML
+  escaped), its default link validation (`javascript:` / `vbscript:` / `file:`
+  / `data:` targets stay literal) and image syntax disabled (no remote
+  fetches), so agent output cannot inject markup into the widget.
 
 ## [0.0.2] - 2026-04-28
 
