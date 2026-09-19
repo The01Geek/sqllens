@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## Unreleased
+
+- **[Improvement] One-row answers are shown as short text instead of a table** — When a `query_database` result has a single row and at most four columns, such as a count or a total, SQL Lens now shows it as a bold column name followed by its value (one line for a single column, a bulleted list for two to four) instead of a one-row table. This applies both in the Claude Desktop and claude.ai widget and in the plain-text answer other assistants receive. Results with more rows or columns, are still shown as a table; a row too large to display is shown as a table of its column names only. No configuration change is required. (#257)
+
 ## September 17, 2026
 
 - **[Fix] Complex questions no longer end in a long "tool limit reached" failure** — Each step of the SQL Lens assistant was limited to 512 output tokens, so a large query (for example a sales pivot with one column per month) could be cut off in the middle. The incomplete step was then retried again and again until the tool-call limit was reached, and the answer failed after several minutes. The per-step limit is now a setting, `llm.max_tokens` (environment variable `SQLLENS_LLM__MAX_TOKENS`), with a default of `8192`. If a step is still cut off, SQL Lens does not run the incomplete query; it tells the assistant to retry with a shorter one. If the assistant sends an invalid or incomplete tool call three times in a row, SQL Lens now stops and returns an error right away instead of retrying until the limit. No configuration change is required. See [Configuration](configuration.md#section-llm). (#247)

@@ -105,7 +105,7 @@ The docstrings are the user-facing tool descriptions that the calling AI client 
 
 `blocks` is a list of typed dicts in stream order. Each dict carries a `"type"` discriminator and the per-type payload:
 
-- `{"type": "text", "text": "<markdown prose>"}` — deliberate user-visible prose (see the TEXT row above). No additional fields.
+- `{"type": "text", "text": "<markdown>"}` — deliberate user-visible prose (see the TEXT row above), or a one-row query result of one to four columns with nothing truncated, rendered as escaped `**column:** value` lines (see the DATAFRAME row above). The two are indistinguishable on the wire. No additional fields.
 - `{"type": "table", "columns": [...], "rows": [[...], ...], "column_types": {...}, "row_count": N, "truncated": K}` — same payload shape as the retired flat `sqllens/table` channel. Built by `_compute_table_payload` (see "Typed (numeric) client-side sort" below for the `column_types` inference); the discriminator is added on top.
 - `{"type": "chart", "chart_type": "...", "x": {...}, "y": {...}, "series": ..., "data": [...], "title": "...", "row_count": N, "truncated": K}` — same payload shape as the retired flat `sqllens/chart` channel. Built by `_compute_chart_payload` and wrapped with the discriminator.
 
