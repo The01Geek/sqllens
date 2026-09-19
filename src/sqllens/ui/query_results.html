@@ -219,6 +219,10 @@ function renderTableBlock(block) {
   // controls fighting each other.
   const state = {
     columns: Array.isArray(block.columns) ? block.columns : [],
+    // Display-only humanized header labels (issue #259), parallel to columns.
+    // Header text reads these; sort/type/CSV keying stays on the raw columns
+    // below, and a missing/short labels array falls back to the raw name.
+    labels: Array.isArray(block.column_labels) ? block.column_labels : [],
     rows: Array.isArray(block.rows) ? block.rows : [],
     types: (block.column_types && typeof block.column_types === "object") ? block.column_types : {},
     rowCount: typeof block.row_count === "number" ? block.row_count : (Array.isArray(block.rows) ? block.rows.length : 0),
@@ -463,7 +467,8 @@ function renderTableBlock(block) {
     const htr = document.createElement("tr");
     state.columns.forEach((name, i) => {
       const th = document.createElement("th");
-      th.textContent = name + " ";
+      const label = (state.labels[i] != null && state.labels[i] !== "") ? state.labels[i] : name;
+      th.textContent = label + " ";
       const ind = document.createElement("span");
       ind.className = "ind";
       ind.textContent = state.sortCol === i ? (state.sortDir === 1 ? "▲" : "▼") : "";
