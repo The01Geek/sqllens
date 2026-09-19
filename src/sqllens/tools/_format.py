@@ -1202,8 +1202,8 @@ def _small_result_to_markdown(payload: dict) -> str | None:
 
     Returns ``None`` when the payload is not a small result (more or fewer than
     one row, zero columns or more than :data:`_SMALL_RESULT_MAX_COLUMNS`
-    columns, or rows dropped by the size budget) — the caller then keeps the table block. One
-    column renders as a single line; two or more as a bullet list in column
+    columns, or rows dropped by the size budget) — the caller then keeps the
+    table block. One column renders as a single line; two or more as a bullet list in column
     order. Values are the payload's already-coerced cell strings.
     """
     columns = payload.get("columns") or []
