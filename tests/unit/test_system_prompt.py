@@ -221,3 +221,25 @@ async def test_answer_composition_block_absent_without_emit_text() -> None:
     # The emit_chart block must still appear — the gating is per-tool, not
     # all-or-nothing.
     assert "EMIT_CHART USAGE" in prompt
+
+
+async def test_one_row_results_are_stated_not_hidden() -> None:
+    """Issue #257: a one-row result renders as short text, so the prompt must
+    tell the model to state it — and no longer claim every result is a table
+    shown outside the response.
+    """
+    builder = DefaultSystemPromptBuilder()
+    prompt = await builder.build_system_prompt(
+        User(id="test-user"),
+        tools=[_ToolSchemaStub("run_sql"), _ToolSchemaStub("emit_text")],
+    )
+
+    assert prompt is not None
+    assert (
+        "When you execute a query, that raw result is shown to the user outside "
+        "of your response so YOU DO NOT need to include it in your response."
+    ) not in prompt
+    assert "more than one row" in prompt and "do NOT repeat the table" in prompt
+    assert "single row, state the answer in a plain sentence" in prompt
+    assert "tables (from run_sql)" not in prompt
+    assert "let the table/chart speak for itself" not in prompt

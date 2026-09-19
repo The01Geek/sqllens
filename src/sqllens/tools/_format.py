@@ -41,6 +41,12 @@ _MAX_ROWS_RENDERED = 500
 # the only thing that actually breaks rendering, so size — not row count — is
 # the cap. Measured against ``json.dumps(payload, separators=(",", ":"))``.
 _MAX_TABLE_PAYLOAD_BYTES = 130 * 1024
+# A one-row result with at most this many columns renders as a text block of
+# ``**column:** value`` lines instead of a table block (issue #257).
+_SMALL_RESULT_MAX_COLUMNS = 4
+# Characters backslash-escaped in those lines so database values render as
+# literal text rather than Markdown formatting.
+_SMALL_RESULT_ESCAPED_CHARS = frozenset("\\`*_[]<>~|&")
 
 # Same budget, same reason, for one chart block. Aliased to the table budget so
 # the two cannot drift apart — both blobs share one sandboxed-iframe rendering
@@ -209,7 +215,11 @@ def components_to_blocks(
     the stream:
 
     - Every ``DATAFRAME`` becomes a ``{"type": "table", ...table payload...}``
-      block at its stream position.
+      block at its stream position — except a result whose table payload holds
+      exactly one row, at most :data:`_SMALL_RESULT_MAX_COLUMNS` columns and
+      nothing truncated, which becomes a ``{"type": "text", "text": ...}``
+      block of escaped ``**column:** value`` lines instead
+      (:func:`_small_result_to_markdown`).
     - Every ``CHART`` becomes a ``{"type": "chart", ...chart payload...}``
       block at its stream position.
     - Every **answer-marked** ``TEXT`` (deliberate prose: ``EmitTextTool``
@@ -294,9 +304,10 @@ def components_to_blocks(
     # pins; the over-budget / payload-fail nuance is pinned by
     # ``test_query_info_row_count_recovered_from_raw_rows_on_payload_reject``.
     last_sql_row_count: int | None = None
-    # Candidate blocks. Text blocks carry a private "_is_answer" tag we strip
-    # before emitting — never expose internal bookkeeping fields in the public
-    # ``sqllens/blocks`` wire shape.
+    # Candidate blocks. Prose text blocks carry a private "_is_answer" tag and
+    # one-row result text blocks a private "_from_result" tag; both are
+    # stripped before emitting — never expose internal bookkeeping fields in
+    # the public ``sqllens/blocks`` wire shape.
     candidates: list[dict] = []
     any_marked_text = False
 
@@ -319,7 +330,13 @@ def components_to_blocks(
         elif ctype == ComponentType.DATAFRAME:
             payload = _build_table_payload(rich)
             if payload is not None:
-                candidates.append({"type": "table", **payload})
+                small = _small_result_to_markdown(payload)
+                if small is not None:
+                    candidates.append(
+                        {"type": "text", "text": small, "_from_result": True}
+                    )
+                else:
+                    candidates.append({"type": "table", **payload})
                 # The size-capped payload may have dropped a tail; row_count
                 # is the kept prefix and truncated the dropped tail, so the
                 # sum is the TRUE row count the SQL produced.
@@ -422,12 +439,16 @@ def components_to_blocks(
     blocks: list[dict] = []
     last_unmarked_text_idx: int | None = None
     for i, cand in enumerate(candidates):
-        if cand["type"] != "text":
+        if cand["type"] != "text" or cand.get("_from_result"):
             continue
         if not cand["_is_answer"]:
             last_unmarked_text_idx = i
     for i, cand in enumerate(candidates):
-        if cand["type"] == "text":
+        if cand.get("_from_result"):
+            # A one-row query result is data, not prose: it must never be
+            # filtered by the answer marker or counted as the fallback text.
+            blocks.append({"type": "text", "text": cand["text"]})
+        elif cand["type"] == "text":
             if cand["_is_answer"]:
                 blocks.append({"type": "text", "text": cand["text"]})
             elif not any_marked_text and i == last_unmarked_text_idx:
@@ -1168,6 +1189,40 @@ def _serialize_blocks_to_markdown(blocks: list[dict]) -> str:
             )
             parts.append(f"_[unsupported block type: `{btype}`]_")
     return "\n\n".join(parts)
+
+
+def _escape_small_result_text(value: str) -> str:
+    """Escape Markdown syntax and flatten line breaks in a column name or value."""
+    value = value.replace("\r", " ").replace("\n", " ")
+    return "".join(
+        "\\" + ch if ch in _SMALL_RESULT_ESCAPED_CHARS else ch for ch in value
+    )
+
+
+def _small_result_to_markdown(payload: dict) -> str | None:
+    """Render a one-row table payload as ``**column:** value`` Markdown.
+
+    Returns ``None`` when the payload is not a small result (more or fewer than
+    one row, more than :data:`_SMALL_RESULT_MAX_COLUMNS` columns, or rows
+    dropped by the size budget) — the caller then keeps the table block. One
+    column renders as a single line; two or more as a bullet list in column
+    order. Values are the payload's already-coerced cell strings.
+    """
+    columns = payload.get("columns") or []
+    rows = payload.get("rows") or []
+    if (
+        len(rows) != 1
+        or payload.get("truncated", 0) != 0
+        or not 1 <= len(columns) <= _SMALL_RESULT_MAX_COLUMNS
+    ):
+        return None
+    lines = [
+        f"**{_escape_small_result_text(col)}:** {_escape_small_result_text(val)}"
+        for col, val in zip(columns, rows[0], strict=True)
+    ]
+    if len(lines) == 1:
+        return lines[0]
+    return "\n".join(f"- {line}" for line in lines)
 
 
 def _table_block_to_markdown(block: dict) -> str:
