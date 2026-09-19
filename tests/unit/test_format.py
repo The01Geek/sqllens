@@ -1728,7 +1728,8 @@ def test_humanize_label_long_name_returns_without_error() -> None:
 
 
 def test_table_payload_carries_humanized_column_labels() -> None:
-    # Two rows so it stays a table block (not the one-row small-result path).
+    # More than one row keeps this a table block (a single row would take the
+    # one-row small-result text path instead).
     df = DataFrameComponent(
         rows=[
             {"customer_id": 1, "total_amount_usd": "9.50"},
