@@ -240,8 +240,10 @@ async def test_one_row_results_are_stated_not_hidden() -> None:
         "of your response so YOU DO NOT need to include it in your response."
     ) not in prompt
     assert "more than one row" in prompt and "do NOT repeat the table" in prompt
-    assert "single row with many columns" in prompt
-    assert "single row with only a few columns" in prompt
-    assert "state the answer in a plain sentence" in prompt
+    assert "single row with more than four columns" in prompt
+    assert (
+        "single row with four or fewer columns, it is shown as short text rather "
+        "than a table, so state the answer in a plain sentence"
+    ) in prompt
     assert "tables (from run_sql)" not in prompt
     assert "let the table/chart speak for itself" not in prompt
