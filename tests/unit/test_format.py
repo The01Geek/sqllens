@@ -133,7 +133,7 @@ def test_self_correction_success_supersedes_earlier_error() -> None:
                 metadata={"sql": "SELECT COUNT(*) FROM orders WHERE time > NOW()"},
             )
         ),
-        _ui(DataFrameComponent(rows=[{"count": 0}])),
+        _ui(DataFrameComponent(rows=[{"count": 0}, {"count": 1}])),
         _ui(RichTextComponent(content="There are 0 orders in the last 10 days.")),
     ]
     markdown, is_error, blocks, query_info, _mi = components_to_blocks(stream)
@@ -381,14 +381,18 @@ def test_dataframe_then_text_renders_table_before_summary() -> None:
     # The happy-path shape: tables in stream order, then the final answer text,
     # separated by blank lines (the serializer joins parts with "\n\n").
     stream = [
-        _ui(DataFrameComponent(rows=[{"id": 1, "name": "alpha"}])),
-        _ui(RichTextComponent(content="one row returned")),
+        _ui(
+            DataFrameComponent(
+                rows=[{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]
+            )
+        ),
+        _ui(RichTextComponent(content="two rows returned")),
     ]
     msg, is_error = components_to_markdown(stream)
     assert is_error is False
     assert msg.startswith("| id | name |")
-    assert msg.endswith("one row returned")
-    assert "\n\none row returned" in msg
+    assert msg.endswith("two rows returned")
+    assert "\n\ntwo rows returned" in msg
 
 
 # ───────────────────────── ordered multi-block output ──────────────────────
@@ -401,7 +405,14 @@ def test_ordered_blocks_preserves_stream_position_for_chart_text_table() -> None
     stream = [
         make_chart(make_chart_spec([{"x": "a", "y": 1}])),
         _answer_text("Top-level summary chart above."),
-        _ui(DataFrameComponent(rows=[{"region": "NA", "revenue": 1200}])),
+        _ui(
+            DataFrameComponent(
+                rows=[
+                    {"region": "NA", "revenue": 1200},
+                    {"region": "EU", "revenue": 900},
+                ]
+            )
+        ),
         _answer_text("Full breakdown below."),
     ]
     _md, is_error, blocks, _qi, _mi = components_to_blocks(stream)
@@ -415,13 +426,13 @@ def test_multiple_table_blocks_each_surface_independently() -> None:
     # Two DataFrames in one stream → two table blocks, with distinct columns
     # preserved (no last-wins collapse).
     stream = [
-        _ui(DataFrameComponent(rows=[{"a": 1}], columns=["a"])),
-        _ui(DataFrameComponent(rows=[{"b": 2}], columns=["b"])),
+        _ui(DataFrameComponent(rows=[{"a": 1}, {"a": 3}], columns=["a"])),
+        _ui(DataFrameComponent(rows=[{"b": 2}, {"b": 4}], columns=["b"])),
     ]
     _, _, blocks, _qi, _mi = components_to_blocks(stream)
     tables = [b for b in blocks if b["type"] == "table"]
     assert [t["columns"] for t in tables] == [["a"], ["b"]]
-    assert [t["rows"] for t in tables] == [[["1"]], [["2"]]]
+    assert [t["rows"] for t in tables] == [[["1"], ["3"]], [["2"], ["4"]]]
 
 
 def test_blocks_total_budget_trims_trailing_blocks_with_notice(caplog) -> None:
@@ -632,7 +643,7 @@ def test_components_to_blocks_marker_strict_identity_check() -> None:
 def test_blocks_within_budget_emit_no_truncation_notice() -> None:
     # Sanity: an under-budget stream has no notice block tacked on.
     stream = [
-        _ui(DataFrameComponent(rows=[{"a": 1}], columns=["a"])),
+        _ui(DataFrameComponent(rows=[{"a": 1}, {"a": 2}], columns=["a"])),
         _answer_text("done"),
     ]
     _, _, blocks, _qi, _mi = components_to_blocks(stream)
@@ -641,9 +652,9 @@ def test_blocks_within_budget_emit_no_truncation_notice() -> None:
         {
             "type": "table",
             "columns": ["a"],
-            "rows": [["1"]],
+            "rows": [["1"], ["2"]],
             "column_types": {"a": "number"},
-            "row_count": 1,
+            "row_count": 2,
             "truncated": 0,
         },
         {"type": "text", "text": "done"},
@@ -744,7 +755,7 @@ def test_table_small_dataframe_exact_block_payload() -> None:
 
 def test_table_explicit_column_types_round_trip() -> None:
     df = DataFrameComponent(
-        rows=[{"a": 1}],
+        rows=[{"a": 1}, {"a": 2}],
         columns=["a"],
         column_types={"a": "number"},
     )
@@ -808,13 +819,14 @@ def test_table_cell_coercion_mirrors_markdown_path() -> None:
                 "null_cell": None,
                 "decimal_cell": Decimal("1.50"),
                 "datetime_cell": datetime(2026, 1, 2, 3, 4, 5),
-            }
+            },
+            {"null_cell": 1, "decimal_cell": 2, "datetime_cell": 3},
         ],
         columns=["null_cell", "decimal_cell", "datetime_cell"],
     )
     _, _, blocks, _qi, _mi = components_to_blocks([_ui(df)])
     table = next(b for b in blocks if b["type"] == "table")
-    assert table["rows"] == [["None", "1.50", "2026-01-02 03:04:05"]]
+    assert table["rows"][0] == ["None", "1.50", "2026-01-02 03:04:05"]
 
 
 def test_table_oversized_payload_truncates_under_per_block_budget() -> None:
@@ -1490,3 +1502,171 @@ def test_build_agent_trace_caps_oversized_arguments() -> None:
     assert "arguments" not in trace["steps"][0] or trace["steps"][0]["arguments"] == {}
     assert trace["steps"][0]["tool"] == "run_sql"
     assert _serialized_len(trace) <= _MAX_TABLE_PAYLOAD_BYTES
+
+
+# ---------------------------------------------------------------------------
+# One-row results render as a text block (issue #257)
+# ---------------------------------------------------------------------------
+
+
+def _one_row(row: dict, columns: list[str] | None = None) -> UiComponent:
+    return _ui(DataFrameComponent(rows=[row], columns=columns or list(row)))
+
+
+def test_one_row_one_column_becomes_single_text_line() -> None:
+    markdown, is_error, blocks, _qi, _mi = components_to_blocks(
+        [_one_row({"total_orders": 1234})]
+    )
+    assert is_error is False
+    assert blocks == [{"type": "text", "text": "**total\\_orders:** 1234"}]
+    assert markdown == "**total\\_orders:** 1234"
+
+
+@pytest.mark.parametrize("ncols", [2, 3, 4])
+def test_one_row_two_to_four_columns_becomes_markdown_table(ncols: int) -> None:
+    cols = [f"c{i}" for i in range(ncols)]
+    row = {c: i for i, c in enumerate(cols)}
+    _, _, blocks, _qi, _mi = components_to_blocks([_one_row(row, cols)])
+    expected = "\n".join(
+        [
+            "| " + " | ".join(cols) + " |",
+            "|" + " --- |" * ncols,
+            "| " + " | ".join(str(i) for i in range(ncols)) + " |",
+        ]
+    )
+    assert blocks == [{"type": "text", "text": expected}]
+
+
+def test_one_row_five_columns_stays_table() -> None:
+    cols = ["a", "b", "c", "d", "e"]
+    _, _, blocks, _qi, _mi = components_to_blocks(
+        [_one_row({c: 1 for c in cols}, cols)]
+    )
+    assert [b["type"] for b in blocks] == ["table"]
+    assert blocks[0]["columns"] == cols
+    assert blocks[0]["rows"] == [["1"] * 5]
+    assert blocks[0]["row_count"] == 1
+
+
+def test_two_rows_stay_table() -> None:
+    df = DataFrameComponent(rows=[{"a": 1}, {"a": 2}], columns=["a"])
+    _, _, blocks, _qi, _mi = components_to_blocks([_ui(df)])
+    assert [b["type"] for b in blocks] == ["table"]
+    assert blocks[0]["rows"] == [["1"], ["2"]]
+
+
+def test_one_row_dropped_by_size_budget_stays_table() -> None:
+    huge = "x" * (_MAX_TABLE_PAYLOAD_BYTES + 10)
+    _, _, blocks, _qi, _mi = components_to_blocks([_one_row({"blob": huge})])
+    assert [b["type"] for b in blocks] == ["table"]
+    assert blocks[0]["rows"] == []
+    assert blocks[0]["truncated"] == 1
+
+
+def test_one_row_text_block_keeps_stream_position() -> None:
+    comps = [
+        make_answer_text("intro"),
+        make_chart(make_chart_spec([{"x": "a", "y": 1}])),
+        _one_row({"n": 7}),
+        make_answer_text("outro"),
+    ]
+    _, _, blocks, _qi, _mi = components_to_blocks(comps)
+    assert [b["type"] for b in blocks] == ["text", "chart", "text", "text"]
+    assert blocks[2] == {"type": "text", "text": "**n:** 7"}
+    assert blocks[0]["text"] == "intro"
+    assert blocks[3]["text"] == "outro"
+
+
+def test_one_row_text_block_with_unmarked_fallback_summary() -> None:
+    """With no answer-marked TEXT in the stream, the last unmarked TEXT is kept
+    as the fallback summary; the one-row result block is kept alongside it and
+    both surface as public ``text`` blocks in stream order.
+    """
+    comps = [
+        _one_row({"n": 7}),
+        _ui(RichTextComponent(content="There are 7 orders.")),
+    ]
+    markdown, is_error, blocks, _qi, _mi = components_to_blocks(comps)
+    assert is_error is False
+    assert blocks == [
+        {"type": "text", "text": "**n:** 7"},
+        {"type": "text", "text": "There are 7 orders."},
+    ]
+    assert markdown == "**n:** 7\n\nThere are 7 orders."
+
+
+def test_one_row_values_use_table_cell_coercion() -> None:
+    row = {
+        "null_cell": None,
+        "decimal_cell": Decimal("1.50"),
+        "datetime_cell": datetime(2026, 1, 2, 3, 4, 5),
+    }
+    _, _, blocks, _qi, _mi = components_to_blocks([_one_row(row)])
+    assert blocks == [
+        {
+            "type": "text",
+            "text": (
+                "| null\\_cell | decimal\\_cell | datetime\\_cell |\n"
+                "| --- | --- | --- |\n"
+                "| None | 1.50 | 2026-01-02 03:04:05 |"
+            ),
+        }
+    ]
+
+
+def test_one_row_escapes_markdown_and_flattens_newlines() -> None:
+    special = "\\`*_[]<>~|&"
+    escaped = "".join("\\" + ch for ch in special)
+    _, _, blocks, _qi, _mi = components_to_blocks(
+        [_one_row({f"k{special}": f"*x* [a](b)\r\n{special}"})]
+    )
+    assert blocks == [
+        {
+            "type": "text",
+            "text": f"**k{escaped}:** \\*x\\* \\[a\\](b)  {escaped}",
+        }
+    ]
+
+
+def test_one_row_table_escapes_pipes_so_cells_do_not_split() -> None:
+    _, _, blocks, _qi, _mi = components_to_blocks(
+        [_one_row({"a|b": "x|y", "c": "line1\nline2"})]
+    )
+    assert blocks == [
+        {
+            "type": "text",
+            "text": "| a\\|b | c |\n| --- | --- |\n| x\\|y | line1 line2 |",
+        }
+    ]
+
+
+def test_two_one_row_results_each_get_own_text_block() -> None:
+    comps = [
+        _one_row({"a": 1}),
+        make_answer_text("between"),
+        _one_row({"b": 2}),
+    ]
+    _, _, blocks, _qi, _mi = components_to_blocks(comps)
+    assert blocks == [
+        {"type": "text", "text": "**a:** 1"},
+        {"type": "text", "text": "between"},
+        {"type": "text", "text": "**b:** 2"},
+    ]
+
+
+def test_one_row_markdown_answer_is_compact_table() -> None:
+    markdown, _, _blocks, _qi, _mi = components_to_blocks(
+        [_one_row({"name": "Alice", "age": 30})]
+    )
+    assert markdown == "| name | age |\n| --- | --- |\n| Alice | 30 |"
+
+
+def test_one_row_result_query_info_row_count_is_one() -> None:
+    stream = [
+        _sql_card("SELECT 1 AS n", status="running"),
+        _one_row({"n": 1}),
+        _sql_card("SELECT 1 AS n", status="success"),
+    ]
+    _, _, blocks, qi, _mi = components_to_blocks(stream)
+    assert blocks[0]["type"] == "text"
+    assert qi is not None and qi["row_count"] == 1

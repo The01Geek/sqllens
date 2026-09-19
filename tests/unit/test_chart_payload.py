@@ -150,7 +150,7 @@ def test_chart_dataframe_table_rendered_into_markdown() -> None:
     # Parity with query_database: a non-apps host still sees the data table
     # plus the answer text alongside the (apps-only) chart block.
     stream = [
-        make_dataframe([{"x": "a", "y": 1}]),
+        make_dataframe([{"x": "a", "y": 1}, {"x": "b", "y": 2}]),
         make_chart(_spec([{"x": "a", "y": 1}])),
         _ui(RichTextComponent(content="here is your chart")),
     ]

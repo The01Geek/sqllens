@@ -41,6 +41,14 @@ _MAX_ROWS_RENDERED = 500
 # the only thing that actually breaks rendering, so size — not row count — is
 # the cap. Measured against ``json.dumps(payload, separators=(",", ":"))``.
 _MAX_TABLE_PAYLOAD_BYTES = 130 * 1024
+# A one-row result with at most this many columns renders as a text block (a
+# ``**column:** value`` line, or a one-row Markdown table for 2+ columns)
+# instead of a table block (issue #257).
+_SMALL_RESULT_MAX_COLUMNS = 4
+# Characters backslash-escaped in those lines so a database value cannot open
+# Markdown emphasis, code spans, bracketed links, tables or raw HTML. Bare URLs
+# are not neutralized: a renderer with autolinking may still link them.
+_SMALL_RESULT_ESCAPED_CHARS = frozenset("\\`*_[]<>~|&")
 
 # Same budget, same reason, for one chart block. Aliased to the table budget so
 # the two cannot drift apart — both blobs share one sandboxed-iframe rendering
@@ -209,7 +217,12 @@ def components_to_blocks(
     the stream:
 
     - Every ``DATAFRAME`` becomes a ``{"type": "table", ...table payload...}``
-      block at its stream position.
+      block at its stream position — except a result whose table payload holds
+      exactly one row, at most :data:`_SMALL_RESULT_MAX_COLUMNS` columns and
+      nothing truncated, which becomes a ``{"type": "text", "text": ...}``
+      block instead — one ``**column:** value`` line for a single column,
+      otherwise a one-row Markdown table
+      (:func:`_small_result_to_markdown`).
     - Every ``CHART`` becomes a ``{"type": "chart", ...chart payload...}``
       block at its stream position.
     - Every **answer-marked** ``TEXT`` (deliberate prose: ``EmitTextTool``
@@ -294,9 +307,10 @@ def components_to_blocks(
     # pins; the over-budget / payload-fail nuance is pinned by
     # ``test_query_info_row_count_recovered_from_raw_rows_on_payload_reject``.
     last_sql_row_count: int | None = None
-    # Candidate blocks. Text blocks carry a private "_is_answer" tag we strip
-    # before emitting — never expose internal bookkeeping fields in the public
-    # ``sqllens/blocks`` wire shape.
+    # Candidate blocks. Prose text blocks carry a private "_is_answer" tag and
+    # one-row results use the private "result_text" type; both are normalized
+    # to the public ``text`` shape before emitting — never expose internal
+    # bookkeeping in the public ``sqllens/blocks`` wire shape.
     candidates: list[dict] = []
     any_marked_text = False
 
@@ -319,7 +333,11 @@ def components_to_blocks(
         elif ctype == ComponentType.DATAFRAME:
             payload = _build_table_payload(rich)
             if payload is not None:
-                candidates.append({"type": "table", **payload})
+                small = _small_result_to_markdown(payload)
+                if small is not None:
+                    candidates.append({"type": "result_text", "text": small})
+                else:
+                    candidates.append({"type": "table", **payload})
                 # The size-capped payload may have dropped a tail; row_count
                 # is the kept prefix and truncated the dropped tail, so the
                 # sum is the TRUE row count the SQL produced.
@@ -432,6 +450,10 @@ def components_to_blocks(
                 blocks.append({"type": "text", "text": cand["text"]})
             elif not any_marked_text and i == last_unmarked_text_idx:
                 blocks.append({"type": "text", "text": cand["text"]})
+        elif cand["type"] == "result_text":
+            # A one-row query result is data, not prose: it is emitted as a
+            # public text block, never filtered by the answer marker.
+            blocks.append({"type": "text", "text": cand["text"]})
         else:
             blocks.append(cand)
     # The agent's production terminal-answer / iteration-limit-warning yields
@@ -1170,6 +1192,45 @@ def _serialize_blocks_to_markdown(blocks: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
+def _escape_small_result_text(value: str) -> str:
+    """Escape Markdown syntax and flatten line breaks in a column name or value."""
+    value = value.replace("\r", " ").replace("\n", " ")
+    return "".join(
+        "\\" + ch if ch in _SMALL_RESULT_ESCAPED_CHARS else ch for ch in value
+    )
+
+
+def _small_result_to_markdown(payload: dict) -> str | None:
+    """Render a one-row table payload as compact Markdown for a text block.
+
+    Returns ``None`` when the payload is not a small result (more or fewer than
+    one row, zero columns or more than :data:`_SMALL_RESULT_MAX_COLUMNS`
+    columns, or rows dropped by the size budget) — the caller then keeps the
+    table block. One column renders as a single ``**column:** value`` line; two
+    or more as a one-row Markdown table in column order. Values are the
+    payload's already-coerced cell strings, escaped so ``|`` cannot split a cell.
+    """
+    columns = payload.get("columns") or []
+    rows = payload.get("rows") or []
+    if (
+        len(rows) != 1
+        or payload.get("truncated", 0) != 0
+        or not 1 <= len(columns) <= _SMALL_RESULT_MAX_COLUMNS
+    ):
+        return None
+    names = [_escape_small_result_text(col) for col in columns]
+    values = [_escape_small_result_text(val) for val in rows[0]]
+    if len(names) == 1:
+        return f"**{names[0]}:** {values[0]}"
+    return "\n".join(
+        [
+            "| " + " | ".join(names) + " |",
+            "|" + " --- |" * len(names),
+            "| " + " | ".join(values) + " |",
+        ]
+    )
+
+
 def _table_block_to_markdown(block: dict) -> str:
     """Render one table block as a Markdown table (mirrors :func:`_render_dataframe`)."""
     columns = block.get("columns") or []
@@ -1200,7 +1261,11 @@ def _render_dataframe(rich) -> str:  # type: ignore[no-untyped-def]
     calling this directly. The production path goes through
     :func:`components_to_blocks` → :func:`_serialize_blocks_to_markdown`, which
     invokes :func:`_table_block_to_markdown` — the same function this helper
-    delegates to, so the two paths emit byte-identical Markdown.
+    delegates to, so the two paths emit byte-identical Markdown for any result
+    the production path keeps as an untruncated table (this helper applies no
+    size budget). A one-row result of at most
+    :data:`_SMALL_RESULT_MAX_COLUMNS` columns takes the text-block path there
+    instead, so this helper's table no longer matches production for it.
     """
     columns, rows = _columns_and_rows(rich)
     if not columns and not rows:

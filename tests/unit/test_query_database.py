@@ -325,7 +325,9 @@ async def test_with_widgets_returns_table_block_on_dataframe(
 ) -> None:
     """A DataFrame in the stream → one ``{"type": "table", ...}`` block."""
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
-    stub = agent_stub_factory([make_dataframe([{"name": "Alice", "age": 30}])])
+    stub = agent_stub_factory(
+        [make_dataframe([{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}])]
+    )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
     markdown, blocks, query_info, _memory, _trace = (
@@ -336,10 +338,33 @@ async def test_with_widgets_returns_table_block_on_dataframe(
     assert len(blocks) == 1
     assert blocks[0]["type"] == "table"
     assert blocks[0]["columns"] == ["name", "age"]
-    assert blocks[0]["rows"] == [["Alice", "30"]]
+    assert blocks[0]["rows"] == [["Alice", "30"], ["Bob", "25"]]
     # No run_sql STATUS_CARD in this stub stream → no query_info, no SQL block.
     assert query_info is None
     assert "```sql" not in markdown
+
+
+@pytest.mark.asyncio
+async def test_with_widgets_one_row_dataframe_becomes_text_block(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """Issue #257: a one-row, narrow DataFrame reaches the tool result as a
+    public ``text`` block (never the internal ``result_text`` type) and the
+    Markdown answer carries the same compact one-row Markdown table.
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    stub = agent_stub_factory([make_dataframe([{"name": "Alice", "age": 30}])])
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    markdown, blocks, _query_info, _memory, _trace = (
+        await query_database_impl_with_widgets(cfg, "who is the oldest user")
+    )
+
+    expected = "| name | age |\n| --- | --- |\n| Alice | 30 |"
+    assert blocks == [{"type": "text", "text": expected}]
+    assert expected in markdown
 
 
 @pytest.mark.asyncio
@@ -401,8 +426,8 @@ async def test_with_widgets_surfaces_executed_sql(
                     metadata={"sql": sql},
                 )
             ),
-            make_dataframe([{"name": "Alice", "age": 30}]),
-            make_text_component("one user"),
+            make_dataframe([{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]),
+            make_text_component("two users"),
         ]
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
@@ -411,7 +436,7 @@ async def test_with_widgets_surfaces_executed_sql(
         await query_database_impl_with_widgets(cfg, "list users")
     )
 
-    assert query_info == {"sql": sql, "query_type": "SELECT", "row_count": 1}
+    assert query_info == {"sql": sql, "query_type": "SELECT", "row_count": 2}
     # Table block was emitted (from the DataFrame component).
     assert any(b["type"] == "table" for b in blocks)
     assert f"```sql\n{sql}\n```" in markdown
@@ -435,7 +460,10 @@ async def test_with_widgets_no_sql_card_means_no_sql_block(
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     assert cfg.agent.show_details is False  # default-off
     stub = agent_stub_factory(
-        [make_dataframe([{"name": "Alice"}]), make_text_component("one user")]
+        [
+            make_dataframe([{"name": "Alice"}, {"name": "Bob"}]),
+            make_text_component("two users"),
+        ]
     )
     monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
 
@@ -507,7 +535,7 @@ async def test_with_widgets_chart_and_dataframe_yield_ordered_blocks(
     vice versa) and the distinct-data assertions below catch it.
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
-    df_rows = [{"city": "Oslo", "sales": 42}]
+    df_rows = [{"city": "Oslo", "sales": 42}, {"city": "Bergen", "sales": 7}]
     chart_rows = [{"genre": "Rock", "revenue": 1200}]
     stub = agent_stub_factory(
         [
@@ -530,7 +558,7 @@ async def test_with_widgets_chart_and_dataframe_yield_ordered_blocks(
     assert [b["type"] for b in blocks] == ["table", "chart", "text"]
     table_block = blocks[0]
     assert table_block["columns"] == ["city", "sales"]
-    assert table_block["rows"] == [["Oslo", "42"]]
+    assert table_block["rows"] == [["Oslo", "42"], ["Bergen", "7"]]
     chart_block = blocks[1]
     assert chart_block["chart_type"] == "bar"
     # The chart block carries the chart rows, NOT the DataFrame rows.
