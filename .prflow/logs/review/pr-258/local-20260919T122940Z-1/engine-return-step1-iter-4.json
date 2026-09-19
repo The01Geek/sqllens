@@ -1,0 +1,522 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "complete",
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (24/24 checklist items passed; 4 Suggestion-level findings, none at or above the `critical` threshold)\n\n## Issue Compliance\nReviewed against issue #257: Show one-row query results as a text block \u2014 criteria from workpad; scope unchanged. Requirement-based checklist items are included in the verification results below.\nCriteria came from the `/prflow:implement` workpad comment \u2014 this run's authoritative set, possibly narrowed from the issue.\nNo divergence between the workpad's criteria and the issue body's.\n\n## Verification Checklist Results\n24 passed, 0 failed, 0 inconclusive \u2014 0 via lite probe, 24 via agent.\n\n<details><summary>Passed items (24 of 24)</summary>\n\n- VC-1..VC-12: AC1-AC12 (issue_acceptance) \u2014 all PASS against src/sqllens/tools/_format.py, query_database.py, agent/core/system_prompt/default.py\n- VC-30: CRLF -> two spaces; no test/doc claims single-space collapse\n- VC-31: payload columns/cells always str via _coerce_cell\n- VC-32: unescaped chars cannot create markup (value never at line start; brackets escaped; markdown-it linkify/typographer off)\n- VC-13, VC-14, VC-15, VC-18, VC-19, VC-22, VC-23, VC-28, VC-29: carried from iter 3, re-verified PASS\n\n</details>\n\nCoverage shortfall: none (dropped_count 0).\n\n## Code Review Findings\n### \ud83d\udfe1 Suggestion / Minor\n1. One-row text block not re-checked against the per-block size budget; escaping can roughly double it (bounded by the 512 KB total trim). [src/sqllens/tools/_format.py:1200-1224] (raised by 1/3 agents)\n2. Comment above `_SMALL_RESULT_ESCAPED_CHARS` states purpose, not the wrong change it prevents (borderline). [src/sqllens/tools/_format.py:47-48] (raised by 1/3 agents)\n3. System-prompt table sentence omits the zero-row case; incomplete but not false. [src/sqllens/agent/core/system_prompt/default.py:67] (raised by 1/3 agents)\n4. No test pins escape-set edge cases (empty column name, unescaped #!() which are inert). [src/sqllens/tools/_format.py:1192-1197] (raised by 1/3 agents)\n\nover-grade annotation: no finding flagged\ntruthfulness sweep: no finding promoted\nintra-diff contradiction scan: no contradiction found\n\n## Notes\n- Phase 0.6 stale-prose lint: exit 0, no STALE rows; 5 UNRESOLVABLE (informational).\n- Prompt extension (review): present-empty. Final-pass reviewer: EXTENSION-STATUS loaded-empty resolved-root=unset (orchestrator also resolved no trusted root; nothing to propagate).\n- Phase 3 roster: silent-failure-hunter, comment-analyzer, requesting-code-review; code-reviewer and pr-test-analyzer excluded by iterations=first-only (iteration 4). Dirty-tree backstop: clean.\n- Carry-forward: 9 of 29 prior items carried (all prior PASS), re-verified by fresh verifier dispatch per caller instruction.\n",
+ "phase3_findings": [
+  {
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "Suggestion",
+   "description": "One-row text block is not re-checked against the per-block size budget (_MAX_TABLE_PAYLOAD_BYTES); backslash escaping can make it up to ~2x the table payload that passed the check. Bounded by the 512 KB total-blocks trim. Suggested fix: re-check the serialized text block size and return None to fall back to the table path.",
+   "defect_signature": {
+    "file": "src/sqllens/tools/_format.py",
+    "line_range": [
+     1200,
+     1224
+    ],
+    "kind": "other"
+   },
+   "corroboration_count": 1
+  },
+  {
+   "agent": "prflow:comment-analyzer",
+   "severity": "Suggestion",
+   "description": "Comment above _SMALL_RESULT_ESCAPED_CHARS states purpose rather than the wrong change it prevents (prevention-only comment standard, borderline).",
+   "defect_signature": {
+    "file": "src/sqllens/tools/_format.py",
+    "line_range": [
+     47,
+     48
+    ],
+    "kind": "style"
+   },
+   "corroboration_count": 1
+  },
+  {
+   "agent": "prflow:comment-analyzer",
+   "severity": "Suggestion",
+   "description": "System-prompt table line omits the zero-row case (zero rows also take the table path); incomplete, not false.",
+   "defect_signature": {
+    "file": "src/sqllens/agent/core/system_prompt/default.py",
+    "line_range": [
+     67,
+     67
+    ],
+    "kind": "comment_drift"
+   },
+   "corroboration_count": 1
+  },
+  {
+   "agent": "prflow:requesting-code-review",
+   "severity": "Suggestion",
+   "description": "No test pins escape-set edge cases (empty column name renders '**:**'; #, !, (, ) unescaped but inert). Robustness note only.",
+   "defect_signature": {
+    "file": "src/sqllens/tools/_format.py",
+    "line_range": [
+     1192,
+     1197
+    ],
+    "kind": "test_gap"
+   },
+   "corroboration_count": 1
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review"
+ ],
+ "expected_reviewers": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:pr-test-analyzer",
+  "prflow:requesting-code-review"
+ ],
+ "plan_exclusions": [
+  {
+   "agent": "prflow:code-reviewer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 4 (>= 2)"
+  },
+  {
+   "agent": "prflow:pr-test-analyzer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 4 (>= 2)"
+  }
+ ],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "detect_all_audit": false,
+  "profile": "full engine"
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "diff_produced_at_head": "1b0753d063228c66237af3bccc90d14937d16cd9",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "category": "issue_acceptance",
+   "claim": "AC1: A payload with 1 row, 1 column and truncated==0 produces exactly one text block `**<column>:** <value>` and no table block.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/_format.py",
+   "source_line": 1221,
+   "verify_hint": "_small_result_to_markdown (line 1200) and the DATAFRAME branch of components_to_blocks near line 330-360",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:_format.py:one-col-single-text-line",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "evidence": "src/sqllens/tools/_format.py:1211-1223 _small_result_to_markdown returns None unless len(rows)==1, truncated==0, and 1<=len(columns)<=_SMALL_RESULT_MAX_COLUMNS. For 1 row/1 column it builds one line '**col:** val' via zip, and since len(lines)==1 returns lines[0] directly (no bullet list). In components_to_blocks (lines 330-337), when small is not None, candidates.append({'type':'result_text','text':small}) is called and the table branch (candidates.append({'type':'table',...})) is skipped entirely via if/else, so no table block is produced.",
+   "file_checked": "src/sqllens/tools/_format.py:1200-1223,330-337"
+  },
+  {
+   "id": "VC-2",
+   "category": "issue_acceptance",
+   "claim": "AC2: A payload with 1 row, 2-4 columns and truncated==0 produces one text block with one `- **<column>:** <value>` bullet per column in column order, and no table block.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/_format.py",
+   "source_line": 1223,
+   "verify_hint": "_small_result_to_markdown bullet join; _SMALL_RESULT_MAX_COLUMNS value",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:_format.py:multi-col-bullet-list",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "evidence": "src/sqllens/tools/_format.py:1200-1223 _small_result_to_markdown returns None unless len(rows)==1, payload['truncated']==0, and 1<=len(columns)<=_SMALL_RESULT_MAX_COLUMNS (=4, line 46). For 2-4 columns it builds `**col:** val` lines via zip(columns, rows[0]) preserving column order, then joins them as `- {line}` bullet list (line 1223). Caller at lines 330-337: when _build_table_payload returns a payload and _small_result_to_markdown returns non-None (small), only a single {'type':'result_text','text':small} candidate is appended (line 335); the table candidate branch (line 337, {'type':'table',...}) is skipped via if/else, so no table block is produced alongside it.",
+   "file_checked": "src/sqllens/tools/_format.py:1200-1223,330-337"
+  },
+  {
+   "id": "VC-3",
+   "category": "issue_acceptance",
+   "claim": "AC3: A payload with 2 or more rows produces the same table block as before this change.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/_format.py",
+   "verify_hint": "len(rows) != 1 guard in _small_result_to_markdown; table block emission in components_to_blocks",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:_format.py:multi-row-table-unchanged",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "evidence": "src/sqllens/tools/_format.py:1211-1216 _small_result_to_markdown returns None whenever len(rows) != 1, so any multi-row (>=2) DATAFRAME payload never takes the text-line path. In components_to_blocks (lines 330-337), when _small_result_to_markdown returns None the code appends {\"type\": \"table\", **payload} exactly as before this change, using the unmodified _build_table_payload/_compute_table_payload pipeline. git show d115edb:src/sqllens/tools/_format.py confirms _small_result_to_markdown/_SMALL_RESULT_MAX_COLUMNS did not exist pre-change, so the base behavior for multi-row was the same plain table block. Multi-row output is therefore unchanged.",
+   "file_checked": "src/sqllens/tools/_format.py:1200-1223"
+  },
+  {
+   "id": "VC-4",
+   "category": "issue_acceptance",
+   "claim": "AC4: A 1-row payload with 5 or more columns produces the same table block as before.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/_format.py",
+   "verify_hint": "_small_result_to_markdown column bound and _SMALL_RESULT_MAX_COLUMNS definition",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:_format.py:wide-row-table-unchanged",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "evidence": "src/sqllens/tools/_format.py:46 defines _SMALL_RESULT_MAX_COLUMNS = 4. _small_result_to_markdown (lines 1200-1216) returns None when len(columns) > _SMALL_RESULT_MAX_COLUMNS (the `not 1 <= len(columns) <= _SMALL_RESULT_MAX_COLUMNS` guard on line 1214). In components_to_blocks (lines 330-337), when _small_result_to_markdown returns None, the code falls through to `candidates.append({\"type\": \"table\", **payload})` \u2014 identical to the pre-feature table-block path. So a 1-row, 5+ column payload takes the table branch unchanged.",
+   "file_checked": "src/sqllens/tools/_format.py:1200-1223"
+  },
+  {
+   "id": "VC-5",
+   "category": "issue_acceptance",
+   "claim": "AC5: A 1-row payload with truncated==1 (row dropped by the size budget) produces the same table block as before.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/_format.py",
+   "source_line": 1213,
+   "verify_hint": "_small_result_to_markdown truncated guard; _compute_table_payload",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:_format.py:truncated-row-table-unchanged",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "evidence": "src/sqllens/tools/_format.py:1200-1223 _small_result_to_markdown returns None when payload.get('truncated', 0) != 0 (line 1213), so a 1-row payload with truncated==1 fails the guard and the function returns None. The caller (components_to_blocks/_serialize_blocks_to_markdown path) then falls through to the normal table block, rendered by _table_block_to_markdown (line 1226), which is the same rendering path used before the small-result feature was added. Thus a 1-row, truncated==1 payload produces the same table block as before.",
+   "file_checked": "src/sqllens/tools/_format.py:1211-1223"
+  },
+  {
+   "id": "VC-6",
+   "category": "issue_acceptance",
+   "claim": "AC6: The one-row text block sits at the same position in `blocks` that its table block used to hold, relative to the surrounding text and chart blocks.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/_format.py",
+   "verify_hint": "candidate ordering and final block-building loop in components_to_blocks",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:_format.py:text-block-position-preserved",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "evidence": "components_to_blocks builds `candidates` in a single forward pass over the component stream (src/sqllens/tools/_format.py:314-424); each DATAFRAME component appends either a `result_text` candidate (one-row/small result) or a `table` candidate at that same stream position (lines 330-343), interleaved with `text` and `chart` candidates in stream order. The final block-building loop (lines 444-455) iterates `candidates` in that identical order and converts `result_text` to a public `{\"type\": \"text\", ...}` block in place (lines 450-453), appending non-text/result_text candidates (chart, unmarked-filtered text) unchanged in the same pass. No reordering step separates table/text/chart candidates before this loop, so the resulting text block sits in the same relative position among surrounding text/chart blocks that a table block would have occupied.",
+   "file_checked": "src/sqllens/tools/_format.py:314-455"
+  },
+  {
+   "id": "VC-7",
+   "category": "issue_acceptance",
+   "claim": "AC7: Each value in the text block is the _coerce_cell string the table block would have held (before escaping).",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/_format.py",
+   "verify_hint": "_build_table_payload coercion and the payload passed into _small_result_to_markdown",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:_format.py:values-are-coerced-cells",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "evidence": "_build_table_payload (src/sqllens/tools/_format.py:907-908) builds columns/rows via _coerce_cell(c) and _coerce_cell(row.get(c, \"\")) into the payload dict. That same payload is passed to _small_result_to_markdown (called at line 333 with `payload` from `_build_table_payload(rich)`), which at lines 1217-1220 does `_escape_small_result_text(val)` for `val` in `rows[0]` -- i.e. it escapes the already-coerced cell strings from the payload, not raw values. This confirms each value rendered in the text block is exactly the _coerce_cell string the table block would have held, before the additional Markdown escaping applied only for the text-block rendering.",
+   "file_checked": "src/sqllens/tools/_format.py:874-908,1200-1223"
+  },
+  {
+   "id": "VC-8",
+   "category": "issue_acceptance",
+   "claim": "AC8: The characters \\ ` * _ [ ] < > ~ | & in column names and values are backslash-escaped, and each CR or LF becomes one space, so `*x* [a](b)` renders literally.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/_format.py",
+   "source_line": 1192,
+   "verify_hint": "_escape_small_result_text and _SMALL_RESULT_ESCAPED_CHARS",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:_format.py:escape-chars-and-newlines",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "evidence": "src/sqllens/tools/_format.py:49 defines _SMALL_RESULT_ESCAPED_CHARS = frozenset(\"\\\\`*_[]<>~|&\") \u2014 exactly the set \\ ` * _ [ ] < > ~ | & claimed. _escape_small_result_text (lines 1192-1197) replaces \\r and \\n each with a single space (line 1194: value.replace(\"\\r\", \" \").replace(\"\\n\", \" \")), then backslash-escapes each character in that set (lines 1195-1197). This is applied to both column names and values in _small_result_to_markdown (line 1218), which would render `*x* [a](b)` as literal escaped text rather than Markdown emphasis/link syntax.",
+   "file_checked": "src/sqllens/tools/_format.py:49,1192-1197,1218"
+  },
+  {
+   "id": "VC-9",
+   "category": "issue_acceptance",
+   "claim": "AC9: Two qualifying one-row results in one turn each become their own text block at their own stream position.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/_format.py",
+   "verify_hint": "components_to_blocks DATAFRAME branch; check it does not dedupe or merge result_text candidates",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:_format.py:two-one-row-results-separate",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "evidence": "In components_to_blocks (src/sqllens/tools/_format.py), each DATAFRAME component is handled independently in the forward pass (lines 330-343): _build_table_payload builds the payload, _small_result_to_markdown (line 1200) checks it qualifies as a one-row/<=4-column/untruncated result, and if so appends a distinct {\"type\": \"result_text\", \"text\": small} candidate (line 335) tagged with nothing that would allow cross-candidate merging. In the second pass (lines 444-455), every 'result_text' candidate is unconditionally converted to a public {\"type\": \"text\", ...} block and appended to `blocks` (lines 450-453) -- there is no dedup, no last-wins collapsing, and no merging logic applied to result_text candidates (unlike the explicit last-wins handling for TEXT components). Two DATAFRAME components in one turn that each qualify as one-row results therefore each produce their own text block, preserved at their own position in stream order (blocks list built by iterating candidates in original order).",
+   "file_checked": "src/sqllens/tools/_format.py:330-343,444-455,1200-1223"
+  },
+  {
+   "id": "VC-10",
+   "category": "issue_acceptance",
+   "claim": "AC10: The tool result's Markdown text content contains the `**<column>:** <value>` lines and no Markdown table for such a result.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/query_database.py",
+   "verify_hint": "query_database.py (widget and non-widget impls) and _render_dataframe in _format.py",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:query_database.py:markdown-has-lines-no-table",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "evidence": "In src/sqllens/tools/_format.py, _small_result_to_markdown (lines 1200-1223) returns the '**column:** value' lines (or bullet list for >1 column) only when len(rows)==1, payload['truncated']==0, and 1<=len(columns)<=_SMALL_RESULT_MAX_COLUMNS (=4, line 46). In components_to_blocks (lines 330-343), when _small_result_to_markdown returns non-None the candidate is tagged 'result_text' (never 'table'); at lines 450-453 result_text candidates become public {'type':'text',...} blocks, so no table block is emitted for such a result. _serialize_blocks_to_markdown (lines 1130-1189) renders text blocks verbatim and only renders 'table' blocks via _table_block_to_markdown, so the resulting markdown contains the **column:** lines and no Markdown table.",
+   "file_checked": "src/sqllens/tools/_format.py:1200-1223,330-343,450-453,1130-1189"
+  },
+  {
+   "id": "VC-11",
+   "category": "issue_acceptance",
+   "claim": "AC11: query_info.row_count is 1 when the turn's last query returned 1 row with at most 4 columns.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/_format.py",
+   "verify_hint": "components_to_blocks: confirm the row_count update still runs when the payload becomes a text block",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:_format.py:query-info-row-count-one",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "evidence": "In components_to_blocks (src/sqllens/tools/_format.py:330-343), when a DATAFRAME component yields a payload via _build_table_payload, last_sql_row_count is set to payload['row_count'] + payload['truncated'] unconditionally at lines 341-343, regardless of whether _small_result_to_markdown (line 333) converts the payload into a 'result_text' block. _small_result_to_markdown (lines 1200-1216) requires exactly 1 row, 0 truncation, and 1<=columns<=_SMALL_RESULT_MAX_COLUMNS (=4, line 46) to produce the text form. In that case payload['row_count']==1 and truncated==0, so last_sql_row_count==1, which _query_info_from_sql (line 69-72) uses to set query_info['row_count']=1 at line 503. Confirmed the row_count update still runs on the text-block path.",
+   "file_checked": "src/sqllens/tools/_format.py:330-343,1200-1216,46"
+  },
+  {
+   "id": "VC-12",
+   "category": "issue_acceptance",
+   "claim": "AC12: The default system prompt (with emit_text) drops the 'YOU DO NOT need to include it' sentence, says multi-row results are shown as a table and one-row results should be stated in a plain sentence, and no other line says a one-row result is shown as a table or should not be stated.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+   "verify_hint": "Every line of default.py mentioning tables, results, or run_sql, including ANSWER COMPOSITION",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:default.py:prompt-one-row-stated",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "evidence": "src/sqllens/agent/core/system_prompt/default.py lines 61-78 and 114-138 contain the full base prompt and ANSWER COMPOSITION section; the old sentence 'When you execute a query, that raw result is shown to the user outside of your response so YOU DO NOT need to include it in your response.' is absent. Line 67 states multi-row (or single row >4 cols) results are shown as a table and should not be repeated. Line 68 states a single row with <=4 columns is shown as short text and the model should state the answer in a plain sentence. Line 121 and 126 (ANSWER COMPOSITION/emit_text) reiterate the same short-text-for-one-row / table-for-multi-row distinction and never say a one-row result is shown as a table or should not be stated.",
+   "file_checked": "src/sqllens/agent/core/system_prompt/default.py:61-138"
+  },
+  {
+   "id": "VC-30",
+   "category": "data_format_assumption",
+   "claim": "_escape_small_result_text turns a CRLF pair into two spaces, not one. The spec says each CR or LF becomes one space, so a CRLF gives two spaces. Check that the tests or docs do not claim a CRLF collapses to a single space.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/_format.py",
+   "source_line": 1194,
+   "verify_hint": "tests in test_format.py covering newline flattening; wording in tools.md",
+   "verification_mode": "agent",
+   "claim_signature": "data_format_assumption:_format.py:crlf-two-spaces",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "evidence": "src/sqllens/tools/_format.py:1194 does value.replace('\\r',' ').replace('\\n',' '), so a CRLF pair produces two spaces (one from \\r, one from \\n), matching the claim. tests/unit/test_format.py:1593-1604 (test_one_row_escapes_markdown_and_flattens_newlines) exercises exactly this: input '...(b)\\r\\n{special}' asserts output '...\\\\](b)  {escaped}' with two literal spaces, confirming the test agrees with the two-space behavior and does not claim single-space collapse. docs/internal/mcp-server/tools.md:96 only says 'line breaks flattened' without asserting a count, and docs/external/*.md have no CRLF-collapse claims (their carriage-return mentions are about unrelated CSV formula-injection escaping). No source or test asserts a single-space collapse for CRLF.",
+   "file_checked": "src/sqllens/tools/_format.py:1192-1197"
+  },
+  {
+   "id": "VC-31",
+   "category": "data_format_assumption",
+   "claim": "_small_result_to_markdown assumes every column name and cell in the payload is a str (it calls .replace), so _coerce_cell and the columns list never yield None or non-str (e.g. None for NULL, or int column labels).",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/_format.py",
+   "source_line": 1218,
+   "verify_hint": "_coerce_cell and the columns derivation in _compute_table_payload",
+   "verification_mode": "agent",
+   "claim_signature": "data_format_assumption:_format.py:cells-columns-always-str",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "evidence": "_small_result_to_markdown (src/sqllens/tools/_format.py:1200-1223) builds each line via _escape_small_result_text(col) and _escape_small_result_text(val) (line 1218). _escape_small_result_text (line 1192-1197) calls value.replace(\"\\r\", \" \").replace(\"\\n\", \" \") at line 1194, which requires value to already be a str (int/None have no .replace). The payload's columns and rows[0] are populated exclusively via _coerce_cell, which unconditionally returns str(value) (line 802-805: 'return str(value)'). _build_table_payload (line 874) delegates to _compute_table_payload (line 895), which sets str_columns = [_coerce_cell(c) for c in columns] (line 907) and coerced_rows = [[_coerce_cell(row.get(c, \"\")) for c in columns] for row in rows] (line 908), and returns payload['columns']=str_columns, and rows built from coerced_rows. The only caller of _small_result_to_markdown (line 333) passes payload = _build_table_payload(rich) (line 331), so the payload it receives always has str columns/cells, confirming the claim that _coerce_cell guarantees str and _small_result_to_markdown depends on that (via _escape_small_result_text's .replace call) rather than handling None or non-str values directly.",
+   "file_checked": "src/sqllens/tools/_format.py:802-805,874-919,1192-1223,330-337"
+  },
+  {
+   "id": "VC-32",
+   "category": "data_format_assumption",
+   "claim": "Unescaped leading characters (digit+period, #, -, +, =, (, !) in a value cannot create block-level or inline markup in the one-row text block, because the text starts with `**` / the value follows the label and brackets are escaped.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/_format.py",
+   "source_line": 1218,
+   "verify_hint": "CommonMark rules vs _SMALL_RESULT_ESCAPED_CHARS; markdown-it in query_results.html",
+   "verification_mode": "agent",
+   "claim_signature": "data_format_assumption:_format.py:unescaped-chars-no-markup",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "evidence": "_format.py:1192-1197 _escape_small_result_text backslash-escapes chars in _SMALL_RESULT_ESCAPED_CHARS = frozenset(\"\\\\`*_[]<>~|&\") (line 49) and flattens \\r/\\n to spaces, so a value can never contain a real line break. _small_result_to_markdown (1217-1223) always renders a value as `**{col}:** {value}` (single column) or `- **{col}:** {value}` (multi-column list), so the escaped value's first character is always preceded by the label/bullet text on the same line, never at true line-start. CommonMark block-level constructs (ATX '#' heading, list markers '-'/'+'/'digit.', setext '=' underline, blockquote) all require the marker at line-start, which never occurs here. Inline markup that could use unescaped '(' or '!' (links/images) requires an unescaped '[' immediately after, but '[' and ']' are in the escaped set, so '!(' and '(' alone produce no markup. The renderer (src/sqllens/ui/query_results.html:753) configures markdown-it with linkify:false and typographer:false, so no autolinking or smart-punctuation path could independently turn these characters into markup. All claimed conditions verified.",
+   "file_checked": "src/sqllens/tools/_format.py:49,1192-1223; src/sqllens/ui/query_results.html:753"
+  },
+  {
+   "id": "VC-13",
+   "category": "absolute_claim",
+   "claim": "The prompt line 'If a single row is too large to display, the user does not see its values' is universal; verify that a truncated one-row table block really hides all values in the widget and in the Markdown serializer (for example, whether a 'Showing ...' footer or column headers leak anything).",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "- If a single row is too large to display, the user does not see its values, so state its key values in your response.",
+   "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+   "verify_against": "_table_block_to_markdown with rows=[] and truncated=1; the query_results.html table renderer",
+   "verify_hint": "Trace a one-row DataFrame larger than _MAX_TABLE_PAYLOAD_BYTES through components_to_blocks by reading the code",
+   "verification_mode": "agent",
+   "claim_signature": "absolute_claim:default.py:too-large-row-not-seen",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "evidence": "Traced a single row too large to fit the budget through src/sqllens/tools/_format.py. _compute_table_payload (lines 895-950) does a binary search on the row prefix; for one oversized row it lands at rows=[], row_count=0, truncated=1 (columns/header-only form is kept unless even that exceeds the byte cap, in which case None is returned and no table block is emitted at all). _small_result_to_markdown (lines 1200-1216) explicitly bails to None when payload['truncated'] != 0, so the one-row special case never fires for a truncated row. _table_block_to_markdown (lines 1226-1245) then renders only the header + separator (rows list is empty) plus, since total(1) is not > _MAX_ROWS_RENDERED, no 'Showing first N of M' footer at all. The widget (src/sqllens/ui/query_results.html lines 405-473) mirrors this: with state.columns.length truthy but rows empty it renders only the <thead> header row and a 'showing 0 of 0 (1 truncated)' meta span (lines 443-446) -- counts only, no cell values. In both serializers the only things that leak are column names and row counts, never any cell value, matching the prompt line under scrutiny.",
+   "file_checked": "src/sqllens/tools/_format.py:895-950,1200-1245; src/sqllens/ui/query_results.html:405-473",
+   "raw_verdict": "PASS",
+   "normalized": false,
+   "reused_from_iter": 3
+  },
+  {
+   "id": "VC-14",
+   "category": "data_format_assumption",
+   "claim": "The prompt's wording 'a single row with four or fewer columns that fits the display size limit' matches the code predicate: 1 to 4 columns, truncated==0, and the per-block budget. The prompt does not mention the zero-column case, and a zero-column one-row payload stays a table.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+   "verify_against": "_small_result_to_markdown predicate and _MAX_TABLE_PAYLOAD_BYTES in _format.py",
+   "verify_hint": "Compare the prompt thresholds to _SMALL_RESULT_MAX_COLUMNS and the truncated check in src/sqllens/tools/_format.py",
+   "verification_mode": "agent",
+   "claim_signature": "data_format_assumption:default.py:prompt-threshold-matches-code",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "evidence": "Prompt text (default.py:67-68) says: single row with four or fewer columns shown as short text; more than four columns or more than one row shown as table. Code predicate in _small_result_to_markdown (_format.py:1210-1214) requires len(rows)==1, truncated==0, and 1 <= len(columns) <= _SMALL_RESULT_MAX_COLUMNS (=4, line 46). This matches: 1-4 columns, truncated==0, and the per-block size cap (_MAX_TABLE_PAYLOAD_BYTES=130*1024, line 43) governs 'truncated'. Zero-column case: predicate requires len(columns)>=1, so a zero-column one-row payload fails the predicate and falls through to the table path, consistent with the claim that the prompt doesn't mention zero columns and such a payload stays a table.",
+   "file_checked": "src/sqllens/tools/_format.py:1200-1214",
+   "raw_verdict": "PASS",
+   "normalized": false,
+   "reused_from_iter": 3
+  },
+  {
+   "id": "VC-15",
+   "category": "absolute_claim",
+   "claim": "tools.md claims the one-row text block 'is not filtered by the answer marker' and 'Table-cell escaping on the table path is unchanged'; verify both against components_to_blocks and _table_block_to_markdown, including the unmarked-text fallback index handling.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "It is not filtered by the answer marker. Table-cell escaping on the table path is unchanged.",
+   "source_file": "docs/internal/mcp-server/tools.md",
+   "verification_mode": "agent",
+   "claim_signature": "absolute_claim:tools.md:not-filtered-by-marker",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "evidence": "src/sqllens/tools/_format.py lines 450-453: result_text candidates are appended to `blocks` unconditionally inside the loop over `candidates`, with no check of `any_marked_text` or `_is_answer` (unlike the sibling `text` branch at lines 444-449 which does gate on the marker/fallback index). This confirms 'not filtered by the answer marker'. Separately, `git diff d115edb 1b0753d -- src/sqllens/tools/_format.py` shows `_table_block_to_markdown` (line 1226) is untouched by this PR's diff -- the only changes near it are new code (`_escape_small_result_text`, `_small_result_to_markdown`) inserted before it and a docstring update on `_render_dataframe` noting the new one-row-text path no longer matches the table helper for that case. `_table_block_to_markdown` itself performs no character escaping (plain `str(c)` cell coercion), confirming its escaping behavior (whatever it was) is unchanged by this change.",
+   "file_checked": "src/sqllens/tools/_format.py:450-453,1226-1245",
+   "raw_verdict": "PASS",
+   "normalized": false,
+   "reused_from_iter": 3
+  },
+  {
+   "id": "VC-18",
+   "category": "test_mock_alignment",
+   "claim": "test_one_row_one_column_becomes_single_text_line's expectation that markdown equals the text block exactly matches _serialize_blocks_to_markdown output when there is no STATUS_CARD.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_format.py",
+   "verification_mode": "agent",
+   "claim_signature": "test_mock_alignment:test_format.py:markdown-equals-text-block",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "evidence": "tests/unit/test_format.py:1516-1522 calls components_to_blocks with a single DataFrameComponent (one row, one column) and no STATUS_CARD; blocks == [{'type':'text','text':'**total\\_orders:** 1234'}]. _serialize_blocks_to_markdown (src/sqllens/tools/_format.py:1130-1189) joins block parts with '\\n\\n'; for a single text block it appends b['text'] verbatim to parts and returns '\\n\\n'.join(parts), which for one element equals that text unchanged. Thus markdown == '**total\\_orders:** 1234' exactly matches the text block content, confirming the claim.",
+   "file_checked": "src/sqllens/tools/_format.py:1140-1146",
+   "raw_verdict": "PASS",
+   "normalized": false,
+   "reused_from_iter": 3
+  },
+  {
+   "id": "VC-19",
+   "category": "test_mock_alignment",
+   "claim": "The new tool-level test in test_query_database.py relies on make_dataframe/agent_stub_factory producing columns in dict insertion order and on query_database_impl_with_widgets adding nothing else to the Markdown it asserts on.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_query_database.py",
+   "verification_mode": "agent",
+   "claim_signature": "test_mock_alignment:test_query_database.py:make-dataframe-column-order",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "evidence": "make_dataframe (tests/unit/_agent_stubs.py:174-186) defaults columns=list(rows[0].keys()) when not given explicitly, so test_with_widgets_one_row_dataframe_becomes_text_block (tests/unit/test_query_database.py:348-367) relies on dict insertion order ({'name':'Alice','age':30}) to produce '- **name:** Alice\\n- **age:** 30'. _small_result_to_markdown (src/sqllens/tools/_format.py:1200-1223) zips columns with rows[0] in the given order with no re-sorting, confirming insertion order drives the rendered order. The test's markdown assertion (`in markdown`) is a substring check plus a negative check that no table header appears, matching that query_database_impl_with_widgets/_format.py adds nothing else that would break the assertion (no other markdown content is asserted away).",
+   "file_checked": "src/sqllens/tools/_format.py:1200-1223",
+   "raw_verdict": "PASS",
+   "normalized": false,
+   "reused_from_iter": 3
+  },
+  {
+   "id": "VC-22",
+   "category": "api_contract",
+   "claim": "The widget renders the escaped `**col:** value` text via renderTextBlock (markdown-it html:false, breaks:true), and the backslash escapes (including \\< \\& \\|) come out as literal characters. The new comment above createMarkdownRenderer states this accurately.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/ui/query_results.html",
+   "verify_against": "markdown-it backslash-escape rules (CommonMark ASCII punctuation escapes) and renderTextBlock",
+   "verify_hint": "renderTextBlock/createMarkdownRenderer in query_results.html; CommonMark escape rules for & and |",
+   "verification_mode": "agent",
+   "claim_signature": "api_contract:query_results.html:escaped-text-renders-literal",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "evidence": "src/sqllens/tools/_format.py:49,1192-1218 backslash-escapes DB values/columns for chars in frozenset(\"\\\\`*_[]<>~|&\") and builds `**col:** value` lines (line 1218). These land in text blocks rendered by renderTextBlock (query_results.html:772-785), which lazily builds the renderer via createMarkdownRenderer (query_results.html:752-753) with markdownit({html:false, linkify:false, typographer:false, breaks:true}). All escaped characters (\\, `, *, _, [, ], <, >, ~, |, &) are ASCII punctuation per CommonMark's backslash-escape rule, so markdown-it (CommonMark-compliant) renders each as the literal character rather than parsing it as markdown syntax or (for <, &) as raw HTML/entities. The comment block at query_results.html:739-751 accurately describes html:false (raw HTML escaped, safe for innerHTML), validateLink, no images, and breaks:true -- all verified against the actual config object and renderer rule overrides (table_open/table_close, link_open) in the same function.",
+   "file_checked": "src/sqllens/ui/query_results.html:739-785; src/sqllens/tools/_format.py:47-49,1192-1218",
+   "raw_verdict": "PASS",
+   "normalized": false,
+   "reused_from_iter": 3
+  },
+  {
+   "id": "VC-23",
+   "category": "test_mock_alignment",
+   "claim": "The test_one_row_result_query_info_row_count_is_one helper _sql_card and the make_answer_text/make_chart helpers used in the new tests exist in test_format.py or conftest with those signatures (status kwarg).",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_format.py",
+   "verify_against": "Helper definitions and imports in tests/unit/test_format.py and tests/conftest or helpers",
+   "verify_hint": "grep 'def _sql_card', 'make_answer_text', 'make_chart_spec' imports in tests/unit/test_format.py",
+   "verification_mode": "agent",
+   "claim_signature": "test_mock_alignment:test_format.py:new-test-helpers-exist",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "evidence": "tests/unit/test_format.py:892 defines `_sql_card(sql: str, status: str = \"success\") -> UiComponent`, used at lines 608, 611, 907, 909, etc. with `status=` kwarg. `make_answer_text` and `make_chart` are imported at test_format.py:51-52 from tests.unit._agent_stubs, where they are defined at _agent_stubs.py:40 (`make_answer_text(content: str)`) and :189 (`make_chart(...)`), and used at test_format.py:1562-1563 (`make_answer_text(\"intro\")`, `make_chart(make_chart_spec(...))`). All helpers exist with signatures matching usage in the new tests.",
+   "file_checked": "tests/unit/test_format.py:892, tests/unit/_agent_stubs.py:40,189",
+   "raw_verdict": "PASS",
+   "normalized": false,
+   "reused_from_iter": 3
+  },
+  {
+   "id": "VC-28",
+   "category": "test_mock_alignment",
+   "claim": "test_system_prompt's _ToolSchemaStub('emit_text') triggers the same gating that production uses to include the ANSWER COMPOSITION block, so the 'tables (from run_sql)' absence assertion actually exercises the edited line.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_system_prompt.py",
+   "verify_against": "The tool-name gating in DefaultSystemPromptBuilder.build_system_prompt",
+   "verify_hint": "Check how default.py detects emit_text among tools (attribute name) versus the _ToolSchemaStub definition in test_system_prompt.py",
+   "verification_mode": "agent",
+   "claim_signature": "test_mock_alignment:test_system_prompt.py:tool-stub-gating",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "evidence": "src/sqllens/agent/core/system_prompt/default.py:55 computes has_emit_text = \"emit_text\" in tool_names, and line 114 gates the entire ANSWER COMPOSITION block (including the run_sql/emit_chart/emit_text phrasing at line 121, 'query results (from run_sql: short text for a one-row result with four or fewer columns...)') on has_emit_text. tests/unit/test_system_prompt.py:232-234 calls build_system_prompt with tools=[_ToolSchemaStub(\"run_sql\"), _ToolSchemaStub(\"emit_text\")], so _ToolSchemaStub('emit_text').name == 'emit_text' is present in tool_names, has_emit_text is True, and the ANSWER COMPOSITION block (with the edited from-run_sql wording) is included in the prompt. The assertion at line 252 (assert \"tables (from run_sql)\" not in prompt) therefore exercises text that only appears when this gating includes the block, confirming the stub correctly triggers production gating.",
+   "file_checked": "src/sqllens/agent/core/system_prompt/default.py:55,114,121",
+   "raw_verdict": "PASS",
+   "normalized": false,
+   "reused_from_iter": 3
+  },
+  {
+   "id": "VC-29",
+   "category": "test_mock_alignment",
+   "claim": "test_one_row_dropped_by_size_budget_stays_table assumes that one oversized cell makes _build_table_payload return a non-None payload with rows=[] and truncated=1, not None or a trimmed cell.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_format.py",
+   "verify_against": "_build_table_payload oversize handling",
+   "verify_hint": "Read _build_table_payload in src/sqllens/tools/_format.py for its behavior when the first row alone exceeds _MAX_TABLE_PAYLOAD_BYTES",
+   "verification_mode": "agent",
+   "claim_signature": "test_mock_alignment:test_format.py:oversize-row-payload-shape",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "evidence": "tests/unit/test_format.py:1552-1557 asserts blocks[0]['type']=='table', blocks[0]['rows']==[] and blocks[0]['truncated']==1 for a single row with one oversized cell. In src/sqllens/tools/_format.py, _compute_table_payload (lines 895-950) binary-searches the row prefix that fits _MAX_TABLE_PAYLOAD_BYTES; with total=1 row over budget, lo=0 so rows=[], row_count=0, truncated=total-lo=1, returning a non-None dict (not None, since header-only form at line 934 fits budget for this case). _build_table_payload (874-892) just forwards this. Then _small_result_to_markdown (1200-1223) explicitly returns None when len(rows)!=1 or truncated!=0 (lines 1211-1216), so the candidate stays type 'table' per components_to_blocks lines 331-337. This matches the claim exactly.",
+   "file_checked": "src/sqllens/tools/_format.py:895-950,1200-1223",
+   "raw_verdict": "PASS",
+   "normalized": false,
+   "reused_from_iter": 3
+  }
+ ],
+ "checklist_metadata": {
+  "total": 24,
+  "new": 15,
+  "carried": 9,
+  "carried_ids": [
+   "VC-13",
+   "VC-14",
+   "VC-15",
+   "VC-18",
+   "VC-19",
+   "VC-22",
+   "VC-23",
+   "VC-28",
+   "VC-29"
+  ],
+  "carry_forward_changed_files": [
+   "docs/external/getting-started.md",
+   "docs/external/index.md",
+   "src/sqllens/tools/_format.py",
+   "src/sqllens/tools/query_database.py"
+  ],
+  "verdict_files_dir": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-4",
+  "verdict_files": 24,
+  "checklist_artifact": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/checklist-iter-4.json",
+  "verification_artifact": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verification-iter-4.json",
+  "coverage_shortfall": {
+   "dropped_count": 0,
+   "criteria": []
+  },
+  "normalized_count": 0,
+  "field_defect_fail_count": 0,
+  "acceptance_criteria_source": "workpad",
+  "stale_prose": {
+   "rc": 0,
+   "stale": 0,
+   "unresolvable": 5
+  },
+  "extension_status": "present-empty",
+  "final_pass_extension_status": "loaded-empty resolved-root=unset",
+  "dirty_tree_backstop": "clean"
+ }
+}

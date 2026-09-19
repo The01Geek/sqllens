@@ -1,0 +1,58 @@
+{
+  "dispatch_mode": "fanned-out",
+  "root_completeness": "complete",
+  "engine_root": "/home/waran/.claude-rad6/plugins/cache/devflow-marketplace/prflow/2.45.10/skills/review",
+  "run_id": "local-20260919T122940Z-1",
+  "entry_kind": "shadow",
+  "iteration": 4,
+  "reviewed_head": "1b0753d063228c66237af3bccc90d14937d16cd9",
+  "diff_produced_at_head": "1b0753d063228c66237af3bccc90d14937d16cd9",
+  "verdict": "REJECT",
+  "report": "## Verdict: REJECT (2 checklist items failed: both are overbroad universal claims in diff-added prose)\n\n## Issue Compliance\nReviewed against issue #257, show one-row query results as a text block. Criteria come from the workpad; scope unchanged. Criteria came from the `/prflow:implement` workpad comment, which is this run's authoritative set and may be narrower than the issue. No divergence between the workpad's criteria and the issue body's. All 12 decided criteria verified PASS: VC-14..VC-25 and VC-31.\n\n## Verification Checklist Results\n29 passed, 2 failed, 0 inconclusive (1 via lite probe, 30 via agent).\n- VC-6: FAIL. The comment at src/sqllens/tools/_format.py:47-48 says the escaping makes database values \"render as literal text rather than Markdown formatting\". A bare URL value (http://..., www...) contains no escaped character, so any renderer with GFM autolinking still turns it into a link. The widget itself sets linkify:false, but the Markdown answer returned to other MCP clients is not covered.\n- VC-7: FAIL. docs/internal/mcp-server/tools.md:96 says \"line breaks flattened\". `_escape_small_result_text` (_format.py:1192-1197) replaces only CR and LF. U+2028, U+0085, \\v and \\f pass through. These are not CommonMark line endings, so this is close to wording-only.\nCoverage shortfall: none (dropped_count 0).\n\n<details><summary>Passed items (29 of 31)</summary>\n\nVC-1..5, VC-8..31, except VC-6 and VC-7.\n\n</details>\n\n## Code Review Findings\n### 🟠 Important / Major\n1. System prompt (default.py:67-69) tells the model to act on whether a single row \"fits the display size limit\" and, if not, to state its values. The model cannot observe the display byte budget: run_sql reports only the row cap, and the budget is checked in the formatter afterwards. An oversized single row therefore renders as an empty table (rows==[], truncated==1) and the answer may never be stated. Suggested fix: always state one-row values, or surface the budget signal to the model. (raised by 1/5 agents) [suspected over-grade: shape 3 — single-source from silent-failure-hunter; observable fail-direction is a missing answer on a rare oversized row]\n2. No test pairs a one-row result_text block with an unmarked RichText fallback summary. Earlier tests that covered this pairing were widened to two-row fixtures. (raised by 1/5 agents) [suspected over-grade: shape 3]\n3. The self-correction path lost its one-row fixture: test_self_correction_success_supersedes_earlier_error now uses two rows. (raised by 1/5 agents) [suspected over-grade: shape 3]\n### 🟡 Suggestion / Minor\n1. docs/internal/mcp-server/tools.md:187 (untouched line) still reads as if every DATAFRAME yields a table block. (raised by 1/5 agents)\n2. The new prompt bullets (default.py:67-69) do not cover zero-row results. (raised by 1/5 agents)\n3. The prompt test pins exact wording and does not tie \"four\" to _SMALL_RESULT_MAX_COLUMNS. (raised by 1/5 agents)\n4. The widget's markdown-it rendering of escaped text is untested. (raised by 1/5 agents)\n5. An empty or whitespace-padded column name breaks the `**col:**` bold markup. (raised by 1/5 agents)\n\nover-grade annotation: the Important findings are flagged shape 3 (advisory only).\ntruthfulness sweep: no Phase-3 finding promoted. The VC-6 and VC-7 checklist FAILs already drive REJECT via rule 1.\nintra-diff contradiction scan: no contradiction found.\nStale-prose lint: 0 STALE, 5 UNRESOLVABLE (informational: count-locked or coverage-universal recognition-only rows in getting-started.md:64, index.md:22, tools.md:96, _format.py:219, query_database.py:169).\nPrompt extension (review): present-empty. Final-pass extension: loaded-empty, resolved-root=unset (consistent with the orchestrator, which also resolved no trusted root).\nDirty-tree backstop: clean.\n\n## Verdict Criteria\nRule 1 fired: any FAIL in the verification checklist means REJECT. Threshold: critical. There are no Critical findings, and the Important findings are below the threshold.",
+  "phase3_findings": [
+    {"agent": "prflow:silent-failure-hunter", "severity": "Important", "description": "System prompt conditions one-row behaviour on a display byte budget the model cannot observe; an oversized single row renders as an empty table and the answer may not be stated.", "defect_signature": {"file": "src/sqllens/agent/core/system_prompt/default.py", "line_range": [67, 69], "kind": "logic_error"}},
+    {"agent": "prflow:pr-test-analyzer", "severity": "Important", "description": "No test pairs a one-row result_text block with an unmarked RichText fallback summary.", "defect_signature": {"file": "tests/unit/test_format.py", "line_range": [1502, 1637], "kind": "test_gap"}},
+    {"agent": "prflow:pr-test-analyzer", "severity": "Important", "description": "Self-correction path lost its one-row fixture (widened to two rows).", "defect_signature": {"file": "tests/unit/test_format.py", "line_range": [125, 140], "kind": "test_gap"}},
+    {"agent": "prflow:pr-test-analyzer", "severity": "Suggestion", "description": "Prompt test pins wording; does not tie 'four' to _SMALL_RESULT_MAX_COLUMNS.", "defect_signature": {"file": "tests/unit/test_system_prompt.py", "line_range": [226, 253], "kind": "test_gap"}},
+    {"agent": "prflow:pr-test-analyzer", "severity": "Suggestion", "description": "Widget markdown-it rendering of escaped text untested.", "defect_signature": {"file": "src/sqllens/ui/query_results.html", "line_range": [737, 745], "kind": "test_gap"}},
+    {"agent": "prflow:comment-analyzer", "severity": "Suggestion", "description": "tools.md:187 (untouched) implies every DATAFRAME yields a table block.", "defect_signature": {"file": "docs/internal/mcp-server/tools.md", "line_range": [187, 187], "kind": "comment_drift"}},
+    {"agent": "prflow:comment-analyzer", "severity": "Suggestion", "description": "New prompt bullets do not cover zero-row results.", "defect_signature": {"file": "src/sqllens/agent/core/system_prompt/default.py", "line_range": [67, 69], "kind": "other"}},
+    {"agent": "prflow:requesting-code-review", "severity": "Suggestion", "description": "Empty or whitespace-padded column name breaks **col:** bold markup.", "defect_signature": {"file": "src/sqllens/tools/_format.py", "line_range": [1200, 1223], "kind": "logic_error"}}
+  ],
+  "phase2_fails": [
+    {"id": "VC-6", "verdict": "FAIL", "claim": "_format.py:47-48 comment: escaping makes values render as literal text rather than Markdown formatting", "evidence": "bare URL values are unescaped and autolink under GFM/linkify renderers", "inaccuracy_scope": "source_authored_text", "defect_signature": {"file": "src/sqllens/tools/_format.py", "line_range": [47, 49], "kind": "documented_falsehood"}},
+    {"id": "VC-7", "verdict": "FAIL", "claim": "tools.md:96 'line breaks flattened'", "evidence": "_escape_small_result_text flattens only CR/LF; U+2028, U+0085, \\v, \\f pass through", "inaccuracy_scope": "source_authored_text", "defect_signature": {"file": "docs/internal/mcp-server/tools.md", "line_range": [96, 96], "kind": "documented_falsehood"}}
+  ],
+  "phase3_dispatched": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:pr-test-analyzer", "prflow:requesting-code-review"],
+  "reviewers_dispatched": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:pr-test-analyzer", "prflow:requesting-code-review"],
+  "expected_reviewers": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:pr-test-analyzer", "prflow:requesting-code-review"],
+  "plan_eligible": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:pr-test-analyzer", "prflow:requesting-code-review"],
+  "plan_exclusions": [],
+  "per_reviewer_assessment": [
+    {"agent": "prflow:code-reviewer", "returned": true, "assessment": "No findings at confidence >= 80; logic, escaping, docs and tests checked."},
+    {"agent": "prflow:silent-failure-hunter", "returned": true, "assessment": "One Important: prompt size-limit guard the model cannot observe (fail-open)."},
+    {"agent": "prflow:comment-analyzer", "returned": true, "assessment": "No documented falsehoods; two Suggestions."},
+    {"agent": "prflow:pr-test-analyzer", "returned": true, "assessment": "Coverage strong; two Important test gaps, two Suggestions."},
+    {"agent": "prflow:requesting-code-review", "returned": true, "assessment": "All 12 ACs met; one cosmetic Suggestion; EXTENSION-STATUS loaded-empty resolved-root=unset."}
+  ],
+  "phase3_failed_agents": [],
+  "diff_profile": {"small_diff": false, "config_only": false, "has_new_types": false, "detect_all_audit": false, "profile": "full engine", "changed_files": 11, "changed_lines": 344},
+  "checklist_skipped": null,
+  "cap_drops": {"count": 0, "by_category": {}},
+  "coverage_shortfall": {"dropped_count": 0, "criteria": []},
+  "acceptance_criteria_source": "workpad",
+  "acceptance_criteria_divergence": "none",
+  "prompt_extension_status": "present-empty",
+  "stale_prose": {"stale": 0, "unresolvable": 5},
+  "deferral_match": {"block_present": false, "honored": 0},
+  "verdict_threshold": "critical",
+  "checklist": {
+    "artifact": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/checklist-shadow-iter-4.json",
+    "verification_artifact": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verification-shadow-iter-4.json",
+    "total": 31, "pass": 29, "fail": 2, "inconclusive": 0, "lite": 1, "agent": 30,
+    "normalized_count": 0, "field_defect_fail_count": 0,
+    "generator_batches": 2, "deduper": "ran (no merges)",
+    "verifier_redispatches": ["VC-5", "VC-8", "VC-16 (first dispatch wrote no nonce file)"],
+    "note": "Shadow artifacts use shadow-suffixed names to avoid clobbering the primary entry's checklist-iter-4/verification-iter-4 files in the shared run directory."
+  }
+}

@@ -1,0 +1,655 @@
+{
+  "pairs": [
+    {
+      "item": {
+        "id": "VC-1",
+        "category": "data_format_assumption",
+        "claim": "_small_result_to_markdown assumes _build_table_payload returns 'columns' (list of str), 'rows' (list of lists of already-coerced str cells) and 'truncated' (int) keys, and that each row has exactly len(columns) cells (zip strict=True would raise otherwise)",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verify_hint": "Check _compute_table_payload: row cell count always equals column count (including ragged/missing-key rows) and cells are str; a ValueError from zip(strict=True) inside components_to_blocks would escape unless caught",
+        "verification_mode": "agent",
+        "claim_signature": "data_format_assumption:_format.py:payload-shape-zip-strict",
+        "merged_from": [
+          "batch1:VC-1"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-1-32ba461b298f5d3f.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-2",
+        "category": "dependency_interaction",
+        "claim": "An exception raised by _small_result_to_markdown (e.g. zip strict mismatch or non-str column name) is contained by the best-effort 'degrade that one block to skipped' handling rather than escaping components_to_blocks",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verify_hint": "In components_to_blocks DATAFRAME branch, check whether _small_result_to_markdown is inside a try/except; it is called outside _build_table_payload",
+        "verification_mode": "agent",
+        "claim_signature": "dependency_interaction:_format.py:small-result-exception-containment",
+        "merged_from": [
+          "batch1:VC-2"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-2-15f34587a771281a.json",
+      "response_text": "",
+      "pinned_verdict": "FAIL"
+    },
+    {
+      "item": {
+        "id": "VC-3",
+        "category": "data_format_assumption",
+        "claim": "Column names in the payload are always str, so _escape_small_result_text(col) cannot fail on int/None column names",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verify_hint": "Check whether _compute_table_payload str()-coerces column names",
+        "verification_mode": "agent",
+        "claim_signature": "data_format_assumption:_format.py:column-names-are-str",
+        "merged_from": [
+          "batch1:VC-3"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-3-1fb1ebadc01f1b40.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-4",
+        "category": "api_contract",
+        "claim": "Internal 'result_text' candidate type never leaks to the public blocks wire shape; normalized to {'type':'text','text':...} in every emission path, including _trim_blocks_to_budget and _serialize_blocks_to_markdown",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verify_hint": "Grep 'result_text' and 'candidates'; ensure no other loop mis-handles the new type",
+        "verification_mode": "agent",
+        "claim_signature": "api_contract:_format.py:result-text-never-leaks",
+        "merged_from": [
+          "batch1:VC-4"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-4-24dcc0aab1d9400d.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-5",
+        "category": "api_contract",
+        "claim": "The widget (query_results.html) renders the one-row text block through markdown-it such that backslash escapes produce the literal characters and '- ' lines render as a list",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/ui/query_results.html",
+        "verify_hint": "Check the md-renderer block in query_results.html (markdownit options)",
+        "verification_mode": "agent",
+        "claim_signature": "api_contract:query_results.html:escaped-text-renders-literally",
+        "merged_from": [
+          "batch1:VC-5"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-5-fdfd1a3669dc5d68.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-6",
+        "category": "absolute_claim",
+        "claim": "Comment asserts the escape set prevents any database value from opening emphasis, code spans, bracketed links, tables or raw HTML",
+        "claim_provenance": "source_authored",
+        "source_excerpt": "Characters backslash-escaped in those lines so a database value cannot open\n# Markdown emphasis, code spans, bracketed links, tables or raw HTML.",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verify_hint": "Construct falsifying values (leading '#', '- ', '1. ', '+ ', '---', '!' before escaped '[', trailing backslash) after the '**col:** ' prefix",
+        "verification_mode": "agent",
+        "claim_signature": "absolute_claim:_format.py:escape-set-blocks-markdown",
+        "merged_from": [
+          "batch1:VC-6"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-6-79833d857e2ce347.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-7",
+        "category": "absolute_claim",
+        "claim": "System prompt claims a row too large to display shows at most its column headers, without values",
+        "claim_provenance": "source_authored",
+        "source_excerpt": "a row too large to display shows at most its column headers, without values",
+        "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+        "verify_hint": "Check _compute_table_payload budget and header-only / dropped-block behavior",
+        "verification_mode": "agent",
+        "claim_signature": "absolute_claim:default.py:large-row-headers-only",
+        "merged_from": [
+          "batch1:VC-7"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-7-de2294a65985b4d9.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-8",
+        "category": "data_format_assumption",
+        "claim": "Docs (tools.md DATAFRAME row) wording about CR/LF replacement matches _escape_small_result_text (each CR and each LF replaced by one space; CRLF becomes two spaces)",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "docs/internal/mcp-server/tools.md",
+        "verify_hint": "Compare tools.md wording with _escape_small_result_text and test_one_row_escapes_markdown_and_flattens_newlines",
+        "verification_mode": "agent",
+        "claim_signature": "data_format_assumption:tools.md:crlf-flatten-doc-match",
+        "merged_from": [
+          "batch1:VC-8"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-8-09e4839262c43cd5.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-9",
+        "category": "api_contract",
+        "claim": "_serialize_blocks_to_markdown emits the one-row text block verbatim so the Markdown answer equals the '**col:** value' lines and contains no table",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verify_hint": "Check _serialize_blocks_to_markdown text branch",
+        "verification_mode": "agent",
+        "claim_signature": "api_contract:_format.py:serializer-emits-text-verbatim",
+        "merged_from": [
+          "batch1:VC-9"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-9-228c75b70c64d79e.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-10",
+        "category": "data_format_assumption",
+        "claim": "last_sql_row_count still computed from payload row_count+truncated for one-row text results (query_info row_count==1)",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verify_hint": "Confirm last_sql_row_count assignment sits outside the small/table if-else",
+        "verification_mode": "agent",
+        "claim_signature": "data_format_assumption:_format.py:row-count-preserved-text-path",
+        "merged_from": [
+          "batch1:VC-10"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-10-f37b342e40fda1be.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-11",
+        "category": "test_mock_alignment",
+        "claim": "Test helpers make_dataframe / DataFrameComponent(rows, columns) and _one_row produce payloads matching production DataFrame components (column order, _coerce_cell coercion)",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "tests/unit/test_format.py",
+        "verify_hint": "Check DataFrameComponent constructor and helpers",
+        "verification_mode": "agent",
+        "claim_signature": "test_mock_alignment:test_format.py:dataframe-helper-shape",
+        "merged_from": [
+          "batch1:VC-11"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-11-bd2e9f1f4ce4e951.json",
+      "response_text": "",
+      "pinned_verdict": "FAIL"
+    },
+    {
+      "item": {
+        "id": "VC-12",
+        "category": "test_mock_alignment",
+        "claim": "test_one_row_dropped_by_size_budget_stays_table expects rows==[] and truncated==1 for a single oversized cell (header-only form fits budget, block not dropped)",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "tests/unit/test_format.py",
+        "verify_hint": "Check row-prefix binary search and header-only fallback in _format.py",
+        "verification_mode": "agent",
+        "claim_signature": "test_mock_alignment:test_format.py:oversized-one-row-table",
+        "merged_from": [
+          "batch1:VC-12"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-12-ba85201784bbb0d7.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-13",
+        "category": "test_mock_alignment",
+        "claim": "test_one_row_text_block_with_unmarked_fallback_summary assumes the unmarked-TEXT fallback still fires when the only other candidate is result_text",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "tests/unit/test_format.py",
+        "verify_hint": "Check any_marked_text and last_unmarked_text_idx logic",
+        "verification_mode": "agent",
+        "claim_signature": "test_mock_alignment:test_format.py:fallback-with-result-text",
+        "merged_from": [
+          "batch1:VC-13"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-13-03d532bea8bb651f.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-14",
+        "category": "test_mock_alignment",
+        "claim": "test_one_row_escapes_markdown_and_flattens_newlines expectation matches _SMALL_RESULT_ESCAPED_CHARS (parentheses not escaped, two spaces for CRLF)",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "tests/unit/test_format.py",
+        "verify_hint": "Compare test expectation with frozenset and replace calls",
+        "verification_mode": "agent",
+        "claim_signature": "test_mock_alignment:test_format.py:escape-test-expectation",
+        "merged_from": [
+          "batch1:VC-14"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-14-869dbbecddb15094.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-15",
+        "category": "test_mock_alignment",
+        "claim": "No unchanged test in test_format.py/test_chart_payload.py/test_query_database.py still expects a table block for a 1-row <=4-col result",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "tests/unit/test_format.py",
+        "verify_hint": "Grep single-row DataFrame constructions in tests/unit/ that assert type=='table'",
+        "verification_mode": "agent",
+        "claim_signature": "test_mock_alignment:test_format.py:residual-one-row-table-tests",
+        "merged_from": [
+          "batch1:VC-15"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-15-e05e0b7e787557c5.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-16",
+        "category": "test_mock_alignment",
+        "claim": "test_with_widgets_one_row_dataframe_becomes_text_block: stream through query_database_impl_with_widgets yields blocks exactly [text]",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "tests/unit/test_query_database.py",
+        "verify_hint": "Check agent_stub_factory and query_database_impl_with_widgets",
+        "verification_mode": "agent",
+        "claim_signature": "test_mock_alignment:test_query_database.py:one-row-widget-test",
+        "merged_from": [
+          "batch1:VC-16"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-16-52b74e649e4dc7a5.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-17",
+        "category": "api_contract",
+        "claim": "getting-started.md conversation-ID paragraph change (removing visualize_data; 'query_database works this way') matches actual tool code",
+        "claim_provenance": "generated_paraphrase",
+        "source_file": "docs/external/getting-started.md",
+        "verify_hint": "Check src/sqllens/tools/ for conversation_id support per tool",
+        "verification_mode": "agent",
+        "claim_signature": "api_contract:getting-started.md:conversation-id-tools",
+        "merged_from": [
+          "batch1:VC-17"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-17-2d346ff03ee17b48.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-18",
+        "category": "absolute_claim",
+        "claim": "Docstring of _render_dataframe claims byte-identical Markdown with production for any untruncated table result",
+        "claim_provenance": "source_authored",
+        "source_excerpt": "so the two paths emit byte-identical Markdown for any result\n    the production path keeps as an untruncated table",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verify_hint": "Compare _render_dataframe with _table_block_to_markdown",
+        "verification_mode": "agent",
+        "claim_signature": "absolute_claim:_format.py:render-dataframe-byte-identical",
+        "merged_from": [
+          "batch1:VC-18"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-18-6185c003abb8cb8a.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-19",
+        "category": "issue_acceptance",
+        "claim": "AC1: 1 row, 1 column, truncated 0 -> exactly one text block '**<column>:** <value>', no table block",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:_format.py:ac1-one-col-text",
+        "merged_from": [
+          "batch1:VC-19"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-19-ef5a4453ac221593.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-20",
+        "category": "issue_acceptance",
+        "claim": "AC2: 1 row, 2-4 columns -> one text block bullet list '- **col:** value' in column order, no table",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:_format.py:ac2-bullet-list",
+        "merged_from": [
+          "batch1:VC-20"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-20-dbb641b6065e6a6c.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-21",
+        "category": "issue_acceptance",
+        "claim": "AC3: 2+ rows -> table block unchanged from before",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:_format.py:ac3-multirow-table",
+        "merged_from": [
+          "batch1:VC-21"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-21-b4fd63d72424a732.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-22",
+        "category": "issue_acceptance",
+        "claim": "AC4: 1 row, 5+ columns -> table block unchanged",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:_format.py:ac4-wide-row-table",
+        "merged_from": [
+          "batch1:VC-22"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-22-92e8179e8f5e2c07.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-23",
+        "category": "issue_acceptance",
+        "claim": "AC5: 1-row result with truncated==1 -> table block unchanged",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:_format.py:ac5-truncated-table",
+        "merged_from": [
+          "batch1:VC-23"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-23-ed407555ea0deded.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-24",
+        "category": "issue_acceptance",
+        "claim": "AC6: text block occupies same stream position the table block would have",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:_format.py:ac6-stream-position",
+        "merged_from": [
+          "batch1:VC-24"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-24-cd63da1d141b3c62.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-25",
+        "category": "issue_acceptance",
+        "claim": "AC7: values are the same _coerce_cell strings the table block held, before escaping",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:_format.py:ac7-coerced-values",
+        "merged_from": [
+          "batch1:VC-25"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-25-a7bb128740f71a40.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-26",
+        "category": "issue_acceptance",
+        "claim": "AC8: each of \\ ` * _ [ ] < > ~ | & in column name/value is backslash-prefixed and each CR/LF replaced by one space",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:_format.py:ac8-escaping",
+        "merged_from": [
+          "batch1:VC-26"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-26-9eab1869a1199597.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-27",
+        "category": "issue_acceptance",
+        "claim": "AC9: two qualifying one-row results in one turn each get their own text block at their own stream positions",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:_format.py:ac9-two-results",
+        "merged_from": [
+          "batch1:VC-27"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-27-3c05f887fef7732b.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-28",
+        "category": "issue_acceptance",
+        "claim": "AC10: Markdown answer in tool result text content contains the '**col:** value' lines and no Markdown table",
+        "source_file": "src/sqllens/tools/query_database.py",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:query_database.py:ac10-markdown-no-table",
+        "merged_from": [
+          "batch1:VC-28"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-28-08e8da94345f4eb6.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-29",
+        "category": "issue_acceptance",
+        "claim": "AC11: query_info row_count == 1 when last query returned one row with <=4 columns",
+        "source_file": "src/sqllens/tools/_format.py",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:_format.py:ac11-row-count",
+        "merged_from": [
+          "batch1:VC-29"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-29-6d7ff7d21cf9c4c2.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-30",
+        "category": "issue_acceptance",
+        "claim": "AC12: default system prompt drops the raw-result sentence, says multi-row results are a table not to repeat, one-row results stated in a plain sentence, and no other line says a one-row result is shown as a table or should not be stated",
+        "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:default.py:ac12-prompt-wording",
+        "merged_from": [
+          "batch1:VC-30"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-30-b21592a855fdaae0.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-31",
+        "category": "dependency_interaction",
+        "claim": "The test builds DefaultSystemPromptBuilder() with no args and awaits build_system_prompt(User(...), tools=[...])",
+        "source_file": "tests/unit/test_system_prompt.py",
+        "verification_mode": "agent",
+        "claim_signature": "dependency_interaction:test_system_prompt.py:build-system-prompt-signature",
+        "merged_from": [
+          "batch2:VC-1"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-31-a91dd5465e9967c1.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-32",
+        "category": "test_mock_alignment",
+        "claim": "_ToolSchemaStub exposes the attribute the builder uses to detect tool names, so the emit_text-gated block is included",
+        "source_file": "tests/unit/test_system_prompt.py",
+        "verification_mode": "agent",
+        "claim_signature": "test_mock_alignment:test_system_prompt.py:tool-schema-stub-name-gating",
+        "merged_from": [
+          "batch2:VC-2"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-32-a0cb0755bb4a84af.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-34",
+        "category": "api_contract",
+        "claim": "The assembled prompt contains 'more than one row' and 'do NOT repeat the table' exactly",
+        "source_file": "tests/unit/test_system_prompt.py",
+        "verification_mode": "agent",
+        "claim_signature": "api_contract:default.py:multi-row-do-not-repeat-text",
+        "merged_from": [
+          "batch2:VC-4"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-34-aaddbf0191c81fa0.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-35",
+        "category": "api_contract",
+        "claim": "The assembled prompt contains exactly 'single row, always state its key values in a plain sentence'",
+        "source_file": "tests/unit/test_system_prompt.py",
+        "verification_mode": "agent",
+        "claim_signature": "api_contract:default.py:single-row-state-sentence",
+        "merged_from": [
+          "batch2:VC-5"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-35-27632cd2fd97bb3c.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-36",
+        "category": "absolute_claim",
+        "claim": "The test's negative assertions are the full set of phrases telling the model a one-row result is shown as a table or should not be stated; no other phrasing in the prompt still says so",
+        "claim_provenance": "source_authored",
+        "source_excerpt": "tell the model to state it — and no longer claim every result is a table\n    shown outside the response.",
+        "source_file": "tests/unit/test_system_prompt.py",
+        "verification_mode": "agent",
+        "claim_signature": "absolute_claim:test_system_prompt.py:no-result-claimed-table",
+        "merged_from": [
+          "batch2:VC-6"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-36-f10f0f94c138c0ab.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-37",
+        "category": "data_format_assumption",
+        "claim": "The test omits the emit_chart stub yet asserts 'let the table/chart speak for itself' absent; if that phrase lived only in the chart-gated block the assertion is vacuous",
+        "source_file": "tests/unit/test_system_prompt.py",
+        "verification_mode": "agent",
+        "claim_signature": "data_format_assumption:test_system_prompt.py:negative-asserts-cover-gated-block",
+        "merged_from": [
+          "batch2:VC-7"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-37-3734b1a84a0eb6ed.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-38",
+        "category": "dependency_interaction",
+        "claim": "The new async test runs under configured pytest-asyncio auto mode (or marker)",
+        "source_file": "tests/unit/test_system_prompt.py",
+        "verification_mode": "agent",
+        "claim_signature": "dependency_interaction:test_system_prompt.py:async-test-mode-configured",
+        "merged_from": [
+          "batch2:VC-8"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-38-3da33fc7592792aa.json",
+      "response_text": ""
+    },
+    {
+      "item": {
+        "id": "VC-39",
+        "category": "issue_acceptance",
+        "claim": "AC12 (criterion 13 per batch 2 numbering): prompt wording criterion, covered by test for run_sql + emit_text tool set, matching the default tool set built by factory.py",
+        "source_file": "tests/unit/test_system_prompt.py",
+        "verification_mode": "agent",
+        "claim_signature": "issue_acceptance:test_system_prompt.py:prompt-one-row-stated",
+        "merged_from": [
+          "batch2:VC-9"
+        ],
+        "reused_from_iter_prev": false
+      },
+      "verdict_path": ".prflow/tmp/review/pr-258/local-20260919T122940Z-1/verdicts/iter-5/VC-39-efbec7b6e96fe147.json",
+      "response_text": ""
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "results": [
+    {
+      "id": "VC-22",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "src/sqllens/ui/query_results.html:752-753 createMarkdownRenderer configures markdown-it with {html:false, linkify:false, typographer:false, breaks:true}; renderTextBlock (line 772-785) uses this renderer via container.innerHTML = markdownRenderer.render(text). src/sqllens/tools/_format.py:47-49 defines _SMALL_RESULT_ESCAPED_CHARS = frozenset(\"\\\\`*_[]<>~|&\") and _escape_small_result_text (line 1192-1196) backslash-escapes those chars, used to build '**col:** value' lines (line 1218). Empirically ran the actual vendored markdown-it.min.js with the same options against text containing \\\\< \\\\& \\\\| and confirmed the rendered output is '<p><strong>col:</strong> a&lt;b&amp;c|d</p>' - i.e. literal <, &, | characters in the rendered HTML, not parsed as markdown/HTML syntax, consistent with CommonMark's ASCII-punctuation backslash-escape rule. The comment block above createMarkdownRenderer (lines 739-751) accurately describes html:false as the XSS boundary and notes the text is backslash-escaped by tools/_format.py, without overstating anything false.",
+      "file_checked": "src/sqllens/ui/query_results.html:739-785; src/sqllens/tools/_format.py:47-49,1192-1218",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-23",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "tests/unit/test_format.py:892 defines `_sql_card(sql: str, status: str = \"success\") -> UiComponent`, matching the status kwarg used throughout (e.g. lines 608-611, 905-972). `make_answer_text` and `make_chart_spec` are imported at tests/unit/test_format.py:51,53 from `._agent_stubs` (line 49) and used at lines 406 (`make_chart(make_chart_spec(...))`) and 72-73 (local wrapper aliasing `make_answer_text`). All referenced helpers exist with the described signatures.",
+      "file_checked": "tests/unit/test_format.py:892",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    }
+  ],
+  "needs_retry": [],
+  "counts": {
+    "normalized_count": 0,
+    "field_defect_fail_count": 0
+  }
+}
