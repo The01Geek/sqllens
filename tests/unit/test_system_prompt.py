@@ -242,6 +242,9 @@ async def test_one_row_results_are_stated_not_hidden() -> None:
     assert "more than one row" in prompt and "do NOT repeat the table" in prompt
     assert "single row with more than four columns" in prompt
     assert (
+        "If a single row is too large to display, the user does not see its values"
+    ) in prompt
+    assert (
         "single row with four or fewer columns that fits the display size limit, "
         "it is shown as short text rather "
         "than a table, so state the answer in a plain sentence"
