@@ -95,8 +95,10 @@ def _humanize_label(name: str) -> str:
     or a deliberately-set chart label), or any other shape (``count(*)``, a
     non-ASCII name, a leading/trailing/doubled underscore) — is returned
     unchanged and never re-processed. That passthrough makes the transform
-    idempotent: a humanized label always contains a space or an uppercase
-    letter, so feeding it back returns it as-is.
+    idempotent: a humanized label either contains a space or an uppercase
+    letter (so the passthrough branch returns it as-is) or maps to itself
+    under the transform (e.g. a pure-digit word like ``2024``), so feeding
+    it back returns it unchanged.
     """
     if not _SNAKE_CASE_IDENTIFIER.match(name):
         return name
