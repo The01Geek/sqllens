@@ -1254,7 +1254,8 @@ def _render_dataframe(rich) -> str:  # type: ignore[no-untyped-def]
     :func:`components_to_blocks` → :func:`_serialize_blocks_to_markdown`, which
     invokes :func:`_table_block_to_markdown` — the same function this helper
     delegates to, so the two paths emit byte-identical Markdown for any result
-    the production path keeps as a table. A one-row result of at most
+    the production path keeps as an untruncated table (this helper applies no
+    size budget). A one-row result of at most
     :data:`_SMALL_RESULT_MAX_COLUMNS` columns takes the text-block path there
     instead, so this helper's table no longer matches production for it.
     """

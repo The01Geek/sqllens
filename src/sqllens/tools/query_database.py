@@ -165,8 +165,9 @@ async def query_database_impl_with_widgets(
     :func:`~sqllens.tools._format.components_to_blocks`, which yields the
     Markdown answer (interleaved DataFrame tables, deliberate prose, and chart
     placeholders) and the ordered ``blocks`` array — one typed block per
-    DataFrame, chart, or answer-marked TEXT in stream order (a one-row,
-    narrow DataFrame becomes a text block rather than a table block). The blocks array
+    DataFrame, chart, or answer-marked TEXT in stream order (a one-row
+    DataFrame of at most four columns that fits the size budget becomes a
+    text block rather than a table block). The blocks array
     is the single structured-data channel: apps-aware hosts render each block
     in order, and ``server.py`` attaches it to ``_meta["sqllens/blocks"]``.
 
