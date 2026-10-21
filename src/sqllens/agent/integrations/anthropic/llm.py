@@ -215,8 +215,8 @@ class AnthropicLlmService(LlmService):
         # Omit unset values: models such as Claude Opus 5.5 reject any temperature.
         if request.temperature is not None:
             payload["temperature"] = request.temperature
-        # Via extra_body, not an `output_config` kwarg: the anthropic>=0.40 floor
-        # predates that SDK parameter.
+        # Via extra_body, not an `output_config` kwarg: SDK versions at the
+        # anthropic>=0.40 floor are not known to accept that keyword.
         if request.effort is not None:
             payload["extra_body"] = {"output_config": {"effort": request.effort}}
         if tools_payload:
