@@ -41,8 +41,13 @@ ToolRegistry    →  RunSqlTool                          (executes generated SQL
                                                           ↓
                                                         Agent(llm, tool_registry, user_resolver,
                                                               agent_memory, conversation_store,
-                                                              AgentConfig(max_tool_iterations, max_tokens))
+                                                              AgentConfig(max_tool_iterations, max_tokens,
+                                                                          temperature, effort))
 ```
+
+## `temperature` and `effort` pass-through (#262)
+
+`build_agent` passes `AgentConfig(temperature=cfg.llm.temperature, effort=cfg.llm.effort)`. Both fields are optional and default to `None` (env `SQLLENS_LLM__TEMPERATURE`, `SQLLENS_LLM__EFFORT`). `effort` is an `EffortLevel` literal: `low | medium | high | xhigh | max`. `config.py` declares its own copy of that literal, so loading config does not import the agent package. A unit test checks that the two copies match. The agent copies both values into every `LlmRequest`. In `AnthropicLlmService._build_payload`, a `None` value means the key is left out of the payload. A set `temperature` goes in as `temperature`. A set `effort` goes in as `extra_body={"output_config": {"effort": ...}}`, not as an `output_config` keyword argument, because SDK versions at the `anthropic>=0.40` floor are not known to accept that keyword. Before this change, `LlmRequest`/`AgentConfig` defaulted `temperature=0.7` and sent it on every call, and models that reject any temperature answered with a 400. `LLMAsJudgeEvaluator` changed in the same way: it used to hard-code `temperature=0.0` and now takes an optional `temperature` argument that defaults to `None`.
 
 `EmitChartTool` carries no SQL runner or file-system capability — the agent runs `run_sql` first to get aggregated rows, then hands them to `emit_chart`, which only validates the DSL (`bar | line | area | scatter | pie | heatmap`, ≤ 200 rows, pie/heatmap series-shape rules) and wraps the result in a `ChartComponent`. The MCP-layer `query_database` tool reads that component off the agent stream and surfaces it as a `{"type": "chart", ...}` block in the ordered `_meta["sqllens/blocks"]` array; the widget draws each chart block in stream order, alongside any sibling table or text blocks (no chart-vs-table precedence). `emit_chart` may be called more than once per request (#194) when the answer warrants multiple distinct charts. See [mcp-server/tools.md](../mcp-server/tools.md#chart-blocks-the-emitcharttool-seam) for the wider picture and [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py) for the DSL source.
 
