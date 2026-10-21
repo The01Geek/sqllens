@@ -27,10 +27,13 @@ inputs:
     required: true
   lint_mode:
     description: >-
-      Lint-tool provisioning mode. Closed set: "provision" installs the
-      manifest's bounded ShellCheck/Ruff toolchain (run-local, no sudo, digest
-      and version verified) before the Claude action; "none" does no lint-tool
-      work and validates no manifest. Any other value is refused.
+      Lint-tool provisioning mode. Closed set: "provision" provisions the
+      manifest's bounded ShellCheck/Ruff/actionlint toolchain before the Claude
+      action — it starts from an empty tool directory and, per tool, reuses a
+      version-matching tool already on the runner's PATH or else downloads the
+      pinned archive, verifies its sha256 against the manifest, and version-checks
+      it (run-local, no sudo); nothing is cached between runs. "none" does no
+      lint-tool work and validates no manifest. Any other value is refused.
     required: false
     default: 'none'
 
@@ -161,17 +164,18 @@ runs:
           fi
           # Build argv as an array — env values and ports are never word-split,
           # so a value containing spaces/metacharacters is passed safely.
+          # A native Windows jq.exe ends each line with CR, which `read` keeps — strip it.
           args=(run -d --name "$name")
-          while IFS= read -r p; do [ -n "$p" ] && args+=(-p "$p"); done \
+          while IFS= read -r p; do p="${p%$'\r'}"; [ -n "$p" ] && args+=(-p "$p"); done \
             < <(echo "$svc" | jq -r '.ports[]? // empty')
-          while IFS= read -r kv; do [ -n "$kv" ] && args+=(-e "$kv"); done \
+          while IFS= read -r kv; do kv="${kv%$'\r'}"; [ -n "$kv" ] && args+=(-e "$kv"); done \
             < <(echo "$svc" | jq -r '.env // {} | to_entries[] | "\(.key)=\(.value)"')
           # `options` is an ARRAY of complete docker-run args (each element one
           # argv token), so a flag whose value contains spaces — e.g.
           # "--health-cmd=mysqladmin ping -h 127.0.0.1" — survives intact. A
           # single space-separated string would word-split on the spaces inside
           # the health command and break it, so the schema requires an array.
-          while IFS= read -r o; do [ -n "$o" ] && args+=("$o"); done \
+          while IFS= read -r o; do o="${o%$'\r'}"; [ -n "$o" ] && args+=("$o"); done \
             < <(echo "$svc" | jq -r '.options[]? // empty')
           args+=("$image")
           echo "::group::Starting service '$name' ($image)"
@@ -231,16 +235,6 @@ runs:
           } >> "$GITHUB_OUTPUT"
         fi
 
-    # The hashFiles(manifest, marker) key covers the whole AC5 tuple transitively —
-    # do not add tuple components to it by hand. A restored $DEST_BIN is still
-    # re-verified by the provisioning step: a cache hit is never verification.
-    - name: Cache the provisioned lint toolchain
-      if: inputs.lint_mode == 'provision'
-      uses: actions/cache@v5
-      with:
-        path: ${{ runner.temp }}/prflow-lint-bin
-        key: lintprov-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.prflow/lint-manifest.json', '.prflow/install-state.json') }}
-
     # Must stay ordered BEFORE the Claude action (provisioning after model start
     # defeats #1388), and the os/arch → artifact/URL mapping stays in the trusted
     # Python helpers — never manifest-supplied strings (#1276 trust model).
@@ -295,6 +289,7 @@ runs:
       run: |
         set -euo pipefail
         INSTALL=$(echo "$CONFIG_JSON" | jq -r '.setup.install | if type=="array" then join("\n") elif type=="string" then . else "" end')
+        INSTALL="${INSTALL//$'\r'/}"  # a native Windows jq.exe writes each LF as CRLF
         if [ -n "$INSTALL" ]; then
           echo "::group::Installing project dependencies"
           # bash -euo pipefail (not a bare `bash -c`): the outer shell's
