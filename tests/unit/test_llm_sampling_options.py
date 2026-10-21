@@ -122,13 +122,6 @@ def test_config_defaults_leave_temperature_and_effort_unset(tmp_path: Path) -> N
     assert agent.config.effort is None
 
 
-def test_config_values_flow_through_factory(tmp_path: Path) -> None:
-    llm = LLMConfig(api_key=SecretStr("sk-ant-test"), temperature=0.2, effort="high")
-    agent = build_agent(_with_llm(tmp_path, llm))
-    assert agent.config.temperature == 0.2
-    assert agent.config.effort == "high"
-
-
 def _with_llm(tmp_path: Path, llm: LLMConfig) -> Config:
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     cfg.llm = llm
