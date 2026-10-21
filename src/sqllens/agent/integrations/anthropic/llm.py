@@ -211,8 +211,14 @@ class AnthropicLlmService(LlmService):
             "messages": messages,
             # Anthropic requires max_tokens; default if not provided
             "max_tokens": request.max_tokens if request.max_tokens is not None else 512,
-            "temperature": request.temperature,
         }
+        # Omit unset values: models such as Claude Opus 5.5 reject any temperature.
+        if request.temperature is not None:
+            payload["temperature"] = request.temperature
+        # Via extra_body, not an `output_config` kwarg: the anthropic>=0.40 floor
+        # predates that SDK parameter.
+        if request.effort is not None:
+            payload["extra_body"] = {"output_config": {"effort": request.effort}}
         if tools_payload:
             payload["tools"] = tools_payload
             payload["tool_choice"] = {"type": "auto"}

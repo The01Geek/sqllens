@@ -86,6 +86,11 @@ class DatabaseConfig(BaseModel):
         return scheme.split("+", 1)[0]
 
 
+# Must equal sqllens.agent.core.llm.models.EffortLevel (pinned by a unit test);
+# not imported so config loading stays free of the agent package.
+EffortLevel = Literal["low", "medium", "high", "xhigh", "max"]
+
+
 class LLMConfig(BaseModel):
     """LLM provider settings. v1: Anthropic only."""
 
@@ -108,6 +113,20 @@ class LLMConfig(BaseModel):
         description=(
             "Maximum output tokens per agent LLM call. Too low truncates long SQL "
             "tool calls; the model's own output limit still applies."
+        ),
+    )
+    # None omits the key from the request; Claude Opus 5.5 rejects any temperature.
+    temperature: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature sent on every agent LLM call; unset sends none.",
+    )
+    effort: EffortLevel | None = Field(
+        default=None,
+        description=(
+            "Anthropic effort level (output_config.effort) sent on every agent LLM "
+            "call; unset sends none and the model uses its default."
         ),
     )
 
