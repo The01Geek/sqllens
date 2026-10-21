@@ -1,0 +1,313 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:comment-analyzer",
+   "severity": "suggestion",
+   "description": "The same model-specific temperature rationale is repeated in five comments (config.py:118, models.py:36, llm.py:215, evaluators.py:190, cli.py:606) and will go stale together.",
+   "defect_signature": {
+    "file": "src/sqllens/config.py",
+    "line_range": [
+     118,
+     118
+    ],
+    "kind": "comment_drift"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "LLMAsJudgeEvaluator stores temperature unvalidated; the 0-2 range is only enforced when evaluate builds an LlmRequest.",
+   "defect_signature": {
+    "file": "src/sqllens/agent/core/evaluation/evaluators.py",
+    "line_range": [
+     178,
+     194
+    ],
+    "kind": "type_design"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-3",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "EffortLevel is defined twice (config.py and agent/core/llm/models.py) and kept equal only by a unit test.",
+   "defect_signature": {
+    "file": "src/sqllens/config.py",
+    "line_range": [
+     160,
+     162
+    ],
+    "kind": "type_design"
+   },
+   "corroboration": 1
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (three suggestions and two inconclusive checklist items, nothing at or above the critical threshold)\n\nThe PR is ready to merge: all eight acceptance criteria verified as met, and no reviewer raised a Critical or Important finding.\nRule applied: rule 6 — only findings below the threshold and INCONCLUSIVE items remain → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (3)\n\n<details><summary>3 items</summary>\n\n1. The same model-specific reason (\"some models, such as Claude Opus 5.5, reject any temperature\") is repeated in five comments: `src/sqllens/config.py:118`, `src/sqllens/agent/core/llm/models.py:36`, `src/sqllens/agent/integrations/anthropic/llm.py:215`, `src/sqllens/agent/core/evaluation/evaluators.py:190` and `src/sqllens/cli.py:606`. All five will become out of date together when model support changes. (raised by 1/6 agents)\n2. `LLMAsJudgeEvaluator` in `src/sqllens/agent/core/evaluation/evaluators.py` (lines 178-194) stores its `temperature` without checking it. The 0–2 range is checked only when `evaluate` builds an `LlmRequest`, so an out-of-range value fails on the first evaluation, not when the judge is built. (raised by 1/6 agents)\n3. `EffortLevel` is defined twice, in `src/sqllens/config.py` (lines 160-162) and in `src/sqllens/agent/core/llm/models.py`. A unit test keeps the two copies equal; the type system does not. (raised by 1/6 agents)\n\n</details>\n\n### ℹ️ Informational — Deferred\n\n- VC-1: INCONCLUSIVE (important) — The anthropic SDK at the project floor (anthropic>=0.40) and installed version accepts an `extra_body` keyword on both `messages.create` and `messages.stream`, merging `output_config` into the JSON request body. [src/sqllens/agent/integrations/anthropic/llm.py]\n\n  <details><summary>Evidence</summary>\n\n  Installed anthropic 0.125.0 (.prflow/tmp/venv/.../anthropic/resources/messages/messages.py) declares `extra_body: Body | None = None` on sync create (lines 118,412,706,1000), stream (1084/1110) and the async create/stream equivalents (1613..2605). llm.py:218-221 sets payload['extra_body']={'output_config':{'effort':...}}. pyproject.toml:30 has floor anthropic>=0.40,<1. The claim also covers the 0.40 floor, but no 0.40 source is available in the supplied views or venv, so the floor signature cannot be read. Not run: inspecting anthropic 0.40 messages.py (e.g. pip download anthropic==0.40.0). Body-merge behaviour of extra_body was also not traced in _base_client.\n\n  </details>\n\n- VC-2: INCONCLUSIVE (suggestion) — The comment asserts the anthropic>=0.40 floor predates the SDK's `output_config` parameter. [src/sqllens/agent/integrations/anthropic/llm.py]\n\n  <details><summary>Evidence</summary>\n\n  The comment is at src/sqllens/agent/integrations/anthropic/llm.py:218-221, and pyproject.toml:30 pins anthropic>=0.40,<1. The claim needs anthropic 0.40's Messages.create signature, and no 0.40 source is available. The only installed copy is anthropic-0.125.0 (.prflow/tmp/venv/.../anthropic-0.125.0.dist-info), which does not show what 0.40 had. I did not fetch the 0.40 sdist/wheel, so I did not run that check. From memory, 0.40 (about Oct 2024) predates output_config (about late 2025), so the comment is probably true, but that is not evidence I read.\n\n  </details>\n\n## Issue Compliance\n\nReviewed against issue #262 — criteria from the workpad; scope unchanged.\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: has_new_types + test_relevant; 9 changed files, 316 changed lines; full checklist run.\n- Working tree: skipped (head-override mode reviews the checked-out PR head; snapshot taken, dirty-tree check clean).\n- Review prompt extension: PROMPT-EXTENSION-STATUS: present-empty. requesting-code-review extension: present-empty.\n- The vendored `.prflow/vendor/prflow/` tree is missing in this checkout, so every helper ran from the plugin's own copy (prflow 2.59.0).\n- CI evidence: none in hand for head c465815; no test suite was run in this entry.\n- Normalized (wording-only): 0\n- Severity threshold: critical.\n- prior-report: none\n- Checklist: 22 passed, 0 failed, 2 inconclusive\n- Five verifier dispatches (VC-20 to VC-24) were first refused by the concurrent-subagent limit and were re-launched after the first wave finished. Eight verifiers that returned their verdict as text were asked to write their verdict file, and all eight did.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] With `[llm] temperature` unset, the request payload that `AnthropicLlmService` sends to `messages.create` and to `messages.stream` contains no `temperature` key.\n- [ ] With `[llm] temperature = 0.2` (or `SQLLENS_LLM__TEMPERATURE=0.2`), the agent request payload contains `\"temperature\": 0.2`.\n- [ ] With `[llm] effort` unset, the agent request contains no `output_config`.\n- [ ] With `[llm] effort = \"high\"` (or `SQLLENS_LLM__EFFORT=high`), the agent request sends `output_config` equal to `{\"effort\": \"high\"}` to Anthropic.\n- [ ] Each of exactly these 5 effort values — `low`, `medium`, `high`, `xhigh`, `max` — complete by construction, loads without error.\n- [ ] An effort value outside that set (for example `SQLLENS_LLM__EFFORT=extreme`) makes `sqllens validate` exit non-zero with a message naming the `effort` field.\n- [ ] A `temperature` outside 0–2 (for example `3`) makes `sqllens validate` exit non-zero with a message naming the `temperature` field.\n- [ ] The evaluation judge's request carries no `temperature` key when its caller passes none.",
+ "diff_produced_at_head": "c465815cd711ae7a48c33dae01bdf7700dab0825",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "category": "dependency_interaction",
+   "claim": "The anthropic SDK at the project floor (anthropic>=0.40) and installed version accepts an `extra_body` keyword on both `messages.create` and `messages.stream`, merging `output_config` into the JSON request body.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/agent/integrations/anthropic/llm.py",
+   "verify_against": "anthropic SDK resources/messages.py (create and stream signatures)",
+   "verify_hint": "Check `Messages.create` and `Messages.stream` in the installed anthropic package for an `extra_body` parameter, and pyproject.toml's anthropic floor",
+   "claim_signature": "dependency_interaction:llm.py:extra-body-output-config",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Installed anthropic 0.125.0 (.prflow/tmp/venv/.../anthropic/resources/messages/messages.py) declares `extra_body: Body | None = None` on sync create (lines 118,412,706,1000), stream (1084/1110) and the async create/stream equivalents (1613..2605). llm.py:218-221 sets payload['extra_body']={'output_config':{'effort':...}}. pyproject.toml:30 has floor anthropic>=0.40,<1. The claim also covers the 0.40 floor, but no 0.40 source is available in the supplied views or venv, so the floor signature cannot be read. Not run: inspecting anthropic 0.40 messages.py (e.g. pip download anthropic==0.40.0). Body-merge behaviour of extra_body was also not traced in _base_client.",
+   "file_checked": "src/sqllens/agent/integrations/anthropic/llm.py:218-221",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-2",
+   "category": "absolute_claim",
+   "claim": "The comment asserts the anthropic>=0.40 floor predates the SDK's `output_config` parameter.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "# Via extra_body, not an `output_config` kwarg: the anthropic>=0.40 floor\n        # predates that SDK parameter.",
+   "source_file": "src/sqllens/agent/integrations/anthropic/llm.py",
+   "verify_against": "anthropic 0.40 release source",
+   "verify_hint": "Check whether anthropic 0.40's `Messages.create` signature has an `output_config` parameter; if it does, the comment is false",
+   "claim_signature": "absolute_claim:llm.py:floor-predates-output-config",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The comment is at src/sqllens/agent/integrations/anthropic/llm.py:218-221, and pyproject.toml:30 pins anthropic>=0.40,<1. The claim needs anthropic 0.40's Messages.create signature, and no 0.40 source is available. The only installed copy is anthropic-0.125.0 (.prflow/tmp/venv/.../anthropic-0.125.0.dist-info), which does not show what 0.40 had. I did not fetch the 0.40 sdist/wheel, so I did not run that check. From memory, 0.40 (about Oct 2024) predates output_config (about late 2025), so the comment is probably true, but that is not evidence I read.",
+   "file_checked": "src/sqllens/agent/integrations/anthropic/llm.py:218-221",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "dependency_interaction:llm.py:single-payload-path",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "important"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "test_mock_alignment:test_llm_sampling_options.py:recording-messages-shape",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "test_mock_alignment:test_llm_sampling_options.py:judge-fakes",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "api_contract:test_llm_sampling_options.py:build-llm-request-signature",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "api_contract:config.py:validate-names-field",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "important"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "data_format_assumption:config.py:env-temperature-coercion",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "important"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "api_contract:config.py:effort-level-pinned",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "absolute_claim:config.py:config-free-of-agent",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "absolute_claim:config.py:temperature-every-call",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "absolute_claim:config.py:effort-every-call",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "data_format_assumption:models.py:temperature-none-consumers",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "important"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "api_contract:config.py:effortlevel-import-cycle",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "important"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "absolute_claim:cli.py:init-template-comments",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "absolute_claim:evaluators.py:judge-none-sends-none",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-17",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-18",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-19",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-20",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-21",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-22",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-23",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-24",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}
