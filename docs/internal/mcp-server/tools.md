@@ -1,5 +1,7 @@
 # MCP tools (the public surface)
 
+<!-- verified-against: 366514f 2026-10-22 -->
+
 The tools that MCP clients see. Source-of-truth reference for [src/sqllens/server.py](../../../src/sqllens/server.py), [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py), [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py), [src/sqllens/tools/list_data_sources.py](../../../src/sqllens/tools/list_data_sources.py), and [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py).
 
 Two tools are **always** registered (`query_database`, `list_data_sources`). Two opt-in surfaces are registered conditionally: `import_memory` **only when `cfg.memory.allow_import` is true** (see [`import_memory` — opt-in tool](#import_memory--opt-in-tool)), and the seven memory-administration tools **only when `cfg.memory.allow_admin_tools` is true** (see [Memory-administration tools](#memory-administration-tools--cfgmemoryallow_admin_tools)).

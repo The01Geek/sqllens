@@ -59,6 +59,8 @@ Defines the language model SQL Lens uses to translate questions into SQL.
 | `effort` | String | One of `low`, `medium`, `high`, `xhigh`, or `max`. Unset by default. When it is set, SQL Lens sends it as the Anthropic effort level on every model call. When it is unset, SQL Lens sends no effort level and the model uses its own default. Check that your chosen model supports the level you pick. The environment override is `SQLLENS_LLM__EFFORT`. |
 | `api_key` | String | Your Anthropic API key. Prefer setting this with the `SQLLENS_LLM__API_KEY` environment variable so the key stays out of the file. Optional during `sqllens validate`; required by `sqllens serve`. |
 
+Every answer SQL Lens returns reports the model and the effort level it was configured with. On hosts that read tool-result metadata, each successful `query_database` answer carries a `sqllens/model_info` entry holding the configured `model` and the configured `reasoning_effort`, which is `null` when `effort` is unset. The values are what SQL Lens was configured to request, not what Anthropic resolved and served, so a model alias in your configuration is reported as the alias. This entry rides every successful answer and is not affected by the `show_details` setting; a failed answer does not carry it.
+
 SQL Lens reads `SQLLENS_*` variables from its process environment only. It does not read a `.env` file. If you keep these settings in a `.env` file, load it yourself: pass `--env-file .env` to `docker run`, or run `set -a; . ./.env; set +a` in your shell before `sqllens serve`.
 
 ## Section: `[memory]`
