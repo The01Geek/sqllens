@@ -93,6 +93,14 @@ _MEMORY_META_KEY = "sqllens/memory_info"
 # failure, a DB timeout, an LLM error) drive the turn down the error path. (The
 # conversation channel rides the error result too, via ``_trace_error_result``.)
 _AGENT_TRACE_META_KEY = "sqllens/agent_trace"
+# Configured-model channel. Present on every successful answer, gated by no
+# flag (the same posture as the memory and conversation channels). Carries
+# {"model", "reasoning_effort"} read straight off the server's configuration —
+# what sqllens was configured to request, never what the Anthropic API resolved
+# and served or the effort the model actually applied, neither of which sqllens
+# observes from the response. Not attached to the trace-carrying ``isError``
+# result.
+_MODEL_INFO_META_KEY = "sqllens/model_info"
 # Conversation continuity channel. The resolved conversation id is returned on
 # every answer turn that resolves a conversation — every successful turn, and
 # also the trace-carrying ``isError`` result (via ``_trace_error_result``).
@@ -316,6 +324,11 @@ def build_server(cfg: Config) -> FastMCP:
         run's ``terminal_error`` — on both successful and failed responses.
         The ``sqllens/agent_trace`` key is omitted entirely when the resolved
         profile's ``show_details`` is off.
+
+        Every successful answer also carries ``_meta["sqllens/model_info"]`` —
+        ``{"model", "reasoning_effort"}``, the model id and reasoning effort
+        this server is configured to request — gated by no flag. The error
+        result does not carry it.
         """
         metadata = _request_metadata(ctx)
         # Mint a stable id when the caller did not supply one, so the resolved
@@ -356,6 +369,10 @@ def build_server(cfg: Config) -> FastMCP:
             extra_meta[_MEMORY_META_KEY] = memory_info
         if agent_trace is not None:
             extra_meta[_AGENT_TRACE_META_KEY] = agent_trace
+        extra_meta[_MODEL_INFO_META_KEY] = {
+            "model": cfg.llm.model,
+            "reasoning_effort": cfg.llm.effort,
+        }
         return _conversation_result(markdown, conversation_id, extra_meta)
 
     @mcp.tool()
