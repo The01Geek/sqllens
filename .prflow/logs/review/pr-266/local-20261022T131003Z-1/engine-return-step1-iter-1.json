@@ -1,0 +1,266 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "verdict": "APPROVE with notes",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "suggestion",
+   "description": "tests/unit/test_server.py: in test_query_database_model_info_present_when_show_details_off, the two trailing assertions that sqllens/query and sqllens/agent_trace are absent cannot fail, because the stub that replaces query_database_impl_with_widgets always returns query_info=None and agent_trace=None and the show_details gate lives inside the replaced function. The model-info presence assertion is real and does protect the criterion.",
+   "defect_signature": {
+    "file": "tests/unit/test_server.py",
+    "line_range": [
+     557,
+     571
+    ],
+    "kind": "test_gap"
+   },
+   "corroboration_count": 2,
+   "step25_classification": null,
+   "fix_decision": null
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:comment-analyzer",
+   "severity": "suggestion",
+   "description": "docs/internal/mcp-server/tools.md line 318: the new \"Configured, not served\" bullet attributes the response mapping to AnthropicLlmService.generate, but that class defines only send_request and stream_request. The rest of the sentence is accurate. Capped by the behavior-inert prose rule at Suggestion: first-conjunct=held limb-one=held limb-two=held.",
+   "defect_signature": {
+    "file": "docs/internal/mcp-server/tools.md",
+    "line_range": [
+     318,
+     318
+    ],
+    "kind": "documented_falsehood"
+   },
+   "corroboration_count": 1,
+   "step25_classification": null,
+   "fix_decision": null
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:pr-test-analyzer",
+  "prflow:requesting-code-review"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:pr-test-analyzer",
+  "prflow:requesting-code-review"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:pr-test-analyzer",
+  "prflow:requesting-code-review"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "report": "## Verdict: APPROVE with notes (two Suggestion findings, neither at or above the Critical threshold)\n\nThis PR is ready to merge once the stale method name in the internal doc is corrected: the shipped code meets all five acceptance criteria, every checklist item verified PASS, and the only defects found are one wrong symbol name in prose and two assertions in a new test that cannot fail.\n\nRule applied: rule 6 — a finding below the threshold remains → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (2)\n\n<details><summary>2 items</summary>\n\n1. In `tests/unit/test_server.py`, the new `test_query_database_model_info_present_when_show_details_off` case contains two assertions that cannot fail for the reason the test name gives. The test replaces `query_database_impl_with_widgets` with a stub that always returns `query_info=None` and `agent_trace=None`, and the `show_details` gate it means to exercise lives inside the function that stub replaced. The two trailing assertions, that `sqllens/query` and `sqllens/agent_trace` are absent from the result metadata, therefore hold for every configuration and prove nothing about the flag. The assertion that does matter, that the model-info channel is present while `show_details` is off, is real and does protect the criterion. (raised by 2/5 agents)\n2. In `docs/internal/mcp-server/tools.md`, the new \"Configured, not served\" bullet names a method that does not exist. It attributes the response mapping to `AnthropicLlmService.generate`, but that class defines only `send_request` and `stream_request`. The rest of the sentence is accurate, because the `LlmResponse` the service builds does carry only content, tool calls, finish reason and token usage, with no served model id. A reader who follows the name to the file finds nothing. (raised by 1/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: enumerated readers of docs/internal/mcp-server/tools.md across the head view — only six other internal doc pages reference it, and no script, workflow, lint, parser or agent-instruction file reads it for behavior; the page is internal and unpublished — no mechanism's covered set is under discussion, and correcting the symbol name changes no output or branch -->\n\n</details>\n\n## Run details\n\n<details><summary>Run details</summary>\n\nDiff profile: `test_relevant` (not small_diff, not config_only, no new types), four changed files, 180 changed lines. `detect_all_audit` not set: the new assertions are fixed-set equality, not a scanner enumerating a population and asserting completeness over it.\n\nPhase 0 working tree: clean, no uncommitted changes.\n\nReview prompt extension: `PROMPT-EXTENSION-STATUS: present-empty`. Reviewer extension `requesting-code-review`: `PROMPT-EXTENSION-STATUS: present-empty`.\n\nCI evidence for the reviewed head 366514f: no injected CI block reached this run. The caller handed an in-environment suite result for this head — 1174 passed, 8 skipped, 16 deselected, 0 failed, and `ruff check` exit 0 — run in a `python:3.12-slim` container against this branch.\n\nNormalized (wording-only): 1\n\nRe-verification: none. No checklist item returned FAIL, so no dispute was registered.\n\nPrior report: `prior-report: none`.\n\nStricter than criterion: no `Stricter` disclosure was held.\n\nFinding rejected lines not counted (no Finding rejected line).\n\nPR body: read.\n\nIssue compliance: `Reviewed against issue #265 — criteria from the workpad; scope unchanged.` The resolver wrote a one-line compliance file rather than a full section, so it is recorded here. Criteria source `workpad`, five criteria, no divergence.\n\nChecklist: 23 items, five of them acceptance criteria. Verified 23 passed, 0 failed, 0 inconclusive. No cap drops. All critical, important, suggestion and informational checklist pieces are empty.\n\nEngine dispatch: the `prflow:review-engine` subagent returned no engine-return file on its first dispatch, so this entry ran on the *Inline engine* arm with the same operands. The engine root resolved to the running plugin's own `skills/review`; both vendored candidates were reported non-existent by the reader.\n\nPhase 2 verifier delivery: twelve verifiers returned a usable verdict but could not write their verdict file on the first pass. Each was sent one delivery-only message and all twelve files then landed, so the second `collect` recorded 23 of 23 PASS with no retry outstanding.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] Every successful `query_database` result's `_meta` includes a `sqllens/model_info` channel, independent of the resolved profile's `show_details` setting and of any other flag.\n- [ ] The `sqllens/model_info` channel carries exactly these two fields — `model` and `reasoning_effort` — and no others.\n- [ ] The `model` field holds the configured Anthropic model id, which is the value of `cfg.llm.model` for the running server.\n- [ ] The `reasoning_effort` field holds the configured reasoning effort, which is the value of `cfg.llm.effort` for the running server: one of the `EffortLevel` values defined in `src/sqllens/config.py` when an effort is configured, and JSON `null` — present, not omitted — when no effort is configured.\n- [ ] A trace-carrying `isError` result from `query_database` does not include a `sqllens/model_info` channel.",
+ "diff_produced_at_head": "366514f72846bcd9fb1a4bb18e35772ee2399dc0",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:server.py:llm-model-effort-fields:372",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "data_format_assumption:server.py:effort-json-serializable:374",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "important"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "api_contract:server.py:model-info-merge-order:376",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "important"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "api_contract:server.py:visualize-data-no-model-info:378",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "absolute_claim:server.py:llmresponse-no-served-model:100",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "absolute_claim:server.py:docstring-every-successful-answer:328",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "absolute_claim:tools.md:effort-level-value-list:317",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "data_format_assumption:tools.md:shipped-llmconfig-defaults:312",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "absolute_claim:tools.md:trace-error-only-two-channels:320",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "absolute_claim:tools.md:meta-key-count:194",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "absolute_claim:tools.md:widget-does-not-read-model-info:321",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "absolute_claim:tools.md:pinned-by-test-server:323",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "absolute_claim:tools.md:build-server-snippet-fidelity:57",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "test_mock_alignment:test_server.py:llmconfig-effort-high:489",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "test_mock_alignment:test_server.py:fake-impl-signature:500",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "test_mock_alignment:test_server.py:calltoolresult-meta-attr:507",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "api_contract:_config_builders.py:llm-kwarg-backcompat:46",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "test_mock_alignment:test_server.py:show-details-off-stubbed:542",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-19",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-20",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-21",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-22",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-23",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}
