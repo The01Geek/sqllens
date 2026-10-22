@@ -306,15 +306,17 @@ Pinned by `tests/unit/test_search_memory_threshold.py` (the tool emits the card 
 
 ## Configured-model channel — `_meta["sqllens/model_info"]`
 
-Every successful `query_database` answer carries which model and which reasoning effort the server was configured to use, so a consuming client can attribute an answer to a model and an effort setting (issue #265 — Guidoo's admin conversation history renders it per answer).
+Every successful `query_database` answer carries which model and which reasoning effort the server was configured to use, so a consuming client can attribute an answer to a model and an effort setting. Issue #265 added it for a downstream admin conversation history that shows the model and effort behind each stored answer.
 
 ```python
 {"model": "claude-sonnet-4-5-20250929", "reasoning_effort": None}
 ```
 
+(The values above are the shipped `LLMConfig` defaults; `model` is whatever `cfg.llm.model` holds for the running server.)
+
 - **Two fields, no others.** `model` is `cfg.llm.model`; `reasoning_effort` is `cfg.llm.effort` — one of the `EffortLevel` values (`low | medium | high | xhigh | max`) when an effort is configured, and JSON `null` when none is. The `null` is **present, not omitted**: effort is unset in the default deployment, so `null` is the ordinary case and a consumer distinguishes "no effort configured" from "field absent" (an older sqllens that predates the channel).
-- **Configured, not served.** Both values are read off the server's configuration object in the tool body — nothing in the agent's result stream is consulted. sqllens never captures the dated snapshot the Anthropic API actually resolved and served, so an alias configuration or a server-side substitution can make the reported `model` differ from the served one; it likewise never observes the effort the model actually applied, so `reasoning_effort` reports only what sqllens requested. Capturing either served value is deliberately out of scope for #265.
-- **Gated by no flag.** `server.py` sets the key unconditionally in the success path's `extra_meta`, so it rides every successful turn regardless of the resolved profile's `show_details` — the same always-on posture as `sqllens/memory_info` and `sqllens/conversation`, not the `show_details`-gated `sqllens/query` and `sqllens/agent_trace`.
+- **Configured, not served.** Both values are read off the server's configuration object in the tool body — nothing in the agent's result stream is consulted. There is nothing else to read: `AnthropicLlmService.generate` in [src/sqllens/agent/integrations/anthropic/llm.py](../../../src/sqllens/agent/integrations/anthropic/llm.py) maps the API response onto an `LlmResponse` carrying only `content`, `tool_calls`, `finish_reason`, and token `usage` — no served model id, and no record of the effort the model actually applied. So an alias configuration or a server-side substitution can make the reported `model` differ from the snapshot that served the answer, and `reasoning_effort` reports only what sqllens requested. Capturing either served value is deliberately out of scope for #265.
+- **Gated by no flag.** `server.py` sets the key unconditionally in the success path's `extra_meta`, so it rides every successful turn regardless of the resolved profile's `show_details`. That flag-independence follows `sqllens/conversation`, which rides every turn, and `sqllens/memory_info`, which is independent of `show_details` (though it rides only a turn that completed a memory search) — not the `show_details`-gated `sqllens/query` and `sqllens/agent_trace`.
 - **Success only.** The trace-carrying `isError` result is built by `_trace_error_result`, which attaches only the conversation and agent-trace channels, so a failed turn carries no `sqllens/model_info`.
 - An observability channel, not a widget channel — the result widget does not read it.
 

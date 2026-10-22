@@ -21,7 +21,7 @@ from mcp.types import CallToolResult
 from pydantic import SecretStr
 
 import sqllens.server as server_module
-from sqllens.config import AgentRuntimeConfig, LLMConfig
+from sqllens.config import AgentRuntimeConfig, Config, LLMConfig
 from sqllens.server import build_server
 from sqllens.tools.query_database import AgentRunError
 
@@ -56,7 +56,7 @@ class _StubCtx:
     request_context = _RC()
 
 
-def _model_info(cfg) -> dict:
+def _model_info(cfg: Config) -> dict:
     """The ``sqllens/model_info`` channel every successful result now carries.
 
     Derived from the config under test so the exact-equality ``result.meta``

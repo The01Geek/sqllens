@@ -93,13 +93,13 @@ _MEMORY_META_KEY = "sqllens/memory_info"
 # failure, a DB timeout, an LLM error) drive the turn down the error path. (The
 # conversation channel rides the error result too, via ``_trace_error_result``.)
 _AGENT_TRACE_META_KEY = "sqllens/agent_trace"
-# Configured-model channel. Present on every successful answer, gated by no
-# flag (the same posture as the memory and conversation channels). Carries
-# {"model", "reasoning_effort"} read straight off the server's configuration —
-# what sqllens was configured to request, never what the Anthropic API resolved
-# and served or the effort the model actually applied, neither of which sqllens
-# observes from the response. Not attached to the trace-carrying ``isError``
-# result.
+# Configured-model channel (shape and posture in the tool docstring below).
+# Do not gate it behind ``show_details`` or a new knob, and do not attach it to
+# ``_trace_error_result``: a consumer renders it per stored answer, so a gate
+# would silently blank the model and effort on deployments that leave the flag
+# off. Both values are what sqllens was configured to *request* — the
+# ``LlmResponse`` the Anthropic integration builds carries no served model id
+# and no applied effort, so neither can be reported here instead.
 _MODEL_INFO_META_KEY = "sqllens/model_info"
 # Conversation continuity channel. The resolved conversation id is returned on
 # every answer turn that resolves a conversation — every successful turn, and
