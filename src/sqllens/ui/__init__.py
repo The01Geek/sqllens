@@ -8,9 +8,9 @@ The HTML widgets and their vendored JS bundles ship inside the wheel (see the
 ``server.py`` serves :func:`load_widget_html` results as ``ui://`` resources
 an apps-aware host renders in sandboxed iframes:
 
-- ``query_results.html`` — always registered. Renders a chart, a data grid,
-  or plain text depending on which ``_meta`` payload the ``query_database``
-  tool pushed via the host's ``ontoolresult`` channel.
+- ``query_results.html`` — always registered. Renders the ordered chart,
+  data-grid and Markdown-text blocks the ``query_database`` tool pushed via
+  the host's ``ontoolresult`` channel.
 - ``memory_admin.html`` — registered only inside ``cfg.memory.allow_admin_tools``.
   A self-driving panel that *pulls* its own data on mount via the App SDK's
   ``callServerTool(...)`` and drives every admin tool (list / get / delete /
@@ -44,10 +44,11 @@ from importlib.resources import files
 
 logger = logging.getLogger("sqllens.ui")
 
-# query_results.html uses BOTH the ext-apps SDK (ESM module import) and
-# echarts (classic UMD) — it renders a chart or a data grid from one payload.
+# query_results.html uses the ext-apps SDK (ESM module import) plus two
+# classic UMD bundles — echarts for chart blocks, markdown-it for text blocks.
 _APP_SDK_IMPORT = 'import { App } from "./vendor/app-with-deps.js";'
 _ECHARTS_SCRIPT_TAG = '<script src="./vendor/echarts.min.js"></script>'
+_MARKDOWN_IT_SCRIPT_TAG = '<script src="./vendor/markdown-it.min.js"></script>'
 
 # The ext-apps bundle ends with one ESM export block ``export { ... eI as App };``
 # from which we extract the local identifier for ``App``. Used by both widgets.
@@ -104,12 +105,28 @@ def _inline_echarts(html: str, bundle: str) -> str:
     return html.replace(_ECHARTS_SCRIPT_TAG, f"<script>{bundle}</script>")
 
 
+def _inline_markdown_it(html: str, bundle: str) -> str:
+    """Replace the ``<script src=markdown-it.min.js>`` tag with the inline bundle.
+
+    Same UMD / load-order contract as :func:`_inline_echarts`: the classic
+    script attaches ``window.markdownit`` before the widget module runs.
+    """
+    if _MARKDOWN_IT_SCRIPT_TAG not in html:
+        raise RuntimeError(
+            "widget HTML no longer loads markdown-it via "
+            "<script src=./vendor/markdown-it.min.js>; the inliner has nothing "
+            "to replace"
+        )
+    return html.replace(_MARKDOWN_IT_SCRIPT_TAG, f"<script>{bundle}</script>")
+
+
 # Per-filename inlining recipe. A widget HTML is read from disk, then each
 # (bundle_filename, splice_fn) pair in its recipe is applied. If a widget
 # ever needs no inlining, register it with an empty list.
 _RECIPES: dict[str, list[tuple[str, Callable[[str, str], str]]]] = {
     "query_results.html": [
         ("echarts.min.js", _inline_echarts),
+        ("markdown-it.min.js", _inline_markdown_it),
         ("app-with-deps.js", _inline_app_sdk),
     ],
     "memory_admin.html": [

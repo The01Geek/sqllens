@@ -18,8 +18,10 @@ from pathlib import Path
 
 import pytest
 from mcp.types import CallToolResult
+from pydantic import SecretStr
 
 import sqllens.server as server_module
+from sqllens.config import AgentRuntimeConfig, Config, LLMConfig
 from sqllens.server import build_server
 from sqllens.tools.query_database import AgentRunError
 
@@ -52,6 +54,17 @@ class _StubCtx:
         meta = None
 
     request_context = _RC()
+
+
+def _model_info(cfg: Config) -> dict:
+    """The ``sqllens/model_info`` channel every successful result now carries.
+
+    Derived from the config under test so the exact-equality ``result.meta``
+    assertions below stay about the channel they are each pinning. The
+    channel's own content is pinned by equality against explicitly configured
+    values in the ``model_info`` tests at the end of this module.
+    """
+    return {"model": cfg.llm.model, "reasoning_effort": cfg.llm.effort}
 
 
 async def test_widget_resource_registered(tmp_path: Path) -> None:
@@ -133,6 +146,7 @@ async def test_query_database_returns_calltoolresult_with_meta_when_table_block(
     assert result.meta == {
         "sqllens/blocks": [table_block],
         "sqllens/conversation": {"conversation_id": "c-1"},
+        "sqllens/model_info": _model_info(cfg),
     }
     # Retired flat channels must NOT appear in _meta — apps-aware hosts and
     # downstream structured-data consumers must migrate to the ordered blocks
@@ -168,6 +182,7 @@ async def test_query_database_meta_carries_query_info_when_present(
         "sqllens/blocks": [table_block],
         "sqllens/query": query_info,
         "sqllens/conversation": {"conversation_id": "c-1"},
+        "sqllens/model_info": _model_info(cfg),
     }
 
 
@@ -193,6 +208,7 @@ async def test_query_database_meta_query_info_without_blocks(
     assert result.meta == {
         "sqllens/query": query_info,
         "sqllens/conversation": {"conversation_id": "c-1"},
+        "sqllens/model_info": _model_info(cfg),
     }
 
 
@@ -214,7 +230,10 @@ async def test_query_database_returns_conversation_meta_when_no_blocks(
 
     result = await _query_database_fn(mcp)("question?", _StubCtx(), conversation_id="c-1")
     assert isinstance(result, CallToolResult)
-    assert result.meta == {"sqllens/conversation": {"conversation_id": "c-1"}}
+    assert result.meta == {
+        "sqllens/conversation": {"conversation_id": "c-1"},
+        "sqllens/model_info": _model_info(cfg),
+    }
     assert result.content[0].text.startswith("just text")
     assert "Conversation ID: `c-1`" in result.content[0].text
 
@@ -287,6 +306,7 @@ async def test_query_database_meta_carries_memory_info_when_present(
     assert result.meta == {
         "sqllens/memory_info": memory_info,
         "sqllens/conversation": {"conversation_id": "c-1"},
+        "sqllens/model_info": _model_info(cfg),
     }
 
 
@@ -308,6 +328,7 @@ async def test_query_database_returns_chart_block_in_blocks(
     assert result.meta == {
         "sqllens/blocks": [_CHART_BLOCK],
         "sqllens/conversation": {"conversation_id": "c-1"},
+        "sqllens/model_info": _model_info(cfg),
     }
     # The retired flat sqllens/chart key must NOT be present.
     assert "sqllens/chart" not in result.meta
@@ -345,6 +366,7 @@ async def test_query_database_attaches_ordered_multi_block_payload(
         "sqllens/blocks": blocks,  # ordered, with the chart-text-table sequence preserved
         "sqllens/query": query_info,
         "sqllens/conversation": {"conversation_id": "c-1"},
+        "sqllens/model_info": _model_info(cfg),
     }
     # Order preservation: the type sequence in _meta must match the source.
     assert [b["type"] for b in result.meta["sqllens/blocks"]] == [
@@ -395,6 +417,7 @@ async def test_query_database_meta_carries_agent_trace_when_present(
     assert result.meta == {
         "sqllens/agent_trace": _AGENT_TRACE,
         "sqllens/conversation": {"conversation_id": "c-1"},
+        "sqllens/model_info": _model_info(cfg),
     }
 
 
@@ -459,3 +482,110 @@ async def test_query_database_reraises_error_without_trace(
 
     with pytest.raises(AgentRunError, match="SQL execution error: boom"):
         await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
+
+
+async def test_query_database_meta_carries_configured_model_info(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The configured model id and reasoning effort ride every successful
+    # answer under sqllens/model_info, asserted by equality against the values
+    # this server was configured with (not against the impl's own expression).
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        llm=LLMConfig(
+            api_key=SecretStr("sk-ant-test"),
+            model="claude-opus-4-1-20250805",
+            effort="high",
+        ),
+    )
+    mcp = build_server(cfg)
+
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
+        return "answer", [], None, None, None
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
+
+    result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
+    assert isinstance(result, CallToolResult)
+    assert result.meta["sqllens/model_info"] == {
+        "model": "claude-opus-4-1-20250805",
+        "reasoning_effort": "high",
+    }
+    # The channel carries those two fields and no others.
+    assert set(result.meta["sqllens/model_info"]) == {"model", "reasoning_effort"}
+    # Regression: the conversation channel still rides alongside the new one.
+    assert result.meta["sqllens/conversation"] == {"conversation_id": "c-1"}
+
+
+async def test_query_database_model_info_reports_null_effort_when_unconfigured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No effort configured (the default deployment): reasoning_effort is
+    # present with the value None — which serializes to JSON null — rather
+    # than being omitted from the channel.
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+    assert cfg.llm.effort is None
+
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
+        return "answer", [], None, None, None
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
+
+    result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
+    assert isinstance(result, CallToolResult)
+    model_info = result.meta["sqllens/model_info"]
+    assert "reasoning_effort" in model_info
+    assert model_info["reasoning_effort"] is None
+    assert model_info["model"] == cfg.llm.model
+
+
+async def test_query_database_model_info_present_when_show_details_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The channel is gated by no flag: it rides the result with show_details
+    # off, the setting that suppresses the sqllens/query and
+    # sqllens/agent_trace channels.
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma",
+        agent=AgentRuntimeConfig(show_details=False),
+    )
+    mcp = build_server(cfg)
+
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
+        return "answer", [], None, None, None
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
+
+    result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
+    assert isinstance(result, CallToolResult)
+    assert result.meta["sqllens/model_info"] == _model_info(cfg)
+    assert "sqllens/query" not in result.meta
+    assert "sqllens/agent_trace" not in result.meta
+
+
+async def test_query_database_error_result_carries_no_model_info(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The trace-carrying isError result is built by _trace_error_result, which
+    # attaches only the conversation and trace channels — no model_info.
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
+        raise AgentRunError("SQL execution error: boom", agent_trace=_AGENT_TRACE)
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
+
+    result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    assert "sqllens/model_info" not in result.meta

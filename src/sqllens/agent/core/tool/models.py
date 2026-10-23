@@ -23,6 +23,13 @@ class ToolCall(BaseModel):
     id: str = Field(description="Unique identifier for this tool call")
     name: str = Field(description="Name of the tool to execute")
     arguments: Dict[str, Any] = Field(description="Raw arguments from LLM")
+    truncated: bool = Field(
+        default=False,
+        description=(
+            "True when the LLM response hit its output-token limit before this "
+            "call's arguments were complete; the registry refuses to run it."
+        ),
+    )
 
 
 class ToolContext(BaseModel):

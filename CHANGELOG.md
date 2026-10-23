@@ -5,6 +5,15 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Added
+- `llm.temperature` (`SQLLENS_LLM__TEMPERATURE`, 0–2) and `llm.effort`
+  (`SQLLENS_LLM__EFFORT`, `low|medium|high|xhigh|max`). Both are unset by
+  default, and SQL Lens sends nothing for a setting that is unset. A set
+  effort is sent as Anthropic `output_config.effort`. SQL Lens no longer
+  sends a hard-coded temperature of 0.7, which models that reject any
+  temperature answered with a 400. (#262)
+- `llm.max_tokens` (`SQLLENS_LLM__MAX_TOKENS`, default `8192`, range 1–128000):
+  output-token cap for every agent LLM call, wired into `AgentConfig.max_tokens`
+  by `build_agent`. Previously unset, so each call fell back to 512 tokens. (#247)
 - Self-driving MCP App widget at `ui://sqllens/memory-admin.html` that
   renders the memory-administration surface (Browse / Import / Stats /
   Danger zone) and drives the seven backing tools (`list_memories`,
@@ -42,6 +51,37 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
 - Renamed `examples/mcp-clients/claude_desktop.json` →
   `claude_desktop_http.json` to disambiguate the HTTP and stdio
   transports now that both example shapes ship.
+- `query_database` table blocks now carry an additive `column_labels`
+  list of humanized display headers (`_humanize_label` in `_format.py`):
+  a lowercase snake_case identifier such as `customer_id` becomes
+  "Customer ID" and `total_amount_usd` becomes "Total Amount USD",
+  while any already reader-friendly name (a SQL alias, `count(*)`, …) is
+  passed through unchanged. The raw `columns` keys are untouched, so the
+  widget's typed sort, the `column_types` lookup, and CSV export keep
+  matching on the original names. Both the interactive table widget and
+  the Markdown fallback (and the one-row small-result text path) render
+  the humanized header, falling back to the raw name when the field is
+  absent. Chart axis titles are defaulted the same way server-side
+  (`_compute_chart_payload` → `_default_axis_label`): an axis whose field
+  is snake_case and whose label the LLM left empty shows the humanized
+  field, while a label the LLM set on purpose is preserved. Chart legend
+  and series names are unchanged. (#259)
+
+### Fixed
+- Agent looped on tool calls cut off by the output-token cap until
+  `max_tool_iterations` (#247). A `tool_use` block in a `max_tokens` response is
+  now marked `truncated` and refused by `ToolRegistry.execute` with an
+  explanatory error instead of running; missing tool input is parsed as `{}`
+  instead of the `{"_raw": None}` placeholder the model kept copying; and the
+  agent stops after 3 consecutive rounds of invalid or truncated tool calls,
+  reported as an error.
+- The `query_database` result widget painted text blocks as raw Markdown
+  source (`#`, `**`, `-` visible in the host). Text blocks are now rendered
+  with a vendored markdown-it 14.3.2 (`src/sqllens/ui/vendor/markdown-it.min.js`,
+  inlined like the other bundles) configured with `html: false` (raw HTML
+  escaped), its default link validation (`javascript:` / `vbscript:` / `file:`
+  / `data:` targets stay literal) and image syntax disabled (no remote
+  fetches), so agent output cannot inject markup into the widget.
 
 ## [0.0.2] - 2026-04-28
 

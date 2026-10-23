@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 from collections.abc import Iterable
 from datetime import datetime
 from decimal import Decimal
@@ -41,6 +42,14 @@ _MAX_ROWS_RENDERED = 500
 # the only thing that actually breaks rendering, so size — not row count — is
 # the cap. Measured against ``json.dumps(payload, separators=(",", ":"))``.
 _MAX_TABLE_PAYLOAD_BYTES = 130 * 1024
+# A one-row result with at most this many columns renders as a text block (a
+# ``**column:** value`` line, or a one-row Markdown table for 2+ columns)
+# instead of a table block (issue #257).
+_SMALL_RESULT_MAX_COLUMNS = 4
+# Characters backslash-escaped in those lines so a database value cannot open
+# Markdown emphasis, code spans, bracketed links, tables or raw HTML. Bare URLs
+# are not neutralized: a renderer with autolinking may still link them.
+_SMALL_RESULT_ESCAPED_CHARS = frozenset("\\`*_[]<>~|&")
 
 # Same budget, same reason, for one chart block. Aliased to the table budget so
 # the two cannot drift apart — both blobs share one sandboxed-iframe rendering
@@ -58,6 +67,45 @@ _MAX_TRACE_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES
 # in-budget blocks still cannot blow the iframe ceiling. Set well above the
 # per-block cap so a handful of full-budget blocks fit comfortably.
 _MAX_BLOCKS_TOTAL_BYTES = 512 * 1024
+
+
+# Words humanization fully upper-cases instead of title-casing. The issue's
+# acceptance criteria fix a minimum set (id/url/api/db/sql/ip/uuid); ``usd`` is
+# added because the same issue's worked example requires
+# ``total_amount_usd`` → "Total Amount USD". Compared lowercase, so a word
+# matches regardless of the identifier's (always-lowercase) casing.
+_ACRONYMS = frozenset({"id", "url", "api", "db", "sql", "ip", "uuid", "usd"})
+
+# A lowercase snake_case identifier: only lowercase ASCII letters and digits,
+# single underscores *between* words, no leading/trailing/doubled underscore.
+# Anything else (an uppercase letter, a space, punctuation, a non-ASCII
+# character, `_id`, `id_`, `a__b`) fails to match and is returned verbatim.
+_SNAKE_CASE_IDENTIFIER = re.compile(r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
+
+
+def _humanize_label(name: str) -> str:
+    """Turn a lowercase snake_case identifier into a readable display label.
+
+    ``customer_id`` → "Customer ID", ``total_amount_usd`` → "Total Amount USD",
+    ``q1_2024`` → "Q1 2024". Splits on underscores, capitalizes each word, and
+    fully upper-cases a word in :data:`_ACRONYMS`.
+
+    Any string that is *not* a lowercase snake_case identifier — one already
+    carrying a space or an uppercase letter (a SQL alias like ``Total Revenue``
+    or a deliberately-set chart label), or any other shape (``count(*)``, a
+    non-ASCII name, a leading/trailing/doubled underscore) — is returned
+    unchanged and never re-processed. That passthrough makes the transform
+    idempotent: a humanized label either contains a space or an uppercase
+    letter (so the passthrough branch returns it as-is) or maps to itself
+    under the transform (e.g. a pure-digit word like ``2024``), so feeding
+    it back returns it unchanged.
+    """
+    if not _SNAKE_CASE_IDENTIFIER.match(name):
+        return name
+    words = name.split("_")
+    return " ".join(
+        word.upper() if word in _ACRONYMS else word.capitalize() for word in words
+    )
 
 
 def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
@@ -209,7 +257,12 @@ def components_to_blocks(
     the stream:
 
     - Every ``DATAFRAME`` becomes a ``{"type": "table", ...table payload...}``
-      block at its stream position.
+      block at its stream position — except a result whose table payload holds
+      exactly one row, at most :data:`_SMALL_RESULT_MAX_COLUMNS` columns and
+      nothing truncated, which becomes a ``{"type": "text", "text": ...}``
+      block instead — one ``**column:** value`` line for a single column,
+      otherwise a one-row Markdown table
+      (:func:`_small_result_to_markdown`).
     - Every ``CHART`` becomes a ``{"type": "chart", ...chart payload...}``
       block at its stream position.
     - Every **answer-marked** ``TEXT`` (deliberate prose: ``EmitTextTool``
@@ -294,9 +347,10 @@ def components_to_blocks(
     # pins; the over-budget / payload-fail nuance is pinned by
     # ``test_query_info_row_count_recovered_from_raw_rows_on_payload_reject``.
     last_sql_row_count: int | None = None
-    # Candidate blocks. Text blocks carry a private "_is_answer" tag we strip
-    # before emitting — never expose internal bookkeeping fields in the public
-    # ``sqllens/blocks`` wire shape.
+    # Candidate blocks. Prose text blocks carry a private "_is_answer" tag and
+    # one-row results use the private "result_text" type; both are normalized
+    # to the public ``text`` shape before emitting — never expose internal
+    # bookkeeping in the public ``sqllens/blocks`` wire shape.
     candidates: list[dict] = []
     any_marked_text = False
 
@@ -319,7 +373,11 @@ def components_to_blocks(
         elif ctype == ComponentType.DATAFRAME:
             payload = _build_table_payload(rich)
             if payload is not None:
-                candidates.append({"type": "table", **payload})
+                small = _small_result_to_markdown(payload)
+                if small is not None:
+                    candidates.append({"type": "result_text", "text": small})
+                else:
+                    candidates.append({"type": "table", **payload})
                 # The size-capped payload may have dropped a tail; row_count
                 # is the kept prefix and truncated the dropped tail, so the
                 # sum is the TRUE row count the SQL produced.
@@ -432,6 +490,10 @@ def components_to_blocks(
                 blocks.append({"type": "text", "text": cand["text"]})
             elif not any_marked_text and i == last_unmarked_text_idx:
                 blocks.append({"type": "text", "text": cand["text"]})
+        elif cand["type"] == "result_text":
+            # A one-row query result is data, not prose: it is emitted as a
+            # public text block, never filtered by the answer marker.
+            blocks.append({"type": "text", "text": cand["text"]})
         else:
             blocks.append(cand)
     # The agent's production terminal-answer / iteration-limit-warning yields
@@ -896,8 +958,16 @@ def _compute_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     column_types = _infer_column_types(str_columns, coerced_rows)
     column_types.update(_safe_column_types(rich))
 
+    # Additive, display-only labels parallel to ``columns`` (issue #259). The
+    # raw ``columns`` strings stay the payload's identity keys — ``column_types``
+    # and the widget's typed sort both key off them — so humanization NEVER
+    # rewrites ``columns``; it rides alongside as a separate list the renderers
+    # read for header text and fall back off when it is absent.
+    column_labels = [_humanize_label(c) for c in str_columns]
+
     payload: dict = {
         "columns": str_columns,
+        "column_labels": column_labels,
         "rows": coerced_rows,
         "column_types": column_types,
         "row_count": len(coerced_rows),
@@ -919,7 +989,13 @@ def _compute_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     lo, hi = 0, total
     while lo < hi:
         mid = (lo + hi + 1) // 2
+        # Measure the candidate with the row_count/truncated values it will
+        # ACTUALLY carry — their digit widths change with the kept-row count, so
+        # measuring the pre-trim shape (row_count=total, truncated=0) could let
+        # the returned block sit a couple of bytes over the ceiling.
         payload["rows"] = coerced_rows[:mid]
+        payload["row_count"] = mid
+        payload["truncated"] = total - mid
         if _serialized_len(payload) <= _MAX_TABLE_PAYLOAD_BYTES:
             lo = mid
         else:
@@ -978,6 +1054,25 @@ def _build_chart_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
         return None
 
 
+def _default_axis_label(axis: object) -> object:
+    # Fill a chart axis's display label from its humanized field name only when
+    # the producer (the LLM via emit_chart) left the label empty (issue #259) —
+    # a label the LLM set on purpose is preserved exactly. Returns the axis
+    # unchanged when it is not a well-formed axis dict, or when the field is not
+    # a non-empty string. The humanizer is a passthrough for a non-snake_case
+    # field, so this matches the widget's existing fallback-to-raw-field while
+    # deriving the value server-side (consistent across every MCP client);
+    # idempotent, since a filled snake_case label is already humanized.
+    if not isinstance(axis, dict):
+        return axis
+    field = axis.get("field")
+    label = axis.get("label")
+    label_is_empty = label is None or (isinstance(label, str) and not label.strip())
+    if isinstance(field, str) and field and label_is_empty:
+        return {**axis, "label": _humanize_label(field)}
+    return axis
+
+
 def _compute_chart_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     # Returns the chart payload WITHOUT the ``"type": "chart"`` discriminator —
     # the wrapping is done by ``components_to_blocks``. The per-block size cap
@@ -1014,8 +1109,8 @@ def _compute_chart_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     payload: dict = {
         "chart_type": spec.get("chart_type"),
         "title": spec.get("title"),
-        "x": spec.get("x"),
-        "y": spec.get("y"),
+        "x": _default_axis_label(spec.get("x")),
+        "y": _default_axis_label(spec.get("y")),
         "series": spec.get("series"),
         "data": coerced_rows,
         "row_count": total,
@@ -1170,6 +1265,61 @@ def _serialize_blocks_to_markdown(blocks: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
+def _escape_small_result_text(value: str) -> str:
+    """Escape Markdown syntax and flatten line breaks in a column name or value."""
+    value = value.replace("\r", " ").replace("\n", " ")
+    return "".join(
+        "\\" + ch if ch in _SMALL_RESULT_ESCAPED_CHARS else ch for ch in value
+    )
+
+
+def _small_result_to_markdown(payload: dict) -> str | None:
+    """Render a one-row table payload as compact Markdown for a text block.
+
+    Returns ``None`` when the payload is not a small result (more or fewer than
+    one row, zero columns or more than :data:`_SMALL_RESULT_MAX_COLUMNS`
+    columns, or rows dropped by the size budget) — the caller then keeps the
+    table block. One column renders as a single ``**column:** value`` line; two
+    or more as a one-row Markdown table in column order. Values are the
+    payload's already-coerced cell strings, escaped so ``|`` cannot split a cell.
+    """
+    columns = payload.get("columns") or []
+    rows = payload.get("rows") or []
+    if (
+        len(rows) != 1
+        or payload.get("truncated", 0) != 0
+        or not 1 <= len(columns) <= _SMALL_RESULT_MAX_COLUMNS
+    ):
+        return None
+    labels = _display_labels(payload, columns)
+    names = [_escape_small_result_text(str(col)) for col in labels]
+    values = [_escape_small_result_text(val) for val in rows[0]]
+    if len(names) == 1:
+        return f"**{names[0]}:** {values[0]}"
+    return "\n".join(
+        [
+            "| " + " | ".join(names) + " |",
+            "|" + " --- |" * len(names),
+            "| " + " | ".join(values) + " |",
+        ]
+    )
+
+
+def _display_labels(payload: dict, columns: list) -> list:
+    """Return the humanized display labels for a table payload's header.
+
+    Reads the additive ``column_labels`` (issue #259) when it is a list of the
+    same length as ``columns``; otherwise falls back to the raw ``columns`` so a
+    payload that predates — or omits — the field still renders. Shared by the
+    Markdown table serializer and the one-row small-result path so the two
+    surfaces cannot drift in how they resolve the label.
+    """
+    labels = payload.get("column_labels")
+    if isinstance(labels, list) and len(labels) == len(columns):
+        return labels
+    return columns
+
+
 def _table_block_to_markdown(block: dict) -> str:
     """Render one table block as a Markdown table (mirrors :func:`_render_dataframe`)."""
     columns = block.get("columns") or []
@@ -1177,7 +1327,8 @@ def _table_block_to_markdown(block: dict) -> str:
     if not columns and not rows:
         return ""
 
-    header = "| " + " | ".join(str(c) for c in columns) + " |"
+    labels = _display_labels(block, columns)
+    header = "| " + " | ".join(str(c) for c in labels) + " |"
     separator = "|" + "|".join(["---"] * len(columns)) + "|"
     body_rows = []
     for row in rows[:_MAX_ROWS_RENDERED]:
@@ -1200,13 +1351,19 @@ def _render_dataframe(rich) -> str:  # type: ignore[no-untyped-def]
     calling this directly. The production path goes through
     :func:`components_to_blocks` → :func:`_serialize_blocks_to_markdown`, which
     invokes :func:`_table_block_to_markdown` — the same function this helper
-    delegates to, so the two paths emit byte-identical Markdown.
+    delegates to, so the two paths emit byte-identical Markdown for any result
+    the production path keeps as an untruncated table (this helper applies no
+    size budget). A one-row result of at most
+    :data:`_SMALL_RESULT_MAX_COLUMNS` columns takes the text-block path there
+    instead, so this helper's table no longer matches production for it.
     """
     columns, rows = _columns_and_rows(rich)
     if not columns and not rows:
         return ""
+    str_columns = [_coerce_cell(c) for c in columns]
     block = {
-        "columns": [_coerce_cell(c) for c in columns],
+        "columns": str_columns,
+        "column_labels": [_humanize_label(c) for c in str_columns],
         "rows": [[_coerce_cell(row.get(c, "")) for c in columns] for row in rows],
         "row_count": len(rows),
         "truncated": 0,

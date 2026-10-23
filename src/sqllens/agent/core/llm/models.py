@@ -4,12 +4,15 @@ LLM domain models.
 This module contains data models for LLM communication.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
 from ..tool.models import ToolCall
 from ..user.models import User
+
+# Anthropic `output_config.effort` levels.
+EffortLevel = Literal["low", "medium", "high", "xhigh", "max"]
 
 
 class LlmMessage(BaseModel):
@@ -30,7 +33,9 @@ class LlmRequest(BaseModel):
     )  # Will be ToolSchema but avoiding circular import
     user: User = Field(description="User making the request")
     stream: bool = Field(default=False, description="Whether to stream response")
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    # None omits the key: some models (Claude Opus 5.5) reject any temperature.
+    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+    effort: Optional[EffortLevel] = Field(default=None)
     max_tokens: Optional[int] = Field(default=None, gt=0)
     system_prompt: Optional[str] = Field(
         default=None, description="System prompt for the LLM"

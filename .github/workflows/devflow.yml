@@ -1,0 +1,2625 @@
+name: PRFlow
+
+# Bare review, review-and-fix and pr-description comments launch a resolved agent-mode prompt.
+# @claude belongs to Anthropic's stock listener; implement uses devflow-implement.yml.
+# The automatic PR-triggered review tier is retired; manual comments remain supported.
+# Setup: https://prflow.ai/docs/runs/cloud/setup
+
+on:
+  # Conversation comments resolve from the trusted default branch.
+  # Do not add PR-head review events: they would expose config and helper execution to PR content.
+  issue_comment:
+    types: [created]
+
+defaults:
+  run:
+    shell: bash
+
+# Read-only floor; each writer job declares its own additional permissions.
+permissions:
+  contents: read
+
+jobs:
+  config:
+    if: |
+      github.event_name == 'issue_comment' && (contains(github.event.comment.body, '/prflow:review') || contains(github.event.comment.body, '/devflow:review') || contains(github.event.comment.body, '/prflow:pr-description') || contains(github.event.comment.body, '/devflow:pr-description')) && !contains(github.event.comment.body, '@claude') && !contains(github.event.comment.body, '/prflow:implement') && !contains(github.event.comment.body, '/devflow:implement')
+    runs-on: ${{ vars.DEVFLOW_LIGHT_RUNNER && (startsWith(vars.DEVFLOW_LIGHT_RUNNER, '[') && fromJSON(vars.DEVFLOW_LIGHT_RUNNER) || format(vars.DEVFLOW_LIGHT_RUNNER, github.run_id)) || (vars.DEVFLOW_RUNNER && (startsWith(vars.DEVFLOW_RUNNER, '[') && fromJSON(vars.DEVFLOW_RUNNER) || format(vars.DEVFLOW_RUNNER, github.run_id)) || 'ubuntu-latest') }}
+    outputs:
+      enabled: ${{ steps.extract.outputs.enabled }}
+      base_branch: ${{ steps.extract.outputs.base_branch }}
+      claude_model: ${{ steps.extract.outputs.claude_model }}
+      allowed_bots: ${{ steps.extract.outputs.allowed_bots }}
+      effort: ${{ steps.extract.outputs.effort }}
+      allowed_tools_extra: ${{ steps.extract.outputs.allowed_tools_extra }}
+      allowed_users: ${{ steps.extract.outputs.allowed_users }}
+      prflow_version: ${{ steps.extract.outputs.prflow_version }}
+      prflow_repo: ${{ steps.extract.outputs.prflow_repo }}
+      # An empty executable path leaves the action to install Claude Code.
+      claude_code_executable: ${{ steps.extract.outputs.claude_code_executable }}
+      # Forward trusted default-branch config; git-env pins are post-merge-only.
+      config_json: ${{ steps.extract.outputs.json }}
+    steps:
+      # Pin the default branch explicitly; an empty ref would fall back to the event ref.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - id: extract
+        uses: ./.github/actions/read-project-config
+        with:
+          command: command
+      - name: Verify config projection compatibility
+        env:
+          PROJECTION_CONTRACT: ${{ steps.extract.outputs.projection_contract }}
+        run: |
+          if [ "$PROJECTION_CONTRACT" != "1" ]; then
+            echo "::error::The installed read-project-config action does not support trigger-time projection. Run install.sh --apply; if it leaves a .github/actions/read-project-config.prflow-new directory, merge that directory into the installed action."
+            exit 1
+          fi
+
+  # Deduplicate review-only requests for the same head; failures allow the requested review.
+  # The seeded-head marker identifies in-flight reviews; Reviewed HEAD records finished reviews.
+  # Retain legacy automatic-review signals for consumers that still have that retired tier.
+  review_dedupe:
+    needs: config
+    if: ${{ needs.config.outputs.enabled == 'true' }}
+    runs-on: ${{ vars.DEVFLOW_LIGHT_RUNNER && (startsWith(vars.DEVFLOW_LIGHT_RUNNER, '[') && fromJSON(vars.DEVFLOW_LIGHT_RUNNER) || format(vars.DEVFLOW_LIGHT_RUNNER, github.run_id)) || (vars.DEVFLOW_RUNNER && (startsWith(vars.DEVFLOW_RUNNER, '[') && fromJSON(vars.DEVFLOW_RUNNER) || format(vars.DEVFLOW_RUNNER, github.run_id)) || 'ubuntu-latest') }}
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: read
+      actions: read
+    outputs:
+      suppress: ${{ steps.guard.outputs.suppress }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      # Use the same vendored command detector as the gate.
+      - uses: ./.github/actions/vendor-plugin
+        with:
+          ref: ${{ needs.config.outputs.prflow_version }}
+          repo: ${{ needs.config.outputs.prflow_repo }}
+          token: ${{ secrets.PRFLOW_REPO_TOKEN || github.token }}
+      - id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BODY: ${{ github.event.comment.body }}
+          PR: ${{ github.event.issue.number || github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          emit() { echo "suppress=$1" >> "$GITHUB_OUTPUT"; }
+          emit false  # fail-OPEN default: manual review proceeds unless we prove auto is in-flight
+
+          # Route body detection through the SAME shared standalone-command
+          # detector the resolver uses (vendored above), so a quoted/documented
+          # /devflow:review mention neither dedupes nor posts a suppression
+          # notice, and the trigger gate and this matcher cannot drift (#321).
+          # The detector is markdown-aware and fires only on a command that is
+          # the sole content of its own line; it emits `command=<token>` on
+          # stdout. First-match-wins is preserved by the detector's
+          # most-specific-first ordering (review-and-fix outranks review).
+          DETECTOR=.prflow/vendor/prflow/scripts/detect-standalone-command.sh
+          if [ ! -x "$DETECTOR" ]; then
+            # Fail OPEN (the job's contract): a missing detector must never
+            # suppress a manual review. Surface it so a vendoring miss is
+            # distinguishable from "not a review request".
+            echo "::warning::devflow detector not found at $DETECTOR — has install.sh vendored the plugin? Fail-open (manual review proceeds)."
+            exit 0
+          fi
+          # Verify the OUTCOME, not just the -x precondition: a present-but-broken
+          # detector (corrupt/partial vendored copy, awk error) or a missing sed
+          # exits non-zero, and under `set -euo pipefail` that would abort this step
+          # and FAIL the job — which then SKIPS the downstream `command` job (it
+          # `needs: review_dedupe` with no always()), silently swallowing the manual
+          # review. That is the fail-CLOSED direction this job's contract forbids, so
+          # absorb any run failure into the same fail-OPEN exit the -x branch uses (#321).
+          if ! CMD="$(printf '%s' "$BODY" | bash "$DETECTOR" | sed -n 's/^command=//p')"; then
+            echo "::warning::devflow detector at $DETECTOR failed to run (broken vendored copy, or missing sed/bash); fail-open (manual review proceeds)."
+            exit 0
+          fi
+          case "$CMD" in
+            /prflow:review-and-fix)
+              echo "::notice::/prflow:review-and-fix has no auto path; not deduping."
+              exit 0 ;;
+            /prflow:review) : ;;
+            *)
+              echo "::notice::Not a standalone /prflow:review request; nothing to dedupe."
+              exit 0 ;;
+          esac
+
+          if [ -z "${PR:-}" ] || [ "$PR" = "null" ]; then
+            echo "::notice::No PR number on this event; fail-open (manual review proceeds)."
+            exit 0
+          fi
+
+          # HEAD/BRANCH resolution adopts Signals 1/2's fail-open-with-::warning::
+          # pattern below, but additionally captures the `gh` failure's stderr
+          # (to a separate file so a partial-stdout-plus-error response can't
+          # pollute the resolved value) and surfaces it in the warning — Signals
+          # 1/2 themselves discard stderr (`2>/dev/null`). A success-but-empty/
+          # null result stays the existing ::notice:: fail-open path. Both arms
+          # still fail open (exit 0 / IR=0).
+          # mktemp itself is guarded (falls back to /dev/null, matching
+          # devflow-implement.yml's stall-backstop precedent) so a mktemp failure
+          # can never abort this step via set -e and defeat the fail-open contract;
+          # captured stderr is newline-collapsed before embedding so a multi-line
+          # gh error can't break the ::warning:: annotation's single-line parsing.
+          HEAD_ERR="$(mktemp 2>/dev/null || echo /dev/null)"
+          if ! HEAD=$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid 2>"$HEAD_ERR"); then
+            echo "::warning::Could not resolve PR #$PR HEAD (gh pr view failed: $(tr '\n' ' ' < "$HEAD_ERR")); fail-open (manual review proceeds)."
+            [ "$HEAD_ERR" = /dev/null ] || rm -f "$HEAD_ERR"
+            exit 0
+          fi
+          [ "$HEAD_ERR" = /dev/null ] || rm -f "$HEAD_ERR"
+          BRANCH_ERR="$(mktemp 2>/dev/null || echo /dev/null)"
+          if ! BRANCH=$(gh pr view "$PR" --repo "$REPO" --json headRefName --jq .headRefName 2>"$BRANCH_ERR"); then
+            echo "::warning::Could not resolve PR #$PR BRANCH (gh pr view failed: $(tr '\n' ' ' < "$BRANCH_ERR")); treating as unresolved (fail-open — Signal 2 treated as 0)."
+            BRANCH=""
+          fi
+          [ "$BRANCH_ERR" = /dev/null ] || rm -f "$BRANCH_ERR"
+          if [ -z "$HEAD" ] || [ "$HEAD" = "null" ]; then
+            echo "::notice::Could not resolve PR #$PR HEAD; fail-open (manual review proceeds)."
+            exit 0
+          fi
+
+          # Signal 1: an in-flight review check on THIS exact HEAD (the current
+          # `PRFlow Review` name, or the superseded `Devflow Review` on an older head).
+          # A query failure stays fail-open (IC=0 → not suppressed) but is
+          # surfaced as a ::warning:: so a permanently-failing signal is
+          # distinguishable from "no auto run existed".
+          if RAW_IC=$(gh api --paginate "repos/$REPO/commits/$HEAD/check-runs" \
+                 --jq '.check_runs[] | select((.name=="PRFlow Review" or .name=="Devflow Review") and (.status=="queued" or .status=="in_progress")) | .id' \
+                 2>/dev/null); then
+            IC=$(printf '%s' "$RAW_IC" | grep -c . || true)
+          else
+            echo "::warning::Signal 1 (check-runs) query failed for $HEAD; treating as 0 (fail-open — manual review may proceed)."
+            IC=0
+          fi
+          [[ "$IC" =~ ^[0-9]+$ ]] || IC=0
+
+          # Signal 2: a queued/in_progress devflow-review.yml run on the
+          # PR's branch. Issue #936 withheld that workflow, so in this tree the
+          # query resolves nothing and Signal 2 never suppresses (an
+          # unresolvable query takes the fail-open arm below). It still fires for
+          # a consumer whose installed copy predates the withholding, where it
+          # covers the sub-second auto-vs-comment race in which the auto run has
+          # started but create_check has not POSTed the check yet (an in-flight
+          # auto run on the same branch is, by that tier's own
+          # first-ready/re-review design, reviewing the latest HEAD).
+          IR=0
+          if [ -n "$BRANCH" ] && [ "$BRANCH" != "null" ]; then
+            if ! IR=$(gh run list --repo "$REPO" \
+                   --workflow devflow-review.yml \
+                   --branch "$BRANCH" \
+                   --json status \
+                   --jq '[.[] | select(.status=="queued" or .status=="in_progress")] | length' \
+                   2>/dev/null); then
+              echo "::warning::Signal 2 (run-list) query failed for branch $BRANCH; treating as 0 (fail-open)."
+              IR=0
+            fi
+          fi
+          [[ "$IR" =~ ^[0-9]+$ ]] || IR=0
+
+          # Signal 3 (Candidate C, issue #989): an IN-FLIGHT review of THIS PR,
+          # detected from the review engine's seeded live progress comment
+          # (`prflow:review-progress`, `🚀 Reviewing`, bot-authored, fresh). This
+          # is the signal that fires in THIS tree (Signals 1/2 target the withheld
+          # auto-review tier and only fire for a consumer whose installed copy
+          # predates the withholding). The branch-selecting decision lives in a
+          # bundled helper so the suite can drive each arm; it is invoked at its
+          # VENDORED path (a repo-relative `scripts/` path is rc 127 in every
+          # consumer checkout, and — this job failing OPEN — that breakage would be
+          # silent). The invocation is GUARDED so a non-zero exit routes to the
+          # fail-open arm (CC=false) instead of aborting this step under
+          # `set -euo pipefail` and skipping the downstream `command` job. The
+          # helper is self-contained (its own gh query + jq); it fails open on every
+          # degraded arm with its own ::warning:: breadcrumb, surfaced to the log
+          # here (its stderr is not captured). The deciding value is parsed from its
+          # stdout with bash builtins only (no tr/sed/grep for the decision).
+          # A /prflow:review carrying the review-backstop marker is a no-verdict
+          # auto-resume posted from inside a still-active run, and is NEVER
+          # suppressed — this OVERRIDES every signal (legacy included), so the
+          # resume always fires (issue #989). The helper applies this to its own
+          # Signal 3, but the short-circuit below skips the helper when a legacy
+          # signal already fired, so the override is applied HERE to IC/IR too.
+          # Marker literal coupled with the helper's BACKSTOP_MARKER and
+          # scripts/request-review-backstop.sh (pinned in lib/test/).
+          # BOTH marker spellings are matched (issue #1003): a resume comment
+          # posted before the rename carries the superseded one, and this arm
+          # fails OPEN in the wrong direction -- a miss lets ordinary dedupe
+          # SUPPRESS the auto-resume, so the dead review is never resumed.
+          case "$BODY" in
+            *"<!-- prflow:review-backstop"*|*"<!-- devflow:review-backstop"*)
+              echo "::notice::dedupe-review: triggering /prflow:review carries the review-backstop marker (a no-verdict auto-resume); not suppressing (all signals overridden)."
+              IC=0; IR=0 ;;
+          esac
+
+          # Signal 3 (Candidate C) is only consulted when neither legacy signal
+          # fired: whenever IC/IR already decide suppression, the helper's full
+          # paginated comments fetch + jq pass would be computed and discarded
+          # (efficiency), so short-circuit it.
+          CC=false
+          if [ "$IC" = "0" ] && [ "$IR" = "0" ]; then
+            CC_HELPER=.prflow/vendor/prflow/scripts/dedupe-review-command.sh
+            if [ ! -x "$CC_HELPER" ]; then
+              echo "::warning::dedupe-review helper not found/executable at $CC_HELPER (has install.sh/vendor-plugin vendored the plugin at the pinned prflow_version?); Candidate-C signal skipped (fail-open — manual review proceeds)."
+            elif ! CC_OUT="$(MODE=detect REPO="$REPO" PR="$PR" HEAD="$HEAD" RUN_ID="${GITHUB_RUN_ID:-}" TRIGGER_BODY="$BODY" bash "$CC_HELPER")"; then
+              echo "::warning::dedupe-review helper exited non-zero for PR #$PR; Candidate-C signal treated as 0 (fail-open)."
+              CC=false
+            else
+              # The helper writes exactly one `suppress=<bool>` line to stdout
+              # (breadcrumbs go to stderr, uncaptured, into the log). Parse it with
+              # a bash case — no tr/sed/grep for the deciding value.
+              case "$CC_OUT" in
+                *suppress=true*) CC=true ;;
+                *) CC=false ;;
+              esac
+            fi
+          fi
+
+          # Select the cause that decided suppression, in precedence order. The
+          # legacy check-run/workflow-run causes name the `PRFlow Review` check
+          # and its Re-run button (on the consumer where they fire those are the
+          # reader's real actions); the new in-flight-review cause names its own
+          # reason. The notice step below composes the text from this cause via the
+          # same helper.
+          CAUSE=""
+          if [ "$IC" != "0" ]; then
+            CAUSE=legacy-check-run
+          elif [ "$IR" != "0" ]; then
+            CAUSE=legacy-workflow-run
+          elif [ "$CC" = "true" ]; then
+            CAUSE=inflight-review
+          fi
+
+          if [ -n "$CAUSE" ]; then
+            emit true
+            # The user-facing suppression notice is posted by the dedicated
+            # step below (under the optional downscoped App token); this step
+            # keeps only the queries + decision on github.token.
+            echo "head=$HEAD" >> "$GITHUB_OUTPUT"
+            echo "cause=$CAUSE" >> "$GITHUB_OUTPUT"
+            echo "::notice::Suppressed manual /prflow:review for PR #$PR (cause=$CAUSE; in-flight check=$IC run=$IR inflight-review=$CC)."
+            exit 0
+          fi
+          echo "::notice::No in-flight auto review for PR #$PR HEAD $HEAD; manual review proceeds."
+
+      # Mint a downscoped notice token only when suppression needs a comment.
+      - name: Mint downscoped notice token (optional)
+        id: dedupe_app_token
+        if: ${{ vars.DEVFLOW_APP_ID != '' && steps.guard.outputs.suppress == 'true' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.DEVFLOW_APP_ID }}
+          private-key: ${{ secrets.DEVFLOW_APP_PRIVATE_KEY }}
+          permission-pull-requests: write
+
+      # Keep guard queries on github.token; post failures warn without changing suppression.
+      - name: Notice — manual review suppressed
+        if: ${{ steps.guard.outputs.suppress == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.dedupe_app_token.outputs.token || github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number || github.event.pull_request.number }}
+          HEAD: ${{ steps.guard.outputs.head }}
+          CAUSE: ${{ steps.guard.outputs.cause }}
+        run: |
+          set -euo pipefail
+          # CRITICAL: the body must contain NO PRFlow trigger phrase (mirrors
+          # the devflow-implement.yml duplicate-notice discipline). Under the
+          # App token this comment fires a real issue_comment event (unlike
+          # GITHUB_TOKEN comments, which GitHub suppresses), so a trigger
+          # substring here could re-enter the gate and loop.
+          #
+          # The notice TEXT is composed by the bundled helper (MODE=notice), not
+          # inline here: a grep over an inline `NOTE=` literal protects the literal,
+          # not the produced message, so the trigger-token guarantee is asserted
+          # against the helper's actual output. Invoked at the VENDORED path (rc 127
+          # in every consumer otherwise) and guarded (a non-zero exit or an absent
+          # helper skips the post rather than aborting under set -euo pipefail — the
+          # command was already suppressed, so a missing notice is cosmetic). The
+          # helper selects the text from CAUSE: the legacy causes name the
+          # `PRFlow Review` check + Re-run button, the in-flight-review cause names
+          # its own reason.
+          NOTICE_HELPER=.prflow/vendor/prflow/scripts/dedupe-review-command.sh
+          NOTE=""
+          if [ ! -x "$NOTICE_HELPER" ]; then
+            echo "::warning::dedupe-review helper not found/executable at $NOTICE_HELPER; skipping suppression notice for PR #$PR (the command was already suppressed)." >&2
+            exit 0
+          fi
+          # The helper writes exactly one `notice=<text>` line to stdout; strip the
+          # key prefix with parameter expansion (no heredoc — a heredoc terminator
+          # dedents inside a YAML `run: |` block).
+          if NOTE_OUT="$(MODE=notice CAUSE="$CAUSE" HEAD="$HEAD" bash "$NOTICE_HELPER")"; then
+            case "$NOTE_OUT" in
+              notice=*) NOTE="${NOTE_OUT#notice=}" ;;
+            esac
+          fi
+          if [ -z "$NOTE" ]; then
+            echo "::warning::dedupe-review: could not compose the suppression notice for PR #$PR (cause='$CAUSE'); skipping notice post (the command was already suppressed)." >&2
+            exit 0
+          fi
+          # REST (not `gh pr comment` porcelain): this step can run under the
+          # repo-scoped App installation token, and GraphQL-resolving porcelain
+          # fails silently under repo-scoped tokens (CLAUDE.md gotcha, #228). A
+          # PR is an issue for the comments endpoint.
+          if ! err="$(gh api --method POST "repos/$REPO/issues/$PR/comments" -f body="$NOTE" 2>&1 >/dev/null)"; then
+            echo "::warning::could not post review-suppressed notice on PR #$PR (continuing): ${err//$'\n'/ }" >&2
+          fi
+
+  # Authorize and resolve before agent mode starts.
+  # Keep both namespaces partitioned: exclude @claude and implement from this light-command path.
+  gate:
+    needs: config
+    if: ${{ needs.config.outputs.enabled == 'true' }}
+    runs-on: ${{ vars.DEVFLOW_LIGHT_RUNNER && (startsWith(vars.DEVFLOW_LIGHT_RUNNER, '[') && fromJSON(vars.DEVFLOW_LIGHT_RUNNER) || format(vars.DEVFLOW_LIGHT_RUNNER, github.run_id)) || (vars.DEVFLOW_RUNNER && (startsWith(vars.DEVFLOW_RUNNER, '[') && fromJSON(vars.DEVFLOW_RUNNER) || format(vars.DEVFLOW_RUNNER, github.run_id)) || 'ubuntu-latest') }}
+    permissions:
+      contents: read        # checkout the resolver; collaborator check uses GITHUB_TOKEN
+      issues: write         # react step: ack reaction on issue comments
+      pull-requests: write  # react step: ack reaction on PR review comments
+    outputs:
+      should_run: ${{ steps.resolve.outputs.should_run }}
+      command: ${{ steps.resolve.outputs.command }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: ./.github/actions/vendor-plugin
+        with:
+          ref: ${{ needs.config.outputs.prflow_version }}
+          repo: ${{ needs.config.outputs.prflow_repo }}
+          token: ${{ secrets.PRFLOW_REPO_TOKEN || github.token }}
+      - id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.event.sender.login }}
+          ALLOWED_BOTS: ${{ needs.config.outputs.allowed_bots }}
+          ALLOWED_USERS: ${{ needs.config.outputs.allowed_users }}
+          CONTEXT_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          # Pass only the real comment body through env, never interpolate it into shell.
+          TRIGGER_TEXT: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          # Vendored path: install.sh copies the plugin into .prflow/vendor/prflow/.
+          RESOLVER=.prflow/vendor/prflow/scripts/resolve-command-trigger.sh
+          if [ ! -x "$RESOLVER" ]; then
+            echo "::error::devflow resolver not found at $RESOLVER — has install.sh vendored the plugin into this repo? Skipping." >&2
+            { echo "should_run=false"; echo "command="; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          "$RESOLVER" >> "$GITHUB_OUTPUT"
+
+      # Downscope to reactions; a broken configured App fails the gate instead of changing identity.
+      - name: Mint downscoped reaction token (optional)
+        id: gate_app_token
+        if: ${{ vars.DEVFLOW_APP_ID != '' && steps.resolve.outputs.should_run == 'true' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.DEVFLOW_APP_ID }}
+          private-key: ${{ secrets.DEVFLOW_APP_PRIVATE_KEY }}
+          permission-issues: write
+          permission-pull-requests: write
+
+      # Acknowledge authorized triggers early; dedupe may later explain suppression in its own comment.
+      - name: Acknowledge trigger
+        if: ${{ steps.resolve.outputs.should_run == 'true' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.gate_app_token.outputs.token || github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        # Use bash so a vendored executable-bit loss does not prevent acknowledgement.
+        run: bash .prflow/vendor/prflow/scripts/react-to-trigger.sh
+
+  command:
+    needs: [config, review_dedupe, gate]
+    if: ${{ needs.gate.outputs.should_run == 'true' && needs.review_dedupe.outputs.suppress != 'true' }}
+    # Promote safe run-end facts for the separate finalizer.
+    # Runner death leaves these empty; execution-file paths cannot be recovered off-host.
+    outputs:
+      claude_outcome: ${{ steps.claude.outcome }}
+      engine_is_error: ${{ steps.engine.outputs.is_error }}
+      subtype: ${{ steps.diag.outputs.subtype }}
+      terminal_reason: ${{ steps.diag.outputs.terminal_reason }}
+      api_error_status: ${{ steps.diag.outputs.api_error_status }}
+      stop_reason: ${{ steps.diag.outputs.stop_reason }}
+      api_retry_error: ${{ steps.diag.outputs.api_retry_error }}
+      api_retry_status: ${{ steps.diag.outputs.api_retry_status }}
+      rate_limit_type: ${{ steps.diag.outputs.rate_limit_type }}
+      rate_limit_resets_at: ${{ steps.diag.outputs.rate_limit_resets_at }}
+      result_excerpt: ${{ steps.diag.outputs.result_excerpt }}
+    runs-on: ${{ startsWith(needs.gate.outputs.command, '/prflow:review ') && (vars.DEVFLOW_REVIEW_RUNNER && (github.event.issue.number || github.event.pull_request.number || !contains(vars.DEVFLOW_REVIEW_RUNNER, '{1}')) && (startsWith(vars.DEVFLOW_REVIEW_RUNNER, '[') && fromJSON(contains(vars.DEVFLOW_REVIEW_RUNNER, '{1}') && format(vars.DEVFLOW_REVIEW_RUNNER, github.run_id, (github.event.issue.number || github.event.pull_request.number)) || vars.DEVFLOW_REVIEW_RUNNER) || format(vars.DEVFLOW_REVIEW_RUNNER, github.run_id, (github.event.issue.number || github.event.pull_request.number))) || (vars.DEVFLOW_LIGHT_RUNNER && (github.event.issue.number || github.event.pull_request.number || !contains(vars.DEVFLOW_LIGHT_RUNNER, '{1}')) && (startsWith(vars.DEVFLOW_LIGHT_RUNNER, '[') && fromJSON(contains(vars.DEVFLOW_LIGHT_RUNNER, '{1}') && format(vars.DEVFLOW_LIGHT_RUNNER, github.run_id, (github.event.issue.number || github.event.pull_request.number)) || vars.DEVFLOW_LIGHT_RUNNER) || format(vars.DEVFLOW_LIGHT_RUNNER, github.run_id, (github.event.issue.number || github.event.pull_request.number))) || (vars.DEVFLOW_RUNNER && (github.event.issue.number || github.event.pull_request.number || !contains(vars.DEVFLOW_RUNNER, '{1}')) && (startsWith(vars.DEVFLOW_RUNNER, '[') && fromJSON(contains(vars.DEVFLOW_RUNNER, '{1}') && format(vars.DEVFLOW_RUNNER, github.run_id, (github.event.issue.number || github.event.pull_request.number)) || vars.DEVFLOW_RUNNER) || format(vars.DEVFLOW_RUNNER, github.run_id, (github.event.issue.number || github.event.pull_request.number))) || 'ubuntu-latest'))) || (vars.DEVFLOW_RUNNER && (github.event.issue.number || github.event.pull_request.number || !contains(vars.DEVFLOW_RUNNER, '{1}')) && (startsWith(vars.DEVFLOW_RUNNER, '[') && fromJSON(contains(vars.DEVFLOW_RUNNER, '{1}') && format(vars.DEVFLOW_RUNNER, github.run_id, (github.event.issue.number || github.event.pull_request.number)) || vars.DEVFLOW_RUNNER) || format(vars.DEVFLOW_RUNNER, github.run_id, (github.event.issue.number || github.event.pull_request.number))) || 'ubuntu-latest') }}
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: write # no step in this job is known to need the write scope; superset still lets Claude read CI results on PRs
+      # The grounding block needs check-runs reads for CI facts.
+      checks: read
+    env:
+      # Job scope authorizes telemetry persistence from agent and post-agent subprocesses.
+      DEVFLOW_TELEMETRY_PUSH: '1'
+      # Share this permission set between the reviewer mint and refresher.
+      # Never empty a key: the mint drops empty inputs. New keys also need matching permission-* inputs.
+      DEVFLOW_REVIEWER_PERMISSIONS: '{"contents":"read","issues":"read","pull-requests":"write","actions":"read"}'
+      # Materialize every extension reachable by the dispatched commands from trusted base refs.
+      # Keep receiving-code-review while consumers need the fix rename read-through.
+      # A missing name produces an empty extension, so the closure drift guard compares reachable names.
+      DEVFLOW_PROTECTED_PROMPT_EXTENSIONS: "pr-description fix receiving-code-review requesting-code-review review review-and-fix"
+    steps:
+      # Writer commands use the primary App; review-only uses its separate reviewer identity.
+      # Mint before checkout so workflow-file pushes use the App credential.
+      # Unconfigured Apps fall back to GITHUB_TOKEN; broken configured Apps fail loud.
+      - name: Mint workflow-capable token (optional)
+        id: app-token
+        if: ${{ vars.DEVFLOW_APP_ID != '' && !startsWith(needs.gate.outputs.command, '/prflow:review ') }}
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.DEVFLOW_APP_ID }}
+          private-key: ${{ secrets.DEVFLOW_APP_PRIVATE_KEY }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          # Full history supports merge-base diffs, reviewed-head reads and fixed test baselines.
+          fetch-depth: 0
+          # git push uses checkout's persisted credential, not the action's github_token.
+          # Seed the primary App for writers; never use the reviewer token for checkout.
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+
+      - uses: ./.github/actions/vendor-plugin
+        with:
+          ref: ${{ needs.config.outputs.prflow_version }}
+          repo: ${{ needs.config.outputs.prflow_repo }}
+          token: ${{ secrets.PRFLOW_REPO_TOKEN || github.token }}
+
+      # Every command requires grounding; validate the renderer before launching the agent.
+      # Keep this guard aligned with composition, not the separate review-only identity gates.
+      - name: Validate vendored grounding renderer
+        run: |
+          set -euo pipefail
+          if [ ! -f .prflow/vendor/prflow/scripts/render-grounding-block.sh ]; then
+            echo "::error::incomplete vendor: render-grounding-block.sh is missing from .prflow/vendor/prflow/scripts/ after materialization — this run's prompt would carry no engine-ground-truth block, its only statement of the headless-run discipline and of the commands it may execute. Repair the committed .prflow/vendor/prflow tree, or check the vendor-plugin fetch (prflow_version). Failing BEFORE Run Claude Code rather than launching an ungrounded agent." >&2
+            exit 1
+          fi
+
+      # Capture trusted base-ref extensions before review-and-fix checks out the PR head.
+      # Always create/export the closure; failed population yields empty extensions, never workspace fallback.
+      # Do not truncate workspace files on this writer tier: that would dirty or commit the caller's tree.
+      # Closure creation/export fail closed; optional population warns and degrades to empty.
+      # This does not protect a loader itself replaced by the later branch checkout.
+      - name: Establish the trusted prompt-extension closure
+        id: promptext
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          CMD: ${{ needs.gate.outputs.command }}
+        run: |
+          set -uo pipefail
+          CLOSURE="$RUNNER_TEMP/devflow-trusted-prompt-ext"
+          # Fail CLOSED on both: with no closure to point at, the loader would take
+          # its repo-root branch and read the working tree — the very thing this step
+          # exists to prevent. There is no degraded-but-safe variant of these two.
+          if ! mkdir -p "$CLOSURE"; then
+            echo "::error::devflow could not create the trusted prompt-extension closure at '$CLOSURE'; refusing to run the command with the loader pointed at the working tree."
+            exit 1
+          fi
+          # $GITHUB_ENV is job-scoped, so this reaches every later step — including the
+          # commands the agent runs and the ones its dispatched Tasks run. It arrives
+          # through the environment rather than a command prefix precisely because the
+          # cloud matcher denies a leading `VAR=value` shape.
+          if ! echo "DEVFLOW_PROMPT_EXTENSION_ROOT=$CLOSURE" >> "$GITHUB_ENV"; then
+            echo "::error::devflow could not export DEVFLOW_PROMPT_EXTENSION_ROOT; refusing to run the command with the loader pointed at the working tree."
+            exit 1
+          fi
+
+          # Same parse the `Compose engine grounding block` step below uses on its
+          # review-mode path, for the
+          # same reason (this job is command-driven, and the gate's resolver fails
+          # closed rather than emitting a command with no number). A missing `grep`
+          # or `head` empties PR_NUM, which routes to the warn-and-empty-closure arm —
+          # this selection fails CLOSED on an absent PATH tool.
+          PR_NUM=$(printf '%s' "$CMD" | grep -oE '[0-9]+' | head -1 || true)
+          # One message, one reason string: each arm below sets only a cause and the
+          # single emit site composes the diagnosis, so no arm can be reordered into
+          # misattributing it (the hazard scripts/describe-denial-count.sh exists for).
+          REASON=''
+          BASE_REF=''
+          if [ -z "$PR_NUM" ]; then
+            REASON="the triggering command carried no issue or pull-request number"
+          elif ! BASE_REF=$(gh pr view "$PR_NUM" --repo "$REPO" --json baseRefName -q .baseRefName 2>/dev/null) || [ -z "$BASE_REF" ]; then
+            BASE_REF=''
+            REASON="the base branch of #${PR_NUM} could not be resolved (gh pr view failed, or the number names an issue rather than a pull request)"
+          # NO `--depth`: a shallow fetch grafts the base tip parentless for the WHOLE
+          # job, and every later `git merge-base` — the review engine's own three-dot
+          # diff, the evidence gate's diff recompute — then answers with a far older
+          # ancestor instead of failing, measuring the PR against a base it never forked
+          # from (issue #802). The checkout above already fetched full history, so this
+          # fetch carries only the base's new commits.
+          elif ! git fetch origin "$BASE_REF" >/dev/null 2>&1; then
+            REASON="the trusted base ref '${BASE_REF}' could not be fetched"
+            BASE_REF=''
+          fi
+
+          # INSIDE the fetch-success branch and NOWHERE ELSE. FETCH_HEAD elsewhere —
+          # for example left by actions/checkout — can point at the PR head, and
+          # reading the extensions from there would hand the agent's own prompt to the
+          # PR author. The helper performs no fetch of its own and resolves no ref but
+          # FETCH_HEAD, so this branch is the whole of its trust premise.
+          if [ -n "$BASE_REF" ]; then
+            HELPER=.prflow/vendor/prflow/scripts/materialize-trusted-prompt-extensions.sh
+            if [ -f "$HELPER" ]; then
+              # The helper prints its own fully-formed ::warning:: / ::notice:: lines
+              # on stdout, so this call site selects no branch and composes no message
+              # for the per-name arms — that logic lives in the helper, where
+              # lib/test/run.sh drives every arm. The protected set is expanded
+              # UNQUOTED on purpose: each name must become its own argv entry, the one
+              # place word splitting is the intended behavior. A NON-ZERO exit is the
+              # helper's deliberate loud refusal of a CALLER defect (exit 2), never a
+              # runtime condition, so it is annotated rather than swallowed.
+              _mtpe_rc=0
+              bash "$HELPER" \
+                --base-ref "$BASE_REF" \
+                --target "$CLOSURE" \
+                $DEVFLOW_PROTECTED_PROMPT_EXTENSIONS || _mtpe_rc=$?
+              if [ "$_mtpe_rc" -ne 0 ]; then
+                echo "::warning::devflow trusted prompt-extension materialization helper exited ${_mtpe_rc} — a caller or usage defect, not a runtime condition; the closure stays empty and this run proceeds with no consumer prompt-extension text."
+              fi
+            else
+              REASON="materialize-trusted-prompt-extensions.sh was not found at the vendored or the repo path (a pinned prflow_version predating issue #874, or a vendor step that did not materialize the plugin)"
+            fi
+          fi
+          if [ -n "$REASON" ]; then
+            echo "::warning::devflow trusted prompt-extension closure not populated: ${REASON}. This run proceeds with NO consumer prompt-extension text rather than reading the pull-request head; see the trusted-ref rule in https://prflow.ai/docs/runs/cloud/setup."
+          fi
+
+          # Skew probe (the replacement for the runner's truncation belt). The loader
+          # the agent actually runs is the VENDORED copy — the skill anchor resolves
+          # through the loaded plugin — so a consumer whose pinned prflow_version
+          # predates issue #874 ships a loader that ignores the variable, resolves the
+          # repo root, and reads the working tree. Truncation cannot be used to blind
+          # it here, so say so loudly instead of failing open in silence. Scoped to
+          # the present-but-too-old case alone: an ABSENT vendored loader is a broken
+          # vendor step that other steps already diagnose, and folding two causes into
+          # one breadcrumb would leave the reader unable to tell them apart.
+          #
+          # The probe is BASH BUILTINS ONLY (`while IFS= read -r` + `case`), not `grep`.
+          # This value decides an EMITTED result — which diagnosis the maintainer reads —
+          # and CLAUDE.md's guard-class 2 bars deriving such a value through a
+          # non-preflight PATH tool. With `grep` the absent-tool case inverted the
+          # condition and published "predates issue #874" about a loader this step never
+          # actually read: loud, but naming a cause it had not established. The builtin
+          # loop cannot fail that way, so the message asserts only what was observed.
+          LOADER=.prflow/vendor/prflow/scripts/load-prompt-extension.sh
+          _loader_honors=no
+          if [ -f "$LOADER" ]; then
+            while IFS= read -r _l || [ -n "$_l" ]; do
+              case "$_l" in
+                *DEVFLOW_PROMPT_EXTENSION_ROOT*) _loader_honors=yes; break ;;
+              esac
+            done < "$LOADER"
+          fi
+          if [ -f "$LOADER" ] && [ "$_loader_honors" = no ]; then
+            echo "::warning::devflow: the vendored load-prompt-extension.sh predates issue #874 and ignores DEVFLOW_PROMPT_EXTENSION_ROOT, so it resolves the WORKING TREE rather than this run's trusted closure — and after /prflow:review-and-fix's branch sync that tree is the pull-request head. Bump prflow_version in .prflow/config.json to close it."
+          fi
+
+      # Shared runtime provisioning reads the trusted setup configuration.
+      - id: cfg
+        uses: ./.github/actions/read-project-config
+      - uses: ./.github/actions/setup-project-env
+        with:
+          config_json: ${{ steps.cfg.outputs.json }}
+          # The command job does not provision lint tools.
+          lint_mode: none
+
+      # Review-only uses a distinct, downscoped App to avoid reviewing its own authored PR.
+      # The trailing space excludes review-and-fix; absence falls back to GITHUB_TOKEN, never the writer App.
+      - name: Mint downscoped DevFlow-Reviewer token (optional)
+        id: reviewer-token
+        if: ${{ vars.DEVFLOW_REVIEWER_APP_ID != '' && startsWith(needs.gate.outputs.command, '/prflow:review ') }}
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.DEVFLOW_REVIEWER_APP_ID }}
+          private-key: ${{ secrets.DEVFLOW_REVIEWER_PRIVATE_KEY }}
+          permission-contents: ${{ fromJSON(env.DEVFLOW_REVIEWER_PERMISSIONS)['contents'] }}
+          permission-issues: ${{ fromJSON(env.DEVFLOW_REVIEWER_PERMISSIONS)['issues'] }}
+          permission-pull-requests: ${{ fromJSON(env.DEVFLOW_REVIEWER_PERMISSIONS)['pull-requests'] }}
+          permission-actions: ${{ fromJSON(env.DEVFLOW_REVIEWER_PERMISSIONS)['actions'] }}
+
+      # Resolve tools once for both the grounding block and action flag.
+      # Edit grants in lib/capability-profiles.json, then regenerate with
+      # tools/generators/generate-capability-profiles.py; never hand-edit the generated region.
+      - name: Resolve allowed-tools
+        id: tools
+        env:
+          EXTRA: ${{ needs.config.outputs.allowed_tools_extra }}
+        run: |
+          set -euo pipefail
+          # devflow-capability-manifest: region=command manifest_version=47 sha256=ed86adcbb2356bec4d53f1d0eb8f1bf85c79bf25a38e9b6056262b6193fdbf5a
+          TOOLS='Read, Write, Edit, Glob, Grep, LS, Skill, Agent, SendMessage, TodoWrite, EnterPlanMode, ExitPlanMode, WebFetch, WebSearch, Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(git pull:*), Bash(git fetch:*), Bash(git ls-remote:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git checkout:*), Bash(git cat-file:*), Bash(git hash-object:*), Bash(git branch:*), Bash(git stash:*), Bash(git rm:*), Bash(git mv:*), Bash(git restore:*), Bash(git revert:*), Bash(git blame:*), Bash(git ls-files:*), Bash(git grep:*), Bash(git rev-parse:*), Bash(git merge-base:*), Bash(git merge:*), Bash(gh pr edit:*), Bash(gh pr diff:*), Bash(gh pr view:*), Bash(gh pr ready:*), Bash(gh pr list:*), Bash(gh pr checks:*), Bash(gh pr status:*), Bash(gh pr reopen:*), Bash(gh pr checkout:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue edit:*), Bash(gh issue reopen:*), Bash(gh issue status:*), Bash(gh search:*), Bash(gh label list:*), Bash(gh repo view:*), Bash(gh run view:*), Bash(gh run list:*), Bash(gh workflow view:*), Bash(gh workflow list:*), Bash(gh api repos/{owner}/{repo}/*), Bash(jq:*), Bash(.prflow/vendor/prflow/scripts/run-jq.sh:*), Bash(.prflow/vendor/prflow/scripts/config-get.sh:*), Bash(.prflow/vendor/prflow/scripts/workpad.py:*), Bash(.prflow/vendor/prflow/scripts/seed-review-progress.sh:*), Bash(.prflow/vendor/prflow/scripts/review-dirty-tree.sh:*), Bash(.prflow/vendor/prflow/scripts/compose-run-url.sh:*), Bash(.prflow/vendor/prflow/scripts/compose-run-key.sh:*), Bash(.prflow/vendor/prflow/scripts/verification-flight.py:*), Bash(.prflow/vendor/prflow/scripts/reception-record.py:*), Bash(.prflow/vendor/prflow/scripts/checkout-fingerprint.py:*), Bash(.prflow/vendor/prflow/scripts/parse-acs.py:*), Bash(.prflow/vendor/prflow/scripts/check-verified-premises.py:*), Bash(.prflow/vendor/prflow/scripts/preflight.py:*), Bash(.prflow/vendor/prflow/scripts/branch-for-issue.py:*), Bash(.prflow/vendor/prflow/scripts/update-branch-checkpoint.sh:*), Bash(.prflow/vendor/prflow/scripts/phase2-durability-checkpoint.sh:*), Bash(.prflow/vendor/prflow/scripts/file-deferrals.py:*), Bash(.prflow/vendor/prflow/scripts/match-deferrals.py:*), Bash(.prflow/vendor/prflow/scripts/normalize-verdicts.py:*), Bash(.prflow/vendor/prflow/scripts/resolve-review-overrides.py:*), Bash(.prflow/vendor/prflow/scripts/dismiss-stale-rejections.sh:*), Bash(.prflow/vendor/prflow/scripts/post-review-verdict.sh:*), Bash(.prflow/vendor/prflow/scripts/loop-verdict-marker.py:*), Bash(.prflow/vendor/prflow/scripts/prompt-surface-growth.py:*), Bash(.prflow/vendor/prflow/scripts/prompt-extension-arrival.py:*), Bash(.prflow/vendor/prflow/scripts/page-job-log.py:*), Bash(.prflow/vendor/prflow/lib/efficiency-trace.sh:*), Bash(.prflow/vendor/prflow/scripts/retro-helper.sh:*), Bash(.prflow/vendor/prflow/scripts/retro-outcome-record.py:*), Bash(.prflow/vendor/prflow/lib/scan.sh:*), Bash(.prflow/vendor/prflow/lib/materialize-retrospectives.sh:*), Bash(.prflow/vendor/prflow/lib/pattern-state.sh:*), Bash(.prflow/vendor/prflow/lib/actionable-patterns.sh:*), Bash(.prflow/vendor/prflow/lib/recurring-targets.sh:*), Bash(.prflow/vendor/prflow/lib/fetch-pr-context.sh:*), Bash(.prflow/vendor/prflow/lib/meta-issue.sh:*), Bash(.prflow/vendor/prflow/scripts/post-issue-comment.sh:*), Bash(.prflow/vendor/prflow/scripts/apply-labels.sh:*), Bash(.prflow/vendor/prflow/scripts/build-experiment-records.py:*), Bash(.prflow/vendor/prflow/scripts/implement-run-report.py:*), Bash(gh auth status:*), Bash(true:*), Bash(trap:*), Bash(pip install:*), Bash(pip:*), Bash(python:*), Bash(python3:*), Bash(python -m:*), Bash(python3 -m:*), Bash(ruff:*), Bash(ruff check:*), Bash(ruff format:*), Bash(pytest:*), Bash(mypy:*), Bash(grep:*), Bash(rg:*), Bash(find:*), Bash(wc:*), Bash(sort:*), Bash(uniq:*), Bash(cut:*), Bash(tr:*), Bash(xargs:*), Bash(awk:*), Bash(sed:*), Bash(diff:*), Bash(comm:*), Bash(cat:*), Bash(head:*), Bash(tail:*), Bash(less:*), Bash(ls:*), Bash(tree:*), Bash(file:*), Bash(stat:*), Bash(date:*), Bash(pwd:*), Bash(realpath:*), Bash(dirname:*), Bash(basename:*), Bash(which:*), Bash(type:*), Bash(echo:*), Bash(printf:*), Bash(test:*), Bash(touch:*), Bash(mkdir:*), Bash(rmdir:*), Bash(rm:*), Bash(mv:*), Bash(cp:*), Bash(mktemp:*), Bash(cmp:*), Bash(.prflow/vendor/prflow/scripts/load-prompt-extension.sh:*), Bash(*/load-prompt-extension.sh:*), Bash(.prflow/vendor/prflow/scripts/render-prompt-extension.sh:*), Bash(*/render-prompt-extension.sh:*), Bash(tee:*)'
+          # Union the vendored plugin's own helper grants into the baked list (issue #352).
+          # Capture as RESOLVED, never a second TOOLS= (the generated-region --check refuses it);
+          # baseline on STDIN and MANIFEST/PROFILE in env, never as args (MSYS rewrites path-shaped args).
+          BASELINE="${TOOLS}${EXTRA}"
+          RESOLVED="$BASELINE"
+          if [ ! -f .prflow/vendor/prflow/scripts/resolve-allowed-tools.py ]; then
+            printf '::warning::resolve-allowed-tools.py is absent from the vendored plugin — plugin-helper grants were not unioned into the allowlist; re-run install.sh and check prflow_version\n' >&2
+          else
+            RESOLVER_ERR="$(mktemp)"
+            if RESOLVED="$(printf '%s' "$BASELINE" | MANIFEST=.prflow/vendor/prflow/lib/capability-profiles.json PROFILE=command python3 .prflow/vendor/prflow/scripts/resolve-allowed-tools.py 2>"$RESOLVER_ERR")"; then
+              cat "$RESOLVER_ERR" >&2
+            else
+              RESOLVER_RC=$?
+              RESOLVED="$BASELINE"
+              printf '::warning::resolve-allowed-tools.py failed (exit %s: %s) — plugin-helper grants were not unioned into the allowlist; re-run install.sh and check prflow_version\n' "$RESOLVER_RC" "$(tail -n1 "$RESOLVER_ERR")" >&2
+            fi
+            rm -f "$RESOLVER_ERR"
+          fi
+          printf 'tools=%s\n' "$RESOLVED" >> "$GITHUB_OUTPUT"
+
+      # Seed the run-keyed review progress before composing the agent prompt.
+      # The agent adopts the same comment; a seeding failure warns and leaves its fallback available.
+      # Ground every command: review mode adds fixed-head CI facts; generic mode covers writers and descriptions.
+      - name: Seed review-progress comment (early acknowledgement)
+        id: seedreview
+        if: ${{ github.event.issue.pull_request || github.event.pull_request.number }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          CONTEXT_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          COMMAND: ${{ needs.gate.outputs.command }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          # Publish the handoff outputs as a neutral token BEFORE any fallible work, so the
+          # reviewcompose step always reads a defined value (the implement early-workpad
+          # neutral-init pattern). A later write of the same key wins, so a successful seed
+          # overrides these.
+          {
+            echo "comment_id=none"
+            echo "marker=none"
+            echo "run_link=none"
+          } >> "$GITHUB_OUTPUT"
+          # Only the review commands seed a review-progress comment — the SAME screen the
+          # dead-run flip step uses (bash builtins only: a selection value must not flow
+          # through a non-preflight-guaranteed PATH tool).
+          case "${COMMAND:-}" in
+            /prflow:review*|/devflow:review*) : ;;
+            *)
+              echo "::notice::seed review-progress: command '${COMMAND:-}' seeds no review-progress comment; nothing to seed"
+              exit 0
+              ;;
+          esac
+          # PR number: the command's own trailing number, else the thread's number — the
+          # SAME derivation the dead-run flip step uses (bash builtins only).
+          PR_NUMBER="${COMMAND##* }"
+          case "$PR_NUMBER" in
+            ''|*[!0-9]*) PR_NUMBER="${CONTEXT_NUMBER:-}" ;;
+          esac
+          if [ -z "$PR_NUMBER" ]; then
+            echo "::warning::seed review-progress: no PR number resolvable from command '${COMMAND:-}' or event context; not seeding (the agent-side Phase 0 seed remains the fallback)"
+            exit 0
+          fi
+          # Resolve the enable flag through config-get.sh (vendored, then repo). Default true;
+          # a bash `case` honors an explicit false and seeds nothing.
+          CFG=.prflow/vendor/prflow/scripts/config-get.sh
+          SEED_ENABLED=true
+          if [ -f "$CFG" ]; then
+            SEED_ENABLED="$(bash "$CFG" .prflow_review.live_progress_comment_enabled true 2>/dev/null || echo true)"
+          fi
+          case "$SEED_ENABLED" in
+            false)
+              echo "::notice::seed review-progress: prflow_review.live_progress_comment_enabled is false; seeding nothing"
+              exit 0
+              ;;
+          esac
+          # Resolve the reviewed head sha the way review_dedupe does, for the seed-time head
+          # key (issue #1010).
+          HEAD_SHA="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || true)"
+          if [ -z "$HEAD_SHA" ]; then
+            echo "::warning::seed review-progress: could not resolve the head sha for PR #$PR_NUMBER (gh pr view failed); not seeding (the agent-side Phase 0 seed remains the fallback)"
+            exit 0
+          fi
+          # Compose a minimal in-progress seed body carrying the two review_dedupe machine-read
+          # keys — the `**Status:** 🚀 Reviewing` line and the seed-time head key — so a
+          # workflow-seeded run stays visible to in-flight dedupe detection. The helper stamps
+          # the run-keyed marker (line one) and rewrites the `**Run:**` line itself; the
+          # engine's first phase-boundary rewrite replaces the rest with the full checklist.
+          BODY_FILE="$(mktemp 2>/dev/null)" || BODY_FILE=""
+          if [ -z "$BODY_FILE" ]; then
+            echo "::warning::seed review-progress: could not create a scratch file for the seed body; not seeding (the agent-side Phase 0 seed remains the fallback)"
+            exit 0
+          fi
+          {
+            printf '%s\n' "# Review in progress"
+            printf '%s\n' ""
+            printf '%s\n' "**Status:** 🚀 Reviewing"
+            printf '%s\n' "**Run:** _(pending)_"
+            printf '%s\n' ""
+            printf '%s\n' "<!-- prflow:review-seeded-head $HEAD_SHA -->"
+          } > "$BODY_FILE"
+          # Invoke the seeding helper (vendored, then repo) with an EMPTY marker slot — on the
+          # cloud tier the helper derives the run-keyed marker from GITHUB_RUN_ID itself.
+          SEED_HELPER=.prflow/vendor/prflow/scripts/seed-review-progress.sh
+          if [ ! -f "$SEED_HELPER" ]; then
+            echo "::warning::seed review-progress: seed-review-progress.sh absent at $SEED_HELPER; not seeding (the agent-side Phase 0 seed remains the fallback)"
+            rm -f "$BODY_FILE"
+            exit 0
+          fi
+          SEED_OUT="$(bash "$SEED_HELPER" "$PR_NUMBER" "" "$BODY_FILE")" || true
+          rm -f "$BODY_FILE"
+          # Only a RESUME/CREATED outcome hands off; a SKIP token or empty result leaves the
+          # neutral tokens in place (warn-and-continue → agent-side fallback owns recovery).
+          case "$SEED_OUT" in
+            RESUME\ *|CREATED\ *) : ;;
+            *)
+              echo "::warning::seed review-progress: seed-review-progress.sh created no comment (output: ${SEED_OUT:-<none>}); not handing off (the agent-side Phase 0 seed remains the fallback)"
+              exit 0
+              ;;
+          esac
+          # Parse the helper's outcome / MARKER / RUNLINK lines with bash builtins only (a
+          # handed-off value must not flow through a non-preflight-guaranteed PATH tool).
+          CID=""; MK=""; RL=""
+          while IFS= read -r line; do
+            case "$line" in
+              RESUME\ *) CID="${line#RESUME }" ;;
+              CREATED\ *) CID="${line#CREATED }" ;;
+              MARKER\ *) MK="${line#MARKER }" ;;
+              RUNLINK\ *) RL="${line#RUNLINK }" ;;
+            esac
+          done <<< "$SEED_OUT"
+          if [ -z "$CID" ] || [ -z "$MK" ]; then
+            echo "::warning::seed review-progress: helper reported success but no comment id/marker; not handing off (the agent-side Phase 0 seed remains the fallback)"
+            exit 0
+          fi
+          {
+            echo "comment_id=$CID"
+            echo "marker=$MK"
+            echo "run_link=$RL"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::seed review-progress: seeded comment #$CID for PR #$PR_NUMBER (marker $MK)"
+          # review status-label mirror (seed) BEGIN
+          # Mirror PRFlow:Reviewing onto the PR and its closing issues the moment
+          # the progress comment is seeded (issue #104). Review-ONLY: the
+          # trailing-space `/prflow:review ` screen keeps /prflow:review-and-fix
+          # out (the outer seed screen above admits both). Best-effort; the helper
+          # resolves review_status_labels.enabled itself and no-ops when off.
+          case "${COMMAND:-}" in
+            /prflow:review\ *|/devflow:review\ *)
+              MIRROR=.prflow/vendor/prflow/scripts/mirror-review-status-label.sh
+              if [ -f "$MIRROR" ]; then
+                bash "$MIRROR" "$PR_NUMBER" reviewing || true
+              else
+                echo "::warning::mirror review status label: mirror-review-status-label.sh absent at the vendored path; PRFlow:Reviewing not written for #$PR_NUMBER (upgrade the vendored plugin pin)"
+              fi
+              ;;
+          esac
+          # review status-label mirror (seed) END
+
+      - name: Compose engine grounding block
+        id: reviewcompose
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SELF_WORKFLOW_NAME: ${{ github.workflow }}
+          ALLOWED_TOOLS: ${{ steps.tools.outputs.tools }}
+          CMD: ${{ needs.gate.outputs.command }}
+          MODE: ${{ startsWith(needs.gate.outputs.command, '/prflow:review ') && 'review' || 'generic' }}
+          SHAPES_FILE: .prflow/tmp/command-shapes.md
+          SEED_COMMENT_ID: ${{ steps.seedreview.outputs.comment_id }}
+          SEED_MARKER: ${{ steps.seedreview.outputs.marker }}
+          SEED_RUN_LINK: ${{ steps.seedreview.outputs.run_link }}
+        run: |
+          set -euo pipefail
+          # The CI section exists only in `review` mode, so resolve its inputs only
+          # there: on a `generic` run the two gh queries below would burn API calls for
+          # a section that is never rendered, and their breadcrumbs would name a "CI
+          # section" the prompt does not carry.
+          CI_SUMMARY=""
+          if [ "$MODE" = review ]; then
+            # `github.sha`/`GITHUB_REF` reflect the TRIGGERING EVENT, not the checkout:
+            # on the sole `issue_comment` trigger `github.sha` is the default branch's
+            # head commit at trigger time, and pinning the checkout `ref:` (issue #1163)
+            # does not change it. Either way it is NOT the reviewed PR's head, so resolve
+            # the head SHA from the PR the command names rather than from `github.sha`.
+            PR_NUM=$(printf '%s' "$CMD" | grep -oE '[0-9]+' | head -1 || true)
+            HEAD_SHA=""
+            if [ -n "$PR_NUM" ]; then
+              HEAD_SHA=$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || true)
+            fi
+            export HEAD_SHA
+            SCC=.prflow/vendor/prflow/scripts/summarize-ci-checks.sh
+            # Each no-op branch names the condition that fired. Two different causes
+            # converging on one breadcrumb would leave a reader unable to tell a missing
+            # helper from an unresolved head — both render the same `CI status
+            # unavailable`, which is the point: an unknown CI state must never render
+            # as a passing one.
+            if [ ! -f "$SCC" ]; then
+              echo "::warning::devflow: summarize-ci-checks.sh not found at the vendored path — the review prompt's CI section will report it unavailable" >&2
+              CI_SUMMARY="CI status unavailable"
+            elif [ -z "$HEAD_SHA" ]; then
+              echo "::warning::devflow: could not resolve a head SHA for PR '${PR_NUM:-<none parsed from the command>}' (gh pr view failed, or the command carried no PR number) — the review prompt's CI section will report it unavailable" >&2
+              CI_SUMMARY="CI status unavailable"
+            else
+              CI_SUMMARY=$(bash "$SCC") || CI_SUMMARY="CI status unavailable"
+            fi
+            [ -n "$CI_SUMMARY" ] || CI_SUMMARY="CI status unavailable"
+          fi
+
+          RGB=.prflow/vendor/prflow/scripts/render-grounding-block.sh
+          if [ ! -f "$RGB" ]; then
+            echo "::error::devflow: render-grounding-block.sh not found at the vendored path — this run's prompt would carry no engine-ground-truth block, its only statement of the headless-run discipline and of the commands it may execute. Repair the vendored .prflow/vendor/prflow tree, or check the vendor-plugin fetch (prflow_version). Refusing to run." >&2
+            exit 1
+          fi
+          # MODE is forwarded EXPLICITLY even though the step env already carries it, so
+          # the tier the block renders for is readable at the call site — the same
+          # cross-file contract scripts/compose-implement-prompt.sh states with
+          # `MODE=implement`. It sits after ALLOWED_TOOLS because devflow-runner.yml
+          # forwards HARDENED_PATHS at that same position, keeping the two files'
+          # shared prefix byte-identical.
+          GROUNDING=$(CI_SUMMARY="$CI_SUMMARY" ALLOWED_TOOLS="$ALLOWED_TOOLS" MODE="$MODE" bash "$RGB") || GROUNDING=""
+          # Verify the OUTCOME, not the file's existence (see devflow-runner.yml). A
+          # present-but-truncated renderer that exits 0 printing nothing FAILS the job
+          # rather than degrading to the bare command prompt: the block is the single
+          # home of the headless-run discipline, so a block-less run is not a
+          # degraded run but an ungrounded one.
+          if [ -z "$GROUNDING" ]; then
+            echo "::error::devflow: render-grounding-block.sh produced no output — this run's prompt would carry no engine-ground-truth block, its only statement of the headless-run discipline and of the commands it may execute. The renderer resolved at '$RGB' but printed nothing or exited non-zero: repair that copy, or check the vendor-plugin fetch (prflow_version). Refusing to run." >&2
+            exit 1
+          fi
+          # When the seeding step (issue #2073) handed off a pre-seeded review-progress
+          # comment, carry its id/marker/run link into the agent prompt as authoritative
+          # facts, so the engine's step 0.3.5 holds them and composes no second marker. A
+          # skipped or failed seed leaves the outputs neutral (`none`/empty), so this block
+          # is empty and the engine seeds the comment itself as before.
+          SEED_HANDOFF=""
+          if [ -n "${SEED_COMMENT_ID:-}" ] && [ "${SEED_COMMENT_ID:-none}" != none ]; then
+            SEED_HANDOFF="
+
+          This run's live review-progress comment was already seeded by the workflow before you started. Hold these as the authoritative live-progress values; do NOT seed a second comment or compose a second marker:
+          - Pre-seeded progress comment id: ${SEED_COMMENT_ID}
+          - Pre-seeded progress comment marker: ${SEED_MARKER}
+          - Pre-seeded run link: ${SEED_RUN_LINK}"
+          fi
+          PROMPT="${GROUNDING}${SEED_HANDOFF}
+
+          ${CMD}"
+          delim="PROMPT_EOF_$(date +%s%N)_$$"
+          { printf 'prompt<<%s\n' "$delim"; printf '%s\n' "$PROMPT"; printf '%s\n' "$delim"; } >> "$GITHUB_OUTPUT"
+
+      # Refresh writer credentials or the review-only token file using the matching App identity.
+      # An empty reviewer secret must never fall through to the primary App's key.
+      # Pipe the key to the detached process and remove it from its exec environment;
+      # the always() stop step reaps the process.
+      - name: Start credential refresher (optional)
+        id: refresher
+        if: ${{ (vars.DEVFLOW_APP_ID != '' && !startsWith(needs.gate.outputs.command, '/prflow:review ')) || (startsWith(needs.gate.outputs.command, '/prflow:review ') && vars.DEVFLOW_REVIEWER_APP_ID != '') }}
+        env:
+          DEVFLOW_APP_ID: ${{ (startsWith(needs.gate.outputs.command, '/prflow:review ') && vars.DEVFLOW_REVIEWER_APP_ID) || (!startsWith(needs.gate.outputs.command, '/prflow:review ') && vars.DEVFLOW_APP_ID) || '' }}
+          DEVFLOW_APP_PRIVATE_KEY: ${{ (startsWith(needs.gate.outputs.command, '/prflow:review ') && secrets.DEVFLOW_REVIEWER_PRIVATE_KEY) || (!startsWith(needs.gate.outputs.command, '/prflow:review ') && secrets.DEVFLOW_APP_PRIVATE_KEY) || '' }}
+          DEVFLOW_REFRESH_SUBCOMMAND: ${{ startsWith(needs.gate.outputs.command, '/prflow:review ') && 'loop-token-file' || 'loop' }}
+          DEVFLOW_REFRESH_PERMISSIONS: ${{ startsWith(needs.gate.outputs.command, '/prflow:review ') && env.DEVFLOW_REVIEWER_PERMISSIONS || '' }}
+        run: |
+          set -euo pipefail
+          # No scripts/… self-repo fallback here (issue #228 removed all such fallbacks):
+          # this step runs right after `vendor-plugin` on the same sequential job, so the
+          # vendored path is always present — a fallback would be dead code. Do NOT add one.
+          # A non-default refresher mode (issue #1980) is probed for first, with bash
+          # builtins only, as a line whose first non-blank text is its case arm `<mode>)`:
+          # an older vendored refresher answers an unknown subcommand with a warning and
+          # exit 0, which would leave a launched-looking refresher refreshing nothing.
+          # Without the mode, launch nothing. On /prflow:review, `launched` gates the wrapper
+          # install and the teardown; it is written before the self-test so a failed
+          # self-test still reaches the teardown's failure attribution.
+          SUB="${DEVFLOW_REFRESH_SUBCOMMAND:-loop}"
+          _sub_ok=yes
+          if [ "$SUB" != loop ]; then
+            _sub_ok=no
+            if [ -f .prflow/vendor/prflow/scripts/refresh-app-credentials.sh ]; then
+              while IFS= read -r _l || [ -n "$_l" ]; do
+                case "${_l#"${_l%%[![:space:]]*}"}" in "$SUB)"*) _sub_ok=yes; break ;; esac
+              done < .prflow/vendor/prflow/scripts/refresh-app-credentials.sh
+            fi
+          fi
+          if [ "$_sub_ok" = no ]; then
+            echo "launched=no" >> "${GITHUB_OUTPUT:-/dev/null}"
+            echo "::warning::credential refresher not started: the vendored refresh-app-credentials.sh is absent or predates its '$SUB' mode, so this run's gh token expires one hour after its mint. Bump prflow_version in .prflow/config.json to close it."
+            exit 0
+          fi
+          echo "launched=yes" >> "${GITHUB_OUTPUT:-/dev/null}"
+          # Job-scoped state (issue #1882): so a later job on this runner never reads or
+          # retires another job's token file/pidfile/log, and the loop retires itself
+          # once its job is no longer the runner's current one (the pointer below).
+          HANDLE="${GITHUB_RUN_ID:-0}-${GITHUB_RUN_ATTEMPT:-0}-${GITHUB_JOB:-job}"
+          PTR="$RUNNER_TEMP/devflow-refresh.current-job"
+          PID="$RUNNER_TEMP/devflow-refresh-$HANDLE.pid"
+          TOK="$RUNNER_TEMP/devflow-gh-token-$HANDLE"
+          LOG="$RUNNER_TEMP/devflow-refresh-$HANDLE.log"
+          STMARK="$RUNNER_TEMP/devflow-refresh-$HANDLE.selftest-failed"
+          printf '%s' "$HANDLE" > "$PTR"
+          rm -f "$STMARK" 2>/dev/null || true
+          # Publish the job-scoped paths to later steps: gh-fresh reads the token file, the teardown
+          # reads the pidfile/log/job pointer. The self-test marker path is NOT published job-wide
+          # (issue #1925) — the Stop step derives it from the same HANDLE, mirroring the DEVFLOW_GH decision.
+          {
+            echo "DEVFLOW_GH_TOKEN_FILE=$TOK"
+            echo "DEVFLOW_REFRESH_PIDFILE=$PID"
+            echo "DEVFLOW_REFRESH_LOG=$LOG"
+            echo "DEVFLOW_REFRESH_JOB_POINTER=$PTR"
+          } >> "$GITHUB_ENV"
+          # Pre-launch self-test (issue #1882): sign a throwaway input with the real key
+          # BEFORE the agent launches, so a host that cannot sign is loud immediately
+          # rather than after the token's hour. A signer that refuses the key, or an
+          # unresolved/too-old interpreter, FAILS THE JOB here (set -e on the non-zero
+          # exit); an absent signer helper (older vendored slice) is warn-and-continue.
+          # Told apart by the helper's presence and exit status, never by its output.
+          SELFTEST=.prflow/vendor/prflow/scripts/refresher-selftest.sh
+          if [ -f "$SELFTEST" ]; then
+            printf '%s' "$DEVFLOW_APP_PRIVATE_KEY" \
+              | DEVFLOW_REFRESH_SELFTEST_FAILED="$STMARK" bash "$SELFTEST"
+          else
+            echo "::warning::credential refresher self-test skipped: no signer helper in this vendored plugin slice (older pin) — launching without a pre-flight signer check"
+          fi
+          # Detached loop. env -u drops the PEM from the long-lived process's environ;
+          # the job-scoped paths + pointer are passed DIRECTLY (GITHUB_ENV reaches only
+          # LATER steps, not this backgrounded subprocess). Key on stdin, never argv/disk.
+          printf '%s' "$DEVFLOW_APP_PRIVATE_KEY" \
+            | env -u DEVFLOW_APP_PRIVATE_KEY \
+                DEVFLOW_REFRESH_JOB_ID="$HANDLE" DEVFLOW_REFRESH_JOB_POINTER="$PTR" \
+                DEVFLOW_REFRESH_PIDFILE="$PID" DEVFLOW_REFRESH_TOKEN_FILE="$TOK" \
+                nohup bash .prflow/vendor/prflow/scripts/refresh-app-credentials.sh "$SUB" \
+                >"$LOG" 2>&1 &
+          disown || true
+          echo "credential refresher started (detached); log: $LOG"
+
+      # Use a PATH wrapper, not global DEVFLOW_GH, so test fixture stubs still work.
+      # Review installs it only after the refresher launches a token file; the installer captures real gh first.
+      # Refresh workflows and plugin pin together; a missing installer fails before the agent.
+      - name: Install fresh-gh wrapper (optional)
+        if: ${{ (vars.DEVFLOW_APP_ID != '' && !startsWith(needs.gate.outputs.command, '/prflow:review ')) || (startsWith(needs.gate.outputs.command, '/prflow:review ') && steps.refresher.outputs.launched == 'yes') }}
+        env:
+          APP_TOKEN: ${{ (startsWith(needs.gate.outputs.command, '/prflow:review ') && steps.reviewer-token.outputs.token) || (!startsWith(needs.gate.outputs.command, '/prflow:review ') && steps.app-token.outputs.token) || '' }}
+        run: |
+          set -euo pipefail
+          bash .prflow/vendor/prflow/scripts/install-gh-wrapper.sh
+      # Keep the inline provider resolver identical across cloud workflows.
+      # No provider selects Anthropic OAuth; an empty resolved model fails loud.
+      - name: Resolve model provider
+        id: provider
+        env:
+          CONFIG_JSON: ${{ steps.cfg.outputs.json }}
+          SECTION: prflow
+        run: |
+          set -euo pipefail
+          # devflow-provider-resolver BEGIN (single-sourced; keep byte-identical across the three cloud workflows — lib/test/run.sh pins it)
+          RESOLVER='
+          (if (. | type) == "object" then . else {} end) as $cfg
+          | (if (($cfg[$section]) | type) == "object" then $cfg[$section] else {} end) as $sec
+          | ($sec.provider) as $praw
+          | (if (($sec.claude_model) | type) == "string" and ($sec.claude_model != "") then $sec.claude_model else ($cfg.claude_model // "") end) as $model
+          | if ($praw == null or $praw == "") then
+              {provider:"", base_url:"", auth:"", timeout_ms:"", effort_supported:true, model:$model, env:{}}
+            elif (($praw) | type) != "string" then
+              {error:"invalid_provider", section:$section, provider:"", detail:"section provider must be a string"}
+            else
+              (if (($cfg.providers) | type) == "object" then $cfg.providers else {} end) as $provs
+              | if (($provs[$praw]) | type) != "object" then
+                  {error:"undefined_provider", section:$section, provider:$praw, detail:"provider is not defined in the providers map"}
+                elif (($provs[$praw].auth) as $a | ($a != "bearer" and $a != "api_key" and $a != "bedrock_api_key")) then
+                  {error:"incomplete_provider", section:$section, provider:$praw, detail:"provider auth must be one of bearer, api_key, bedrock_api_key"}
+                elif (($provs[$praw].auth) as $a | (($a == "bearer" or $a == "api_key") and ((($provs[$praw].base_url) | type) != "string" or ($provs[$praw].base_url == "")))) then
+                  {error:"incomplete_provider", section:$section, provider:$praw, detail:"provider entry has no base_url"}
+                else
+                  ($provs[$praw]) as $p
+                  | {provider:$praw, base_url:(if (($p.base_url) | type) == "string" then $p.base_url else "" end), auth:$p.auth, timeout_ms:($p.timeout_ms // ""), effort_supported:(($p.effort_supported // false) == true), model:$model, env:(if (($p.env) | type) == "object" then $p.env else {} end)}
+                end
+            end
+          '
+          # devflow-provider-resolver END
+          DECISION=$(printf '%s' "$CONFIG_JSON" | jq -c --arg section "$SECTION" "$RESOLVER")
+          # jq on EMPTY stdin emits nothing with rc 0, so an empty CONFIG_JSON would
+          # otherwise sail through as a zero-output "decision" and silently select the
+          # default path (or a misdirected empty-model error downstream). Both producers
+          # provably never emit empty today, so this is a fail-loud tripwire, not a live path.
+          if [ -z "$DECISION" ]; then
+            echo "::error::provider resolver produced no decision for section '$SECTION' (empty config input?). Refusing to run."
+            exit 1
+          fi
+          if [ "$(printf '%s' "$DECISION" | jq -r '.error // ""')" != "" ]; then
+            PNAME=$(printf '%s' "$DECISION" | jq -r '.provider // ""')
+            DETAIL=$(printf '%s' "$DECISION" | jq -r '.detail // "provider configuration is invalid"')
+            echo "::error::.prflow/config.json section '$SECTION' provider '$PNAME': $DETAIL. Fix the providers.$PNAME entry or remove the section provider key. Refusing to run."
+            exit 1
+          fi
+          # One jq pass emits every scalar decision field to the step output, each as a
+          # newline-safe heredoc block: a config-sourced value carrying an embedded newline
+          # would otherwise split a plain KEY=VALUE line and forge further step outputs. The
+          # timestamped+PID delimiter mirrors the decision<< output below.
+          sdelim="OUT_EOF_$(date +%s%N)_$$"
+          printf '%s' "$DECISION" | jq -r --arg d "$sdelim" '
+            ["provider","model","auth","base_url","timeout_ms","effort_supported"][] as $k
+            | "\($k)<<\($d)", "\(.[$k])", $d' >> "$GITHUB_OUTPUT"
+          # Forward the full decision (it carries the provider env map) to the
+          # inject step via a heredoc output so embedded values survive verbatim.
+          delim="DEC_EOF_$(date +%s%N)_$$"
+          {
+            printf 'decision<<%s\n' "$delim"
+            printf '%s\n' "$DECISION"
+            printf '%s\n' "$delim"
+          } >> "$GITHUB_OUTPUT"
+
+      # Write dynamic provider env keys only when routed; missing secrets fail before the agent.
+      # The default path must not acquire even empty provider variables.
+      - name: Inject provider endpoint (provider-routed sections only)
+        if: ${{ steps.provider.outputs.provider != '' }}
+        env:
+          DECISION: ${{ steps.provider.outputs.decision }}
+          AUTH: ${{ steps.provider.outputs.auth }}
+          BASE_URL: ${{ steps.provider.outputs.base_url }}
+          TIMEOUT_MS: ${{ steps.provider.outputs.timeout_ms }}
+          PROVIDER: ${{ steps.provider.outputs.provider }}
+          PROVIDER_API_KEY: ${{ secrets.DEVFLOW_PROVIDER_API_KEY }}
+          SECTION: prflow
+        run: |
+          set -euo pipefail
+          if [ -z "$PROVIDER_API_KEY" ]; then
+            echo "::error::.prflow/config.json section '$SECTION' selects provider '$PROVIDER' but the DEVFLOW_PROVIDER_API_KEY repository secret is empty. Set that secret (the provider API key) before running a provider-routed job. Refusing to run."
+            exit 1
+          fi
+          # SECURITY: the env-map KEY is interpolated RAW into the `KEY<<DELIM` heredoc
+          # header — the newline-safe heredoc protects VALUES, not keys, so a key
+          # carrying a newline or `<<` could forge a further job env var name or break
+          # the heredoc terminator (leaving an opaque "matching delimiter not found"
+          # abort). Keys come from maintainer-controlled config, but validate them
+          # POSITIVELY against a real env-var-name charset and fail loud on any stray
+          # key rather than emit a malformed/forged $GITHUB_ENV block.
+          if printf '%s' "$DECISION" | jq -e '.env | keys[] | select(test("^[A-Za-z_][A-Za-z0-9_]*$") | not)' >/dev/null 2>&1; then
+            echo "::error::.prflow/config.json section '$SECTION' provider '$PROVIDER' has an env-map key that is not a valid environment variable name ([A-Za-z_][A-Za-z0-9_]*). Fix the providers.$PROVIDER.env keys. Refusing to run."
+            exit 1
+          fi
+          # SECURITY (issue #1773): the shape guard above accepts any valid env-var NAME — do not
+          # drop this guard, and keep the assignment bare: a local/declare prefix or an if/&&/||
+          # context makes set -e swallow a jq failure, and a denied key is then exported job-wide.
+          denied_env_keys="$(printf '%s' "$DECISION" | jq -r '[.env // {} | keys[] | select(ascii_upcase | IN("PATH","GITHUB_TOKEN","GH_TOKEN","GITHUB_ENV","GITHUB_OUTPUT","GITHUB_PATH","ANTHROPIC_API_KEY","ANTHROPIC_AUTH_TOKEN","CLAUDE_CODE_OAUTH_TOKEN","AWS_ACCESS_KEY_ID","AWS_SECRET_ACCESS_KEY","AWS_SESSION_TOKEN","AWS_BEARER_TOKEN_BEDROCK","BASH_ENV","ENV","LD_PRELOAD","LD_LIBRARY_PATH","DYLD_INSERT_LIBRARIES","NODE_OPTIONS","PYTHONPATH","CLAUDE_CODE_SUBAGENT_MODEL"))] | join(" ")')"
+          if [ -n "$denied_env_keys" ]; then
+            echo "::error::.prflow/config.json section '$SECTION' provider '$PROVIDER' env map contains forbidden key(s): $denied_env_keys — a credential name, a variable that would shadow the job environment or its Actions plumbing, an interpreter/loader hook that can make every later step load code you did not intend, or the subagent-model override that flattens the review roster. Set credentials via the DEVFLOW_PROVIDER_API_KEY repository secret, and remove these keys from providers.$PROVIDER.env. Refusing to run."
+            exit 1
+          fi
+          # Keep the assignment bare, exactly as denied_env_keys above (issue #1911): a local/declare
+          # or an if/&&/|| context lets set -e swallow a jq failure and the warning silently never fires.
+          warned_env_keys="$(printf '%s' "$DECISION" | jq -r '[.env // {} | keys[] | select(ascii_upcase | IN("ANTHROPIC_BASE_URL","API_TIMEOUT_MS","HOME","RUNNER_TEMP"))] | join(" ")')"
+          if [ -n "$warned_env_keys" ]; then
+            echo "::warning::.prflow/config.json section '$SECTION' provider '$PROVIDER' env map sets key(s): $warned_env_keys — the env map is written last, so its value overrides the dedicated provider field (base_url/timeout_ms) or the job's own HOME/RUNNER_TEMP for every later step. The env map's value takes effect; remove these keys from providers.$PROVIDER.env if that override was not intended."
+          fi
+          # Every $GITHUB_ENV write below uses GitHub's newline-safe multiline (heredoc) form —
+          # the scalar endpoint values via genv(), the provider env map via the inline jq heredoc
+          # emit at the end — so a config-sourced value carrying an embedded newline cannot split
+          # a plain KEY=VALUE line and inject/forge a further job env var. Mirrors the resolver's
+          # decision<< output; the timestamped+PID delimiter makes value collision negligible.
+          genv() { local d; d="ENV_EOF_$(date +%s%N)_$$"; { printf '%s<<%s\n' "$1" "$d"; printf '%s\n' "$2"; printf '%s\n' "$d"; } >> "$GITHUB_ENV"; }
+          # base_url is guaranteed non-empty by the resolver for bearer/api_key; the
+          # bedrock_api_key arm needs none and reaches Bedrock via AWS_REGION instead.
+          if [ "$AUTH" = "bedrock_api_key" ]; then
+            # AWS region is required and travels in the env map (passthrough below); fail
+            # loud when absent/empty so the run does not authenticate then die on every
+            # model call. A non-string region reads as absent (strings|select) — fail closed.
+            if ! printf '%s' "$DECISION" | jq -e '.env.AWS_REGION | strings | select(. != "")' >/dev/null 2>&1; then
+              echo "::error::.prflow/config.json section '$SECTION' provider '$PROVIDER' uses bedrock_api_key auth but its env map sets no AWS_REGION. Add AWS_REGION to providers.$PROVIDER.env (the Bedrock client requires a region). Refusing to run."
+              exit 1
+            fi
+            # base_url is unused here; warn (never fail) if one was set, and export NO
+            # ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN on this arm.
+            if [ -n "$BASE_URL" ]; then
+              echo "::warning::.prflow/config.json section '$SECTION' provider '$PROVIDER' uses bedrock_api_key auth; its base_url is ignored (Bedrock is reached via AWS_REGION, not base_url). Remove base_url from providers.$PROVIDER."
+            fi
+            genv AWS_BEARER_TOKEN_BEDROCK "$PROVIDER_API_KEY"
+          else
+            genv ANTHROPIC_BASE_URL "$BASE_URL"
+            # Bearer-token gateways read Authorization from ANTHROPIC_AUTH_TOKEN; the
+            # same key also rides as the anthropic_api_key action input below (the
+            # documented two-slot recipe). auth: api_key passes it via the input only.
+            if [ "$AUTH" = "bearer" ]; then genv ANTHROPIC_AUTH_TOKEN "$PROVIDER_API_KEY"; fi
+          fi
+          # API_TIMEOUT_MS applies to either arm, so write it once after the branch.
+          if [ -n "$TIMEOUT_MS" ]; then genv API_TIMEOUT_MS "$TIMEOUT_MS"; fi
+          # Do not describe these as filtered: a denied key aborts the whole run above, so nothing
+          # is ever dropped and exported alongside. Only the API key above is a masked secret.
+          edelim="ENV_EOF_$(date +%s%N)_$$"
+          printf '%s' "$DECISION" | jq -r --arg d "$edelim" '.env | to_entries[] | "\(.key)<<\($d)", "\(.value)", $d' >> "$GITHUB_ENV"
+
+      # Always pass the validated model; omit effort only when the provider lacks support.
+      - name: Build claude_args head (model + conditional effort)
+        id: cargs
+        env:
+          MODEL: ${{ steps.provider.outputs.model }}
+          EFFORT: ${{ needs.config.outputs.effort }}
+          EFFORT_SUPPORTED: ${{ steps.provider.outputs.effort_supported }}
+        run: |
+          set -euo pipefail
+          if [ -z "$MODEL" ]; then
+            echo "::error::claude_model is missing from .prflow/config.json (set a top-level claude_model, or a per-section claude_model). Refusing to run."
+            exit 1
+          fi
+          # SECURITY: MODEL and EFFORT are spliced UNQUOTED into claude_args (a folded
+          # CLI string), and the runner can read either from PR-head config (EFFORT
+          # always via steps.extract when the caller passes no effort input; MODEL in
+          # the bootstrap fallback) — so refuse any value that could smuggle an extra
+          # CLI flag. A blacklist is NOT enough here: the action tokenises claude_args
+          # shell-style, so a flag-shaped single token (`--model --evil`) records
+          # --model as valueless and passes --evil through as its own flag, and a
+          # bytewise [[:space:]] check misses Unicode whitespace (NBSP/U+2028/U+3000)
+          # under a non-UTF-8 runner locale while the JS tokeniser still splits on it.
+          # So MODEL is validated POSITIVELY: reject a leading dash, then reject any
+          # character outside the conservative model-id allowlist
+          # A-Za-z0-9 . _ / : @ [ ] -  (covers claude-*, provider/model,
+          # bracket-suffix context-window ids like name-1.2[1m], and Bedrock-style
+          # colon ids) — a
+          # multibyte character is rejected in every locale because none of its bytes
+          # (C locale) nor its codepoint (UTF-8 locale) is in the allowlist. EFFORT is
+          # pinned to its schema enum (or empty, which drops the flag below). In the
+          # negated bracket expression, `]` sits first after `!` and `-` last, making
+          # both literal members of the set.
+          case "$MODEL" in
+            -*)
+              echo "::error::claude_model value is flag-shaped (leading dash) — refusing to compose claude_args (flag-injection guard; the model must be a single non-dash-leading token)."
+              exit 1 ;;
+            *[!]A-Za-z0-9._/:@[-]*)
+              echo "::error::claude_model value contains a character outside the model-id allowlist (A-Za-z0-9 . _ / : @ [ ] -) — refusing to compose claude_args (flag-injection guard)."
+              exit 1 ;;
+          esac
+          case "$EFFORT" in
+            '' | low | medium | high | xhigh | max) : ;;
+            *)
+              echo "::error::effort value is not one of low/medium/high/xhigh/max — refusing to compose claude_args (flag-injection guard)."
+              exit 1 ;;
+          esac
+          ARGS="--model $MODEL"
+          # --effort only when the provider supports it AND a value actually resolved. The
+          # config effort defaults to "high", so the default path always has one; the -n
+          # co-guard just avoids ever handing the CLI a valueless --effort on a pathological
+          # empty effort.
+          if [ "$EFFORT_SUPPORTED" = "true" ] && [ -n "$EFFORT" ]; then
+            ARGS="$ARGS --effort $EFFORT"
+          fi
+          # Newline-safe heredoc output (mirrors the resolver's decision<< / scalar-output form).
+          adelim="OUT_EOF_$(date +%s%N)_$$"
+          { printf 'args<<%s\n' "$adelim"; printf '%s\n' "$ARGS"; printf '%s\n' "$adelim"; } >> "$GITHUB_OUTPUT"
+
+      # Compose the shared baseline with plugins declared in trusted default-branch settings.
+      - name: Compose plugin inputs (baseline + settings-declared)
+        id: plugins
+        run: |
+          set -euo pipefail
+          BAKED_PLUGINS="$(printf '%s\n' prflow@devflow-marketplace)"
+          BAKED_MARKETPLACES="$(printf '%s\n' https://github.com/anthropics/claude-plugins-official.git ./)"
+          SETTINGS=.claude/settings.json
+          HELPER=.prflow/vendor/prflow/scripts/resolve-extra-plugins.sh
+          COMPOSE=.prflow/vendor/prflow/scripts/describe-plugin-compose.sh
+          EX_P="$(mktemp)"; EX_M="$(mktemp)"; ERR_P="$(mktemp)"; ERR_M="$(mktemp)"; ENTRIES="$(mktemp)"
+          trap 'rm -f "$EX_P" "$EX_M" "$ERR_P" "$ERR_M" "$ENTRIES"' EXIT
+          if [ ! -f "$HELPER" ]; then
+            # Skew arm (issue #455 two-halves; inline + grep-pinned by run.sh): the
+            # helper is absent at the vendored path — a consumer whose pinned
+            # prflow_version predates issue #505 running an upgraded workflow.
+            # Proceed with the baked baseline; one ::warning:: names prflow_version
+            # as the remedy. This arm fires precisely when describe-plugin-compose.sh
+            # (absent alongside it) cannot be invoked, so the warning stays inline
+            # rather than routed through the helper.
+            echo "::warning::devflow resolve-extra-plugins.sh not found at $HELPER — a pinned prflow_version predating issue #505 running an upgraded workflow; proceeding with the baked plugin baseline. Bump prflow_version in .prflow/config.json to compose settings-declared plugins."
+            : > "$EX_P"; : > "$EX_M"; : > "$ERR_P"; : > "$ERR_M"
+          else
+            bash "$HELPER" plugins "$SETTINGS" > "$EX_P" 2>"$ERR_P" || true
+            bash "$HELPER" marketplaces "$SETTINGS" > "$EX_M" 2>"$ERR_M" || true
+          fi
+          # Join breadcrumbs into one defect string (bash builtins; guard-class 2 —
+          # the joined value that decides the degraded-arm message is not derived
+          # through cat/tr/sed, non-preflight PATH tools).
+          DEFECT=""
+          for f in "$ERR_P" "$ERR_M"; do
+            while IFS= read -r line || [ -n "$line" ]; do
+              [ -z "$line" ] && continue
+              if [ -z "$DEFECT" ]; then DEFECT="$line"; else DEFECT="$DEFECT; $line"; fi
+            done < "$f"
+          done
+          # Spliced entries (extras beyond baseline) for the splice ::notice::.
+          : > "$ENTRIES"
+          for f in "$EX_P" "$EX_M"; do
+            while IFS= read -r line || [ -n "$line" ]; do
+              [ -z "$line" ] && continue
+              printf '%s\n' "$line" >> "$ENTRIES"
+            done < "$f"
+          done
+          # Dedupe baseline + extras, keeping the first occurrence (bash builtins;
+          # guard-class 2 — no tr/sed/wc/cut/head for the emitted list). The `|`
+          # separator never occurs in a plugin@marketplace entry or a marketplace URL.
+          dedupe() {
+            local baseline="$1" extras="$2" seen="" line out=""
+            while IFS= read -r line || [ -n "$line" ]; do
+              [ -z "$line" ] && continue
+              case "$seen" in *"|$line|"*) ;; *) seen="$seen|$line|"; out="${out:+$out$'\n'}$line" ;; esac
+            done <<< "$baseline"
+            if [ -f "$extras" ]; then
+              while IFS= read -r line || [ -n "$line" ]; do
+                [ -z "$line" ] && continue
+                case "$seen" in *"|$line|"*) ;; *) seen="$seen|$line|"; out="${out:+$out$'\n'}$line" ;; esac
+              done < "$extras"
+            fi
+            printf '%s\n' "$out"
+          }
+          COMBINED_PLUGINS="$(dedupe "$BAKED_PLUGINS" "$EX_P")"
+          COMBINED_MK="$(dedupe "$BAKED_MARKETPLACES" "$EX_M")"
+          pdelim="PLG_EOF_$(date +%s%N)_$$"
+          { printf 'plugins<<%s\n' "$pdelim"; printf '%s\n' "$COMBINED_PLUGINS"; printf '%s\n' "$pdelim"; } >> "$GITHUB_OUTPUT"
+          mdelim="MKT_EOF_$(date +%s%N)_$$"
+          { printf 'plugin_marketplaces<<%s\n' "$mdelim"; printf '%s\n' "$COMBINED_MK"; printf '%s\n' "$mdelim"; } >> "$GITHUB_OUTPUT"
+          # Annotation — arm classification lives in describe-plugin-compose.sh (the
+          # describe-denial-count.sh extraction convention; run.sh drives every arm).
+          # Inline fallback for the partial-vendor skew (HELPER present, COMPOSE
+          # absent): the helper ran and may have set DEFECT (a degraded settings
+          # entry) AND/OR emitted valid extras into ENTRIES (which were already
+          # spliced into the credentialed runner's plugin surface unconditionally
+          # above). DEFECT and a splice can COEXIST (PR #513) — a degraded entry
+          # must NOT suppress the splice ::notice:: for the valid extras. Without
+          # COMPOSE to render the annotation, mirror the helper's arms inline and
+          # emit each independently, so a spliced entry is never added without an
+          # audit line (https://prflow.ai/docs/runs/cloud/setup: every spliced entry logged, never silent).
+          if [ -f "$COMPOSE" ]; then
+            # Capture the renderer's status rather than `|| true`-swallowing it: the
+            # extras were already spliced above, so a non-zero renderer must still
+            # leave an audit line (PR #513 "never silent"). The run is never
+            # broken — the failure is caught, not propagated.
+            if ! bash "$COMPOSE" ok "$ENTRIES" "$DEFECT"; then
+              echo "::warning::describe-plugin-compose.sh failed (rc≠0); extras (if any) were composed but the audit annotation could not be rendered."
+            fi
+          else
+            # Join the spliced entries via a bash-builtin loop (guard-class 2 — no
+            # cat/tr/sed for the emitted list), mirroring describe-plugin-compose.sh's
+            # splice ::notice::.
+            _splice=""
+            if [ -s "$ENTRIES" ]; then
+              while IFS= read -r line || [ -n "$line" ]; do
+                [ -z "$line" ] && continue
+                if [ -z "$_splice" ]; then _splice="$line"; else _splice="$_splice, $line"; fi
+              done < "$ENTRIES"
+            fi
+            if [ -n "$DEFECT" ] && [ -n "$_splice" ]; then
+              echo "::warning::.claude/settings.json has degraded entries ($DEFECT); those are skipped, the valid extras below are composed."
+              echo "::notice::Composed plugin/marketplace entries beyond the baked baseline (describe-plugin-compose.sh unavailable): $_splice"
+            elif [ -n "$DEFECT" ]; then
+              echo "::warning::.claude/settings.json is degraded ($DEFECT); proceeding with the baked plugin baseline."
+            elif [ -n "$_splice" ]; then
+              echo "::notice::Composed plugin/marketplace entries beyond the baked baseline (describe-plugin-compose.sh unavailable): $_splice"
+            fi
+          fi
+
+      # Default-off git-env pins are job-scoped, including later cleanup.
+      # GIT_WORK_TREE can disrupt plugin cloning; an empty GIT_DIR is not an unset variable.
+      # Missing helpers leave the working default untouched.
+      - name: Resolve git-env pins
+        env:
+          GITENV_CFGJSON: ${{ needs.config.outputs.config_json }}
+          GITENV_WS: ${{ github.workspace }}
+        run: |
+          set -uo pipefail
+          HELPER='.prflow/vendor/prflow/scripts/emit-git-env.sh'
+          if [ ! -f "$HELPER" ]; then
+            echo "::notice::devflow git-env pins: bundled helper '$HELPER' is absent (this workflow ships via install.sh's file-copy, the helper via the prflow_version vendor fetch, so a consumer can carry the step first). Failing open to the working default: neither GIT_DIR nor GIT_WORK_TREE is exported."
+            exit 0
+          fi
+          CFG="${RUNNER_TEMP}/devflow-gitenv-config.json"
+          if ! printf '%s' "$GITENV_CFGJSON" > "$CFG" 2>/dev/null; then
+            echo "::warning::devflow git-env pins: could not materialize the trigger-time config into RUNNER_TEMP; failing open to the working default (neither variable exported)."
+            exit 0
+          fi
+          bash "$HELPER" --workspace "$GITENV_WS" --config-file "$CFG" --tier command >> "$GITHUB_ENV"
+
+      # Optional attribution changes writer commit metadata, not push identity; failures are advisory.
+      - name: Resolve committer identity
+        env:
+          ATTR_CFGJSON: ${{ needs.config.outputs.config_json }}
+          SENDER_LOGIN: ${{ github.event.sender.login }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+        run: |
+          set -uo pipefail
+          HELPER='.prflow/vendor/prflow/scripts/resolve-committer-identity.sh'
+          if [ ! -f "$HELPER" ]; then
+            echo "::notice::devflow commit attribution: bundled helper '$HELPER' is absent (this workflow ships via install.sh's file-copy, the helper via the prflow_version vendor fetch, so a consumer can carry the step first). Falling back to current authorship: no GIT_* identity exported."
+            exit 0
+          fi
+          CFG="${RUNNER_TEMP}/devflow-committer-config.json"
+          if ! printf '%s' "$ATTR_CFGJSON" > "$CFG" 2>/dev/null; then
+            echo "::warning::devflow commit attribution: could not materialize the trigger-time config into RUNNER_TEMP; falling back to current authorship (no GIT_* identity exported)."
+            exit 0
+          fi
+          # The helper's own contract is always-exit-0 (advisory attribution never
+          # gates the run); the `|| echo` makes that guarantee real at the step
+          # boundary rather than contract-dependent — a helper that ever exits
+          # non-zero degrades to current authorship with a breadcrumb, never a
+          # failed writer job over an advisory read.
+          bash "$HELPER" --login "$SENDER_LOGIN" --config-file "$CFG" >> "$GITHUB_ENV" \
+            || echo "::warning::devflow commit attribution: the identity helper exited non-zero; continuing with current authorship (attribution never gates the run)."
+
+      # Inspect the trusted base-ref extension closure, never the later PR-head checkout.
+      - name: Classify prompt-extension arrival
+        id: extarrival
+        env:
+          CMD: ${{ needs.gate.outputs.command }}
+        run: |
+          set -euo pipefail
+          # Select the workpad-less skill this command runs, so classify reads the right
+          # <skill>.md from the closure. review-and-fix outranks review (substring), same
+          # most-specific-first ordering the rest of this file uses.
+          case "$CMD" in
+            *"/prflow:review-and-fix"*|*"/devflow:review-and-fix"*) SKILL=review-and-fix ;;
+            *"/prflow:pr-description"*|*"/devflow:pr-description"*) SKILL=pr-description ;;
+            *"/prflow:review"*|*"/devflow:review"*) SKILL=review ;;
+            *) SKILL="" ;;
+          esac
+          if [ -z "$SKILL" ]; then
+            # Never reuse detector-absent here: its reconcile arm diagnoses an older
+            # prflow_version, so a command added to resolve-command-trigger.sh's allowlist
+            # without an arm above would fail closed pointing at the wrong remedy.
+            echo "::warning::prompt-extension-arrival: no skill arm above matches command '$CMD' (add one); recording skill-unresolved"
+            echo "state=skill-unresolved" >> "$GITHUB_OUTPUT"
+            echo "skill=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          H=.prflow/vendor/prflow/scripts/prompt-extension-arrival.py
+          if [ ! -f "$H" ]; then
+            # Record detector-absent rather than exiting clean: an exit-clean here would
+            # silently drop this arrival check on an older vendored prflow_version.
+            echo "::warning::prompt-extension-arrival.py absent from .prflow/vendor/prflow/scripts/ (older prflow_version); recording detector-absent"
+            echo "state=detector-absent" >> "$GITHUB_OUTPUT"
+            echo "skill=$SKILL" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # classify resolves DEVFLOW_PROMPT_EXTENSION_ROOT itself. `|| true` is required:
+          # classify exits 3 on a present-but-undeliverable fault and -e would abort before
+          # the state is published.
+          classify_one() {
+            local out state
+            out="$(python3 "$H" classify --skill "$1")" || true
+            echo "$out" >&2
+            state=""
+            case "$out" in state=*) state="${out#state=}"; state="${state%% *}" ;; esac
+            # classify-unreadable, never detector-absent: the detector file IS present
+            # (statted above), so empty/unparsable classify output is a run fault whose
+            # remedy is a re-run — not the bump-prflow_version remedy detector-absent names.
+            echo "${state:-classify-unreadable}"
+          }
+          STATE="$(classify_one "$SKILL")"
+          # The two review commands deliver a SECOND extension on this tier; a fault on it
+          # must not hide behind a deliverable primary, so a faulted second state wins.
+          # Promote FAULTS only: promoting a deliverable second state would overwrite a
+          # faulted primary with a clean terminal.
+          SKILL2=""
+          case "$SKILL" in
+            review-and-fix) SKILL2=fix ;;
+            review) SKILL2=requesting-code-review ;;
+          esac
+          if [ -n "$SKILL2" ]; then
+            STATE2="$(classify_one "$SKILL2")"
+            case "$STATE2" in
+              undeliverable-*|classify-unreadable) STATE="$STATE2"; SKILL="$SKILL2" ;;
+            esac
+          fi
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"
+          echo "skill=$SKILL" >> "$GITHUB_OUTPUT"
+          echo "prompt-extension-arrival: classified state=$STATE (skill=$SKILL)"
+
+      # Snapshot roots and review IDs before the engine so evidence is attributed by set difference.
+      # The gate reads each verdict's head; pr-description has no review inventory.
+      - name: Snapshot pre-engine review-evidence inventory
+        id: pre-evidence
+        if: ${{ startsWith(needs.gate.outputs.command, '/prflow:review') || startsWith(needs.gate.outputs.command, '/devflow:review') }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          REPO: ${{ github.repository }}
+          CONTEXT_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          COMMAND: ${{ needs.gate.outputs.command }}
+        run: |
+          set -uo pipefail
+          PR_NUMBER="${COMMAND##* }"
+          case "$PR_NUMBER" in ''|*[!0-9]*) PR_NUMBER="$CONTEXT_NUMBER" ;; esac
+          mkdir -p .prflow/tmp
+          # Run roots present BEFORE the engine step, as <slug>/<run-id> pairs. Never a
+          # newest-directory glob (a self-hosted runner can persist the workspace between
+          # runs) — the whole set is recorded so the gate attributes by delta.
+          ROOTS_JSON='[]'
+          if [ -d .prflow/tmp/review ]; then
+            ROOTS_JSON="$( (cd .prflow/tmp/review && find . -mindepth 2 -maxdepth 2 -type d) \
+              | sed 's#^\./##' | jq -R . | jq -s . )"
+          fi
+          # Whether the review-ID baseline was ESTABLISHED is load-bearing: if the fetch
+          # fails and we default to an empty set, a prior run's legitimate verdict would
+          # read as "fresh" and could be dismissed. So record the establishment flag and
+          # let the gate go unestablished (never dismiss) when the baseline is false.
+          IDS_JSON='[]'
+          IDS_ESTABLISHED=false
+          if [ -n "${PR_NUMBER:-}" ]; then
+            if RAW_IDS="$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews?per_page=100" --jq '.[].id' 2>/dev/null)"; then
+              IDS_JSON="$(printf '%s\n' "$RAW_IDS" | jq -R . | jq -s 'map(select(length>0) | tonumber)')"
+              IDS_ESTABLISHED=true
+            fi
+          fi
+          jq -n --argjson r "$ROOTS_JSON" --argjson i "$IDS_JSON" --argjson e "$IDS_ESTABLISHED" \
+            '{run_roots: $r, review_ids: $i, review_ids_established: $e}' > .prflow/tmp/pre-inventory.json
+          echo "review-evidence pre-inventory: $(cat .prflow/tmp/pre-inventory.json)"
+
+      # Resolve PRFlow from the vendored subtree in both implement and command jobs.
+      # Keep the step bodies aligned; the job-local rewrite leaves tracked marketplace data intact.
+      # The emitted local marketplace entry needs its ./ prefix for action validation.
+      - name: Resolve plugin root to the vendored subtree (issue #1049)
+        id: vendor_marketplace
+        env:
+          COMPOSED_MK: ${{ steps.plugins.outputs.plugin_marketplaces }}
+        run: |
+          set -euo pipefail
+          VENDORMK=.prflow/vendor/prflow/scripts/compose-vendor-marketplace.sh
+          MKF="$(mktemp)"; printf '%s\n' "$COMPOSED_MK" > "$MKF"
+          if [ -f "$VENDORMK" ]; then
+            bash "$VENDORMK" "$MKF" .prflow/vendor \
+              || echo "::warning::devflow compose-vendor-marketplace.sh failed (rc≠0); the prflow plugin resolves from the repo-root marketplace (./)."
+          else
+            echo "::warning::devflow compose-vendor-marketplace.sh not found at $VENDORMK — a pinned prflow_version predating issue #1049 running an upgraded workflow; the prflow plugin resolves from the repo-root marketplace (./). Bump prflow_version in .prflow/config.json."
+          fi
+          # Re-read the (possibly transformed) list via bash builtins (guard-class 2 —
+          # no cat/tr/sed/wc/cut/head for the emitted marketplace list). Blank lines are
+          # dropped deliberately, so an empty entry never reaches plugin_marketplaces.
+          OUT=""
+          while IFS= read -r mkline || [ -n "$mkline" ]; do
+            [ -z "$mkline" ] && continue
+            OUT="${OUT:+$OUT$'\n'}$mkline"
+          done < "$MKF"
+          rm -f "$MKF"
+          vdelim="MKV_EOF_$(date +%s%N)_$$"
+          { printf 'plugin_marketplaces<<%s\n' "$vdelim"; printf '%s\n' "$OUT"; printf '%s\n' "$vdelim"; } >> "$GITHUB_OUTPUT"
+
+      - name: Stamp the transcript store before the Claude step
+        if: always()
+        run: |
+          set -uo pipefail
+          # A cancelled/killed Claude step writes no execution file; this stamp's mtime is the
+          # cutoff the scrub step uses to select THIS run's own session files (issue #342).
+          STAMP="$RUNNER_TEMP/prflow-transcript-stamp"
+          : > "$STAMP"
+          echo "transcript store stamped at $STAMP"
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@8cf3482550831fb35a4fc3fbf7ca139cf8028b4c # v1.0.233 (CLI 2.1.281)
+        env:
+          # Keep dispatched work foregrounded so the headless run can collect it before exiting.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+        with:
+          # OAuth is exclusive to the default path; routed providers use their own credentials.
+          claude_code_oauth_token: ${{ steps.provider.outputs.provider == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          # Bedrock must use the action input: its step env overrides a job-level provider toggle.
+          use_bedrock: ${{ steps.provider.outputs.auth == 'bedrock_api_key' && 'true' || '' }}
+          # Bedrock authenticates with AWS_BEARER_TOKEN_BEDROCK; other routed providers use this key.
+          anthropic_api_key: ${{ steps.provider.outputs.provider != '' && steps.provider.outputs.auth != 'bedrock_api_key' && secrets.DEVFLOW_PROVIDER_API_KEY || '' }}
+          # Review-only must never inherit the primary App's identity; writers use that App or GITHUB_TOKEN.
+          github_token: ${{ startsWith(needs.gate.outputs.command, '/prflow:review ') && (steps.reviewer-token.outputs.token || secrets.GITHUB_TOKEN) || (steps.app-token.outputs.token || secrets.GITHUB_TOKEN) }}
+          allowed_bots: ${{ needs.config.outputs.allowed_bots }}
+
+          # Every command requires a composed grounding block; fallback prevents an empty agent-mode prompt.
+          prompt: ${{ steps.reviewcompose.outputs.prompt || needs.gate.outputs.command }}
+
+          additional_permissions: |
+            actions: read
+
+          # Keep the default timeout below the ceiling, aligned with the implement tier.
+          # The env-only settings input preserves project hooks; these bounds do not predict consumer suite duration.
+          settings: |
+            {
+              "env": {
+                "BASH_DEFAULT_TIMEOUT_MS": "900000",
+                "BASH_MAX_TIMEOUT_MS": "1200000"
+              }
+            }
+
+          # Use the trusted default-branch vendored engine with settings-declared extras.
+          # PR-branch engine changes are not exercised by this comment-triggered workflow.
+          plugin_marketplaces: ${{ steps.vendor_marketplace.outputs.plugin_marketplaces }}
+
+          plugins: ${{ steps.plugins.outputs.plugins }}
+
+          base_branch: ${{ needs.config.outputs.base_branch }}
+          path_to_claude_code_executable: ${{ needs.config.outputs.claude_code_executable }}
+          claude_args: >-
+            ${{ steps.cargs.outputs.args }}
+            --allowed-tools "${{ steps.tools.outputs.tools }}"
+
+      # Mirror a determined review-only verdict before later handlers, including on failure paths.
+      # Absent/disabled configuration makes no API call; the helper cannot change job status.
+      - name: Mirror review status label (terminal verdict)
+        if: ${{ always() && (startsWith(needs.gate.outputs.command, '/prflow:review ') || startsWith(needs.gate.outputs.command, '/devflow:review ')) && (github.event.issue.pull_request || github.event.pull_request.number) && (github.event.issue.number || github.event.pull_request.number) }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          CONTEXT_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          COMMAND: ${{ needs.gate.outputs.command }}
+          REPO: ${{ github.repository }}
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          set -uo pipefail
+          # review status-label terminal write BEGIN
+          RSL_PR="${COMMAND##* }"
+          case "$RSL_PR" in ''|*[!0-9]*) RSL_PR="${CONTEXT_NUMBER:-}" ;; esac
+          if [ -z "$RSL_PR" ]; then
+            echo "::notice::mirror review status label: no PR number resolvable from command '${COMMAND:-}' or event context; nothing to label"
+            exit 0
+          fi
+          # Config-gate first (vendored, then repo): only the literal `true` enables,
+          # so a consumer whose config lacks the key exits here before any API call.
+          RSL_CFG=.prflow/vendor/prflow/scripts/config-get.sh
+          RSL_ENABLED=false
+          if [ -f "$RSL_CFG" ]; then
+            RSL_ENABLED="$(bash "$RSL_CFG" .review_status_labels.enabled false 2>/dev/null || echo false)"
+          fi
+          case "$RSL_ENABLED" in
+            true) : ;;
+            *)
+              echo "::notice::mirror review status label: review_status_labels.enabled is not 'true' (resolved '${RSL_ENABLED}'); no label written"
+              exit 0
+              ;;
+          esac
+          # ENGINE_ERROR is parsed HERE — this step runs before the engine step that
+          # publishes is_error — from the same execution log via the same helper.
+          PEE=.prflow/vendor/prflow/scripts/parse-engine-error.sh
+          RSL_ENGINE_ERROR=false
+          if [ -f "$PEE" ]; then
+            RSL_ENGINE_ERROR=$(bash "$PEE" "${EXECUTION_FILE:-}" || echo false)
+            [ "$RSL_ENGINE_ERROR" = "true" ] || RSL_ENGINE_ERROR=false
+          else
+            echo "::notice::mirror review status label: parse-engine-error.sh absent; treating engine is_error as false (fail-safe)."
+          fi
+          RSL_HEAD_SHA="$(gh pr view "$RSL_PR" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || true)"
+          # Derive the verdict for the reviewed HEAD (fail-closed): a DETERMINED
+          # approve/reject maps to approved/changes-requested; everything else
+          # (undetermined, incomplete, engine error, unverifiable) maps to
+          # review-failed. The state token is a selection value, chosen with bash
+          # builtins only (CLAUDE.md guard-class 2).
+          DERIVER=.prflow/vendor/prflow/scripts/derive-review-verdict.sh
+          RSL_STATE=review-failed
+          if [ -f "$DERIVER" ]; then
+            RSL_VOUT="$(HEAD_SHA="$RSL_HEAD_SHA" ENGINE_ERROR="$RSL_ENGINE_ERROR" PR_NUMBER="$RSL_PR" REPO="$REPO" bash "$DERIVER")"
+            RSL_VERDICT=""; RSL_DETERMINED=""
+            while IFS= read -r rsl_line; do
+              case "$rsl_line" in
+                verdict=*) RSL_VERDICT="${rsl_line#verdict=}" ;;
+                verdict_determined=*) RSL_DETERMINED="${rsl_line#verdict_determined=}" ;;
+              esac
+            done <<< "$RSL_VOUT"
+            if [ "$RSL_DETERMINED" = "true" ] && [ "$RSL_VERDICT" = "approve" ]; then
+              RSL_STATE=approved
+            elif [ "$RSL_DETERMINED" = "true" ] && [ "$RSL_VERDICT" = "reject" ]; then
+              RSL_STATE=changes-requested
+            else
+              RSL_STATE=review-failed
+            fi
+          else
+            echo "::warning::mirror review status label: derive-review-verdict.sh absent at $DERIVER; defaulting the label to review-failed (upgrade the vendored plugin pin)"
+          fi
+          MIRROR=.prflow/vendor/prflow/scripts/mirror-review-status-label.sh
+          if [ -f "$MIRROR" ]; then
+            bash "$MIRROR" "$RSL_PR" "$RSL_STATE" || true
+          else
+            echo "::warning::mirror review status label: mirror-review-status-label.sh absent at the vendored path; the review status label for #$RSL_PR was not written (upgrade the vendored plugin pin)"
+          fi
+          # review status-label terminal write END
+
+      # Always reap launched refreshers, including a failed self-test.
+      # Review-only requires launched=yes so an absent helper is not reported as a defeated process.
+      - name: Stop credential refresher (optional)
+        if: ${{ always() && ((vars.DEVFLOW_APP_ID != '' && !startsWith(needs.gate.outputs.command, '/prflow:review ')) || (startsWith(needs.gate.outputs.command, '/prflow:review ') && steps.refresher.outputs.launched == 'yes')) }}
+        env:
+          # A failed launch ran; skipped/cancelled launches legitimately have no pidfile.
+          DEVFLOW_REFRESH_STARTED: ${{ steps.refresher.outcome }}
+          DEVFLOW_REFRESH_SURFACES: ${{ startsWith(needs.gate.outputs.command, '/prflow:review ') && 'token-file' || 'both' }}
+        run: |
+          # Derive the self-test marker path in this step's own body (issue #1925),
+          # from the same HANDLE the Start step used — it is no longer published job-wide.
+          # GITHUB_RUN_ID/GITHUB_RUN_ATTEMPT/GITHUB_JOB are available in every step.
+          HANDLE="${GITHUB_RUN_ID:-0}-${GITHUB_RUN_ATTEMPT:-0}-${GITHUB_JOB:-job}"
+          export DEVFLOW_REFRESH_SELFTEST_FAILED="$RUNNER_TEMP/devflow-refresh-$HANDLE.selftest-failed"
+          H=.prflow/vendor/prflow/scripts/stop-refresher.sh
+          bash "$H"
+
+      # Best-effort diagnostics stay enabled unless explicitly false and do not change job status.
+      # The helper owns bounded denial detail and safe rendering.
+      # Execution-file diagnostics must stay in-job; the path dies with the runner.
+      - name: Surface execution diagnostics
+        id: diag
+        if: always()
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          # Renderer annotations include the Claude step outcome without changing this step status.
+          CLAUDE_STEP_OUTCOME: ${{ steps.claude.outcome }}
+        run: |
+          set -euo pipefail
+          CG=.prflow/vendor/prflow/scripts/config-get.sh
+          # `|| true` so config-get's hard-fail exit (malformed config.json / missing
+          # python3) can't abort this step under GitHub's default `-e` run shell — which
+          # would fail the job and break the "never changes the job's pass/fail" contract
+          # above. The empty read then falls safe to enabled on the next line. (Mirrors the
+          # `|| echo false` assignment guard in devflow-runner.yml's engine-error step.)
+          ENABLED="$("$CG" .prflow.execution_diagnostics_enabled true || true)"
+          [ -n "$ENABLED" ] || ENABLED=true
+          if [ "$ENABLED" = "false" ]; then
+            echo "execution diagnostics: disabled via .prflow.execution_diagnostics_enabled=false; skipping."
+            exit 0
+          fi
+          SED=.prflow/vendor/prflow/scripts/surface-execution-diagnostics.sh
+          if [ -f "$SED" ]; then
+            # `|| echo ::notice::` for the same reason as the config-get guard above:
+            # the helper's always-exit-0 contract holds for the committed file, but a
+            # partial-copy / truncated vendored helper (a documented deployment hazard)
+            # could exit non-zero, which under GitHub's default `-e` run shell would
+            # abort this always() step and fail the job. Guard it so the read-only
+            # "never changes the job's pass/fail" contract holds even then.
+            bash "$SED" "${EXECUTION_FILE:-}" || echo "::notice::surface-execution-diagnostics.sh exited non-zero; execution diagnostics unavailable (best-effort)."
+          else
+            echo "::notice::surface-execution-diagnostics.sh absent; execution diagnostics not surfaced (best-effort)."
+          fi
+
+      # Parse engine is_error separately from the action outcome; an absent log yields false.
+      # Parsing stays in-job, but its output can describe an alive failure to the finalizer.
+      - name: Surface review-engine execution result
+        id: engine
+        if: ${{ always() }}
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          set -euo pipefail
+          PEE=.prflow/vendor/prflow/scripts/parse-engine-error.sh
+          if [ -f "$PEE" ]; then
+            # Never 2>/dev/null the helper — a broken jq would otherwise report
+            # is_error=false forever with zero trace.
+            IS_ERROR=$(bash "$PEE" "${EXECUTION_FILE:-}" || echo false)
+            [ "$IS_ERROR" = "true" ] || IS_ERROR=false
+          else
+            echo "::notice::parse-engine-error.sh absent; treating engine is_error as false (fail-safe)."
+            IS_ERROR=false
+          fi
+          echo "is_error=$IS_ERROR" >> "$GITHUB_OUTPUT"
+
+      # Terminalize this run's review progress when no verdict exists, even after a clean agent exit.
+      # Outcomes explain the cause, not whether to check. The run-keyed upsert is idempotent and best-effort.
+      - name: Flip review-progress comment on dead run
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          CONTEXT_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
+          ENGINE_ERROR: ${{ steps.engine.outputs.is_error }}
+          # Pass the safe cause fields to the helper; result excerpts must not reach comments.
+          SUBTYPE: ${{ steps.diag.outputs.subtype }}
+          TERMINAL_REASON: ${{ steps.diag.outputs.terminal_reason }}
+          API_ERROR_STATUS: ${{ steps.diag.outputs.api_error_status }}
+          API_RETRY_ERROR: ${{ steps.diag.outputs.api_retry_error }}
+          API_RETRY_STATUS: ${{ steps.diag.outputs.api_retry_status }}
+          RATE_LIMIT_TYPE: ${{ steps.diag.outputs.rate_limit_type }}
+          RATE_LIMIT_RESETS_AT: ${{ steps.diag.outputs.rate_limit_resets_at }}
+          COMMAND: ${{ needs.gate.outputs.command }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # dead-run review-progress upsert BEGIN
+          FLIP_MARKER="<!-- prflow:review-progress run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} -->"
+          FLIP_HELPER=.prflow/vendor/prflow/scripts/flip-review-progress-failed.sh
+          if [ -z "${CONTEXT_NUMBER:-}" ]; then
+            echo "::notice::flip review-progress: no issue/PR number on this event; nothing to flip"
+            exit 0
+          fi
+          # Only the review commands seed (and therefore own) a review-progress
+          # comment. Without this screen the ungated step would CREATE one on a
+          # pr-description run that never had one — the upsert's create arm
+          # turning a benign no-op into a spurious "Review failed" comment on an
+          # unrelated command. Matched with bash builtins only: a value that
+          # decides a selection must not flow through a non-preflight-guaranteed
+          # PATH tool.
+          case "${COMMAND:-}" in
+            /prflow:review*|/devflow:review*) : ;;
+            *)
+              echo "::notice::flip review-progress: command '${COMMAND:-}' seeds no review-progress comment; nothing to write"
+              exit 0
+              ;;
+          esac
+          # TARGET_NUMBER is the command's own number; since issue #1863 that equals the
+          # thread the comment sits on (the fallback covers a numberless command). Bash
+          # builtins only — this value decides where a write lands (no non-preflight PATH tool).
+          TARGET_NUMBER="${COMMAND##* }"
+          case "$TARGET_NUMBER" in
+            ''|*[!0-9]*) TARGET_NUMBER="$CONTEXT_NUMBER" ;;
+          esac
+          # Name the specific mode that fired, so the comment's cause line and
+          # the job log agree on why the run was treated as dead. The four-mode
+          # partition and its arm ORDER live in the helper, not here.
+          CAUSE_HELPER=.prflow/vendor/prflow/scripts/describe-dead-run-cause.sh
+          if [ -f "$CAUSE_HELPER" ]; then
+            CAUSE="$(bash "$CAUSE_HELPER" "${CLAUDE_OUTCOME:-}" "${ENGINE_ERROR:-false}")"
+          else
+            # A consumer's installed devflow.yml and their vendored scripts/
+            # upgrade on independent schedules, so a pin that predates this
+            # helper must degrade rather than fail: warn, and fall back to a
+            # cause that still names both observables.
+            echo "::warning::flip review-progress: describe-dead-run-cause.sh absent at $CAUSE_HELPER; falling back to an undifferentiated cause (upgrade the vendored plugin pin)"
+            CAUSE="claude step ${CLAUDE_OUTCOME:-unavailable} (engine is_error=${ENGINE_ERROR:-false})"
+          fi
+          # Verdict-presence gate (issue #1172). The flip/create must never fabricate
+          # a "no verdict" banner beside a verdict THIS SAME run already posted for the
+          # reviewed HEAD. Before writing, ask the HEAD-scoped, fail-closed verdict
+          # deriver — via scripts/dead-run-verdict-present.sh, which reuses
+          # derive-review-verdict.sh and so reads BOTH channels post-review-verdict.sh
+          # writes (the formal review AND this run's run-keyed progress comment) —
+          # whether a verdict EXISTS. Only a positively-determined verdict suppresses
+          # the write; everything else (no HEAD sha, deriver absent, query failure,
+          # genuinely no verdict, or an engine error) reports `absent` and the banner
+          # still writes, so a genuinely verdict-less run keeps getting it (the fix must
+          # not be "stop emitting it"). The selection lives in the helper, not here, so
+          # the suite drives it per arm — the both-channels case and the truly-absent
+          # case among them — rather than an untestable inline query.
+          VERDICT_HELPER=.prflow/vendor/prflow/scripts/dead-run-verdict-present.sh
+          SUPPRESS_FLIP=no
+          if [ -f "$VERDICT_HELPER" ]; then
+            if [ "$(bash "$VERDICT_HELPER" "$REPO" "$TARGET_NUMBER" "${ENGINE_ERROR:-false}")" = present ]; then
+              SUPPRESS_FLIP=yes
+            fi
+          else
+            # A consumer's installed devflow.yml and their vendored scripts/ upgrade on
+            # independent schedules, so a pin predating this helper must DEGRADE rather
+            # than silently drop the banner: warn, and fall through to writing it (the
+            # fail-toward-the-banner direction — never suppress on an unestablished
+            # verdict).
+            echo "::warning::flip review-progress: dead-run-verdict-present.sh absent at $VERDICT_HELPER; cannot check for a posted verdict, so the dead-run banner is NOT suppressed (upgrade the vendored plugin pin)"
+          fi
+          if [ "$SUPPRESS_FLIP" = yes ]; then
+            echo "::notice::flip review-progress: a verdict for the reviewed HEAD was posted by this run; suppressing the dead-run '❌ Review failed' write (issue #1172)"
+          elif [ -f "$FLIP_HELPER" ]; then
+            bash "$FLIP_HELPER" "$TARGET_NUMBER" "$FLIP_MARKER" "$CAUSE" || true
+            # review status-label mirror (dead-run) BEGIN
+            # This run reached the flip/create arm (no verdict was posted), so
+            # mirror PRFlow:ReviewStuck (issue #104). Review-ONLY trailing-space
+            # screen; best-effort — the helper resolves enablement and no-ops off.
+            case "${COMMAND:-}" in
+              /prflow:review\ *|/devflow:review\ *)
+                MIRROR=.prflow/vendor/prflow/scripts/mirror-review-status-label.sh
+                if [ -f "$MIRROR" ]; then
+                  bash "$MIRROR" "$TARGET_NUMBER" review-failed || true
+                else
+                  echo "::warning::mirror review status label: mirror-review-status-label.sh absent at the vendored path; PRFlow:ReviewStuck not written for #$TARGET_NUMBER (upgrade the vendored plugin pin)"
+                fi
+                ;;
+            esac
+            # review status-label mirror (dead-run) END
+          else
+            echo "::warning::flip review-progress: flip-review-progress-failed.sh absent at $FLIP_HELPER; review-progress comment not flipped to '❌ Review failed'"
+          fi
+          # dead-run review-progress upsert END
+          # review-progress marker diagnosis BEGIN
+          # The authoritative flip runs first. Diagnosis still recognizes its
+          # exact marker after terminalization, while only active Reviewing
+          # comments under another identity can produce a mismatch warning.
+          DIAG_RUNNER=.prflow/vendor/prflow/scripts/run-review-progress-diagnosis.sh
+          if [ -f "$DIAG_RUNNER" ]; then
+            bash "$DIAG_RUNNER" "$COMMAND" "$REPO" "$TARGET_NUMBER" "$FLIP_MARKER" || true
+          else
+            echo "::notice::flip review-progress: could not establish marker diagnosis because the dispatcher is absent at $DIAG_RUNNER"
+          fi
+          # review-progress marker diagnosis END
+
+      # Validate a newly posted merge-gating verdict against this run's attributed phase artifacts.
+      # The helper owns the decision; failure records the cause, terminalizes progress and dismisses the review.
+      # Include review-and-fix: it normally posts no verdict, but a direct review API bypass still needs evidence.
+      - name: Review evidence gate
+        id: review-evidence-gate
+        if: ${{ always() && (startsWith(needs.gate.outputs.command, '/prflow:review') || startsWith(needs.gate.outputs.command, '/devflow:review')) && (github.event.issue.pull_request || github.event.pull_request.number) && (github.event.issue.number || github.event.pull_request.number) }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          REPO: ${{ github.repository }}
+          CONTEXT_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          COMMAND: ${{ needs.gate.outputs.command }}
+          # Match the engine token identity so a human review cannot count as this run's verdict.
+          REVIEWER_LOGIN: ${{ startsWith(needs.gate.outputs.command, '/prflow:review ') && (steps.reviewer-token.outputs.app-slug != '' && format('{0}[bot]', steps.reviewer-token.outputs.app-slug) || 'github-actions[bot]') || (steps.app-token.outputs.app-slug != '' && format('{0}[bot]', steps.app-token.outputs.app-slug) || 'github-actions[bot]') }}
+          # The optional transcript check is in-job; without a transcript the gate grades artifacts alone.
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          set -uo pipefail
+          # The pre-engine inventory step is what makes attribution possible; without it
+          # (a non-review command, or a race) there is nothing this run can be attributed
+          # against, so the gate no-ops rather than guessing.
+          if [ ! -f .prflow/tmp/pre-inventory.json ]; then
+            echo "::warning::review evidence gate: no pre-engine inventory was recorded for this run; the gate cannot attribute the run root, so the check is unestablished"
+            exit 0
+          fi
+          PR_NUMBER="${COMMAND##* }"
+          case "$PR_NUMBER" in ''|*[!0-9]*) PR_NUMBER="$CONTEXT_NUMBER" ;; esac
+          GATE=.prflow/vendor/prflow/scripts/review-evidence-gate.py
+          if [ ! -f "$GATE" ]; then
+            # The workflow step owns this arm because an absent script cannot report itself.
+            echo "::warning::review evidence gate: review-evidence-gate.py is absent at the vendored path; the gate did not run (upgrade the vendored plugin pin)"
+            exit 0
+          fi
+          VENDOR_ROOT=.prflow/vendor/prflow/skills/review
+          [ -d "$VENDOR_ROOT" ] || VENDOR_ROOT=skills/review
+          # The reviewed head is read from the verdict marker itself inside the gate; only
+          # the base ref is supplied here, for the diff-classification recompute.
+          BASE_REF_RAW="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq .base.ref 2>/dev/null || true)"
+          BASE_REF=""
+          if [ -n "$BASE_REF_RAW" ]; then
+            git fetch --quiet origin "$BASE_REF_RAW:refs/remotes/origin/$BASE_REF_RAW" 2>/dev/null || true
+            BASE_REF="origin/$BASE_REF_RAW"
+          fi
+          REVIEWS_FILE="$RUNNER_TEMP/evidence-gate-reviews.json"
+          # A failed fetch leaves the file empty on purpose — the gate reads that as an
+          # unparseable payload (unestablished), never as an empty '[]' review set that
+          # would launder a hollow verdict into a green no-verdict.
+          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews?per_page=100" > "$REVIEWS_FILE" 2>/dev/null || true
+          RESULT="$(python3 "$GATE" --pre-inventory .prflow/tmp/pre-inventory.json \
+            --post-tree-root . --reviews-payload "$REVIEWS_FILE" \
+            --base-ref "$BASE_REF" --repo-root . --reviewer-login "$REVIEWER_LOGIN" \
+            --vendored-engine-root "$VENDOR_ROOT" --execution-file "$EXECUTION_FILE")"
+          TOKEN="$(printf '%s\n' "$RESULT" | head -1)"
+          echo "review-evidence-gate: $TOKEN"
+          case "$TOKEN" in
+            pass\ *|no-verdict)
+              echo "::notice::review evidence gate: $TOKEN"
+              ;;
+            unestablished\ *)
+              echo "::warning::review evidence gate: $TOKEN (the evidence state could not be established; reported neither as a pass nor a failure)"
+              ;;
+            fail\ *)
+              echo "::error::review evidence gate: $TOKEN — this run posted a merge-gating verdict without the phase-execution evidence its diff requires"
+              # (a) durable pull-request comment naming the missing evidence. The
+              # human detail leads; the machine token is kept as a trailing footer so
+              # a reader is not met by the raw `fail missing=… review_id=…` line, and
+              # the token still stays quotable from the comment itself.
+              printf '%s\n' "$RESULT" | tail -n +2 > "$RUNNER_TEMP/evidence-gate-body.md"
+              printf '\n<!-- review-evidence-gate token -->\n`%s`\n' "$TOKEN" \
+                >> "$RUNNER_TEMP/evidence-gate-body.md"
+              if jq -n --rawfile b "$RUNNER_TEMP/evidence-gate-body.md" '{body: $b}' \
+                   | gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" --input - >/dev/null; then
+                echo "::notice::review evidence gate: posted the missing-evidence comment on #$PR_NUMBER"
+              else
+                echo "::warning::review evidence gate: the missing-evidence comment could not be posted on #$PR_NUMBER"
+              fi
+              # (b) flip this run's progress comment to its failed state — the flip
+              # helper's evidence-gate arm, taken even when the run wrote a terminal Status.
+              FLIP=.prflow/vendor/prflow/scripts/flip-review-progress-failed.sh
+              # The run-keyed progress marker (a distinct variable name from the dead-run
+              # flip step's FLIP_MARKER, so the #1054 single-producer pin still finds one).
+              PROGRESS_MARKER="<!-- prflow:review-progress run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} -->"
+              if [ -f "$FLIP" ]; then
+                bash "$FLIP" "$PR_NUMBER" "$PROGRESS_MARKER" "review evidence gate failed: $TOKEN" --evidence-gate-fail || true
+              else
+                echo "::warning::review evidence gate: flip-review-progress-failed.sh absent; progress comment not flipped"
+              fi
+              # review status-label mirror (evidence-gate) BEGIN
+              # The evidence gate failed, so mirror PRFlow:ReviewStuck (issue #104).
+              # This step's `if:` admits /prflow:review-and-fix (no trailing space),
+              # so screen it out here; best-effort — the helper no-ops when off.
+              case "${COMMAND:-}" in
+                /prflow:review\ *|/devflow:review\ *)
+                  MIRROR=.prflow/vendor/prflow/scripts/mirror-review-status-label.sh
+                  if [ -f "$MIRROR" ]; then
+                    bash "$MIRROR" "$PR_NUMBER" review-failed || true
+                  else
+                    echo "::warning::mirror review status label: mirror-review-status-label.sh absent at the vendored path; PRFlow:ReviewStuck not written for #$PR_NUMBER (upgrade the vendored plugin pin)"
+                  fi
+                  ;;
+              esac
+              # review status-label mirror (evidence-gate) END
+              # (c) dismiss the unbacked review — only a merge-gating state (APPROVED or
+              # CHANGES_REQUESTED); a COMMENTED-state verdict is left to the durable comment.
+              RID="$(printf '%s' "$TOKEN" | sed -n 's/.*review_id=\([0-9][0-9]*\).*/\1/p')"
+              RSTATE="$(printf '%s' "$TOKEN" | sed -n 's/.*review_state=\([A-Z_]*\).*/\1/p')"
+              if [ -n "$RID" ] && { [ "$RSTATE" = APPROVED ] || [ "$RSTATE" = CHANGES_REQUESTED ]; }; then
+                if gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/reviews/$RID/dismissals" \
+                     -f message="Dismissed by the PRFlow review-evidence gate: this verdict lacks phase-execution evidence ($TOKEN). See the durable comment on this pull request." >/dev/null 2>&1; then
+                  echo "::notice::review evidence gate: dismissed the unbacked review $RID"
+                else
+                  echo "::warning::review evidence gate: dismissal of review $RID failed; the durable comment stands as the recorded residual"
+                fi
+              else
+                echo "::notice::review evidence gate: review ${RID:-<none>} state ${RSTATE:-<none>} is not merge-gating; left to the durable comment (not dismissed)"
+              fi
+              exit 1
+              ;;
+            *)
+              echo "::warning::review evidence gate: unrecognized gate output '$TOKEN'; treated as unestablished"
+              ;;
+          esac
+          exit 0
+
+      # Read failed verdict delivery before the mint/backstop so either can respond to a failed post.
+      - name: Read whether the verdict post failed
+        id: verdict-post
+        if: ${{ always() && startsWith(needs.gate.outputs.command, '/prflow:review ') }}
+        run: |
+          # verdict-post failed read BEGIN
+          FAILED=false
+          CHECK=.prflow/vendor/prflow/scripts/check-verdict-post-reached.sh
+          if [ -f "$CHECK" ]; then
+            LINE=$(bash "$CHECK" || true)
+            case "$LINE" in
+              'REACHED FAILED no-durable-channel'*) FAILED=true ;;
+            esac
+          else
+            echo "::warning::$CHECK absent (older vendored tree); verdict-post failure unchecked"
+          fi
+          echo "failed=$FAILED" >> "$GITHUB_OUTPUT"
+          echo "::notice::verdict post failed on both channels: $FAILED (check said: ${LINE:-<no output>})"
+          # verdict-post failed read END
+
+      # Mint a fresh App token for bounded retries of failed, non-cancelled review-only runs.
+      # Without an App the dead-run record remains, but no recursive GITHUB_TOKEN retry is possible.
+      - name: Mint review-backstop token (optional)
+        id: backstop-token
+        if: ${{ always() && startsWith(needs.gate.outputs.command, '/prflow:review ') && (steps.engine.outputs.is_error == 'true' || steps.claude.outcome == 'failure' || (!cancelled() && steps.verdict-post.outputs.failed == 'true')) && vars.DEVFLOW_APP_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.DEVFLOW_APP_ID }}
+          private-key: ${{ secrets.DEVFLOW_APP_PRIVATE_KEY }}
+      # Keep redispatch in-job until coexistence with an external backstop is established.
+      - name: Review stall backstop
+        if: ${{ always() && startsWith(needs.gate.outputs.command, '/prflow:review ') && (steps.engine.outputs.is_error == 'true' || steps.claude.outcome == 'failure' || (!cancelled() && steps.verdict-post.outputs.failed == 'true')) }}
+        env:
+          GH_TOKEN: ${{ steps.backstop-token.outputs.token || github.token }}
+          REPO: ${{ github.repository }}
+          CONTEXT_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          COMMAND: ${{ needs.gate.outputs.command }}
+          # This path delivered no verdict; do not infer one from another run.
+          VERDICT: incomplete
+          APP_TOKEN_PRESENT: ${{ steps.backstop-token.outputs.token != '' }}
+          # Pass safe cause facts, never the result excerpt.
+          CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
+          ENGINE_ERROR: ${{ steps.engine.outputs.is_error }}
+          VERDICT_POST_FAILED: ${{ steps.verdict-post.outputs.failed }}
+          SUBTYPE: ${{ steps.diag.outputs.subtype }}
+          TERMINAL_REASON: ${{ steps.diag.outputs.terminal_reason }}
+          API_ERROR_STATUS: ${{ steps.diag.outputs.api_error_status }}
+          API_RETRY_ERROR: ${{ steps.diag.outputs.api_retry_error }}
+          API_RETRY_STATUS: ${{ steps.diag.outputs.api_retry_status }}
+          RATE_LIMIT_TYPE: ${{ steps.diag.outputs.rate_limit_type }}
+          RATE_LIMIT_RESETS_AT: ${{ steps.diag.outputs.rate_limit_resets_at }}
+        run: |
+          set -euo pipefail
+          # Since issue #1863 the light-command resolver makes the command's trailing
+          # number the reviewed thread's own, so this derivation (and its event-number
+          # fallback) lands on the guarded thread. Bash builtins only (issue #1858).
+          PR_NUMBER="${COMMAND##* }"
+          case "$PR_NUMBER" in
+            ''|*[!0-9]*) PR_NUMBER="$CONTEXT_NUMBER" ;;
+          esac
+          # The stall-backstop helper reads PR_NUMBER from the env (issue #1858).
+          export PR_NUMBER
+          if [ -z "${PR_NUMBER:-}" ]; then
+            echo "::notice::review stall backstop: no PR number on this event; nothing to resume."
+            exit 0
+          fi
+          # The comment marker is head-scoped; resolve the PR head SHA (this manual path
+          # carries no precheck head_sha output). A failed lookup leaves HEAD_SHA empty and
+          # the helper's decision takes its unscoped no-fire arm — never an unbounded resume.
+          # The `|| true` is LOAD-BEARING under this step's errexit shell: without it, an
+          # expected lookup failure (issue-comment event, transient API error) is an
+          # assignment-position non-zero that kills the whole backstop before the helper
+          # runs — the exact shape that took down the harden_hooks step (PR #461).
+          HEAD_SHA=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq .head.sha 2>/dev/null || true)
+          # The post-and-annotate glue — resolve+call request-review-backstop.sh (its
+          # decision contract UNCHANGED), parse the decision, compose the /devflow:review
+          # re-trigger body, POST it via post-issue-comment.sh, and select the
+          # ::notice::/::warning:: annotation on the POST success breadcrumb — is the shared
+          # post-review-backstop-comment.sh helper (issue #414), unit-tested in lib/test/run.sh.
+          # Pass the runtime-derived HEAD_SHA; the helper reads PR_NUMBER/REPO/VERDICT/
+          # APP_TOKEN_PRESENT/GH_TOKEN from this step's env.
+          HELPER=.prflow/vendor/prflow/scripts/post-review-backstop-comment.sh
+          if [ ! -f "$HELPER" ]; then
+            echo "::warning::review stall backstop: post-review-backstop-comment.sh absent at $HELPER; no auto-resume (degrades to the pre-existing dead-end flip)."
+            exit 0
+          fi
+          # Compose the one-line cause via the shared cause helper (review wording;
+          # cause set from the env above), and the run URL, and hand both to the
+          # backstop helper so its comment names the engine's reason (issue #158).
+          # An absent cause helper degrades to a still-informative fallback.
+          CAUSE_HELPER=.prflow/vendor/prflow/scripts/describe-dead-run-cause.sh
+          if [ -f "$CAUSE_HELPER" ]; then
+            CAUSE="$(bash "$CAUSE_HELPER" "${CLAUDE_OUTCOME:-}" "${ENGINE_ERROR:-false}")"
+          else
+            CAUSE="review run ended without a verdict (cause helper absent at $CAUSE_HELPER)"
+          fi
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          HEAD_SHA="$HEAD_SHA" CAUSE="$CAUSE" RUN_URL="$RUN_URL" bash "$HELPER"
+
+      # Record verdict delivery only for review-only PR runs; issue-mode has no PR verdict to post.
+      # Helpers own receipt classification, messages and the job-status decision.
+      # Keep cancellation as an argument so diagnostics still run while the status helper permits cancellation.
+      - name: Record whether the verdict emitter was reached
+        if: ${{ always() && startsWith(needs.gate.outputs.command, '/prflow:review ') && (github.event.issue.pull_request || github.event.pull_request.number) && (github.event.issue.number || github.event.pull_request.number) }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          REPO: ${{ github.repository }}
+          CONTEXT_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          COMMAND: ${{ needs.gate.outputs.command }}
+          # Scope verdict reads to this reviewer App, or github-actions[bot] when it is unconfigured.
+          REVIEWER_LOGIN: ${{ steps.reviewer-token.outputs.app-slug != '' && format('{0}[bot]', steps.reviewer-token.outputs.app-slug) || 'github-actions[bot]' }}
+          JOB_CANCELLED: ${{ job.status == 'cancelled' }}
+        run: |
+          set -uo pipefail
+          # Since issue #1863 the light-command resolver makes the command's trailing
+          # number the reviewed thread's own, so this derivation (and its event-number
+          # fallback) lands on the guarded thread. Bash builtins only (issue #1858).
+          PR_NUMBER="${COMMAND##* }"
+          case "$PR_NUMBER" in
+            ''|*[!0-9]*) PR_NUMBER="$CONTEXT_NUMBER" ;;
+          esac
+          CHECK=.prflow/vendor/prflow/scripts/check-verdict-post-reached.sh
+          GAP=.prflow/vendor/prflow/scripts/describe-verdict-post-gap.sh
+          CLS=.prflow/vendor/prflow/scripts/classify-head-reviews.sh
+          # issue #1271: the job-status decision helper. Resolved with the same
+          # vendored-literal + repo-root fallback as its siblings. Its absence from an
+          # older vendored tree is handled at the decision point below (warn, status
+          # unchanged) rather than here, so the ::notice::/::warning::/comment record
+          # still emits on a deployment that predates it.
+          DECIDE=.prflow/vendor/prflow/scripts/decide-verdict-gap-job-status.sh
+          if [ ! -f "$CHECK" ] || [ ! -f "$GAP" ]; then
+            echo "::warning::verdict-post reach record: the check helpers are absent from this deployment (an older vendored tree); this run leaves no record of whether Phase 4.4's verdict emitter was reached."
+            exit 0
+          fi
+          # The head SHA is a REPORTED field, never a gate: a failed lookup must
+          # not suppress the record. This step runs without errexit and ends in an
+          # explicit `exit 0`, so the `|| true` changes no exit status — it is
+          # here so the shape stays correct if either of those ever changes, and
+          # so a reader is not left wondering whether the failure was handled.
+          HEAD_SHA=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq .head.sha 2>/dev/null || true)
+          LINE=$(bash "$CHECK" || true)
+          # Classify the reviews recorded on the head so the renderer can stop
+          # asserting the reviews API was untouched when it was NOT (issue #1250).
+          # The query and classification are best-effort: a failed query leaves an
+          # empty payload the classifier reads as `unestablished`, and an absent
+          # classifier (older vendored tree) leaves REVIEW_CLASS empty — either way
+          # the renderer degrades to asserting nothing about the API, never to a
+          # false claim. This step selects NOTHING on REVIEW_CLASS; it passes the
+          # opaque token straight to the arm-dispatch helper.
+          REVIEW_CLASS=""
+          if [ -f "$CLS" ]; then
+            REVIEWS_FILE="$RUNNER_TEMP/head-reviews.json"
+            # --paginate so a heavily-reviewed PR whose own head review sits past the
+            # first 100 reviews is still seen: gh merges the paged JSON arrays into one
+            # array, which the classifier reads whole. Missing it would let the classifier
+            # answer `none` and the renderer assert the reviews API was untouched — the
+            # exact false claim #1250 exists to remove. A query failure still truncates the
+            # file to empty, which the classifier reads as `unestablished` (never `none`).
+            gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews?per_page=100" > "$REVIEWS_FILE" 2>/dev/null || : > "$REVIEWS_FILE"
+            REVIEW_CLASS=$(bash "$CLS" "$REVIEWS_FILE" "$HEAD_SHA" "$REVIEWER_LOGIN" || true)
+          fi
+          WARNING_FILE="$RUNNER_TEMP/verdict-post-gap-warning.txt"
+          BODY_FILE="$RUNNER_TEMP/verdict-post-gap-body.md"
+          ARM=$(bash "$GAP" "$LINE" "${GITHUB_RUN_ID:-}" "$PR_NUMBER" "$HEAD_SHA" "$WARNING_FILE" "$BODY_FILE" "$REVIEW_CLASS" || true)
+          echo "::notice::verdict-post reach record: ${ARM:-ARM unreported} (check said: ${LINE:-<no output>})"
+          if [ -s "$WARNING_FILE" ]; then
+            while IFS= read -r WARNING_LINE; do
+              [ -z "$WARNING_LINE" ] || echo "::warning::$WARNING_LINE"
+            done < "$WARNING_FILE"
+          fi
+          if [ -s "$BODY_FILE" ]; then
+            # Environment addressing is the correct form here under the
+            # .github/workflows/ exemption lint-gh-api-repo-path.py records:
+            # this job resolves $GITHUB_REPOSITORY from the runner, and the
+            # helpers that can also run outside Actions carry no gh call at all.
+            if jq -n --rawfile b "$BODY_FILE" '{body: $b}' \
+                 | gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" --input - >/dev/null; then
+              echo "::notice::verdict-post reach record: posted the cause-naming comment on #$PR_NUMBER."
+            else
+              echo "::warning::verdict-post reach record: the cause-naming comment could not be posted on #$PR_NUMBER; the ::warning:: above is the only surviving record."
+            fi
+          fi
+          # ── Job-status gate (issue #1271). Stop laundering a verdict-less review as
+          # `success`. The DECISION is owned entirely by the helper (its contract lists the
+          # FAIL shapes); it passes on every could-not-tell arm and on a
+          # cancelled run (carve-out passed as the JOB_CANCELLED argument, not a step
+          # condition). The step reads the helper's token, names the failed post on
+          # `FAIL failed-post`, and exits accordingly. The arm token drops the "ARM " prefix the renderer
+          # printed. When the helper is absent (an older vendored tree) the job status is
+          # left unchanged, mirroring every sibling helper-absence path in this step.
+          if [ ! -f "$DECIDE" ]; then
+            echo "::warning::verdict-post reach record: the job-status helper (decide-verdict-gap-job-status.sh) is absent from this deployment (an older vendored tree); the job status is left unchanged."
+            exit 0
+          fi
+          # verdict-post job-status gate BEGIN
+          ARM_TOKEN="${ARM#ARM }"
+          DECISION=$(bash "$DECIDE" "$ARM_TOKEN" "$REVIEW_CLASS" "${JOB_CANCELLED:-false}" "$LINE" || true)
+          echo "::notice::verdict-post job-status decision: ${DECISION:-<none>}"
+          if [ "$DECISION" = "FAIL failed-post" ]; then
+            echo "::error::PRFlow review: the verdict post failed on both channels (reach record: $LINE), so no review or comment carries this run's verdict. Failing the job so the failed post is visible; the review stall backstop re-requests the review when it can."
+            exit 1
+          fi
+          if [ "${DECISION%% *}" = "FAIL" ]; then
+            echo "::error::PRFlow review: this run reached no verdict any merge-gate consumer reads (reach record not-reached; the head-scoped review oracle established no verdict for the reviewed head). Failing the job so the gap is visible and retryable through the ordinary re-run affordance."
+            exit 1
+          fi
+          # verdict-post job-status gate END
+          exit 0
+
+      # Dismiss stale rejections only after a positively determined head-scoped APPROVE and a successful evidence gate.
+      # An unavailable/defaulted verdict must not clear a live rejection. The helper is idempotent and best-effort.
+      - name: Dismiss superseded REJECT on a determined APPROVE
+        if: ${{ always() && startsWith(needs.gate.outputs.command, '/prflow:review ') && (github.event.issue.pull_request || github.event.pull_request.number) && (github.event.issue.number || github.event.pull_request.number) }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          REPO: ${{ github.repository }}
+          CONTEXT_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          COMMAND: ${{ needs.gate.outputs.command }}
+          ENGINE_ERROR: ${{ steps.engine.outputs.is_error }}
+          EVIDENCE_GATE_OUTCOME: ${{ steps.review-evidence-gate.outcome }}
+        run: |
+          set -uo pipefail
+          # Since issue #1863 the light-command resolver makes the command's trailing
+          # number the reviewed thread's own, so this derivation (and its event-number
+          # fallback) lands on the guarded thread. Bash builtins only (issue #1858).
+          PR_NUMBER="${COMMAND##* }"
+          case "$PR_NUMBER" in
+            ''|*[!0-9]*) PR_NUMBER="$CONTEXT_NUMBER" ;;
+          esac
+          # stale-REJECT dismissal net BEGIN
+          if [ "${EVIDENCE_GATE_OUTCOME:-}" != success ]; then
+            echo "::warning::stale-REJECT net: review evidence gate outcome '${EVIDENCE_GATE_OUTCOME:-<empty>}'; no superseded REJECT was dismissed; inspect the Review evidence gate step before relying on this review"
+            exit 0
+          fi
+          NET=.prflow/vendor/prflow/scripts/dismiss-stale-rejections-net.sh
+          if [ ! -f "$NET" ]; then
+            echo "::warning::stale-REJECT net: dismiss-stale-rejections-net.sh absent at $NET; a superseded REJECT (if any) is NOT dismissed by the workflow — Phase 4.4 remains the only path (upgrade the vendored plugin pin)"
+            exit 0
+          fi
+          # The helper reports one token on stdout and its diagnostics on stderr; it
+          # always exits 0. The token is the observable outcome — echo it as a notice,
+          # and warn on the UNEXPECTED arms where a REJECT may still block the pull
+          # request (a genuine dismiss failure, a refused dismissal, or a missing helper)
+          # so a maintainer sees it without reading the step log. The legitimate-refusal
+          # tokens are deliberately NOT warned: no-dismiss-reject is a live change-request
+          # that must stand, and no-dismiss-undetermined is the expected verdict-less run —
+          # warning on either would spam every ordinary review.
+          OUTCOME=$(bash "$NET" "$REPO" "$PR_NUMBER" "${ENGINE_ERROR:-false}" || true)
+          echo "::notice::stale-REJECT net: ${OUTCOME:-<no output>} (PR #$PR_NUMBER)"
+          case "$OUTCOME" in
+            dismiss-failed|dismiss-refused|unavailable)
+              echo "::warning::stale-REJECT net: outcome '$OUTCOME' for PR #$PR_NUMBER — a superseded REJECT may still block it; dismiss it manually if appropriate"
+              ;;
+          esac
+          # stale-REJECT dismissal net END
+          exit 0
+
+      # Transcript artifacts are default-off and separate from bounded denial diagnostics.
+      # scrub-transcript.sh owns safe publication; source files cannot survive runner loss.
+      - name: Scrub execution transcript for upload
+        id: scrub_transcript
+        if: always()
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          set -uo pipefail
+          CG=.prflow/vendor/prflow/scripts/config-get.sh
+          # Default-OFF: only the exact string "true" enables (builtin comparison, not a
+          # sed/grep pipeline); `|| true` guards config-get's hard-fail under set -e.
+          TRANSCRIPT="$("$CG" .prflow.execution_transcript_artifact_enabled false || true)"
+          if [ "$TRANSCRIPT" != "true" ]; then
+            echo "::notice::execution transcript artifact disabled (execution_transcript_artifact_enabled != true); nothing uploaded."
+            exit 0
+          fi
+          OUT="$RUNNER_TEMP/claude-execution-scrubbed.json"
+          STAMP="$RUNNER_TEMP/prflow-transcript-stamp"
+          if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+            STORE_ROOT="$CLAUDE_CONFIG_DIR/projects"
+          else
+            STORE_ROOT="$HOME/.claude/projects"
+          fi
+          ST=.prflow/vendor/prflow/scripts/scrub-transcript.sh
+          if [ -f "$ST" ]; then
+            SCRUB_OUT="$RUNNER_TEMP/scrub-transcript-out.txt"
+            bash "$ST" "$EXECUTION_FILE" "$OUT" "$STORE_ROOT" "$STAMP" > "$SCRUB_OUT"
+            tee -a "$GITHUB_OUTPUT" < "$SCRUB_OUT"
+            # A helper predating the native-session fallback prints no source= line; warn but
+            # still upload any path= it advertised, so an old vendored tree is told apart from
+            # a new helper that found nothing (issue #342).
+            if ! grep -q '^source=' "$SCRUB_OUT"; then
+              echo "::warning::transcript scrub helper advertised no source= line (a vendored tree predating the native-session fallback); a newer prflow_version is needed to preserve a cancelled run's transcript."
+            fi
+          else
+            echo "::warning::transcript scrub inert: $ST missing (an older vendored tree); NOT uploading (fail-closed)."
+          fi
+
+      - name: Upload execution transcript artifact
+        if: always() && steps.scrub_transcript.outputs.path != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: claude-execution-transcript-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.scrub_transcript.outputs.path }}
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # Execution-file observability stays in-job because its source path dies with the runner.
+      - name: Persist review-and-fix observability artifacts (backstop)
+        if: ${{ always() }}
+        env:
+          # Prefer the resolved command target; the event number is only a fallback for the floor helper.
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          DEVFLOW_COMMAND: ${{ needs.gate.outputs.command }}
+          DEVFLOW_CANDIDATE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          # Use a job-lifetime token for PR resolution; supply the final engine outcome to the floor.
+          DEVFLOW_ENGINE_OUTCOME: ${{ steps.claude.outcome }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          HELPER=.prflow/vendor/prflow/lib/efficiency-trace.sh
+          [ -f "$HELPER" ] || { echo "::warning::observability backstop: $HELPER missing; skipped"; exit 0; }
+          # Harness-side cost floor (issue #475): the glue helper runs the execution-file
+          # reader, verifies the PR, and emits the floor env values consumed by --persist.
+          # Guard its existence exactly like $HELPER: a vendored tree pinned to an OLDER
+          # prflow_version lacks it, and that must draw a NAMED ::warning:: (floor inert),
+          # never a raw `No such file` under `set +e`.
+          FLOOR=.prflow/vendor/prflow/scripts/prepare-harness-floor.sh
+          DEVFLOW_EXECUTION_COST=""
+          DEVFLOW_EXECUTION_PR=""
+          DEVFLOW_COMMAND_CLASS=""
+          # Emitted by prepare-harness-floor.sh alongside the two above (issue #2006).
+          # DEVFLOW_ISSUE_NUMBER is non-empty only on the implement class; it keys the
+          # PR-less record and the prior-record count. DEVFLOW_NO_PR_REASON names which
+          # PR-resolution branch fired.
+          DEVFLOW_ISSUE_NUMBER=""
+          DEVFLOW_NO_PR_REASON=""
+          DEVFLOW_RUN_PROFILE=""
+          if [ -f "$FLOOR" ]; then
+            COST_FILE="${RUNNER_TEMP:-/tmp}/devflow-harness-cost-$$.json"
+            # The glue prints four eval-able env assignments (PR, class, issue number,
+            # no-PR reason) to stdout and
+            # writes the cost JSON to $COST_FILE; its breadcrumbs go to the step log.
+            eval "$(bash "$FLOOR" "${EXECUTION_FILE:-}" "${DEVFLOW_COMMAND:-}" "${DEVFLOW_CANDIDATE_NUMBER:-}" "$COST_FILE")"
+            [ -s "$COST_FILE" ] && DEVFLOW_EXECUTION_COST="$(cat "$COST_FILE")"
+            rm -f "$COST_FILE"
+          else
+            echo "::warning::harness cost floor inert: $FLOOR missing (a vendored tree pinned to an older prflow_version); the cost floor is skipped this run"
+          fi
+          # Permission-denial forensics floor (issue #1064 D2/D5) — identical wiring to
+          # devflow-implement.yml (the shared review engine runs here too, so a denial
+          # produces the same no-verdict failure mode; symmetry is the point). Read the
+          # default-ON command-text gate through config-get.sh (the RUNTIME channel) and
+          # decide with a bash-builtin `case` (AC9). Defaults to TRUE — the OPPOSITE
+          # default from execution_transcript_artifact_enabled (that key gates the whole
+          # transcript; this one only a bounded, scrubbed, command-only field) — do NOT
+          # harmonize them. Documented residual (AC6): `0`/`""` read as ENABLED (the safe
+          # direction for a default-on key); a real JSON `false` DOES disable. The builder
+          # scrubs command text and fails closed; count + tool_name are always persisted.
+          DENIAL_CG=.prflow/vendor/prflow/scripts/config-get.sh
+          DENIAL_ENABLED_RAW="$("$DENIAL_CG" .prflow.execution_denial_commands_enabled true || true)"
+          case "$DENIAL_ENABLED_RAW" in
+            false) DENIAL_CMDS_ENABLED=false ;;
+            *)     DENIAL_CMDS_ENABLED=true ;;
+          esac
+          DENIAL_BUILDER=.prflow/vendor/prflow/scripts/build-denial-record.sh
+          DEVFLOW_DENIAL_RECORD=""
+          if [ -f "$DENIAL_BUILDER" ]; then
+            DEVFLOW_DENIAL_RECORD="$(bash "$DENIAL_BUILDER" "${EXECUTION_FILE:-}" "$DENIAL_CMDS_ENABLED")"
+          else
+            echo "::warning::denial forensics inert: $DENIAL_BUILDER missing (a vendored tree pinned to an older prflow_version); the denial record is skipped this run"
+          fi
+          # --persist derives each run's record + durable workpad copy and writes them to
+          # the dedicated telemetry branch via git plumbing, then pushes with a fetch/
+          # re-parent retry loop — all inside the helper. With the floor env set it ALSO
+          # merge-fills harness_cost into this run's record (or writes a minimal cost
+          # skeleton) AND the permission_denials record (issue #1064); unset, it is
+          # byte-identical to before (issue #441/#475). It never touches HEAD or the
+          # TRACKED working tree. Best-effort/exit-0.
+          # Run-profile floor glue (issue #2006): resolve this run's workpad and derive its
+          # per-phase durations and final status. Guarded exactly like $FLOOR — a vendored
+          # tree pinned to an older prflow_version lacks it, and that must draw a NAMED
+          # ::warning:: (profile inert) rather than a bare interpreter error under `set +e`.
+          PROFILE_GLUE=.prflow/vendor/prflow/scripts/prepare-run-profile.sh
+          if [ ! -f "$PROFILE_GLUE" ]; then
+            echo "::warning::run-profile floor inert: $PROFILE_GLUE missing (a vendored tree pinned to an older prflow_version); the run profile is skipped this run"
+          elif [ -z "$DEVFLOW_ISSUE_NUMBER" ]; then
+            echo "::notice::run-profile floor inert: no issue number for this command class; the run profile is derived for implement runs only"
+          else
+            PROFILE_FILE="${RUNNER_TEMP:-/tmp}/devflow-run-profile-$$.json"
+            # Do NOT drop the rc: the glue exits 0 by design, so a non-zero exit means a
+            # corrupt or partial vendored copy, which must draw a NAMED ::warning:: rather
+            # than leaving DEVFLOW_RUN_PROFILE silently empty with no diagnosis.
+            if ! bash "$PROFILE_GLUE" "$DEVFLOW_ISSUE_NUMBER" "$PROFILE_FILE"; then
+              echo "::warning::run-profile floor inert: $PROFILE_GLUE exited non-zero (a corrupt or partial vendored copy); the run profile is skipped this run"
+            fi
+            [ -s "$PROFILE_FILE" ] && DEVFLOW_RUN_PROFILE="$(cat "$PROFILE_FILE")"
+            rm -f "$PROFILE_FILE"
+          fi
+          DEVFLOW_EXECUTION_COST="$DEVFLOW_EXECUTION_COST" \
+          DEVFLOW_EXECUTION_PR="$DEVFLOW_EXECUTION_PR" \
+          DEVFLOW_COMMAND_CLASS="$DEVFLOW_COMMAND_CLASS" \
+          DEVFLOW_DENIAL_RECORD="$DEVFLOW_DENIAL_RECORD" \
+          DEVFLOW_ISSUE_NUMBER="$DEVFLOW_ISSUE_NUMBER" \
+          DEVFLOW_NO_PR_REASON="$DEVFLOW_NO_PR_REASON" \
+          DEVFLOW_RUN_PROFILE="$DEVFLOW_RUN_PROFILE" \
+          DEVFLOW_ENGINE_OUTCOME="${DEVFLOW_ENGINE_OUTCOME:-}" \
+            bash "$HELPER" --persist
+          exit 0
+
+      # On successful runs, fail closed when the extension expectation cannot be established.
+      - name: Reconcile prompt-extension arrival
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CMD: ${{ needs.gate.outputs.command }}
+          EXPECTED: ${{ steps.extarrival.outputs.state }}
+          SKILL: ${{ steps.extarrival.outputs.skill }}
+          AGENT_OUTCOME: ${{ steps.claude.outcome }}
+          REPO: ${{ github.repository }}
+        run: |
+          set +e
+          # Every ::error:: restates that permission_denials_count is blind to a lost
+          # skill-body load, or a reader treats a low count as evidence it loaded.
+          fail_closed() {
+            echo "::error::prompt-extension-arrival: $1 — cannot establish that the '${SKILL:-unknown}' skill body / consumer extension arrived on this review/command-tier run, so a clean terminal is unverified. NOTE: permission_denials_count does NOT cover a lost skill-body load (the refused Skill-tool load surfaces as a Skill tool result, not a permission_denied event), so a low denial count is not evidence the body loaded."
+          }
+          # Pure-bash PR number from the resolved '/prflow:<class> <n>' command (the gate
+          # appends the number as the trailing token); grep/head are not preflight-guaranteed
+          # and must not decide which PR this step reads or writes.
+          PR_NUM="${CMD##* }"
+          case "$PR_NUM" in ''|*[!0-9]*) PR_NUM="" ;; esac
+          # Fixed AC3 durable-surface order for this tier: no issue workpad exists, so the
+          # PR is the durable surface; when even that is unresolvable the ::error:: and the
+          # non-zero job conclusion are the only record (record unrecordable).
+          record_non_arrival() {
+            if [ -n "$PR_NUM" ]; then
+              # REST (a PR is an issue), never `gh pr comment` porcelain, which resolves the
+              # repo via org-scoped GraphQL and fails under a repo-scoped token.
+              gh api --method POST "repos/$REPO/issues/$PR_NUM/comments" -f body="⛔ ${1:-prompt-extension arrival unestablished — the skill body / consumer extension did not reach the agent on this run.}" >/dev/null \
+                || echo "::warning::prompt-extension-arrival: could not write the durable non-arrival record to PR #$PR_NUM (record unrecordable)"
+            else
+              echo "::warning::prompt-extension-arrival: no PR number resolvable from command '$CMD' to record non-arrival (record unrecordable); the ::error:: and non-zero job conclusion are the only record"
+            fi
+          }
+          if [ -z "${EXPECTED:-}" ]; then
+            # Fail closed on a successful agent run: a missing expectation disabled the
+            # whole check, and exiting clean would report an unverified run as verified.
+            if [ "$AGENT_OUTCOME" = "success" ]; then
+              fail_closed "the pre-agent classify step recorded no expectation, so the post-agent arrival check could not run on a run the agent reported successful"
+              record_non_arrival "prompt-extension arrival unestablished — the pre-agent classify step recorded no expectation, so arrival could not be checked"
+              exit 1
+            fi
+            echo "prompt-extension-arrival: no pre-agent expectation and claude outcome '${AGENT_OUTCOME:-unknown}' (already non-green); nothing to reconcile"
+            exit 0
+          fi
+          if [ "$EXPECTED" = "absent" ]; then
+            echo "prompt-extension-arrival: $SKILL extension absent (a clean consumer state); terminal permitted"
+            exit 0
+          fi
+          # Enforce only on a successful agent step from here on: a failed/cancelled job is
+          # already non-green, so re-failing it here would add no signal.
+          if [ "$AGENT_OUTCOME" != "success" ]; then
+            echo "prompt-extension-arrival: expectation '$EXPECTED' and claude outcome '${AGENT_OUTCOME:-unknown}' (already non-green); no enforcement needed"
+            exit 0
+          fi
+          if [ "$EXPECTED" = "detector-absent" ]; then
+            fail_closed "the arrival detector is absent (older prflow_version)"
+            record_non_arrival "prompt-extension arrival unestablished — the arrival detector is absent (older prflow_version)"
+            exit 1
+          fi
+          # Enforcing, not a pass-through: an unclassified command has no arrival evidence
+          # at all, and exiting clean here would be the declare-arrival-by-absence the
+          # positive-signal rule exists to forbid.
+          if [ "$EXPECTED" = "skill-unresolved" ]; then
+            fail_closed "the pre-agent classify step matched no skill arm for command '$CMD', so no extension could be classified"
+            record_non_arrival "prompt-extension arrival unestablished — the pre-agent classify step matched no skill arm for this command; add one to that step's case"
+            exit 1
+          fi
+          if [ "$EXPECTED" = "classify-unreadable" ]; then
+            fail_closed "the pre-agent classify step could not read a classification from the present arrival detector (empty or unparsable output — a run fault, not a version skew; re-run the command)"
+            record_non_arrival "prompt-extension arrival unestablished — the pre-agent classify step could not read a classification from the arrival detector; re-run the command"
+            exit 1
+          fi
+          case "$EXPECTED" in
+            undeliverable-*)
+              fail_closed "the extension file was present but undeliverable ($EXPECTED)"
+              record_non_arrival "prompt-extension arrival unestablished — present-but-undeliverable extension file: $EXPECTED"
+              exit 1
+              ;;
+            arrived-expected)
+              # arrived-expected + success: deliverable at the trusted closure, but this
+              # read-only tier has no positive-tick artifact, so consumption is confirmed
+              # only by the agent-side forced record — not at job level (documented residual).
+              echo "prompt-extension-arrival: $SKILL extension deliverable at the trusted closure; job-level cannot independently confirm consumption on this read-only tier — the agent-side forced record is the catch (documented residual)"
+              exit 0
+              ;;
+            *)
+              # Fail closed on a token this step does not recognize: passing it through
+              # would be the declare-arrival-by-absence the positive-signal rule forbids.
+              fail_closed "the pre-agent classify step published an unrecognized expectation token '$EXPECTED'"
+              record_non_arrival "prompt-extension arrival unestablished — unrecognized expectation token '$EXPECTED' from the pre-agent classify step"
+              exit 1
+              ;;
+          esac
+
+  # Finalize review and review-and-fix on a separate runner so progress survives command-runner death.
+  # API reads and run-keyed writes make the progress flip idempotent with its in-job counterpart.
+  # Missing job outputs require a generic cause; execution files and process teardown remain in-job.
+  review_finalize:
+    needs: [config, review_dedupe, gate, command]
+    # Require a successful upstream chain so a review skipped before launch does not receive a dead-run banner.
+    if: ${{ always() && needs.config.result == 'success' && needs.gate.result == 'success' && needs.review_dedupe.result == 'success' && needs.config.outputs.enabled == 'true' && needs.gate.outputs.should_run == 'true' && needs.review_dedupe.outputs.suppress != 'true' && (startsWith(needs.gate.outputs.command, '/prflow:review') || startsWith(needs.gate.outputs.command, '/devflow:review')) }}
+    runs-on: ${{ vars.DEVFLOW_LIGHT_RUNNER && (startsWith(vars.DEVFLOW_LIGHT_RUNNER, '[') && fromJSON(vars.DEVFLOW_LIGHT_RUNNER) || format(vars.DEVFLOW_LIGHT_RUNNER, github.run_id)) || (vars.DEVFLOW_RUNNER && (startsWith(vars.DEVFLOW_RUNNER, '[') && fromJSON(vars.DEVFLOW_RUNNER) || format(vars.DEVFLOW_RUNNER, github.run_id)) || 'ubuntu-latest') }}
+    # Only checkout, issue-comment writes and PR/review reads; no code pushes or runner control.
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      # The optional identity mint is best-effort here; failure falls back to GITHUB_TOKEN.
+      - name: Mint finalizer token (optional)
+        id: finalize-token
+        if: ${{ vars.DEVFLOW_APP_ID != '' }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.DEVFLOW_APP_ID }}
+          private-key: ${{ secrets.DEVFLOW_APP_PRIVATE_KEY }}
+
+      - name: Checkout repository (finalizer)
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      # Materialize trusted default-branch helpers for thin consumer checkouts.
+      - uses: ./.github/actions/vendor-plugin
+        with:
+          ref: ${{ needs.config.outputs.prflow_version }}
+          repo: ${{ needs.config.outputs.prflow_repo }}
+          token: ${{ secrets.PRFLOW_REPO_TOKEN || github.token }}
+
+      - name: Finalize a review run whose command job did not report
+        env:
+          GH_TOKEN: ${{ steps.finalize-token.outputs.token || github.token }}
+          REPO: ${{ github.repository }}
+          COMMAND: ${{ needs.gate.outputs.command }}
+          COMMAND_RESULT: ${{ needs.command.result }}
+          CONTEXT_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          # Dead runners emit no outputs; empty facts select the generic cause instead of guessing.
+          CLAUDE_OUTCOME: ${{ needs.command.outputs.claude_outcome }}
+          ENGINE_ERROR: ${{ needs.command.outputs.engine_is_error }}
+          SUBTYPE: ${{ needs.command.outputs.subtype }}
+          TERMINAL_REASON: ${{ needs.command.outputs.terminal_reason }}
+          API_ERROR_STATUS: ${{ needs.command.outputs.api_error_status }}
+          API_RETRY_ERROR: ${{ needs.command.outputs.api_retry_error }}
+          API_RETRY_STATUS: ${{ needs.command.outputs.api_retry_status }}
+          RATE_LIMIT_TYPE: ${{ needs.command.outputs.rate_limit_type }}
+          RATE_LIMIT_RESETS_AT: ${{ needs.command.outputs.rate_limit_resets_at }}
+        run: |
+          set -uo pipefail
+          # review-finalizer BEGIN
+          # (Everything between these markers is extracted verbatim and executed
+          # against recording helper stubs by the #1174 wiring block in
+          # lib/test/modules/review-trigger-helpers.sh, so every branch below —
+          # the CAUSE ladder, the TARGET_NUMBER derivation, the suppress-vs-write
+          # gate, the verdict-helper arg order and each degraded-helper arm — is
+          # driven as a real branch rather than grepped. Keep the markers.)
+          # The JOB-level arm — did the command job report at all — decided by a
+          # helper the suite drives arm-by-arm (issue #1174 AC6). This is a
+          # DISTINCT decision from describe-dead-run-cause.sh (the cause clause),
+          # which it must not duplicate.
+          ARM_HELPER=.prflow/vendor/prflow/scripts/describe-command-job-arm.sh
+          if [ ! -f "$ARM_HELPER" ]; then
+            echo "::warning::review finalizer: describe-command-job-arm.sh absent at $ARM_HELPER (an older vendored tree); cannot decide the command-job arm, so this run leaves no out-of-job dead-run record (upgrade the vendored plugin pin)"
+            exit 0
+          fi
+          ARM="$(bash "$ARM_HELPER" "${COMMAND_RESULT:-}")"
+          echo "::notice::review finalizer: command job result='${COMMAND_RESULT:-<none>}' -> arm='$ARM'"
+          # completed-normally: the command job ran to completion and its own
+          # in-job always() handlers already did their work. Produce NOTHING — no
+          # second comment, no duplicate reach record (AC3/T3).
+          if [ "$ARM" = "completed-normally" ]; then
+            echo "::notice::review finalizer: the command job completed normally; nothing for the out-of-job backstop to do."
+            exit 0
+          fi
+
+          if [ -z "${CONTEXT_NUMBER:-}" ]; then
+            echo "::notice::review finalizer: no issue/PR number on this event; nothing to finalize."
+            exit 0
+          fi
+          # The resolved command carries its own target number
+          # (resolve-command-trigger.sh emits `/prflow:<cmd> <n>`); prefer it and
+          # fall back to the event number. Bash builtins only — a value that
+          # decides where a write lands must not flow through a non-preflight
+          # PATH tool (CLAUDE.md guard-class 2).
+          TARGET_NUMBER="${COMMAND##* }"
+          case "$TARGET_NUMBER" in
+            ''|*[!0-9]*) TARGET_NUMBER="$CONTEXT_NUMBER" ;;
+          esac
+
+          # Cause clause. When the promoted outputs SURVIVED (an alive failure),
+          # reuse describe-dead-run-cause.sh for the richer diagnosis; when they
+          # are EMPTY (a runner-death path — the AC4 unavailable-operand case) or
+          # the arm is `cancelled`, state the generic message plainly.
+          if [ "$ARM" = "cancelled" ]; then
+            CAUSE="the review run was cancelled (needs.command.result=cancelled); no verdict was recorded"
+          elif [ -n "${CLAUDE_OUTCOME:-}" ]; then
+            CAUSE_HELPER=.prflow/vendor/prflow/scripts/describe-dead-run-cause.sh
+            if [ -f "$CAUSE_HELPER" ]; then
+              CAUSE="$(bash "$CAUSE_HELPER" "${CLAUDE_OUTCOME:-}" "${ENGINE_ERROR:-false}")"
+            else
+              CAUSE="the review command job failed (claude step ${CLAUDE_OUTCOME:-unavailable}, engine is_error=${ENGINE_ERROR:-false})"
+            fi
+          else
+            # The runner-death path: the promoted operands are unavailable, so the
+            # message says exactly that rather than guessing.
+            CAUSE="the review command job did not report (needs.command.result=${COMMAND_RESULT:-unavailable}); the job or its runner was lost before it could record a verdict"
+          fi
+
+          # ── Verdict-emitter REACH record (issue #1156/#1250, the second moved
+          # handler). Fully API-driven, so it survives the command runner's death:
+          # ask the HEAD-scoped, fail-closed verdict oracle whether a verdict for
+          # the reviewed HEAD EXISTS. It does double duty — it is the reach record
+          # (emitted as a surviving ::notice::), and it gates the flip exactly as
+          # the in-job #1172 handler does: a verdict that was actually posted must
+          # never draw a "no verdict" banner beside it. Only a POSITIVELY-present
+          # verdict suppresses the flip; everything else (no HEAD sha, deriver
+          # absent, query failure, genuinely absent) reports `absent` and the
+          # banner still writes, so a genuinely verdict-less dead run keeps it.
+          # CAVEAT: the oracle is HEAD-sha-scoped, not run-scoped — so a verdict an
+          # EARLIER round posted for the same unchanged HEAD also reads `present`
+          # and suppresses this dead run's banner. Deliberate, and identical to the
+          # in-job #1172 gate: at an unchanged HEAD the posted verdict still
+          # describes the reviewed tree, so "no verdict" would be the false claim.
+          VERDICT_HELPER=.prflow/vendor/prflow/scripts/dead-run-verdict-present.sh
+          SUPPRESS_FLIP=no
+          if [ -f "$VERDICT_HELPER" ]; then
+            if [ "$(bash "$VERDICT_HELPER" "$REPO" "$TARGET_NUMBER" "${ENGINE_ERROR:-false}")" = present ]; then
+              SUPPRESS_FLIP=yes
+              echo "::notice::review finalizer reach record: a verdict for the reviewed HEAD of #$TARGET_NUMBER WAS posted; the emitter was reached, so no dead-run banner is written."
+            else
+              echo "::notice::review finalizer reach record: no verdict for the reviewed HEAD of #$TARGET_NUMBER was found; recording the dead-run state."
+            fi
+          else
+            echo "::warning::review finalizer: dead-run-verdict-present.sh absent at $VERDICT_HELPER; cannot check for a posted verdict, so the dead-run banner is NOT suppressed (upgrade the vendored plugin pin)"
+          fi
+
+          if [ "$SUPPRESS_FLIP" = yes ]; then
+            exit 0
+          fi
+
+          # ── Dead-run FLIP (the first moved handler). Idempotent and run-keyed:
+          # the marker matches ONLY this run's comment (this job shares the run's
+          # GITHUB_RUN_ID/ATTEMPT with the dead command job), and the helper flips
+          # only an interim 🚀 Status — so if the command job's own always() flip
+          # already ran on an alive failure, this call resolves the same comment,
+          # reads its terminal Status, and writes nothing (no second banner —
+          # AC2/AC3). On a runner-death path the in-job flip never ran, so this is
+          # the only write; and if the run died before the engine seeded any
+          # comment, the helper's upsert creates the terminal comment naming the
+          # run URL.
+          # Distinct variable name (RP_RUN_MARKER) from the in-job flip's FLIP_MARKER,
+          # so the #356/#1054 uniqueness pins stay anchored to that in-job literal; the
+          # string built here is byte-identical and pinned so in lib/test/run.sh.
+          RP_RUN_MARKER="<!-- prflow:review-progress run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} -->"
+          FLIP_HELPER=.prflow/vendor/prflow/scripts/flip-review-progress-failed.sh
+          if [ -f "$FLIP_HELPER" ]; then
+            bash "$FLIP_HELPER" "$TARGET_NUMBER" "$RP_RUN_MARKER" "$CAUSE" || true
+          else
+            echo "::warning::review finalizer: flip-review-progress-failed.sh absent at $FLIP_HELPER; the review-progress comment for #$TARGET_NUMBER is NOT flipped to a terminal state (upgrade the vendored plugin pin)"
+          fi
+          # review status-label mirror (finalizer) BEGIN
+          # This backstop reached the flip path (no verdict was posted; the
+          # suppress arm exited earlier), so mirror PRFlow:ReviewStuck (issue
+          # #104). This job's `if:` admits /prflow:review-and-fix (no trailing
+          # space), so screen it out; best-effort — the helper no-ops when off.
+          case "${COMMAND:-}" in
+            /prflow:review\ *|/devflow:review\ *)
+              MIRROR=.prflow/vendor/prflow/scripts/mirror-review-status-label.sh
+              if [ -f "$MIRROR" ]; then
+                bash "$MIRROR" "$TARGET_NUMBER" review-failed || true
+              else
+                echo "::warning::mirror review status label: mirror-review-status-label.sh absent at the vendored path; PRFlow:ReviewStuck not written for #$TARGET_NUMBER (upgrade the vendored plugin pin)"
+              fi
+              ;;
+          esac
+          # review status-label mirror (finalizer) END
+          exit 0
+          # review-finalizer END

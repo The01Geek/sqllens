@@ -86,6 +86,11 @@ class DatabaseConfig(BaseModel):
         return scheme.split("+", 1)[0]
 
 
+# Must equal sqllens.agent.core.llm.models.EffortLevel (pinned by a unit test);
+# not imported so config loading stays free of the agent package.
+EffortLevel = Literal["low", "medium", "high", "xhigh", "max"]
+
+
 class LLMConfig(BaseModel):
     """LLM provider settings. v1: Anthropic only."""
 
@@ -98,6 +103,35 @@ class LLMConfig(BaseModel):
     # with the same message.
     api_key: SecretStr | None = Field(default=None, description="Anthropic API key")
     model: str = Field(default="claude-sonnet-4-5-20250929", description="Anthropic model id")
+    # Output-token cap for every agent LLM call. The framework fallback was 512,
+    # which cuts off a tool call carrying a long SQL statement mid-arguments
+    # (#247). Env override: SQLLENS_LLM__MAX_TOKENS.
+    max_tokens: int = Field(
+        default=8192,
+        ge=1,
+        le=128_000,
+        description=(
+            "Maximum output tokens per agent LLM call. Too low truncates long SQL "
+            "tool calls; the model's own output limit still applies."
+        ),
+    )
+    # None omits the key from the request; Claude Opus 5.5 rejects any temperature.
+    temperature: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature sent on every agent LLM call; unset sends none.",
+    )
+    effort: EffortLevel | None = Field(
+        default=None,
+        description=(
+            "Anthropic effort level (output_config.effort) sent on every agent LLM "
+            "call; unset sends none and the model uses its default."
+        ),
+    )
+
+
+_DEFAULT_SIMILARITY_THRESHOLD = 0.7
 
 
 class MemoryConfig(BaseModel):
@@ -109,7 +143,21 @@ class MemoryConfig(BaseModel):
     )
     collection: str = Field(default="sqllens", description="ChromaDB collection name")
     similarity_threshold: float = Field(
-        default=0.7, ge=0.0, le=1.0, description="Minimum cosine similarity for memory hits"
+        default=_DEFAULT_SIMILARITY_THRESHOLD,
+        ge=0.0,
+        le=1.0,
+        description="Minimum cosine similarity for memory hits",
+    )
+    context_similarity_threshold: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Opt-in floor for system-prompt context injection only. Unset (the "
+            "default) keeps the context tier off. When set below the effective "
+            "similarity_threshold, text memories and saved question->SQL pairs "
+            "scoring at or above it are injected as related context."
+        ),
     )
     save_queries: bool = Field(
         default=False,

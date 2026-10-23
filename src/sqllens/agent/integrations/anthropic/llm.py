@@ -211,8 +211,14 @@ class AnthropicLlmService(LlmService):
             "messages": messages,
             # Anthropic requires max_tokens; default if not provided
             "max_tokens": request.max_tokens if request.max_tokens is not None else 512,
-            "temperature": request.temperature,
         }
+        # Omit unset values: models such as Claude Opus 5.5 reject any temperature.
+        if request.temperature is not None:
+            payload["temperature"] = request.temperature
+        # Via extra_body, not an `output_config` kwarg: SDK versions at the
+        # anthropic>=0.40 floor are not known to accept that keyword.
+        if request.effort is not None:
+            payload["extra_body"] = {"output_config": {"effort": request.effort}}
         if tools_payload:
             payload["tools"] = tools_payload
             payload["tool_choice"] = {"type": "auto"}
@@ -247,24 +253,48 @@ class AnthropicLlmService(LlmService):
                 tc_id = getattr(block, "id", None) or (
                     block.get("id") if isinstance(block, dict) else None
                 )
-                input_data = getattr(block, "input", None) or (
-                    block.get("input") if isinstance(block, dict) else None
+                # Explicit dict check: an empty ``{}`` input is falsy, so an ``or``
+                # chain would drop it and fall through to None.
+                input_data = (
+                    block.get("input")
+                    if isinstance(block, dict)
+                    else getattr(block, "input", None)
                 )
                 if name:
-                    try:
-                        # input_data should be a dict already
-                        args = (
-                            input_data
-                            if isinstance(input_data, dict)
-                            else {"_raw": input_data}
-                        )
-                    except Exception:
+                    if isinstance(input_data, dict):
+                        args = input_data
+                    elif input_data is None:
+                        # Never echo a ``{"_raw": None}`` placeholder: it is replayed
+                        # to the model in the conversation history, and the model
+                        # then imitates it on every retry (#247).
+                        args = {}
+                    else:
                         args = {"_raw": str(input_data)}
                     tool_calls.append(
                         ToolCall(
                             id=str(tc_id or "tool_call"), name=str(name), arguments=args
                         )
                     )
+
+        stop_reason = (
+            msg.get("stop_reason")
+            if isinstance(msg, dict)
+            else getattr(msg, "stop_reason", None)
+        )
+        if stop_reason == "max_tokens" and tool_calls:
+            # Generation stopped at the output-token cap. Only the last block can
+            # be cut off; its input may be empty or a partially parsed dict (e.g.
+            # SQL ending mid-statement), so it must never run. Keep the history
+            # entry clean ({}) and let the registry return an explanatory error.
+            last = tool_calls[-1]
+            tool_calls[-1] = ToolCall(
+                id=last.id, name=last.name, arguments={}, truncated=True
+            )
+            logger.warning(
+                "LLM response hit max_tokens inside tool call %r; "
+                "the call was not executed",
+                last.name,
+            )
 
         text_content = "".join(text_parts)
         return text_content, tool_calls

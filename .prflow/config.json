@@ -2,7 +2,8 @@
   "$schema": "./config.schema.json",
   "base_branch": "main",
   "claude_model": "claude-opus-5",
-  "prflow_version": "",
+  "prflow_version": "v2.59.0",
+  "prflow_repo": "",
   "prflow": {
     "allowed_bots": "claude,dependabot,prflow-implementer",
     "allowed_users": "The01Geek,Lightsaber-Coder",
@@ -21,8 +22,10 @@
     ],
     "execution_diagnostics_enabled": true,
     "execution_transcript_artifact_enabled": false,
+    "execution_transcript_job_log_enabled": false,
     "execution_denial_commands_enabled": true,
-    "attribute_commits_to_triggerer": false
+    "attribute_commits_to_triggerer": false,
+    "publish_model_effort": true
   },
   "prflow_implement": {
     "effort": "low",
@@ -39,59 +42,57 @@
       "Bash(mypy:*)"
     ],
     "update_branch_checkpoints": true,
+    "ci_verification": {
+      "enabled": false,
+      "pre_request_checks": []
+    },
+    "merge_drivers": {},
     "stall_backstop": {
       "enabled": true,
-      "max_resume_attempts": 2
+      "max_resume_attempts": 2,
+      "defer_to_runner_retry": false
+    },
+    "spot_interruption_watcher": {
+      "enabled": false
     }
-  },
-  "prflow_runner": {
-    "effort": "low",
-    "provision_env": false,
-    "allowed_tools": [
-      "Bash(docker:*)",
-      "Bash(docker compose:*)",
-      "Bash(docker-compose:*)",
-      "Bash(python:*)",
-      "Bash(python3:*)",
-      "Bash(pip:*)",
-      "Bash(pytest:*)",
-      "Bash(ruff:*)",
-      "Bash(mypy:*)"
-    ]
   },
   "prflow_review_and_fix": {
     "fix_severity_threshold": "important",
     "max_iterations": 5,
+    "fix_below_threshold_iterations": 1,
     "efficiency_telemetry_enabled": true,
     "efficiency_cut_candidate_min_dispatch": 3
   },
   "prflow_review": {
     "verdict_severity_threshold": "critical",
     "live_progress_comment_enabled": true,
-    "stale_prose": {
-      "enabled": true,
-      "severity": "important"
-    },
-    "require_up_to_date": true,
-    "require_ci_green": true,
     "stall_backstop": {
       "enabled": true,
       "max_resume_attempts": 2
     },
     "agent_overrides": {
+      "prflow:code-reviewer": {
+        "model": "opus",
+        "iterations": "first-only",
+        "effort": "low"
+      },
+      "prflow:pr-test-analyzer": {
+        "iterations": "first-only"
+      },
       "default": {
         "effort": "low"
       },
       "prflow:checklist-deduper": {
-        "model": "claude-sonnet-5",
+        "model": "sonnet",
         "effort": "low"
-      },
-      "prflow:code-reviewer": {
-        "model": "claude-opus-5",
-        "effort": "low",
-        "iterations": "first-only"
       }
-    }
+    },
+    "stale_prose": {
+      "enabled": true,
+      "severity": "important"
+    },
+    "require_up_to_date": true,
+    "require_ci_green": true
   },
   "receiving_review": {
     "fix_severity_threshold": "critical"
@@ -116,13 +117,20 @@
     "changelog_file": "CHANGELOG.md",
     "labels": "Documented"
   },
-  "create_issue": {
+  "spec": {
     "investigation_record_enabled": true
   },
   "deferred": {
     "labels": "PRFlow,Deferred"
   },
+  "status_labels": {
+    "enabled": true
+  },
+  "review_status_labels": {
+    "enabled": false
+  },
   "telemetry": {
+    "enabled": true,
     "branch": "prflow-telemetry"
   },
   "verification_flight": {
@@ -146,6 +154,22 @@
   },
   "workflows": {
     "prflow": true,
-    "prflow-review": false
+    "prflow-review": false,
+    "prflow-retrospective": false
+  },
+  "prflow_runner": {
+    "effort": "low",
+    "provision_env": false,
+    "allowed_tools": [
+      "Bash(docker:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker-compose:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(pip:*)",
+      "Bash(pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(mypy:*)"
+    ]
   }
 }
