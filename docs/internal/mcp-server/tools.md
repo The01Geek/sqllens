@@ -311,7 +311,7 @@ Pinned by `tests/unit/test_search_memory_threshold.py` (the tool emits the card 
 Every successful `query_database` answer carries which model and which reasoning effort the server was configured to use, so a consuming client can attribute an answer to a model and an effort setting. Issue #265 added it for a downstream admin conversation history that shows the model and effort behind each stored answer.
 
 ```python
-{"model": "claude-sonnet-4-5-20250929", "reasoning_effort": None}
+{"model": "claude-opus-5-5", "reasoning_effort": None}
 ```
 
 (The values above are the shipped `LLMConfig` defaults; `model` is whatever `cfg.llm.model` holds for the running server.)

@@ -696,6 +696,7 @@ class Agent:
                     role="assistant",
                     content=response.content or "",  # Ensure content is not None
                     tool_calls=response.tool_calls,
+                    provider_content=response.provider_content,
                 )
                 conversation.add_message(assistant_message)
 
@@ -1098,12 +1099,17 @@ class Agent:
                     )
                 )
 
-                # Yield final text response
-                if response.content:
+                # Store opaque blocks even when the model returns no display text.
+                if response.content or response.provider_content:
                     # Add assistant response to conversation
                     conversation.add_message(
-                        Message(role="assistant", content=response.content)
+                        Message(
+                            role="assistant", content=response.content or "",
+                            provider_content=response.provider_content,
+                        )
                     )
+                # Yield final text response
+                if response.content:
                     # Marker (sqllens.agent.markers.IS_ANSWER_MARKER_KEY) shared
                     # with EmitTextTool: the MCP-layer block builder reads it to
                     # include the terminal answer as a rendered TEXT block while
@@ -1278,6 +1284,7 @@ You can:
                 content=msg.content,
                 tool_calls=msg.tool_calls,
                 tool_call_id=msg.tool_call_id,
+                provider_content=msg.provider_content,
             )
             messages.append(llm_msg)
 
@@ -1425,6 +1432,7 @@ You can:
 
         accumulated_content = ""
         accumulated_tool_calls = []
+        provider_content = None
         finish_reason = None
 
         # Create span for streaming
@@ -1444,6 +1452,8 @@ You can:
                 accumulated_tool_calls.extend(chunk.tool_calls)
             if chunk.finish_reason:
                 finish_reason = chunk.finish_reason
+            if chunk.provider_content is not None:
+                provider_content = chunk.provider_content
 
         # End streaming span
         if self.observability_provider and stream_span:
@@ -1459,6 +1469,7 @@ You can:
             content=accumulated_content if accumulated_content else None,
             tool_calls=accumulated_tool_calls if accumulated_tool_calls else None,
             finish_reason=finish_reason,
+            provider_content=provider_content,
         )
 
         # Apply after_llm_response middlewares with observability

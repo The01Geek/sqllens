@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## October 28, 2026
+
+- **[Change] Opus 5.5 defaults** — New configurations, Claude Desktop installs, MCPB installs, and the SQLite example now select `claude-opus-5-5`. SQL Lens preserves signed thinking blocks across tool rounds. Existing TOML or environment model overrides still win; update `llm.model` or `SQLLENS_LLM__MODEL` to switch an existing instance, and leave `llm.temperature` unset for Opus 5.5.
+
 ## Unreleased
 
 - **[Improvement] Each answer reports the model and reasoning effort behind it** — Every successful `query_database` answer carries the model and the reasoning effort SQL Lens is configured with, attached to the response metadata under the `sqllens/model_info` key for hosts that read tool-result metadata. The entry holds the configured `model` and `reasoning_effort` — `null` when `llm.effort` is unset — and it rides every successful answer regardless of the `agent.show_details` setting, which lets a client attribute each stored answer to a model and an effort level. No configuration change is required. See [Configuration](configuration.md#section-llm). ([#265](https://github.com/The01Geek/sqllens/issues/265))
