@@ -119,8 +119,10 @@ def build_agent(cfg: Config) -> Agent:
     tools.register_local_tool(EmitTextTool(), access_groups=access)
     # save_question_tool_args lets the agent write question -> SQL pairs into
     # memory. Gated by memory.save_queries (OFF by default); the default system
-    # prompt switches its save instructions on the tool's presence, so dropping
-    # the registration cleanly drops the prompt guidance too.
+    # prompt gates its save bullet and the example workflow's save step on
+    # has_save, so dropping the registration drops those. The "Do NOT forget to
+    # save successful executions." sentence rides on has_search instead, and the
+    # search tool is registered unconditionally, so that sentence still prints.
     if cfg.memory.save_queries:
         tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
     tools.register_local_tool(

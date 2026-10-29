@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr
 
-from sqllens.agent import User
+from sqllens.agent import Agent, User
 from sqllens.agent.core import DefaultLlmContextEnhancer
 from sqllens.agent.core.system_prompt.default import DefaultSystemPromptBuilder
 from sqllens.agent.factory import build_agent
@@ -235,7 +235,7 @@ def test_show_details_on_grants_static_user_access_to_tool_arguments(
     )
 
 
-async def _prompt_from_agent_tools(agent: object) -> str:
+async def _prompt_from_agent_tools(agent: Agent) -> str:
     """Build the default system prompt from the agent's own tool list.
 
     ``build_agent`` passes no prompt builder, so the live agent uses

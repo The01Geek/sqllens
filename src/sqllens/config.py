@@ -172,7 +172,10 @@ class MemoryConfig(BaseModel):
             "Expose the save_question_tool_args agent tool, which lets the agent "
             "persist successful question -> SQL pairs into vector memory. OFF by "
             "default: when disabled the tool is not registered and the system "
-            "prompt drops its save instructions automatically. Reading saved "
+            "prompt drops its save bullet and the example workflow's save "
+            "step; the 'Do NOT forget to save successful executions.' sentence "
+            "rides on the always-registered search tool and still prints. "
+            "Reading saved "
             "memory (search_saved_correct_tool_uses) is unaffected."
         ),
     )
