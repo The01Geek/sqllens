@@ -4,20 +4,9 @@
 """Streamable HTTP transport for SQL Lens.
 
 The MCP Python SDK's ``FastMCP.streamable_http_app()`` returns a Starlette app
-that registers its endpoint at the path ``/mcp``. We wrap it with:
-
-1. **Path normalization.** The bare path (``/``) and the all-but-trailing-slash
-   form (``/mcp``) both redirect or get rewritten to ``/mcp/``, so clients that
-   forget the trailing slash still work — fixing the routing footgun we hit in
-   the parent project where bare ``/mcp/sql`` silently fell through to the
-   all-in-one mount.
-2. **Authentication middleware.** Every request hits the configured
-   ``Authenticator`` before the MCP handler sees it. Failures return ``401``
-   with a short reason; auth-mode ``none`` is a passthrough.
-3. **Session-manager lifespan.** FastMCP's session manager must be started
-   inside an async context for requests to succeed; we wrap the stack in an
-   ASGI lifespan adapter so any host (uvicorn, FastAPI mount, custom server)
-   that drives lifespan events will start/stop it correctly.
+that registers its endpoint at the path ``/mcp``. See ``_build_asgi_app_bare``
+for the HTTP middleware composition and ``build_asgi_app`` for the outer
+session-manager lifespan adapter.
 
 Public surface: ``build_asgi_app(cfg)`` returns the mount-ready app;
 ``run(cfg)`` is the uvicorn launcher used by ``sqllens serve``.

@@ -56,6 +56,10 @@ TrustedHostMiddleware      — rejects a disallowed Host with 400 (DNS-rebinding
                              Fronts everything below, including the /healthz
                              and /readyz short-circuits (issue #186 S-13).
   ↓
+_InsecureAuthMarker        — optional, for the explicit unauthenticated
+                             non-loopback override; see "HTTP construction
+                             policy and posture" below
+  ↓
 _PathNormalizer            — fixes "/" and "/mcp/" path mismatches; serves
                              /healthz and /readyz (post-host-check, pre-auth)
   ↓
@@ -90,7 +94,7 @@ FastMCP registers its endpoint at the **bare** path `/mcp`. Every MCP client we 
 | `/readyz` | **Short-circuit**: emit a 200/503 readiness JSON and return, with the same pre-auth / post-host-check ordering as `/healthz`. See "Readiness probe" below. |
 | Anything else | Pass through to `_AuthMiddleware`; FastMCP will 404 if the path is unrecognized. `TrustedHostMiddleware` has already validated `Host` upstream. |
 
-The reason this isn't done with a Starlette `Mount` is recorded in the docstring at the top of `transport/http.py`: `Mount` has surprising trailing-slash semantics, and the single-server SQL Lens transport doesn't need path-based dispatch.
+See the `build_asgi_app` docstring in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py) for why this uses middleware instead of a Starlette `Mount`.
 
 ## Liveness probe: `GET /healthz`
 
