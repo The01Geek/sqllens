@@ -97,7 +97,10 @@ report matching the analyzed SHA. Every finding and existing-draft reference is
 validated before the first write. Invalid, oversized, incomplete or truncated
 reports fail, and a clean report is distinct from failure. The limit is 20 findings
 and 120 KB per report. Repeated audits reuse stable finding markers or explicit
-references to existing drafts, including drafts maintained by humans.
+references to existing drafts, including drafts maintained by humans. References
+must agree with existing finding markers, and distinct findings cannot claim the
+same draft in one report. Matching an unmarked human draft still relies on the
+analyzer's judgment and maintainer validation.
 
 Only missing drafts are created. Existing drafts are never edited, closed or
 published, so maintainer edits survive reruns. Deduplication covers current drafts;

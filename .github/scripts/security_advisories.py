@@ -255,9 +255,26 @@ def publish(client: GitHub, raw: str, sha: str) -> list[dict]:
     # Validate every reference before making any write, including later items.
     if any(f["existing_advisory"] and f["existing_advisory"] not in by_id for f in findings):
         raise AuditError("Referenced draft no longer available")
-    receipt = []
+    marked_ids = {draft["ghsa_id"]: key for key, draft in by_key.items()}
+    resolved = []
+    claimed = set()
     for finding in findings:
-        existing = by_key.get(finding["id"]) or by_id.get(finding["existing_advisory"])
+        marked = by_key.get(finding["id"])
+        referenced = by_id.get(finding["existing_advisory"])
+        if referenced:
+            identity = marked_ids.get(referenced["ghsa_id"])
+            if identity is not None and identity != finding["id"]:
+                raise AuditError("Referenced draft identity mismatch")
+            if marked and marked["ghsa_id"] != referenced["ghsa_id"]:
+                raise AuditError("Conflicting draft references")
+        existing = marked or referenced
+        if existing:
+            if existing["ghsa_id"] in claimed:
+                raise AuditError("Repeated draft reference")
+            claimed.add(existing["ghsa_id"])
+        resolved.append(existing)
+    receipt = []
+    for finding, existing in zip(findings, resolved, strict=True):
         if existing:
             ghsa = existing["ghsa_id"]
         else:

@@ -425,3 +425,83 @@ def test_analysis_step_has_no_advisory_token_or_write_tools():
     deliver = next(step for step in steps if "publish" in step.get("run", ""))
     assert deliver["env"]["AUDIT_CONCLUSION"] == "${{ steps.audit.outputs.conclusion }}"
     assert deliver["env"]["AUDIT_REPORT_JSON"] == "${{ steps.audit.outputs.structured_output }}"
+
+
+@pytest.mark.parametrize(
+    ("drafts", "findings"),
+    [
+        ([draft("different.identity")], [finding(existing_advisory=GHSA)]),
+        (
+            [draft(), {**draft(ghsa="GHSA-jmpq-rvwx-2345"), "description": "Maintainer text"}],
+            [finding(existing_advisory="GHSA-jmpq-rvwx-2345")],
+        ),
+        (
+            [{**draft(), "description": "Maintainer text"}],
+            [
+                finding(existing_advisory=GHSA),
+                finding(id="second.identity", existing_advisory=GHSA),
+            ],
+        ),
+        (
+            [draft()],
+            [finding(), finding(id="second.identity", existing_advisory=GHSA)],
+        ),
+    ],
+)
+def test_conflicting_draft_references_fail_before_any_write(drafts, findings):
+    new = finding(id="new.identity")
+    client = FakeGitHub((drafts, None), (draft(new["id"], "GHSA-3333-4444-5555"), None))
+    with pytest.raises(audit.AuditError, match=r"identity|Conflicting|Repeated"):
+        audit.publish(client, report(new, *findings), SHA)
+    assert client.calls == [("GET", audit.ADVISORIES + "?state=draft&per_page=100", None)]
+
+
+def test_consistent_marked_and_unmarked_references_preserve_human_drafts():
+    other_id = "GHSA-jmpq-rvwx-2345"
+    drafts = [draft(), {**draft(ghsa=other_id), "description": "Maintainer text"}]
+    client = FakeGitHub((drafts, None))
+    receipts = audit.publish(
+        client,
+        report(
+            finding(existing_advisory=GHSA),
+            finding(id="second.identity", existing_advisory=other_id),
+        ),
+        SHA,
+    )
+    assert receipts == [
+        {"id": GHSA, "analyzed_sha": SHA, "already_tracked": True},
+        {"id": other_id, "analyzed_sha": SHA, "already_tracked": True},
+    ]
+    assert client.calls == [("GET", audit.ADVISORIES + "?state=draft&per_page=100", None)]
+    assert drafts[1]["description"] == "Maintainer text"
+
+
+@pytest.mark.parametrize("matches", [False, True])
+def test_publish_cli_reports_only_consistent_draft_delivery(monkeypatch, tmp_path, capsys, matches):
+    existing = draft() if matches else draft("different.identity")
+    client = FakeGitHub(({"private": True}, None), ([existing], None))
+    monkeypatch.setattr(audit, "GitHub", lambda token: client)
+    monkeypatch.setattr(audit.sys, "argv", ["audit", "publish"])
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "example/private-audit")
+    monkeypatch.setenv("SOURCE_SHA", SHA)
+    monkeypatch.setenv("AUDIT_CONCLUSION", "success")
+    monkeypatch.setenv(
+        "AUDIT_REPORT_JSON",
+        report(finding(existing_advisory=GHSA, description="SYNTHETIC-PRIVATE-CANARY")),
+    )
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+
+    assert audit.main() == (0 if matches else 1)
+    output = capsys.readouterr()
+    assert "SYNTHETIC-PRIVATE-CANARY" not in output.out + output.err
+    assert [call[0] for call in client.calls] == ["GET", "GET"]
+    if matches:
+        assert "Private advisory delivery completed." in output.out
+        assert GHSA in summary.read_text()
+        assert "already tracked: True" in summary.read_text()
+    else:
+        assert output.out == ""
+        assert "Security audit failed" in output.err
+        assert not summary.exists()
