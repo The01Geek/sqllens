@@ -205,18 +205,14 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
     Fail-secure: any failure to read the request context yields ``{}`` — a
     dynamic RLS rule then sees its key as missing and blocks the query (static
     rules are unaffected), rather than the tool crashing or, worse, a request
-    influencing the query unfiltered. This is also why stdio (no per-request
-    ``_meta`` channel) only ever gets ``{}`` here, which is the documented
-    "dynamic rules are HTTP-only" behaviour.
+    influencing the query unfiltered. Metadata is read from the MCP request
+    context on either transport; requests without extras receive ``{}``.
     """
     try:
         meta = ctx.request_context.meta
     except ValueError:
-        # Documented, expected case: the MCP SDK raises ``ValueError`` from
-        # ``request_context`` when no request is active (stdio — the primary
-        # transport — and tests). This is the common path, not a fault, so it
-        # is logged at debug without a traceback; warning+traceback here would
-        # fire on every stdio query and drown out a genuine SDK drift.
+        # The MCP SDK raises ValueError when no request is active. This
+        # expected case needs no traceback; actual extraction faults do.
         logger.debug("no active request context; returning empty metadata")
         return {}
     except Exception:
