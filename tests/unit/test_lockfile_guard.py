@@ -3,18 +3,10 @@
 
 """Drift / wheel-content guard for the shipped runtime lockfile (S-12).
 
-``requirements.txt`` is a point-in-time resolution of the core runtime
-dependencies. Nothing re-resolves it, so a Dependabot bump or a hand edit
-could silently pin a version that violates the conservative upper bounds in
-``pyproject.toml`` (the bounds are the source of truth — see CLAUDE.md), or
-the wheel could stop shipping it. These tests are that missing guard.
-
-The lockfile and the ``force-include`` packaging glue are introduced by a
-separate PR (#112, issue #108) and do not exist on ``main`` yet. The
-``test_real_*`` integration tests therefore skip until that lands and then
-activate automatically; the ``test_logic_*`` tests exercise the parsing and
-comparison logic against synthetic fixtures and run unconditionally, so a
-bug in the guard surfaces now rather than the moment #112 merges.
+``requirements.txt`` records the core runtime closure tested by constrained CI.
+These tests check active marker variants against project dependency bounds
+and verify the wheel inclusion setting. Synthetic fixtures cover parser and
+comparison failures without relying on a network resolver.
 """
 
 from __future__ import annotations
@@ -40,7 +32,9 @@ def _core_requirements(pyproject_text: str) -> list[Requirement]:
     return [r for r in reqs if r.marker is None or r.marker.evaluate()]
 
 
-def _locked_versions(lockfile_text: str) -> dict[str, Version]:
+def _locked_versions(
+    lockfile_text: str, environment: dict[str, str] | None = None
+) -> dict[str, Version]:
     """Map canonical package name -> pinned Version from lockfile text.
 
     Handles both the plain ``pip freeze`` dialect (``pkg==1.2.3``) and the
@@ -51,7 +45,9 @@ def _locked_versions(lockfile_text: str) -> dict[str, Version]:
     only ``==`` pins are recorded — a package present under a non-``==`` pin
     reads as *absent* (the intended signal for a hand-edited lock).
 
-    A canonical package pinned ``==`` twice to *different* versions raises
+    Environment-excluded pins are skipped so a universal resolution can carry
+    different versions for distinct Python/platform targets. A canonical
+    package pinned ``==`` twice to *different* active versions raises
     ``ValueError`` rather than silently last-write-wins, which would otherwise
     validate only the surviving pin while the contradictory artifact ships. An
     exact-duplicate pin (same version twice) is idempotent and accepted. (A
@@ -67,6 +63,8 @@ def _locked_versions(lockfile_text: str) -> dict[str, Version]:
         try:
             req = Requirement(line)
         except InvalidRequirement:
+            continue
+        if req.marker is not None and not req.marker.evaluate(environment):
             continue
         # A concrete version that survived Requirement() parsing in an "=="
         # specifier is already PEP 440-valid, so the Version() construction
@@ -95,6 +93,24 @@ def _missing_core_deps(pyproject_text: str, lockfile_text: str) -> list[str]:
         for r in _core_requirements(pyproject_text)
         if canonicalize_name(r.name) not in locked
     ]
+
+
+@pytest.mark.parametrize(("version", "expected"), [("3.11.9", "2.4.6"), ("3.12.9", "2.5.4")])
+def test_logic_disjoint_python_marker_pins(version: str, expected: str) -> None:
+    lock = """numpy==2.4.6 ; python_full_version < '3.12'
+numpy==2.5.4 ; python_full_version >= '3.12'
+"""
+    assert _locked_versions(lock, {"python_full_version": version}) == {
+        "numpy": Version(expected)
+    }
+
+
+def test_logic_overlapping_marker_pins_still_fail() -> None:
+    with pytest.raises(ValueError, match="conflicting"):
+        _locked_versions(
+            "example==1 ; python_version >= '3.11'\nexample==2 ; python_version >= '3.12'",
+            {"python_version": "3.12"},
+        )
 
 
 def _bound_violations(pyproject_text: str, lockfile_text: str) -> list[str]:

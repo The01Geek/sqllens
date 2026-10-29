@@ -9,7 +9,7 @@ The agent generates SQL from natural language. Before that SQL is executed, ever
 Two predicate sources are supported:
 
 - **Static** — a fixed value spelled in `sqllens.toml` / `SQLLENS_*` env. Same filter for every request. Works on every transport, including stdio.
-- **Dynamic** — value resolved per request from caller-supplied MCP `_meta`. Only meaningful on the HTTP transport (stdio has no per-request `_meta` channel); the embedding application is the source of truth for identity. SQL Lens itself does not authenticate the caller for the purpose of identifying the principal.
+- **Dynamic** — value resolved per request from caller-supplied MCP `_meta`. The embedding application is the source of truth for identity. SQL Lens itself does not authenticate the caller for the purpose of identifying the principal.
 
 RLS is opt-in: an empty `rls` list disables the guard wholly (no decorator is wrapped, see [Wiring](#wiring) below) and the no-RLS path stays a zero-overhead passthrough.
 
@@ -158,7 +158,7 @@ Three properties of this path are deliberate and pinned by tests in [tests/unit/
 
 - **Reserved internal-control keys are stripped at the MCP boundary.** The agent reads `starter_ui_request` and `ui_features_available` off `request_context.metadata` to steer its own control flow (starter-UI rendering, audit logger UI-feature list — see `agent/core/agent/agent.py`, `agent/core/registry.py`, `agent/tools/agent_memory.py`). Untrusted MCP metadata must not be able to forge those keys, so [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) strips them via `_RESERVED_METADATA_KEYS` before constructing the `RequestContext`. Caller-supplied metadata can therefore *only* supply RLS predicate values, never agent-internal control signal.
 - **Caller metadata cannot shadow internal keys downstream either.** When the agent builds `ToolContext.metadata` it spreads `**request_context.metadata` *first* and the internal `ui_features_available` key *last*, so even if a caller's key collided with an internal name and somehow passed the strip, the internal key wins. Defense-in-depth, not the primary line.
-- **Fail-secure on metadata extraction.** `_request_metadata(ctx)` in [src/sqllens/server.py](../../../src/sqllens/server.py) catches `ValueError`/`AttributeError` reading `ctx.request_context.meta` and returns `{}`. A dynamic rule then sees its key as missing and blocks the query — rather than the tool crashing or, worse, a request influencing the query unfiltered. This is also why stdio (no per-request `_meta` channel) only ever gets `{}` here, which is the documented "dynamic rules are HTTP-only" behaviour.
+- **Fail-secure on metadata extraction.** `_request_metadata(ctx)` in [src/sqllens/server.py](../../../src/sqllens/server.py) returns `{}` on extraction failures or invalid/oversized metadata. Extras are limited to 64 top-level keys, 16 KiB of compact ASCII-escaped JSON, 1,024 nodes including keys, and eight nesting levels below the root. Traversal stops at the limits; oversized trees are never partially forwarded. Dynamic rules then block on missing values. This bounds propagation after MCP parsing, not HTTP request parsing.
 
 ## Wiring
 
@@ -193,15 +193,9 @@ The error contract mirrors [database-connectors/read-only-safety.md](read-only-s
 - The vendored `RunSqlTool` swallows `RlsError` into a tool result the same way it does `UnsafeSqlError` today, so in practice the calling agent receives the rejection as a tool error and can re-plan (or surface a clean message).
 - [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) also has an explicit `except RlsError` branch in `query_database_impl_with_widgets` that re-raises the message verbatim as `RuntimeError(str(e))` — same defensive rationale as the `UnsafeSqlError` branch, for any future path that lets `RlsError` propagate out of `send_message`. Like the unsafe-SQL branch, RLS blocks are actionable safety feedback and must reach the client unsanitized, not collapsed into the `_INTERNAL_ERROR_MESSAGE` category.
 
-## Static-only on stdio
+## Transport and missing metadata
 
-Dynamic rules (`value_from_metadata`) only work on the HTTP transport, because only HTTP carries per-request MCP `_meta`. On stdio:
-
-- `_request_metadata(ctx)` returns `{}` (no per-request channel).
-- A dynamic rule's key is missing → `RlsError` → the query is blocked.
-- A static rule (`value = ...`) needs no metadata and works identically on stdio and HTTP.
-
-This is intentional. There is no plausible stdio identity channel — the parent process owns the pipe and is the principal. If you need per-principal scoping on stdio, run one process per principal.
+The MCP request context can carry `_meta` on HTTP and stdio. Dynamic rules require the calling application to supply the configured metadata key; missing or rejected metadata blocks the query. Static rules need no request metadata and work on either transport. The application supplying metadata remains the identity authority.
 
 ## Testing the guard
 

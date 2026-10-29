@@ -48,7 +48,7 @@ Reopen from the Start menu. See [Verify](#verify) and [Troubleshooting](#trouble
 | `--dry-run` | Print the TOML, the `.cmd` body, and a unified diff of the JSON change. No filesystem writes. The best first invocation against an already-configured machine. |
 | `--name <key>` | Override the `mcpServers` key. Defaults to the SQLite file stem (`chinook` for `chinook.db`) or the database segment of the DSN. |
 | `--api-key sk-ant-...` | Pass the key inline instead of via env. |
-| `--model claude-...` | Choose a different Anthropic model. Defaults to `claude-sonnet-4-5-20250929`. |
+| `--model claude-...` | Choose a different Anthropic model. Defaults to `claude-opus-5-5`. |
 | `--working-dir <path>` | Where `sqllens.toml` and the `.cmd` launcher land. Defaults to `%USERPROFILE%\sqllens`. |
 | `--memory-dir <path>` | ChromaDB persistence directory. Defaults to `<working-dir>\chroma`. |
 | `--config-path <path>` | Override the detected `claude_desktop_config.json` location. |
@@ -128,7 +128,7 @@ read_only = true
 
 [llm]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-opus-5-5"
 
 [memory]
 persist_dir = "C:/Users/USERNAME/sqllens/chroma"

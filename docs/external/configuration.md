@@ -53,7 +53,7 @@ Defines the language model SQL Lens uses to translate questions into SQL.
 | Field | Type | Description |
 |---|---|---|
 | `provider` | String | Only `anthropic` is supported at present. |
-| `model` | String | A Claude model identifier, for example `claude-sonnet-4-5-20250929`. |
+| `model` | String | A Claude model identifier, for example `claude-opus-5-5`. |
 | `max_tokens` | Integer | Between `1` and `128000`. Defaults to `8192`. The largest reply SQL Lens lets the model write in one step, measured in tokens. If a reply reaches this limit while the model is writing a query, SQL Lens does not run the incomplete query and asks the model to try again with a shorter one. Raise it if you see answers stop with a "repeated invalid tool calls" error on very large queries; the model's own output limit still applies. The environment override is `SQLLENS_LLM__MAX_TOKENS`. |
 | `temperature` | Number | Between `0` and `2`. Unset by default. When it is set, SQL Lens sends it as the sampling temperature on every model call. When it is unset, SQL Lens sends no temperature and the model uses its own default. Leave it unset for models that reject a temperature setting. The environment override is `SQLLENS_LLM__TEMPERATURE`. |
 | `effort` | String | One of `low`, `medium`, `high`, `xhigh`, or `max`. Unset by default. When it is set, SQL Lens sends it as the Anthropic effort level on every model call. When it is unset, SQL Lens sends no effort level and the model uses its own default. Check that your chosen model supports the level you pick. The environment override is `SQLLENS_LLM__EFFORT`. |
@@ -79,7 +79,7 @@ Both kinds of entries live in the same ChromaDB collection on disk.
 | `similarity_threshold` | Number | Minimum cosine similarity, between `0.0` and `1.0`, for a saved entry to be returned when SQL Lens searches its memory. Defaults to `0.7`. Lower the value if useful past answers are being missed; raise it if irrelevant past answers are surfacing. This value is the server-side default and can be overridden per call by the assistant when warranted. It is also the bar a memory must clear to be added automatically to the assistant's background context. |
 | `context_similarity_threshold` | Number | Between `0.0` and `1.0`. Turns on an optional tier of automatic background context. When you set it **below** `similarity_threshold`, SQL Lens adds saved question-and-answer pairs and free-form notes that score at or above this value to the assistant's background context on each question (at most five of each). Not set by default, which keeps this tier off no matter what `similarity_threshold` is. The environment override is `SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD`. See [Managing memory](managing-memory.md#near-match-background-context). |
 | `save_queries` | Boolean | Defaults to `false`. When set to `true`, SQL Lens can save successful question-and-answer patterns to memory so similar future questions reuse the same approach. When off, no question-and-answer patterns are written, and SQL Lens still reads any patterns already in memory and still saves free-form notes. The environment override is `SQLLENS_MEMORY__SAVE_QUERIES`. See [Managing memory](managing-memory.md). |
-| `allow_import` | Boolean | Defaults to `false`. When set to `true`, SQL Lens exposes an extra `import_memory` tool to the connected assistant so it can bulk-load curated knowledge over the connection. Leave this off unless you trust every client that can reach the server: a client able to write memory can influence future SQL generation. The `sqllens import-memory` and `sqllens export-memory` commands work regardless of this setting. See [Managing memory](managing-memory.md). |
+| `allow_import` | Boolean | Defaults to `false`. When set to `true`, SQL Lens exposes an extra `import_memory` tool to the connected assistant so it can bulk-load curated knowledge over the connection. Calls also require bearer authentication or an explicit closed-network `auth.insecure=true` opt-in. Leave this off unless you trust every client that can reach the server: a client able to write memory can influence future SQL generation. The `sqllens import-memory` and `sqllens export-memory` commands work regardless of this setting. See [Managing memory](managing-memory.md). |
 | `allow_admin_tools` | Boolean | Defaults to `false`. When set to `true`, SQL Lens exposes seven memory-administration tools to the connected assistant for inspecting and curating the saved memory: list, get, delete, clear, add, export and statistics. Leave this off unless you trust every client that can reach the server, since these tools read and change the saved memory. The tools that change memory (delete, clear and add) also refuse to run when the server requires no authentication, unless you set `auth.insecure` to acknowledge a closed network. The environment override is `SQLLENS_MEMORY__ALLOW_ADMIN_TOOLS`. See [Managing memory](managing-memory.md). |
 
 The first time SQL Lens runs, ChromaDB downloads roughly 80 MB of embedding model weights into `persist_dir`. Allow time and network access for this initial step.
@@ -125,7 +125,9 @@ The check is there to prevent an unauthenticated SQL endpoint from being exposed
 
 - **Closed-network override**: set `SQLLENS_AUTH__INSECURE=1` (or `auth.insecure = true` in `sqllens.toml`). Use this only when the listener is reachable solely from a trusted network — for example, a private VPC, a Kubernetes ClusterIP service, or a host-only Docker network. When the override is active, SQL Lens still prints a yellow warning at startup so the choice is visible in the logs.
 
-The guard does not affect `transport = "stdio"`, and it does not affect `bearer` mode.
+The CLI guard does not affect `transport = "stdio"`, and it does not affect `bearer` mode. Calling `build_asgi_app(cfg)` or the HTTP `run(cfg)` directly always applies the HTTP policy, even if `cfg.server.transport` was left at `stdio`. Embedded hosts must keep `cfg.server.host` consistent with their actual bind address.
+
+When the unauthenticated non-loopback override is active, HTTP responses to requests accepted by the Host guard carry `X-SQLLens-Auth: insecure-loopback-override`, including health/readiness probes. The server logs a reminder on the first Host-accepted request and at most once per 60 seconds while requests continue. Fixed JSON status/auth responses also carry `X-Content-Type-Options: nosniff`.
 
 ## Section: `[server]`
 
@@ -179,7 +181,7 @@ The predicate is combined with whatever filter the assistant already produced us
 | `column` | String | The column on `table` the predicate compares. Same identifier rules as `table`. |
 | `operator` | String | One of `=`, `!=`, `<`, `<=`, `>`, `>=`, or `in`. Matched case-insensitively. |
 | `value` | Scalar or list | Static predicate value. Mutually exclusive with `value_from_metadata`. For `operator = "in"`, this must be a non-empty list. |
-| `value_from_metadata` | String | Metadata key resolved per request from caller-supplied MCP `_meta`. Mutually exclusive with `value`. Must be a bare identifier with the same rules as `table` and `column`. Only meaningful on the HTTP transport; the stdio transport has no per-request metadata channel. |
+| `value_from_metadata` | String | Metadata key resolved per request from caller-supplied MCP `_meta`. Mutually exclusive with `value`. Must be a bare identifier with the same rules as `table` and `column`. |
 
 A static rule with the same value for every request:
 

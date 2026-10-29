@@ -685,7 +685,7 @@ def test_validate_allows_non_loopback_with_bearer_auth(
     ],
 )
 def test_is_loopback_host_accepts_loopback_forms(host: str) -> None:
-    from sqllens.cli import _is_loopback_host
+    from sqllens.auth.policy import is_loopback_host as _is_loopback_host
 
     assert _is_loopback_host(host) is True
 
@@ -706,7 +706,7 @@ def test_is_loopback_host_accepts_loopback_forms(host: str) -> None:
     ],
 )
 def test_is_loopback_host_rejects_non_loopback_forms(host: str) -> None:
-    from sqllens.cli import _is_loopback_host
+    from sqllens.auth.policy import is_loopback_host as _is_loopback_host
 
     assert _is_loopback_host(host) is False
 
@@ -718,7 +718,7 @@ def test_is_loopback_host_fails_closed_on_non_string(host: object) -> None:
     # passed e.g. `IPv4Address(...)` directly must not raise out of the
     # guard. A traceback in place of a refusal is exactly the obscure
     # failure mode the guard is supposed to prevent.
-    from sqllens.cli import _is_loopback_host
+    from sqllens.auth.policy import is_loopback_host as _is_loopback_host
 
     assert _is_loopback_host(host) is False  # type: ignore[arg-type]
 

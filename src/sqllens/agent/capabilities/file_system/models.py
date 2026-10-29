@@ -14,12 +14,3 @@ class FileSearchMatch:
 
     path: str
     snippet: Optional[str] = None
-
-
-@dataclass
-class CommandResult:
-    """Represents the result of executing a shell command."""
-
-    stdout: str
-    stderr: str
-    returncode: int
