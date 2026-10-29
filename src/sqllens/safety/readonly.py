@@ -339,12 +339,11 @@ def _mysql_parse_sql(sql: str) -> str:
             quote = sql[i]
             i += 1
             while i < len(sql):
-                if sql[i] == "\\" and i + 1 < len(sql):
+                if quote != "`" and sql[i] == "\\" and i + 1 < len(sql):
                     if sql[i + 1] == quote:
                         raise UnsafeSqlError("MySQL backslash-escaped quotes are not allowed")
-                    if quote != "`":
-                        i += 2
-                        continue
+                    i += 2
+                    continue
                 if sql[i] == quote:
                     if i + 1 < len(sql) and sql[i + 1] == quote:
                         i += 2

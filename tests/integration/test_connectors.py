@@ -131,6 +131,16 @@ class TestPostgresRunner:
 
 
 class TestMysqlRunner:
+    @pytest.mark.parametrize("name", ["a\\", r"a\\", r"a\`b"])
+    async def test_backslashes_in_backtick_aliases_pass_guard(
+        self, mysql_url: str, name: str,
+    ) -> None:
+        runner = ReadOnlyGuardRunner(build_sql_runner(mysql_url), dialect="mysql")
+        quoted_name = "`" + name.replace("`", "``") + "`"
+        result = await runner.run_sql(RunSqlToolArgs(sql=f"SELECT 1 AS {quoted_name}"), _ctx())
+        assert list(result.columns) == [name]
+        assert int(result.iloc[0][name]) == 1
+
     async def test_double_dash_is_arithmetic_and_guard_refuses_it(self, mysql_url: str) -> None:
         runner = build_sql_runner(mysql_url)
         sql = "SELECT 1--1 AS n"

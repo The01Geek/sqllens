@@ -775,6 +775,29 @@ class TestIsIntrospectionQuery:
 
 class TestMysqlLexicalBoundaries:
     @pytest.mark.parametrize("sql", [
+        r"SELECT `a\` FROM t",
+        r"SELECT `a\\` FROM t",
+        r"SELECT `a\``b` FROM t",
+        r"SELECT `a\``/*! identifier */` FROM t",
+        r"SELECT 1 AS `a\`",
+    ])
+    def test_backslashes_are_data_in_backtick_identifiers(self, sql: str) -> None:
+        assert_select_only(sql, dialect="mysql")
+
+    @pytest.mark.parametrize(("sql", "reason"), [
+        (r"SELECT `a\` FROM t /*!50000 UNION SELECT sleep(0) */", "executable comments"),
+        (r"SELECT `a\` FROM t--1", "double-dash"),
+        (r"SELECT `a\` FROM t WHERE x = 'y\' + sleep(0) -- '", "backslash-escaped quotes"),
+        (r'SELECT `a\` FROM t WHERE x = "y\" + sleep(0) -- "', "backslash-escaped quotes"),
+    ])
+    @pytest.mark.parametrize("dialect", ["mysql", None])
+    def test_identifier_closing_backtick_does_not_hide_unsafe_sql(
+        self, sql: str, reason: str, dialect: str | None,
+    ) -> None:
+        with pytest.raises(UnsafeSqlError, match=reason):
+            assert_select_only(sql, dialect=dialect)
+
+    @pytest.mark.parametrize("sql", [
         "SELECT 1--1 + sleep(0)",
         "SELECT 1--1 + benchmark(1,1)",
         "SELECT 1--\u00a0+sleep(0)",
