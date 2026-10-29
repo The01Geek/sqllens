@@ -143,7 +143,7 @@ Separately, FastMCP defaults to rejecting non-loopback `Host` headers with HTTP 
 
 ## HTTP construction policy and posture
 
-The CLI and transport share the loopback predicate in `auth.policy`. For the explicit unauthenticated non-loopback override, `_InsecureAuthMarker` wraps the host guard and stamps every HTTP response with `X-SQLLens-Auth: insecure-loopback-override`. It logs on the first HTTP request and at most once per 60 seconds thereafter; non-HTTP scopes pass through. The shared JSON response writer adds `X-Content-Type-Options: nosniff` to status and authentication error responses. Wildcard probe Host acceptance remains as documented above.
+The CLI and transport share the loopback predicate in `auth.policy`. For the explicit unauthenticated non-loopback override, `_InsecureAuthMarker` sits inside the host guard and stamps HTTP responses to Host-accepted requests with `X-SQLLens-Auth: insecure-loopback-override`. It logs on the first Host-accepted HTTP request and at most once per 60 seconds thereafter; non-HTTP scopes pass through. The shared JSON response writer adds `X-Content-Type-Options: nosniff` to status and authentication error responses. Wildcard probe Host acceptance remains as documented above.
 
 ## Plain-HTTP credential warning (S-9)
 

@@ -127,7 +127,7 @@ The check is there to prevent an unauthenticated SQL endpoint from being exposed
 
 The CLI guard does not affect `transport = "stdio"`, and it does not affect `bearer` mode. Calling `build_asgi_app(cfg)` or the HTTP `run(cfg)` directly always applies the HTTP policy, even if `cfg.server.transport` was left at `stdio`. Embedded hosts must keep `cfg.server.host` consistent with their actual bind address.
 
-When the unauthenticated non-loopback override is active, every HTTP response carries `X-SQLLens-Auth: insecure-loopback-override`, including health/readiness probes. The server logs a reminder on the first request and at most once per 60 seconds while requests continue. Fixed JSON status/auth responses also carry `X-Content-Type-Options: nosniff`.
+When the unauthenticated non-loopback override is active, HTTP responses to requests accepted by the Host guard carry `X-SQLLens-Auth: insecure-loopback-override`, including health/readiness probes. The server logs a reminder on the first Host-accepted request and at most once per 60 seconds while requests continue. Fixed JSON status/auth responses also carry `X-Content-Type-Options: nosniff`.
 
 ## Section: `[server]`
 

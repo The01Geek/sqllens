@@ -219,9 +219,9 @@ def _build_asgi_app_bare(cfg: Config, readiness: _Readiness) -> tuple[ASGIApp, F
     inner stack composition. The split exists to keep the SDK-attribute reach
     at a single guarded site.
 
-    Composition (outermost → innermost), inside the optional insecure-mode
-    response marker:
-    ``TrustedHostMiddleware`` → ``_PathNormalizer`` → ``_AuthMiddleware`` →
+    Composition (outermost → innermost):
+    ``TrustedHostMiddleware`` → optional insecure-mode response marker →
+    ``_PathNormalizer`` → ``_AuthMiddleware`` →
     FastMCP. ``TrustedHostMiddleware`` gates the handlers so a disallowed
     ``Host`` is rejected with 400 before *anything* downstream sees the
     request — including the ``/healthz`` / ``/readyz`` short-circuits in
@@ -246,10 +246,8 @@ def _build_asgi_app_bare(cfg: Config, readiness: _Readiness) -> tuple[ASGIApp, F
     normalized = _PathNormalizer(
         _AuthMiddleware(inner, authenticator), readiness
     )
-    guarded: ASGIApp = TrustedHostMiddleware(normalized, allowed_hosts=_allowed_hosts(cfg))
-    if insecure_bind:
-        guarded = _InsecureAuthMarker(guarded)
-    return guarded, mcp
+    marked: ASGIApp = _InsecureAuthMarker(normalized) if insecure_bind else normalized
+    return TrustedHostMiddleware(marked, allowed_hosts=_allowed_hosts(cfg)), mcp
 
 
 def run(cfg: Config) -> None:

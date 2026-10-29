@@ -97,3 +97,19 @@ async def test_unneeded_insecure_flag_does_not_mark_loopback(tmp_path) -> None:
         response = await client.get("/healthz")
     assert response.status_code == 200
     assert "x-sqllens-auth" not in response.headers
+
+
+@pytest.mark.asyncio
+async def test_rejected_host_does_not_reveal_insecure_marker(tmp_path, caplog) -> None:
+    cfg = _cfg(tmp_path)
+    cfg.server.host = "192.0.2.10"
+    cfg.auth.insecure = True
+    caplog.set_level(logging.WARNING, logger="sqllens.transport.http")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(http.build_asgi_app(cfg)),
+        base_url="http://unlisted.invalid",
+    ) as client:
+        response = await client.get("/healthz")
+    assert response.status_code == 400
+    assert "x-sqllens-auth" not in response.headers
+    assert not any("auth.insecure=1" in r.message for r in caplog.records)
