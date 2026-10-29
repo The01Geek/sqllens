@@ -72,6 +72,12 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
   query selection, with short errors that do not echo rejected names. Invalid
   legacy names require manual repair; profile writes stay disabled until
   repair and restart so excluded entries are not lost. (#211, #214)
+- Memory administration bounds add batches to 10,000 items per block and
+  list results to 0–1000 rows, scanning storage in pages while retaining
+  newest-first ordering and the full matching count. Saved-query searches
+  accept limits from 1–100. Per-item validation and storage failures keep
+  their indices without returning raw validation inputs or exception details.
+  (#221, #223)
 - Agent looped on tool calls cut off by the output-token cap until
   `max_tool_iterations` (#247). A `tool_use` block in a `max_tokens` response is
   now marked `truncated` and refused by `ToolRegistry.execute` with an

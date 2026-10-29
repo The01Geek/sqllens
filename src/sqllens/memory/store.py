@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -253,6 +254,25 @@ class MemoryStore:
         collection = self._mem._get_collection()
         include = ["metadatas", "embeddings"] if include_embeddings else ["metadatas"]
         got = collection.get(include=include)
+        return self._records_from_result(got, include_embeddings=include_embeddings)
+
+    def iter_records(self, *, include_embeddings: bool = False) -> Iterator[MemoryRecord]:
+        """Scan raw admin records in pages without loading the whole collection."""
+        collection = self._mem._get_collection()
+        include = ["metadatas", "embeddings"] if include_embeddings else ["metadatas"]
+        offset, page_size = 0, 256
+        while True:
+            got = collection.get(include=include, limit=page_size, offset=offset)
+            ids = got.get("ids") or []
+            if not ids:
+                return
+            yield from self._records_from_result(got, include_embeddings=include_embeddings)
+            if len(ids) < page_size:
+                return
+            offset += len(ids)
+
+    @staticmethod
+    def _records_from_result(got: dict, *, include_embeddings: bool) -> list[MemoryRecord]:
         ids = got.get("ids") or []
         metadatas = got.get("metadatas") or []
         embeddings = got.get("embeddings") if include_embeddings else None
@@ -264,7 +284,7 @@ class MemoryStore:
                 continue
             embedding = None
             if embeddings is not None and i < len(embeddings):
-                embedding = self._coerce_embedding(embeddings[i])
+                embedding = MemoryStore._coerce_embedding(embeddings[i])
             records.append(
                 MemoryRecord(
                     memory_id=memory_id, metadata=dict(metadata), embedding=embedding
