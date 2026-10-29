@@ -72,6 +72,10 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
   query selection, with short errors that do not echo rejected names. Invalid
   legacy names require manual repair; profile writes stay disabled until
   repair and restart so excluded entries are not lost. (#211, #214)
+- Retrieved memory context is quoted as untrusted reference data with escaped
+  delimiters, per-field limits, and a 32,768-character total cap. This bounds
+  prompt growth and clarifies its role; it does not guarantee prompt-injection
+  resistance or change the text-memory save default. (#221)
 - Agent looped on tool calls cut off by the output-token cap until
   `max_tool_iterations` (#247). A `tool_use` block in a `max_tokens` response is
   now marked `truncated` and refused by `ToolRegistry.execute` with an
