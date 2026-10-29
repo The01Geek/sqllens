@@ -16,7 +16,7 @@ End-to-end, one invocation:
 4. Merges an entry into `mcpServers` inside `claude_desktop_config.json`, preserving the existing `preferences` block and every sibling server.
 5. Writes a timestamped `.bak` of the JSON before mutating it.
 
-The command never returns half-applied state. If TOML validation fails the TOML write is reverted and the JSON is left untouched. If the JSON write fails the JSON backup is kept alongside the original file.
+If TOML validation fails the TOML write is reverted and the JSON is left untouched. If the JSON write fails the JSON backup is kept alongside the original file.
 
 `run_install` catches **any** exception from `validate_toml` (a broad `except Exception`, not the former narrow `(ValueError, OSError, ImportError)` tuple) before reverting. The generated TOML embeds the user's `--api-key` / `--db` secret, so a non-`(ValueError/OSError/ImportError)` failure escaping to `cli.py`'s generic backstop would (a) print raw `f"{exc}"` — an unscrubbed leak — and (b) skip the revert, leaving orphaned secret-bearing files. The broad catch reverts in all cases and routes the message through `cli._format_config_error` (lazily imported to keep the `cli → installers` direction acyclic), which fails closed for unknown types, so the `InstallError` cause line cannot echo the secret. The original exception is preserved via `__cause__` for debugging.
 
@@ -41,7 +41,7 @@ The installer file is structured as **pure helpers → orchestrator → formatte
 | `generate_toml` | Renders the TOML body, with TOML *literal strings* for paths so Windows backslashes aren't interpreted. |
 | `generate_cmd_launcher` | Renders the Windows `.cmd` body. CRLF line endings, cmd.exe-safe quoting. |
 | `merge_into_mcp_servers` | Pure-function merge: deep-copies the existing JSON, overwrites only `mcpServers[<name>]`, returns the count of preserved siblings. |
-| `validate_toml` | Round-trips the generated TOML through `sqllens.config.Config.load()` with the API key temporarily injected into the env. |
+| `validate_toml` | Round-trips the generated TOML through `sqllens.config.Config.load()` with an explicit `llm_api_key` argument; it does not assign the supplied key to the process environment. |
 | `resolve_options` | Fills OS defaults into raw CLI flags. |
 | `run_install` | The orchestrator — dry-run aware, idempotent. |
 | `format_install_result` | Returns a list of Rich-markup lines for `cli.py` to print. |
@@ -81,7 +81,7 @@ Historically the `.cmd` was *load-bearing* for correctness: scratch CSVs used to
 
 These are the three traps from the original runbook the installer eliminates:
 
-- **UTF-8 BOM in `sqllens.toml`.** `generate_toml` produces a plain Python string and `run_install` writes it with `path.write_text(text, encoding="utf-8")`, which never adds a BOM. The PowerShell `Set-Content -Encoding utf8` trap from the manual runbook is bypassed entirely. See [config-loading.md](../setup/config-loading.md) for why the loader rejects BOMs.
+- **UTF-8 BOM in `sqllens.toml`.** `generate_toml` produces a plain Python string and `run_install` writes it with the shared atomic UTF-8 writer, which never adds a BOM. The PowerShell `Set-Content -Encoding utf8` trap from the manual runbook is bypassed entirely. See [config-loading.md](../setup/config-loading.md) for why the loader rejects BOMs.
 - **Windows backslashes in TOML.** Path fields are emitted as TOML *literal* strings (`'C:\Users\…\chroma'`, single-quoted), which TOML defines as "no escape processing". `_toml_string` falls back to a double-quoted basic string with full escapes only when the value itself contains a `'`.
 - **JSON merge destroying `preferences`.** `merge_into_mcp_servers` deep-copies the entire existing JSON object, sets `["mcpServers"][name]`, and returns. Every other top-level key (including `preferences`) and every sibling server is preserved verbatim. Idempotency is established by comparing the parsed `dict` *before* and *after* the merge — re-running with the same flags is a no-op even if the on-disk JSON was hand-formatted with different indentation, CRLF, or no trailing newline.
 
@@ -133,3 +133,17 @@ All flags resolve through `resolve_options`. Defaults marked "OS-specific" are d
 - CLI glue via Typer's `CliRunner`: required flags, exit codes on `InstallError`, env-var fallback for the API key.
 
 [tests/conftest.py](../../../tests/conftest.py) holds a top-level autouse `_scrub_leaky_env` fixture (inherited by both the unit and integration suites) that deletes unprefixed env names (`MODE`, `HOST`, `PORT`, ...) before each test. Pydantic-settings sub-models in `sqllens.config` don't carry their own `env_prefix`, so a runner that exports plain `MODE=production` would otherwise be picked up as `auth.mode` and produce confusing `literal_error` failures. The fixture also scrubs `SQLLENS_CONFIG` between tests because `Config.load()` mutates it as a side effect.
+
+## Local file safety
+
+New or replaced TOML, launcher, JSON and backup files use sibling temporary
+files with mode 0600 on POSIX before any content is written, then atomic
+replacement. Rollbacks use the same writer. Byte-identical files whose writes
+are skipped retain their existing permissions. Windows access is governed by
+the destination directory ACL; POSIX mode bits are not an ACL guarantee.
+
+The installer rejects final symlink destinations, including broken links,
+before reading or writing its config/launcher paths and before creating a
+backup. Parent-directory permissions remain the operator's responsibility.
+API-key validation uses an explicit loader argument and preserves other
+TOML/environment settings. Invalid database-URL messages omit the input value.

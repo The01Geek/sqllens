@@ -643,11 +643,14 @@ class Config(BaseSettings):
         return tuple(sources)
 
     @classmethod
-    def load(cls, path: str | Path | None = None) -> Config:
+    def load(cls, path: str | Path | None = None, *, llm_api_key: str | None = None) -> Config:
         """Resolve config from env + TOML.
 
         If ``path`` is given it takes precedence over ``SQLLENS_CONFIG`` and the
         default ``./sqllens.toml`` location.
+
+        ``llm_api_key`` supplies an explicit key override without exporting it
+        into the process environment. Other values keep their usual precedence.
 
         Raises ``ConfigBomError`` — a ``ValueError`` subclass, so ``except
         ValueError:`` still catches it — when the resolved TOML begins with a
@@ -671,7 +674,7 @@ class Config(BaseSettings):
             resolved = _resolved_toml_path()
             token = _LOAD_TOML_PATH.set(resolved)
             try:
-                return cls()
+                return cls(llm={"api_key": llm_api_key}) if llm_api_key is not None else cls()
             except Exception as exc:
                 # BOM detection drives the message swap — we check the file's first
                 # three bytes, not the exception text. Any other parse error keeps

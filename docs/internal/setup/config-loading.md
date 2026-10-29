@@ -85,7 +85,7 @@ PowerShell on Windows trips this constantly:
 
 Detection runs regardless of how the path was resolved (explicit `--config`, `SQLLENS_CONFIG` env, or default `./sqllens.toml`). When the file does not exist or is not readable, the BOM check is silently skipped and the original pydantic-settings error path runs unchanged. When the TOML is BOM-free but otherwise malformed, the original `tomllib.TOMLDecodeError` message is preserved.
 
-Mitigation: `sqllens claude-desktop install` always writes BOM-free UTF-8 via Python's `Path.write_text(..., encoding="utf-8")`, so users who let the installer generate the file never hit this trap. The loader still needs a clearer error for hand-written configs.
+Mitigation: `sqllens claude-desktop install` always writes BOM-free UTF-8 via the shared atomic UTF-8 writer, so users who let the installer generate the file never hit this trap. The loader still needs a clearer error for hand-written configs.
 
 ### 2. Missing `llm.api_key` during `sqllens validate`
 
