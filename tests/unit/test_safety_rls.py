@@ -532,8 +532,9 @@ class _RecordingRunner:
         self.calls: list[RunSqlToolArgs] = []
 
     async def run_sql(
-        self, args: RunSqlToolArgs, context: object
+        self, args: RunSqlToolArgs, context: object, *, require_base_tables: bool = False
     ) -> pd.DataFrame:
+        assert require_base_tables
         self.calls.append(args)
         return pd.DataFrame()
 

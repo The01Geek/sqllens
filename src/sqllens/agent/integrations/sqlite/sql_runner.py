@@ -14,6 +14,7 @@ from sqllens.agent.core.tool import ToolContext
 # in their fetchmany path — keeping the per-request policy in one place.
 from sqllens.safety.limits import effective_row_cap, rows_to_capped_df
 from sqllens.safety.readonly import is_read_shaped
+from sqllens.safety.relations import verify_base_tables
 
 
 _DEFAULT_MAX_ROWS = 10_000
@@ -69,12 +70,16 @@ class SqliteRunner(SqlRunner):
         self._max_rows = max_rows
         self._read_only = read_only
 
-    async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
+    async def run_sql(
+        self, args: RunSqlToolArgs, context: ToolContext, *, require_base_tables: bool = False
+    ) -> pd.DataFrame:
         """Execute SQL query against SQLite database and return results as DataFrame.
 
         Args:
             args: SQL query arguments
             context: Tool execution context
+            require_base_tables: Check relation types on this connection and
+                refuse views or failed catalog lookups before executing RLS SQL.
 
         Returns:
             DataFrame with query results. For SELECTs, ``df.attrs['truncated']`` is True
@@ -115,6 +120,10 @@ class SqliteRunner(SqlRunner):
                 conn.set_progress_handler(
                     _make_deadline_handler(deadline), _PROGRESS_HANDLER_INSTRUCTIONS
                 )
+
+            if require_base_tables:
+                conn.execute("BEGIN")
+                verify_base_tables(conn, args.sql, dialect="sqlite")
 
             cursor.execute(args.sql)
 

@@ -127,6 +127,7 @@ SQL Lens blocks a query and surfaces an actionable error to the assistant when:
 - The generated SQL is not a `SELECT`-shaped read.
 - The generated SQL references a protected table in a shape that cannot be safely scoped.
 - The generated SQL fails to parse against the configured database dialect.
+- The query references a database view (including a PostgreSQL materialized view), or SQL Lens cannot verify a referenced relation's type on the database connection.
 
 When a query is blocked, the assistant receives an actionable message and can re-plan or surface the failure to you. It never sees unfiltered data because of a rewrite failure.
 
@@ -154,6 +155,7 @@ If any `[[rls]]` block is malformed, validation fails with a clear message namin
 
 ## Limitations
 
+- **Views are unavailable while RLS is active.** SQL Lens checks referenced relations on the connection that will execute the query and requires base tables. It does not expand stored view definitions, so this also blocks views over unprotected tables. Use base-table queries when RLS rules are configured. Views remain available when RLS is off.
 - **One process, one database, one configuration.** The rules in `sqllens.toml` apply to every request handled by that SQL Lens process. If you need per-database rules, run one SQL Lens process per database.
 - **No schema-qualified table names.** `table = "orders"` is supported; `table = "public.orders"` is not.
 - **Dynamic rules require HTTP.** The stdio transport has no per-request metadata channel.

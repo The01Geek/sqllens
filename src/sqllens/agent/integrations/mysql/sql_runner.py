@@ -9,6 +9,7 @@ from sqllens.agent.core.tool import ToolContext
 # See the sqlite runner for the rationale on this shared helper.
 from sqllens.safety.limits import effective_row_cap, rows_to_capped_df
 from sqllens.safety.readonly import is_read_shaped
+from sqllens.safety.relations import verify_base_tables
 
 
 _DEFAULT_MAX_ROWS = 10_000
@@ -69,12 +70,16 @@ class MySQLRunner(SqlRunner):
         self._max_rows = max_rows
         self._read_only = read_only
 
-    async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
+    async def run_sql(
+        self, args: RunSqlToolArgs, context: ToolContext, *, require_base_tables: bool = False
+    ) -> pd.DataFrame:
         """Execute SQL query against MySQL database and return results as DataFrame.
 
         Args:
             args: SQL query arguments
             context: Tool execution context
+            require_base_tables: Check relation types on this connection and
+                refuse views or failed catalog lookups before executing RLS SQL.
 
         Returns:
             DataFrame with query results. For SELECTs, ``df.attrs['truncated']`` is True
@@ -115,6 +120,9 @@ class MySQLRunner(SqlRunner):
                         )
                 finally:
                     setup.close()
+
+            if require_base_tables:
+                verify_base_tables(conn, args.sql, dialect="mysql")
 
             if is_read_shaped(args.sql):
                 # SSDictCursor streams from the server instead of materialising the

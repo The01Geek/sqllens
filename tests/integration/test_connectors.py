@@ -29,9 +29,16 @@ from sqllens.config import (
     DatabaseConfig,
     LLMConfig,
     MemoryConfig,
+    RlsRule,
     ServerConfig,
 )
-from sqllens.safety import ReadOnlyGuardRunner, UnsafeSqlError
+from sqllens.safety import (
+    ReadOnlyGuardRunner,
+    RlsError,
+    RlsGuardRunner,
+    RowCapRunner,
+    UnsafeSqlError,
+)
 from sqllens.safety.limits import MAX_ROWS_ATTR, TRUNCATED_ATTR
 
 pytestmark = [pytest.mark.connectors, pytest.mark.asyncio]
@@ -63,7 +70,48 @@ def _ctx() -> Any:
         conversation = None
         output_directory = "/tmp"
 
+        def __init__(self):
+            self.metadata = {}
+
     return _Ctx()
+
+
+async def _assert_rls_view_blocked(url: str, dialect: str, *, materialized: bool = False) -> None:
+    table = f"rls_{uuid.uuid4().hex}"
+    view = f"{table}_view"
+    view_kind = "MATERIALIZED VIEW" if materialized else "VIEW"
+    writer = build_sql_runner(url, read_only=False)
+
+    async def execute(sql: str) -> None:
+        await writer.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+
+    await execute(f"CREATE TABLE {table} (id INTEGER, tenant_id TEXT)")
+    try:
+        await execute(f"INSERT INTO {table} VALUES (1, 'alpha'), (2, 'beta')")
+        await execute(f"CREATE {view_kind} {view} AS SELECT * FROM {table}")
+        guard = RlsGuardRunner(
+            ReadOnlyGuardRunner(
+                RowCapRunner(build_sql_runner(url), max_rows=10), dialect=dialect
+            ),
+            [RlsRule(table=table, column="tenant_id", value="alpha")],
+            dialect=dialect,
+        )
+        result = await guard.run_sql(RunSqlToolArgs(sql=f"SELECT id FROM {table}"), _ctx())
+        assert result["id"].tolist() == [1]
+        with pytest.raises(RlsError, match="view"):
+            await guard.run_sql(RunSqlToolArgs(sql=f"SELECT id FROM {view}"), _ctx())
+    finally:
+        await execute(f"DROP {view_kind} IF EXISTS {view}")
+        await execute(f"DROP TABLE IF EXISTS {table}")
+
+
+@pytest.mark.parametrize("materialized", [False, True])
+async def test_postgres_rls_views(postgres_url, materialized) -> None:
+    await _assert_rls_view_blocked(postgres_url, "postgres", materialized=materialized)
+
+
+async def test_mysql_rls_views(mysql_url) -> None:
+    await _assert_rls_view_blocked(mysql_url, "mysql")
 
 
 # ─────────────────────────────── postgres ───────────────────────────────────

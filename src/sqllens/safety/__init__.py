@@ -77,7 +77,9 @@ class ReadOnlyGuardRunner(SqlRunner):
         self._inner = inner
         self._dialect = dialect
 
-    async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
+    async def run_sql(
+        self, args: RunSqlToolArgs, context: ToolContext, *, require_base_tables: bool = False
+    ) -> pd.DataFrame:
         try:
             assert_select_only(args.sql, dialect=self._dialect)
         except UnsafeSqlError as e:
@@ -101,7 +103,8 @@ class ReadOnlyGuardRunner(SqlRunner):
                 f"refusing to execute SQL: read-only guard errored "
                 f"({type(e).__name__}: {e})"
             ) from e
-        return await self._inner.run_sql(args, context)
+        options = {"require_base_tables": True} if require_base_tables else {}
+        return await self._inner.run_sql(args, context, **options)
 
 
 class RlsGuardRunner(SqlRunner):
@@ -116,6 +119,9 @@ class RlsGuardRunner(SqlRunner):
     Dynamic predicate values are read from ``context.metadata`` (populated per
     request from caller-supplied MCP metadata). Static rules need no metadata
     and so are enforced on every transport, including stdio.
+
+    With active rules, the inner runner must also verify base-table relations
+    on its execution connection; stored views are refused rather than expanded.
     """
 
     def __init__(
@@ -129,7 +135,9 @@ class RlsGuardRunner(SqlRunner):
         self._rules = rules
         self._dialect = dialect
 
-    async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
+    async def run_sql(
+        self, args: RunSqlToolArgs, context: ToolContext, *, require_base_tables: bool = False
+    ) -> pd.DataFrame:
         try:
             rewritten = apply_rls(
                 args.sql,
@@ -160,6 +168,10 @@ class RlsGuardRunner(SqlRunner):
                 f"refusing to execute query: row-level-security guard errored "
                 f"({type(e).__name__}: {e})"
             ) from e
-        return await self._inner.run_sql(
-            args.model_copy(update={"sql": rewritten}), context
-        )
+        options = {"require_base_tables": True} if self._rules or require_base_tables else {}
+        try:
+            return await self._inner.run_sql(
+                args.model_copy(update={"sql": rewritten}), context, **options
+            )
+        except TypeError as exc:
+            raise RlsError("SQL runner could not enforce the RLS relation check") from exc
