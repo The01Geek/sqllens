@@ -54,7 +54,6 @@ class PostgresRunner(SqlRunner):
             connect_timeout: Via kwargs, defaults to 5 seconds unless the DSN
                 or PGCONNECT_TIMEOUT already supplies a value. An explicit
                 DSN value takes precedence over the constructor option.
-            **kwargs: Additional psycopg2 connection parameters (sslmode, connect_timeout, etc.)
         """
         try:
             import psycopg2
