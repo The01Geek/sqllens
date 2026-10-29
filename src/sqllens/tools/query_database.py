@@ -216,7 +216,7 @@ async def query_database_impl_with_widgets(
     # the ContextVar BEFORE the agent is invoked, so every downstream shaping
     # site (each integration runner's fetchmany cap, RowCapRunner, the agent
     # run-loop iteration cap, the search-memory threshold fallback) reads the
-    # request-local value. An unknown / omitted profile name resolves through
+    # request-local value. An unknown valid or omitted profile name resolves through
     # ``default`` to base config — existing callers see no change.
     effective: EffectiveSettings = resolve_effective_settings(
         cfg, profile, store=profile_store

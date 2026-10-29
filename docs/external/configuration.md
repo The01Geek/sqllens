@@ -161,6 +161,12 @@ Defines the audit-logging surface. These fields are accepted and validated today
 
 **Note:** Unlike other sections, an unrecognized key inside `[agent.audit]` is rejected at config load rather than silently ignored. Because this is a privacy-sensitive surface, a misspelled key (for example, `sanitize_paramters`) fails loudly instead of quietly reverting to the safe default.
 
+## Profile names
+
+Named profiles use 1–64 ASCII letters, digits, dots, underscores or hyphens (`[A-Za-z0-9_.-]`). This applies to profile administration, persisted profile keys and non-empty query profile arguments. Unknown valid names still fall back to `default`; omitted or empty query profile arguments also use that default. The reserved `default` profile cannot be deleted through the admin tool.
+
+If an older `sqllens.profiles.json` under `memory.persist_dir` contains other names, SQL Lens reports a warning, excludes those entries and disables profile writes. The original file stays intact. Stop the server, back up that JSON file, rename the affected keys to unique valid names while preserving their knob values, and restart. Valid stored profiles remain available to query resolution while repair is pending. The admin tools continue to report the degraded store instead of presenting it as a clean load.
+
 ## Section: `[[rls]]`
 
 Defines Row-Level Security rules. Each `[[rls]]` block declares one predicate that SQL Lens injects into every query the assistant generates against the named table. This is opt-in: with no `[[rls]]` blocks configured, no rewriting takes place and there is no overhead.
