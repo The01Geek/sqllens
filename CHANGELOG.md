@@ -72,6 +72,10 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
   query selection, with short errors that do not echo rejected names. Invalid
   legacy names require manual repair; profile writes stay disabled until
   repair and restart so excluded entries are not lost. (#211, #214)
+- Apply the unauthenticated non-loopback policy to HTTP app factories and
+  launchers as well as the CLI. The explicit insecure override adds response
+  markers and throttled reminders; status/auth JSON includes `nosniff`.
+  (#176, #218, #223, #229, #261)
 - Agent looped on tool calls cut off by the output-token cap until
   `max_tool_iterations` (#247). A `tool_use` block in a `max_tokens` response is
   now marked `truncated` and refused by `ToolRegistry.execute` with an

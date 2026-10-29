@@ -95,9 +95,11 @@ def make_server(tmp_path: Path):
     handles: list[_ServerHandle] = []
     threads: list[threading.Thread] = []
 
-    def _build(auth: AuthConfig) -> _ServerHandle:
+    def _build(auth: AuthConfig, *, configured_host: str = "127.0.0.1") -> _ServerHandle:
         port = _free_port()
         cfg = _make_config(auth=auth, port=port, tmp_path=tmp_path)
+        # Exercise configured bind policy while keeping the real test socket local.
+        cfg.server.host = configured_host
         app = build_asgi_app(cfg)
 
         config = uvicorn.Config(
