@@ -26,6 +26,7 @@ from mcp.types import CallToolResult, TextContent
 from pydantic import Field, ValidationError
 
 from sqllens._bounded_json import JsonBoundsError, copy_bounded_json
+from sqllens._memory_consistency import MemoryChangedError
 from sqllens.config import Config
 from sqllens.profiles import (
     DEFAULT_PROFILE_NAME,
@@ -533,6 +534,7 @@ def build_server(cfg: Config) -> FastMCP:
             ``tool_usage``, ``text``, or omitted for all. Returns a JSON object
             ``{"memories": [...], "total": N}``. ``limit`` ranges from 0 to 1000;
             zero returns no rows while still counting all matching memories.
+            A concurrent managed write aborts listing with a retryable tool error.
             """
             mtype = _parse_memory_type(memory_type)
             try:
@@ -542,7 +544,7 @@ def build_server(cfg: Config) -> FastMCP:
                     limit=limit,
                     include_embedding_preview=include_embedding_preview,
                 )
-            except memory_admin.MemoryInputError as exc:
+            except (memory_admin.MemoryInputError, MemoryChangedError) as exc:
                 raise RuntimeError(str(exc)) from None
             except Exception:
                 logger.exception("list_memories tool failed")

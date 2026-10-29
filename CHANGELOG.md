@@ -5,6 +5,10 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Security
+- Memory listings now return a retryable error when SQL Lens writes overlap the
+  paged scan, preserving exact totals and ordering without returning partial data.
+  Coordination covers managed writes within one process; concurrent local writers
+  from separate processes remain unsupported by Chroma.
 - Bound MCP metadata propagation by key count, serialized bytes, nodes, and depth; bound debug trace argument strings and structures while preserving truncation flags. (#200)
 
 ### Removed

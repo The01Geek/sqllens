@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from pydantic import ValidationError
 
+from sqllens._memory_consistency import CollectionState
 from sqllens.agent.core.registry import ToolRegistry
 from sqllens.agent.core.tool import ToolCall, ToolContext
 from sqllens.agent.core.user import User
@@ -92,7 +93,9 @@ class PagedCollection:
 
 def store_with_pages(collection):
     store = object.__new__(MemoryStore)
-    store._mem = SimpleNamespace(_get_collection=lambda: collection)
+    store._mem = SimpleNamespace(
+        _get_collection=lambda: collection, _collection_state=CollectionState()
+    )
     return store
 
 

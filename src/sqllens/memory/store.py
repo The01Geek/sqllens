@@ -216,7 +216,8 @@ class MemoryStore:
         collection = self._mem._get_collection()
         ids = collection.get(include=[]).get("ids") or []
         if ids:
-            collection.delete(ids=ids)
+            with self._mem._collection_state.writing():
+                collection.delete(ids=ids)
         return len(ids)
 
     # --- Raw admin enumeration / mutation -------------------------------------
@@ -257,16 +258,25 @@ class MemoryStore:
         return self._records_from_result(got, include_embeddings=include_embeddings)
 
     def iter_records(self, *, include_embeddings: bool = False) -> Iterator[MemoryRecord]:
-        """Scan raw admin records in pages without loading the whole collection."""
+        """Page through records, refusing success if a managed write overlaps.
+
+        Consumers must exhaust this iterator before publishing a result. A
+        concurrent write can invalidate already yielded rows; the next check
+        raises MemoryChangedError instead of returning an incomplete listing.
+        """
         collection = self._mem._get_collection()
+        state = self._mem._collection_state
+        generation = state.snapshot()
         include = ["metadatas", "embeddings"] if include_embeddings else ["metadatas"]
         offset, page_size = 0, 256
         while True:
             got = collection.get(include=include, limit=page_size, offset=offset)
+            state.check(generation)
             ids = got.get("ids") or []
             if not ids:
                 return
             yield from self._records_from_result(got, include_embeddings=include_embeddings)
+            state.check(generation)
             if len(ids) < page_size:
                 return
             offset += len(ids)
@@ -331,6 +341,7 @@ class MemoryStore:
         present = collection.get(ids=ids, include=[]).get("ids") or []
         if not present:
             return 0
-        collection.delete(ids=present)
+        with self._mem._collection_state.writing():
+            collection.delete(ids=present)
         still_present = collection.get(ids=present, include=[]).get("ids") or []
         return len(present) - len(still_present)

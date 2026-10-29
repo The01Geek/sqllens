@@ -157,6 +157,8 @@ def list_memories(
 
     ``total`` is the count of all rows matching ``memory_type`` (not just the
     returned slice) so the panel can show how many exist beyond ``limit``.
+    Concurrent SQL Lens writes cause MemoryChangedError; no partial result is
+    returned. The store iterator must be exhausted before publishing this result.
     """
     if not isinstance(limit, int) or not 0 <= limit <= MAX_LIST_LIMIT:
         raise MemoryInputError(f"limit must be between 0 and {MAX_LIST_LIMIT}")

@@ -145,6 +145,12 @@ Each entry has a stable identifier you can pass to the get and delete tools. SQL
 
 **Warning:** Leave `allow_admin_tools` off unless you trust every client that can reach the server. These tools can read and permanently delete the saved memory, and adding entries can influence the SQL that SQL Lens generates for future questions.
 
+If memory changes during a listing, the tool returns a retry error instead of
+partial rows or an unreliable total. Retry after the write finishes. This covers
+SQL Lens writes within one running process, including background agent writes.
+Do not run concurrent writers from separate processes against the same local
+memory directory; Chroma does not support that deployment.
+
 ### Interactive Memory-Administration Panel
 
 When `allow_admin_tools` is enabled, SQL Lens also ships a packaged interactive panel that compatible assistants can render inline alongside the chat. The panel groups the seven tools into four sections:

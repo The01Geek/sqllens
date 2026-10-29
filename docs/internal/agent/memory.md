@@ -247,10 +247,11 @@ Every admin tool accepts a required `data_source_id` argument, but SQL Lens serv
 
 ### `MemoryRecord` and the raw `store.py` seam
 
-[src/sqllens/memory/store.py](../../../src/sqllens/memory/store.py) gained a frozen `MemoryRecord` dataclass (`memory_id`, `metadata`, optional `embedding`) and four raw collection operations that back the admin layer. Unlike `iter_all` (which only re-materializes the two bundle-representable kinds), these return metadata **verbatim** so the admin layer can surface every stored row — auto-learned tool memories included — with its discriminator (`is_text_memory`), tracking keys (`hit_count` / `last_hit_date`), and provenance intact:
+[src/sqllens/memory/store.py](../../../src/sqllens/memory/store.py) gained a frozen `MemoryRecord` dataclass (`memory_id`, `metadata`, optional `embedding`) and the raw collection operations that back the admin layer. Unlike `iter_all` (which only re-materializes the two bundle-representable kinds), these return metadata **verbatim** so the admin layer can surface every stored row — auto-learned tool memories included — with its discriminator (`is_text_memory`), tracking keys (`hit_count` / `last_hit_date`), and provenance intact:
 
 | Method | Behaviour |
 |---|---|
+| `iter_records(include_embeddings=False)` | Paged admin listing, retaining 256 rows per page. Raises `MemoryChangedError` if a managed write overlaps; callers must exhaust it before returning a result. The shared per-collection generation covers agent executor writes and direct admin deletes without blocking writes for the scan. |
 | `get_all(include_embeddings=False)` | Every stored row as a `MemoryRecord`. Rows whose metadata is missing/non-dict are skipped (they cannot be classified or addressed). |
 | `get_one(memory_id, include_embedding=False)` | One row by id, or `None` if absent. |
 | `delete_ids(ids)` | Deletes the given ids; returns how many *actually* left the store (present-before minus still-present-after), never an optimistic "asked to delete N" — so a partial-delete failure is not reported as a clean success. |
