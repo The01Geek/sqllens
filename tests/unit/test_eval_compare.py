@@ -47,11 +47,11 @@ def test_error_when_expected_unparseable() -> None:
     assert compare(expected, actual, dialect="sqlite") is Status.ERROR
 
 
-def test_actual_unparseable_classifies_as_changed() -> None:
-    """A garbled agent answer is a regression signal, not a golden-file bug."""
+def test_actual_unparseable_classifies_as_error() -> None:
+    """Unparseable agent output follows the issue's ERROR taxonomy."""
     expected = "SELECT 1"
     actual = "@@@ definitely not sql @@@"
-    assert compare(expected, actual, dialect="sqlite") is Status.CHANGED
+    assert compare(expected, actual, dialect="sqlite") is Status.ERROR
 
 
 def test_dialect_none_still_classifies() -> None:
@@ -72,7 +72,7 @@ def test_sqlalchemy_dialect_name_postgresql_normalises() -> None:
     """`DatabaseConfig.dialect` returns 'postgresql' from a postgresql:// URL.
 
     Without dialect-name mapping, sqlglot raises ``Unknown dialect 'postgresql'``
-    and every Postgres case silently classifies as ERROR.
+    and comparison cannot proceed.
     """
     # PASS path — the mapping must be applied.
     assert compare("SELECT 1", "select 1", dialect="postgresql") is Status.PASS
@@ -103,27 +103,16 @@ def test_unmapped_dialect_passes_through() -> None:
 
 
 def test_dialect_lookup_is_case_insensitive() -> None:
-    """An upper-cased URL scheme (technically tolerated by SQLAlchemy) must
-    still hit the mapping so a Postgres deployment with a ``PostgreSQL://``
-    URL doesn't re-trigger the silent-ERROR mode the dialect map fixed.
-    """
+    """The SQLAlchemy-to-sqlglot lookup is case-insensitive."""
     assert compare("SELECT 1", "select 1", dialect="PostgreSQL") is Status.PASS
     assert compare("SELECT 1", "select 1", dialect="MSSQL") is Status.PASS
 
 
-def test_actual_unterminated_string_classifies_as_changed() -> None:
-    """``TokenError`` (lex-level garbage like an unterminated string literal)
-    must be treated the same as ``ParseError`` — actual unparseable → CHANGED,
-    not ERROR.
-
-    ``TokenError`` is a sibling of ``ParseError`` under ``SqlglotError``, not
-    a subclass. A narrow ``except ParseError`` was the iter-2 mistake; this
-    test pins the broader ``SqlglotError`` catch so future regressions don't
-    silently re-narrow it.
-    """
+def test_actual_unterminated_string_classifies_as_error() -> None:
+    """Tokenization and grammar errors both classify as ERROR."""
     expected = "SELECT name FROM users"
     actual = 'SELECT name FROM users WHERE name = "unterminated'  # lex error
-    assert compare(expected, actual, dialect="sqlite") is Status.CHANGED
+    assert compare(expected, actual, dialect="sqlite") is Status.ERROR
 
 
 def test_expected_unterminated_string_classifies_as_error() -> None:
@@ -137,16 +126,6 @@ def test_expected_unterminated_string_classifies_as_error() -> None:
 
 
 def test_unknown_dialect_raises_not_swallowed() -> None:
-    """A dialect name sqlglot does NOT recognise (e.g. an unsupported third-party
-    SQLAlchemy driver) must surface as a real exception, not be silently
-    converted to ERROR — the operator needs the diagnostic, otherwise every
-    case classifies as a misleading "golden file is malformed" ERROR.
-
-    ``compare()`` catches only :class:`sqlglot.errors.SqlglotError`; a
-    ``ValueError("Unknown dialect ...")`` is not a subclass of that family
-    and propagates to ``_run_one_case``'s catch where it lands in
-    :attr:`CaseResult.error` — see the matching runner-level test in
-    ``test_eval_runner.py`` and the rationale in ``compare.py``'s docstring.
-    """
+    """Unknown dialects retain their diagnostic instead of a bare ERROR status."""
     with pytest.raises(ValueError, match="Unknown dialect"):
         compare("SELECT 1", "select 1", dialect="cockroachdb_no_such")

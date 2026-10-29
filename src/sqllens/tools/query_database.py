@@ -221,7 +221,8 @@ async def query_database_impl_with_widgets(
     uses the singleton. ``sqllens verify-memory`` passes its own agent, built
     with ``build_agent(..., allow_memory_writes=False)``, so the verification
     run goes through this exact pipeline without the cached agent's memory
-    write tools.
+    write tools. Callers supplying an agent must build it from the same
+    ``cfg`` passed here so its guards and request settings agree.
     """
     # Resolve the named profile into an EffectiveSettings and publish it on
     # the ContextVar BEFORE the agent is invoked, so every downstream shaping

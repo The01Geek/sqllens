@@ -119,7 +119,7 @@ Use `--format json` (the default) for a complete, lossless backup. Use `--format
 
 `import-memory` writes curated question-and-answer pairs straight into the memory the assistant uses at query time, with no safety net of its own. `verify-memory` is the post-import regression guard: it runs a curated **golden file** of reference questions through the live assistant and reports, per question, whether SQL Lens still produces the SQL you expected.
 
-Each reference question is a full live run of the assistant, the same as a real `query_database` call. It typically makes several billed requests to your language-model provider and runs the SQL the assistant generates against your configured database. Size your golden file with that cost in mind.
+Each reference question is a full live run of the assistant using the persisted `default` profile's retrieval threshold, row limit, and iteration limit. SQL details are forced on for comparison. It typically makes several billed requests to your language-model provider and runs the SQL the assistant generates against your configured database. Size your golden file with that cost in mind.
 
 `verify-memory` does not write to memory. For the duration of the run, the assistant's tools for saving question-and-answer pairs and notes are turned off, even if your configuration enables saving queries. A verification run therefore cannot change the memory it is checking, and one reference question cannot influence the next. The assistant still reads memory as usual, which is what you are testing.
 
@@ -130,10 +130,10 @@ sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]
 | Option | Effect |
 |---|---|
 | `--format` | `json` (default) or `csv`. The golden file uses the same shape as a memory bundle's question-and-answer pairs (the `sql_pairs` block in JSON, or a `question,sql` CSV), so any tool that can write a bundle can write a golden file. |
-| `--fail-under PCT` | Pass-rate percentage tolerance from 0 to 100. When set, the command exits 0 if the pass rate is at or above the threshold and non-zero otherwise. Without it, any non-PASS result exits non-zero. Use this when occasional flaky results from the assistant's natural variability are expected. |
+| `--fail-under PCT` | Pass-rate percentage tolerance from 0 to 100. See the exit-code rules below; at least one case must PASS. |
 | `-c CONFIG` | Path to `sqllens.toml`. Falls back to the environment or `./sqllens.toml`. |
 
-A golden file is structurally a memory bundle's question-and-answer block — the same 10 MiB and 10,000-item limits apply, the same CSV-injection defang is applied to CSV golden files, and the same blank-value and length rules are enforced. The free-form notes block, if present, is ignored: only question-and-answer pairs are reference cases.
+A golden file is structurally a memory bundle's question-and-answer block — the same 10 MiB and 10,000-item limits apply, and the same blank-value and length rules are enforced. CSV golden values are preserved exactly; unlike memory import/export, verification does not add spreadsheet formula-protection prefixes. The free-form notes block, if present, is ignored: only question-and-answer pairs are reference cases.
 
 A typical workflow is to import an updated bundle, then immediately verify it:
 
@@ -146,7 +146,7 @@ For each case, `verify-memory` classifies the assistant's answer as one of:
 
 - **PASS**: The assistant's SQL, after normalization, matches the expected SQL.
 - **CHANGED**: Both the expected and actual SQL parsed cleanly, but the normalized forms differ. The assistant's SQL changed and needs review. CHANGED does not always mean the answer is wrong — two correct queries with different JOIN order, or `IN` versus `EXISTS`, both register as CHANGED — so the per-case detail shows both queries side by side for inspection.
-- **ERROR**: The expected SQL in the golden file itself could not be parsed, or the assistant failed to produce a SQL statement (the language model errored, an internal tool failed, and so on).
+- **ERROR**: Either the expected or actual SQL could not be parsed, or the assistant failed to produce a SQL statement (the language model errored, an internal tool failed, and so on).
 
 When the command finishes it prints a table of results and a summary line, for example:
 
@@ -154,15 +154,16 @@ When the command finishes it prints a table of results and a summary line, for e
 PASS 7 | CHANGED 2 | ERROR 1 (total 10, pass-rate 70.0%)
 ```
 
-Per-case details follow the summary for any non-PASS result, showing the expected SQL, the actual SQL the assistant produced (when one was produced), and an error message (when the run failed). That error message is the same sanitized text a connected assistant would receive, for example `SQL execution error: An unexpected error occurred while processing your message. Please try again.` or `internal error; see server logs`. It deliberately omits connection details. The underlying cause, with its traceback, is logged to the command's standard error.
+Per-case details follow the summary for any non-PASS result, showing the expected SQL, the actual SQL the assistant produced (when one was produced), and an error message (when the run failed). Parse-failure diagnostics identify whether the golden SQL or the assistant's SQL could not be parsed. A missing SQL statement has its own diagnostic.
 
-The normalization step uses the dialect of the configured database, so two equally valid renderings for that dialect — for example, quoted versus unquoted identifiers where case-sensitivity allows — compare equal.
+Normalization uses the configured database dialect. Quoted and unquoted identifiers can still compare differently; the comparison does not prove semantic equivalence.
 
 **Exit codes** follow SQL Lens's strict "never silent success" rule:
 
 - An **empty golden file** (no question-and-answer pairs) exits non-zero with an explicit error. There is nothing to verify, so a clean exit would be misleading.
 - **Any non-PASS case** exits non-zero by default. Use `--fail-under` to relax this when occasional variability is expected.
 - An **all-non-PASS run** always exits non-zero, even with `--fail-under 0`, so a completely broken assistant cannot pass an unrestricted threshold.
+- With **`--fail-under PCT`** and at least one PASS, the command exits zero when the PASS percentage is at or above PCT and non-zero otherwise.
 
 **Note:** The assistant's answers are not perfectly deterministic. A single CHANGED result on a re-run is not necessarily a real regression — re-running may produce a PASS. If you expect some noise in normal operation, set `--fail-under` to the pass rate you require (for example, `--fail-under 90` to pass when at least 90 percent of cases PASS).
 

@@ -12,9 +12,8 @@ file format is introduced. The on-disk shape is identical to an
 - In a golden file, each ``(question, sql)`` pair is the *expected agent
   output to match against* (the ``sql`` is ground truth, not a hint).
 
-By reusing the parser we inherit every existing safety cap for free:
-``MAX_BUNDLE_BYTES``, ``MAX_BUNDLE_ITEMS``, the JSON recursion-bomb guard,
-and the CSV-injection defang.
+The bundle size and item caps and JSON recursion guard apply. CSV cells are
+preserved verbatim because both the question and SQL are ground truth.
 """
 
 from __future__ import annotations
@@ -49,7 +48,7 @@ def load_golden(text: str, fmt: str) -> list[GoldenCase]:
         raise ValueError(
             f"unknown golden-file format {fmt!r}; expected one of {VALID_FORMATS}"
         )
-    bundle = parse_csv(text) if fmt == "csv" else parse_json(text)
+    bundle = parse_csv(text, defang=False) if fmt == "csv" else parse_json(text)
     if bundle.sql_pairs is None:
         return []
     return [

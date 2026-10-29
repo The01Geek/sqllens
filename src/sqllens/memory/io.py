@@ -29,7 +29,7 @@ VALID_FORMATS = ("json", "csv")
 
 # CSV-injection (CWE-1236) defang set. Any cell starting with one of these
 # characters becomes a formula trigger when opened in Excel/LibreOffice; we
-# prefix such cells with a single apostrophe at both the parse and serialize
+# prefix such cells with a single apostrophe at the default parse and serialize
 # boundaries so a planted bundle cannot survive a round-trip and detonate in a
 # spreadsheet later.
 _CSV_FORMULA_TRIGGERS = frozenset({"=", "+", "-", "@", "\t", "\r", "\n"})
@@ -136,10 +136,18 @@ def parse_json(text: str) -> MemoryBundle:
     return bundle
 
 
-def parse_csv(text: str) -> MemoryBundle:
+def parse_csv(text: str, *, defang: bool = True) -> MemoryBundle:
+    """Parse a bundle, preserving exact cells only for non-spreadsheet consumers.
+
+    Golden-set comparison passes ``defang=False`` because the cells are ground
+    truth. Memory imports retain the default formula protection.
+    """
     _enforce_size_cap(text)
     reader = csv.reader(io.StringIO(text))
-    rows = list(reader)
+    try:
+        rows = list(reader)
+    except csv.Error as exc:
+        raise BundleFormatError(f"invalid CSV: {exc}") from exc
     if not rows:
         raise BundleFormatError("CSV is empty (expected a 'question,sql' header)")
     header = [c.strip().lower() for c in rows[0]]
@@ -158,8 +166,8 @@ def parse_csv(text: str) -> MemoryBundle:
         try:
             pairs.append(
                 SqlPair(
-                    question=_defang_csv_cell(row[0]),
-                    sql=_defang_csv_cell(row[1]),
+                    question=_defang_csv_cell(row[0]) if defang else row[0],
+                    sql=_defang_csv_cell(row[1]) if defang else row[1],
                 )
             )
         except ValidationError as exc:

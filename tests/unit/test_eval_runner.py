@@ -14,7 +14,7 @@ import pytest
 from sqllens.config import Config
 from sqllens.eval.compare import Status
 from sqllens.eval.golden import GoldenCase
-from sqllens.eval.runner import run_verification
+from sqllens.eval.runner import CaseResult, RunReport, run_verification
 
 
 def _config(tmp_path: Path) -> Config:
@@ -52,7 +52,10 @@ def _scripted_driver(
     iterator = iter(responses)
 
     async def _driver(cfg: Config, question: str):
-        nxt = next(iterator)
+        try:
+            nxt = next(iterator)
+        except StopIteration:
+            pytest.fail(f"test driver out of scripted responses on question {question!r}")
         if isinstance(nxt, Exception):
             raise nxt
         return nxt
@@ -182,7 +185,7 @@ def test_run_against_empty_cases_returns_empty_report(tmp_path: Path) -> None:
 
 
 def test_dialect_threaded_from_config(tmp_path: Path, monkeypatch) -> None:
-    """The runner reads ``cfg.database.dialect`` and passes it to ``compare``."""
+    """The runner reads ``cfg.database.dialect`` and passes it to ``compare_sql``."""
     cfg = _config(tmp_path)
     seen: list[str | None] = []
 
@@ -190,7 +193,7 @@ def test_dialect_threaded_from_config(tmp_path: Path, monkeypatch) -> None:
         seen.append(dialect)
         return Status.PASS
 
-    monkeypatch.setattr("sqllens.eval.runner.compare", fake_compare)
+    monkeypatch.setattr("sqllens.eval.runner.compare_sql", fake_compare)
     cases = [GoldenCase("q", "SELECT 1")]
     driver = _scripted_driver([("ok", [], {"sql": "SELECT 1"}, None, None)])
     asyncio.run(run_verification(cfg, cases, driver=driver))
@@ -198,17 +201,7 @@ def test_dialect_threaded_from_config(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_unknown_dialect_surfaces_per_case_error(tmp_path: Path) -> None:
-    """An unknown sqlglot dialect must reach the operator as a clear
-    ``CaseResult.error``, not as a mysterious ERROR row with no diagnostic.
-
-    The runner forces ``cfg.database.dialect`` through ``compare()`` for every
-    case. Before the iter-2 fix, ``compare()`` swallowed the
-    ``ValueError("Unknown dialect '...'")`` into a bare ``Status.ERROR`` with
-    ``error=None`` — same Day-1 silent-failure mode the dialect map fixed for
-    Postgres but kept for any unmapped scheme. The narrow except in
-    ``compare()`` now lets the ``ValueError`` propagate to ``_run_one_case``'s
-    catch where it lands on ``CaseResult.error``.
-    """
+    """An unknown dialect produces a per-case diagnostic."""
     cfg_path = tmp_path / "sqllens.toml"
     cfg_path.write_text(
         f"""
@@ -337,3 +330,118 @@ def test_production_driver_agent_has_no_memory_write_tools(
     assert "run_sql" in tools
     assert used_cfg.memory.save_queries is False
     assert used_cfg.agent.show_details is True
+
+
+@pytest.mark.parametrize(
+    "expected, actual, side",
+    [
+        ('SELECT "unterminated', "SELECT 1", "expected SQL in the golden file"),
+        ("SELECT 1", 'SELECT "unterminated', "actual SQL produced by the agent"),
+    ],
+)
+def test_parse_failure_identifies_side_and_keeps_actual_sql(
+    tmp_path: Path, expected: str, actual: str, side: str
+) -> None:
+    report = asyncio.run(run_verification(
+        _config(tmp_path),
+        [GoldenCase("q", expected)],
+        driver=_scripted_driver([("ok", [], {"sql": actual}, None, None)]),
+    ))
+    result = report.results[0]
+    assert result.status is Status.ERROR
+    assert result.actual_sql == actual
+    assert side in result.error
+
+
+def test_production_driver_uses_default_profile_and_forces_details(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqllens.profiles import Profile, ProfileStore
+    from sqllens.runtime import get_effective_settings
+
+    from ._agent_stubs import make_status_card
+
+    cfg = _config(tmp_path)
+    original = cfg.model_dump()
+    store = ProfileStore(cfg)
+    asyncio.run(store.upsert("default", Profile(
+        show_details=False, similarity_threshold=0.91, max_rows=17, max_tool_iterations=3,
+    )))
+    profile_bytes = store.path.read_bytes()
+    seen = []
+
+    class AgentSpy:
+        async def send_message(self, context, question, *, conversation_id=None):
+            seen.append(get_effective_settings())
+            yield make_status_card(
+                title="Executing run_sql", status="success", metadata={"sql": "SELECT 1"},
+            )
+
+    def build_spy(forced, *, allow_memory_writes):
+        assert allow_memory_writes is False
+        assert forced.memory.save_queries is False
+        assert forced.memory.similarity_threshold == 0.91
+        return AgentSpy()
+
+    monkeypatch.setattr("sqllens.agent.factory.build_agent", build_spy)
+    report = asyncio.run(run_verification(cfg, [GoldenCase("q", "SELECT 1")]))
+
+    assert report.passed == 1
+    assert seen[0].show_details is True
+    assert seen[0].similarity_threshold == 0.91
+    assert seen[0].max_rows == 17
+    assert seen[0].max_tool_iterations == 3
+    assert cfg.model_dump() == original
+    assert store.path.read_bytes() == profile_bytes
+
+
+def test_async_comparator_can_compare_rows(tmp_path: Path) -> None:
+    import sqlite3
+
+    connection = sqlite3.connect(":memory:")
+
+    async def rows_equal(expected: str, actual: str) -> Status:
+        await asyncio.sleep(0)
+        expected_rows = connection.execute(expected).fetchall()
+        actual_rows = connection.execute(actual).fetchall()
+        return Status.PASS if expected_rows == actual_rows else Status.CHANGED
+
+    try:
+        report = asyncio.run(run_verification(
+            _config(tmp_path),
+            [GoldenCase("q", "SELECT 1 + 1")],
+            driver=_scripted_driver([("ok", [], {"sql": "SELECT 2"}, None, None)]),
+            comparator=rows_equal,
+        ))
+    finally:
+        connection.close()
+    assert report.passed == 1
+
+
+def test_scripted_driver_exhaustion_is_a_test_failure(tmp_path: Path) -> None:
+    with pytest.raises(pytest.fail.Exception, match="out of scripted responses"):
+        asyncio.run(run_verification(
+            _config(tmp_path), [GoldenCase("q", "SELECT 1")], driver=_scripted_driver([]),
+        ))
+
+
+@pytest.mark.parametrize(
+    "actual, status, error",
+    [
+        (None, Status.ERROR, None),
+        ("SELECT 1", Status.ERROR, " "),
+        (None, Status.PASS, None),
+        ("SELECT 1", Status.PASS, "failure"),
+    ],
+)
+def test_case_result_rejects_missing_or_contradictory_diagnostics(actual, status, error) -> None:
+    with pytest.raises(ValueError):
+        CaseResult("q", "SELECT 1", actual, status, error)
+
+
+def test_report_keeps_a_snapshot_of_its_results() -> None:
+    results = [CaseResult("q", "SELECT 1", "SELECT 1", Status.PASS)]
+    report = RunReport(results=results)
+    results.clear()
+    assert report.total == 1
+    assert isinstance(report.results, tuple)

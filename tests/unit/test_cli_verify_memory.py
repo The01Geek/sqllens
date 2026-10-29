@@ -67,14 +67,8 @@ def _patch_driver(monkeypatch, responses: list) -> None:
     async def _drv(cfg, question):
         try:
             nxt = next(iterator)
-        except StopIteration as exc:
-            # PEP 479: a bare StopIteration in an async function would be
-            # converted to RuntimeError and silently captured by the runner's
-            # per-case except, producing an ERROR row that masks the test
-            # under-provisioning the responses iterator.
-            raise AssertionError(
-                f"test driver out of scripted responses on question {question!r}"
-            ) from exc
+        except StopIteration:
+            pytest.fail(f"test driver out of scripted responses on question {question!r}")
         if isinstance(nxt, Exception):
             raise nxt
         return nxt
@@ -112,6 +106,7 @@ def test_any_changed_exits_nonzero(tmp_path: Path, monkeypatch) -> None:
 
     assert r.exit_code == 1, r.output
     assert "CHANGED 1" in r.output
+    assert "Verification failed" in r.stderr
     assert "Expected SQL" in r.output
     assert "Actual SQL" in r.output
 
@@ -309,3 +304,76 @@ def test_fail_under_invalid_value(
     )
     # Typer rejects out-of-range / non-numeric values with exit code 2.
     assert r.exit_code == 2
+
+
+
+def test_fail_under_accepts_exact_boundary(tmp_path: Path, monkeypatch) -> None:
+    cfg = _config(tmp_path)
+    golden = _golden(tmp_path, [("q1", "SELECT 1"), ("q2", "SELECT 2")])
+    _patch_driver(monkeypatch, [
+        ("ok", [], {"sql": "SELECT 1"}, None, None),
+        ("ok", [], {"sql": "SELECT 3"}, None, None),
+    ])
+    result = runner.invoke(
+        app, ["verify-memory", str(golden), "-c", str(cfg), "--fail-under", "50"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "pass-rate 50.0%" in result.output
+
+
+def test_setup_failure_has_structured_diagnostic(tmp_path: Path, monkeypatch) -> None:
+    cfg = _config(tmp_path)
+    golden = _golden(tmp_path, [("q", "SELECT 1")])
+
+    def fail_build(*args, **kwargs):
+        raise RuntimeError("agent setup unavailable")
+
+    monkeypatch.setattr("sqllens.agent.factory.build_agent", fail_build)
+    result = runner.invoke(app, ["verify-memory", str(golden), "-c", str(cfg)])
+    assert result.exit_code == 1, result.output
+    assert "Verification run failed (RuntimeError)" in result.stderr
+    assert "agent setup unavailable" in result.stderr
+
+
+def test_expected_parse_failure_shows_golden_file_diagnostic(tmp_path: Path, monkeypatch) -> None:
+    cfg = _config(tmp_path)
+    golden = _golden(tmp_path, [("q", 'SELECT "unterminated')])
+    _patch_driver(monkeypatch, [("ok", [], {"sql": "SELECT 1"}, None, None)])
+    result = runner.invoke(app, ["verify-memory", str(golden), "-c", str(cfg)])
+    assert result.exit_code == 1, result.output
+    assert "ERROR 1" in result.output
+    assert "expected SQL in the golden file could not be parsed" in " ".join(result.output.split())
+    assert "SELECT 1" in result.output
+
+
+def test_csv_field_limit_failure_has_structured_diagnostic(tmp_path: Path) -> None:
+    import csv
+
+    cfg = _config(tmp_path)
+    golden = tmp_path / "golden.csv"
+    golden.write_text("question,sql\nq," + "x" * (csv.field_size_limit() + 1) + "\n")
+    result = runner.invoke(
+        app, ["verify-memory", str(golden), "--format", "csv", "-c", str(cfg)],
+    )
+    assert result.exit_code == 1, result.output
+    assert "Invalid golden file" in result.stderr
+    assert "field larger" in result.stderr
+
+
+def test_csv_comment_and_question_are_not_rewritten(tmp_path: Path, monkeypatch) -> None:
+    import csv
+
+    cfg = _config(tmp_path)
+    golden = tmp_path / "golden.csv"
+    sql = "-- comment\nSELECT 1"
+    with golden.open("w", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["question", "sql"])
+        writer.writerow(["- question", sql])
+    _patch_driver(monkeypatch, [("ok", [], {"sql": sql}, None, None)])
+    result = runner.invoke(
+        app, ["verify-memory", str(golden), "--format", "csv", "-c", str(cfg)],
+    )
+    assert result.exit_code == 0, result.output
+    assert "PASS 1" in result.output
+    assert "- question" in result.output

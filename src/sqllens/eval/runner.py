@@ -3,55 +3,48 @@
 
 """Drive a golden set through the live agent and classify each case.
 
-The runner is intentionally thin: it forces ``show_details`` on (so
-``query_info["sql"]`` is populated for every case), invokes the same agent
-path the ``query_database`` MCP tool uses, extracts the agent's generated SQL,
-and hands the ``(expected, actual)`` pair to the pluggable comparator in
-:mod:`sqllens.eval.compare` for the verdict.
-
-A verification run never writes to memory: the production driver uses a
-dedicated agent built with ``build_agent(..., allow_memory_writes=False)``
-(no ``save_question_tool_args``, no ``save_text_memory``) from a config clone
-with ``memory.save_queries=False``, instead of the process-wide cached agent.
-Otherwise a run could persist CHANGED (wrong) SQL as a trusted pair, or let an
-earlier case's notes steer a later case.
-
-The runner deliberately does **not** know the PASS / CHANGED / ERROR taxonomy.
-A future row-execution comparator (execute both queries against the configured
-database, compare result sets) drops in by satisfying the same comparator
-contract — no runner changes required.
+Verification resolves the persisted default profile, forces SQL details on,
+and disables the dedicated agent's memory-writing tools. Missing SQL produces
+an ERROR row. Each case has its own conversation.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from sqllens.config import Config
-from sqllens.eval.compare import Status, compare
+from sqllens.eval.compare import Status, compare_sql
 from sqllens.eval.golden import GoldenCase
+from sqllens.profiles import ProfileStore, resolve_effective_settings
 
 
 @dataclass(frozen=True)
 class CaseResult:
-    """Outcome of running one golden case through the agent."""
+    """Outcome of one case; every ERROR carries a diagnostic."""
 
     question: str
     expected_sql: str
-    # The agent's generated SQL — ``None`` when the agent raised before
-    # producing one (a tool-internal failure, an LLM error, etc.).
     actual_sql: str | None
     status: Status
-    # Populated when the agent path raised; ``None`` otherwise. Surfaced in the
-    # CLI's per-case table for any non-PASS row.
     error: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status is Status.ERROR:
+            if not self.error or not self.error.strip():
+                raise ValueError("an ERROR result requires a diagnostic")
+        elif self.error is not None or not self.actual_sql or not self.actual_sql.strip():
+            raise ValueError("a PASS or CHANGED result requires SQL and no error")
 
 
 @dataclass(frozen=True)
 class RunReport:
-    """Aggregate over every :class:`CaseResult` in one verification run."""
+    """Immutable aggregate over every case in one verification run."""
 
-    results: list[CaseResult] = field(default_factory=list)
+    results: tuple[CaseResult, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "results", tuple(self.results))
 
     @property
     def total(self) -> int:
@@ -71,40 +64,34 @@ class RunReport:
 
     @property
     def pass_rate(self) -> float:
-        """Fraction of cases that PASSed, in ``[0.0, 1.0]``. Zero on an empty run.
-
-        An empty run is itself a CLAUDE.md "structured signal" failure mode —
-        the CLI guards against ever reporting it as a green result — so the
-        zero return here is the "no signal, no credit" floor, not a value any
-        downstream gate would compare against meaningfully.
-        """
-        if self.total == 0:
-            return 0.0
-        return self.passed / self.total
+        """Fraction of cases that PASSed, in [0.0, 1.0]; zero on an empty run."""
+        return self.passed / self.total if self.total else 0.0
 
 
-# Type alias for the agent-driver injection seam — a coroutine
-# ``(cfg, question) -> (markdown, blocks, query_info, memory_info, agent_trace)``.
-# Tests inject a deterministic fake; production wires
-# :func:`sqllens.tools.query_database.query_database_impl_with_widgets`.
+# query_info is validated at the driver boundary by _extract_sql.
 AgentDriver = Callable[
     [Config, str],
-    Awaitable[tuple[str, list[dict], dict | None, dict | None, dict | None]],
+    Awaitable[tuple[str, list[dict], object, dict | None, dict | None]],
 ]
+Comparator = Callable[[str, str], Awaitable[Status]]
 
 
 def verification_config(cfg: Config) -> Config:
-    """Return the clone of ``cfg`` a verification run uses; ``cfg`` is untouched.
+    """Resolve the persisted default profile into a clone, then force verification settings.
 
-    Forces ``agent.show_details=True`` (so ``query_info["sql"]`` is populated)
-    and ``memory.save_queries=False`` (so ``save_question_tool_args`` is never
-    registered). ``save_text_memory`` has no config gate to flip here; the
-    production driver drops it via ``build_agent(..., allow_memory_writes=False)``.
+    Details are enabled and query saving is disabled without changing the caller
+    or the stored profile. The dedicated agent also omits both memory save tools.
     """
+    effective = resolve_effective_settings(cfg, None, store=ProfileStore(cfg))
     return cfg.model_copy(
         update={
-            "agent": cfg.agent.model_copy(update={"show_details": True}),
-            "memory": cfg.memory.model_copy(update={"save_queries": False}),
+            "agent": cfg.agent.model_copy(
+                update={"show_details": True, "max_tool_iterations": effective.max_tool_iterations}
+            ),
+            "database": cfg.database.model_copy(update={"max_rows": effective.max_rows}),
+            "memory": cfg.memory.model_copy(
+                update={"save_queries": False, "similarity_threshold": effective.similarity_threshold}
+            ),
         }
     )
 
@@ -114,38 +101,18 @@ async def run_verification(
     cases: Iterable[GoldenCase],
     *,
     driver: AgentDriver | None = None,
+    comparator: Comparator | None = None,
 ) -> RunReport:
-    """Run every ``cases`` entry through the agent and classify the result.
+    """Run each case independently and return its verdict or failure diagnostic.
 
-    Each case is run independently — one agent run per case, no shared
-    conversation. The runner extracts ``query_info["sql"]`` from the
-    ``show_details``-on response and hands it to :func:`compare` along with
-    the configured database dialect (``cfg.database.dialect``). A case where
-    the agent raises (any exception, including a sanitized tool-internal
-    failure) classifies as :class:`Status.ERROR` with the exception message
-    surfaced on :attr:`CaseResult.error` and ``actual_sql=None``.
+    ``driver`` replaces the live agent for tests. The production driver builds
+    one dedicated agent with no memory-writing tools and never uses the cached
+    singleton. A setup failure propagates before any case runs.
 
-    A case where the agent answered but ``query_info["sql"]`` came back
-    missing — meaning the show-details force was bypassed by an upstream
-    change, or no ``run_sql`` tool call happened — also classifies as ERROR
-    with a clear diagnostic message rather than being silently scored against
-    an empty string.
-
-    The runner clones ``cfg`` (see :func:`verification_config`) with
-    ``agent.show_details=True`` and ``memory.save_queries=False`` rather than
-    mutating it: a concurrent request path that holds the same ``cfg``
-    reference must see no change. This relies on the runner never passing a
-    ``profile=`` arg to the agent driver — if it ever did, the per-request
-    profile resolution would shadow the cloned base. The single call site
-    here makes that explicit; revisit if verify-memory grows profile awareness.
-
-    ``driver`` is the injection seam for tests; production callers leave it
-    ``None`` and the runner wires :func:`query_database_impl_with_widgets`
-    with a dedicated agent built once per run by
-    ``build_agent(forced_cfg, allow_memory_writes=False)``, never the
-    process-wide cached agent (which may carry memory write tools). A failure
-    building that agent (e.g. an unsupported database URL) propagates to the
-    caller before any case runs.
+    ``comparator`` defaults to dialect-normalized SQL comparison. An async
+    replacement accepts expected and actual SQL, returning a ``Status`` or
+    raising a diagnostic on failure. It can capture a database connection in a
+    closure for row comparison without changing the runner.
     """
     forced_cfg = verification_config(cfg)
     if driver is None:
@@ -157,26 +124,26 @@ async def run_verification(
         async def _prod_driver(
             forced: Config, question: str
         ) -> tuple[str, list[dict], dict | None, dict | None, dict | None]:
-            return await query_database_impl_with_widgets(
-                forced, question, agent=verify_agent
-            )
+            return await query_database_impl_with_widgets(forced, question, agent=verify_agent)
 
         impl: AgentDriver = _prod_driver
     else:
         impl = driver
-    dialect = forced_cfg.database.dialect
-    results: list[CaseResult] = []
+    if comparator is None:
+        async def _sql_comparator(expected: str, actual: str) -> Status:
+            return compare_sql(expected, actual, dialect=forced_cfg.database.dialect)
+
+        comparator = _sql_comparator
+    results = []
     for case in cases:
-        results.append(
-            await _run_one_case(impl, forced_cfg, dialect, case)
-        )
-    return RunReport(results=results)
+        results.append(await _run_one_case(impl, forced_cfg, comparator, case))
+    return RunReport(results=tuple(results))
 
 
 async def _run_one_case(
     driver: AgentDriver,
     forced_cfg: Config,
-    dialect: str,
+    comparator: Comparator,
     case: GoldenCase,
 ) -> CaseResult:
     try:
@@ -203,15 +170,8 @@ async def _run_one_case(
                 "or show_details was filtered out upstream)"
             ),
         )
-    # ``compare()`` catches only ``sqlglot.errors.SqlglotError`` (the
-    # parse/lex family base — covers both ``ParseError`` and ``TokenError``).
-    # A ``ValueError("Unknown dialect '...'")`` from a misconfigured /
-    # unmapped SQLAlchemy URL scheme propagates here, where we capture it
-    # with the SQL alongside so the operator's per-case detail shows both
-    # the agent's actual SQL and the real diagnostic (CLAUDE.md
-    # structured-signal rule).
     try:
-        status = compare(case.expected_sql, actual_sql, dialect=dialect)
+        status = await comparator(case.expected_sql, actual_sql)
     except Exception as exc:
         return CaseResult(
             question=case.question,
@@ -225,24 +185,12 @@ async def _run_one_case(
         expected_sql=case.expected_sql,
         actual_sql=actual_sql,
         status=status,
+        error="comparator reported an error" if status is Status.ERROR else None,
     )
 
 
-def _extract_sql(query_info: object | None) -> str | None:
-    """Pull the executed SQL out of ``query_info`` if present and non-empty.
-
-    Matches the shape ``query_database_impl_with_widgets`` puts on the wire:
-    ``query_info`` is either ``None`` (show-details off — defensive: this
-    runner forces it on, but a future filter could still null it) or a mapping
-    with a ``"sql"`` key. An empty/whitespace string is treated as missing so
-    the comparator never normalises an empty input.
-
-    Annotated as ``object | None`` rather than ``dict | None`` so the
-    isinstance guard is load-bearing: a future upstream contract drift that
-    returned a list, namedtuple, or other non-mapping shape would otherwise
-    raise ``AttributeError`` on ``.get`` and abort the entire run instead of
-    producing one ERROR row (the runner's per-case fault-tolerance promise).
-    """
+def _extract_sql(query_info: object) -> str | None:
+    """Validate driver metadata and extract its non-blank SQL string."""
     if not isinstance(query_info, dict):
         return None
     sql = query_info.get("sql")

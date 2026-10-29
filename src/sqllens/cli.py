@@ -520,7 +520,7 @@ def verify_memory(
         max=100.0,
         help=(
             "PASS-rate percentage tolerance (0-100). When set, the command exits "
-            "0 if PASS rate >= this threshold and non-zero otherwise. Without it, "
+            "0 only if at least one case PASSes and PASS rate >= this threshold. Without it, "
             "any non-PASS case exits non-zero. Use this when occasional CHANGED "
             "noise from LLM non-determinism is expected."
         ),
@@ -538,13 +538,11 @@ def verify_memory(
     Each case is a full live agent run: typically several billed LLM
     requests, plus the queries the agent runs against the configured
     database. The run never writes to memory
-    (the agent's save tools are disabled whatever the config says). An ERROR
-    row shows the same sanitized message an MCP client would get; the
-    underlying cause is logged to stderr.
+    (the agent's save tools are disabled whatever the config says).
 
     Exits non-zero on any non-PASS case (or, with ``--fail-under``, when the
-    PASS rate is below the threshold). An empty golden file is itself an
-    error — there is nothing to verify, so the command refuses to exit 0.
+    PASS rate is below the threshold). Empty and all-non-PASS runs always
+    exit non-zero, including with ``--fail-under 0``.
     """
     import asyncio
 
@@ -594,21 +592,19 @@ def verify_memory(
     _exit_for_report(report, fail_under)
 
 
-_STATUS_COLOUR = {"PASS": "green", "CHANGED": "yellow", "ERROR": "red"}
-
-
 def _print_report(report: RunReport) -> None:
     """Render the per-case table, then the summary line plus non-PASS details."""
     from rich.table import Table
 
     from sqllens.eval import Status
 
+    status_colour = {Status.PASS: "green", Status.CHANGED: "yellow", Status.ERROR: "red"}
     table = Table(title="verify-memory results", show_lines=False)
     table.add_column("#", justify="right", no_wrap=True)
     table.add_column("status", no_wrap=True)
     table.add_column("question", overflow="fold")
     for idx, case in enumerate(report.results, start=1):
-        colour = _STATUS_COLOUR[case.status.value]
+        colour = status_colour.get(case.status, "white")
         table.add_row(
             str(idx),
             f"[{colour}]{case.status.value}[/{colour}]",
@@ -660,6 +656,10 @@ def _exit_for_report(report: RunReport, fail_under: float | None) -> None:
     if fail_under is None:
         if all(r.status is Status.PASS for r in report.results):
             return
+        err_console.print(
+            "[red]Verification failed:[/red] one or more cases did not PASS. "
+            "See the per-case details."
+        )
         raise typer.Exit(code=1)
     if report.passed == 0:
         err_console.print(

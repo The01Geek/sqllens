@@ -1,18 +1,12 @@
 # SPDX-FileCopyrightText: 2026 Daniel Radman
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for :mod:`sqllens.eval.golden`.
-
-The load-bearing claim in ``load_golden``'s docstring is that the golden file
-inherits every safety cap from the memory-bundle parser
-(``MAX_BUNDLE_BYTES``, ``MAX_BUNDLE_ITEMS``, JSON recursion-bomb guard,
-CSV-injection defang). These tests pin that inheritance against the actual
-parser so a future refactor that bypasses :mod:`sqllens.memory.io` cannot
-silently drop the safety surface.
-"""
+"""Golden parsing preserves reference values while enforcing bundle limits."""
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 
 import pytest
@@ -113,18 +107,22 @@ def test_load_golden_inherits_item_cap() -> None:
         load_golden(text, "json")
 
 
-def test_load_golden_csv_defang_applied_to_sql_cell() -> None:
-    """A CSV cell beginning with a formula trigger is defanged with a leading
-    apostrophe — exact same behaviour as ``import-memory`` so a planted file
-    cannot detonate when later opened in a spreadsheet.
+@pytest.mark.parametrize("prefix", ["=", "+", "-", "@", "\t", "\r", "\n"])
+def test_load_golden_csv_preserves_question_and_sql(prefix: str) -> None:
+    question = prefix + "question"
+    sql = prefix + "SELECT 1"
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["question", "sql"])
+    writer.writerow([question, sql])
 
-    Verifies the defang is *visible* in the loaded case (the apostrophe
-    survives), so an operator authoring SQL with leading ``-``/``=``/``@`` in
-    a CSV file knows the SQL was rewritten.
-    """
-    text = "question,sql\nq1,=SUM(A1)\n"
-    cases = load_golden(text, "csv")
-    assert cases == [GoldenCase(question="q1", expected_sql="'=SUM(A1)")]
+    assert load_golden(buf.getvalue(), "csv") == [GoldenCase(question, sql)]
+
+
+def test_csv_parser_error_is_a_bundle_format_error() -> None:
+    text = "question,sql\nq," + "x" * (csv.field_size_limit() + 1) + "\n"
+    with pytest.raises(BundleFormatError, match="invalid CSV.*field larger"):
+        load_golden(text, "csv")
 
 
 def test_load_golden_csv_rejects_missing_header() -> None:
