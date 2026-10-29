@@ -661,8 +661,9 @@ def build_server(cfg: Config) -> FastMCP:
         ) -> str | CallToolResult:
             """Export the store as a JSON or CSV blob.
 
-            JSON round-trips: its ``{"sql_pairs": [...], "schema_docs": [...]}``
-            output feeds straight back into ``add_memories``. Returns
+            JSON uses the ``{"sql_pairs": [...], "schema_docs": [...]}``
+            shape accepted by ``add_memories``. Split larger exports into
+            batches of at most 10,000 items per block before adding. Returns
             ``{"format", "data", "warnings", "lossy"}``; when ``lossy`` is true
             (data that exists was dropped) the result is an ``isError``, and a
             wholesale-corrupt store fails loudly rather than exporting an empty

@@ -15,9 +15,9 @@ Single-tenant note: SQL Lens serves one database per running instance, so the
 storage. The tools accept it to keep the wire contract stable with a
 multi-tenant client (Option A in issue #181).
 
-Round-trip contract: :func:`export_memories` (JSON) emits exactly the
+:func:`export_memories` (JSON) emits the
 ``{"sql_pairs": [...], "schema_docs": [...]}`` shape :func:`add_memories`
-accepts, so an export can be fed straight back in without reshaping.
+accepts. Split larger exports into batches within the per-block item cap.
 """
 
 from __future__ import annotations
@@ -308,10 +308,11 @@ async def add_memories(
 
 
 def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str, Any]:
-    """Serialize the store to a blob that round-trips back into ``add_memories``.
+    """Serialize the store to a JSON or CSV blob.
 
     JSON emits ``{"sql_pairs": [{question, sql}], "schema_docs": [{content}]}``
-    — the exact argument shape ``add_memories`` accepts. CSV carries SQL pairs
+    — the argument shape ``add_memories`` accepts, subject to its per-block
+    item cap. Split larger exports into batches before adding. CSV carries SQL pairs
     only (a ``question,sql`` sheet); schema docs are reported as a warning since
     they are not representable.
 
