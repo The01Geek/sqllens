@@ -64,9 +64,8 @@ jobs:
       # Per-trigger checkout ref (issue #93): do NOT collapse this to
       # github.event.repository.default_branch — it is UNSET in a `schedule` payload,
       # whose runs execute on the default branch that github.ref_name already names.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v6
         with:
-          persist-credentials: false
           ref: ${{ github.event_name == 'schedule' && github.ref_name || github.event.repository.default_branch }}
       - id: cfg
         uses: ./.github/actions/read-project-config
@@ -169,15 +168,14 @@ jobs:
       - name: Mint workflow-capable token (optional)
         id: app-token
         if: ${{ vars.DEVFLOW_APP_ID != '' }}
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        uses: actions/create-github-app-token@v3
         with:
           client-id: ${{ vars.DEVFLOW_APP_ID }}
           private-key: ${{ secrets.DEVFLOW_APP_PRIVATE_KEY }}
 
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@v6
         with:
-          persist-credentials: true
           fetch-depth: 0
           ref: ${{ github.event_name == 'schedule' && github.ref_name || github.event.repository.default_branch }}
           # LOAD-BEARING (issue #357): the credential actions/checkout persists here is
@@ -601,7 +599,7 @@ jobs:
 
       - name: Run Claude Code
         id: claude
-        uses: anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6 # v1
+        uses: anthropics/claude-code-action@v1
         env:
           CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
         with:
@@ -686,7 +684,7 @@ jobs:
 
       - name: Upload execution transcript artifact
         if: always() && steps.scrub_transcript.outputs.path != ''
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        uses: actions/upload-artifact@v7
         with:
           name: claude-execution-transcript-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ steps.scrub_transcript.outputs.path }}
@@ -708,7 +706,7 @@ jobs:
       # failed store save or a cancelled run does not discard them (issue #396).
       - name: Upload retrospective learnings artifact
         if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        uses: actions/upload-artifact@v7
         with:
           name: retrospective-learnings-${{ github.run_id }}-${{ github.run_attempt }}
           # The path is under hidden .prflow/; the negation drops the store writers' .overrides* temp files.

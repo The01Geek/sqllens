@@ -3,23 +3,31 @@
 
 """CI dependency and checkout credentials must remain explicit."""
 
+import json
 import re
 from pathlib import Path
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-# These jobs push reviewed/implemented branches using the app checkout token.
-PUSH_JOBS = {
-    ("devflow.yml", "command"),
-    ("devflow-implement.yml", "claude"),
-    ("devflow-retrospective.yml", "retrospective"),
-}
+
+
+def _prflow_managed_paths():
+    """Paths PRFlow's installer owns; their pins and checkout settings come from upstream."""
+    manifest = json.loads((ROOT / ".prflow/install-manifest.json").read_text())
+    return [ROOT / artifact for artifact in manifest["artifacts"]]
+
+
+def _is_prflow_managed(path, managed):
+    return any(path == owned or owned in path.parents for owned in managed)
 
 
 def test_remote_actions_use_immutable_commit_references():
+    managed = _prflow_managed_paths()
     failures = []
     for path in (ROOT / ".github").rglob("*.yml"):
+        if _is_prflow_managed(path, managed):
+            continue
         data = yaml.safe_load(path.read_text())
         jobs = data.get("jobs", {})
         steps = [step for job in jobs.values() for step in job.get("steps", [])]
@@ -32,22 +40,18 @@ def test_remote_actions_use_immutable_commit_references():
     assert not failures, "Mutable or unsupported action refs: " + "; ".join(failures)
 
 
-def test_only_branch_writers_persist_checkout_credentials():
-    seen_push_jobs = set()
+def test_checkouts_do_not_persist_credentials():
+    # PRFlow-managed workflows own their branch-pushing checkouts upstream.
+    managed = _prflow_managed_paths()
     for path in (ROOT / ".github/workflows").glob("*.yml"):
+        if _is_prflow_managed(path, managed):
+            continue
         for job_id, job in yaml.safe_load(path.read_text())["jobs"].items():
             for step in job.get("steps", []):
                 if not step.get("uses", "").startswith("actions/checkout@"):
                     continue
-                key = path.name, job_id
                 options = step.get("with", {})
-                if key in PUSH_JOBS:
-                    seen_push_jobs.add(key)
-                    assert options.get("persist-credentials") is True, key
-                    assert "app-token.outputs.token" in options["token"], key
-                else:
-                    assert options.get("persist-credentials") is False, key
-    assert seen_push_jobs == PUSH_JOBS
+                assert options.get("persist-credentials") is False, (path.name, job_id)
 
 
 def test_ci_token_is_read_only_and_check_names_stay_stable():
