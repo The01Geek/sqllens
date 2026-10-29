@@ -191,7 +191,9 @@ function applyHostContext(ctx) {
   const vars = ctx.styles && ctx.styles.variables;
   if (vars) {
     for (const [k, v] of Object.entries(vars)) {
-      if (typeof v === "string") document.documentElement.style.setProperty(k, v);
+      if (k.startsWith("--color-") && typeof v === "string") {
+        document.documentElement.style.setProperty(k, v);
+      }
     }
   }
   if (theme !== widgetState.theme) {
@@ -275,8 +277,9 @@ function renderTableBlock(block) {
   // ── CSV export (per-block) ────────────────────────────────────────────────
 
   function csvEscape(v) {
-    const s = String(v);
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    let s = String(v);
+    if (s.trim() && /^[=+@\-\t\r\n]/.test(s)) s = "'" + s;
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
 
   function buildCsvText() {

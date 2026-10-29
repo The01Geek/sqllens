@@ -32,7 +32,7 @@ VALID_FORMATS = ("json", "csv")
 # prefix such cells with a single apostrophe at both the parse and serialize
 # boundaries so a planted bundle cannot survive a round-trip and detonate in a
 # spreadsheet later.
-_CSV_FORMULA_TRIGGERS = frozenset({"=", "+", "-", "@", "\t", "\r"})
+_CSV_FORMULA_TRIGGERS = frozenset({"=", "+", "-", "@", "\t", "\r", "\n"})
 
 
 class BundleFormatError(ValueError):

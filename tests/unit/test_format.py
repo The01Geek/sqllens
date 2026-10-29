@@ -726,11 +726,10 @@ def test_cell_value_coercion_none_and_decimal_and_datetime() -> None:
     assert body_line == "| None | 1.50 | 2026-01-02 03:04:05 |"
 
 
-def test_markdown_pipe_in_cell_value_is_escaped_or_documented() -> None:
+def test_markdown_pipe_in_cell_value_is_escaped() -> None:
     rendered = _render_dataframe(_df(["text"], [{"text": "a|b"}]))
     body_line = rendered.splitlines()[-1]
-    assert body_line == "| a|b |"
-    assert "a\\|b" not in rendered
+    assert body_line == "| a\\|b |"
 
 
 def test_table_small_dataframe_exact_block_payload() -> None:
@@ -1774,7 +1773,7 @@ def test_table_markdown_header_falls_back_to_raw_when_labels_absent() -> None:
         "row_count": 1,
         "truncated": 0,
     }
-    assert _table_block_to_markdown(block).splitlines()[0] == "| customer_id | name |"
+    assert _table_block_to_markdown(block).splitlines()[0] == r"| customer\_id | name |"
 
 
 def test_small_result_one_column_uses_humanized_label() -> None:

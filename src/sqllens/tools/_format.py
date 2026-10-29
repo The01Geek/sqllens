@@ -1328,11 +1328,11 @@ def _table_block_to_markdown(block: dict) -> str:
         return ""
 
     labels = _display_labels(block, columns)
-    header = "| " + " | ".join(str(c) for c in labels) + " |"
+    header = "| " + " | ".join(_escape_small_result_text(str(c)) for c in labels) + " |"
     separator = "|" + "|".join(["---"] * len(columns)) + "|"
     body_rows = []
     for row in rows[:_MAX_ROWS_RENDERED]:
-        cells = [str(c) for c in row]
+        cells = [_escape_small_result_text(str(c)) for c in row]
         body_rows.append("| " + " | ".join(cells) + " |")
     note = ""
     # row_count is the kept prefix after the per-block size cap; truncated is

@@ -69,7 +69,9 @@ Realistic curated bundles fit comfortably under both limits. If you have more cu
 
 ### CSV files and spreadsheet formulas
 
-When SQL Lens writes a CSV bundle (or reads one back in), any cell whose first character is one of `=`, `+`, `-`, `@`, tab, or carriage return is prefixed with a single apostrophe (`'`). Excel and LibreOffice would otherwise interpret these cells as formulas when an operator opens the file in a spreadsheet — a CSV-injection vector (CWE-1236) by which a planted bundle could execute attacker-supplied formulas on the operator's machine. The apostrophe prefix is the documented spreadsheet convention for "treat this cell as text," so files open as expected.
+When SQL Lens writes a CSV bundle (or reads one back in), any nonblank cell whose first character is one of `=`, `+`, `-`, `@`, tab, carriage return, or newline is prefixed with a single apostrophe (`'`). Excel and LibreOffice would otherwise interpret these cells as formulas when an operator opens the file in a spreadsheet — a CSV-injection vector (CWE-1236) by which a planted bundle could execute attacker-supplied formulas on the operator's machine. The apostrophe prefix is the documented spreadsheet convention for "treat this cell as text," so files open as expected.
+
+The query-results widget applies the same prefix rule to CSV headers and cells. CSV delimiter quoting also preserves embedded commas, quotes, carriage returns and newlines.
 
 The defang is idempotent — re-importing and re-exporting the same file does not accumulate apostrophes — and is applied only to CSV bundles. JSON bundles are unchanged, because the tools that consume JSON do not interpret leading `=`/`+`/`-`/`@` as formulas. One side effect: a legitimate value whose first character is one of the trigger characters (for example, a SQL fragment starting with `-` from a comment, or a `@`-prefixed identifier) is stored with a leading apostrophe after a CSV round-trip. If you need to preserve such values exactly, use the JSON bundle format.
 

@@ -22,14 +22,13 @@ accepts, so an export can be fed straight back in without reshaping.
 
 from __future__ import annotations
 
-import csv
-import io
 import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from sqllens.memory.importer import import_bundle
+from sqllens.memory.io import serialize_csv
 from sqllens.memory.schema import (
     MemoryBundle,
     SchemaDoc,
@@ -308,12 +307,7 @@ def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str
                 f"CSV carries SQL pairs only — {len(docs)} schema doc(s) are NOT "
                 "in this export. Use format='json' for a lossless backup."
             )
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow(["question", "sql"])
-        for pair in pairs:
-            writer.writerow([pair.question, pair.sql])
-        data = buf.getvalue()
+        data = serialize_csv(bundle)
     else:
         data = json.dumps(
             {

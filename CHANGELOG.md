@@ -72,6 +72,10 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
   query selection, with short errors that do not echo rejected names. Invalid
   legacy names require manual repair; profile writes stay disabled until
   repair and restart so excluded entries are not lost. (#211, #214)
+- Escape table headers and cells in Markdown, keep SQL inside a sufficiently
+  long code fence, share CSV formula protection across memory exports, protect
+  widget CSV headers/cells, and restrict host theme updates to string-valued
+  `--color-*` properties. JSON data is unchanged. (#211, #218, #221, #226, #229, #261)
 - Agent looped on tool calls cut off by the output-token cap until
   `max_tool_iterations` (#247). A `tool_use` block in a `max_tokens` response is
   now marked `truncated` and refused by `ToolRegistry.execute` with an
