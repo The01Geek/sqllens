@@ -1,3 +1,5 @@
+> **Frozen archive:** This page preserves the release-note text recorded before the fragment migration. Its dated and Unreleased entries are historical records, not a current release-status promise. Read the [canonical changelog](../../CHANGELOG.md) for released versions and [draft fragments](../../changelog.d/) for upcoming changes. Add new notes only as fragments.
+
 # Release Notes
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
