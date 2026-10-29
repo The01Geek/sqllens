@@ -100,6 +100,20 @@ async def _assert_rls_view_blocked(url: str, dialect: str, *, materialized: bool
         assert result["id"].tolist() == [1]
         with pytest.raises(RlsError, match="view"):
             await guard.run_sql(RunSqlToolArgs(sql=f"SELECT id FROM {view}"), _ctx())
+        if dialect == "postgres":
+            # A quoted uppercase CTE must not shadow an unquoted database name.
+            result = await guard.run_sql(
+                RunSqlToolArgs(sql=(
+                    f'WITH "{table.upper()}" AS (SELECT 1) SELECT id FROM {table.upper()}'
+                )), _ctx()
+            )
+            assert result["id"].tolist() == [1]
+            with pytest.raises(RlsError, match="view"):
+                await guard.run_sql(
+                    RunSqlToolArgs(sql=(
+                        f'WITH "{view.upper()}" AS (SELECT 1) SELECT id FROM {view.upper()}'
+                    )), _ctx()
+                )
     finally:
         await execute(f"DROP {view_kind} IF EXISTS {view}")
         await execute(f"DROP TABLE IF EXISTS {table}")

@@ -42,6 +42,8 @@ Scope analysis distinguishes real database relations from CTE/derived aliases. C
 
 Custom `SqlRunner` implementations used beneath `RlsGuardRunner` must implement the `require_base_tables` keyword and enforce the same check on their execution connection. A runner lacking the keyword fails closed. Calling the standalone `apply_rls` function only rewrites SQL; it cannot verify stored relations without a database connection.
 
+SQLite uses `pragma_table_list` (SQLite 3.37+), which distinguishes ordinary tables from virtual tables and their shadow tables. Virtual and shadow tables are refused while RLS is active; an unavailable catalog function also blocks the query. PostgreSQL unquoted ASCII identifiers are lowercased before both scope analysis and relation lookup so quoted CTE names do not hide distinct database relations. Unquoted non-ASCII PostgreSQL identifiers are rejected because their folding depends on server encoding and locale; quote these identifiers explicitly.
+
 ## No string interpolation — CWE-89 / CWE-284
 
 Identifiers come **only** from config, validated against a strict allowlist at load time, and are never request-influenced. Values are always built as `sqlglot` literal nodes (`exp.convert(value)`), never spliced into SQL text. This means a request-supplied value cannot alter the statement's shape — the worst it can do is fail the value-sanitization check above and block the query.

@@ -11,11 +11,12 @@ import sqlglot
 from sqlglot import expressions as exp
 from sqlglot.optimizer.scope import traverse_scope
 
-from sqllens.safety.rls import RlsError
+from sqllens.safety.rls import RlsError, normalize_rls_identifiers
 
 
 def _relations(sql: str, dialect: str) -> list[exp.Table]:
     tree = sqlglot.parse_one(sql, dialect=dialect)
+    normalize_rls_identifiers(tree, dialect)
     sources: dict[str, exp.Table] = {}
     accounted: set[int] = set()
     for scope in traverse_scope(tree):
@@ -107,12 +108,13 @@ def _sqlite_kind(cursor: Any, relation: exp.Table) -> str | None:
         cursor.execute("PRAGMA database_list")
         schemas = ["temp", "main"] + [row[1] for row in cursor.fetchall() if row[1] != "main"]
     for schema in schemas:
-        if relation.name.lower() in ("sqlite_master", "sqlite_schema"):
+        if relation.name.lower() in (
+            "sqlite_master", "sqlite_schema", "sqlite_temp_master", "sqlite_temp_schema"
+        ):
             return "table"
-        quoted = exp.to_identifier(schema, quoted=True).sql(dialect="sqlite")
         cursor.execute(
-            f"SELECT type FROM {quoted}.sqlite_master WHERE name = ? COLLATE NOCASE",
-            (relation.name,),
+            "SELECT type FROM pragma_table_list(?) WHERE schema = ? COLLATE NOCASE",
+            (relation.name, schema),
         )
         row = cursor.fetchone()
         if row:

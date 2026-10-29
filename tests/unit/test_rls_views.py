@@ -14,6 +14,7 @@ from sqllens.agent.integrations.sqlite.sql_runner import SqliteRunner
 from sqllens.config import RlsRule
 from sqllens.safety import ReadOnlyGuardRunner, RlsError, RlsGuardRunner, RowCapRunner
 from sqllens.safety.relations import verify_base_tables
+from sqllens.safety.rls import apply_rls
 
 
 @pytest.fixture
@@ -140,3 +141,65 @@ async def test_custom_runner_without_relation_check_fails_closed() -> None:
             RunSqlToolArgs(sql="SELECT * FROM orders"), ToolContext.model_construct()
         )
     assert not inner.called
+
+
+@pytest.mark.parametrize("sql", [
+    'WITH "ALL_ORDERS" AS (SELECT 1) SELECT * FROM ALL_ORDERS',
+    'WITH ALL_ORDERS AS (SELECT 1) SELECT * FROM "ALL_ORDERS"',
+])
+def test_postgres_cte_case_does_not_hide_a_database_view(sql) -> None:
+    cursor = Mock()
+    cursor.fetchone.return_value = ("v",)
+    connection = Mock()
+    connection.cursor.return_value = cursor
+    with pytest.raises(RlsError, match="view"):
+        verify_base_tables(connection, sql, dialect="postgres")
+    cursor.execute.assert_called_once()
+
+
+async def test_sqlite_virtual_tables_cannot_hide_protected_content(database) -> None:
+    with sqlite3.connect(database) as conn:
+        if not conn.execute("SELECT sqlite_compileoption_used('ENABLE_FTS5')").fetchone()[0]:
+            pytest.skip("SQLite build does not include FTS5")
+        conn.execute(
+            "CREATE VIRTUAL TABLE searchable_orders USING fts5(tenant_id, content='orders')"
+        )
+    with pytest.raises(RlsError, match="base table"):
+        await _guard(database).run_sql(
+            RunSqlToolArgs(sql="SELECT * FROM searchable_orders"), ToolContext.model_construct()
+        )
+
+
+def test_postgres_cte_case_cannot_skip_base_table_predicate() -> None:
+    sql = 'WITH "ORDERS" AS (SELECT 1) SELECT * FROM ORDERS'
+    rewritten = apply_rls(
+        sql, [RlsRule(table="orders", column="tenant_id", value="alpha")], dialect="postgres"
+    )
+    assert "orders.tenant_id = 'alpha'" in rewritten
+
+
+def test_postgres_non_ascii_unquoted_names_require_explicit_quoting() -> None:
+    with pytest.raises(RlsError, match="quote non-ASCII"):
+        apply_rls(
+            'WITH "Ä" AS (SELECT 1) SELECT * FROM Ä',
+            [RlsRule(table="orders", column="tenant_id", value="alpha")], dialect="postgres"
+        )
+
+
+def test_postgres_quoted_non_ascii_cte_remains_supported() -> None:
+    sql = 'WITH "Ä" AS (SELECT 1 AS id) SELECT * FROM "Ä"'
+    rewritten = apply_rls(
+        sql, [RlsRule(table="orders", column="tenant_id", value="alpha")], dialect="postgres"
+    )
+    connection = Mock()
+    verify_base_tables(connection, rewritten, dialect="postgres")
+    connection.cursor.assert_not_called()
+    assert 'FROM "Ä"' in rewritten
+
+
+def test_sqlite_missing_table_list_capability_blocks_execution() -> None:
+    connection = Mock()
+    cursor = connection.cursor.return_value
+    cursor.execute.side_effect = sqlite3.OperationalError("no such table: pragma_table_list")
+    with pytest.raises(RlsError, match="could not verify relation types"):
+        verify_base_tables(connection, "SELECT * FROM main.orders", dialect="sqlite")

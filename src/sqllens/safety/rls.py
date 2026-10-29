@@ -180,6 +180,21 @@ def _predicate(rule: RlsRule, qualifier: str, value: _Scalar | list[_Scalar]) ->
     return op_cls(this=col, expression=exp.convert(value))
 
 
+def normalize_rls_identifiers(tree: exp.Expression, dialect: str | None) -> None:
+    """Preserve PostgreSQL's quoted/unquoted distinction before scope analysis."""
+    if dialect != "postgres":
+        return
+    for identifier in tree.find_all(exp.Identifier):
+        if not identifier.args.get("quoted"):
+            # Non-ASCII folding depends on the server encoding/locale, which
+            # this parser-only stage cannot verify. Quoting is unambiguous.
+            if not identifier.name.isascii():
+                raise RlsError(
+                    "quote non-ASCII PostgreSQL identifiers when using row-level security"
+                )
+            identifier.set("this", identifier.name.lower())
+
+
 def apply_rls(
     sql: str,
     rules: list[RlsRule],
@@ -209,6 +224,7 @@ def apply_rls(
             f"(got {len(statements)})"
         )
     tree = statements[0]
+    normalize_rls_identifiers(tree, dialect)
 
     # Fail-secure on non-query shapes. Scope analysis can only reason about
     # SELECT/UNION-shaped reads; statements like Postgres ``TABLE orders``

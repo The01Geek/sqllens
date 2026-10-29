@@ -156,6 +156,8 @@ If any `[[rls]]` block is malformed, validation fails with a clear message namin
 ## Limitations
 
 - **Views are unavailable while RLS is active.** SQL Lens checks referenced relations on the connection that will execute the query and requires base tables. It does not expand stored view definitions, so this also blocks views over unprotected tables. Use base-table queries when RLS rules are configured. Views remain available when RLS is off.
+- **SQLite RLS requires SQLite 3.37 or newer.** Virtual tables and their shadow tables are blocked, and unavailable relation metadata blocks the query.
+- **Quote non-ASCII PostgreSQL identifiers when using RLS.** SQL Lens rejects their unquoted form because case folding depends on the server's encoding and locale.
 - **One process, one database, one configuration.** The rules in `sqllens.toml` apply to every request handled by that SQL Lens process. If you need per-database rules, run one SQL Lens process per database.
 - **No schema-qualified table names.** `table = "orders"` is supported; `table = "public.orders"` is not.
 - **Dynamic rules require HTTP.** The stdio transport has no per-request metadata channel.
