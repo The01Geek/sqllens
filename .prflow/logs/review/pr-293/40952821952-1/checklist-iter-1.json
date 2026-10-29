@@ -1,0 +1,600 @@
+[
+  {
+    "id": "VC-1",
+    "category": "absolute_claim",
+    "claim": "A blank value (empty or whitespace-only env var or TOML string) for memory.save_text_memories reads as off, and any other non-boolean value fails config validation.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A blank value (an\n  empty or whitespace-only env var or TOML string) reads as off; any other\n  non-boolean fails config validation.",
+    "source_file": "CHANGELOG.md",
+    "source_line": 61,
+    "source_line_end": 63,
+    "verify_against": "The MemoryConfig.save_text_memories field and its mode=\"before\" validator in src/sqllens/config.py",
+    "verify_hint": "Check `MemoryConfig` in `src/sqllens/config.py` for the `save_text_memories` field validator; falsifying inputs are `\"  \"`, `\"ture\"`, `0`, `\"off\"`, and a None env value",
+    "claim_signature": "absolute_claim:CHANGELOG.md:blank-value-reads-off:61",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "absolute_claim",
+    "claim": "The gate lives only in the factory, so curated imports via sqllens.memory.store, the import-memory/export-memory CLI commands, and the memory-administration tools are unaffected, and the context enhancer still injects stored notes matching a question.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The gate is in the factory, not in\n  `SaveTextMemoryTool.execute` or `ChromaAgentMemory.save_text_memory`, so\n  curated imports via `sqllens.memory.store`, the `import-memory` /\n  `export-memory` CLI commands, and the memory-administration tools are\n  unaffected, and the context enhancer still injects stored notes that\n  match a question.",
+    "source_file": "CHANGELOG.md",
+    "source_line": 63,
+    "source_line_end": 69,
+    "verify_against": "src/sqllens/agent/factory.py, src/sqllens/memory/store.py, SaveTextMemoryTool.execute, ChromaAgentMemory.save_text_memory, DefaultLlmContextEnhancer.enhance_system_prompt",
+    "verify_hint": "Check that no save_text_memories check exists in `SaveTextMemoryTool.execute` (`src/sqllens/agent/tools/agent_memory.py`), `ChromaAgentMemory.save_text_memory`, `src/sqllens/memory/store.py`, or the admin memory tools, and that `DefaultLlmContextEnhancer.enhance_system_prompt` does not consult the tool list",
+    "claim_signature": "absolute_claim:CHANGELOG.md:gate-only-in-factory:63",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "data_format_assumption",
+    "claim": "The MCPB manifest exposes the flag as a user config labelled \"Let the assistant save free-form notes\", defaulting to off.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "CHANGELOG.md",
+    "source_line": 68,
+    "source_line_end": 69,
+    "verify_against": "The user_config block in mcpb/manifest.json",
+    "verify_hint": "Check the `user_config.save_text_memories` entry in `mcpb/manifest.json` for its `title`/label text, `type`, `default` and `required`",
+    "claim_signature": "data_format_assumption:CHANGELOG.md:mcpb-user-config-label:68",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "absolute_claim",
+    "claim": "With save_queries off, no question-and-answer patterns are written while SQL Lens still reads patterns already in memory (the previous mention of still saving free-form notes is removed).",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "When off, no question-and-answer patterns are written, and SQL Lens still reads any patterns already in memory.",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 80,
+    "verify_against": "The save_queries gate in src/sqllens/agent/factory.py and the save paths in ChromaAgentMemory",
+    "verify_hint": "Check the `if cfg.memory.save_queries:` branch in `build_agent` (`src/sqllens/agent/factory.py`) and any other caller of `ChromaAgentMemory.save_tool_usage` that could write a pattern with the flag off",
+    "claim_signature": "absolute_claim:configuration.md:save-queries-off-no-writes:80",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "absolute_claim",
+    "claim": "For an MCPB install, the \"Let the assistant save free-form notes\" checkbox always wins over the value in the TOML file, and an empty or whitespace-only value for SQLLENS_MEMORY__SAVE_TEXT_MEMORIES counts as off.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The environment override is `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES`; an empty or whitespace-only value counts as off. For an MCPB install, use the \"Let the assistant save free-form notes\" checkbox in the extension's settings, which always wins over this file.",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 82,
+    "verify_against": "The env-vs-TOML precedence in src/sqllens/config.py settings sources and server.mcp_config.env in mcpb/manifest.json",
+    "verify_hint": "Check the settings-source ordering in `src/sqllens/config.py` (does env always win over TOML?) and whether `mcpb/manifest.json`'s `server.mcp_config.env` always sets `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES`, including when the checkbox is unticked",
+    "claim_signature": "absolute_claim:configuration.md:mcpb-checkbox-wins-over-toml:82",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "absolute_claim",
+    "claim": "Notes added with the command-line import or the memory-administration tools are stored whatever the save_text_memories setting is and are never affected by it.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "notes you add with the command-line import or the memory-administration tools are stored whatever that setting is, and are never affected by it.",
+    "source_file": "docs/external/managing-memory.md",
+    "source_line": 10,
+    "verify_against": "src/sqllens/memory/store.py import path and the memory-administration tool implementations",
+    "verify_hint": "Check `src/sqllens/memory/store.py` and the add/import memory tools under `src/sqllens/tools/` for any read of `cfg.memory.save_text_memories`",
+    "claim_signature": "absolute_claim:managing-memory.md:import-unaffected-by-flag:10",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "absolute_claim",
+    "claim": "SQL Lens records nothing about where a note came from, so a note the assistant saved cannot be told apart from one added by an import.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "SQL Lens records nothing about where a note came from, so a note the assistant saved cannot be told apart from one added by an import.",
+    "source_file": "docs/external/release-notes.md",
+    "source_line": 11,
+    "verify_against": "The metadata written by ChromaAgentMemory.save_text_memory and by the import path",
+    "verify_hint": "Compare the Chroma metadata dict built in `ChromaAgentMemory.save_text_memory` (`src/sqllens/agent/integrations/chromadb/agent_memory.py`) with the metadata the import path in `src/sqllens/memory/store.py` writes, looking for any source/origin or timestamp field",
+    "claim_signature": "absolute_claim:release-notes.md:no-note-origin-metadata:11",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "absolute_claim",
+    "claim": "An MCPB install's settings offer no way to turn on the memory-administration tools.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "An MCPB install's settings offer no way to turn those tools on.",
+    "source_file": "docs/external/release-notes.md",
+    "source_line": 11,
+    "verify_against": "The user_config and server.mcp_config.env blocks of mcpb/manifest.json",
+    "verify_hint": "Check `mcpb/manifest.json` for any `user_config` entry or env mapping touching `memory.allow_admin_tools` / `SQLLENS_MEMORY__ALLOW_ADMIN_TOOLS` or `auth.insecure`",
+    "claim_signature": "absolute_claim:release-notes.md:mcpb-no-admin-tools-toggle:11",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "dependency_interaction",
+    "claim": "In the factory's tool table, SaveTextMemoryTool is registered only when cfg.memory.save_text_memories.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "SaveTextMemoryTool                  (memory write — free-form text notes;\n                                                        registered only when\n                                                        cfg.memory.save_text_memories)",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 40,
+    "source_line_end": 42,
+    "verify_against": "build_agent in src/sqllens/agent/factory.py",
+    "verify_hint": "Check the `SaveTextMemoryTool` registration in `build_agent` (`src/sqllens/agent/factory.py`) and the attribute name it reads",
+    "claim_signature": "dependency_interaction:factory.md:savetextmemorytool-gated:40",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "absolute_claim",
+    "claim": "The context enhancer still injects stored notes matching a question because DefaultLlmContextEnhancer.enhance_system_prompt searches the collection and never consults the tool list.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "the context enhancer still injects the ones matching a question: `DefaultLlmContextEnhancer.enhance_system_prompt` searches the collection and never consults the tool list.",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 24,
+    "verify_against": "DefaultLlmContextEnhancer.enhance_system_prompt in the agent sources",
+    "verify_hint": "Check `DefaultLlmContextEnhancer.enhance_system_prompt` under `src/sqllens/agent/` for any tool-list or tool_names reference and for the text-memory search call",
+    "claim_signature": "absolute_claim:memory.md:enhancer-ignores-tool-list:24",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "dependency_interaction",
+    "claim": "The documented code excerpt matches build_agent: the search tool is registered unconditionally and SaveTextMemoryTool is registered under `if cfg.memory.save_text_memories:`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "if cfg.memory.save_text_memories:\n    tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 89,
+    "source_line_end": 90,
+    "verify_against": "The registration block in build_agent, src/sqllens/agent/factory.py",
+    "verify_hint": "Diff the quoted snippet against the corresponding lines of `build_agent` in `src/sqllens/agent/factory.py`, including the `access_groups=access` argument",
+    "claim_signature": "dependency_interaction:memory.md:quoted-wiring-snippet:89",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "absolute_claim",
+    "claim": "The sentence \"Do NOT forget to save successful executions.\" is emitted under `if has_search`, not `has_save`, and the search tool is registered unconditionally, so it prints even with both save flags off.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "the sentence `Do NOT forget to save successful executions.` is emitted under `if has_search`, not `has_save`, and the search tool is registered unconditionally — so it prints even with both save flags off.",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 96,
+    "verify_against": "src/sqllens/agent/core/system_prompt/default.py and the unconditional search-tool registration in factory.py",
+    "verify_hint": "Check which predicate guards the `Do NOT forget to save successful executions.` string in `src/sqllens/agent/core/system_prompt/default.py`, and that `SearchSavedCorrectToolUsesTool` registration in `factory.py` is ungated",
+    "claim_signature": "absolute_claim:memory.md:save-sentence-rides-has-search:96",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "absolute_claim",
+    "claim": "Curated notes still arrive through sqllens import-memory and the memory-administration tools, which call ChromaAgentMemory.save_text_memory directly rather than through SaveTextMemoryTool.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "curated notes still arrive through `sqllens import-memory` and the memory-administration tools, which call `ChromaAgentMemory.save_text_memory` directly rather than through this tool.",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 97,
+    "verify_against": "src/sqllens/memory/store.py and the memory-administration tool implementations",
+    "verify_hint": "Trace the `sqllens import-memory` CLI path and the add-memories admin tool to confirm they call `ChromaAgentMemory.save_text_memory` and not `SaveTextMemoryTool`",
+    "claim_signature": "absolute_claim:memory.md:curated-path-calls-memory-directly:97",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "data_format_assumption",
+    "claim": "The tunables table row documents save_text_memories with default false and env override SQLLENS_MEMORY__SAVE_TEXT_MEMORIES, a blank value reading as false and any other non-boolean failing config load, and the prompt's `2. TEXT MEMORY` section not printed when off.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `save_text_memories` | `false` | `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` | Registers `SaveTextMemoryTool` so the agent can persist free-form notes into text memory.",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 112,
+    "verify_against": "MemoryConfig in src/sqllens/config.py and the section heading text in src/sqllens/agent/core/system_prompt/default.py",
+    "verify_hint": "Check the field default and env alias for `save_text_memories` in `src/sqllens/config.py`, and that the prompt section is literally numbered `2. TEXT MEMORY` in `src/sqllens/agent/core/system_prompt/default.py`",
+    "claim_signature": "data_format_assumption:memory.md:save-text-memories-tunable-row:112",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "absolute_claim",
+    "claim": "Of the three memory tool classes, a default config registers the search tool alone.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "each save tool behind its own flag (see [Wiring](#wiring)); of those three, a default config registers the search tool alone.",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 140,
+    "verify_against": "Defaults of MemoryConfig.save_queries / save_text_memories in src/sqllens/config.py and the registration branches in factory.py",
+    "verify_hint": "Confirm both `save_queries` and `save_text_memories` default to `false` in `MemoryConfig` (`src/sqllens/config.py`) and that no other branch in `build_agent` registers either save tool",
+    "claim_signature": "absolute_claim:memory.md:default-registers-search-only:140",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "dependency_interaction",
+    "claim": "`field_validator(\"save_text_memories\", mode=\"before\")` runs before pydantic's bool coercion on values arriving from both the TOML settings source and the `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` environment source, so a blank string from either source becomes False while a non-blank non-boolean string such as `ture` still raises a validation error.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 221,
+    "source_line_end": 230,
+    "verify_against": "pydantic v2 `field_validator` mode=\"before\" ordering and pydantic-settings env/TOML source precedence for nested models",
+    "verify_hint": "Check `MemoryConfig._blank_save_text_memories_is_off` in `src/sqllens/config.py` against `Config.settings_customise_sources`/`Config.load` in the same file and pydantic-settings' env-var parsing for `SQLLENS_MEMORY__*`",
+    "claim_signature": "dependency_interaction:config.py:blank-before-validator-coercion:221",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "api_contract",
+    "claim": "A blank `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` environment value overrides a `save_text_memories = true` TOML key rather than falling through to the TOML value, i.e. the env source supplies the blank string into `MemoryConfig` for the merged config.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_config_schema.py",
+    "source_line": 254,
+    "verify_against": "pydantic-settings source precedence as wired in `Config`",
+    "verify_hint": "Check `Config.settings_customise_sources` and `Config.load` in `src/sqllens/config.py` for how the env source and the TOML source are merged for nested `[memory]` keys",
+    "claim_signature": "api_contract:test_config_schema.py:blank-env-beats-toml:254",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "dependency_interaction",
+    "claim": "`MemoryConfig` declares no `model_config`, so unknown `[memory]` keys such as `save_text_memory` are ignored at load time and `cfg.memory` exposes no such attribute.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_config_schema.py",
+    "source_line": 279,
+    "verify_against": "`MemoryConfig` definition and any inherited/global pydantic `extra` setting",
+    "verify_hint": "Check the `MemoryConfig` class body in `src/sqllens/config.py` for a `model_config` / `ConfigDict(extra=...)`, and whether the enclosing `Config` forbids extras in nested tables",
+    "claim_signature": "dependency_interaction:config.py:memory-extra-keys-ignored",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "dependency_interaction",
+    "claim": "The default system prompt derives its `2. TEXT MEMORY` section solely from the presence of a tool named `save_text_memory` in the tool list (`has_text_memory`), so skipping `tools.register_local_tool(SaveTextMemoryTool(), ...)` removes that section with no prompt-template change.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 142,
+    "source_line_end": 143,
+    "verify_against": "the default system prompt builder's `has_text_memory` derivation",
+    "verify_hint": "Check `DefaultSystemPromptBuilder.build_system_prompt` and the `has_text_memory` computation in `src/sqllens/agent/core/system_prompt/default.py`",
+    "claim_signature": "dependency_interaction:factory.py:text-memory-prompt-gate:142",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "absolute_claim",
+    "claim": "The comment asserts that moving the gate into `SaveTextMemoryTool.execute` or `ChromaAgentMemory.save_text_memory` would drop curated notes, because curated imports in `sqllens.memory.store` call that same storage method.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Do not move this gate into SaveTextMemoryTool.execute or\n    # ChromaAgentMemory.save_text_memory: curated imports (sqllens.memory.store)\n    # call the same storage method, so a gate there would drop curated notes.",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 139,
+    "source_line_end": 141,
+    "verify_against": "the import path in `src/sqllens/memory/store.py`",
+    "verify_hint": "Check which storage method the import path in `src/sqllens/memory/store.py` calls (e.g. `save_text_memory` on `ChromaAgentMemory` in `src/sqllens/agent/integrations/chromadb/`) and whether it goes through `SaveTextMemoryTool`",
+    "claim_signature": "absolute_claim:factory.py:curated-imports-share-storage:139",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "absolute_claim",
+    "claim": "The comment asserts the \"Do NOT forget to save successful executions.\" sentence rides on `has_search` and still prints whenever the search tool is registered, while the save bullet and the example workflow's save step are gated on `has_save`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# prompt gates its save bullet and the example workflow's save step on\n    # has_save, so dropping the registration drops those. The \"Do NOT forget to\n    # save successful executions.\" sentence rides on has_search instead, and the\n    # search tool is registered unconditionally, so that sentence still prints.",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 122,
+    "source_line_end": 125,
+    "verify_against": "the default system prompt template's `has_save` / `has_search` conditionals",
+    "verify_hint": "Check the prompt fragments guarded by `has_save` and `has_search` in `DefaultSystemPromptBuilder` (`src/sqllens/agent/core/system_prompt/default.py`)",
+    "claim_signature": "absolute_claim:factory.py:save-sentence-rides-has-search:122",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "absolute_claim",
+    "claim": "The field description asserts that with `save_text_memories` off, notes already stored — including curated imports — are untouched and the context enhancer still injects the ones matching a question.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"drops its TEXT MEMORY section automatically. Notes already stored \"\n            \"— including curated imports — are untouched, and the context \"\n            \"enhancer still injects the ones matching a question. A blank \"\n            \"value (an empty or whitespace-only environment variable or TOML \"\n            \"string) reads as OFF.\"",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 190,
+    "source_line_end": 194,
+    "verify_against": "the context enhancer's text-memory retrieval path",
+    "verify_hint": "Check `DefaultLlmContextEnhancer` (`src/sqllens/agent/core/`) and `ChromaAgentMemory`'s text-memory search to confirm retrieval is independent of `cfg.memory.save_text_memories`",
+    "claim_signature": "absolute_claim:config.py:notes-untouched-enhancer-injects:190",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "data_format_assumption",
+    "claim": "The MCPB manifest's `user_config.save_text_memories` entry uses the keys `type`/`title`/`description`/`default`/`required` as accepted by the declared manifest schema v0.4, and `${user_config.save_text_memories}` is a valid substitution target whose expanded boolean value is a string the config loader can parse into `bool`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "mcpb/manifest.json",
+    "source_line": 58,
+    "source_line_end": 64,
+    "verify_against": "the MCPB manifest v0.4 JSON schema referenced by `$schema` and boolean `${user_config.*}` substitution behavior",
+    "verify_hint": "Check the `$schema` URL at the top of `mcpb/manifest.json` (mcpb-manifest-v0.4) for the `user_config` boolean field keys, and compare with the existing `read_only` entry and its `SQLLENS_DATABASE__READ_ONLY` env mapping",
+    "claim_signature": "data_format_assumption:manifest.json:save-text-memories-user-config:58",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "test_mock_alignment",
+    "claim": "`ROOT = Path(__file__).resolve().parents[2]` resolves to the repository root so that `ROOT / \"mcpb\" / \"manifest.json\"` is the tracked manifest, under the layout from which pytest collects `tests/unit/test_mcpb_manifest.py`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mcpb_manifest.py",
+    "source_line": 18,
+    "source_line_end": 19,
+    "verify_against": "repository directory layout and pytest rootdir/testpaths configuration",
+    "verify_hint": "Check that `tests/unit/` is two levels below the repo root and the `[tool.pytest.ini_options]` section of `pyproject.toml` for `testpaths`/`rootdir`",
+    "claim_signature": "test_mock_alignment:test_mcpb_manifest.py:root-path-parents:18",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "test_mock_alignment",
+    "claim": "`_prompt_from_agent_tools` uses the real seams: `agent.get_available_tools(user)` returns the registry's tools for a `User` whose `group_memberships` is `[\"default\"]` (matching `DEFAULT_USER_GROUP` used at registration), and `DefaultSystemPromptBuilder().build_system_prompt(user, tools)` is the same builder `build_agent` leaves in place.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 238,
+    "source_line_end": 250,
+    "verify_against": "`Agent.get_available_tools`, `DEFAULT_USER_GROUP`, and the prompt builder `build_agent` configures",
+    "verify_hint": "Check `Agent.get_available_tools` in `src/sqllens/agent/core/`, the value of `DEFAULT_USER_GROUP`, and whether `build_agent` in `src/sqllens/agent/factory.py` leaves the system prompt builder unset",
+    "claim_signature": "test_mock_alignment:test_factory_wiring.py:prompt-from-agent-tools:238",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "test_mock_alignment",
+    "claim": "The async tests added to `test_factory_wiring.py` are collected and awaited by the project's pytest configuration without a per-test async marker.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 253,
+    "verify_against": "pytest async plugin configuration",
+    "verify_hint": "Check `[tool.pytest.ini_options]` in `pyproject.toml` for `asyncio_mode` / `anyio_mode` and the dev dependency providing it",
+    "claim_signature": "test_mock_alignment:test_factory_wiring.py:async-auto-mode:253",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "api_contract",
+    "claim": "`tests/unit/test_mcpb_manifest.py` carries the required SPDX header pair for new first-party `.py` files.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mcpb_manifest.py",
+    "source_line": 1,
+    "source_line_end": 2,
+    "verify_against": "the SPDX header convention in CLAUDE.md and any lint/CI rule enforcing it",
+    "verify_hint": "Check the \"New first-party `.py` files get SPDX headers\" rule in `CLAUDE.md` and any header check in `pyproject.toml`'s ruff config",
+    "claim_signature": "api_contract:repo:spdx-header",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "absolute_claim",
+    "claim": "The new test module's docstring asserts that no pull-request CI job builds the bundle because `.github/workflows/mcpb.yml` runs on release tags and manual dispatches only.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "No pull-request CI job builds the bundle — ``.github/workflows/mcpb.yml``\nruns on release tags and manual dispatches only — so a broken or missing\n``user_config`` field would first surface in a published release asset.",
+    "source_file": "tests/unit/test_mcpb_manifest.py",
+    "source_line": 6,
+    "source_line_end": 8,
+    "verify_against": "the `on:` triggers of `.github/workflows/mcpb.yml` and any other workflow that builds the bundle",
+    "verify_hint": "Check the `on:` block of `.github/workflows/mcpb.yml` and grep the other files in `.github/workflows/` for mcpb/bundle build steps",
+    "claim_signature": "absolute_claim:test_mcpb_manifest.py:no-pr-job-builds-bundle:6",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "absolute_claim",
+    "claim": "The internal config-loading doc asserts that with `save_text_memories` off `SaveTextMemoryTool` is not registered, the agent writes no free-form notes, the prompt's `2. TEXT MEMORY` section is not printed, a blank value reads as false, any other non-boolean fails the load, and notes already stored are untouched.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`save_text_memories` defaults to `false` (env var `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES`) — when off, `SaveTextMemoryTool` is not registered, so the agent writes no free-form notes and the prompt's `2. TEXT MEMORY` section is not printed; a blank value reads as `false`, any other non-boolean fails the load, and notes already stored are untouched.",
+    "source_file": "docs/internal/setup/config-loading.md",
+    "source_line": 30,
+    "verify_against": "`MemoryConfig.save_text_memories` + its before-validator in `src/sqllens/config.py` and the registration gate in `build_agent`",
+    "verify_hint": "Check `MemoryConfig._blank_save_text_memories_is_off` in `src/sqllens/config.py`, the `if cfg.memory.save_text_memories:` gate in `src/sqllens/agent/factory.py`, and the `2. TEXT MEMORY` heading text in `src/sqllens/agent/core/system_prompt/default.py`",
+    "claim_signature": "absolute_claim:config-loading.md:save-text-memories-off-behavior:30",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "absolute_claim",
+    "claim": "The architecture overview asserts the three `agent_memory` tools' registration conditions: `SaveQuestionToolArgsTool` only when `cfg.memory.save_queries` is true, `SearchSavedCorrectToolUsesTool` always, and `SaveTextMemoryTool` only when `cfg.memory.save_text_memories` is true.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "and the three `agent_memory` tools (`SaveQuestionToolArgsTool`, registered only when `cfg.memory.save_queries` is true; `SearchSavedCorrectToolUsesTool`, always registered; and `SaveTextMemoryTool`, registered only when `cfg.memory.save_text_memories` is true).",
+    "source_file": "docs/internal/architecture/overview.md",
+    "source_line": 93,
+    "verify_against": "the registration block in `build_agent`",
+    "verify_hint": "Check the `register_local_tool` calls and their guards in `build_agent` in `src/sqllens/agent/factory.py`",
+    "claim_signature": "absolute_claim:overview.md:memory-tool-registration-conditions:93",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "absolute_claim",
+    "claim": "The `save_queries` field description asserts that when it is disabled the system prompt drops its save bullet and the example workflow's save step while the 'Do NOT forget to save successful executions.' sentence rides on the always-registered search tool and still prints.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"prompt drops its save bullet and the example workflow's save \"\n            \"step; the 'Do NOT forget to save successful executions.' sentence \"\n            \"rides on the always-registered search tool and still prints. \"",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 175,
+    "source_line_end": 177,
+    "verify_against": "the `has_save` / `has_search` conditionals in the default system prompt",
+    "verify_hint": "Check which prompt fragments are guarded by `has_save` versus `has_search` in `src/sqllens/agent/core/system_prompt/default.py`",
+    "claim_signature": "absolute_claim:config.py:save-queries-prompt-fragments:175",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With `save_text_memories` not set, as in a config file holding only settings that exist before this change, the config loads without error, `build_agent` registers no `save_text_memory` tool, and the system prompt built from that agent's tool list contains no \"TEXT MEMORY\" section. The same holds with `save_text_memories = false`, and with an empty or whitespace-only value, whether it comes from the environment variable `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` or from `save_text_memories = \"\"` in the TOML file. Any other value that is not a boolean, such as `ture`, still fails config validation.",
+    "claim_signature": "issue-acceptance-1",
+    "criteria_file": ".prflow/tmp/review/pr-293/40952821952-1/criteria.json",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 182,
+    "verify_hint": "Check `MemoryConfig.save_text_memories` and `_blank_save_text_memories_is_off` in `src/sqllens/config.py`, the gate in `build_agent` (`src/sqllens/agent/factory.py`), and the arms in `tests/unit/test_config_schema.py` / `tests/unit/test_factory_wiring.py`",
+    "id": "VC-32",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`mcpb/manifest.json` declares a `user_config` field `save_text_memories` of type `boolean` with `\"default\": false` and `\"required\": false`, and its `server.mcp_config.env` sets `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` to `${user_config.save_text_memories}`. Because that variable is always set for a bundle install, the checkbox value wins over any `save_text_memories` in a TOML file there. `mcpb/README.md`'s settings table has a row for the checkbox stating that it defaults to off.",
+    "claim_signature": "issue-acceptance-2",
+    "criteria_file": ".prflow/tmp/review/pr-293/40952821952-1/criteria.json",
+    "source_file": "mcpb/manifest.json",
+    "source_line": 30,
+    "verify_hint": "Check the `save_text_memories` block and the `env` entry in `mcpb/manifest.json`, and the settings table row at `mcpb/README.md` line 30",
+    "id": "VC-33",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With `save_text_memories = true` in TOML, and separately with the environment variable `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES=true` and no TOML key, `build_agent` registers the `save_text_memory` tool as a `SaveTextMemoryTool`, and the system prompt built from that agent's tool list contains the \"TEXT MEMORY\" section.",
+    "claim_signature": "issue-acceptance-3",
+    "criteria_file": ".prflow/tmp/review/pr-293/40952821952-1/criteria.json",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 142,
+    "verify_hint": "Check `test_save_text_memory_tool_registered_when_enabled` in `tests/unit/test_factory_wiring.py` and whether any arm exercises the env-var-only enabled path",
+    "id": "VC-34",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The first `## Unreleased` section of `docs/external/release-notes.md`, the one directly below the October 28, 2026 entry at the top of the page, has an entry that states the agent no longer saves free-form notes unless `save_text_memories = true`, marks this as a behavior change for existing deployments, and tells operators who configure SQL Lens with a TOML file or environment variables to set `save_text_memories = true` to keep the old behavior, and tells MCPB users to turn on the new checkbox in the extension's settings. It also says that free-form notes saved earlier stay in memory and are still used, that notes the agent saved cannot be told apart from notes added by an import, that operators who configure SQL Lens with a TOML file or environment variables can review the free-form notes and delete the wrong ones with the memory administration tools, linking the \"Memory-Administration Tools for the Assistant\" section of `docs/external/managing-memory.md` for how to enable them and what deleting requires, and that an MCPB install's settings offer no way to turn on those tools.",
+    "claim_signature": "issue-acceptance-4",
+    "criteria_file": ".prflow/tmp/review/pr-293/40952821952-1/criteria.json",
+    "source_file": "docs/external/release-notes.md",
+    "source_line": 11,
+    "verify_hint": "Read the entry at `docs/external/release-notes.md` line 11 against criterion 4 clause by clause, and confirm the `#memory-administration-tools-for-the-assistant` anchor resolves to a heading in `docs/external/managing-memory.md`",
+    "id": "VC-35",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The change leaves these as they are: the handling of unknown keys under `[memory]`, so a misspelled key such as `save_text_memory = true` is ignored and the tool stays unregistered; the system prompt sentence \"Do NOT forget to save successful executions.\", which still prints whenever the memory search tool is registered, including when no save tool is registered; the notes already in memory, none of which is deleted or changed, and the context enhancer still adds the matching ones to the system prompt; the metadata stored with a note, which still records nothing about whether the agent or an import wrote it; the `sqllens init` and Claude Desktop installer config templates, which do not list `save_text_memories`; and `mcpb/manifest.json`'s other settings, which still include nothing for `memory.allow_admin_tools` or `auth.insecure`.",
+    "claim_signature": "issue-acceptance-5",
+    "criteria_file": ".prflow/tmp/review/pr-293/40952821952-1/criteria.json",
+    "source_file": "tests/unit/test_mcpb_manifest.py",
+    "source_line": 50,
+    "verify_hint": "Check `test_memory_admin_and_insecure_auth_are_not_exposed` in `tests/unit/test_mcpb_manifest.py`, `test_misspelled_memory_key_is_still_ignored` and `test_save_instruction_survives_with_no_save_tool`, plus the `sqllens init` template in `src/sqllens/cli.py` and the Claude Desktop installer template for absence of `save_text_memories`",
+    "id": "VC-36",
+    "reused_from_iter_prev": false
+  }
+]
