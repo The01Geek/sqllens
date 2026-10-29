@@ -15,22 +15,28 @@ Single-tenant note: SQL Lens serves one database per running instance, so the
 storage. The tools accept it to keep the wire contract stable with a
 multi-tenant client (Option A in issue #181).
 
-Round-trip contract: :func:`export_memories` (JSON) emits exactly the
+:func:`export_memories` (JSON) emits the
 ``{"sql_pairs": [...], "schema_docs": [...]}`` shape :func:`add_memories`
-accepts, so an export can be fed straight back in without reshaping.
+accepts. Split larger exports into batches within the per-block item cap.
 """
 
 from __future__ import annotations
 
 import csv
+import heapq
 import io
 import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
+from pydantic import ValidationError
+
+from sqllens._errors import validation_error_lines
 from sqllens.memory.importer import import_bundle
 from sqllens.memory.schema import (
+    MAX_BUNDLE_ITEMS,
+    QUESTION_MAX,
     MemoryBundle,
     SchemaDoc,
     SqlPair,
@@ -50,6 +56,11 @@ _EMBEDDING_PREVIEW_LEN = 8
 _RECENT_HITS_DAYS = 30
 # How many top-hit memories get_memory_stats returns.
 _TOP_HIT_LIMIT = 10
+MAX_LIST_LIMIT = 1000
+
+
+class MemoryInputError(ValueError):
+    """A bounded, client-safe memory input error."""
 
 
 class MemoryNotFoundError(LookupError):
@@ -146,13 +157,29 @@ def list_memories(
 
     ``total`` is the count of all rows matching ``memory_type`` (not just the
     returned slice) so the panel can show how many exist beyond ``limit``.
+    Concurrent SQL Lens writes cause MemoryChangedError; no partial result is
+    returned. The store iterator must be exhausted before publishing this result.
     """
-    records = store.get_all(include_embeddings=include_embedding_preview)
-    if memory_type is not None:
-        records = [r for r in records if _classify(r.metadata) == memory_type]
-    records.sort(key=_sort_key, reverse=True)
-    total = len(records)
-    sliced = records[: max(0, limit)] if limit is not None else records
+    if not isinstance(limit, int) or not 0 <= limit <= MAX_LIST_LIMIT:
+        raise MemoryInputError(f"limit must be between 0 and {MAX_LIST_LIMIT}")
+    total = 0
+
+    def matching_records():
+        nonlocal total
+        for record in store.iter_records(include_embeddings=include_embedding_preview):
+            if memory_type is None or _classify(record.metadata) == memory_type:
+                total += 1
+                yield record
+
+    records = matching_records()
+    if limit:
+        sliced = heapq.nlargest(limit, records, key=_sort_key)
+    else:
+        # nlargest(0, ...) does not consume its input, but total still counts
+        # the complete filtered scan when no rows are requested.
+        for _ in records:
+            pass
+        sliced = []
     memories = [
         _record_to_wire(
             r,
@@ -213,7 +240,18 @@ async def add_memories(
     caller is responsible for treating a non-empty ``errors`` list as a tool
     failure (partial failure is failure — see the server wiring).
     """
+    for name, items in (("sql_pairs", sql_pairs), ("schema_docs", schema_docs)):
+        if items is not None and len(items) > MAX_BUNDLE_ITEMS:
+            raise MemoryInputError(f"{name} exceeds the {MAX_BUNDLE_ITEMS}-item cap")
     errors: list[dict[str, Any]] = []
+
+    def validation_message(exc: Exception) -> str:
+        if isinstance(exc, ValidationError):
+            return "; ".join(validation_error_lines(exc, with_type=False))
+        if isinstance(exc, TypeError):
+            return "Memory item must be an object with the required fields."
+        logger.exception("memory item validation failed")
+        return "Could not validate memory item; check the server logs."
 
     valid_pairs: list[SqlPair] = []
     pair_orig_index: list[int] = []
@@ -226,8 +264,10 @@ async def add_memories(
             # the question lookup so a malformed item is a clean per-row error
             # rather than an AttributeError that fails the whole batch.
             question = raw.get("question") if isinstance(raw, dict) else None
+            if not isinstance(question, str) or len(question) > QUESTION_MAX:
+                question = None
             errors.append(
-                {"index": index, "question": question, "error": str(exc)}
+                {"index": index, "question": question, "error": validation_message(exc)}
             )
 
     valid_docs: list[SchemaDoc] = []
@@ -238,7 +278,7 @@ async def add_memories(
             doc_orig_index.append(index)
         except Exception as exc:
             errors.append(
-                {"index": index, "question": None, "error": str(exc)}
+                {"index": index, "question": None, "error": validation_message(exc)}
             )
 
     bundle = MemoryBundle(
@@ -270,10 +310,11 @@ async def add_memories(
 
 
 def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str, Any]:
-    """Serialize the store to a blob that round-trips back into ``add_memories``.
+    """Serialize the store to a JSON or CSV blob.
 
     JSON emits ``{"sql_pairs": [{question, sql}], "schema_docs": [{content}]}``
-    — the exact argument shape ``add_memories`` accepts. CSV carries SQL pairs
+    — the argument shape ``add_memories`` accepts, subject to its per-block
+    item cap. Split larger exports into batches before adding. CSV carries SQL pairs
     only (a ``question,sql`` sheet); schema docs are reported as a warning since
     they are not representable.
 
