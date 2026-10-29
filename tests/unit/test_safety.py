@@ -62,7 +62,7 @@ class TestRejectsWrites:
 class TestExecutableComments:
     @pytest.mark.parametrize("separator", ["\u00a0", "\u0085", "\u2028"])
     def test_unicode_space_does_not_hide_executable_comment(self, separator) -> None:
-        with pytest.raises(UnsafeSqlError, match="executable comments"):
+        with pytest.raises(UnsafeSqlError, match=r"executable comments|double-dash"):
             assert_select_only(f"SELECT 1--{separator}/*! + sleep(0) */", dialect="mysql")
 
     @pytest.mark.parametrize("sql", [
@@ -79,7 +79,7 @@ class TestExecutableComments:
     ])
     @pytest.mark.parametrize("dialect", ["mysql", None])
     def test_executable_comments_rejected(self, sql, dialect) -> None:
-        with pytest.raises(UnsafeSqlError, match="executable comments"):
+        with pytest.raises(UnsafeSqlError, match=r"executable comments|double-dash"):
             assert_select_only(sql, dialect=dialect)
 
     @pytest.mark.parametrize("sql", [
@@ -87,7 +87,6 @@ class TestExecutableComments:
         'SELECT "/*M! text */"',
         "SELECT `/*! identifier */` FROM t",
         "SELECT 'quote''/*! marker */'",
-        r"SELECT 'quote\'/*! marker */'",
         "SELECT 1 /* ordinary comment */",
         "SELECT 1 -- /*! ignored */\n",
         "SELECT 1 -- ordinary\r/*! ignored */",
@@ -103,7 +102,7 @@ class TestExecutableComments:
     async def test_comment_refusal_never_calls_runner(self) -> None:
         runner = _RecordingRunner()
         guard = ReadOnlyGuardRunner(runner, dialect="mysql")
-        with pytest.raises(UnsafeSqlError, match="executable comments"):
+        with pytest.raises(UnsafeSqlError, match=r"executable comments|double-dash"):
             await guard.run_sql(
                 RunSqlToolArgs(sql="SELECT 1 /*! + 1 */"), ToolContext.model_construct()
             )
@@ -773,3 +772,37 @@ class TestIsIntrospectionQuery:
         # Fail-open-to-False: a query we cannot parse is not classified as
         # introspection, so it does not silently withhold a recovered answer.
         assert is_introspection_query("this is not sql ;;;") is False
+
+class TestMysqlLexicalBoundaries:
+    @pytest.mark.parametrize("sql", [
+        "SELECT 1--1 + sleep(0)",
+        "SELECT 1--1 + benchmark(1,1)",
+        "SELECT 1--\u00a0+sleep(0)",
+        r"SELECT 'x\' + sleep(0) -- '",
+        r'SELECT "x\" + sleep(0) -- "',
+        "SELECT 1 /* outer /* nested */ + sleep(0) # */",
+    ])
+    @pytest.mark.parametrize("dialect", ["mysql", None])
+    def test_ambiguous_lexing_rejected(self, sql, dialect) -> None:
+        with pytest.raises(UnsafeSqlError):
+            assert_select_only(sql, dialect=dialect)
+
+    @pytest.mark.parametrize("sql", [
+        "SELECT 'one--two', '--1 + sleep(0)'",
+        "SELECT `one--two` FROM t",
+        "SELECT 'quote''d', '/* text */'",
+        r"SELECT 'path\\folder', 'pattern\%text'",
+        "SELECT 1 -- ordinary\r'ignored\n+2",
+        "SELECT 1 # ordinary\r'ignored\n+2",
+        "SELECT 1 /* ordinary --1 */ + 2",
+    ])
+    def test_unambiguous_reads_pass(self, sql) -> None:
+        assert_select_only(sql, dialect="mysql")
+
+    async def test_refusal_precedes_execution(self) -> None:
+        runner = _RecordingRunner()
+        with pytest.raises(UnsafeSqlError):
+            await ReadOnlyGuardRunner(runner, dialect="mysql").run_sql(
+                RunSqlToolArgs(sql="SELECT 1--1 + sleep(0)"), ToolContext.model_construct()
+            )
+        assert runner.calls == []

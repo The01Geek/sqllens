@@ -14,9 +14,6 @@ path, which makes prompt-injection attacks harder.
 
 from __future__ import annotations
 
-import re
-from itertools import chain
-
 import sqlglot
 from sqlglot import expressions as exp
 
@@ -327,27 +324,62 @@ def _func_name_candidates(node: exp.Func) -> set[str]:
     return {n.lower() for n in sql_names()}
 
 
-# Only inspect comment gaps between tokens, so quoted strings and identifiers
-# containing these markers remain ordinary data. MySQL line comments end at
-# LF; the byte after -- must be ASCII whitespace/control, not Unicode \s.
-_MYSQL_COMMENTS = re.compile(r"/\*.*?\*/|\#[^\n]*|--(?=[\x00-\x20\x7f]|$)[^\n]*", re.DOTALL)
+def _mysql_parse_sql(sql: str) -> str:
+    """Keep MySQL and parser token boundaries aligned, or refuse ambiguity.
 
-
-def _reject_mysql_executable_comments(sql: str) -> None:
-    """Reject server-executed comment syntax before the parser discards it."""
-    if "/*!" not in sql and "/*M!" not in sql:
-        return
-    # sqlglot treats CR as a line-comment terminator; MySQL only uses LF.
-    # A same-width space keeps source offsets while aligning comment scope,
-    # including quotes that MySQL ignores inside a comment after CR.
-    tokens = sqlglot.tokenize(sql.replace("\r", " "), read="mysql")
-    start = 0
-    gaps = chain(((t.start, t.end + 1) for t in tokens), [(len(sql), len(sql))])
-    for stop, next_start in gaps:
-        for comment in _MYSQL_COMMENTS.finditer(sql, start, stop):
-            if comment.group().startswith(("/*!", "/*M!")):
+    MySQL SQL modes can change quote escaping. Refuse backslash-escaped quote
+    boundaries and use doubled quotes instead; ordinary backslashes are data.
+    Reject non-comment double dashes and nested block-comment openers because
+    sqlglot can discard SQL that MySQL would execute at those boundaries.
+    """
+    chars = list(sql)
+    i = 0
+    while i < len(sql):
+        if sql[i] in "'\"`":
+            quote = sql[i]
+            i += 1
+            while i < len(sql):
+                if sql[i] == "\\" and i + 1 < len(sql):
+                    if sql[i + 1] == quote:
+                        raise UnsafeSqlError("MySQL backslash-escaped quotes are not allowed")
+                    if quote != "`":
+                        i += 2
+                        continue
+                if sql[i] == quote:
+                    if i + 1 < len(sql) and sql[i + 1] == quote:
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                i += 1
+            continue
+        if sql.startswith("/*", i):
+            if sql.startswith(("/*!", "/*M!"), i):
                 raise UnsafeSqlError("MySQL executable comments are not allowed")
-        start = next_start
+            end = sql.find("*/", i + 2)
+            if end < 0:
+                raise UnsafeSqlError("Unterminated MySQL comment")
+            if "/*" in sql[i + 2:end]:
+                raise UnsafeSqlError("Nested MySQL comments are not allowed")
+            i = end + 2
+            continue
+        if sql.startswith("--", i):
+            following = sql[i + 2:i + 3]
+            if following and not (ord(following) <= 32 or ord(following) == 127):
+                raise UnsafeSqlError("Ambiguous MySQL double-dash syntax is not allowed")
+        if sql[i] == "#" or sql.startswith("--", i):
+            end = sql.find("\n", i)
+            if end < 0:
+                end = len(sql)
+            # MySQL line comments end at LF; sqlglot also treats CR as an end.
+            # Normalize only comment text, never literals or identifiers.
+            for offset in range(i, end):
+                if chars[offset] == "\r":
+                    chars[offset] = " "
+            i = end
+            continue
+        i += 1
+    return "".join(chars)
 
 
 def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
@@ -361,7 +393,7 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
 
     try:
         if dialect in ("mysql", None):
-            _reject_mysql_executable_comments(sql)
+            sql = _mysql_parse_sql(sql)
         statements = sqlglot.parse(sql, dialect=dialect)
     except (sqlglot.errors.ParseError, sqlglot.errors.TokenError) as e:
         raise UnsafeSqlError(f"could not parse SQL: {e}") from e

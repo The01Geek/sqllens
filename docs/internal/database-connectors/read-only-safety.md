@@ -230,3 +230,7 @@ Other regression classes in [tests/unit/test_safety.py](../../../tests/unit/test
 - `TestSqliteReadOnlyUri` / `TestReadOnlyUriSpecialChars` / `TestSqliteConnectorReadOnlyEnforced` — the SQLite `_readonly_uri` builder, its `?`/`#` percent-encoding, and the connector-level `mode=ro` + `PRAGMA query_only` enforcement.
 
 Connector-level read-only against live Postgres/MySQL is exercised by [tests/integration/test_connectors.py](../../../tests/integration/test_connectors.py) under the `connectors` marker.
+
+### MySQL lexical boundaries
+
+For MySQL (and unspecified dialects), the guard refuses double dashes without the ASCII whitespace/control character required for a MySQL line comment, nested block-comment openers, and backslash-escaped closing quotes. Use spaced arithmetic and doubled quotes instead. This keeps inspection independent of `NO_BACKSLASH_ESCAPES` and `ANSI_QUOTES` quote-boundary changes. Ordinary backslashes, quoted comment markers, and standard comments remain accepted; carriage returns inside line comments are normalized only for parser inspection because MySQL ends those comments at LF. The original SQL still reaches the connector after validation.

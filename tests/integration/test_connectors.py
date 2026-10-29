@@ -131,6 +131,16 @@ class TestPostgresRunner:
 
 
 class TestMysqlRunner:
+    async def test_double_dash_is_arithmetic_and_guard_refuses_it(self, mysql_url: str) -> None:
+        runner = build_sql_runner(mysql_url)
+        sql = "SELECT 1--1 AS n"
+        result = await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+        assert int(result.iloc[0]["n"]) == 2
+        with pytest.raises(UnsafeSqlError, match="double-dash"):
+            await ReadOnlyGuardRunner(runner, dialect="mysql").run_sql(
+                RunSqlToolArgs(sql=sql), _ctx()
+            )
+
     async def test_select_one(self, mysql_url: str) -> None:
         runner = build_sql_runner(mysql_url)
         df = await runner.run_sql(RunSqlToolArgs(sql="SELECT 1 AS n"), _ctx())
