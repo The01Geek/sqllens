@@ -95,3 +95,58 @@ async def test_ordinary_domain_knowledge_is_preserved():
 
 async def test_empty_memory_keeps_the_original_prompt():
     assert await enhanced() == BASE
+
+
+@pytest.mark.parametrize("texts", [(), ("ordinary note",)])
+@pytest.mark.parametrize("sql", ["SELECT 1", ""])
+async def test_pair_only_overreturn_has_an_omission_notice(texts, sql):
+    pairs = [(f"question {index}", sql) for index in range(5)]
+    out = await enhanced(texts, [*pairs, ("beyond the search limit", "SELECT 6")])
+
+    assert "Some retrieved memory was omitted.\n" in out
+    expected = [{"kind": "text", "content": text} for text in texts]
+    if sql:
+        expected += [
+            {"kind": "sql_example", "question": question, "sql": sql}
+            for question, sql in pairs
+        ]
+    assert records(out) == expected
+    assert out.startswith(BASE)
+    assert len(out) - len(BASE) <= 32768
+
+
+async def test_pair_overreturn_does_not_inspect_records_beyond_limit():
+    memory = StubAgentMemory()
+    memory.search_text_memories = AsyncMock(return_value=[])
+    pair = ToolMemorySearchResult(
+        memory=ToolMemory(
+            question="ordinary question", tool_name="run_sql", args={"sql": "SELECT 1"}
+        ),
+        similarity_score=0.9,
+        rank=1,
+    )
+    memory.search_similar_usage = AsyncMock(return_value=[pair] * 5 + [object()])
+    enhancer = DefaultLlmContextEnhancer(memory, context_similarity_threshold=0.3)
+    out = await enhancer.enhance_system_prompt(BASE, "question", User(id="test"))
+
+    assert "Some retrieved memory was omitted.\n" in out
+    assert records(out) == [
+        {"kind": "sql_example", "question": "ordinary question", "sql": "SELECT 1"}
+    ] * 5
+    assert memory.search_similar_usage.call_args.kwargs["limit"] == 5
+
+
+async def test_five_ordinary_pairs_do_not_claim_omission():
+    pairs = [(f"question {index}", f"SELECT {index}") for index in range(5)]
+    out = await enhanced(pairs=pairs)
+    assert "omitted" not in out
+    assert records(out) == [
+        {"kind": "sql_example", "question": question, "sql": sql}
+        for question, sql in pairs
+    ]
+
+
+async def test_text_count_omission_does_not_claim_a_size_cause():
+    out = await enhanced(texts=["small note"] * 6)
+    assert "Some retrieved memory was omitted.\n" in out
+    assert records(out) == [{"kind": "text", "content": "small note"}] * 5

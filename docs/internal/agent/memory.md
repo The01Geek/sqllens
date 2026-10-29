@@ -52,7 +52,7 @@ This framing reduces ambiguity and bounds prompt growth; it cannot guarantee tha
 
 **Hit counting.** `search_similar_usage` bumps `hit_count` / `last_hit_date` for every row it returns (see *Per-memory hit tracking*). With the tier on, each request therefore counts up to 5 pairs as retrieved, and a pair that the search tool also returns in the same request is counted twice.
 
-**Graceful degrade.** If the text-memory search raises, the enhancer logs a `WARNING` (with the traceback) and returns the **unmodified** system prompt. If only the pair search raises, it logs a `WARNING` and still injects the text memories it already found. A memory failure never fails the request. When memory yields nothing relevant, the prompt is returned untouched.
+**Graceful degrade.** If the text-memory search raises, the enhancer logs a `WARNING` (with the traceback) and returns the **unmodified** system prompt. If only the pair search raises, it logs a `WARNING` and still injects the text memories it already found. A memory failure never fails the request.
 
 Before this feature landed, `similarity_threshold` did not reach the text-memory injection path at all: the framework's fallback enhancer froze its text-search floor at a hardcoded `0.7`. Wiring the enhancer explicitly in `build_agent` (see below) is what first brings the configured `similarity_threshold` to that floor. **This is a behavior change for deployments that set `similarity_threshold` away from `0.7`, even with the context tier off:** a low value (for example `0.3`) now injects up to 5 loosely related text memories into every prompt; a high value injects fewer.
 

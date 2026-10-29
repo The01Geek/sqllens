@@ -34,7 +34,7 @@ _CONTEXT_PREFIX = (
     "<sqllens_memory_data>\n"
 )
 _CONTEXT_SUFFIX = "\n</sqllens_memory_data>\n"
-_CONTEXT_OMITTED = "Some retrieved memory was omitted because of context size limits.\n"
+_CONTEXT_OMITTED = "Some retrieved memory was omitted.\n"
 
 if TYPE_CHECKING:
     from ..user.models import User
@@ -146,6 +146,7 @@ class DefaultLlmContextEnhancer(LlmContextEnhancer):
             # match for the real question. A pair also returned by the search
             # tool is simply seen twice.
             pairs: List["ToolMemorySearchResult"] = []
+            pairs_omitted = False
             if tier_enabled:
                 try:
                     tool_hits = await self.agent_memory.search_similar_usage(
@@ -162,6 +163,7 @@ class DefaultLlmContextEnhancer(LlmContextEnhancer):
                         exc_info=True,
                     )
                     tool_hits = []
+                pairs_omitted = len(tool_hits) > _CONTEXT_PAIR_LIMIT
                 pairs = [
                     r
                     for r in tool_hits[:_CONTEXT_PAIR_LIMIT]
@@ -170,10 +172,12 @@ class DefaultLlmContextEnhancer(LlmContextEnhancer):
                     and r.memory.args["sql"].strip()
                 ]
 
-            if not memories and not pairs:
+            if not memories and not pairs and not pairs_omitted:
                 return system_prompt
 
-            return system_prompt + _format_context(memories, pairs)
+            return system_prompt + _format_context(
+                memories, pairs, pairs_omitted=pairs_omitted
+            )
 
         except Exception:
             # If memory search fails, return original prompt
@@ -206,7 +210,7 @@ def _cap(value: str, limit: int, marker: str = " [truncated]") -> str:
 
 
 def _format_context(memories: list["TextMemorySearchResult"],
-                    pairs: list["ToolMemorySearchResult"]) -> str:
+                    pairs: list["ToolMemorySearchResult"], *, pairs_omitted: bool) -> str:
     """Bound and quote reference records; this framing is not an injection guarantee."""
     candidates = [
         {"kind": "text", "content": _cap(r.memory.content, _CONTEXT_TEXT_MAX_CHARS)}
@@ -222,7 +226,7 @@ def _format_context(memories: list["TextMemorySearchResult"],
     remaining = (_CONTEXT_MAX_CHARS - len(_CONTEXT_PREFIX) - len(_CONTEXT_SUFFIX)
                  - len(_CONTEXT_OMITTED) - 2)  # enclosing JSON brackets
     encoded = []
-    omitted = len(memories) > _CONTEXT_TEXT_LIMIT
+    omitted = pairs_omitted or len(memories) > _CONTEXT_TEXT_LIMIT
     for record in candidates:
         # Escape delimiters even inside quoted values. Newlines/control characters
         # remain JSON escapes, and stored markup cannot close the outer data block.
