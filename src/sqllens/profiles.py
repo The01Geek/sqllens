@@ -287,10 +287,9 @@ def resolve_effective_settings(
 
     - An empty / ``None`` profile name resolves to the reserved ``default``
       profile, which itself falls through to base config when not customised.
-    - An unknown valid profile name also resolves through ``default`` — the issue
-      mandates "unknown / omitted names resolve to ``default``" so a caller
-      typo does not error out the query path; only the admin-tool ``get`` /
-      ``delete`` paths surface unknown-name as ``isError``.
+    - An unknown valid profile name also resolves through ``default``; only
+      the admin-tool ``get`` / ``delete`` paths surface unknown valid names
+      as ``isError``. Invalid non-empty names fail validation on both paths.
     - ``None`` fields on the resolved profile inherit from base ``Config``.
 
     ``store`` is the cached singleton owned by the server (or any caller). When

@@ -311,9 +311,10 @@ def build_server(cfg: Config) -> FastMCP:
         ``profile`` selects a named config profile for this single request —
         the request-local overlay of result-shaping knobs (``show_details``,
         ``max_tool_iterations``, ``max_rows``, ``similarity_threshold``).
-        Omitting it (or passing an unknown name)
-        resolves through the reserved ``default`` profile, which falls back
-        to base config — existing callers see no change. Profiles are managed
+        A non-empty name must use 1-64 characters from ``[A-Za-z0-9_.-]``;
+        other names fail before the agent runs. Omitting it, passing an empty
+        string, or passing an unknown valid name resolves through the reserved
+        ``default`` profile, which falls back to base config. Profiles are managed
         through ``list_profiles`` / ``get_profile`` / ``upsert_profile`` /
         ``delete_profile`` (all gated on ``profiles.allow_admin_tools``).
 

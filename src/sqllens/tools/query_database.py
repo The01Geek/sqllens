@@ -171,7 +171,8 @@ async def query_database_impl_with_widgets(
     is the single structured-data channel: apps-aware hosts render each block
     in order, and ``server.py`` attaches it to ``_meta["sqllens/blocks"]``.
 
-    Three error categories, unchanged: tool-internal failures raise
+    Invalid non-empty profile names raise ``ProfileNameError`` before agent work.
+    Tool-internal failures raise
     ``_INTERNAL_ERROR_MESSAGE``, agent-reported SQL failures raise
     ``_SQL_EXECUTION_ERROR_PREFIX + answer`` (as an :class:`AgentRunError`),
     and ``UnsafeSqlError`` is re-raised verbatim. ``blocks`` is an empty list
@@ -217,7 +218,7 @@ async def query_database_impl_with_widgets(
     # site (each integration runner's fetchmany cap, RowCapRunner, the agent
     # run-loop iteration cap, the search-memory threshold fallback) reads the
     # request-local value. An unknown valid or omitted profile name resolves through
-    # ``default`` to base config — existing callers see no change.
+    # ``default`` to base config. Invalid non-empty names fail before agent work.
     effective: EffectiveSettings = resolve_effective_settings(
         cfg, profile, store=profile_store
     )
