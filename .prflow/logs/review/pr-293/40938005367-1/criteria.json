@@ -1,0 +1,22 @@
+[
+  {
+    "criterion": 1,
+    "text": "With `save_text_memories` not set, as in a config file holding only settings that exist before this change, the config loads without error, `build_agent` registers no `save_text_memory` tool, and the system prompt built from that agent's tool list contains no \"TEXT MEMORY\" section. The same holds with `save_text_memories = false`, and with an empty or whitespace-only value, whether it comes from the environment variable `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` or from `save_text_memories = \"\"` in the TOML file. Any other value that is not a boolean, such as `ture`, still fails config validation."
+  },
+  {
+    "criterion": 2,
+    "text": "`mcpb/manifest.json` declares a `user_config` field `save_text_memories` of type `boolean` with `\"default\": false` and `\"required\": false`, and its `server.mcp_config.env` sets `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` to `${user_config.save_text_memories}`. Because that variable is always set for a bundle install, the checkbox value wins over any `save_text_memories` in a TOML file there. `mcpb/README.md`'s settings table has a row for the checkbox stating that it defaults to off."
+  },
+  {
+    "criterion": 3,
+    "text": "With `save_text_memories = true` in TOML, and separately with the environment variable `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES=true` and no TOML key, `build_agent` registers the `save_text_memory` tool as a `SaveTextMemoryTool`, and the system prompt built from that agent's tool list contains the \"TEXT MEMORY\" section."
+  },
+  {
+    "criterion": 4,
+    "text": "The first `## Unreleased` section of `docs/external/release-notes.md`, the one directly below the October 28, 2026 entry at the top of the page, has an entry that states the agent no longer saves free-form notes unless `save_text_memories = true`, marks this as a behavior change for existing deployments, and tells operators who configure SQL Lens with a TOML file or environment variables to set `save_text_memories = true` to keep the old behavior, and tells MCPB users to turn on the new checkbox in the extension's settings. It also says that free-form notes saved earlier stay in memory and are still used, that notes the agent saved cannot be told apart from notes added by an import, that operators who configure SQL Lens with a TOML file or environment variables can review the free-form notes and delete the wrong ones with the memory administration tools, linking the \"Memory-Administration Tools for the Assistant\" section of `docs/external/managing-memory.md` for how to enable them and what deleting requires, and that an MCPB install's settings offer no way to turn on those tools."
+  },
+  {
+    "criterion": 5,
+    "text": "The change leaves these as they are: the handling of unknown keys under `[memory]`, so a misspelled key such as `save_text_memory = true` is ignored and the tool stays unregistered; the system prompt sentence \"Do NOT forget to save successful executions.\", which still prints whenever the memory search tool is registered, including when no save tool is registered; the notes already in memory, none of which is deleted or changed, and the context enhancer still adds the matching ones to the system prompt; the metadata stored with a note, which still records nothing about whether the agent or an import wrote it; the `sqllens init` and Claude Desktop installer config templates, which do not list `save_text_memories`; and `mcpb/manifest.json`'s other settings, which still include nothing for `memory.allow_admin_tools` or `auth.insecure`."
+  }
+]

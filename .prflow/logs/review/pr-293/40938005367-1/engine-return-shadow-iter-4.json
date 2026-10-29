@@ -1,0 +1,473 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "verdict": "APPROVE with notes",
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "phase3_failed_agents": [],
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "file": "docs/external/release-notes.md",
+   "line_range": [
+    73,
+    73
+   ],
+   "kind": "documented_falsehood",
+   "severity": "Suggestion",
+   "agent": "prflow:silent-failure-hunter, prflow:comment-analyzer",
+   "corroboration_count": 2,
+   "description": "The historical release-note entry for the earlier save_queries change, at line 73 of docs/external/release-notes.md, still says that SQL Lens \"still saves free-form notes\" when save_queries is off. This change removed exactly that clause from the matching row in docs/external/configuration.md, so the release-notes copy now states a promise the code no longer keeps. The line sits in a dated historical entry and the diff does not touch it. The two reviewers filed it with different kinds (documented_falsehood and comment_drift) but describe the same defect at the same file and line."
+  },
+  {
+   "finding_id": "F-2",
+   "file": "src/sqllens/config.py",
+   "line_range": [
+    221,
+    230
+   ],
+   "kind": "other",
+   "severity": "Suggestion",
+   "agent": "prflow:silent-failure-hunter",
+   "corroboration_count": 1,
+   "description": "A blank or whitespace-only value for save_text_memories is turned into false with no log line or warning, at lines 221 to 230 of src/sqllens/config.py. An operator whose launcher expands an unset shell variable into SQLLENS_MEMORY__SAVE_TEXT_MEMORIES therefore gets note saving switched off silently, while a plain typo such as ture still fails loudly. The one case where the operator's intent is unclear is the one case with no diagnostic."
+  },
+  {
+   "finding_id": "F-3",
+   "file": "docs/internal/production-readiness-v0.1.0.md",
+   "line_range": [
+    70,
+    70
+   ],
+   "kind": "comment_drift",
+   "severity": "Suggestion",
+   "agent": "prflow:silent-failure-hunter",
+   "corroboration_count": 1,
+   "description": "The internal readiness page docs/internal/production-readiness-v0.1.0.md, at line 70, still records that SaveTextMemoryTool is registered as a settled fact. After this change the tool is registered only when save_text_memories is on, so the unqualified sentence no longer holds for a default configuration. The file is a dated, point-in-time page and is outside this diff."
+  },
+  {
+   "finding_id": "F-4",
+   "file": "mcpb/manifest.json",
+   "line_range": [
+    30,
+    30
+   ],
+   "kind": "other",
+   "severity": "Suggestion",
+   "agent": "prflow:requesting-code-review",
+   "corroboration_count": 1,
+   "description": "Line 30 of mcpb/manifest.json maps the environment variable to ${user_config.save_text_memories}. If an upgraded bundle install that has no stored value for this newly added field passes the placeholder through unreplaced, config loading raises a validation error and the server does not start, rather than falling back to off. The same shape already exists for read_only, so this is an existing pattern rather than something this change introduced."
+  },
+  {
+   "finding_id": "F-5",
+   "file": "tests/unit/test_factory_wiring.py",
+   "line_range": [
+    253,
+    276
+   ],
+   "kind": "test_gap",
+   "severity": "Suggestion",
+   "agent": "prflow:pr-test-analyzer",
+   "corroboration_count": 1,
+   "description": "The new tests at lines 253 to 276 of tests/unit/test_factory_wiring.py assert only that the tool is absent and that the prompt section is missing. They do not pin the two further promises the factory comment makes for the flag-off path: that stored notes are still injected into the prompt, and that curated writes through MemoryStore.save_text_memory still go through. Those are the exact regressions the comment warns a future refactor could cause."
+  },
+  {
+   "finding_id": "F-6",
+   "file": "tests/unit/test_mcpb_manifest.py",
+   "line_range": [
+    51,
+    61
+   ],
+   "kind": "test_gap",
+   "severity": "Suggestion",
+   "agent": "prflow:pr-test-analyzer",
+   "corroboration_count": 1,
+   "description": "The test test_memory_admin_and_insecure_auth_are_not_exposed, at lines 51 to 61 of tests/unit/test_mcpb_manifest.py, pins the absence of settings unrelated to the behavior this change adds. It will fail and need editing on the day an unrelated change legitimately adds an admin-tools checkbox, with no real regression behind the failure. This is a maintenance cost rather than a defect."
+  }
+ ],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "file_count": 15,
+  "changed_lines": 340
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "report": "## Verdict: APPROVE with notes (six suggestion-level findings, none at or above the critical threshold)\n\nThis pull request is ready to merge: every one of the forty-three checklist items passed, all five acceptance criteria are itemized and verified against the shipped code, and the six remaining findings are suggestions that no reviewer raised above suggestion level.\n\nRule applied: rule 6 — findings below the threshold remain → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (6)\n\n<details><summary>6 items</summary>\n\n1. The historical release-note entry for the earlier `save_queries` change, at line 73 of `docs/external/release-notes.md`, still says that SQL Lens \"still saves free-form notes\" when `save_queries` is off. This change removed exactly that clause from the matching row in `docs/external/configuration.md`, so the release-notes copy now states a promise the code no longer keeps. The line sits in a dated historical entry and the diff does not touch it. (raised by 2/5 agents)\n2. A blank or whitespace-only value for `save_text_memories` is turned into `false` with no log line or warning, at lines 221 to 230 of `src/sqllens/config.py`. An operator whose launcher expands an unset shell variable into `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` therefore gets note saving switched off silently, while a plain typo such as `ture` still fails loudly. The one case where the operator's intent is unclear is the one case with no diagnostic. (raised by 1/5 agents)\n3. The internal readiness page `docs/internal/production-readiness-v0.1.0.md`, at line 70, still records that `SaveTextMemoryTool` is registered as a settled fact. After this change the tool is registered only when `save_text_memories` is on, so the unqualified sentence no longer holds for a default configuration. The file is a dated, point-in-time page and is outside this diff. (raised by 1/5 agents)\n4. Line 30 of `mcpb/manifest.json` maps the environment variable to `${user_config.save_text_memories}`. If an upgraded bundle install that has no stored value for this newly added field passes the placeholder through unreplaced, config loading raises a validation error and the server does not start, rather than falling back to off. The same shape already exists for `read_only`, so this is an existing pattern rather than something this change introduced. (raised by 1/5 agents)\n5. The new tests at lines 253 to 276 of `tests/unit/test_factory_wiring.py` assert only that the tool is absent and that the prompt section is missing. They do not pin the two further promises the factory comment makes for the flag-off path: that stored notes are still injected into the prompt, and that curated writes through `MemoryStore.save_text_memory` still go through. Those are the exact regressions the comment warns a future refactor could cause. (raised by 1/5 agents)\n6. The test `test_memory_admin_and_insecure_auth_are_not_exposed`, at lines 51 to 61 of `tests/unit/test_mcpb_manifest.py`, pins the absence of settings unrelated to the behavior this change adds. It will fail and need editing on the day an unrelated change legitimately adds an admin-tools checkbox, with no real regression behind the failure. This is a maintenance cost rather than a defect. (raised by 1/5 agents)\n\n</details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\nDiff profile: `test_relevant` (15 changed files, 340 changed lines).\n\nWorking tree: clean, no uncommitted changes.\n\nReview prompt extension: `PROMPT-EXTENSION-STATUS: present-empty`. Final-pass `requesting-code-review` extension: `PROMPT-EXTENSION-STATUS: present-empty`.\n\nCI evidence for the reviewed head: missing. No engine-ground-truth block listing CI results reached this entry, and no in-environment suite result for commit `1e58a05030c3e5f7b88cea8b93b20315df122d07` was handed to it, so no test evidence was established.\n\nNormalized (wording-only): 0\n\nRe-verification: none. No checklist item failed, so there was no stored FAIL to dispute.\n\nPrior report re-verification: not owed. This is the Step 2.6 shadow entry, so `render` ran without `--prior` and reported no prior lines.\n\n- Checklist: 43 passed, 0 failed, 0 inconclusive\n- <details><summary>✅ Passed items (43 of 43)</summary>\n\n  - VC-1: A user can load free-form notes with `sqllens import-memory` under all circumstances, regardless of the `save_text_memories` setting. [docs/external/configuration.md:71]\n  - VC-2: An empty or whitespace-only value for `save_text_memories`, from either the `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` env var or a TOML string, is accepted by config validation and resolves to `false`. [docs/external/configuration.md:82]\n  - VC-3: For an MCPB install, the \"Let the assistant save free-form notes\" checkbox in the extension's settings overrides any `save_text_memories` value in a TOML file. [docs/external/configuration.md:82]\n  - VC-4: Notes added via the command-line import or the memory-administration tools are stored for every value of `save_text_memories` and are never affected by it. [docs/external/managing-memory.md:10]\n  - VC-5: The release-note link `managing-memory.md#memory-administration-tools-for-the-assistant` resolves to an existing heading in docs/external/managing-memory.md that explains how to enable those tools and what deleting requires. [docs/external/release-notes.md:11]\n  - VC-6: SQL Lens stores no provenance for a free-form note, so an agent-saved note cannot be distinguished from an imported one. [docs/external/release-notes.md:11]\n  - VC-7: The MCPB checkbox the release note names is literally \"Let the assistant save free-form notes\" and an MCPB install's settings expose no way to enable the memory-administration tools. [docs/external/release-notes.md:11]\n  - VC-8: `SaveTextMemoryTool` is registered in the tool registry only when `cfg.memory.save_text_memories` is true. [docs/internal/agent/factory.md:40]\n  - VC-9: With `save_text_memories` off the `TEXT MEMORY` prompt section is dropped because the default system prompt gates it on `has_text_memory = \"save_text_memory\" in tool_names`, while `DefaultLlmContextEnhancer.enhance_system_prompt` still injects matching stored notes without consulting the tool list. [docs/internal/agent/memory.md:24]\n  - VC-10: The quoted registration snippet (save_queries guard, unconditional search-tool registration with default_similarity_threshold, and the `if cfg.memory.save_text_memories:` guard) reproduces the current code in `build_agent`. [docs/internal/agent/memory.md:80]\n  - VC-11: The system-prompt sentence \"Do NOT forget to save successful executions.\" is emitted under `if has_search`, not `has_save`, and the search tool is registered unconditionally, so it prints even with both save flags off. [docs/internal/agent/memory.md:96]\n  - VC-12: `sqllens import-memory` and the memory-administration tools call `ChromaAgentMemory.save_text_memory` directly rather than through `SaveTextMemoryTool`, so the gate in `build_agent` does not affect them. [docs/internal/agent/memory.md:97]\n  - VC-13: The config-knob table row asserts `save_text_memories` defaults to `false`, reads a blank env var or TOML string as `false`, still fails config load for any other non-boolean, and suppresses the prompt's `2. TEXT MEMORY` section when off. [docs/internal/agent/memory.md:112]\n  - VC-14: `ChromaAgentMemory.save_text_memory` is reachable from the agent only via `SaveTextMemoryTool` when `cfg.memory.save_text_memories` is on. [docs/internal/agent/memory.md:140]\n  - VC-15: Of the three memory tool classes in agent/tools/agent_memory.py, a default config registers only `SearchSavedCorrectToolUsesTool`. [docs/internal/agent/memory.md:148]\n  - VC-16: In the kept-from-upstream list, `SaveQuestionToolArgsTool` is registered only when `cfg.memory.save_queries` is true, `SearchSavedCorrectToolUsesTool` is always registered, and `SaveTextMemoryTool` only when `cfg.memory.save_text_memories` is true. [docs/internal/architecture/overview.md:93]\n  - VC-17: The default system prompt gates its TEXT MEMORY section on the presence of the `save_text_memory` tool (a `has_text_memory` flag), so skipping the registration removes that section. [src/sqllens/agent/factory.py:142]\n  - VC-18: The authored comment asserts the \"Do NOT forget to save successful executions.\" sentence rides on has_search, that the search tool is registered unconditionally, and that the sentence therefore still prints with the save tools off. [src/sqllens/agent/factory.py:122]\n  - VC-19: The authored comment asserts that curated imports in `sqllens.memory.store` call the same storage method as `SaveTextMemoryTool`, so a gate inside `SaveTextMemoryTool.execute` or `ChromaAgentMemory.save_text_memory` would drop curated notes. [src/sqllens/agent/factory.py:139]\n  - VC-20: The `save_text_memories` before-validator receives raw TOML/env values, and returning `False` for a whitespace-only string while passing every other value through leaves non-boolean strings such as \"ture\" to fail pydantic bool validation. [src/sqllens/config.py:221]\n  - VC-21: A blank `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` env value reaches `MemoryConfig` as an empty string that overrides a TOML `save_text_memories = true`, rather than being dropped by the env source so TOML wins. [src/sqllens/config.py:228]\n  - VC-22: The field description asserts that with `save_text_memories` off the tool is not registered, the default system prompt drops its TEXT MEMORY section, already-stored notes including curated imports are untouched, the context enhancer still injects matching ones, and a blank env or TOML value reads as OFF. [src/sqllens/config.py:188]\n  - VC-23: The `save_queries` description asserts that when disabled the prompt drops its save bullet and the example workflow's save step while the 'Do NOT forget to save successful executions.' sentence rides on the always-registered search tool and still prints. [src/sqllens/config.py:175]\n  - VC-24: `agent.get_available_tools(User(id=\"anyone\", group_memberships=[\"default\"]))` returns the registry's tools for the factory's `DEFAULT_USER_GROUP` access list, so the prompt built from them reflects the registry the factory produced. [tests/unit/test_factory_wiring.py:246]\n  - VC-25: `DefaultSystemPromptBuilder().build_system_prompt(user, tools)` is an awaitable accepting a user and a tool list and returning a prompt string that contains the literal \"TEXT MEMORY\" when the save_text_memory tool is present. [tests/unit/test_factory_wiring.py:248]\n  - VC-26: The async test functions in `test_factory_wiring.py` are collected and awaited by the test runner without an explicit asyncio marker. [tests/unit/test_factory_wiring.py:253]\n  - VC-27: `Agent` and `User` are exported from `sqllens.agent` and `DefaultSystemPromptBuilder` from `sqllens.agent.core.system_prompt.default`, and `User` accepts `id` and `group_memberships` keyword arguments. [tests/unit/test_factory_wiring.py:22]\n  - VC-28: `MemoryConfig(persist_dir=...)` built without `save_text_memories` is the config shape a pre-#267 deployment loads, and `Config(...)` with only database/llm/memory/auth/agent satisfies all required top-level fields. [tests/unit/test_factory_wiring.py:266]\n  - VC-29: `agent.tool_registry._tools` is a dict keyed by tool name containing `search_saved_correct_tool_uses`, `save_question_tool_args` and `save_text_memory` under exactly those names. [tests/unit/test_factory_wiring.py:317]\n  - VC-30: The MCPB manifest's `server.mcp_config.env` entry `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` maps to the `MemoryConfig.save_text_memories` field via pydantic-settings' double-underscore nesting, and `${user_config.save_text_memories}` is a boolean substitution the loader renders into a value pydantic accepts. [mcpb/manifest.json:30]\n  - VC-31: The `save_text_memories` entry sits inside the manifest's top-level `user_config` object with the `type`/`title`/`description`/`default`/`required` keys the MCPB manifest schema expects for a boolean field. [mcpb/manifest.json:58]\n  - VC-32: `Path(__file__).resolve().parents[2] / \"mcpb\" / \"manifest.json\"` resolves to the repository's manifest when the test runs from an installed/editable package layout. [tests/unit/test_mcpb_manifest.py:18]\n  - VC-33: The module docstring asserts that no pull-request CI job builds the MCPB bundle because `.github/workflows/mcpb.yml` runs only on release tags and manual dispatches. [tests/unit/test_mcpb_manifest.py:6]\n  - VC-34: The config-loading doc row asserts that with `save_text_memories` off `SaveTextMemoryTool` is not registered, the agent writes no free-form notes, the prompt's `2. TEXT MEMORY` section is not printed, a blank value reads as false, any other non-boolean fails the load, and stored notes are untouched. [docs/internal/setup/config-loading.md:30]\n  - VC-35: The same doc row asserts that with `save_queries` off the prompt drops its save bullet and the example workflow's save step while the `Do NOT forget to save successful executions.` sentence rides `has_search` and still prints. [docs/internal/setup/config-loading.md:30]\n  - VC-36: The MCPB README settings row asserts the checkbox defaults to off and that turning it on lets the assistant write its own schema notes into memory. [mcpb/README.md:30]\n  - VC-37: `build_test_config`'s new `save_text_memories` keyword is forwarded into `MemoryConfig`, and every existing caller that relies on the previous behavior of a registered `save_text_memory` tool still passes. [tests/unit/_config_builders.py:33]\n  - VC-38: `MemoryConfig` has no `model_config` of its own, so it inherits pydantic's `extra=\"ignore\"` and a misspelled `[memory]` key such as `save_text_memory` is dropped rather than rejected. [tests/unit/test_config_schema.py:561]\n  - VC-39: With `save_text_memories` not set, as in a config file holding only settings that exist before this change, the config loads without error, `build_agent` registers no `save_text_memory` tool, and the system prompt built from that agent's tool list contains no \"TEXT MEMORY\" section. The same holds with `save_text_memories = false`, and with an empty or whitespace-only value, whether it comes from the environment variable `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` or from `save_text_memories = \"\"` in the TOML file. Any other value that is not a boolean, such as `ture`, still fails config validation. [src/sqllens/config.py:221]\n  - VC-40: `mcpb/manifest.json` declares a `user_config` field `save_text_memories` of type `boolean` with `\"default\": false` and `\"required\": false`, and its `server.mcp_config.env` sets `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` to `${user_config.save_text_memories}`. Because that variable is always set for a bundle install, the checkbox value wins over any `save_text_memories` in a TOML file there. `mcpb/README.md`'s settings table has a row for the checkbox stating that it defaults to off. [mcpb/manifest.json:58]\n  - VC-41: With `save_text_memories = true` in TOML, and separately with the environment variable `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES=true` and no TOML key, `build_agent` registers the `save_text_memory` tool as a `SaveTextMemoryTool`, and the system prompt built from that agent's tool list contains the \"TEXT MEMORY\" section. [src/sqllens/agent/factory.py:142]\n  - VC-42: The first `## Unreleased` section of `docs/external/release-notes.md`, the one directly below the October 28, 2026 entry at the top of the page, has an entry that states the agent no longer saves free-form notes unless `save_text_memories = true`, marks this as a behavior change for existing deployments, and tells operators who configure SQL Lens with a TOML file or environment variables to set `save_text_memories = true` to keep the old behavior, and tells MCPB users to turn on the new checkbox in the extension's settings. It also says that free-form notes saved earlier stay in memory and are still used, that notes the agent saved cannot be told apart from notes added by an import, that operators who configure SQL Lens with a TOML file or environment variables can review the free-form notes and delete the wrong ones with the memory administration tools, linking the \"Memory-Administration Tools for the Assistant\" section of `docs/external/managing-memory.md` for how to enable them and what deleting requires, and that an MCPB install's settings offer no way to turn on those tools. [docs/external/release-notes.md:11]\n  - VC-43: The change leaves these as they are: the handling of unknown keys under `[memory]`, so a misspelled key such as `save_text_memory = true` is ignored and the tool stays unregistered; the system prompt sentence \"Do NOT forget to save successful executions.\", which still prints whenever the memory search tool is registered, including when no save tool is registered; the notes already in memory, none of which is deleted or changed, and the context enhancer still adds the matching ones to the system prompt; the metadata stored with a note, which still records nothing about whether the agent or an import wrote it; the `sqllens init` and Claude Desktop installer config templates, which do not list `save_text_memories`; and `mcpb/manifest.json`'s other settings, which still include nothing for `memory.allow_admin_tools` or `auth.insecure`. [src/sqllens/agent/factory.py:139]\n\n  </details>\n- Reviewed against issue #267 — criteria from the workpad; scope unchanged.\n\nAcceptance criteria: source `workpad`, 5 criteria, divergence `none`. The checklist itemized all 5, matching the resolved count.\n\nPhase 2 held no `Stricter than criterion` disclosure lines.\n\nDeferrals: the pull request body holds no deferred-findings block, so the deferral matcher did not run.\n\nPR body: read.\n\nBehavior-inert prose cap: evaluated over every Phase 3 finding. No finding was capped and none was routed into a Phase 4.2 carve-out, so no inertness annotation was recorded. The two stale-prose findings, items 1 and 3 above, name lines this diff neither adds nor modifies, so neither enters the self-contradicting-diff carve-out.\n\nReviewers dispatched: 5 of 5 returned results. None failed.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] With `save_text_memories` not set, as in a config file holding only settings that exist before this change, the config loads without error, `build_agent` registers no `save_text_memory` tool, and the system prompt built from that agent's tool list contains no \"TEXT MEMORY\" section. The same holds with `save_text_memories = false`, and with an empty or whitespace-only value, whether it comes from the environment variable `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` or from `save_text_memories = \"\"` in the TOML file. Any other value that is not a boolean, such as `ture`, still fails config validation.\n- [ ] `mcpb/manifest.json` declares a `user_config` field `save_text_memories` of type `boolean` with `\"default\": false` and `\"required\": false`, and its `server.mcp_config.env` sets `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` to `${user_config.save_text_memories}`. Because that variable is always set for a bundle install, the checkbox value wins over any `save_text_memories` in a TOML file there. `mcpb/README.md`'s settings table has a row for the checkbox stating that it defaults to off.\n- [ ] With `save_text_memories = true` in TOML, and separately with the environment variable `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES=true` and no TOML key, `build_agent` registers the `save_text_memory` tool as a `SaveTextMemoryTool`, and the system prompt built from that agent's tool list contains the \"TEXT MEMORY\" section.\n- [ ] The first `## Unreleased` section of `docs/external/release-notes.md`, the one directly below the October 28, 2026 entry at the top of the page, has an entry that states the agent no longer saves free-form notes unless `save_text_memories = true`, marks this as a behavior change for existing deployments, and tells operators who configure SQL Lens with a TOML file or environment variables to set `save_text_memories = true` to keep the old behavior, and tells MCPB users to turn on the new checkbox in the extension's settings. It also says that free-form notes saved earlier stay in memory and are still used, that notes the agent saved cannot be told apart from notes added by an import, that operators who configure SQL Lens with a TOML file or environment variables can review the free-form notes and delete the wrong ones with the memory administration tools, linking the \"Memory-Administration Tools for the Assistant\" section of `docs/external/managing-memory.md` for how to enable them and what deleting requires, and that an MCPB install's settings offer no way to turn on those tools.\n- [ ] The change leaves these as they are: the handling of unknown keys under `[memory]`, so a misspelled key such as `save_text_memory = true` is ignored and the tool stays unregistered; the system prompt sentence \"Do NOT forget to save successful executions.\", which still prints whenever the memory search tool is registered, including when no save tool is registered; the notes already in memory, none of which is deleted or changed, and the context enhancer still adds the matching ones to the system prompt; the metadata stored with a note, which still records nothing about whether the agent or an import wrote it; the `sqllens init` and Claude Desktop installer config templates, which do not list `save_text_memories`; and `mcpb/manifest.json`'s other settings, which still include nothing for `memory.allow_admin_tools` or `auth.insecure`.",
+ "diff_produced_at_head": "1e58a05030c3e5f7b88cea8b93b20315df122d07",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "absolute_claim:configuration.md:import-memory-always-available:71",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "data_format_assumption:configuration.md:blank-value-off:82",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "api_contract:configuration.md:mcpb-checkbox-overrides-toml:82",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "absolute_claim:managing-memory.md:import-admin-writes-ungated:10",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "api_contract:release-notes.md:admin-tools-anchor:11",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "data_format_assumption:release-notes.md:note-provenance-absent:11",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "api_contract:release-notes.md:mcpb-checkbox-label:11",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "dependency_interaction:factory.md:save-text-memory-gate:40",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "dependency_interaction:memory.md:text-memory-prompt-gate:24",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "dependency_interaction:memory.md:wiring-snippet-matches-factory:80",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "dependency_interaction:memory.md:do-not-forget-sentence-branch:96",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "dependency_interaction:memory.md:curated-paths-bypass-tool:97",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "data_format_assumption:memory.md:config-knob-row:112",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "dependency_interaction:memory.md:save-text-memory-reachability:140",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "dependency_interaction:memory.md:default-config-search-only:148",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "dependency_interaction:overview.md:three-memory-tool-gates:93",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "dependency_interaction:factory.py:text-memory-prompt-gate:142",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "absolute_claim:factory.py:save-sentence-rides-has-search:122",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "absolute_claim:factory.py:curated-imports-share-storage:139",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "data_format_assumption:config.py:blank-bool-before-validator:221",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "data_format_assumption:config.py:blank-env-beats-toml:228",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "absolute_claim:config.py:save-text-memories-description:188",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-23",
+   "claim_signature": "absolute_claim:config.py:save-queries-description:175",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-24",
+   "claim_signature": "test_mock_alignment:test_factory_wiring.py:default-group-available-tools:246",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-25",
+   "claim_signature": "dependency_interaction:test_factory_wiring.py:build-system-prompt-signature:248",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-26",
+   "claim_signature": "test_mock_alignment:test_factory_wiring.py:async-tests-auto-mode:253",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-27",
+   "claim_signature": "dependency_interaction:test_factory_wiring.py:agent-user-prompt-imports:22",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-28",
+   "claim_signature": "test_mock_alignment:test_factory_wiring.py:direct-config-construction:266",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-29",
+   "claim_signature": "test_mock_alignment:test_factory_wiring.py:tool-registry-names:317",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-30",
+   "claim_signature": "api_contract:manifest.json:save-text-memories-env-mapping:30",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-31",
+   "claim_signature": "data_format_assumption:manifest.json:user-config-boolean-shape:58",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-32",
+   "claim_signature": "test_mock_alignment:test_mcpb_manifest.py:repo-root-parents:18",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-33",
+   "claim_signature": "absolute_claim:test_mcpb_manifest.py:no-pr-bundle-job:6",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-34",
+   "claim_signature": "absolute_claim:config-loading.md:save-text-memories-row:30",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-35",
+   "claim_signature": "absolute_claim:config-loading.md:save-queries-row:30",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-36",
+   "claim_signature": "absolute_claim:README.md:mcpb-settings-row:30",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-37",
+   "claim_signature": "test_mock_alignment:_config_builders.py:save-text-memories-kwarg-default:33",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-38",
+   "claim_signature": "data_format_assumption:test_config_schema.py:memory-extra-ignore:561",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-39",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-40",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-41",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-42",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-43",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}

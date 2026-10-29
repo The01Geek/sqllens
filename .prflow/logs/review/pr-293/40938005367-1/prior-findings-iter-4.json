@@ -1,0 +1,124 @@
+[
+ {
+  "agent": "prflow:comment-analyzer",
+  "severity": "Suggestion",
+  "description": "The expanded comment runs eight lines, of which only the last three name a wrong change and its consequence (do not move the gate into SaveTextMemoryTool.execute or ChromaAgentMemory.save_text_memory, which would drop curated notes). The earlier lines restate what save_text_memory is for and how has_text_memory gates the prompt section, already recorded in docs/internal/agent/memory.md. The comment is accurate, just longer than the project standard asks.",
+  "iter": 1
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "Suggestion",
+  "description": "With the tool unregistered, a model that still emits a save_text_memory call receives the registry's \"Tool 'save_text_memory' not found\" card, which can turn an otherwise successful query_database answer into an error result for the MCP client. The change adds no handling or test for that path. The failure is loud rather than silent and the prompt section is now dropped, so the trigger is unlikely.",
+  "iter": 1
+ },
+ {
+  "agent": "prflow:pr-test-analyzer",
+  "severity": "Suggestion",
+  "description": "No test composes the environment-variable arm of acceptance criterion three end to end. tests/unit/test_config_schema.py lines 317 to 322 prove the environment variable sets the field and tests/unit/test_factory_wiring.py lines 479 to 491 prove a true field registers the tool, but nothing runs Config.load under SQLLENS_MEMORY__SAVE_TEXT_MEMORIES and then build_agent. The gate reads cfg.memory.save_text_memories directly, so the escape risk is low.",
+  "iter": 1
+ },
+ {
+  "agent": "prflow:pr-test-analyzer",
+  "severity": "Suggestion",
+  "description": "The mcpb/README.md settings row acceptance criterion two requires has no assertion, unlike the manifest field, its environment mapping and the deliberate absence of allow_admin_tools and insecure, which the new test pins. Since no pull-request job builds the bundle, a later manifest title or default change can drift from the published table unnoticed. The consequence is limited to documentation.",
+  "iter": 1
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "Suggestion",
+  "description": "The blank-string coercion accepts an empty or whitespace-only value for save_text_memories and reads it as off, while the sibling booleans exposed through the same MCPB ${user_config.<bool>} mapping (MemoryConfig.save_queries, allow_import, allow_admin_tools, DatabaseConfig.read_only) have no such coercion and raise a validation error at startup instead. The final pass adds the related case of a bundle upgraded from a version predating the field, where an unreplaced ${user_config.save_text_memories} placeholder blocks server startup rather than reading as off. No decided criterion asks for either behavior.",
+  "fix_decision": "deferred",
+  "iter": 2
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "Suggestion",
+  "description": "The internal docs claim the prompt's section numbered 2. TEXT MEMORY is not printed when the flag is off, repeated at docs/internal/setup/config-loading.md line 30, but the new assertions in tests/unit/test_factory_wiring.py lines 483, 498 and 513 match only the bare text TEXT MEMORY, so the section-number half of the claim has no test behind it. The claim itself holds against src/sqllens/agent/core/system_prompt/default.py.",
+  "fix_decision": "deferred",
+  "iter": 2
+ },
+ {
+  "agent": "prflow:comment-analyzer",
+  "severity": "Suggestion",
+  "description": "The new eight-line comment names the wrong change and its consequence only in its last three lines; the first five restate what save_text_memory is for and how has_text_memory gates the prompt section, which docs/internal/agent/memory.md already records. The comment is accurate. Reported in the previous iteration with no decision recorded and still present at this head.",
+  "fix_decision": "deferred",
+  "iter": 2
+ },
+ {
+  "agent": "prflow:requesting-code-review",
+  "severity": "Suggestion",
+  "description": "The pre-existing save_queries comment still says dropping the registration drops the prompt guidance with it, which is the claim this change corrects for the text-memory case in docs/internal/agent/memory.md line 96 and docs/internal/setup/config-loading.md line 30, because the save sentence rides on has_search and survives. The diff mirrors the corrected wording into the new comment but leaves this sibling comment unchanged. The line is outside the diff and is an internal code comment, so it is a clarity gap only.",
+  "fix_decision": "deferred",
+  "iter": 2
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "Important",
+  "description": "The diff edits the dated, already-published May 20, 2026 release-note entry for memory.save_queries, removing the clause 'and still saves free-form notes'. The issue asked that dated release-note and changelog entries be left unedited; only the first ## Unreleased section was to gain the new entry. The edit also makes that release's description of shipped behavior less accurate, because at that release SQL Lens did still save free-form notes with save_queries off.",
+  "defect_signature": {
+   "file": "docs/external/release-notes.md",
+   "line_range": [
+    73,
+    73
+   ],
+   "kind": "other"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "Suggestion",
+  "description": "The new helper _prompt_from_agent_tools declares its parameter as `object` and then calls agent.get_available_tools(user), giving up static checking on the one seam the three new prompt assertions depend on.",
+  "defect_signature": {
+   "file": "tests/unit/test_factory_wiring.py",
+   "line_range": [
+    238,
+    247
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:comment-analyzer",
+  "severity": "Suggestion",
+  "description": "The save_queries field description still says the system prompt 'drops its save instructions automatically' when the flag is off, while this change establishes in the internal docs that 'Do NOT forget to save successful executions.' survives under has_search. The doc files were corrected in this diff; this untouched description is the last statement of the superseded claim.",
+  "defect_signature": {
+   "file": "src/sqllens/config.py",
+   "line_range": [
+    167,
+    176
+   ],
+   "kind": "comment_drift"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:pr-test-analyzer",
+  "severity": "Suggestion",
+  "description": "Same defect as F-2: the new prompt helper is typed `object` while dereferencing an Agent-only method, so a rename of Agent.get_available_tools would surface only as a runtime AttributeError.",
+  "defect_signature": {
+   "file": "tests/unit/test_factory_wiring.py",
+   "line_range": [
+    444,
+    457
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:requesting-code-review",
+  "severity": "Suggestion",
+  "description": "The manifest always sets SQLLENS_MEMORY__SAVE_TEXT_MEMORIES, but nothing in this change establishes what an upgraded bundle install substitutes for a user_config field with no stored value. An unreplaced literal placeholder would fail config load and stop startup, with no pull-request-time signal because mcpb.yml runs on tags and manual dispatches only. Pre-existing shape, also present for read_only.",
+  "defect_signature": {
+   "file": "mcpb/manifest.json",
+   "line_range": [
+    30,
+    30
+   ],
+   "kind": "other"
+  },
+  "fix_decision": "advisory"
+ }
+]

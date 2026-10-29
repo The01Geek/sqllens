@@ -1,0 +1,136 @@
+{
+  "root_completeness": "established",
+  "verdict": "APPROVE with notes",
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:pr-test-analyzer",
+    "prflow:requesting-code-review"
+  ],
+  "plan_eligible": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:pr-test-analyzer",
+    "prflow:requesting-code-review"
+  ],
+  "plan_exclusions": [],
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:pr-test-analyzer",
+    "prflow:requesting-code-review"
+  ],
+  "phase3_failed_agents": [],
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "file": "docs/external/release-notes.md",
+      "line_range": [73, 73],
+      "kind": "other",
+      "severity": "Important",
+      "agent": "prflow:silent-failure-hunter",
+      "corroboration": 1,
+      "description": "The diff edits the dated, already-published May 20, 2026 release-note entry for memory.save_queries, removing the clause 'and still saves free-form notes'. The issue asked that dated release-note and changelog entries be left unedited; only the first ## Unreleased section was to gain the new entry, which it correctly does at line 11. The edit also makes that release's description of shipped behavior less accurate, because at that release SQL Lens did still save free-form notes with save_queries off. Behavior-inert prose cap applied: capped at Important (first-conjunct=held, limb-one=held, limb-two=not-held), so it takes no self-contradicting-diff carve-out."
+    },
+    {
+      "finding_id": "F-2",
+      "file": "src/sqllens/config.py",
+      "line_range": [218, 227],
+      "kind": "api_misuse",
+      "severity": "Suggestion",
+      "agent": "prflow:silent-failure-hunter",
+      "corroboration": 2,
+      "description": "Blank-string-reads-as-off tolerance is added only for save_text_memories; siblings save_queries, allow_import and allow_admin_tools still reject a blank environment variable, so the same operator mistake behaves differently across the memory flags and nothing documents the split. Corroborated by prflow:requesting-code-review (F-9)."
+    },
+    {
+      "finding_id": "F-3",
+      "file": "tests/unit/test_factory_wiring.py",
+      "line_range": [238, 247],
+      "kind": "type_design",
+      "severity": "Suggestion",
+      "agent": "prflow:silent-failure-hunter",
+      "corroboration": 2,
+      "description": "The new helper _prompt_from_agent_tools declares its parameter as `object` and then calls agent.get_available_tools(user), giving up static checking on the one seam the three new prompt assertions depend on. Corroborated by prflow:pr-test-analyzer (F-7)."
+    },
+    {
+      "finding_id": "F-4",
+      "file": "src/sqllens/config.py",
+      "line_range": [167, 176],
+      "kind": "comment_drift",
+      "severity": "Suggestion",
+      "agent": "prflow:comment-analyzer",
+      "corroboration": 1,
+      "description": "The save_queries field description still says the system prompt 'drops its save instructions automatically' when the flag is off, while this change establishes in the internal docs that 'Do NOT forget to save successful executions.' survives under has_search. The doc files were corrected in this diff; this untouched description is the last statement of the superseded claim."
+    },
+    {
+      "finding_id": "F-5",
+      "file": "src/sqllens/agent/factory.py",
+      "line_range": [132, 140],
+      "kind": "style",
+      "severity": "Suggestion",
+      "agent": "prflow:comment-analyzer",
+      "corroboration": 1,
+      "description": "In the save_text_memory block comment, only the last three lines name a specific wrong change and its consequence; the first five restate what the adjacent gate line and the sibling save_queries comment already convey."
+    },
+    {
+      "finding_id": "F-6",
+      "file": "tests/unit/test_factory_wiring.py",
+      "line_range": [501, 513],
+      "kind": "test_gap",
+      "severity": "Suggestion",
+      "agent": "prflow:pr-test-analyzer",
+      "corroboration": 1,
+      "description": "The enabled-path registration test only exercises save_text_memories=True built directly into MemoryConfig. Acceptance criterion three also names the environment-variable route reaching build_agent, which is covered only at the config layer, so the full composition from environment variable to prompt is inferred rather than exercised. Small risk, a completeness nicety."
+    },
+    {
+      "finding_id": "F-7",
+      "file": "tests/unit/test_factory_wiring.py",
+      "line_range": [444, 457],
+      "kind": "type_design",
+      "severity": "Suggestion",
+      "agent": "prflow:pr-test-analyzer",
+      "corroboration": 2,
+      "description": "Same defect as F-3: the new prompt helper is typed `object` while dereferencing an Agent-only method, so a rename of Agent.get_available_tools would surface only as a runtime AttributeError."
+    },
+    {
+      "finding_id": "F-8",
+      "file": "mcpb/manifest.json",
+      "line_range": [30, 30],
+      "kind": "other",
+      "severity": "Suggestion",
+      "agent": "prflow:requesting-code-review",
+      "corroboration": 1,
+      "description": "The manifest always sets SQLLENS_MEMORY__SAVE_TEXT_MEMORIES, but nothing in this change establishes what an upgraded bundle install substitutes for a user_config field with no stored value. An unreplaced literal placeholder would fail config load and stop startup, with no pull-request-time signal because mcpb.yml runs on tags and manual dispatches only. Pre-existing shape, also present for read_only."
+    },
+    {
+      "finding_id": "F-9",
+      "file": "src/sqllens/config.py",
+      "line_range": [218, 227],
+      "kind": "style",
+      "severity": "Suggestion",
+      "agent": "prflow:requesting-code-review",
+      "corroboration": 2,
+      "description": "Same defect as F-2: save_text_memories is the only MemoryConfig boolean with blank-string tolerance, so the asymmetry is a trap for an operator who exports an unset shell variable for a sibling flag."
+    }
+  ],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": false,
+    "test_relevant": true,
+    "detect_all_audit": false,
+    "file_count": 15,
+    "changed_lines": 331,
+    "checklist_skipped": null
+  },
+  "cap_drops": {
+    "count": 0,
+    "by_category": {}
+  },
+  "phase4_demoted": [],
+  "reject_drivers": [],
+  "criterion_exempt": []
+}

@@ -1,0 +1,42 @@
+[
+ {
+  "agent": "prflow:code-reviewer",
+  "severity": "Important",
+  "description": "docs/external/release-notes.md has no entry for this change. The first '## Unreleased' section, directly below the October 28, 2026 entry, mentions neither save_text_memories nor the agent no longer saving free-form notes. Acceptance criterion four requires an entry there stating the agent no longer saves free-form notes unless save_text_memories = true, marking it a behavior change for existing deployments, telling TOML and environment-variable operators to set save_text_memories = true to keep the old behavior, telling MCPB users to tick the new checkbox, and explaining that earlier notes stay in memory and are still used, that an agent-written note cannot be told apart from an imported one, that TOML and environment operators can review and delete wrong notes with the memory-administration tools, linking the 'Memory-Administration Tools for the Assistant' section of docs/external/managing-memory.md, and that an MCPB install's settings cannot turn those tools on.",
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:comment-analyzer",
+  "severity": "Suggestion",
+  "description": "The expanded comment runs eight lines, of which only the last three name a wrong change and its consequence (do not move the gate into SaveTextMemoryTool.execute or ChromaAgentMemory.save_text_memory, which would drop curated notes). The earlier lines restate what save_text_memory is for and how has_text_memory gates the prompt section, already recorded in docs/internal/agent/memory.md. The comment is accurate, just longer than the project standard asks."
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "Suggestion",
+  "description": "With the tool unregistered, a model that still emits a save_text_memory call receives the registry's \"Tool 'save_text_memory' not found\" card, which can turn an otherwise successful query_database answer into an error result for the MCP client. The change adds no handling or test for that path. The failure is loud rather than silent and the prompt section is now dropped, so the trigger is unlikely."
+ },
+ {
+  "agent": "prflow:pr-test-analyzer",
+  "severity": "Suggestion",
+  "description": "No test composes the environment-variable arm of acceptance criterion three end to end. tests/unit/test_config_schema.py lines 317 to 322 prove the environment variable sets the field and tests/unit/test_factory_wiring.py lines 479 to 491 prove a true field registers the tool, but nothing runs Config.load under SQLLENS_MEMORY__SAVE_TEXT_MEMORIES and then build_agent. The gate reads cfg.memory.save_text_memories directly, so the escape risk is low."
+ },
+ {
+  "agent": "prflow:pr-test-analyzer",
+  "severity": "Suggestion",
+  "description": "The mcpb/README.md settings row acceptance criterion two requires has no assertion, unlike the manifest field, its environment mapping and the deliberate absence of allow_admin_tools and insecure, which the new test pins. Since no pull-request job builds the bundle, a later manifest title or default change can drift from the published table unnoticed. The consequence is limited to documentation."
+ },
+ {
+  "agent": "loop:class-sweep",
+  "severity": "Important",
+  "description": "docs/external/release-notes.md line 73, the May 20, 2026 save_queries entry, still claimed that with save_queries off \"SQL Lens still reads any patterns already in memory and still saves free-form notes\". This change makes the free-form-notes half untrue by default. Phase 2 had already removed the same clause from docs/external/configuration.md line 81 (checklist VC-4) but missed this published copy. Class sibling of F-1, found by the Step 3 item 3 sweep over the changed surface.",
+  "defect_signature": {
+   "file": "docs/external/release-notes.md",
+   "line_range": [
+    73,
+    73
+   ],
+   "kind": "documented_falsehood"
+  },
+  "fix_decision": "applied"
+ }
+]

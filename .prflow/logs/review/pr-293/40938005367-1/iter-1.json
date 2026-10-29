@@ -1,0 +1,527 @@
+{
+  "iter": 1,
+  "loop_role": "fix",
+  "fix_commit_sha": "01ab0d870ec9cce39cca79924d189c2619aa67e6",
+  "dispatch_mode": "fanned-out",
+  "dispatch_disposition": null,
+  "fix_decisions": [
+    {
+      "finding_id": "F-1",
+      "decision": "applied",
+      "commit": "01ab0d870ec9cce39cca79924d189c2619aa67e6",
+      "source_file": "docs/external/release-notes.md",
+      "claim_text": "The first ## Unreleased section has no entry for this change, which acceptance criterion 4 requires.",
+      "evidence": "Added the [Change] entry at the top of the first ## Unreleased section (docs/external/release-notes.md line 11). Each clause traced to code before writing: the gate at src/sqllens/agent/factory.py:140; the false default and blank-value handling at src/sqllens/config.py:181,218-225; the MCPB checkbox and its env mapping at mcpb/manifest.json:30,58-64; the absence of any allow_admin_tools checkbox or SQLLENS_MEMORY__ALLOW_ADMIN_TOOLS env entry in that manifest, which is what makes the 'an MCPB install's settings offer no way to turn those tools on' claim true; the admin-tool enablement and the authentication requirement for deleting at docs/external/managing-memory.md:130,144, linked by the anchor #memory-administration-tools-for-the-assistant verified against the heading at line 128."
+    },
+    {
+      "finding_id": "VC-43",
+      "decision": "applied",
+      "commit": "01ab0d870ec9cce39cca79924d189c2619aa67e6",
+      "source_file": "docs/external/release-notes.md",
+      "claim_text": "The first `## Unreleased` section of `docs/external/release-notes.md` has an entry that states the agent no longer saves free-form notes unless `save_text_memories = true`, marks this as a behavior change for existing deployments, tells TOML and environment-variable operators to set it true to keep the old behavior, tells MCPB users to turn on the new checkbox, says earlier notes stay in memory and are still used, says an agent-saved note cannot be told apart from an imported one, says TOML and environment operators can review and delete wrong notes with the memory-administration tools, linking the \"Memory-Administration Tools for the Assistant\" section of docs/external/managing-memory.md, and says an MCPB install's settings offer no way to turn those tools on.",
+      "evidence": "Same fix as F-1; the new entry carries every conjunct this checklist item enumerates, each traced to the implementing line as recorded on the F-1 row."
+    },
+    {
+      "finding_id": "F-6",
+      "decision": "applied",
+      "commit": "01ab0d870ec9cce39cca79924d189c2619aa67e6",
+      "source_file": "docs/external/release-notes.md",
+      "claim_text": "The May 20, 2026 save_queries entry still claimed SQL Lens \"still saves free-form notes\" when save_queries is off, which this change makes untrue by default.",
+      "evidence": "Deleted the attacked clause, the first step in the fix discipline's prose order: no acceptance criterion needs it, the remaining sentence (\"SQL Lens still reads any patterns already in memory, and you can seed patterns from a file with sqllens import-memory at any time\") is true at HEAD and still describes the save_queries-off behavior, and the reader is a person reading a published page who can lose a deleted clause. Matches the treatment Phase 2 already applied to the same clause in docs/external/configuration.md line 81."
+    }
+  ],
+  "telemetry": {
+    "phase_1": {
+      "calls": 1,
+      "tokens": 113620,
+      "wall_clock_s": 482
+    }
+  },
+  "phase3_failed_agents": [],
+  "diff_produced_at_head": "4b77e8ef2f85b35341ad2576a4f4fead179c8430",
+  "iteration_head": "01ab0d870ec9cce39cca79924d189c2619aa67e6",
+  "reference_reads": {
+    "fix_delta": {
+      "status": "verified",
+      "outcome": "clean",
+      "reason": null
+    }
+  },
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "file": "docs/external/release-notes.md",
+      "line_range": [
+        9,
+        20
+      ],
+      "kind": "documented_falsehood",
+      "severity": "Important",
+      "corroboration_count": 4,
+      "description": "docs/external/release-notes.md has no entry for this change. The first '## Unreleased' section, directly below the October 28, 2026 entry, mentions neither save_text_memories nor the agent no longer saving free-form notes. Acceptance criterion four requires an entry there stating the agent no longer saves free-form notes unless save_text_memories = true, marking it a behavior change for existing deployments, telling TOML and environment-variable operators to set save_text_memories = true to keep the old behavior, telling MCPB users to tick the new checkbox, and explaining that earlier notes stay in memory and are still used, that an agent-written note cannot be told apart from an imported one, that TOML and environment operators can review and delete wrong notes with the memory-administration tools, linking the 'Memory-Administration Tools for the Assistant' section of docs/external/managing-memory.md, and that an MCPB install's settings cannot turn those tools on.",
+      "capped_by_4_1_5": true,
+      "capped_grade": "important",
+      "inertness": {
+        "first_conjunct": "held",
+        "limb_one": "held",
+        "limb_two": "not-held"
+      },
+      "corroborating_checklist_item": "VC-43",
+      "agent": "prflow:code-reviewer",
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-2",
+      "file": "src/sqllens/agent/factory.py",
+      "line_range": [
+        132,
+        140
+      ],
+      "kind": "style",
+      "severity": "Suggestion",
+      "corroboration_count": 1,
+      "description": "The expanded comment runs eight lines, of which only the last three name a wrong change and its consequence (do not move the gate into SaveTextMemoryTool.execute or ChromaAgentMemory.save_text_memory, which would drop curated notes). The earlier lines restate what save_text_memory is for and how has_text_memory gates the prompt section, already recorded in docs/internal/agent/memory.md. The comment is accurate, just longer than the project standard asks.",
+      "agent": "prflow:comment-analyzer"
+    },
+    {
+      "finding_id": "F-3",
+      "file": "src/sqllens/agent/factory.py",
+      "line_range": [
+        143,
+        144
+      ],
+      "kind": "api_misuse",
+      "severity": "Suggestion",
+      "corroboration_count": 1,
+      "description": "With the tool unregistered, a model that still emits a save_text_memory call receives the registry's \"Tool 'save_text_memory' not found\" card, which can turn an otherwise successful query_database answer into an error result for the MCP client. The change adds no handling or test for that path. The failure is loud rather than silent and the prompt section is now dropped, so the trigger is unlikely.",
+      "agent": "prflow:silent-failure-hunter"
+    },
+    {
+      "finding_id": "F-4",
+      "file": "tests/unit/test_factory_wiring.py",
+      "line_range": [
+        479,
+        491
+      ],
+      "kind": "test_gap",
+      "severity": "Suggestion",
+      "corroboration_count": 1,
+      "description": "No test composes the environment-variable arm of acceptance criterion three end to end. tests/unit/test_config_schema.py lines 317 to 322 prove the environment variable sets the field and tests/unit/test_factory_wiring.py lines 479 to 491 prove a true field registers the tool, but nothing runs Config.load under SQLLENS_MEMORY__SAVE_TEXT_MEMORIES and then build_agent. The gate reads cfg.memory.save_text_memories directly, so the escape risk is low.",
+      "agent": "prflow:pr-test-analyzer"
+    },
+    {
+      "finding_id": "F-5",
+      "file": "tests/unit/test_mcpb_manifest.py",
+      "line_range": [
+        41,
+        51
+      ],
+      "kind": "test_gap",
+      "severity": "Suggestion",
+      "corroboration_count": 1,
+      "description": "The mcpb/README.md settings row acceptance criterion two requires has no assertion, unlike the manifest field, its environment mapping and the deliberate absence of allow_admin_tools and insecure, which the new test pins. Since no pull-request job builds the bundle, a later manifest title or default change can drift from the published table unnoticed. The consequence is limited to documentation.",
+      "agent": "prflow:pr-test-analyzer"
+    },
+    {
+      "finding_id": "F-6",
+      "agent": "loop:class-sweep",
+      "severity": "Important",
+      "description": "docs/external/release-notes.md line 73, the May 20, 2026 save_queries entry, still claimed that with save_queries off \"SQL Lens still reads any patterns already in memory and still saves free-form notes\". This change makes the free-form-notes half untrue by default. Phase 2 had already removed the same clause from docs/external/configuration.md line 81 (checklist VC-4) but missed this published copy. Class sibling of F-1, found by the Step 3 item 3 sweep over the changed surface.",
+      "defect_signature": {
+        "file": "docs/external/release-notes.md",
+        "line_range": [
+          73,
+          73
+        ],
+        "kind": "documented_falsehood"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    }
+  ],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": false,
+    "test_relevant": true,
+    "detect_all_audit": false,
+    "file_count": 14,
+    "changed_lines": 327
+  },
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:pr-test-analyzer"
+  ],
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:pr-test-analyzer"
+  ],
+  "cap_drops": {
+    "count": 0,
+    "by_category": {}
+  },
+  "checklist": [
+    {
+      "id": "VC-1",
+      "claim_signature": "absolute_claim:configuration.md:text-notes-only-when-flag-on:71",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-2",
+      "claim_signature": "absolute_claim:configuration.md:save-text-memories-row-blank-off:82",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-3",
+      "claim_signature": "api_contract:configuration.md:mcpb-checkbox-label-wins:82",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-4",
+      "claim_signature": "absolute_claim:configuration.md:save-queries-off-no-writes:81",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-5",
+      "claim_signature": "absolute_claim:managing-memory.md:import-admin-notes-ungated:10",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-6",
+      "claim_signature": "dependency_interaction:factory.md:save-text-memory-gate:40",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-7",
+      "claim_signature": "absolute_claim:memory.md:text-memory-gate-and-enhancer:24",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-8",
+      "claim_signature": "dependency_interaction:memory.md:per-flag-save-gates:78",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-9",
+      "claim_signature": "dependency_interaction:memory.md:quoted-registration-snippet:89",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-10",
+      "claim_signature": "dependency_interaction:memory.md:save-sentence-under-has-search:96",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-11",
+      "claim_signature": "dependency_interaction:memory.md:curated-paths-direct-save:97",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-12",
+      "claim_signature": "data_format_assumption:memory.md:save-text-memories-knob-row:112",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-13",
+      "claim_signature": "dependency_interaction:memory.md:save-queries-knob-row:111",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-14",
+      "claim_signature": "dependency_interaction:memory.md:save-text-memory-reachability:140",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-15",
+      "claim_signature": "absolute_claim:memory.md:default-registers-search-only:148",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-16",
+      "claim_signature": "dependency_interaction:overview.md:memory-tool-registration-gates:93",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-17",
+      "claim_signature": "dependency_interaction:config.py:blank-bool-before-validator:218",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-18",
+      "claim_signature": "data_format_assumption:config.py:empty-env-arrives-as-str:225",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-19",
+      "claim_signature": "dependency_interaction:factory.py:save-text-tool-gate:140",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-20",
+      "claim_signature": "absolute_claim:factory.py:has-text-memory-gate-comment:133",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-21",
+      "claim_signature": "absolute_claim:config.py:save-text-memories-description:181",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-22",
+      "claim_signature": "absolute_claim:config-loading.md:save-text-memories-row:30",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-23",
+      "claim_signature": "api_contract:manifest.json:save-text-memories-env-boolean:30",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-24",
+      "claim_signature": "data_format_assumption:manifest.json:user-config-field-shape:58",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-25",
+      "claim_signature": "absolute_claim:manifest.json:imports-unaffected:61",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-26",
+      "claim_signature": "absolute_claim:README.md:checkbox-table-row:30",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-27",
+      "claim_signature": "test_mock_alignment:test_factory_wiring.py:prompt-helper-signatures:246",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-28",
+      "claim_signature": "test_mock_alignment:test_factory_wiring.py:prompt-literal-substrings:306",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-29",
+      "claim_signature": "test_mock_alignment:test_factory_wiring.py:async-auto-mode:253",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-30",
+      "claim_signature": "test_mock_alignment:test_factory_wiring.py:config-direct-construction:266",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-31",
+      "claim_signature": "test_mock_alignment:test_factory_wiring.py:tool-registry-private-dict:303",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-32",
+      "claim_signature": "test_mock_alignment:test_factory_wiring.py:new-imports-exist:22",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-33",
+      "claim_signature": "test_mock_alignment:test_config_schema.py:memory-extra-ignore:561",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-34",
+      "claim_signature": "test_mock_alignment:test_config_schema.py:blank-toml-string:525",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-35",
+      "claim_signature": "test_mock_alignment:test_config_schema.py:env-cleanup-fixture:43",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-36",
+      "claim_signature": "test_mock_alignment:test_mcpb_manifest.py:manifest-path-parents:18",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-37",
+      "claim_signature": "absolute_claim:test_mcpb_manifest.py:no-pr-bundle-ci:6",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-38",
+      "claim_signature": "absolute_claim:test_mcpb_manifest.py:admin-insecure-not-exposed:51",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-39",
+      "claim_signature": "test_mock_alignment:_config_builders.py:save-text-memories-param:33",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-1",
+      "id": "VC-40",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-2",
+      "id": "VC-41",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-3",
+      "id": "VC-42",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-4",
+      "id": "VC-43",
+      "reused_from_iter_prev": false,
+      "verdict": "FAIL",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-5",
+      "id": "VC-44",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    }
+  ],
+  "fix_files": [
+    "docs/external/release-notes.md"
+  ],
+  "synthesized": false
+}

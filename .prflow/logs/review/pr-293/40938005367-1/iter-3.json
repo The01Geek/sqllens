@@ -1,0 +1,185 @@
+{
+  "iter": 3,
+  "loop_role": "promoted",
+  "promotion_provenance": "shadow",
+  "fix_commit_sha": "1e58a05030c3e5f7b88cea8b93b20315df122d07",
+  "dispatch_mode": "fanned-out",
+  "dispatch_disposition": null,
+  "phase3_failed_agents": [],
+  "phase3_dispatched": [],
+  "expected_reviewers": [],
+  "fix_decisions": [
+    {
+      "finding_id": "F-1",
+      "decision": "applied",
+      "commit": "1e58a05030c3e5f7b88cea8b93b20315df122d07",
+      "source_file": "docs/external/release-notes.md",
+      "claim_text": "The diff edits the dated, already-published May 20, 2026 release-note entry, which the issue asked be left unedited, and the removal makes that release's description of shipped behavior less accurate.",
+      "evidence": "Verified and applied. The issue body line 71 states: \"leave the dated entries of the release notes and the changelog, and the historical v0.1.0 production-readiness audit page under the internal docs, unedited\" — an explicit instruction my iteration 1 class sweep violated. The clause was also true of the release it dates: before this change save_text_memory was ungated, so at the 2026-05-20 release SQL Lens did still save free-form notes with save_queries off. Restored the clause verbatim; git diff against the base 4b77e8ef now shows the added Unreleased entry as the only change to this file, so the dated entry is byte-identical to the base. This supersedes iteration 1's F-6, which was my own misjudgment: I read a dated historical entry as a present-tense claim. No rework could satisfy both, because the only issue-compliant state of a dated entry is its original text, so iteration 1's F-6 is withdrawn as claim-quality rather than reworked."
+    },
+    {
+      "finding_id": "F-2",
+      "decision": "applied",
+      "commit": "1e58a05030c3e5f7b88cea8b93b20315df122d07",
+      "source_file": "tests/unit/test_factory_wiring.py",
+      "claim_text": "The new helper _prompt_from_agent_tools is typed `object` while dereferencing the Agent-only get_available_tools method.",
+      "evidence": "Annotated the parameter as Agent and added Agent to the existing `from sqllens.agent import User` import at line 22; Agent is exported from sqllens.agent (src/sqllens/agent/__init__.py lines 8 and 29) and is build_agent's declared return type (src/sqllens/agent/factory.py line 55). Class sweep over `: object` in tests/ found no further instance of this defect: the other hits are genuine generic uses (varargs on fakes, _unwrap over arbitrary decorators, and a fails-closed-on-non-string parameter)."
+    },
+    {
+      "finding_id": "F-3",
+      "decision": "applied",
+      "commit": "1e58a05030c3e5f7b88cea8b93b20315df122d07",
+      "source_file": "src/sqllens/config.py",
+      "claim_text": "The save_queries field description still says the system prompt 'drops its save instructions automatically', the claim this change corrects elsewhere.",
+      "evidence": "Weakened the restatement to what holds in every case rather than deleting it, because a reader of the config schema needs to know what turning the flag off does: the description now says the prompt drops its save bullet and the example workflow's save step while the 'Do NOT forget to save successful executions.' sentence rides on the always-registered search tool and still prints. Traced to src/sqllens/agent/core/system_prompt/default.py, where that sentence is emitted under `if has_search` (lines 181 to 182) and the save bullet and workflow save step sit under `has_save` (lines 159 and 178); the search tool is registered unconditionally in build_agent. Wording matches what this PR already established in docs/internal/setup/config-loading.md line 30."
+    },
+    {
+      "finding_id": "F-4",
+      "decision": "applied",
+      "commit": "1e58a05030c3e5f7b88cea8b93b20315df122d07",
+      "source_file": "tests/unit/test_factory_wiring.py",
+      "claim_text": "Same defect as F-2: the new prompt helper is typed `object` while dereferencing an Agent-only method.",
+      "evidence": "Same single fix as F-2; one annotation closes both rows."
+    },
+    {
+      "finding_id": "F-5",
+      "decision": "advisory",
+      "source_file": "mcpb/manifest.json",
+      "claim_text": "Nothing in this change establishes what an upgraded bundle install substitutes for a user_config field it has no stored value for; an unreplaced literal ${user_config.save_text_memories} would fail config load and stop startup.",
+      "skip_category": "advisory-parked",
+      "evidence": "inconclusive after web verification",
+      "step25_classification": "web_inconclusive",
+      "parking_evidence": {
+        "basis": "Step 2.5 web verification could not settle the platform behavior the claim rests on. The MCPB MANIFEST.md spec describes ${user_config.KEY} only as \"Replaced with the user-provided value for configuration KEY\", says nothing about what it resolves to when no stored value exists, and says nothing about upgrades or reinstalls where a new user_config field was added. Two lookups used, within the five-fetch budget. The exposure is pre-existing shape shared with read_only, and the issue already records this boundary as unestablished, so no guard was added for an input whose existence is unestablished.",
+        "failing_input": "An MCPB install upgraded from a bundle version predating the save_text_memories user_config field, where the host has no stored value for it.",
+        "source": null,
+        "finding_ref": {
+          "iter": 3,
+          "index": 5
+        }
+      }
+    },
+    {
+      "finding_id": null,
+      "decision": "applied",
+      "commit": "1e58a05030c3e5f7b88cea8b93b20315df122d07",
+      "source_file": "src/sqllens/agent/factory.py",
+      "claim_text": "The pre-existing save_queries comment at lines 121 to 123 still says dropping the registration drops the prompt guidance with it, the claim this change corrects for the text-memory case, because the save sentence rides on has_search and survives.",
+      "evidence": "Class sibling of F-3, fixed in the same commit under Step 3 item 3, which forbids leaving a sibling of a finding being fixed as out-of-scope. This also resolves iteration 2's below-important-damper-parked F-4, whose site and claim this row carries. The comment now distinguishes the has_save-gated save bullet and example workflow step from the has_search-gated 'Do NOT forget to save successful executions.' sentence, traced to default.py lines 159, 178 and 181 to 182."
+    },
+    {
+      "finding_id": "D-1",
+      "decision": "pushed_back",
+      "source_file": "docs/external/release-notes.md",
+      "claim_text": "The delta inserts the present-tense claim \"SQL Lens ... still saves free-form notes\" into the memory.save_queries entry, but on this branch save_text_memories defaults to false and build_agent only registers SaveTextMemoryTool when it is true, so free-form notes are not saved by default; the same file's line 11 entry states the opposite, leaving two contradictory user-facing claims.",
+      "skip_category": "uncategorized",
+      "original_severity": "Suggestion",
+      "evidence": "Not fixed under fixing.md item 2: the edit this finding asks for would make iteration 3's applied F-1 hold again, and that rule says such an edit is not made and the current finding is pushed back as uncategorized naming the earlier finding. Iteration 3 F-1 is the shadow pass's Important finding, which required restoring this exact clause because the issue body line 71 instructs \"leave the dated entries of the release notes and the changelog, and the historical v0.1.0 production-readiness audit page under the internal docs, unedited\". No rework clears both, because the only issue-compliant state of a dated entry is its original text. The gate is blinded to the issue text, so it could not see that instruction. On the merits the clause is not a present-tense claim: it sits under the dated heading \"## May 20, 2026\" (docs/external/release-notes.md line 70) in a newest-first page of per-release entries, so it describes what shipped at that release, and it was true then because save_text_memory was ungated before this change. The current default is announced for readers by the new first Unreleased entry at line 11. Revisit only if the issue author amends the leave-dated-entries-unedited instruction, after which the clause should be scoped or dropped."
+    }
+  ],
+  "telemetry": {
+    "phase_1": "unavailable"
+  },
+  "iteration_head": "1e58a05030c3e5f7b88cea8b93b20315df122d07",
+  "reference_reads": {
+    "fix_delta": {
+      "status": "verified",
+      "outcome": "pushed_back",
+      "reason": null
+    }
+  },
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "shadow_finding_id": "F-1",
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "Important",
+      "description": "The diff edits the dated, already-published May 20, 2026 release-note entry for memory.save_queries, removing the clause 'and still saves free-form notes'. The issue asked that dated release-note and changelog entries be left unedited; only the first ## Unreleased section was to gain the new entry. The edit also makes that release's description of shipped behavior less accurate, because at that release SQL Lens did still save free-form notes with save_queries off.",
+      "defect_signature": {
+        "file": "docs/external/release-notes.md",
+        "line_range": [
+          73,
+          73
+        ],
+        "kind": "other"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-2",
+      "shadow_finding_id": "F-3",
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "Suggestion",
+      "description": "The new helper _prompt_from_agent_tools declares its parameter as `object` and then calls agent.get_available_tools(user), giving up static checking on the one seam the three new prompt assertions depend on.",
+      "defect_signature": {
+        "file": "tests/unit/test_factory_wiring.py",
+        "line_range": [
+          238,
+          247
+        ],
+        "kind": "type_design"
+      },
+      "corroboration_count": 2,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-3",
+      "shadow_finding_id": "F-4",
+      "agent": "prflow:comment-analyzer",
+      "severity": "Suggestion",
+      "description": "The save_queries field description still says the system prompt 'drops its save instructions automatically' when the flag is off, while this change establishes in the internal docs that 'Do NOT forget to save successful executions.' survives under has_search. The doc files were corrected in this diff; this untouched description is the last statement of the superseded claim.",
+      "defect_signature": {
+        "file": "src/sqllens/config.py",
+        "line_range": [
+          167,
+          176
+        ],
+        "kind": "comment_drift"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-4",
+      "shadow_finding_id": "F-7",
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "Suggestion",
+      "description": "Same defect as F-2: the new prompt helper is typed `object` while dereferencing an Agent-only method, so a rename of Agent.get_available_tools would surface only as a runtime AttributeError.",
+      "defect_signature": {
+        "file": "tests/unit/test_factory_wiring.py",
+        "line_range": [
+          444,
+          457
+        ],
+        "kind": "type_design"
+      },
+      "corroboration_count": 2,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-5",
+      "shadow_finding_id": "F-8",
+      "agent": "prflow:requesting-code-review",
+      "severity": "Suggestion",
+      "description": "The manifest always sets SQLLENS_MEMORY__SAVE_TEXT_MEMORIES, but nothing in this change establishes what an upgraded bundle install substitutes for a user_config field with no stored value. An unreplaced literal placeholder would fail config load and stop startup, with no pull-request-time signal because mcpb.yml runs on tags and manual dispatches only. Pre-existing shape, also present for read_only.",
+      "defect_signature": {
+        "file": "mcpb/manifest.json",
+        "line_range": [
+          30,
+          30
+        ],
+        "kind": "other"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "advisory"
+    }
+  ],
+  "fix_files": [
+    "docs/external/release-notes.md",
+    "src/sqllens/agent/factory.py",
+    "src/sqllens/config.py",
+    "tests/unit/test_factory_wiring.py"
+  ],
+  "synthesized": false
+}
