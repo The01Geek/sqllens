@@ -22,9 +22,7 @@ accepts. Split larger exports into batches within the per-block item cap.
 
 from __future__ import annotations
 
-import csv
 import heapq
-import io
 import json
 import logging
 from datetime import datetime, timedelta
@@ -34,6 +32,7 @@ from pydantic import ValidationError
 
 from sqllens._errors import validation_error_lines
 from sqllens.memory.importer import import_bundle
+from sqllens.memory.io import serialize_csv
 from sqllens.memory.schema import (
     MAX_BUNDLE_ITEMS,
     QUESTION_MAX,
@@ -325,7 +324,8 @@ def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str
     (unrepresentable rows, or schema docs absent from a CSV) — the caller raises
     on that. A merely-empty store is not lossy (nothing existed to lose): it
     returns ``lossy=False`` with an explanatory warning, matching the non-fatal
-    behaviour of the CLI ``export_bundle``.
+    behaviour of the CLI ``export_bundle``. CSV formula-prefix additions also
+    return a non-fatal warning; ``lossy`` still refers to dropped records.
     """
     bundle = store.iter_all()
     pairs = list(bundle.sql_pairs.pairs) if bundle.sql_pairs else []
@@ -349,12 +349,7 @@ def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str
                 f"CSV carries SQL pairs only — {len(docs)} schema doc(s) are NOT "
                 "in this export. Use format='json' for a lossless backup."
             )
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow(["question", "sql"])
-        for pair in pairs:
-            writer.writerow([pair.question, pair.sql])
-        data = buf.getvalue()
+        data = serialize_csv(bundle, warnings=warnings)
     else:
         data = json.dumps(
             {
