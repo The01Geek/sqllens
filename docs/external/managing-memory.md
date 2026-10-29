@@ -117,6 +117,8 @@ Use `--format json` (the default) for a complete, lossless backup. Use `--format
 
 By default, only the command line can import memory. If you set `allow_import = true` in the `[memory]` section (or `SQLLENS_MEMORY__ALLOW_IMPORT=1`), SQL Lens additionally exposes an `import_memory` tool to the connected assistant, which accepts a JSON bundle and returns a summary of what was saved.
 
+Calls also require `auth.mode = "bearer"`, or an explicit `auth.insecure = true` acknowledgement on a closed network. With the default `auth.mode = "none"` and `auth.insecure = false`, the tool returns an error before parsing or importing the bundle. This applies to both stdio and HTTP connections.
+
 If any entry in the bundle fails to save, the tool reports the import as an error to the assistant rather than a success, even when some entries saved and only others failed. A partial import is treated as a failure so the assistant is never told an import succeeded when part of it did not. The reported message gives only the counts of saved, skipped and errored entries; the detailed reason for each failure is written to the server log, not returned to the client.
 
 The same 10 MiB / 10,000-item bundle size limits described under [Bundle size limits](#bundle-size-limits) apply to the tool. A bundle that exceeds either cap is refused with `Invalid memory bundle: ...` before any item is written, so a single oversized request cannot block the server.
