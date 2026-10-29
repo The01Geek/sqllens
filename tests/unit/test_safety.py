@@ -51,11 +51,52 @@ class TestRejectsWrites:
             "DROP TABLE users",
             "CREATE TABLE t (a INT)",
             "ALTER TABLE users ADD COLUMN x INT",
+            "MERGE INTO t USING s ON t.id=s.id WHEN MATCHED THEN DELETE",
         ],
     )
     def test_dml_ddl_rejected(self, sql: str) -> None:
         with pytest.raises(UnsafeSqlError):
             assert_select_only(sql)
+
+
+class TestExecutableComments:
+    @pytest.mark.parametrize("sql", [
+        "SELECT 1 /*!50000 + 1 */",
+        "/*!50000 SELECT 1 */",
+        "SELECT /*! + */ 1",
+        "SELECT 1 /*M!100100 + 1 */",
+        "SELECT 'quoted' /* ordinary */ /*! + 1 */",
+        "SELECT 1 /* # ordinary */ /*! + 1 */",
+        "SELECT 1--x /*! + 1 */",
+        "SELECT 1 # ordinary\n/*! + 1 */",
+    ])
+    @pytest.mark.parametrize("dialect", ["mysql", None])
+    def test_executable_comments_rejected(self, sql, dialect) -> None:
+        with pytest.raises(UnsafeSqlError, match="executable comments"):
+            assert_select_only(sql, dialect=dialect)
+
+    @pytest.mark.parametrize("sql", [
+        "SELECT '/*!50000 text */'",
+        'SELECT "/*M! text */"',
+        "SELECT `/*! identifier */` FROM t",
+        "SELECT 'quote''/*! marker */'",
+        r"SELECT 'quote\'/*! marker */'",
+        "SELECT 1 /* ordinary comment */",
+        "SELECT 1 -- /*! ignored */\n",
+        "SELECT 1 # /*! ignored */\n",
+        "SELECT 1 /* -- ordinary */",
+    ])
+    def test_literals_identifiers_and_ordinary_comments_pass(self, sql) -> None:
+        assert_select_only(sql, dialect="mysql")
+
+    async def test_comment_refusal_never_calls_runner(self) -> None:
+        runner = _RecordingRunner()
+        guard = ReadOnlyGuardRunner(runner, dialect="mysql")
+        with pytest.raises(UnsafeSqlError, match="executable comments"):
+            await guard.run_sql(
+                RunSqlToolArgs(sql="SELECT 1 /*! + 1 */"), ToolContext.model_construct()
+            )
+        assert runner.calls == []
 
 
 class TestRejectsMixed:
@@ -111,6 +152,87 @@ class TestNestedDmlInCte:
 # safety net referenced by ``TestCorpusStaysRejected``: a future sqlglot
 # bump that silently re-opens any of these holes fails the suite.
 _BYPASS_CORPUS: list[tuple[str, str | None]] = [
+    # Weekly audit regressions (#221, #237, #261).
+    ("SELECT pg_catalog.set_config('search_path', 'public', true)", "postgres"),
+    ("WITH q AS (SELECT PG_ADVISORY_LOCK(0)) SELECT * FROM q", "postgres"),
+    ("SELECT public.dblink_get_result('synthetic')", "postgres"),
+    ("SELECT set_config('search_path', 'public', true)", None),
+    ("SELECT dblink_get_notify('synthetic')", "postgres"),
+    ('SELECT 1 /*!50000 UNION SELECT sleep(0) */', 'mysql'),
+    ('SELECT 1 /*! UNION SELECT sleep(0) */', 'mysql'),
+    ('SELECT 1 /*M!100100 UNION SELECT sleep(0) */', 'mysql'),
+    ("SELECT 1 INTO OUTFILE 'synthetic.csv'", 'mysql'),
+    ("SELECT 1 INTO DUMPFILE 'synthetic.bin'", 'mysql'),
+    ('SELECT pg_catalog.pg_sleep(0)', 'postgres'),
+    (
+        'WITH changed AS (MERGE INTO target t USING source s ON t.id=s.id '
+        'WHEN MATCHED THEN DELETE RETURNING t.id) SELECT * FROM changed',
+        'postgres',
+    ),
+    (
+        'WITH changed AS (MERGE INTO target t USING source s ON t.id=s.id '
+        'WHEN MATCHED THEN UPDATE SET value=s.value RETURNING t.id) SELECT * FROM changed',
+        'postgres',
+    ),
+    (
+        'WITH changed AS (MERGE INTO target t USING source s ON t.id=s.id '
+        'WHEN NOT MATCHED THEN INSERT (id) VALUES (s.id) RETURNING t.id) SELECT * FROM changed',
+        'postgres',
+    ),
+    (
+        'WITH changed AS (MERGE INTO target t USING source s ON t.id=s.id '
+        'WHEN MATCHED THEN DO NOTHING RETURNING t.id) SELECT * FROM changed',
+        'postgres',
+    ),
+    ("SELECT dblink('synthetic', 'SELECT 1')", 'postgres'),
+    ("SELECT dblink_connect('synthetic')", 'postgres'),
+    ("SELECT dblink_connect_u('synthetic')", 'postgres'),
+    ("SELECT dblink_disconnect('synthetic')", 'postgres'),
+    ("SELECT dblink_open('cursor', 'SELECT 1')", 'postgres'),
+    ("SELECT dblink_fetch('cursor', 1)", 'postgres'),
+    ("SELECT dblink_close('cursor')", 'postgres'),
+    ("SELECT dblink_send_query('synthetic', 'SELECT 1')", 'postgres'),
+    ("SELECT dblink_get_result('synthetic')", 'postgres'),
+    ("SELECT dblink_cancel_query('synthetic')", 'postgres'),
+    ("SELECT set_config('search_path', 'public', true)", 'postgres'),
+    ("SELECT pg_notify('test', 'test')", 'postgres'),
+    ('SELECT pg_reload_conf()', 'postgres'),
+    ('SELECT pg_promote()', 'postgres'),
+    ('SELECT pg_rotate_logfile()', 'postgres'),
+    ('SELECT pg_switch_wal()', 'postgres'),
+    ('SELECT pg_advisory_lock(0)', 'postgres'),
+    ('SELECT pg_advisory_lock_shared(0)', 'postgres'),
+    ('SELECT pg_advisory_xact_lock(0)', 'postgres'),
+    ('SELECT pg_advisory_xact_lock_shared(0)', 'postgres'),
+    ('SELECT pg_try_advisory_lock(0)', 'postgres'),
+    ('SELECT pg_try_advisory_lock_shared(0)', 'postgres'),
+    ('SELECT pg_try_advisory_xact_lock(0)', 'postgres'),
+    ('SELECT pg_try_advisory_xact_lock_shared(0)', 'postgres'),
+    ('SELECT pg_advisory_unlock(0)', 'postgres'),
+    ('SELECT pg_advisory_unlock_shared(0)', 'postgres'),
+    ('SELECT pg_advisory_unlock_all()', 'postgres'),
+    ('SELECT pg_stat_reset()', 'postgres'),
+    ("SELECT pg_stat_reset_shared('wal')", 'postgres'),
+    ('SELECT pg_stat_reset_single_table_counters(0)', 'postgres'),
+    ('SELECT pg_stat_reset_single_function_counters(0)', 'postgres'),
+    ("SELECT pg_stat_reset_slru('notify')", 'postgres'),
+    ("SELECT pg_stat_reset_replication_slot('test')", 'postgres'),
+    ('SELECT pg_stat_reset_subscription_stats(0)', 'postgres'),
+    ('SELECT pg_stat_reset_backend_stats(0)', 'postgres'),
+    ("SELECT query_to_xml('SELECT 1', true, false, '')", 'postgres'),
+    ("SELECT query_to_xmlschema('SELECT 1', true, false, '')", 'postgres'),
+    ("SELECT query_to_xml_and_xmlschema('SELECT 1', true, false, '')", 'postgres'),
+    ("SELECT table_to_xml('synthetic', true, false, '')", 'postgres'),
+    ("SELECT table_to_xmlschema('synthetic', true, false, '')", 'postgres'),
+    ("SELECT table_to_xml_and_xmlschema('synthetic', true, false, '')", 'postgres'),
+    ("SELECT schema_to_xml('synthetic', true, false, '')", 'postgres'),
+    ("SELECT schema_to_xmlschema('synthetic', true, false, '')", 'postgres'),
+    ("SELECT schema_to_xml_and_xmlschema('synthetic', true, false, '')", 'postgres'),
+    ("SELECT database_to_xml(true, false, '')", 'postgres'),
+    ("SELECT database_to_xmlschema(true, false, '')", 'postgres'),
+    ("SELECT database_to_xml_and_xmlschema(true, false, '')", 'postgres'),
+    ("SELECT cursor_to_xml('test', 1, true, false, '')", 'postgres'),
+    ("SELECT cursor_to_xmlschema('test', true, false, '')", 'postgres'),
     # Side-effecting / RCE / DoS functions, per dialect.
     ("SELECT load_extension('evil.so')", "sqlite"),  # SQLite RCE (default deploy)
     ("SELECT dblink_exec('dbname=x', 'DROP TABLE t')", "postgres"),
@@ -354,6 +476,9 @@ class TestBenignTypedFunctionLiteralsPass:
         ("sql", "dialect"),
         [
             ("SELECT md5('pg_sleep')", "postgres"),
+            ("SELECT lower('set_config')", "postgres"),
+            ("SELECT xmlconcat('<a/>', '<b/>')", "postgres"),
+            ("SELECT current_setting('server_version')", "postgres"),
             ("SELECT lower('load_extension')", "sqlite"),
             ("SELECT length('benchmark') FROM t", "mysql"),
             ("SELECT upper('generate_series')", "postgres"),

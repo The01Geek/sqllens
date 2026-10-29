@@ -14,6 +14,9 @@ path, which makes prompt-injection attacks harder.
 
 from __future__ import annotations
 
+import re
+from itertools import chain
+
 import sqlglot
 from sqlglot import expressions as exp
 
@@ -163,6 +166,7 @@ _DML_DDL_TYPES: tuple[type[exp.Expression], ...] = (
     exp.Insert,
     exp.Update,
     exp.Delete,
+    exp.Merge,
     exp.Drop,
     exp.Create,
     _ALTER_TYPE,
@@ -180,6 +184,56 @@ _SIDE_EFFECT_FUNCS: dict[str, frozenset[str]] = {
     "postgres": frozenset(
         {
             "dblink_exec",
+            "dblink",
+            "dblink_connect",
+            "dblink_connect_u",
+            "dblink_disconnect",
+            "dblink_open",
+            "dblink_fetch",
+            "dblink_close",
+            "dblink_send_query",
+            "dblink_get_result",
+            "dblink_get_notify",
+            "dblink_cancel_query",
+            "set_config",
+            "pg_notify",
+            "pg_reload_conf",
+            "pg_promote",
+            "pg_rotate_logfile",
+            "pg_switch_wal",
+            "pg_advisory_lock",
+            "pg_advisory_lock_shared",
+            "pg_advisory_xact_lock",
+            "pg_advisory_xact_lock_shared",
+            "pg_try_advisory_lock",
+            "pg_try_advisory_lock_shared",
+            "pg_try_advisory_xact_lock",
+            "pg_try_advisory_xact_lock_shared",
+            "pg_advisory_unlock",
+            "pg_advisory_unlock_shared",
+            "pg_advisory_unlock_all",
+            "pg_stat_reset",
+            "pg_stat_reset_shared",
+            "pg_stat_reset_single_table_counters",
+            "pg_stat_reset_single_function_counters",
+            "pg_stat_reset_slru",
+            "pg_stat_reset_replication_slot",
+            "pg_stat_reset_subscription_stats",
+            "pg_stat_reset_backend_stats",
+            "query_to_xml",
+            "query_to_xmlschema",
+            "query_to_xml_and_xmlschema",
+            "table_to_xml",
+            "table_to_xmlschema",
+            "table_to_xml_and_xmlschema",
+            "schema_to_xml",
+            "schema_to_xmlschema",
+            "schema_to_xml_and_xmlschema",
+            "database_to_xml",
+            "database_to_xmlschema",
+            "database_to_xml_and_xmlschema",
+            "cursor_to_xml",
+            "cursor_to_xmlschema",
             "pg_sleep",
             "pg_terminate_backend",
             "pg_cancel_backend",
@@ -273,6 +327,25 @@ def _func_name_candidates(node: exp.Func) -> set[str]:
     return {n.lower() for n in sql_names()}
 
 
+# Only inspect comment gaps between tokens, so quoted strings and identifiers
+# containing these markers remain ordinary data. Preserve line-comment scope.
+_MYSQL_COMMENTS = re.compile(r"/\*.*?\*/|\#[^\r\n]*|--(?=\s|$)[^\r\n]*", re.DOTALL)
+
+
+def _reject_mysql_executable_comments(sql: str) -> None:
+    """Reject server-executed comment syntax before the parser discards it."""
+    if "/*!" not in sql and "/*M!" not in sql:
+        return
+    tokens = sqlglot.tokenize(sql, read="mysql")
+    start = 0
+    gaps = chain(((t.start, t.end + 1) for t in tokens), [(len(sql), len(sql))])
+    for stop, next_start in gaps:
+        for comment in _MYSQL_COMMENTS.finditer(sql, start, stop):
+            if comment.group().startswith(("/*!", "/*M!")):
+                raise UnsafeSqlError("MySQL executable comments are not allowed")
+        start = next_start
+
+
 def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
     """Raise ``UnsafeSqlError`` if ``sql`` contains anything other than reads.
 
@@ -283,8 +356,10 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
         raise UnsafeSqlError("empty SQL")
 
     try:
+        if dialect in ("mysql", None):
+            _reject_mysql_executable_comments(sql)
         statements = sqlglot.parse(sql, dialect=dialect)
-    except sqlglot.errors.ParseError as e:
+    except (sqlglot.errors.ParseError, sqlglot.errors.TokenError) as e:
         raise UnsafeSqlError(f"could not parse SQL: {e}") from e
 
     if len(statements) != 1:
