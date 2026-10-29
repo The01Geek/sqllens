@@ -49,7 +49,7 @@ Reopen Claude Desktop from the Start menu, then jump to [Verify the connection](
 | `--db <url>` | The SQLAlchemy connection URL for your database. Required. |
 | `--api-key <key>` | Anthropic API key. Defaults to the `SQLLENS_LLM__API_KEY` environment variable. |
 | `--name <key>` | Name shown in Claude Desktop and used as the `mcpServers` key. Defaults to the SQLite file stem or the database segment of the URL. |
-| `--model <id>` | Anthropic model identifier. Defaults to `claude-sonnet-4-5-20250929`. |
+| `--model <id>` | Anthropic model identifier. Defaults to `claude-opus-5-5`. |
 | `--working-dir <path>` | Folder where `sqllens.toml` and the launcher are written. Defaults to `%USERPROFILE%\sqllens`. |
 | `--memory-dir <path>` | ChromaDB persistence folder. Defaults to `<working-dir>\chroma`. |
 | `--config-path <path>` | Override the detected `claude_desktop_config.json` location. |
@@ -133,7 +133,7 @@ read_only = true
 
 [llm]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-opus-5-5"
 
 [memory]
 persist_dir = "C:/Users/USERNAME/sqllens/chroma"
@@ -164,7 +164,7 @@ Get-Content $env:USERPROFILE\sqllens\sqllens.toml -Encoding Byte -TotalCount 4
 sqllens validate -c $env:USERPROFILE\sqllens\sqllens.toml
 ```
 
-`sqllens validate` checks structure only and does not require `llm.api_key` to be set for the file to parse. When the key is absent, the command prints the `Config OK` summary (marking the key explicitly as `llm: anthropic / claude-sonnet-4-5-20250929 (api_key NOT SET)`), then prints a `Would fail to start:` notice and exits with code `1` — the configuration is structurally fine but the server would not start until you supply the key. That is expected at this step: you supply the key to `sqllens serve` later through the Claude Desktop `env` block in step 7.
+`sqllens validate` checks structure only and does not require `llm.api_key` to be set for the file to parse. When the key is absent, the command prints the `Config OK` summary (marking the key explicitly as `llm: anthropic / claude-opus-5-5 (api_key NOT SET)`), then prints a `Would fail to start:` notice and exits with code `1` — the configuration is structurally fine but the server would not start until you supply the key. That is expected at this step: you supply the key to `sqllens serve` later through the Claude Desktop `env` block in step 7.
 
 The expected output includes a `Config OK` line. Once the API key is set, `sqllens validate` exits with code `0`.
 

@@ -365,7 +365,7 @@ def claude_desktop_install(
         help="Display name and mcpServers key. Derived from the DSN by default.",
     ),
     model: str = typer.Option(
-        "claude-sonnet-4-5-20250929",
+        "claude-opus-5-5",
         "--model",
         help="Anthropic model id used by the agent.",
     ),
@@ -602,7 +602,7 @@ read_only = true
 [llm]
 provider = "anthropic"
 api_key = "sk-ant-..."   # or set SQLLENS_LLM__API_KEY env var
-model = "claude-sonnet-4-5-20250929"
+model = "claude-opus-5-5"
 # temperature = 0.2      # 0-2; unset sends none (some models reject it)
 # effort = "high"        # low | medium | high | xhigh | max; unset uses the model default
 
