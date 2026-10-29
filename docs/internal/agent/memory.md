@@ -1,6 +1,6 @@
 # Agent memory (ChromaDB-backed vector store)
 
-<!-- verified-against: issue-251 branch 2026-09-17 -->
+<!-- verified-against: 1e58a05 2026-10-29 -->
 
 How the agent recalls prior successful tool uses, and what tunables affect retrieval quality. Source-of-truth reference for [src/sqllens/agent/integrations/chromadb/agent_memory.py](../../../src/sqllens/agent/integrations/chromadb/agent_memory.py), [src/sqllens/agent/capabilities/agent_memory/](../../../src/sqllens/agent/capabilities/agent_memory/), and [src/sqllens/agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py).
 

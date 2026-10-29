@@ -54,6 +54,20 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
   `.cmd` launcher workaround for the non-writable CWD issue (#10).
 
 ### Changed
+- `save_text_memory` is gated behind the new `memory.save_text_memories`
+  flag (`SQLLENS_MEMORY__SAVE_TEXT_MEMORIES`), which defaults to `false`.
+  When off, `build_agent` does not register `SaveTextMemoryTool`, so the
+  agent writes no free-form notes and the default system prompt drops its
+  `2. TEXT MEMORY` section (gated on `has_text_memory`). A blank value (an
+  empty or whitespace-only env var or TOML string) reads as off; any other
+  non-boolean fails config validation. The gate is in the factory, not in
+  `SaveTextMemoryTool.execute` or `ChromaAgentMemory.save_text_memory`, so
+  curated imports via `sqllens.memory.store`, the `import-memory` /
+  `export-memory` CLI commands, and the memory-administration tools are
+  unaffected, and the context enhancer still injects stored notes that
+  match a question. The MCPB manifest exposes the flag as the
+  "Let the assistant save free-form notes" user config, defaulting to off.
+  (#267)
 - Renamed `examples/mcp-clients/claude_desktop.json` →
   `claude_desktop_http.json` to disambiguate the HTTP and stdio
   transports now that both example shapes ship.
