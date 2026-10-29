@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from sqllens._bounded_json import JsonBoundsError
 from sqllens.agent.core.rich_component import ComponentType
 from sqllens.config import RlsRule
 from sqllens.safety.rls import RlsError, apply_rls
@@ -62,14 +63,49 @@ def test_metadata_deep_and_cyclic_values_are_discarded():
     assert metadata(cyclic) == {}
 
 
-def test_metadata_accessor_failure_does_not_escape():
+@pytest.mark.parametrize("failure", [RuntimeError, JsonBoundsError])
+def test_metadata_accessor_failure_is_distinct_and_content_free(failure, caplog):
     class BrokenMeta:
         @property
         def model_extra(self):
-            raise RuntimeError("synthetic-private-detail")
+            raise failure("synthetic-private-detail")
 
     context = SimpleNamespace(request_context=SimpleNamespace(meta=BrokenMeta()))
     assert _request_metadata(context) == {}
+    assert caplog.messages == [
+        "failed to read request metadata extras; returning empty metadata"
+    ]
+    assert all(record.exc_info is None and record.stack_info is None for record in caplog.records)
+    assert "synthetic-private-detail" not in caplog.text
+
+
+@pytest.mark.parametrize("failure", [RuntimeError, ValueError])
+def test_metadata_copy_failure_is_distinct_and_content_free(failure, caplog, monkeypatch):
+    def broken_copy(value):
+        raise failure("synthetic-private-detail")
+
+    monkeypatch.setattr("sqllens.server.copy_bounded_json", broken_copy)
+    assert metadata({"tenant": "private-tenant"}) == {}
+    assert caplog.messages == [
+        "unexpected failure bounding request metadata; returning empty metadata"
+    ]
+    assert all(record.exc_info is None and record.stack_info is None for record in caplog.records)
+    assert "synthetic-private-detail" not in caplog.text
+    assert "private-tenant" not in caplog.text
+
+
+@pytest.mark.parametrize("extras", [
+    {"tenant": "private-tenant", "padding": "x" * 20000},
+    {str(i): "private-tenant" for i in range(65)},
+    ["private-tenant"],
+])
+def test_metadata_rejection_is_distinct_and_content_free(extras, caplog):
+    assert metadata(extras) == {}
+    assert caplog.messages == [
+        "invalid or oversized request metadata; returning empty metadata"
+    ]
+    assert all(record.exc_info is None and record.stack_info is None for record in caplog.records)
+    assert "private-tenant" not in caplog.text
 
 
 def test_trace_nested_strings_are_truncated_without_mutating_input():

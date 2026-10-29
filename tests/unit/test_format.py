@@ -1507,6 +1507,21 @@ def test_build_agent_trace_caps_oversized_arguments() -> None:
     assert _serialized_len(trace) <= _MAX_TABLE_PAYLOAD_BYTES
 
 
+def test_build_agent_trace_strips_arguments_when_small_steps_exceed_total_budget() -> None:
+    arguments = {"sql": "x" * 1024}
+    stream = []
+    for _ in range(140):
+        stream.extend(make_tool_cards("run_sql", arguments, ok=True))
+    trace = build_agent_trace(stream, total_duration_ms=5, max_iterations=200)
+    assert _serialized_len(trace) <= _MAX_TABLE_PAYLOAD_BYTES
+    assert trace["arguments_truncated"] is True
+    assert trace["iterations"] == 140
+    assert len(trace["steps"]) == 140
+    assert all("arguments" not in step for step in trace["steps"])
+    assert not trace.get("steps_truncated")
+    assert all(card.rich_component.metadata == {"sql": "x" * 1024} for card in stream)
+
+
 # ---------------------------------------------------------------------------
 # One-row results render as a text block (issue #257)
 # ---------------------------------------------------------------------------

@@ -25,7 +25,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
 from pydantic import ValidationError
 
-from sqllens._bounded_json import copy_bounded_json
+from sqllens._bounded_json import JsonBoundsError, copy_bounded_json
 from sqllens.config import Config
 from sqllens.profiles import (
     DEFAULT_PROFILE_NAME,
@@ -229,19 +229,27 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
         return {}
     if meta is None:
         return {}
+    # Keep extras diagnostics content-free, including unexpected SDK/helper
+    # faults: exception messages and tracebacks can contain metadata values.
     try:
         extra = getattr(meta, "model_extra", None)
-        if extra is None:
-            logger.debug("request _meta exposes no model_extra; returning empty metadata")
-            return {}
+    except Exception:
+        logger.warning("failed to read request metadata extras; returning empty metadata")
+        return {}
+    if extra is None:
+        logger.debug("request _meta exposes no model_extra; returning empty metadata")
+        return {}
+    try:
         if type(extra) is not dict or len(extra) > 64:
-            raise ValueError("request metadata key limit or shape")
+            raise JsonBoundsError("request metadata key limit or shape")
         bounded, _ = copy_bounded_json(extra)
         return bounded
-    except Exception:
-        # Do not echo metadata or exception content into the diagnostic. A
-        # rejected tree is never partially forwarded to dynamic RLS rules.
+    except JsonBoundsError:
+        # A rejected tree is never partially forwarded to dynamic RLS rules.
         logger.warning("invalid or oversized request metadata; returning empty metadata")
+        return {}
+    except Exception:
+        logger.warning("unexpected failure bounding request metadata; returning empty metadata")
         return {}
 
 

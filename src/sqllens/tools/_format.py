@@ -656,10 +656,7 @@ def build_agent_trace(
        silently reported as a clean finish;
     5. else ``None`` — a clean run.
 
-    Argument strings retain at most 1024 characters plus a truncation suffix.
-    Per-step argument trees exceeding 16 KiB of ASCII-escaped JSON, 1024 nodes,
-    or eight nesting levels are replaced by an empty object. Either form of
-    elision sets ``arguments_truncated``. This bounds content, not secrets.
+    For per-step argument bounds, see ``docs/internal/mcp-server/tools.md``.
     Over-budget traces are size-capped by :func:`_cap_trace_size`, which may add
     ``arguments_truncated``/``steps_truncated`` flags and drop per-step
     ``arguments`` or trailing steps to fit the ``_meta`` iframe ceiling.
@@ -802,9 +799,8 @@ def _cap_trace_size(trace: dict) -> dict:
 
     The trace rides the same ``CallToolResult._meta`` blob as the table/chart
     payloads, which the host pushes into a sandboxed iframe — a multi-MB blob is
-    what actually breaks rendering (see ``_MAX_TABLE_PAYLOAD_BYTES``). Per-step
-    ``arguments`` (raw SQL, memory-search text) are the unbounded part, so when
-    the trace is over budget we drop them first (flagging ``arguments_truncated``
+    what actually breaks rendering (see ``_MAX_TABLE_PAYLOAD_BYTES``). When
+    the trace is over budget we drop per-step ``arguments`` first (flagging ``arguments_truncated``
     and stripping ``arguments`` from each step), then, only if still over, keep
     the largest contiguous step prefix that fits (recording ``steps_truncated``).
     A loud flag beats a silently-broken widget on the debugging path.
