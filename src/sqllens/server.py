@@ -26,7 +26,13 @@ from mcp.types import CallToolResult, TextContent
 from pydantic import ValidationError
 
 from sqllens.config import Config
-from sqllens.profiles import DEFAULT_PROFILE_NAME, Profile, ProfileStore
+from sqllens.profiles import (
+    DEFAULT_PROFILE_NAME,
+    Profile,
+    ProfileNameError,
+    ProfileStore,
+    validate_profile_name,
+)
 from sqllens.tools._format import append_conversation_footer
 from sqllens.tools.list_data_sources import list_data_sources_impl
 from sqllens.tools.query_database import AgentRunError, query_database_impl_with_widgets
@@ -305,9 +311,10 @@ def build_server(cfg: Config) -> FastMCP:
         ``profile`` selects a named config profile for this single request —
         the request-local overlay of result-shaping knobs (``show_details``,
         ``max_tool_iterations``, ``max_rows``, ``similarity_threshold``).
-        Omitting it (or passing an unknown name)
-        resolves through the reserved ``default`` profile, which falls back
-        to base config — existing callers see no change. Profiles are managed
+        A non-empty name must use 1-64 characters from ``[A-Za-z0-9_.-]``;
+        other names fail before the agent runs. Omitting it, passing an empty
+        string, or passing an unknown valid name resolves through the reserved
+        ``default`` profile, which falls back to base config. Profiles are managed
         through ``list_profiles`` / ``get_profile`` / ``upsert_profile`` /
         ``delete_profile`` (all gated on ``profiles.allow_admin_tools``).
 
@@ -734,6 +741,13 @@ def build_server(cfg: Config) -> FastMCP:
 
         _profile_error = _json_error_result
 
+        def _profile_name_error(name: str) -> CallToolResult | None:
+            try:
+                validate_profile_name(name)
+            except ProfileNameError as exc:
+                return _profile_error({"error": str(exc)})
+            return None
+
         # Bounds derived from the live Profile pydantic model so the wire
         # shape (and the widget's bounded inputs) cannot drift from the
         # validator the upsert path enforces. Adding a fifth knob to
@@ -783,6 +797,8 @@ def build_server(cfg: Config) -> FastMCP:
         async def get_profile(name: str) -> str | CallToolResult:
             """Fetch one named profile by name.
 
+            Names must be 1-64 characters from ``[A-Za-z0-9_.-]``.
+
             Returns the profile's JSON object, or an ``isError`` result with
             ``{"error": "profile not found", "name": ...}`` when no profile
             has that name. Per CLAUDE.md's isError discipline an unknown name
@@ -791,6 +807,8 @@ def build_server(cfg: Config) -> FastMCP:
             instead — a plain "not found" against a corrupt store would
             silently mask the real reason the profile is unreachable.
             """
+            if error := _profile_name_error(name):
+                return error
             store = profile_store
             if store.load_error:
                 return _profile_error(
@@ -815,6 +833,8 @@ def build_server(cfg: Config) -> FastMCP:
         ) -> str | CallToolResult:
             """Create or replace ``name`` with ``knobs`` (write-guarded).
 
+            Names must be 1-64 characters from ``[A-Za-z0-9_.-]``.
+
             ``knobs`` is a dict of the four profile fields; omit a field to
             mean "inherit from base config". Refuses on an unauthenticated
             endpoint unless ``auth.insecure`` is set. Returns the saved
@@ -823,10 +843,8 @@ def build_server(cfg: Config) -> FastMCP:
             success that merely reports the failure.
             """
             _profile_write_auth()
-            if not isinstance(name, str) or not name.strip():
-                return _profile_error(
-                    {"error": "profile name must be a non-empty string"}
-                )
+            if error := _profile_name_error(name):
+                return error
             if not isinstance(knobs, dict):
                 return _profile_error(
                     {"error": "knobs must be a JSON object"}
@@ -850,6 +868,8 @@ def build_server(cfg: Config) -> FastMCP:
             try:
                 async with profile_admin_lock:
                     saved = await store.upsert(name, profile)
+            except ProfileNameError as exc:
+                return _profile_error({"error": str(exc)})
             except Exception:
                 logger.exception("upsert_profile tool failed")
                 raise RuntimeError(
@@ -863,6 +883,8 @@ def build_server(cfg: Config) -> FastMCP:
         async def delete_profile(name: str) -> str | CallToolResult:
             """Delete the named profile (write-guarded).
 
+            Names must be 1-64 characters from ``[A-Za-z0-9_.-]``.
+
             The reserved ``default`` name cannot be deleted; the call returns
             ``isError`` with a clear message. An unknown name also returns
             ``isError``. Refuses on an unauthenticated endpoint unless
@@ -871,6 +893,8 @@ def build_server(cfg: Config) -> FastMCP:
             ``get_profile`` for the same short-circuit rationale.
             """
             _profile_write_auth()
+            if error := _profile_name_error(name):
+                return error
             if name == DEFAULT_PROFILE_NAME:
                 return _profile_error(
                     {"error": "cannot delete the reserved 'default' profile",
@@ -888,6 +912,8 @@ def build_server(cfg: Config) -> FastMCP:
             try:
                 async with profile_admin_lock:
                     await store.delete(name)
+            except ProfileNameError as exc:
+                return _profile_error({"error": str(exc)})
             except KeyError:
                 return _profile_error(
                     {"error": "profile not found", "name": name}
