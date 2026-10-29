@@ -220,7 +220,7 @@ async def test_schema_doc_per_item_failure_is_isolated(
     assert report.saved == 1
     assert len(report.errors) == 1
     assert report.errors[0].kind == "schema_doc"
-    assert "doc-boom" in report.errors[0].message
+    assert report.errors[0].message == "Failed to save memory item; check the server logs."
 
 
 async def test_per_item_save_failure_is_reported_not_fatal(
@@ -241,7 +241,7 @@ async def test_per_item_save_failure_is_reported_not_fatal(
     assert report.saved == 2  # 1 pair failed, 1 pair + 1 doc saved
     assert len(report.errors) == 1
     assert report.errors[0].kind == "sql_pair"
-    assert "boom" in report.errors[0].message
+    assert report.errors[0].message == "Failed to save memory item; check the server logs."
 
 
 async def test_systemic_error_aborts_import_not_per_item(

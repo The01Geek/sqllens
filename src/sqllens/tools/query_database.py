@@ -16,6 +16,7 @@ because the forms here remain mutually distinguishable under it.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Mapping
 from typing import Any
@@ -118,7 +119,8 @@ def _append_sql_block(markdown: str, query_info: dict | None) -> str:
     sql = query_info.get("sql")
     if not sql:
         return markdown
-    return f"{markdown}\n\n**Executed SQL:**\n\n```sql\n{sql}\n```"
+    fence = "`" * max(3, 1 + max((len(run) for run in re.findall(r"`+", sql)), default=0))
+    return f"{markdown}\n\n**Executed SQL:**\n\n{fence}sql\n{sql}\n{fence}"
 
 
 async def query_database_impl(

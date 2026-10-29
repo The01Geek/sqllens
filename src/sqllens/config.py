@@ -184,8 +184,7 @@ class MemoryConfig(BaseModel):
         description=(
             "Expose the save_text_memory agent tool, which lets the agent "
             "persist free-form notes (schema vocabulary, semantic hints) into "
-            "vector memory. OFF by default: a wrong guess the agent saves "
-            "becomes a note later questions receive as trusted context. When "
+            "vector memory. OFF by default. When "
             "disabled the tool is not registered and the default system prompt "
             "drops its TEXT MEMORY section automatically. Notes already stored "
             "— including curated imports — are untouched, and the context "
