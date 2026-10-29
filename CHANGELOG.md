@@ -75,6 +75,7 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
   query selection, with short errors that do not echo rejected names. Invalid
   legacy names require manual repair; profile writes stay disabled until
   repair and restart so excluded entries are not lost. (#211, #214)
+- Reject MySQL executable comments, ambiguous quote/comment boundaries, and nested `MERGE` in the read-only SQL guard, and extend the PostgreSQL function denylist for remote queries, XML exports, and session/administrative changes. Block MySQL advisory-lock changes and position-based replication waits. Regression coverage includes supported parser boundaries. (#221, #237, #261)
 - Pin both Docker base stages to a verified multi-platform digest and constrain
   the complete Python runtime install, including PostgreSQL/MySQL drivers.
   CI and the advisory scan cover those driver pins; Dependabot tracks the base.
