@@ -4,6 +4,9 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Removed
+- Unused shell-execution capability (`run_bash`) and its `CommandResult` model from the agent file-system API. SQL scratch-file operations remain available. (#211, #218, #223, #241, #261)
+
 ### Added
 - `llm.temperature` (`SQLLENS_LLM__TEMPERATURE`, 0–2) and `llm.effort`
   (`SQLLENS_LLM__EFFORT`, `low|medium|high|xhigh|max`). Both are unset by
@@ -77,6 +80,10 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
   CI and the advisory scan cover those driver pins; Dependabot tracks the base.
   (#176, #237, #261)
 - Refresh the compatible runtime dependency closure, require patched MCP/Starlette/settings versions, test constrained installs in CI, and add advisory dependency scanning with explicit Chroma server exclusions. (#261)
+- The opt-in `import_memory` MCP tool now checks write authorization before
+  parsing or importing a bundle, matching the other memory-writing tools.
+  Calls require bearer auth or the explicit closed-network `auth.insecure`
+  opt-in; CLI import/export is unaffected. (#237, #261)
 - Agent looped on tool calls cut off by the output-token cap until
   `max_tool_iterations` (#247). A `tool_use` block in a `max_tokens` response is
   now marked `truncated` and refused by `ToolRegistry.execute` with an

@@ -311,7 +311,7 @@ Pinned by `tests/unit/test_search_memory_threshold.py` (the tool emits the card 
 Every successful `query_database` answer carries which model and which reasoning effort the server was configured to use, so a consuming client can attribute an answer to a model and an effort setting. Issue #265 added it for a downstream admin conversation history that shows the model and effort behind each stored answer.
 
 ```python
-{"model": "claude-sonnet-4-5-20250929", "reasoning_effort": None}
+{"model": "claude-opus-5-5", "reasoning_effort": None}
 ```
 
 (The values above are the shipped `LLMConfig` defaults; `model` is whatever `cfg.llm.model` holds for the running server.)
@@ -353,6 +353,7 @@ It is **off by default** because a remote client that can write memory can poiso
 
 Behaviour and contract:
 
+- **Write authorization.** Before parsing the bundle or calling the importer, `_require_write_auth("memory")` rejects `auth.mode="none"` unless `auth.insecure=true` explicitly acknowledges a closed network. Refusals reach MCP clients as `isError: true`. This matches the other memory-writing MCP tools and applies to both stdio and HTTP; bearer authentication is the supported authenticated mode.
 - **JSON only.** The tool takes a single `bundle_json` string. There is no CSV over MCP; CSV is a CLI-only convenience. It calls `parse_json` then `import_bundle` with default `clear=False`, `dry_run=False`.
 - **DoS caps refused at the parse boundary (issue #186).** `parse_json` rejects a `bundle_json` whose UTF-8 byte length exceeds `MAX_BUNDLE_BYTES` (10 MiB) and rejects a parsed bundle whose `sql_pairs.pairs` or `schema_docs` list exceeds `MAX_BUNDLE_ITEMS` (10 000). Both surface to the client as the parse-failure arm — `RuntimeError("Invalid memory bundle: ...")` (`isError: true`). The caps live in `_enforce_size_cap` / `_enforce_item_caps` in [src/sqllens/memory/io.py](../../../src/sqllens/memory/io.py); see [agent/memory.md](../agent/memory.md#bundle-level-dos-caps-parse-boundary-issue-186) for why they are at the parse boundary rather than on the Pydantic models.
 - **Success result.** Returns `ImportReport.to_markdown()` — a `| metric | count |` table of `saved` / `skipped (duplicate)` / `errors` — **only when the import was fully clean** (`report.errors` empty). A normal (`isError: false`) result is therefore returned only when every item that the bundle promised was saved or deliberately skipped as a duplicate, with no per-item failures.
