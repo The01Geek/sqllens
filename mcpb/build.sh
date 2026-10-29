@@ -70,7 +70,7 @@ echo "→ packing → $OUT"
 
 # mcpb pack needs to be run from inside the staging dir so manifest.json is at
 # the top of the resulting zip.
-( cd "$STAGE" && npx --yes @anthropic-ai/mcpb pack . "$REPO_ROOT/$OUT" )
+( cd "$STAGE" && npx --yes @anthropic-ai/mcpb@2.1.2 pack . "$REPO_ROOT/$OUT" )
 
 ls -lh "$OUT"
 echo "✓ built $OUT"

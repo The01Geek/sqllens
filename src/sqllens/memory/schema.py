@@ -39,7 +39,8 @@ Measured against the UTF-8-encoded byte length of the input (not the
 character count) so a multi-byte payload cannot bypass the cap by up to 4x."""
 
 MAX_BUNDLE_ITEMS = 10_000
-"""Per-block item cap enforced by ``memory.io`` after parse. Sized to cover
+"""Per-block item cap enforced by ``memory.io`` after parse and by admin add
+before validating items or touching the store. Sized to cover
 the largest realistic curated bundles while still bounding the work done
 under ``import_lock``."""
 

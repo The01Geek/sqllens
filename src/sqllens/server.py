@@ -19,13 +19,14 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Any, get_args
+from typing import Annotated, Any, get_args
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 from sqllens._bounded_json import JsonBoundsError, copy_bounded_json
+from sqllens._memory_consistency import MemoryChangedError
 from sqllens.config import Config
 from sqllens.profiles import (
     DEFAULT_PROFILE_NAME,
@@ -523,7 +524,7 @@ def build_server(cfg: Config) -> FastMCP:
         async def list_memories(
             data_source_id: str,
             memory_type: str | None = None,
-            limit: int = 1000,
+            limit: Annotated[int, Field(ge=0, le=1000)] = 1000,
             include_embedding_preview: bool = False,
         ) -> str:
             """List stored memories (newest first), optionally filtered by type.
@@ -531,7 +532,9 @@ def build_server(cfg: Config) -> FastMCP:
             ``data_source_id`` is accepted for client-contract stability but is
             advisory: this server serves a single database. ``memory_type`` is
             ``tool_usage``, ``text``, or omitted for all. Returns a JSON object
-            ``{"memories": [...], "total": N}``.
+            ``{"memories": [...], "total": N}``. ``limit`` ranges from 0 to 1000;
+            zero returns no rows while still counting all matching memories.
+            A concurrent managed write aborts listing with a retryable tool error.
             """
             mtype = _parse_memory_type(memory_type)
             try:
@@ -541,6 +544,8 @@ def build_server(cfg: Config) -> FastMCP:
                     limit=limit,
                     include_embedding_preview=include_embedding_preview,
                 )
+            except (memory_admin.MemoryInputError, MemoryChangedError) as exc:
+                raise RuntimeError(str(exc)) from None
             except Exception:
                 logger.exception("list_memories tool failed")
                 raise RuntimeError(
@@ -627,7 +632,8 @@ def build_server(cfg: Config) -> FastMCP:
             """Bulk-add curated SQL pairs and schema docs, with server-side dedup.
 
             ``sql_pairs`` items are ``{"question", "sql"}``; ``schema_docs`` items
-            are ``{"content"}``. Exact ``(question, sql)`` / ``content`` matches
+            are ``{"content"}``. Each block accepts up to 10,000 items.
+            Exact ``(question, sql)`` / ``content`` matches
             (already stored or repeated in the batch) are skipped. Write-guarded:
             refuses on an unauthenticated endpoint unless auth.insecure is set.
 
@@ -643,6 +649,8 @@ def build_server(cfg: Config) -> FastMCP:
                     result = await memory_admin.add_memories(
                         admin_store, sql_pairs=sql_pairs, schema_docs=schema_docs
                     )
+            except memory_admin.MemoryInputError as exc:
+                raise RuntimeError(str(exc)) from None
             except Exception:
                 logger.exception("add_memories tool failed")
                 raise RuntimeError(
@@ -667,8 +675,9 @@ def build_server(cfg: Config) -> FastMCP:
         ) -> str | CallToolResult:
             """Export the store as a JSON or CSV blob.
 
-            JSON round-trips: its ``{"sql_pairs": [...], "schema_docs": [...]}``
-            output feeds straight back into ``add_memories``. Returns
+            JSON uses the ``{"sql_pairs": [...], "schema_docs": [...]}``
+            shape accepted by ``add_memories``. Split larger exports into
+            batches of at most 10,000 items per block before adding. Returns
             ``{"format", "data", "warnings", "lossy"}``; when ``lossy`` is true
             (data that exists was dropped) the result is an ``isError``, and a
             wholesale-corrupt store fails loudly rather than exporting an empty
