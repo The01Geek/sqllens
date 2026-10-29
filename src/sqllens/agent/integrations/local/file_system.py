@@ -4,12 +4,11 @@ Local file system implementation.
 This module provides a local file system implementation with per-user isolation.
 """
 
-import asyncio
 import hashlib
 from pathlib import Path
 from typing import List, Optional
 
-from sqllens.agent.capabilities.file_system import CommandResult, FileSearchMatch, FileSystem
+from sqllens.agent.capabilities.file_system import FileSearchMatch, FileSystem
 from sqllens.agent.core.tool import ToolContext
 
 MAX_SEARCH_FILE_BYTES = 1_000_000
@@ -203,40 +202,3 @@ class LocalFileSystem(FileSystem):
                 matches.append(FileSearchMatch(path=relative_path, snippet=snippet))
 
         return matches
-
-    async def run_bash(
-        self,
-        command: str,
-        context: ToolContext,
-        *,
-        timeout: Optional[float] = None,
-    ) -> CommandResult:
-        """Execute a bash command within the user's isolated space."""
-
-        if not command.strip():
-            raise ValueError("Command must not be empty")
-
-        user_dir = self._get_user_directory(context)
-
-        process = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(user_dir),
-        )
-
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(), timeout=timeout
-            )
-        except asyncio.TimeoutError as exc:
-            process.kill()
-            await process.wait()
-            raise TimeoutError(f"Command timed out after {timeout} seconds") from exc
-
-        stdout = stdout_bytes.decode("utf-8", errors="replace")
-        stderr = stderr_bytes.decode("utf-8", errors="replace")
-
-        return CommandResult(
-            stdout=stdout, stderr=stderr, returncode=process.returncode or 0
-        )

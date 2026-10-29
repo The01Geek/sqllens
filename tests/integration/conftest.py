@@ -8,7 +8,7 @@ bundled SQLite Chinook DB, with a configurable auth mode. We use a real
 ``mcp`` SDK client over Streamable HTTP — these tests prove the wire protocol
 works, not just our internal abstractions.
 
-LLM is never called: only ``list_data_sources`` and ``tools/list`` are invoked.
+LLM is never called: tests invoke discovery, metadata, and memory-import tools.
 ``query_database`` integration tests live in a separate file gated behind a
 real Anthropic key.
 """
@@ -57,7 +57,9 @@ def _wait_for_port(host: str, port: int, *, timeout: float = 10.0) -> None:
     raise TimeoutError(f"server didn't start on {host}:{port} within {timeout}s")
 
 
-def _make_config(*, auth: AuthConfig, port: int, tmp_path: Path) -> Config:
+def _make_config(
+    *, auth: AuthConfig, port: int, tmp_path: Path, allow_import: bool = False
+) -> Config:
     return Config.model_construct(
         database=DatabaseConfig(
             url=f"sqlite:///{CHINOOK_DB}",
@@ -68,6 +70,7 @@ def _make_config(*, auth: AuthConfig, port: int, tmp_path: Path) -> Config:
         memory=MemoryConfig(
             persist_dir=tmp_path / "chroma",
             collection="test",
+            allow_import=allow_import,
         ),
         auth=auth,
         server=ServerConfig(transport="http", host="127.0.0.1", port=port),
@@ -95,9 +98,13 @@ def make_server(tmp_path: Path):
     handles: list[_ServerHandle] = []
     threads: list[threading.Thread] = []
 
-    def _build(auth: AuthConfig) -> _ServerHandle:
+    def _build(
+        auth: AuthConfig, *, configured_host: str = "127.0.0.1", allow_import: bool = False
+    ) -> _ServerHandle:
         port = _free_port()
-        cfg = _make_config(auth=auth, port=port, tmp_path=tmp_path)
+        cfg = _make_config(auth=auth, port=port, tmp_path=tmp_path, allow_import=allow_import)
+        # Exercise configured bind policy while keeping the real test socket local.
+        cfg.server.host = configured_host
         app = build_asgi_app(cfg)
 
         config = uvicorn.Config(

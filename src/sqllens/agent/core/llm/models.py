@@ -22,6 +22,8 @@ class LlmMessage(BaseModel):
     content: str = Field(description="Message content")
     tool_calls: Optional[List[ToolCall]] = Field(default=None)
     tool_call_id: Optional[str] = Field(default=None)
+    # Signed provider blocks must be replayed unchanged through tool rounds.
+    provider_content: Optional[List[Dict[str, Any]]] = None
 
 
 class LlmRequest(BaseModel):
@@ -51,6 +53,7 @@ class LlmResponse(BaseModel):
     finish_reason: Optional[str] = None
     usage: Optional[Dict[str, int]] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    provider_content: Optional[List[Dict[str, Any]]] = None
 
     def is_tool_call(self) -> bool:
         """Check if this response contains tool calls."""
@@ -64,3 +67,4 @@ class LlmStreamChunk(BaseModel):
     tool_calls: Optional[List[ToolCall]] = None
     finish_reason: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    provider_content: Optional[List[Dict[str, Any]]] = None
