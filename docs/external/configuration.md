@@ -46,6 +46,8 @@ Both `statement_timeout_ms` and `max_rows` are safety bounds that protect SQL Le
 
 On Windows, always use forward slashes inside the URL even though the underlying file path uses backslashes.
 
+PostgreSQL runtime connections use a five-second connection timeout by default. Set `connect_timeout` in the database URL (for example, `?connect_timeout=10`) or use `PGCONNECT_TIMEOUT` to override it; direct `PostgresRunner` callers may also pass the constructor option. A DSN value takes precedence, including `0` to disable this timeout. The default overrides a timeout supplied only in a libpq service file. This libpq timeout applies per host and is separate from `statement_timeout_ms`.
+
 ## Section: `[llm]`
 
 Defines the language model SQL Lens uses to translate questions into SQL.
