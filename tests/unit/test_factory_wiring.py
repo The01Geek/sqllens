@@ -255,8 +255,7 @@ async def test_save_text_memory_tool_omitted_when_field_unset(
 ) -> None:
     """``memory.save_text_memories`` is OFF by default, so the agent must not
     get the ``save_text_memory`` tool and the default system prompt must carry
-    no TEXT MEMORY section — otherwise a wrong guess the agent writes becomes a
-    note later questions receive as trusted context (issue #267).
+    no TEXT MEMORY section.
 
     ``MemoryConfig`` is built without the field, not through
     ``build_test_config``, which always passes it: this is the config a
