@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from sqlglot.errors import TokenError
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
@@ -135,6 +136,31 @@ class TestRejectsMixed:
     def test_garbage_rejected(self) -> None:
         with pytest.raises(UnsafeSqlError):
             assert_select_only("not even sql")
+
+
+class TestTokenizerFailures:
+    @pytest.mark.parametrize(("sql", "dialect"), [
+        ("SELECT 'unterminated", "sqlite"),
+        ("SELECT 'unterminated", "postgres"),
+        ("SELECT 'unterminated", "mysql"),
+        ("SELECT 'unterminated", None),
+        ("SELECT `unterminated", "mysql"),
+    ])
+    def test_tokenization_failure_is_a_structured_refusal(
+        self, sql: str, dialect: str | None,
+    ) -> None:
+        with pytest.raises(UnsafeSqlError, match="could not parse SQL") as exc:
+            assert_select_only(sql, dialect=dialect)
+        assert isinstance(exc.value.__cause__, TokenError)
+
+    @pytest.mark.parametrize("dialect", ["sqlite", "postgres"])
+    async def test_tokenization_refusal_never_reaches_runner(self, dialect: str) -> None:
+        inner = _RecordingRunner()
+        with pytest.raises(UnsafeSqlError, match="could not parse SQL"):
+            await ReadOnlyGuardRunner(inner, dialect=dialect).run_sql(
+                RunSqlToolArgs(sql="SELECT 'unterminated"), ToolContext.model_construct(),
+            )
+        assert inner.calls == []
 
 
 class TestNestedDmlInCte:
@@ -950,17 +976,19 @@ class TestMysqlLexicalBoundaries:
         with pytest.raises(UnsafeSqlError, match=reason):
             assert_select_only(sql, dialect=dialect)
 
-    @pytest.mark.parametrize("sql", [
-        "SELECT 1--1 + sleep(0)",
-        "SELECT 1--1 + benchmark(1,1)",
-        "SELECT 1--\u00a0+sleep(0)",
-        r"SELECT 'x\' + sleep(0) -- '",
-        r'SELECT "x\" + sleep(0) -- "',
-        "SELECT 1 /* outer /* nested */ + sleep(0) # */",
+    @pytest.mark.parametrize(("sql", "reason"), [
+        ("SELECT 1--1 + sleep(0)", "double-dash"),
+        ("SELECT 1--1 + benchmark(1,1)", "double-dash"),
+        ("SELECT 1--\u00a0+sleep(0)", "double-dash"),
+        (r"SELECT 'x\' + sleep(0) -- '", "backslash-escaped quotes"),
+        (r'SELECT "x\" + sleep(0) -- "', "backslash-escaped quotes"),
+        ("SELECT 1 /* outer /* nested */ + sleep(0) # */", "Nested MySQL comments"),
     ])
     @pytest.mark.parametrize("dialect", ["mysql", None])
-    def test_ambiguous_lexing_rejected(self, sql, dialect) -> None:
-        with pytest.raises(UnsafeSqlError):
+    def test_ambiguous_lexing_rejected(
+        self, sql: str, reason: str, dialect: str | None,
+    ) -> None:
+        with pytest.raises(UnsafeSqlError, match=reason):
             assert_select_only(sql, dialect=dialect)
 
     @pytest.mark.parametrize("sql", [
@@ -982,3 +1010,40 @@ class TestMysqlLexicalBoundaries:
                 RunSqlToolArgs(sql="SELECT 1--1 + sleep(0)"), ToolContext.model_construct()
             )
         assert runner.calls == []
+
+
+class TestBlockCommentBoundaries:
+    @pytest.mark.parametrize(("sql", "reason"), [
+        ("SELECT 1 /* unfinished", "Unterminated MySQL comment"),
+        ("SELECT 1 /* outer /* nested */ + 2 -- */", "Nested MySQL comments"),
+    ])
+    @pytest.mark.parametrize("dialect", ["mysql", None])
+    def test_ambiguous_block_comments_rejected(
+        self, sql: str, reason: str, dialect: str | None,
+    ) -> None:
+        with pytest.raises(UnsafeSqlError, match=reason):
+            assert_select_only(sql, dialect=dialect)
+
+    @pytest.mark.parametrize("sql", [
+        "SELECT '/* unfinished'",
+        "SELECT '/* outer /* nested */'",
+    ])
+    @pytest.mark.parametrize("dialect", ["mysql", None])
+    def test_quoted_comment_markers_pass(self, sql: str, dialect: str | None) -> None:
+        assert_select_only(sql, dialect=dialect)
+
+    @pytest.mark.parametrize(("dialect", "call", "reason"), [
+        ("sqlite", "load_extension('x')", "function 'load_extension' is not allowed"),
+        ("postgres", "pg_sleep(0)", "function 'pg_sleep' is not allowed"),
+    ])
+    def test_call_after_nested_comment_markers_is_checked(
+        self, dialect: str, call: str, reason: str,
+    ) -> None:
+        with pytest.raises(UnsafeSqlError, match=reason):
+            assert_select_only(
+                f"SELECT 1 /* outer /* nested */ -- */\n + {call}", dialect=dialect,
+            )
+
+    @pytest.mark.parametrize("dialect", ["sqlite", "postgres"])
+    def test_read_after_nested_comment_markers_passes(self, dialect: str) -> None:
+        assert_select_only("SELECT 1 /* outer /* nested */ -- */\n + 2", dialect=dialect)
