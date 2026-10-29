@@ -14,7 +14,7 @@ settings against the same process-wide singleton agent without rebuilding it.
 
 Each profile field is ``None``-able. ``None`` means "inherit from base
 ``Config``". The reserved ``default`` profile is always present (created
-lazily if absent), and an unknown / missing profile name resolves through it.
+lazily if absent), and an unknown valid or missing profile name resolves through it.
 
 The store is intentionally tiny: there is no model versioning, no migrations,
 no concurrent multi-process writer story. A single ``asyncio.Lock`` serializes
@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -45,6 +46,17 @@ DEFAULT_PROFILE_NAME = "default"
 
 #: Profile-store JSON file lives alongside the ChromaDB persist directory.
 _PROFILES_FILENAME = "sqllens.profiles.json"
+_PROFILE_NAME_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+
+
+class ProfileNameError(ValueError):
+    """A bounded profile-name or required-migration diagnostic."""
+
+
+def validate_profile_name(name: str) -> None:
+    """Require a bounded ASCII identifier without echoing rejected input."""
+    if not isinstance(name, str) or _PROFILE_NAME_RE.fullmatch(name) is None:
+        raise ProfileNameError("profile name must be 1-64 characters from [A-Za-z0-9_.-]")
 
 
 class Profile(BaseModel):
@@ -89,6 +101,10 @@ class ProfileStore:
     overwrites it cleanly. This satisfies CLAUDE.md's "lossy success needs a
     loud warning, not green output" rule: a corrupt store does not silently
     erase its contents.
+
+    Invalid legacy names are excluded with a bounded warning. Writes remain
+    disabled until the operator renames those keys in the original JSON file
+    and restarts, so a save cannot erase the excluded profiles.
     """
 
     def __init__(self, cfg: Config) -> None:
@@ -96,6 +112,7 @@ class ProfileStore:
         self._write_lock = asyncio.Lock()
         self._profiles: dict[str, Profile] = {}
         self._load_error: str | None = None
+        self._invalid_profile_names = False
         self._read_from_disk()
 
     @property
@@ -138,9 +155,15 @@ class ProfileStore:
         # outcome is a loud warning rather than silent loss.
         good: dict[str, Profile] = {}
         skipped: list[str] = []
+        invalid_names = 0
         for name, body in data.items():
-            if not isinstance(name, str) or not isinstance(body, dict):
-                skipped.append(str(name))
+            try:
+                validate_profile_name(name)
+            except ProfileNameError:
+                invalid_names += 1
+                continue
+            if not isinstance(body, dict):
+                skipped.append(name)
                 continue
             try:
                 good[name] = Profile.model_validate(body)
@@ -154,7 +177,17 @@ class ProfileStore:
                     "profile store: skipping malformed entry %r (%s)", name, exc
                 )
         self._profiles = good
-        if skipped:
+        if invalid_names:
+            # Keep the original file intact until an operator renames legacy
+            # entries; saving this filtered cache would otherwise delete them.
+            self._invalid_profile_names = True
+            self._load_error = (
+                f"Warning: profile store contains {invalid_names} invalid profile name(s). "
+                "Manually rename them in sqllens.profiles.json and restart. "
+                "Profile writes are disabled until repaired; malformed entries must also be fixed."
+            )
+            logger.warning(self._load_error)
+        elif skipped:
             # Log the aggregate alongside setting `_load_error` so an operator
             # tailing the log sees a single headline like the whole-file
             # corrupt path emits (via `_flag_corrupt`), not only per-entry
@@ -169,6 +202,11 @@ class ProfileStore:
             logger.warning(self._load_error)
 
     async def _save(self) -> None:
+        if self._invalid_profile_names:
+            raise ProfileNameError(
+                "Manually rename invalid profile names in sqllens.profiles.json "
+                "and restart before writing profiles."
+            )
         # Atomic replace via the shared helper. Run on a worker thread so the
         # event loop stays responsive to concurrent requests (e.g. an
         # in-flight ``query_database``) even when fsync stalls.
@@ -192,6 +230,7 @@ class ProfileStore:
         ``None`` and the caller treats that as "inherit base config",
         which is the documented semantics.
         """
+        validate_profile_name(name)
         return self._profiles.get(name)
 
     async def upsert(self, name: str, profile: Profile) -> Profile:
@@ -203,6 +242,7 @@ class ProfileStore:
         and a restart would silently "lose" what looked like a confirmed
         upsert. Same rollback applies to :meth:`delete`.
         """
+        validate_profile_name(name)
         async with self._write_lock:
             prior = self._profiles.get(name)
             self._profiles[name] = profile
@@ -225,6 +265,7 @@ class ProfileStore:
         everything-from-base behaviour). Rolls back the in-memory cache on
         a failed save (see :meth:`upsert`).
         """
+        validate_profile_name(name)
         async with self._write_lock:
             if name not in self._profiles:
                 raise KeyError(name)
@@ -246,10 +287,9 @@ def resolve_effective_settings(
 
     - An empty / ``None`` profile name resolves to the reserved ``default``
       profile, which itself falls through to base config when not customised.
-    - An unknown profile name also resolves through ``default`` — the issue
-      mandates "unknown / omitted names resolve to ``default``" so a caller
-      typo does not error out the query path; only the admin-tool ``get`` /
-      ``delete`` paths surface unknown-name as ``isError``.
+    - An unknown valid profile name also resolves through ``default``; only
+      the admin-tool ``get`` / ``delete`` paths surface unknown valid names
+      as ``isError``. Invalid non-empty names fail validation on both paths.
     - ``None`` fields on the resolved profile inherit from base ``Config``.
 
     ``store`` is the cached singleton owned by the server (or any caller). When
@@ -259,6 +299,7 @@ def resolve_effective_settings(
     foot-gun.
     """
     name = profile_name or DEFAULT_PROFILE_NAME
+    validate_profile_name(name)
     profile: Profile | None = None
     if store is not None:
         profile = store.get(name)
