@@ -408,6 +408,7 @@ def build_server(cfg: Config) -> FastMCP:
             Exact-match duplicates (already stored or repeated in the bundle)
             are skipped. Returns a Markdown summary of saved / skipped / errors.
             """
+            _require_write_auth("memory")
             try:
                 bundle = parse_json(bundle_json)
             except BundleFormatError as exc:

@@ -174,7 +174,9 @@ class MemoryConfig(BaseModel):
         description=(
             "Expose the import_memory MCP tool. OFF by default: a remote client "
             "that can write memory can poison future SQL generation. Enable only "
-            "for trusted operators. The CLI import/export commands are unaffected."
+            "for trusted operators. Calls require auth.mode='bearer' or an "
+            "explicit auth.insecure=true acknowledgement on a closed network. "
+            "The CLI import/export commands are unaffected."
         ),
     )
     allow_admin_tools: bool = Field(
