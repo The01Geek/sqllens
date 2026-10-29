@@ -13,7 +13,7 @@ import pytest
 from anthropic.types import Message
 
 from sqllens.agent.core.llm import LlmRequest
-from sqllens.agent.core.user import User
+from sqllens.agent.core.user import RequestContext, User
 from sqllens.agent.integrations.anthropic.llm import AnthropicLlmService
 
 from .test_truncated_tool_calls import _agent, _FakeRunSql, _run
@@ -31,12 +31,14 @@ class _Messages:
 
     def create(self, **kwargs: Any) -> Message:
         self.requests.append(deepcopy(kwargs))
-        first = len(self.requests) == 1
+        first = len(self.requests) % 2 == 1
+        blocks = deepcopy(_BLOCKS)
+        blocks[-1]["id"] = f"tool-{(len(self.requests) + 1) // 2}"
         return Message.model_validate({
             "id": "msg-1" if first else "msg-2",
             "role": "assistant",
             "model": "claude-opus-5-5",
-            "content": _BLOCKS if first else [{"type": "text", "text": "Done."}],
+            "content": blocks if first else [{"type": "text", "text": "Done."}],
             "stop_reason": "tool_use" if first else "end_turn",
             "stop_sequence": None,
             "type": "message",
@@ -118,3 +120,38 @@ async def test_real_sdk_stream_retains_signature_and_tool_input() -> None:
         )]
 
     assert chunks[-1].provider_content == [_BLOCKS[0], _BLOCKS[2]]
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_followup_refreshes_memories_without_replaying_old_thinking(stream: bool) -> None:
+    service = AnthropicLlmService(model="claude-opus-5-5", api_key="test-key")
+    messages = _Messages()
+    service._client = SimpleNamespace(messages=messages)
+    tool = _FakeRunSql()
+    agent = _agent(service, tool)
+    agent.config.stream_responses = stream
+
+    class ChangingMemories:
+        async def enhance_system_prompt(self, system_prompt, user_message, user):
+            return system_prompt + "\nMemory for " + user_message
+
+        async def enhance_user_messages(self, history, user):
+            return history
+
+    agent.llm_context_enhancer = ChangingMemories()
+    context = RequestContext(headers={}, cookies={}, metadata={})
+    for question in ("sales", "profit"):
+        _ = [item async for item in agent.send_message(
+            context, question, conversation_id="followup",
+        )]
+
+    assert len(messages.requests) == 4
+    first, _, third, fourth = messages.requests
+    assert third["system"] != first["system"]
+    old_assistant = next(m for m in third["messages"] if m["role"] == "assistant")
+    assert old_assistant["content"] == _BLOCKS[1:]
+    assistants = [m for m in fourth["messages"] if m["role"] == "assistant"]
+    expected = deepcopy(_BLOCKS)
+    expected[-1]["id"] = "tool-2"
+    assert assistants[-1]["content"] == expected
+    assert all(block["type"] not in {"thinking", "redacted_thinking"}
+               for m in assistants[:-1] for block in m["content"])

@@ -47,6 +47,12 @@ ToolRegistry    →  RunSqlTool                          (executes generated SQL
 
 ## Opus 5.5 defaults and conversation history
 
+Thinking signatures are replayed only within the current user turn. Before a new
+user question, the adapter omits `thinking` and `redacted_thinking` blocks from
+completed turns while retaining their text and tool history. This permits the
+existing per-question memory/system prompt refresh without replaying signatures
+bound to an older prefix. Earlier thinking stays omitted on later tool requests.
+
 `LLMConfig.model`, the CLI installer and generated config, the MCPB manifest, the SQLite example, and the standalone Anthropic adapter default to `claude-opus-5-5`. Existing explicit model overrides still take precedence. The adapter uses an 8,192-token output budget when a request supplies none; the factory already supplies `cfg.llm.max_tokens` (also 8,192 by default).
 
 The adapter retains the assistant response's content blocks in `provider_content` alongside the parsed display text and tool calls. Both non-streaming and streaming responses carry those blocks through `Message` storage and the next `LlmMessage`; `_build_payload` replays them unchanged instead of reconstructing the assistant content. This preserves empty thinking blocks, signatures, and their order relative to tool calls. `anthropic>=0.49` is required for SDK thinking/signature stream support. These opaque blocks are internal conversation state, not display text.

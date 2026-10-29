@@ -137,15 +137,24 @@ class AnthropicLlmService(LlmService):
         # Anthropic requires messages content as list of content blocks per message
         # We need to group consecutive tool messages into single user messages
         messages: List[Dict[str, Any]] = []
+        # Memories/system instructions may change on each new user turn.
+        last_user = max(
+            (index for index, message in enumerate(request.messages) if message.role == "user"),
+            default=-1,
+        )
         i = 0
 
         while i < len(request.messages):
             m = request.messages[i]
 
-            # Replay complete assistant content, including signed empty thinking
-            # and tool blocks. Rebuilding it from parsed text/tools loses signatures.
             if m.role == "assistant" and m.provider_content is not None:
-                messages.append({"role": "assistant", "content": deepcopy(m.provider_content)})
+                content = deepcopy(m.provider_content)
+                if i < last_user:
+                    # Keep only the current turn's signed thinking, never older signatures.
+                    content = [block for block in content
+                               if block.get("type") not in {"thinking", "redacted_thinking"}]
+                if content:
+                    messages.append({"role": "assistant", "content": content})
                 i += 1
                 continue
 
