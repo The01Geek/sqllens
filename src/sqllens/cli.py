@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import ipaddress
 import os
 import sys
 import tomllib
@@ -21,6 +20,10 @@ from rich.markup import escape
 
 from sqllens import __version__
 from sqllens._errors import validation_error_lines
+from sqllens.auth.policy import (
+    INSECURE_NON_LOOPBACK_MESSAGE as _INSECURE_NON_LOOPBACK_MESSAGE,
+)
+from sqllens.auth.policy import unauthenticated_non_loopback
 from sqllens.config import API_KEY_MISSING_MESSAGE, ConfigBomError
 
 if TYPE_CHECKING:
@@ -110,38 +113,6 @@ def _format_config_error(exc: Exception) -> str:
     )
 
 
-def _is_loopback_host(host: str) -> bool:
-    # Recognizes the entire 127.0.0.0/8 IPv4 loopback range and ::1, plus
-    # IPv4-mapped IPv6 loopback (e.g. ::ffff:127.0.0.1) — the IPv4-mapped form
-    # is unwrapped explicitly because CPython's IPv6Address.is_loopback returns
-    # False for these on Python 3.11.x and 3.12.0-3.12.3 (gh-117566, fixed in
-    # 3.12.4 / 3.13). No DNS resolution — wildcards ("0.0.0.0", "::") and
-    # arbitrary external hostnames fail closed and must use bearer auth or
-    # the SQLLENS_AUTH__INSECURE opt-out. The single literal hostname
-    # "localhost" is matched case-insensitively (RFC 1035); no other
-    # hostnames are recognized. Non-string input (None, ints, etc. from a
-    # future refactor) also fails closed rather than raising — this is a
-    # security guard and a traceback in place of a refusal would be misread
-    # as "the guard didn't apply".
-    try:
-        if host.lower() == "localhost":
-            return True
-        addr = ipaddress.ip_address(host)
-    except (ValueError, AttributeError, TypeError):
-        return False
-    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
-        return addr.ipv4_mapped.is_loopback
-    return addr.is_loopback
-
-
-_INSECURE_NON_LOOPBACK_MESSAGE = (
-    "Refusing to start an unauthenticated HTTP server on a non-loopback interface "
-    "(server.host={host!r}, auth.mode=none). Set SQLLENS_AUTH__MODE=bearer with a "
-    "SQLLENS_AUTH__BEARER_TOKEN, or SQLLENS_AUTH__INSECURE=1 to override for "
-    "closed-network deployments."
-)
-
-
 def _loopback_policy_violated(cfg: Config) -> bool:
     """True when the unauthenticated-non-loopback policy condition holds.
 
@@ -152,11 +123,7 @@ def _loopback_policy_violated(cfg: Config) -> bool:
     ``cfg.auth.insecure`` itself so callers can phrase the warning/error
     message in surface-appropriate terms.
     """
-    return (
-        cfg.server.transport == "http"
-        and cfg.auth.mode == "none"
-        and not _is_loopback_host(cfg.server.host)
-    )
+    return cfg.server.transport == "http" and unauthenticated_non_loopback(cfg)
 
 def _version_callback(value: bool) -> None:
     if value:
