@@ -130,9 +130,15 @@ def build_agent(cfg: Config) -> Agent:
         access_groups=access,
     )
     # save_text_memory persists free-form domain knowledge (vocabulary, semantic
-    # notes) so subsequent questions can land on the right tables/columns. The
-    # default system prompt switches on its presence via has_text_memory.
-    tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
+    # notes) so subsequent questions can land on the right tables/columns. Gated
+    # by memory.save_text_memories (OFF by default); the default system prompt
+    # switches its TEXT MEMORY section on the tool's presence via
+    # has_text_memory, so dropping the registration cleanly drops the prompt
+    # guidance too. Do not move this gate into SaveTextMemoryTool.execute or
+    # ChromaAgentMemory.save_text_memory: curated imports (sqllens.memory.store)
+    # call the same storage method, so a gate there would drop curated notes.
+    if cfg.memory.save_text_memories:
+        tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
 
     # The framework default gates the tool-arguments card to admin-only. We
     # *always* admit DEFAULT_USER_GROUP so the executed-SQL / tool-args card

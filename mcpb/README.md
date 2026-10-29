@@ -27,6 +27,7 @@ Drag the `.mcpb` matching your platform onto Claude Desktop. It'll prompt for th
 | Database URL | yes | SQLAlchemy DSN. Examples: `sqlite:///path/to/db.sqlite`, `postgresql://user:pw@host/db`, `mysql+pymysql://user:pw@host/db` |
 | Database display name | no | Defaults to `primary` |
 | Enforce read-only | no | Defaults to on. Strongly recommended |
+| Let the assistant save free-form notes | no | Defaults to off. Turn it on to let the assistant write its own schema notes into memory |
 | Anthropic API key | yes | Stored in your OS keychain |
 | Anthropic model | no | Defaults to Claude Opus 5.5 |
 | Memory directory | yes | Where ChromaDB persists. Defaults to `~/.sqllens/chroma` |

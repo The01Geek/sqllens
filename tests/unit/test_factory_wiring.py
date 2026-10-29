@@ -19,7 +19,9 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr
 
+from sqllens.agent import User
 from sqllens.agent.core import DefaultLlmContextEnhancer
+from sqllens.agent.core.system_prompt.default import DefaultSystemPromptBuilder
 from sqllens.agent.factory import build_agent
 from sqllens.agent.tools import (
     EmitChartTool,
@@ -106,9 +108,9 @@ def test_emit_chart_tool_is_registered(tmp_path: Path) -> None:
     """Without ``emit_chart`` in the ToolRegistry the LLM never sees it and
     ``query_database`` silently degrades to table/text-only (never a chart) —
     exactly the silent failure the precedent
-    ``test_save_text_memory_tool_is_registered`` exists to catch. Pins that a
-    future re-lift or factory refactor cannot drop the registration without
-    test signal.
+    ``test_save_text_memory_tool_registered_when_enabled`` exists to catch.
+    Pins that a future re-lift or factory refactor cannot drop the
+    registration without test signal.
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     agent = build_agent(cfg)
@@ -233,18 +235,76 @@ def test_show_details_on_grants_static_user_access_to_tool_arguments(
     )
 
 
-def test_save_text_memory_tool_is_registered(tmp_path: Path) -> None:
-    """The default system prompt's text-memory instructions only fire when
-    ``save_text_memory`` is registered (``has_text_memory`` in default.py).
-    Without this wiring the LLM never sees the tool, so free-form domain
-    knowledge can never be persisted — see issue #76.
+async def _prompt_from_agent_tools(agent: object) -> str:
+    """Build the default system prompt from the agent's own tool list.
+
+    ``build_agent`` passes no prompt builder, so the live agent uses
+    ``DefaultSystemPromptBuilder``; going through ``get_available_tools``
+    is what makes the prompt assertions below reflect the registry the
+    factory actually produced rather than a hand-written tool list.
+    """
+    user = User(id="anyone", group_memberships=["default"])
+    tools = await agent.get_available_tools(user)
+    prompt = await DefaultSystemPromptBuilder().build_system_prompt(user, tools)
+    assert prompt is not None
+    return prompt
+
+
+async def test_save_text_memory_tool_omitted_by_default(tmp_path: Path) -> None:
+    """``memory.save_text_memories`` is OFF by default, so the agent must not
+    get the ``save_text_memory`` tool and the default system prompt must carry
+    no TEXT MEMORY section — otherwise a wrong guess the agent writes becomes a
+    note later questions receive as trusted context (issue #267).
     """
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    agent = build_agent(cfg)
+
+    assert "save_text_memory" not in agent.tool_registry._tools
+    assert "TEXT MEMORY" not in await _prompt_from_agent_tools(agent)
+
+
+async def test_save_text_memory_tool_omitted_when_explicitly_false(
+    tmp_path: Path,
+) -> None:
+    """An explicit ``save_text_memories=False`` is the same as leaving it unset
+    — the registration and the prompt section both stay absent."""
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma", save_text_memories=False
+    )
+    agent = build_agent(cfg)
+
+    assert "save_text_memory" not in agent.tool_registry._tools
+    assert "TEXT MEMORY" not in await _prompt_from_agent_tools(agent)
+
+
+async def test_save_text_memory_tool_registered_when_enabled(
+    tmp_path: Path,
+) -> None:
+    """Setting ``memory.save_text_memories=True`` registers ``save_text_memory``
+    and brings the prompt's TEXT MEMORY section back, which is how an operator
+    restores the pre-#267 behavior."""
+    cfg = build_test_config(persist_dir=tmp_path / "chroma", save_text_memories=True)
     agent = build_agent(cfg)
 
     assert "save_text_memory" in agent.tool_registry._tools
     save_text_memory_tool = _unwrap(agent.tool_registry._tools["save_text_memory"])
     assert isinstance(save_text_memory_tool, SaveTextMemoryTool)
+    assert "TEXT MEMORY" in await _prompt_from_agent_tools(agent)
+
+
+async def test_save_instruction_survives_with_no_save_tool(tmp_path: Path) -> None:
+    """The prompt's "Do NOT forget to save successful executions." sentence is
+    gated on the memory *search* tool, which is always registered, so gating
+    the two save tools off must not remove it (issue #267 leaves it as it is).
+    """
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    agent = build_agent(cfg)
+
+    assert "save_question_tool_args" not in agent.tool_registry._tools
+    assert "save_text_memory" not in agent.tool_registry._tools
+    assert "search_saved_correct_tool_uses" in agent.tool_registry._tools
+    prompt = await _prompt_from_agent_tools(agent)
+    assert "Do NOT forget to save successful executions." in prompt
 
 
 def test_save_question_tool_omitted_by_default(tmp_path: Path) -> None:
