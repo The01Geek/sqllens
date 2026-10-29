@@ -256,3 +256,11 @@ To skip the preflight checks, for example in a container orchestrator where depe
 
 - **[Getting started](getting-started.md)** for the minimal configuration needed to run the demo.
 - **[Install on Claude Desktop (Windows)](install-claude-desktop-windows.md)** for a complete Windows configuration example.
+
+### Generated file permissions
+
+`sqllens init` writes a sample through a private temporary file and atomic
+replacement (mode 0600 on POSIX), including when `--force` replaces a file.
+Windows uses the destination directory ACL. The desktop installer uses the
+same protection for new/replaced files and backups, and refuses symlink
+file destinations. Unchanged files retain their existing permissions.

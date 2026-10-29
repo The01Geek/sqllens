@@ -1188,14 +1188,16 @@ class TestAtomicJsonWrite:
         self, base_options: InstallOptions, fake_config_json: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
-        from sqllens.installers import claude_desktop as installer_mod
+        from sqllens import _atomic as atomic_mod
 
-        original_replace = installer_mod.os.replace
+        original_replace = atomic_mod.os.replace
 
-        def boom_replace(*args: object, **kwargs: object) -> None:
-            raise OSError("simulated rename failure")
+        def boom_replace(source, destination) -> None:
+            if Path(destination) == fake_config_json:
+                raise OSError("simulated rename failure")
+            original_replace(source, destination)
 
-        monkeypatch.setattr(installer_mod.os, "replace", boom_replace)
+        monkeypatch.setattr(atomic_mod.os, "replace", boom_replace)
         with pytest.raises(InstallError, match="If it is missing or corrupt, restore it with"):
             run_install(
                 base_options,
@@ -1276,7 +1278,7 @@ class TestRevertVisibility:
         assert "inconsistent state" in captured.err
 
     def test_revert_cmd_bytes_warns_on_secondary_oserror(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from sqllens.installers.claude_desktop import _revert_cmd_bytes
 
@@ -1286,12 +1288,8 @@ class TestRevertVisibility:
         def boom(*_args: object, **_kwargs: object) -> None:
             raise PermissionError("simulated antivirus lock")
 
-        original_write_bytes = Path.write_bytes
-        try:
-            Path.write_bytes = boom  # type: ignore[method-assign]
-            _revert_cmd_bytes(cmd_path, original=b"@echo old\r\n")
-        finally:
-            Path.write_bytes = original_write_bytes  # type: ignore[method-assign]
+        monkeypatch.setattr("sqllens.installers.claude_desktop._atomic_write_bytes", boom)
+        _revert_cmd_bytes(cmd_path, original=b"@echo old\r\n")
 
         captured = capsys.readouterr()
         assert "WARNING" in captured.err

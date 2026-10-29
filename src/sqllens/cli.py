@@ -20,6 +20,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from sqllens import __version__
+from sqllens._atomic import atomic_write_text
 from sqllens._errors import validation_error_lines
 from sqllens.config import API_KEY_MISSING_MESSAGE, ConfigBomError
 
@@ -196,7 +197,13 @@ def init(
     if path.exists() and not force:
         err_console.print(f"[red]{path} already exists. Use --force to overwrite.[/red]")
         raise typer.Exit(code=1)
-    path.write_text(_SAMPLE_CONFIG)
+    try:
+        if path.is_symlink():
+            raise OSError("refusing a symlink config destination")
+        atomic_write_text(path, _SAMPLE_CONFIG)
+    except OSError as exc:
+        err_console.print(f"[red]Could not write config:[/red] {escape(str(exc))}")
+        raise typer.Exit(code=1) from exc
     console.print(f"[green]Wrote {path}[/green]")
     console.print("Edit it, then run [bold]sqllens serve[/bold].")
 

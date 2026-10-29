@@ -72,6 +72,10 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
   query selection, with short errors that do not echo rejected names. Invalid
   legacy names require manual repair; profile writes stay disabled until
   repair and restart so excluded entries are not lost. (#211, #214)
+- Write generated configuration and installer backups/rollbacks through private
+  atomic files; reject installer symlink destinations and validate the supplied
+  API key without exporting it. Database URL/driver diagnostics omit raw values.
+  (#176, #221, #237, #261)
 - Agent looped on tool calls cut off by the output-token cap until
   `max_tool_iterations` (#247). A `tool_use` block in a `max_tokens` response is
   now marked `truncated` and refused by `ToolRegistry.execute` with an
