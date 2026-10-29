@@ -1,0 +1,727 @@
+[
+  {
+    "id": "VC-1",
+    "category": "dependency_interaction",
+    "claim": "The devflow/PRFlow workflows read `claude_model`, `devflow_retrospective.retrospective_model` and `devflow_retrospective.audit_model` from `.github/project-config.yml` and pass the value through as a model id the Claude action accepts.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/project-config.yml",
+    "source_line": 17,
+    "source_line_end": 95,
+    "verify_against": "Workflow files that consume project-config.yml model keys",
+    "verify_hint": "Check the `.github/workflows/devflow*.yml` steps that read `claude_model`/`audit_model`/`retrospective_model` out of `.github/project-config.yml` and the model argument they pass to `anthropics/claude-code-action`.",
+    "claim_signature": "dependency_interaction:project-config.yml:workflow-model-keys",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "absolute_claim",
+    "claim": "The authored comment asserts that `effort: \"medium\"` causes the workflow to omit `--effort` entirely so the model's built-in default applies, for any model configured.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# so the model's built-in default applies. Pin explicitly when it would\n  # change depth on a model upgrade.",
+    "source_file": ".github/project-config.yml",
+    "source_line": 19,
+    "source_line_end": 20,
+    "verify_against": "The workflow step that maps the `effort` config value to a CLI flag",
+    "verify_hint": "Check the `.github/workflows/devflow*.yml` logic that reads `claude.effort` and conditionally appends `--effort`; confirm `medium` is the only value that omits the flag.",
+    "claim_signature": "absolute_claim:project-config.yml:effort-medium-omits-flag",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "dependency_interaction",
+    "claim": "`anthropics/claude-code-action@v1` honours the `ANTHROPIC_DEFAULT_OPUS_MODEL` and `ANTHROPIC_DEFAULT_SONNET_MODEL` environment variables to select the model for the audit run.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/security-audit.yml",
+    "source_line": 74,
+    "source_line_end": 76,
+    "verify_against": "The claude-code-action v1 / Claude Code CLI documented environment variables",
+    "verify_hint": "Check the `anthropics/claude-code-action@v1` action inputs and the Claude Code CLI env-var names for default Opus/Sonnet model overrides.",
+    "claim_signature": "dependency_interaction:security-audit.yml:default-model-env-vars",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "api_contract",
+    "claim": "`claude-opus-5-5` is a valid Anthropic model identifier accepted by the Anthropic SDK/API as configured in `llm.model`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "examples/sqlite-demo/sqllens.toml",
+    "source_line": 16,
+    "verify_against": "Anthropic model id list / the model string accepted by `AnthropicLlmService`",
+    "verify_hint": "Check `src/sqllens/agent/integrations/anthropic/llm.py` (`AnthropicLlmService.__init__`, line ~54) and the Anthropic model-name documentation for the exact id `claude-opus-5-5`.",
+    "claim_signature": "api_contract:sqllens.toml:opus-5-5-model-id",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "api_contract",
+    "claim": "The MCPB manifest's `anthropic_model` user-config default `claude-opus-5-5` is the value forwarded into `SQLLENS_LLM__MODEL` by the bundle's server command.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "mcpb/manifest.json",
+    "source_line": 68,
+    "verify_against": "The `server.mcp_config` env wiring in the same manifest",
+    "verify_hint": "Check the `server` section of `mcpb/manifest.json` where `${user_config.anthropic_model}` is mapped to an `SQLLENS_LLM__*` env var, and `LLMConfig.model` in `src/sqllens/config.py`.",
+    "claim_signature": "api_contract:manifest.json:anthropic-model-default",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "absolute_claim",
+    "claim": "The MCPB README asserts the bundle's Anthropic model prompt defaults to Claude Opus 5.5.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| Anthropic model | no | Defaults to Claude Opus 5.5 |",
+    "source_file": "mcpb/README.md",
+    "source_line": 31,
+    "verify_against": "`mcpb/manifest.json` user_config default",
+    "verify_hint": "Check the `anthropic_model` entry's `default` in `mcpb/manifest.json`.",
+    "claim_signature": "absolute_claim:README.md:mcpb-model-default",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "dependency_interaction",
+    "claim": "The code on this branch requires Anthropic SDK features (thinking/signature stream events, `provider_content` replay) available only at `anthropic>=0.49`, and remains compatible with the whole `<1` range.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "pyproject.toml",
+    "source_line": 30,
+    "source_line_end": 31,
+    "verify_against": "Anthropic Python SDK changelog and the adapter's SDK usage",
+    "verify_hint": "Check the stream-event and content-block attributes used in `src/sqllens/agent/integrations/anthropic/llm.py` (`_parse_message_content`, the streaming handler) against the Anthropic SDK 0.49 release.",
+    "claim_signature": "dependency_interaction:pyproject.toml:anthropic-049-floor",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "absolute_claim",
+    "claim": "The release-notes entry asserts that new configurations, Claude Desktop installs, MCPB installs and the SQLite example all now select `claude-opus-5-5`, that SQL Lens preserves signed thinking blocks across tool rounds, and that existing TOML/environment model overrides still win.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- **[Change] Opus 5.5 defaults** — New configurations, Claude Desktop installs, MCPB installs, and the SQLite example now select `claude-opus-5-5`. SQL Lens preserves signed thinking blocks across tool rounds. Existing TOML or environment model overrides still win; update `llm.model` or `SQLLENS_LLM__MODEL` to switch an existing instance, and leave `llm.temperature` unset for Opus 5.5.",
+    "source_file": "docs/external/release-notes.md",
+    "source_line": 7,
+    "verify_against": "`LLMConfig` defaults, the CLI installer, the MCPB manifest, and the adapter's thinking-block handling",
+    "verify_hint": "Check `LLMConfig.model` in `src/sqllens/config.py`, the installer default in `src/sqllens/cli.py` (~line 368) and generated TOML (~line 605), `mcpb/manifest.json`, and the `provider_content` replay in `src/sqllens/agent/integrations/anthropic/llm.py`.",
+    "claim_signature": "absolute_claim:release-notes.md:opus-55-defaults-entry",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "data_format_assumption",
+    "claim": "The new release-notes section is placed above `## Unreleased` under a dated heading, asserting these changes shipped in a released version on October 28, 2026.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "## October 28, 2026",
+    "source_file": "docs/external/release-notes.md",
+    "source_line": 5,
+    "verify_against": "The page's own convention for dated vs. Unreleased sections, and the released version list",
+    "verify_hint": "Check the ordering convention of existing dated sections in `docs/external/release-notes.md` and whether `pyproject.toml` version 0.0.2 corresponds to a released tag.",
+    "claim_signature": "data_format_assumption:release-notes.md:dated-section-placement",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "absolute_claim",
+    "claim": "The doc asserts that before a new user question the adapter omits `thinking` and `redacted_thinking` blocks from completed turns while retaining their text and tool history, and that earlier thinking stays omitted on later tool requests.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Thinking signatures are replayed only within the current user turn. Before a new\nuser question, the adapter omits `thinking` and `redacted_thinking` blocks from\ncompleted turns while retaining their text and tool history. This permits the\nexisting per-question memory/system prompt refresh without replaying signatures\nbound to an older prefix. Earlier thinking stays omitted on later tool requests.",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 50,
+    "source_line_end": 54,
+    "verify_against": "The history-building code in the Anthropic adapter",
+    "verify_hint": "Check `_build_payload` and the assistant-history reconstruction in `src/sqllens/agent/integrations/anthropic/llm.py` for the branch that strips `thinking`/`redacted_thinking` from completed user turns.",
+    "claim_signature": "absolute_claim:factory.md:thinking-omitted-past-turns",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "absolute_claim",
+    "claim": "The doc asserts that `LLMConfig.model`, the CLI installer and generated config, the MCPB manifest, the SQLite example and the standalone Anthropic adapter all default to `claude-opus-5-5`, and that the adapter falls back to an 8,192-token output budget when a request supplies none.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`LLMConfig.model`, the CLI installer and generated config, the MCPB manifest, the SQLite example, and the standalone Anthropic adapter default to `claude-opus-5-5`. Existing explicit model overrides still take precedence. The adapter uses an 8,192-token output budget when a request supplies none; the factory already supplies `cfg.llm.max_tokens` (also 8,192 by default).",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 56,
+    "verify_against": "`LLMConfig` in config.py, cli.py installer defaults, mcpb/manifest.json, examples/sqlite-demo/sqllens.toml, and the adapter's max_tokens fallback",
+    "verify_hint": "Check the `max_tokens` fallback constant in `AnthropicLlmService._build_payload` (`src/sqllens/agent/integrations/anthropic/llm.py`) and the five default sites named in the sentence.",
+    "claim_signature": "absolute_claim:factory.md:opus-defaults-and-8192-fallback",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "absolute_claim",
+    "claim": "The doc asserts the adapter stores response content blocks in `provider_content`, that both non-streaming and streaming paths carry them through `Message` storage and the next `LlmMessage`, that `_build_payload` replays them unchanged, and that this preserves empty thinking blocks, signatures and their order relative to tool calls.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The adapter retains the assistant response's content blocks in `provider_content` alongside the parsed display text and tool calls. Both non-streaming and streaming responses carry those blocks through `Message` storage and the next `LlmMessage`; `_build_payload` replays them unchanged instead of reconstructing the assistant content. This preserves empty thinking blocks, signatures, and their order relative to tool calls. `anthropic>=0.49` is required for SDK thinking/signature stream support. These opaque blocks are internal conversation state, not display text.",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 58,
+    "verify_against": "The adapter and message models that define `provider_content`",
+    "verify_hint": "Check `provider_content` on `LlmResponse`/`LlmMessage` in `src/sqllens/agent/core/llm/models.py`, the `Message` model used by the conversation store, and both response paths in `src/sqllens/agent/integrations/anthropic/llm.py`.",
+    "claim_signature": "absolute_claim:factory.md:provider-content-replay",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "absolute_claim",
+    "claim": "The doc asserts that SDK versions at the `anthropic>=0.49` floor are not known to accept an `output_config` keyword argument, so `effort` is sent via `extra_body`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "because SDK versions at the `anthropic>=0.49` floor are not known to accept that keyword",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 62,
+    "verify_against": "Anthropic SDK 0.49 `messages.create` signature and `_build_payload`",
+    "verify_hint": "Check whether `anthropic` 0.49's `Messages.create` accepts an `output_config` keyword, and how `_build_payload` in `src/sqllens/agent/integrations/anthropic/llm.py` passes `effort`.",
+    "claim_signature": "absolute_claim:factory.md:output-config-keyword-floor",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "api_contract",
+    "claim": "The installer's `--model` option defaults to `claude-opus-5-5`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `--model` | `claude-opus-5-5` | Anthropic model id. |",
+    "source_file": "docs/internal/installation/claude-desktop-installer.md",
+    "source_line": 113,
+    "verify_against": "`resolve_options` / the `--model` Typer option default in cli.py",
+    "verify_hint": "Check the `--model` default in the `claude-desktop install` command in `src/sqllens/cli.py` (around line 368).",
+    "claim_signature": "api_contract:claude-desktop-installer.md:model-flag-default:113",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "api_contract",
+    "claim": "The `--model` flag for the Windows installer defaults to `claude-opus-5-5`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `--model claude-...` | Choose a different Anthropic model. Defaults to `claude-opus-5-5`. |",
+    "source_file": "docs/internal/installation/claude-desktop-windows-install.md",
+    "source_line": 51,
+    "verify_against": "`--model` default in `src/sqllens/cli.py`",
+    "verify_hint": "Check the `--model` Typer option default in the `claude-desktop install` command in `src/sqllens/cli.py`.",
+    "claim_signature": "api_contract:claude-desktop-windows-install.md:model-flag-default:51",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "data_format_assumption",
+    "claim": "The installer-generated `sqllens.toml` contains `model = \"claude-opus-5-5\"` in its `[llm]` table.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "model = \"claude-opus-5-5\"",
+    "source_file": "docs/internal/installation/claude-desktop-windows-install.md",
+    "source_line": 131,
+    "verify_against": "The TOML template rendered by the installer in cli.py",
+    "verify_hint": "Check the TOML template string in `src/sqllens/cli.py` (around line 605) that writes the `[llm]` section.",
+    "claim_signature": "data_format_assumption:claude-desktop-windows-install.md:generated-toml-model:131",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "data_format_assumption",
+    "claim": "The installer-generated `sqllens.toml` shown in the external Windows install guide contains `model = \"claude-opus-5-5\"`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "model = \"claude-opus-5-5\"",
+    "source_file": "docs/external/install-claude-desktop-windows.md",
+    "source_line": 136,
+    "verify_against": "The TOML template rendered by the installer in cli.py",
+    "verify_hint": "Check the generated-TOML template in `src/sqllens/cli.py` (around line 605).",
+    "claim_signature": "data_format_assumption:install-claude-desktop-windows.md:generated-toml-model:136",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "api_contract",
+    "claim": "The external Windows guide asserts `--model <id>` defaults to `claude-opus-5-5`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `--model <id>` | Anthropic model identifier. Defaults to `claude-opus-5-5`. |",
+    "source_file": "docs/external/install-claude-desktop-windows.md",
+    "source_line": 52,
+    "verify_against": "`--model` default in `src/sqllens/cli.py`",
+    "verify_hint": "Check the `--model` Typer option default in the `claude-desktop install` command in `src/sqllens/cli.py`.",
+    "claim_signature": "api_contract:install-claude-desktop-windows.md:model-flag-default:52",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "data_format_assumption",
+    "claim": "`sqllens validate` with no api_key prints a summary line of the form `llm: anthropic / claude-opus-5-5 (api_key NOT SET)`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "marking the key explicitly as `llm: anthropic / claude-opus-5-5 (api_key NOT SET)`",
+    "source_file": "docs/external/install-claude-desktop-windows.md",
+    "source_line": 167,
+    "verify_against": "The `validate` summary formatting in cli.py",
+    "verify_hint": "Check the summary line emitted by the `validate` command in `src/sqllens/cli.py` (the `llm:` row and its `api_key NOT SET` marker).",
+    "claim_signature": "data_format_assumption:install-claude-desktop-windows.md:validate-summary-line:167",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "data_format_assumption",
+    "claim": "The internal config-loading doc asserts the `validate` summary line reads `llm:      anthropic / claude-opus-5-5 (api_key NOT SET)`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`llm:      anthropic / claude-opus-5-5 (api_key NOT SET)`",
+    "source_file": "docs/internal/setup/config-loading.md",
+    "source_line": 92,
+    "verify_against": "The `validate` summary formatting in cli.py",
+    "verify_hint": "Check the exact `llm:` summary row (including spacing) printed by `validate` in `src/sqllens/cli.py`.",
+    "claim_signature": "data_format_assumption:config-loading.md:validate-summary-line:92",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "data_format_assumption",
+    "claim": "`[llm].model` defaults to `claude-opus-5-5` in the merged config schema.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`model` defaults to `claude-opus-5-5`.",
+    "source_file": "docs/internal/setup/config-loading.md",
+    "source_line": 29,
+    "verify_against": "`LLMConfig.model` in src/sqllens/config.py",
+    "verify_hint": "Check the `model` field default on `LLMConfig` in `src/sqllens/config.py` (line ~105).",
+    "claim_signature": "data_format_assumption:config-loading.md:llm-model-default:29",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "data_format_assumption",
+    "claim": "The documented example of the `query_database` model metadata, `{\"model\": \"claude-opus-5-5\", \"reasoning_effort\": None}`, matches the shipped `LLMConfig` defaults and the keys the tool actually emits.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "{\"model\": \"claude-opus-5-5\", \"reasoning_effort\": None}",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 314,
+    "verify_against": "The metadata dict built by the `query_database` tool and `LLMConfig` defaults",
+    "verify_hint": "Check the `_meta` model/effort payload construction in `src/sqllens/tools/` for `query_database` and the `model`/`effort` defaults in `LLMConfig`.",
+    "claim_signature": "data_format_assumption:tools.md:model-metadata-example:314",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "data_format_assumption",
+    "claim": "The external configuration reference's example model identifier `claude-opus-5-5` is a value `llm.model` accepts and matches the shipped default.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `model` | String | A Claude model identifier, for example `claude-opus-5-5`. |",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 56,
+    "verify_against": "`LLMConfig.model` in src/sqllens/config.py",
+    "verify_hint": "Check the `model` field type and default on `LLMConfig` in `src/sqllens/config.py`.",
+    "claim_signature": "data_format_assumption:configuration.md:model-example:56",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "dependency_interaction",
+    "claim": "Anthropic SDK content blocks expose `.model_dump(mode=\"json\", exclude_unset=True)` producing a dict that round-trips back to the Messages API as a valid assistant content block (thinking/redacted_thinking signature fields and tool_use input included), and `msg.content` is always iterable on both the non-streaming response and `stream.get_final_message()`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/anthropic/llm.py",
+    "source_line": 252,
+    "source_line_end": 259,
+    "verify_against": "anthropic SDK types (anthropic.types.Message content block models) at the declared >=0.49 floor",
+    "verify_hint": "Check `_provider_content` in `src/sqllens/agent/integrations/anthropic/llm.py` against `anthropic.types.ThinkingBlock`/`RedactedThinkingBlock`/`ToolUseBlock` model_dump output and the Messages API request block schema",
+    "claim_signature": "dependency_interaction:llm.py:provider-block-model-dump:252",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "dependency_interaction",
+    "claim": "The declared minimum `anthropic` version supports thinking blocks, `signature_delta` stream events and `extra_body` on `messages.create`/`messages.stream`, so the docstring's `anthropic>=0.49` floor matches the project's dependency pin.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "(anthropic>=0.49). Supports non-streaming and streaming text output.",
+    "source_file": "src/sqllens/agent/integrations/anthropic/llm.py",
+    "source_line": 5,
+    "verify_against": "the `anthropic` requirement in pyproject.toml",
+    "verify_hint": "Compare the `anthropic` version specifier in `pyproject.toml` dependencies with the `anthropic>=0.49` claims in the module docstring (line 5) and the `_build_payload` comment (line 239)",
+    "claim_signature": "dependency_interaction:llm.py:anthropic-version-floor:5",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "data_format_assumption",
+    "claim": "Every element of a stored `provider_content` list is a dict supporting `.get(\"type\")`, so the thinking/redacted_thinking filter in `_build_payload` cannot raise on a non-dict block.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/anthropic/llm.py",
+    "source_line": 150,
+    "source_line_end": 159,
+    "verify_against": "the producers of `provider_content`: `_provider_content` and any persisted conversation storage that rehydrates `Message.provider_content`",
+    "verify_hint": "Check `_provider_content` in `src/sqllens/agent/integrations/anthropic/llm.py` and `Message.provider_content` in `src/sqllens/agent/core/storage/models.py` for the block element type",
+    "claim_signature": "data_format_assumption:llm.py:provider-block-dict-get:150",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "api_contract",
+    "claim": "When an assistant message carries `provider_content`, replaying only those blocks (and dropping `m.content`/`m.tool_calls`) preserves every tool_use id the following tool_result blocks reference, so the Anthropic API never sees a tool_result without its matching tool_use.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/anthropic/llm.py",
+    "source_line": 150,
+    "source_line_end": 159,
+    "verify_against": "the tool_result grouping branch in the same `_build_payload` loop and the assistant-message construction in the agent",
+    "verify_hint": "Check the `m.role == \"tool\"` branch of `_build_payload` in `src/sqllens/agent/integrations/anthropic/llm.py` against the `assistant_message` built around line 695 of `src/sqllens/agent/core/agent/agent.py`",
+    "claim_signature": "api_contract:llm.py:tool-use-result-pairing:150",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "api_contract",
+    "claim": "Stripping thinking blocks from assistant messages at index < the last user message, while keeping them on later ones, satisfies Anthropic's requirement about signed thinking placement relative to tool_use turns in the replayed history.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "                    # Keep only the current turn's signed thinking, never older signatures.",
+    "source_file": "src/sqllens/agent/integrations/anthropic/llm.py",
+    "source_line": 153,
+    "verify_against": "Anthropic Messages API extended-thinking history rules (thinking block preservation requirements during tool use)",
+    "verify_hint": "Check the `last_user` computation and the filter at lines 140-157 of `src/sqllens/agent/integrations/anthropic/llm.py` against Anthropic's extended-thinking tool-use documentation",
+    "claim_signature": "api_contract:llm.py:thinking-history-placement:153",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "dependency_interaction",
+    "claim": "`AnthropicLlmService.__init__` forwards unrecognized kwargs such as `http_client` straight to `anthropic.Anthropic()`, and a sync `httpx.Client` is accepted there for the async streaming path used by the tests.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/anthropic/llm.py",
+    "source_line": 58,
+    "source_line_end": 64,
+    "verify_against": "`anthropic.Anthropic` constructor signature",
+    "verify_hint": "Check `extra_client_kwargs` handling in `AnthropicLlmService.__init__` against the `anthropic.Anthropic` client's `http_client` parameter type",
+    "claim_signature": "dependency_interaction:llm.py:http-client-passthrough:58",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "data_format_assumption",
+    "claim": "The fallback output cap of 8192 tokens matches the factory/config default for `max_tokens` that the comment and PR claim it mirrors.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/anthropic/llm.py",
+    "source_line": 233,
+    "verify_against": "the agent factory and `LLMConfig.max_tokens` default",
+    "verify_hint": "Check `max_tokens` default in `LLMConfig` in `src/sqllens/config.py` and where `build_agent` in `src/sqllens/agent/factory.py` sets the request max_tokens",
+    "claim_signature": "data_format_assumption:llm.py:fallback-max-tokens-default:233",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "dependency_interaction",
+    "claim": "Only the final stream chunk carries `provider_content`, and the agent's last-wins accumulation (`if chunk.provider_content is not None`) yields the complete final-message block list for the response.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/agent/agent.py",
+    "source_line": 1455,
+    "verify_against": "`stream_request` in the Anthropic integration, which yields chunks",
+    "verify_hint": "Check `stream_request` in `src/sqllens/agent/integrations/anthropic/llm.py` against `_handle_streaming_response` in `src/sqllens/agent/core/agent/agent.py`",
+    "claim_signature": "dependency_interaction:agent.py:stream-provider-content-accumulation:1455",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "api_contract",
+    "claim": "Adding a final assistant `Message` whose `content` is `\"\"` but whose `provider_content` is set is accepted by conversation storage and by every downstream consumer of conversation history (including non-Anthropic payload builders that must not emit an empty-text assistant turn).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/agent/agent.py",
+    "source_line": 1102,
+    "source_line_end": 1110,
+    "verify_against": "`conversation.add_message` / storage validation and `_build_llm_request` consumers",
+    "verify_hint": "Check `add_message` and `Message` in `src/sqllens/agent/core/storage/models.py` and `_build_llm_request` around line 1284 of `src/sqllens/agent/core/agent/agent.py`",
+    "claim_signature": "api_contract:agent.py:empty-content-assistant-message:1102",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "data_format_assumption",
+    "claim": "`Message.provider_content` (storage model) persists and rehydrates as a list of dicts through whatever serialization the conversation store uses, so signatures survive a store round-trip.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/storage/models.py",
+    "source_line": 24,
+    "source_line_end": 25,
+    "verify_against": "the conversation store implementation that serializes `Message`",
+    "verify_hint": "Check the conversation storage backend under `src/sqllens/agent/core/storage/` (and any memory/ChromaDB persistence of messages) for how `Message` fields are serialized",
+    "claim_signature": "data_format_assumption:models.py:provider-content-persistence:24",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "test_mock_alignment",
+    "claim": "The `_Messages` fake's `create`/`stream` surface (returning a validated `anthropic.types.Message` and a context manager exposing `text_stream` and `get_final_message`) matches the real `client.messages` API the service calls.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_opus_history.py",
+    "source_line": 28,
+    "source_line_end": 63,
+    "verify_against": "the real `anthropic` client's `messages.create` and `messages.stream` interfaces as used by `AnthropicLlmService`",
+    "verify_hint": "Compare `_Messages` in `tests/unit/test_opus_history.py` with `send_request`/`stream_request` usage in `src/sqllens/agent/integrations/anthropic/llm.py`",
+    "claim_signature": "test_mock_alignment:test_opus_history.py:messages-client-fake:28",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "test_mock_alignment",
+    "claim": "`_BLOCKS` round-trips unchanged through `Message.model_validate` and `_provider_content`, so asserting `assistant[\"content\"] == _BLOCKS` is a real equality test and not masking SDK-injected or dropped fields (e.g. a `thinking` block with empty text).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_opus_history.py",
+    "source_line": 85,
+    "verify_against": "`anthropic.types.Message` block validation plus `_provider_content`'s `exclude_unset` dump",
+    "verify_hint": "Check `_BLOCKS` (lines 21-25) against `_provider_content` in `src/sqllens/agent/integrations/anthropic/llm.py` and `anthropic.types` block field defaults",
+    "claim_signature": "test_mock_alignment:test_opus_history.py:blocks-roundtrip-equality:85",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "test_mock_alignment",
+    "claim": "The helpers `_agent`, `_FakeRunSql` and `_run` imported from `test_truncated_tool_calls` exist with the signatures used here, and `_FakeRunSql` exposes `.executed`; `_agent` builds an agent whose `config.stream_responses` and `llm_context_enhancer` attributes are the ones the agent actually reads.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_opus_history.py",
+    "source_line": 19,
+    "verify_against": "`tests/unit/test_truncated_tool_calls.py` and the agent's config/enhancer attributes",
+    "verify_hint": "Check `_agent`, `_FakeRunSql`, `_run` in `tests/unit/test_truncated_tool_calls.py` and `llm_context_enhancer` / `config.stream_responses` use in `src/sqllens/agent/core/agent/agent.py`",
+    "claim_signature": "test_mock_alignment:test_opus_history.py:shared-agent-helpers:19",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-37",
+    "category": "test_mock_alignment",
+    "claim": "The hand-written `ChangingMemories` stub implements the full interface the agent invokes on `llm_context_enhancer` (`enhance_system_prompt`, `enhance_user_messages` and no other required method), with matching argument order.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_opus_history.py",
+    "source_line": 133,
+    "source_line_end": 140,
+    "verify_against": "the context-enhancer protocol the agent calls",
+    "verify_hint": "Check every `self.llm_context_enhancer.` call site in `src/sqllens/agent/core/agent/agent.py` and the enhancer protocol definition it implements",
+    "claim_signature": "test_mock_alignment:test_opus_history.py:context-enhancer-stub:133",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-38",
+    "category": "data_format_assumption",
+    "claim": "The hand-built SSE event sequence (message_start/content_block_start/signature_delta/input_json_delta/message_delta/message_stop with these exact field names) is what the anthropic SDK's stream parser accepts at the pinned version, so the test exercises real accumulation rather than erroring into an empty result.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_opus_history.py",
+    "source_line": 95,
+    "source_line_end": 111,
+    "verify_against": "anthropic SDK streaming event schemas (`anthropic.types.RawMessageStreamEvent` and friends)",
+    "verify_hint": "Check the `events` list in `tests/unit/test_opus_history.py` against `anthropic.lib.streaming` accumulation and `anthropic.types.raw_*_event` models",
+    "claim_signature": "data_format_assumption:test_opus_history.py:sse-event-schema:95",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-39",
+    "category": "absolute_claim",
+    "claim": "The authored comment asserts signed provider blocks are replayed unchanged through tool rounds — i.e. no code path mutates or drops them mid-round.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    # Signed provider blocks must be replayed unchanged through tool rounds.",
+    "source_file": "src/sqllens/agent/core/llm/models.py",
+    "source_line": 25,
+    "verify_against": "`_build_payload` in the Anthropic integration, which filters thinking blocks for pre-last-user assistant turns",
+    "verify_hint": "Falsify by tracing a multi-user-turn history through `_build_payload` in `src/sqllens/agent/integrations/anthropic/llm.py` lines 140-159, where thinking/redacted_thinking blocks are removed",
+    "claim_signature": "absolute_claim:models.py:provider-blocks-replayed-unchanged:25",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-40",
+    "category": "absolute_claim",
+    "claim": "The authored module docstring asserts that Opus's signed thinking and tool blocks survive a real agent tool round.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"Opus's signed thinking and tool blocks survive a real agent tool round.\"\"\"",
+    "source_file": "tests/unit/test_opus_history.py",
+    "source_line": 4,
+    "verify_against": "what the tests in this file actually exercise (a fake `messages` client for two of three tests)",
+    "verify_hint": "Falsify by checking whether `_Messages` in `tests/unit/test_opus_history.py` bypasses the real SDK request/response path, and whether multi-turn histories drop thinking blocks per `_build_payload`",
+    "claim_signature": "absolute_claim:test_opus_history.py:blocks-survive-tool-round:4",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-41",
+    "category": "absolute_claim",
+    "claim": "The authored comment asserts that `exclude_unset` preserves wire fields without injecting SDK defaults — for every block type returned by the API.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "        # exclude_unset preserves wire fields without injecting SDK defaults.",
+    "source_file": "src/sqllens/agent/integrations/anthropic/llm.py",
+    "source_line": 254,
+    "verify_against": "pydantic `model_dump(exclude_unset=True)` semantics on SDK block models constructed by streaming accumulation rather than validation",
+    "verify_hint": "Falsify with a stream-accumulated block whose fields were assigned (not validated) — check `anthropic.lib.streaming` block construction against `_provider_content` in `src/sqllens/agent/integrations/anthropic/llm.py`",
+    "claim_signature": "absolute_claim:llm.py:exclude-unset-preserves-wire:254",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-42",
+    "category": "data_format_assumption",
+    "claim": "`claude-opus-5-5` is a valid Anthropic model id accepted by the Messages API, and the config/CLI/docstring defaults all use the same string.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 105,
+    "verify_against": "Anthropic model id list and the other default sites in this change",
+    "verify_hint": "Check `LLMConfig.model` in `src/sqllens/config.py` against the `--model` default in `claude_desktop_install` in `src/sqllens/cli.py`, the sample TOML in `export_memory`'s help text, and `self.model` in `src/sqllens/agent/integrations/anthropic/llm.py`",
+    "claim_signature": "data_format_assumption:config.py:opus-5-5-model-id:105",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-43",
+    "category": "api_contract",
+    "claim": "The generated Claude Desktop TOML's `model` default and the `LLMConfig` default stay in sync, so an installer-written config and a bare config select the same model.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 368,
+    "verify_against": "`LLMConfig.model` default in `src/sqllens/config.py`",
+    "verify_hint": "Compare the `--model` typer option default in `claude_desktop_install` in `src/sqllens/cli.py` with `LLMConfig.model` in `src/sqllens/config.py`",
+    "claim_signature": "api_contract:cli.py:installer-model-default-sync:368",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  }
+]
