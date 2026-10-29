@@ -74,6 +74,8 @@ class TestExecutableComments:
         "SELECT 1 /* # ordinary */ /*! + 1 */",
         "SELECT 1--x /*! + 1 */",
         "SELECT 1 # ordinary\n/*! + 1 */",
+        "SELECT 1 # ordinary\r'ignored\n/*! + sleep(0) */#'",
+        "SELECT 1 -- ordinary\r'ignored\n/*! + sleep(0) */#'",
     ])
     @pytest.mark.parametrize("dialect", ["mysql", None])
     def test_executable_comments_rejected(self, sql, dialect) -> None:

@@ -337,22 +337,17 @@ def _reject_mysql_executable_comments(sql: str) -> None:
     """Reject server-executed comment syntax before the parser discards it."""
     if "/*!" not in sql and "/*M!" not in sql:
         return
-    tokens = sqlglot.tokenize(sql, read="mysql")
+    # sqlglot treats CR as a line-comment terminator; MySQL only uses LF.
+    # A same-width space keeps source offsets while aligning comment scope,
+    # including quotes that MySQL ignores inside a comment after CR.
+    tokens = sqlglot.tokenize(sql.replace("\r", " "), read="mysql")
     start = 0
     gaps = chain(((t.start, t.end + 1) for t in tokens), [(len(sql), len(sql))])
     for stop, next_start in gaps:
         for comment in _MYSQL_COMMENTS.finditer(sql, start, stop):
             if comment.group().startswith(("/*!", "/*M!")):
                 raise UnsafeSqlError("MySQL executable comments are not allowed")
-            # sqlglot ends a line comment at CR; MySQL only ends it at LF.
-            # Keep the server's scope even across tokens sqlglot emitted.
-            start = comment.end()
-            if comment.group().startswith(("#", "--")):
-                newline = sql.find("\n", comment.start())
-                start = len(sql) if newline < 0 else newline
-            if start >= stop:
-                break
-        start = max(start, next_start)
+        start = next_start
 
 
 def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
