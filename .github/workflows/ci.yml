@@ -25,6 +25,9 @@ on:
   # and PRs stall in the queue indefinitely.
   merge_group:
 
+permissions:
+  contents: read
+
 jobs:
   unit:
     name: Lint + unit + transport (py${{ matrix.python-version }})
@@ -34,15 +37,27 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
       - run: pip install -c requirements.txt -c docker/requirements-drivers.txt -e ".[dev,all]"
       - run: pip check
+      - name: Validate release fragments
+        run: python scripts/changelog.py check
+      - name: Guard generated release files on pull requests
+        if: github.event_name == 'pull_request'
+        env:
+          CHANGELOG_BASE: ${{ github.event.pull_request.base.sha }}
+          CHANGELOG_BRANCH: ${{ github.head_ref }}
+        run: |
+          git fetch --no-tags origin "$CHANGELOG_BASE"
+          python scripts/changelog.py policy --base "$CHANGELOG_BASE" --branch "$CHANGELOG_BRANCH"
       - run: ruff check .
       # Skip the connectors marker — those need real DB service containers
       # and run in the dedicated job below.
@@ -87,9 +102,11 @@ jobs:
       SQLLENS_TEST_MYSQL_URL: mysql+pymysql://sqllens:sqllens@127.0.0.1:3306/sqllens
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -149,7 +166,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
           sparse-checkout: |
@@ -168,7 +185,7 @@ jobs:
           ref: ${{ fromJSON(steps.cfg.outputs.json).prflow_version }}
       - name: Mint downscoped review-trigger token
         id: app-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
           client-id: ${{ vars.DEVFLOW_APP_ID }}
           private-key: ${{ secrets.DEVFLOW_APP_PRIVATE_KEY }}
