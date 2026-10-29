@@ -53,7 +53,7 @@ Defines the language model SQL Lens uses to translate questions into SQL.
 | Field | Type | Description |
 |---|---|---|
 | `provider` | String | Only `anthropic` is supported at present. |
-| `model` | String | A Claude model identifier, for example `claude-sonnet-4-5-20250929`. |
+| `model` | String | A Claude model identifier, for example `claude-opus-5-5`. |
 | `max_tokens` | Integer | Between `1` and `128000`. Defaults to `8192`. The largest reply SQL Lens lets the model write in one step, measured in tokens. If a reply reaches this limit while the model is writing a query, SQL Lens does not run the incomplete query and asks the model to try again with a shorter one. Raise it if you see answers stop with a "repeated invalid tool calls" error on very large queries; the model's own output limit still applies. The environment override is `SQLLENS_LLM__MAX_TOKENS`. |
 | `temperature` | Number | Between `0` and `2`. Unset by default. When it is set, SQL Lens sends it as the sampling temperature on every model call. When it is unset, SQL Lens sends no temperature and the model uses its own default. Leave it unset for models that reject a temperature setting. The environment override is `SQLLENS_LLM__TEMPERATURE`. |
 | `effort` | String | One of `low`, `medium`, `high`, `xhigh`, or `max`. Unset by default. When it is set, SQL Lens sends it as the Anthropic effort level on every model call. When it is unset, SQL Lens sends no effort level and the model uses its own default. Check that your chosen model supports the level you pick. The environment override is `SQLLENS_LLM__EFFORT`. |

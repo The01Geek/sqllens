@@ -2,6 +2,10 @@
 
 This page lists user-visible changes in each released version of SQL Lens. For the full developer-facing changelog, see `CHANGELOG.md` in the repository.
 
+## October 28, 2026
+
+- **[Change] Opus 5.5 defaults** — New configurations, Claude Desktop installs, MCPB installs, and the SQLite example now select `claude-opus-5-5`. SQL Lens preserves signed thinking blocks across tool rounds. Existing TOML or environment model overrides still win; update `llm.model` or `SQLLENS_LLM__MODEL` to switch an existing instance, and leave `llm.temperature` unset for Opus 5.5.
+
 ## Unreleased
 
 - **[Fix] Profile names have a bounded format** — Profile administration and query selection now require 1–64 ASCII letters, digits, dots, underscores or hyphens. Rejected names are not echoed in errors. Existing nonconforming names require a manual rename in the profile JSON file; writes stay disabled to protect the original data until repair and restart. See [Profile names](configuration.md#profile-names). (#211, #214)

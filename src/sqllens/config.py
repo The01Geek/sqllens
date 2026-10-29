@@ -102,7 +102,7 @@ class LLMConfig(BaseModel):
     # embedders and tests that bypass the CLI entirely; it raises ``ValueError``
     # with the same message.
     api_key: SecretStr | None = Field(default=None, description="Anthropic API key")
-    model: str = Field(default="claude-sonnet-4-5-20250929", description="Anthropic model id")
+    model: str = Field(default="claude-opus-5-5", description="Anthropic model id")
     # Output-token cap for every agent LLM call. The framework fallback was 512,
     # which cuts off a tool call carrying a long SQL statement mid-arguments
     # (#247). Env override: SQLLENS_LLM__MAX_TOKENS.

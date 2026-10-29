@@ -28,7 +28,7 @@ Drag the `.mcpb` matching your platform onto Claude Desktop. It'll prompt for th
 | Database display name | no | Defaults to `primary` |
 | Enforce read-only | no | Defaults to on. Strongly recommended |
 | Anthropic API key | yes | Stored in your OS keychain |
-| Anthropic model | no | Defaults to the current Sonnet |
+| Anthropic model | no | Defaults to Claude Opus 5.5 |
 | Memory directory | yes | Where ChromaDB persists. Defaults to `~/.sqllens/chroma` |
 
 ## Caveats
