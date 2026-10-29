@@ -25,6 +25,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from decimal import Decimal
 
+from sqllens._bounded_json import JsonBoundsError, copy_bounded_json
 from sqllens.agent.core.components import UiComponent
 from sqllens.agent.core.rich_component import ComponentType
 from sqllens.agent.markers import IS_ANSWER_MARKER_KEY
@@ -655,6 +656,10 @@ def build_agent_trace(
        silently reported as a clean finish;
     5. else ``None`` — a clean run.
 
+    Argument strings retain at most 1024 characters plus a truncation suffix.
+    Per-step argument trees exceeding 16 KiB of ASCII-escaped JSON, 1024 nodes,
+    or eight nesting levels are replaced by an empty object. Either form of
+    elision sets ``arguments_truncated``. This bounds content, not secrets.
     Over-budget traces are size-capped by :func:`_cap_trace_size`, which may add
     ``arguments_truncated``/``steps_truncated`` flags and drop per-step
     ``arguments`` or trailing steps to fit the ``_meta`` iframe ceiling.
@@ -666,6 +671,7 @@ def build_agent_trace(
     by_id: dict[str, dict] = {}
     agent_error: str | None = None
     hit_iteration_limit = False
+    arguments_truncated = False
 
     for comp in components:
         rich = comp.rich_component
@@ -701,10 +707,16 @@ def build_agent_trace(
         tool = title[len(_TOOL_CARD_PREFIX):]
         timestamp = getattr(rich, "timestamp", None)
         metadata = getattr(rich, "metadata", None)
-        arguments = metadata if isinstance(metadata, dict) else {}
 
         step = by_id.get(card_id) if isinstance(card_id, str) else None
         if step is None:
+            arguments = {}
+            if isinstance(metadata, dict):
+                try:
+                    arguments, truncated = copy_bounded_json(metadata, max_string_chars=1024)
+                    arguments_truncated |= truncated
+                except JsonBoundsError:
+                    arguments_truncated = True
             # First card for this tool call — the ``running`` open.
             step = {
                 "index": len(steps),
@@ -780,6 +792,7 @@ def build_agent_trace(
             "total_duration_ms": total_duration_ms,
             "steps": public_steps,
             "terminal_error": terminal_error,
+            **({"arguments_truncated": True} if arguments_truncated else {}),
         }
     )
 

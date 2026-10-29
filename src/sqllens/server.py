@@ -25,6 +25,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
 from pydantic import ValidationError
 
+from sqllens._bounded_json import copy_bounded_json
 from sqllens.config import Config
 from sqllens.profiles import (
     DEFAULT_PROFILE_NAME,
@@ -196,6 +197,11 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
     declared field and is excluded). This is the dynamic-value source the
     row-level-security guard reads.
 
+    Forward at most 64 extra keys, 16 KiB of compact ASCII-escaped JSON,
+    1024 nodes (including keys), and eight nesting levels below the root.
+    Invalid or oversized trees are discarded as a whole. These bounds apply
+    after the MCP transport has parsed the request, not to HTTP body parsing.
+
     Fail-secure: any failure to read the request context yields ``{}`` — a
     dynamic RLS rule then sees its key as missing and blocks the query (static
     rules are unaffected), rather than the tool crashing or, worse, a request
@@ -227,19 +233,20 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
         return {}
     if meta is None:
         return {}
-    extra = getattr(meta, "model_extra", None)
-    if extra is None:
-        # meta present but no extras attribute — either the caller sent only
-        # declared fields, or the MCP SDK changed how _meta extras surface.
-        # Logged at debug so a "every dynamic RLS query suddenly blocks"
-        # incident is traceable to this seam rather than looking like the
-        # caller never sent metadata.
-        logger.debug(
-            "request _meta present but exposes no model_extra; "
-            "dynamic RLS rules will see no metadata"
-        )
+    try:
+        extra = getattr(meta, "model_extra", None)
+        if extra is None:
+            logger.debug("request _meta exposes no model_extra; returning empty metadata")
+            return {}
+        if type(extra) is not dict or len(extra) > 64:
+            raise ValueError("request metadata key limit or shape")
+        bounded, _ = copy_bounded_json(extra)
+        return bounded
+    except Exception:
+        # Do not echo metadata or exception content into the diagnostic. A
+        # rejected tree is never partially forwarded to dynamic RLS rules.
+        logger.warning("invalid or oversized request metadata; returning empty metadata")
         return {}
-    return dict(extra) if extra else {}
 
 
 def build_server(cfg: Config) -> FastMCP:

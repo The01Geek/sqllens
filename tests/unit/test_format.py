@@ -1502,7 +1502,7 @@ def test_build_agent_trace_caps_oversized_arguments() -> None:
     cards = make_tool_cards("run_sql", {"sql": huge_sql}, ok=True)
     trace = build_agent_trace(cards, total_duration_ms=5, max_iterations=20)
     assert trace["arguments_truncated"] is True
-    assert "arguments" not in trace["steps"][0] or trace["steps"][0]["arguments"] == {}
+    assert trace["steps"][0]["arguments"] == {"sql": huge_sql[:1024] + "…(truncated)"}
     assert trace["steps"][0]["tool"] == "run_sql"
     assert _serialized_len(trace) <= _MAX_TABLE_PAYLOAD_BYTES
 

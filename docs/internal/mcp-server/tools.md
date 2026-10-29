@@ -249,6 +249,8 @@ Pinned by `tests/unit/test_format.py` (component-stream cases), `tests/unit/test
 
 ## Agent trace channel — `agent.show_details`
 
+Trace argument string values retain up to 1,024 characters plus `…(truncated)`. A per-step argument tree exceeding 16 KiB of compact ASCII-escaped JSON, 1,024 nodes (including keys), or eight nesting levels below its root is replaced by `{}`. Invalid JSON-shaped values are also dropped. Both truncation and dropping set `arguments_truncated: true`; the existing whole-trace size cap remains. Short values are preserved, including any sensitive content they contain: this is a size bound, not secret redaction. Enable details only for trusted debugging clients.
+
 The same `agent.show_details` flag that unlocks the executed-SQL channel additionally emits a **structured step-by-step trace of the agent loop** under `_meta["sqllens/agent_trace"]` (issue #180). It is gated on the same flag deliberately: `show_details` already admits schema/SQL leakage to "trusted, debugging-oriented deployments", and a per-step trace falls under the same threat model — so this adds no new security knob. With the flag **off** (the default) no trace is built and the channel is absent — behaviour is byte-for-byte unchanged.
 
 The trace is the answer to "what did the agent actually do, and where did a slow or failed run spend its time?" — the question the executed-SQL card alone could not answer. It is assembled by `build_agent_trace` in [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py) in a **single forward pass over the same buffered component stream** — the agent is never re-run or re-instrumented (issue #180 scope note). Shape:

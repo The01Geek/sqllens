@@ -23,6 +23,28 @@ from sqllens.tools import _agent as agent_module
 pytestmark = pytest.mark.asyncio
 
 
+async def test_query_metadata_limits_over_mcp_http(make_server, monkeypatch) -> None:
+    from sqllens import server as server_module
+
+    seen = []
+
+    async def fake_query(cfg, question, **kwargs):
+        seen.append(kwargs["metadata"])
+        return "ok", [], None, None, None
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_query)
+    handle = make_server(AuthConfig(mode="none"))
+    async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            for meta in ({"tenant": "alpha"}, {"tenant": "alpha", "padding": "x" * 20000}):
+                result = await session.call_tool(
+                    "query_database", {"question": "synthetic metadata check"}, meta=meta
+                )
+                assert result.isError is False
+    assert seen == [{"tenant": "alpha"}, {}]
+
+
 # ─────────────────────── happy path: auth=none ──────────────────────────────
 
 
