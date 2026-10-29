@@ -1,0 +1,1 @@
+Refresh the compatible runtime dependency closure, require patched MCP/Starlette/settings versions, test constrained installs in CI, and add advisory dependency scanning with explicit Chroma server exclusions. (#261)
