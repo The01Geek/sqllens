@@ -72,6 +72,10 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
   query selection, with short errors that do not echo rejected names. Invalid
   legacy names require manual repair; profile writes stay disabled until
   repair and restart so excluded entries are not lost. (#211, #214)
+- Pin both Docker base stages to a verified multi-platform digest and constrain
+  the complete Python runtime install, including PostgreSQL/MySQL drivers.
+  CI and the advisory scan cover those driver pins; Dependabot tracks the base.
+  (#176, #237, #261)
 - Refresh the compatible runtime dependency closure, require patched MCP/Starlette/settings versions, test constrained installs in CI, and add advisory dependency scanning with explicit Chroma server exclusions. (#261)
 - Agent looped on tool calls cut off by the output-token cap until
   `max_tool_iterations` (#247). A `tool_use` block in a `max_tokens` response is
