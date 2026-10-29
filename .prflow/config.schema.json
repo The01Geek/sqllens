@@ -1,0 +1,1282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/The01Geek/prflow/.prflow/config.schema.json",
+  "title": "PRFlow project config",
+  "description": "PRFlow project configuration. The LOCAL tier (the /prflow:implement, /prflow:review, /prflow:docs skills you run inside Claude Code) works with NO config file at all \u2014 every value has a sane built-in default. You only need this file if you enable the GitHub Actions automation (the optional cloud/autopilot tier).",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path/URL to this schema for editor autocomplete and validation. Ignored at load time."
+    },
+    "base_branch": {
+      "type": "string",
+      "description": "Branch that PRs target by default. Used as the review/merge base.",
+      "default": "main"
+    },
+    "claude_model": {
+      "type": "string",
+      "description": "Claude model for AI-powered workflows (individual workflows may override).",
+      "default": "claude-opus-5-5"
+    },
+    "prflow_version": {
+      "type": "string",
+      "description": "Git ref (tag, branch, or commit SHA) of the plugin repository (see prflow_repo) that the cloud-tier workflows fetch the plugin from at runtime (the vendor-plugin composite action's fetch branch \u2014 i.e. a thin install where the plugin tree is NOT committed). install.sh pins this to the commit it installed from (when no jq/node/python3 is available at install time it stays empty and you must set it by hand). Bump it to update. Ignored when the plugin is committed into .prflow/vendor/prflow/ (DEVFLOW_VENDOR=1). Empty by default on purpose: the fetch branch fails loud on an empty ref rather than silently tracking mutable main, so an un-pinned thin install is caught instead of drifting.",
+      "default": ""
+    },
+    "prflow_repo": {
+      "type": "string",
+      "description": "owner/name of the repository the cloud-tier workflows fetch the plugin from at runtime, at the ref named by prflow_version. Empty (the default) means the public repository The01Geek/prflow. Set it to fetch the plugin from a fork or a private repository; a private repository additionally needs a token that can read it, supplied through the PRFLOW_REPO_TOKEN repository secret. install.sh records it when installed from a non-default repository.",
+      "default": ""
+    },
+    "providers": {
+      "type": "object",
+      "description": "OPT-IN, BEST-EFFORT third-party model providers for the CLOUD tier (issue #313). A named map of model provider routes that the devflow / prflow_implement sections can each select via their own `provider` key. A route is either an HTTP endpoint speaking Anthropic's message API (a hosted model gateway, or a self-run proxy) or, with `auth: bedrock_api_key`, Amazon Bedrock reached with a long-lived Bedrock API key. With no providers map and no per-section `provider`, cloud behavior matches the Anthropic-OAuth default (unchanged for a given `claude_model`; the runner's default-path model now resolves from base-ref config). The provider API credential is NOT named here — it is always the fixed repository secret DEVFLOW_PROVIDER_API_KEY (kept greppable/auditable and fail-closed on absence). Anthropic does not support routing Claude Code to non-Claude models, so this is best-effort.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["auth"],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": { "required": ["auth"], "properties": { "auth": { "enum": ["bearer", "api_key"] } } },
+            "then": { "required": ["base_url"] }
+          }
+        ],
+        "properties": {
+          "base_url": {
+            "type": "string",
+            "description": "Anthropic-compatible base URL: scheme + host + whatever path prefix your endpoint serves Anthropic's message API under. The client appends the API path (/v1/messages) itself, so this value does not include a /v1 segment of its own. Exported to the action step as ANTHROPIC_BASE_URL. Required for `bearer` and `api_key` auth; ignored (and warned about) for `bedrock_api_key`, which reaches Bedrock via the AWS region rather than a base URL."
+          },
+          "auth": {
+            "type": "string",
+            "enum": ["bearer", "api_key", "bedrock_api_key"],
+            "description": "How DEVFLOW_PROVIDER_API_KEY is presented. 'bearer' (the usual case for a hosted gateway): the key rides as the anthropic_api_key action input AND as ANTHROPIC_AUTH_TOKEN (the Authorization: Bearer header) — the documented two-slot recipe. 'api_key': the key is passed as the anthropic_api_key input only (x-api-key). 'bedrock_api_key': the key is a long-lived Amazon Bedrock API key, exported as AWS_BEARER_TOKEN_BEDROCK and passed with the use_bedrock action input so the run reaches Amazon Bedrock (not an Anthropic endpoint); this arm needs no base_url and requires AWS_REGION in the entry's env map."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "description": "Optional request timeout in milliseconds, exported as API_TIMEOUT_MS (e.g. 3000000 for a 50-minute ceiling on slow gateway routes). Omitted → the action/client default."
+          },
+          "effort_supported": {
+            "type": "boolean",
+            "description": "Whether this provider accepts the --effort flag. Default false: many gateways reject unknown params with HTTP 400, so --effort is dropped for a provider unless this is explicitly true. The Anthropic default path keeps --effort (for a schema-valid, non-empty effort value).",
+            "default": false
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "description": "Extra environment variables written into the job environment for the action step, each accepted key's value written verbatim (e.g. ANTHROPIC_DEFAULT_HAIKU_MODEL so background calls resolve to a real model the endpoint serves; CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS='1' to avoid anthropic-beta-header gateway 400s; CLAUDE_CODE_ATTRIBUTION_HEADER='0' to preserve gateway prompt caching — two distinct concerns). Keys are name-filtered, not exported unfiltered: this map is committed configuration, so the inject step REFUSES a run (fail loud) whose keys include a credential name (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_BEARER_TOKEN_BEDROCK — set the provider credential via the DEVFLOW_PROVIDER_API_KEY repository secret, never here), a name that shadows the job environment or its Actions plumbing (PATH, GITHUB_TOKEN, GH_TOKEN, GITHUB_ENV, GITHUB_OUTPUT, GITHUB_PATH), an interpreter or loader hook that can make every later job step load code you did not intend (BASH_ENV, ENV, LD_PRELOAD, LD_LIBRARY_PATH, DYLD_INSERT_LIBRARIES, NODE_OPTIONS, PYTHONPATH), or CLAUDE_CODE_SUBAGENT_MODEL, which overrides the model of every subagent — both the one a dispatch requests and the one the agent definition declares — and so flattens the agent_overrides review roster to a single model (use ANTHROPIC_DEFAULT_HAIKU_MODEL to map only the background model). Separately from that refused list — which stops the run — four WATCHED keys are accepted but WARNED, not refused: ANTHROPIC_BASE_URL, API_TIMEOUT_MS, HOME, RUNNER_TEMP. When the map names one or more of these the step prints a single ::warning:: naming every match and continues; the map's value still takes effect (it overrides the dedicated base_url/timeout_ms field, or the job's own HOME/RUNNER_TEMP for later steps). Watched-key matching is case-folded and whole-name (home warns like HOME; HOMEDIR does not), the same rule the refused list applies. The env map is written last in the step, so an accepted key takes effect for every subsequent step in the job, not just the action step."
+          }
+        }
+      }
+    },
+    "status_labels": {
+      "type": "object",
+      "description": "Mirror the /prflow:implement run status onto managed GitHub labels on the issue and its open PR (issue #2117), so a maintainer sees a stalled or finished run from the issue/PR LIST without opening the workpad comment. Three managed labels track the workpad Status: PRFlow:Implementing (a run is in progress), PRFlow:Stuck (a run stopped and needs attention), PRFlow:Complete (a run finished). The labels are a derived mirror of the workpad Status, which stays the source of truth, and are applied best-effort by scripts/workpad.py after each status write (including the ones written after the agent has stopped) and after each --pr-link write that records the PR link — taking the PR number from the link value's /pull/<digits> segment (else a #<digits>), so the pull request carries its label from the moment the run links it rather than only once the next status write resolves the open PR by lookup. ON by default.",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the status-label mirror is active. true (the default) keeps the managed labels in sync on every status change and on every --pr-link write that records the PR link; set to an explicit JSON false (or the JSON string \"false\") to turn the whole feature off, keeping exactly today's no-label behaviour. Read directly from the checked-out working-tree config in Python (mirroring scripts/workpad.py's workpad_marker read), NOT via config-get.sh: only the JSON boolean false and the JSON string \"false\" disable it; every other shape — a missing key, a missing/unreadable/unparseable config file, an empty string, a number, an array, an object — leaves the feature enabled (the truthy-default direction).",
+          "default": true
+        }
+      }
+    },
+    "review_status_labels": {
+      "type": "object",
+      "description": "Mirror a cloud /prflow:review run's status onto four managed GitHub labels on the pull request and each issue it closes (issue #104), so a maintainer sees whether a review is running, approved, requested changes, or died from the issue/PR LIST without opening the run's progress comment — beside the implement status labels (status_labels, #2117). The four managed labels are PRFlow:Reviewing (a review is running), PRFlow:Approved (a determined approve), PRFlow:ReviewRejected (a determined reject), PRFlow:ReviewStuck (no determined verdict, a dead run, an evidence-gate fail, or the finalizer catch). The labels are a derived mirror of the run's progress comment, which stays the source of truth, and are written best-effort by scripts/mirror-review-status-label.sh from the devflow.yml command/review_finalize jobs (never from the review skill, whose downscoped token cannot write issues). OFF by default: the key is absent from consumer configs, so a consumer run makes no label request; only a local interactive review and /prflow:review-and-fix are out of scope regardless.",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the review status-label mirror is active. Resolved through scripts/config-get.sh and honoured only when it resolves to the literal string true — a JSON boolean true and a JSON string \"true\" both resolve to it. Every other shape leaves the feature OFF and issues no label request: a JSON false or string \"false\", an empty string, null, a number, an array, a non-object review_status_labels value, a missing key, a missing/unreadable/unparseable config file, and an absent resolver (the truthy-OFF, config-gated-default direction, opposite status_labels.enabled which defaults ON).",
+          "default": false
+        }
+      }
+    },
+    "prflow": {
+      "type": "object",
+      "description": "Shared PRFlow settings. allowed_bots/allowed_users gate triggering across the shipped PRFlow workflows (devflow.yml, devflow-implement.yml, devflow-retrospective.yml); workpad_marker is used by /prflow:implement; effort and allowed_tools apply specifically to the light /prflow:* command path (devflow.yml). The automatic pull-request-triggered review tier has been decommissioned (see issues #930, #920 and #237) and its runner and telemetry-relay workflows are no longer in the plugin; use /prflow:review by collaborator comment instead.",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Optional: name of a `providers` entry to route the light /prflow:* command path (devflow.yml) through, instead of the Anthropic default. Requires the DEVFLOW_PROVIDER_API_KEY repo secret. Unset → Anthropic-OAuth default (issue #313)."
+        },
+        "claude_model": {
+          "type": "string",
+          "description": "Optional per-section model override for the light /prflow:* command path (devflow.yml). Takes precedence over the global claude_model. Unset → global claude_model (issue #313)."
+        },
+        "allowed_bots": {
+          "type": "string",
+          "description": "Bot logins allowed to trigger PRFlow workflows (comma-separated). 'claude' is Anthropic's GitHub App identity; add your own bot/automation logins (e.g. dependabot). Each entry may be written as the bare slug, '<slug>[bot]', or 'app/<slug>', and comparison ignores case. Beyond triggering, it is the default set of watched authors for the weekly retrospective and decides two deferral-filer trust arms (scripts/match-deferrals.py): a listed author is trusted, and a '*' entry trusts any bot whose pull-request head branch is in this repository, not a fork. For triggering, PRFlow's own gate reads a '*' entry as a literal login, not a wildcard, but claude-code-action's allowed_bots input, which receives the same value, reads it as all bots.",
+          "default": "claude,dependabot"
+        },
+        "allowed_users": {
+          "type": "string",
+          "description": "Human logins allowed to trigger PRFlow command/implement workflows (comma-separated), in addition to the write/admin/maintain collaborator requirement. '*' (default) allows any collaborator; narrow it to restrict to specific logins. Bots are governed separately by allowed_bots. The same rule decides the human deferral-filer trust arm (scripts/match-deferrals.py): a human pull-request author who passes it is trusted.",
+          "default": "*"
+        },
+        "workpad_marker": {
+          "type": "string",
+          "description": "Marker line identifying the persistent /prflow:implement workpad comment on issues. One comment per issue whose body starts with this marker.",
+          "default": "<!-- prflow:workpad -->"
+        },
+        "effort": {
+          "type": "string",
+          "description": "Reasoning effort for the light /prflow:* command path (devflow.yml). Passed explicitly via --effort on the Anthropic default path (including the default 'high'), so the effort is pinned rather than relying on the model's built-in default; a provider-routed section drops --effort unless its provider sets effort_supported: true (issue #313).",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "default": "high"
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Extra --allowed-tools entries for the light /prflow:* command path (devflow.yml), APPENDED on top of devflow's built-in base list. Use claude-code-action tool syntax, e.g. \"Bash(make:*)\", \"Bash(docker compose:*)\". Does not apply to /prflow:implement \u2014 see prflow_implement.allowed_tools. Empty/omitted \u2192 base list only.",
+          "default": []
+        },
+        "execution_diagnostics_enabled": {
+          "type": "boolean",
+          "description": "Gates whether the cloud-tier workflows that run claude-code-action surface the run's execution diagnostics after the claude step \u2014 the run summary (is_error, num_turns, duration_ms, total_cost_usd, permission_denials_count) and the permission-denial detail (count when available, else reported unavailable; per-denial tool_name + truncated tool_input when the execution file carries it) \u2014 to the job log and $GITHUB_STEP_SUMMARY via scripts/surface-execution-diagnostics.sh. A pure read-only diagnostic: it never changes the job's pass/fail result, adds no token scope, and uploads no artifact. true (the default) enables the surfacing; false is for quieter runs. Absent config resolves to true (enabled by default). Read by the 'Surface execution diagnostics' step in each cloud-tier workflow. Inherits from telemetry.enabled (issue #2035): when this key does not resolve to a value — absent, JSON null, or an empty string — and telemetry.enabled is the JSON boolean false, this gate resolves to false; a value that does resolve always wins.",
+          "default": true
+        },
+        "execution_transcript_artifact_enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt-in: upload the engine's token-scrubbed execution transcript as a 7-day run artifact. Default false; the scrub is a blocklist, so enable only if run artifacts are acceptable exposure for this repo's access model. Also gates the downstream rebuild of that same artifact from the job log after an abrupt runner death (issue #799): the rebuilt artifact carries the same content through the same scrub, so it carries the same consent."
+        },
+        "execution_transcript_job_log_enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt-in: stream every engine message into the /prflow:implement claude job's own LOG as it arrives, by passing the engine action's show_full_output input (issue #799). This exists for one failure mode: when the runner dies abruptly (a host-level termination rather than a graceful cancel) the job runs NONE of its own always() post-steps, so the transcript artifact step never fires and the execution file — which the engine writes only after its message loop ends — dies with the host. The job log is the only channel the runner has already uploaded, so with this key on the downstream recovery job rebuilds the transcript from it via scripts/recover-transcript-from-job-log.py; the rebuilt artifact also needs execution_transcript_artifact_enabled, and with only this key on the log is streamed and no artifact is produced. Default false and a SEPARATE key from execution_transcript_artifact_enabled, which gates a credential-SCRUBBED artifact: the job log is NOT scrubbed or masked by PRFlow (any credential the agent echoes, refreshed App tokens included, lands in it), a public repository publishes its job logs, and GitHub keeps them far longer than the 7-day artifact — the two surfaces carry different exposure, so do not harmonize them. The workflow honors this key only when the triggering event reports the repository private: on a public repository, or when the event does not state the visibility, it passes show_full_output false and emits a warning naming the cause. Cost when on: the streamed transcript makes the job log as large as the transcript itself (tens of MB on a multi-hour run). It adds nothing to the agent's own context. Read at runtime through scripts/config-get.sh against the checked-out tree."
+        },
+        "execution_denial_commands_enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Gates whether the SCRUBBED text of the engine's denied Bash commands is persisted into the run's efficiency record on the telemetry branch (prflow-telemetry) durably — a bounded, credential-scrubbed, command-only field used to diagnose which command shapes the permission matcher keeps refusing. The scrub is an INCOMPLETE blocklist — see docs/external/docs/configuration/observability-and-privacy.md for the redacted credential families and what stays unrecognized — so a novel credential shape can survive; enable only if scrubbed command text on a long-lived branch is acceptable for this repo's access model. Defaults to ENABLED: an upgrading repository begins persisting this field without opting in — set false to disable. Deliberately the OPPOSITE default from execution_transcript_artifact_enabled (which defaults false): that key gates the WHOLE execution transcript (prompt text, repository content, a potentially dumped environment), while this key gates only a bounded scrubbed command-only field, so the two surfaces carry different risk and different defaults — do not harmonize them. The denial COUNT and the denied tool_name are NOT gated by this key; they are always persisted (a number and a fixed-vocabulary tool identifier carry no credential risk). Read at runtime through scripts/config-get.sh against the checked-out tree, so a change is live in the same run. Read by the 'Persist review-and-fix observability artifacts (backstop)' step in each cloud-tier workflow. Inherits from telemetry.enabled (issue #2035): when this key does not resolve to a value — absent, JSON null, or an empty string — and telemetry.enabled is the JSON boolean false, this gate resolves to false; a value that does resolve always wins."
+        },
+        "attribute_commits_to_triggerer": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt-in: on the cloud-tier WRITER runs (/prflow:implement's claude job and /prflow:review-and-fix's command job), author the agent's git commits as the human who triggered the run, so `git blame`/history show the responsible human — parity with local runs. Default FALSE; when false or absent, commits are authored exactly as today (byte-for-byte unchanged). Read at TRIGGER time from a trusted default-branch checkout, so its effect is POST-MERGE-ONLY: a value present only in a PR head has no effect on that PR's own run. HUMANS ONLY, fail-safe: identity is emitted only for a GitHub `.type == \"User\"` login that does not carry the `[bot]` suffix; any other type, a `[bot]` login, or a type that cannot be established falls back to current authorship with a warning. The former read-only review tier never committed and is untouched. Needs NO new credential — commit author/committer is git metadata, independent of the push token (which stays the App/github-actions[bot] identity). Fail-open: attribution is advisory and never fails or gates the run. Posting the review AS the human and the PR opened-by identity are out of scope (they require a per-user credential)."
+        },
+        "publish_model_effort": {
+          "type": "boolean",
+          "description": "Whether the PRFlow provenance line (rendered by scripts/render-pr-provenance-line.py) names the session model and reasoning effort alongside the plugin version, for every command that emits the line — the /prflow:implement draft-PR line and the /prflow:spec issue line alike. true (the default) publishes the model and effort clause when those values can be established; the plugin version is always emitted whatever this key holds. Set to an explicit JSON false to suppress the model and effort clause (version only) for a repository that does not wish to publish its model configuration. The helper reads this key directly from the checked-out working-tree config in Python (mirroring scripts/workpad.py), NOT via config-get.sh, so suppression is detected as a raw JSON boolean false — an explicit false switches the clause off, while a missing key, empty string, or any other value leaves it enabled (the truthy-default direction). Read at RUN time from the working tree. This key supersedes the former per-command key in the prflow_implement section, which is now read by nothing.",
+          "default": true
+        }
+      }
+    },
+    "prflow_implement": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Optional: name of a `providers` entry to route the /prflow:implement action (devflow-implement.yml) through, instead of the Anthropic default. Requires the DEVFLOW_PROVIDER_API_KEY repo secret. Unset → Anthropic-OAuth default (issue #313)."
+        },
+        "claude_model": {
+          "type": "string",
+          "description": "Optional per-section model override for /prflow:implement (devflow-implement.yml): the model id to pass as --model, written in whatever form the routed endpoint expects (a provider-routed section usually needs this, since the global claude_model names a Claude model). Takes precedence over the global claude_model. Unset → global claude_model (issue #313)."
+        },
+        "effort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "implement_pr_state": {
+          "type": "string",
+          "enum": [
+            "ready_for_review",
+            "draft"
+          ],
+          "description": "Final state of the PR a /prflow:implement run produces. 'ready_for_review' (the default) publishes the PR in Phase 4.3 via `gh pr ready`, exactly as before. 'draft' leaves it the draft created in Phase 3.1 (the run still finalizes with Status: Complete and the outcome reaction, but does not publish, so the cloud review and CI ready_for_review listener do not auto-fire until a human publishes). Any other value \u2014 missing key, empty string, or an unrecognized string \u2014 resolves to 'ready_for_review'; default-to-publish is the safe direction.",
+          "default": "ready_for_review"
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Extra --allowed-tools entries for the /prflow:implement path (devflow-implement.yml), APPENDED on top of devflow's built-in base list. The implement path does NOT inherit prflow.allowed_tools, so list every extra tool you want during implementation here. Empty/omitted \u2192 base list only.",
+          "default": []
+        },
+        "update_branch_checkpoints": {
+          "type": "boolean",
+          "description": "Master switch for the base-branch update checkpoints (issue #448). true (the default) brings the feature branch up to date with base_branch at four checkpoints of a /prflow:implement run \u2014 the end of Phase 1.4 (every \u00a71.4 arm since issue #779 \u2014 new branch, adopted branch, and landed resume alike), pre-draft-PR (Phase 3.1), each fix iteration + loop exit of the review-and-fix loop under --push-each-iteration (Checkpoint 3), and pre-ready (Phase 4.3) \u2014 via scripts/update-branch-checkpoint.sh, so every state the merge gate or an auto-review consumes is current, including the terminal pushed state. This same key also governs the checkpoint inside a standalone /prflow:review-and-fix --push-each-iteration run. Disabled exactly when the value serializes to the string 'false' via config-get.sh \u2014 an explicit JSON false, the JSON string \"false\", or [false] (arrays comma-join); a missing key, empty string, or any other value leaves the checkpoints enabled (issue #312 valid-falsy discipline). A consumer repo without an up-to-date branch-protection rule keeps working unchanged apart from ordinary base merges on feature branches.",
+          "default": true
+        },
+        "ci_verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Cloud-only opt-in (issue #403): the explicitly-selected CI verification mode for THIS repository's own /prflow:implement cloud runs. When enabled AND the deployment is complete (a ci.yml carrying the workflow_dispatch request_id/expected_head_sha inputs, and an implement capability profile granting scripts/ci-verification-request.py), a full-suite verification boundary offloads to the existing CI workflow for the committed, pushed candidate instead of running the suite on the implementation host; scripts/ci-verification-request.py owns the dispatch/wait/evidence lifecycle and scripts/check-completion-evidence.py validates the resulting cloud_ci_evidence record. Fail-closed and default OFF: absent, or enabled:false/0/'', keeps the existing in-environment cloud verification path unchanged for every consumer and for this repository until a follow-up flips it on. An incomplete deployment refuses CI mode with an actionable explanation rather than mis-verifying. Consumer repositories do not ship ci.yml, so this key has no effect there.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "true activates CI verification mode (subject to the deployment check above). Any other value — missing key, false, 0, or empty string — leaves the mode OFF (issue #312 valid-falsy discipline).",
+              "default": false
+            },
+            "pre_request_checks": {
+              "type": "array",
+              "description": "Opt-in (issue #870): commands `ci-verification-request.py request` runs, in order from the repository root, before it dispatches a new CI run; the first non-zero exit refuses the request unless the same check fails the same way at the merge-base with the base. Each entry is one argv list, run with no shell; a first token ending in .py runs under the helper's interpreter. Empty or absent runs no check.",
+              "items": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string" }
+              },
+              "default": []
+            }
+          },
+          "default": {}
+        },
+        "merge_drivers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Git merge drivers scripts/update-branch-checkpoint.sh registers before each base merge. A map from a git merge-driver name (as declared by a `merge=<name>` attribute in the repository's .gitattributes) to the repository-relative path of a driver script that accepts `--register` and writes the git config for that driver. Before a base merge the helper walks every `merge=<name>` attribute over the tracked index and, for each name with an entry here, runs `python3 <repo-root>/<script> --register` (an idempotent overwrite that repairs a stale local value on every checkpoint). A name with no entry is skipped silently — PRFlow does not own it — whether or not git resolves it to a built-in or a configured driver. An entry whose script is absent, and a registration that exits non-zero, each leave a stderr breadcrumb naming the name and continue to the merge with no registration. A non-object value for this key prints a stderr breadcrumb naming the key and skips merge-driver registration. Empty/omitted → no merge-driver registration.",
+          "default": {}
+        },
+        "stall_backstop": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Cloud-only workflow-level backstop for /prflow:implement (devflow-implement.yml). A headless single-shot run can end mid-lifecycle (e.g. right after `gh pr create`) yet report success, because the SDK session ends the moment the model emits a tool-call-free turn. After the `claude` step, the backstop reads the issue workpad Status (never PR draft state): a terminal Status (\ud83c\udf89 Complete / \ud83d\udc4e Blocked / \ud83d\udca5 Failed / \ud83d\uded1 Cancelled) is a no-op, an interim Status (\ud83d\ude80 \u2026) auto-resumes `/prflow:implement <n>` up to `max_resume_attempts`, and an exhausted cap or an unreadable Status fails the job loud with a distinct issue comment. Every fail-loud exit reached after reading a genuinely interim Status also flips the workpad Status to \ud83d\udca5 Failed (best-effort) so a dead run stops reporting itself as still working. A cancelled run (job.status=cancelled) is a decided ending, not a stall: the backstop resumes nothing, flips an interim workpad to 🛑 Cancelled (best-effort, no comment, no resume attempt consumed), and leaves terminal/unreadable/auth-failure classes untouched (issue #498). Purely additive: absent/disabled, the job behaves exactly as before.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Master switch for the stall backstop. true (the default) enables the post-run status check + auto-resume/fail-loud behavior; false skips the backstop entirely (no status read, no resume, no fail, no comment) so the job stays green on a mid-lifecycle stop, exactly as before this feature. An unrecognized/missing value resolves to true \u2014 the safe, honest-failure direction.",
+              "default": true
+            },
+            "max_resume_attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Hard cap on automatic resume attempts before the backstop fails loud. 0 means detect-and-fail-loud only (no auto-resume). N means up to N auto-resumes, each announced by a distinct issue comment, before the job exits non-zero. A negative or non-integer value resolves to the default 2.",
+              "default": 2
+            },
+            "defer_to_runner_retry": {
+              "type": "boolean",
+              "description": "Opt-in for a runner that retries a failed `claude` job on its own (for example RunsOn `retry=when-interrupted` on EC2 Spot). It governs ONLY the disposition of an UNCLASSIFIED interim `failure`: when true, the backstop and the Spot recovery job leave the workpad interim, post one informational comment, and let the runner's own retry resume it (issue #305); when false (the default), the backstop resumes it itself. Independent of this flag (issue #401), a failure positively classified as a provider/application failure that no runner retries (`terminal_reason=api_error` with a numeric `api_error_status`; issue #362) is converged by PRFlow rather than deferred: a `provider-failure` takes a capped `/prflow:implement` resume, and a rate-limit rejection whose reset is still in the future takes a terminal 💥 Failed disposition naming the reset time (a resume would re-enter the exhausted limit) — so this #362 protection now applies whether the flag is true or false. An unclassifiable or unavailable failure — including an unobservable Spot reclaim (a reclaimed job's diagnostics are absent) — is governed by the flag as above, so the two recovery mechanisms never drive one issue at once. A `cancelled` job is unaffected (no runner retries a cancel). Only the JSON boolean true enables the defer behavior; every other shape leaves the unclassified-failure disposition at the resume default. Leave false on a runner without job-level retry, or a deferred failed interim run is never resumed.",
+              "default": false
+            }
+          }
+        },
+        "spot_interruption_watcher": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Opt-in EC2 Spot-interruption watcher for /prflow:implement (devflow-implement.yml), for a repository whose heavy `claude` job runs on a Linux EC2 Spot self-hosted runner. When enabled, a background watcher polls IMDSv2 `spot/instance-action` while the runner is still alive; on a valid interruption action it posts a run-scoped durable reclaim marker comment and ends the Claude step so the existing post-run handlers get the remaining interruption window, and a downstream GitHub-hosted recovery job later reconciles the terminal result (reclaim → capped resume, human-cancel/unclassifiable → no reclaim resume). Default OFF: the watcher requires IMDSv2 access and Linux process-lifecycle support (Windows and macOS are outside its boundary), so it never starts unless explicitly turned on. The recovery job itself always runs (it is a no-op on a successful/skipped claude result); only the in-job watcher is gated by this key.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Master switch for the in-job Spot-interruption watcher. ONLY the JSON boolean true starts it; every other shape — a missing key, the JSON string \"true\", a number, null, an object, an array, or the JSON boolean false — leaves it off. It is read as raw JSON by scripts/watcher-config-enabled.py (testing `value is True`), NEVER through config-get.sh's string-coercing resolver, so a string \"true\" does not enable it. Default false (opt-in; safe on any host, since a non-Linux/non-EC2 host leaves the Claude step untouched even when enabled).",
+              "default": false
+            }
+          }
+        }
+      }
+    },
+    "prflow_review_and_fix": {
+      "type": "object",
+      "description": "Settings for /prflow:review-and-fix: the fix-loop iteration cap, the fix-severity routing threshold, and per-run subagent effectiveness telemetry.",
+      "properties": {
+        "fix_severity_threshold": {
+          "type": "string",
+          "enum": [
+            "critical",
+            "important",
+            "suggestion"
+          ],
+          "description": "The /prflow:review-and-fix fix loop routes to the fixer every finding and verification-checklist FAIL whose severity is at or above this threshold (severity ordering: critical > important > suggestion); findings below it stay advisory (except fix-delta gate findings about the loop's own fixes, which can go back to the fixer whatever this threshold is), and a checklist INCONCLUSIVE item never reaches the fixer. At the default 'important', the loop fixes Critical + Important/Major findings and checklist FAILs. Set 'suggestion' for a more aggressive fixer (Suggestion/Minor also routed to the fixer, bounded by max_iterations, the convergence check, and the fix_below_threshold_iterations damper window that parks below-important findings and holds back below-important checklist FAILs after the opening iterations on a Critical/Important-clean iteration) or 'critical' for a conservative one. Independent of prflow_review.verdict_severity_threshold, except that every REJECT-driving finding or checklist FAIL, and every finding the review exempts from REJECT because a decided acceptance criterion decides it, is always fixable regardless of this key. A missing/wrong-type/unknown value falls back to the default with a stderr breadcrumb (never aborts a run).",
+          "default": "important"
+        },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum number of fix-loop iterations /prflow:review-and-fix runs before exiting with its latest verdict. Higher converges on a clean verdict more often at greater subagent cost; lower saves cost. A value below 1 is clamped up to 1, and a non-integer/empty/unparseable value (or an unreadable config) falls back to the default. No upper bound is imposed.",
+          "default": 5
+        },
+        "fix_below_threshold_iterations": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many leading /prflow:review-and-fix iterations route below-important findings (Suggestion/Minor) that fix_severity_threshold admits to the fixer. After this opening window, on an iteration whose routed findings include no Critical and no Important finding, each fresh below-important finding is parked as an advisory, and each below-important checklist FAIL held back from the fixer, instead of starting a new fix iteration; on an iteration that routes at least one Critical or Important finding, below-important findings still ride along to the fixer. A finding the review exempts from REJECT because a decided acceptance criterion decides it, or one that drives a REJECT, is never parked by this window. Set 0 to park below-important findings from the first iteration on; set at or above max_iterations to restore the pre-damper behavior. A negative/non-integer/empty/unparseable value (or an unreadable config) falls back to the default with a stderr breadcrumb (never aborts a run).",
+          "default": 1
+        },
+        "efficiency_telemetry_enabled": {
+          "type": "boolean",
+          "description": "Opt-in effectiveness telemetry (default false). When true, /prflow:review-and-fix persists one per-run effectiveness record to .prflow/logs/efficiency/ at Loop Exit. When false, the loop derives no effectiveness record, and a cloud run persists no permission-denial record (its denied tool names and scrubbed command text). It does not gate the durable copy of each run's workpads or the workflow's cost and run-profile records, which telemetry.enabled alone gates. Derivation is best-effort: a failure never aborts the fix loop. Inherits from telemetry.enabled (issue #2035): when this key does not resolve to a value — absent, JSON null, or an empty string — and telemetry.enabled is the JSON boolean false, this gate resolves to false; a value that does resolve always wins. Upgrades preserve saved values, including true from an earlier scaffold.",
+          "default": false
+        },
+        "efficiency_cut_candidate_min_dispatch": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Minimum number of times a Phase-3 subagent must have been dispatched (across runs) before an all-null/noise agent is flagged as a cut candidate. Defined here so the config surface is stable; consumed by the follow-up cross-run analyzer, not by /prflow:review-and-fix itself. The per-run record carries this value forward for that analyzer.",
+          "default": 3
+        }
+      }
+    },
+    "prflow_review": {
+      "type": "object",
+      "description": "Settings for the standalone /prflow:review engine.",
+      "properties": {
+        "verdict_severity_threshold": {
+          "type": "string",
+          "enum": [
+            "critical",
+            "important",
+            "suggestion"
+          ],
+          "description": "Moves the REJECT line of the shared review engine's Phase 4.2 verdict computation and, as its complement, the APPROVE-with-notes boundary: a finding, or a verification-checklist FAIL item by its stored severity (one the behavior-inert prose cap covers weighs at its capped grade), at or above this severity (severity ordering: critical > important > suggestion), excluding findings the review moved to Informational on a confirmed criterion disclosure and, at 'important' or 'suggestion', findings the review exempts (pre-existing behavior the diff does not touch, or a below-Critical finding a decided acceptance criterion decides), drives REJECT; one below it does not reject on its own and lands in the report as a note. A checklist INCONCLUSIVE item never rejects at any value; the report lists it under Informational — Deferred. A checklist FAIL re-checking an earlier finding marked as a self-contradicting diff rejects at every value, whatever its severity. Both standalone /prflow:review and the Phase-3 pass of /prflow:review-and-fix inherit this. A failed read, or a value that reads as none of the three, falls back to the default, and the review report's Run details say which (never aborts a run).",
+          "default": "critical"
+        },
+        "live_progress_comment_enabled": {
+          "type": "boolean",
+          "description": "When true, a PR-mode /prflow:review authors a live progress comment for that run (a run-keyed <!-- prflow:review-progress run=<id>-<attempt> --> comment \u2014 one per review run, so a later run posts its own rather than overwriting an earlier run's) incrementally as it works \u2014 a blueprint of the phases up front, then per-phase updates (diff classification, checklist results, each Phase-3 agent's findings as they land, the verdict), finalizing with the verdict-first report. When false, /prflow:review falls back to producing its report once at the end (no incremental updates). Independent of prflow_review_and_fix.efficiency_telemetry_enabled, which separately gates the run-telemetry record. Inherits from telemetry.enabled (issue #2035): when this key does not resolve to a value — absent, JSON null, or an empty string — and telemetry.enabled is the JSON boolean false, this gate resolves to false; a value that does resolve always wins.",
+          "default": true
+        },
+        "stale_prose": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Deprecated and ignored: the review engine no longer runs the stale-counted-prose lint. The keys stay accepted so existing configs keep validating; remove them at your convenience.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Deprecated and ignored."
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "important",
+                "suggestion"
+              ],
+              "description": "Deprecated and ignored."
+            }
+          }
+        },
+        "stall_backstop": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Cloud-only workflow-level backstop for the review engine. A headless review run can end `success` with NO verdict — the SDK session ends the moment the model emits a tool-call-free turn (e.g. after ScheduleWakeup while a Phase-3 agent is still pending), so the required `PRFlow Review` check fails 'incomplete — re-run needed' and a human must manually re-trigger. On the AUTO-review path (devflow-review.yml's finalize_check), which derives the verdict for the head, the backstop fires when the run concludes incomplete with no verdict positively observed for the head — exactly this early-quit — and posts a `/prflow:review` re-trigger comment (authored by a freshly minted App token) up to `max_resume_attempts` per head, so the review re-runs without human intervention. The MANUAL /prflow:review comment path (devflow.yml) has no verdict-derivation step, so it fires the same backstop on the #356 dead-run signal (the engine ending is_error, or the claude step ending failure — a hard death) and, on a run that was not cancelled, on a verdict post that failed on both channels (`FAILED no-durable-channel`), not on any other clean success-with-no-verdict; that manual-path case is covered only by the headless-wait skill/grounding prose. When the cap is exhausted, or no workflow-capable App token is configured (DEVFLOW_APP_ID unset — a GITHUB_TOKEN-authored comment never re-triggers a workflow), behavior degrades to exactly the pre-existing dead-end flip, with a breadcrumb naming why the backstop did not fire. Because the re-trigger re-enters the SAME manual /prflow:review comment gate, auto-resume additionally requires the minting App's bot login to be in `prflow.allowed_bots` (the same prerequisite the implement backstop carries); otherwise the comment posts but the gate declines it and no review re-runs. This is the review-side sibling of prflow_implement.stall_backstop. A cancelled run is excluded from auto-resume on every PRFlow backstop (a cancel is a decided ending, not a benign timing stall — issue #498); the review tier's exclusion is already correct at source (the dead-run signal fires only on is_error/failure, never on cancellation). Purely additive: absent/disabled, the review behaves exactly as before. REMOVED: the automatic pull-request-triggered review tier has been decommissioned (see issues #930, #920 and #237) \u2014 its runner and telemetry-relay workflows are no longer in the plugin, so only the manual /prflow:review path above reads this setting. Use /prflow:review by collaborator comment instead.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Master switch for the review stall backstop. true (the default) enables the no-verdict auto-resume; false skips it entirely (no resume comment) so an incomplete review degrades to the dead-end flip exactly as before this feature. An unrecognized/missing value resolves to true — the safe, honest-failure direction.",
+              "default": true
+            },
+            "max_resume_attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Hard cap on automatic review-resume attempts per head before the backstop stops firing and the run degrades to the dead-end flip. 0 disables auto-resume (detect-and-flip only). N means up to N auto-resumes per head, each carrying a distinct `<!-- prflow:review-backstop head=<sha> attempt=<n> -->` marker comment that the count is derived from. A negative or non-integer value resolves to the default 2.",
+              "default": 2
+            }
+          }
+        },
+        "agent_overrides": {
+          "type": "object",
+          "description": "Per-subagent model and iterations overrides for the shared /prflow:review engine. Applies to BOTH standalone /prflow:review AND the Phase-3 review pass of /prflow:review-and-fix (and thus /prflow:implement), since both drive the same engine. Keys are the nine review-engine subagent leaves, each accepted under EITHER declared plugin namespace — `prflow:` (canonical) or the `devflow:` alias, so an override committed before the plugin rename keeps resolving — giving 18 accepted subagent keys (byte-identical to the telemetry strings) plus an optional `default` fallback. The accepted namespace set is derived from lib/plugin-identity.json, and this enumeration is its mirror: `additionalProperties` stays false, so the allowlist remains closed. Each value optionally sets `model` (one of the Agent tool's accepted model aliases: sonnet, opus, haiku, or fable — an out-of-set value warns and is dropped, leaving that agent with no model override; a provider-routed identifier belongs at `claude_model`, not here), `effort` (deprecated and ignored: the Agent tool has no per-agent effort parameter, so every subagent runs at the session effort; the key stays accepted), and/or `iterations` (issue #425; only valid value `first-only` \u2014 an agent whose resolved override carries it is excluded from the Phase-3 review roster on a primary fix-loop entry at iteration >= 2, resolved by the resolver's --plan-phase3 mode; an out-of-enum value warns and is dropped rather than aborting; absent, this key excludes nothing). Resolution is entry-level: a subagent with its own entry uses only that entry (the `default` does NOT backfill its missing fields); `default` supplies model and iterations only for subagents with no entry of their own. A subagent with neither its own entry nor a `default` is dispatched with no override.",
+          "additionalProperties": false,
+          "properties": {
+            "default": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "prflow:checklist-generator": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "prflow:checklist-deduper": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Retired: the checklist deduper no longer runs; accepted and ignored so existing configs stay valid.",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "prflow:checklist-verifier": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "prflow:code-reviewer": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "prflow:silent-failure-hunter": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "prflow:comment-analyzer": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "prflow:type-design-analyzer": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "prflow:pr-test-analyzer": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "prflow:requesting-code-review": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "devflow:checklist-generator": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "devflow:checklist-deduper": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Retired: the checklist deduper no longer runs; accepted and ignored so existing configs stay valid.",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "devflow:checklist-verifier": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "devflow:code-reviewer": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "devflow:silent-failure-hunter": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "devflow:comment-analyzer": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "devflow:type-design-analyzer": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "devflow:pr-test-analyzer": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            },
+            "devflow:requesting-code-review": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "sonnet",
+                    "opus",
+                    "haiku",
+                    "fable"
+                  ]
+                },
+                "effort": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ]
+                },
+                "iterations": {
+                  "type": "string",
+                  "enum": [
+                    "first-only"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "receiving_review": {
+      "type": "object",
+      "description": "Settings for a direct invocation of /prflow:fix (the fix-loop principles skill). Consulted only when the skill is invoked directly; the /prflow:review-and-fix loop governs its own routing via prflow_review_and_fix.fix_severity_threshold and does NOT consult this section.",
+      "properties": {
+        "fix_severity_threshold": {
+          "type": "string",
+          "enum": [
+            "critical",
+            "important",
+            "suggestion"
+          ],
+          "description": "When /prflow:fix is invoked directly and the verdict is already non-blocking, the diff is re-opened for a finding at or above this severity (severity ordering: critical > important > suggestion). At the default 'critical' this matches the historical behavior (re-open only for a Critical/blocking finding). The demonstrable-correctness-defect / documented-falsehood carve-out re-opens the diff at every threshold value \u2014 it is a correctness principle, not a severity grade. Its scope excludes behavior-inert prose \u2014 prose that cannot change what the program does \u2014 an untrue line of which is a Suggestion, or Important when read outside the repository; see the review engine's Phase 4.1.5 for the authoritative definition of behavior-inertness. A missing, null or empty value means the default, and so does an array or object, which the config read reports on stderr; any other value outside the three falls back to the default and the pass reports the fallback.",
+          "default": "critical"
+        }
+      }
+    },
+    "setup": {
+      "type": "object",
+      "description": "Cloud-tier runtime provisioning: how the GitHub Actions runner is prepared BEFORE Claude runs \u2014 for the /prflow:* command path, /prflow:implement, AND the automated reviewer. /prflow:init auto-populates node_version + install per detected language (deterministic presets), then the LLM enriches php_version/extensions and services by reading docker-compose/CI/composer.json. Provisioning order: Python \u2192 Node \u2192 PHP \u2192 service containers \u2192 install lines. REMOVED: the automatic pull-request-triggered review tier has been decommissioned (see issues #930, #920 and #237) \u2014 its runner and telemetry-relay workflows are no longer in the plugin, so this setting has no effect; it is retained only so existing consumer configs keep validating. Use /prflow:review by collaborator comment instead.",
+      "properties": {
+        "python_version": {
+          "type": "string",
+          "description": "setup-python runs ONLY if non-empty. Config (JSON) is read by a python3 resolver (config-get.sh) using the stdlib json module \u2014 no PyYAML needed for config. match-deferrals.py additionally needs Python >= 3.11 with PyYAML to parse the YAML deferred-findings blocks in PR bodies, and it runs in the cloud workflows, so keep this set (e.g. '3.11'). (workpad.py is stdlib-only \u2014 it needs Python >= 3.11 but not PyYAML.)"
+        },
+        "node_version": {
+          "type": "string",
+          "description": "setup-node runs ONLY if non-empty. Set it (e.g. '20') if your project's tests/build need Node. When set, npm/yarn/pnpm download caching is enabled automatically IF a lockfile (package-lock.json / yarn.lock / pnpm-lock.yaml / npm-shrinkwrap.json) is present in the directory named by node_working_directory (the repo root by default)."
+        },
+        "node_working_directory": {
+          "type": "string",
+          "description": "Directory (relative to the repo root) that holds the Node project's package.json/lockfile, for repos whose JS build lives in a subdirectory (e.g. 'jsx', 'resources/js', 'frontend') rather than at the root. When set, setup-node's download caching resolves the lockfile under this directory and /prflow:init scopes the generated Node install line into it. Empty/absent (the default) \u2192 caching and detection key off the repo root, byte-for-byte identical to the root-based behavior. Note: this only affects the auto-detected Node install line and cache resolution; setup.install lines still run from the repo root."
+        },
+        "php_version": {
+          "type": "string",
+          "description": "shivammathur/setup-php runs ONLY if non-empty (e.g. '8.3'). Sets the PHP runtime + Composer. Populated by /prflow:init from composer.json's require.php constraint when detectable."
+        },
+        "php_extensions": {
+          "type": "string",
+          "description": "CSV list of PHP extensions to install with setup-php (e.g. 'mbstring, pdo_mysql, redis, intl'). Only used when php_version is set. Populated by /prflow:init from composer.json require.ext-* and the project's service needs."
+        },
+        "php_tools": {
+          "type": "string",
+          "description": "CSV list of PHP tools for setup-php (e.g. 'composer:v2, phpunit'). Optional \u2014 Composer is set up by default. Only used when php_version is set."
+        },
+        "services": {
+          "type": "array",
+          "description": "Service containers (databases, caches, queues) started via `docker run -d` BEFORE the install lines, reachable from the runner on 127.0.0.1:<host-port>. NOT GitHub Actions `services:` (which can't be defined in a composite action or driven by config). Populated by /prflow:init from docker-compose.yml / .env / existing CI. The runner needs Docker (preinstalled on ubuntu-latest) and the `docker` preset's allowlist.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "image"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Container name (also the --name)."
+              },
+              "image": {
+                "type": "string",
+                "description": "Image ref, e.g. 'mysql:8.0', 'redis:7', 'postgres:16'."
+              },
+              "ports": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Port mappings 'host:container', e.g. ['3306:3306']. The app's test config should connect to 127.0.0.1:<host-port>."
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Environment variables passed as -e KEY=VALUE, e.g. {\"MYSQL_ROOT_PASSWORD\": \"root\", \"MYSQL_DATABASE\": \"app_test\"}."
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Extra `docker run` options, one complete arg per array element (NOT a single space-separated string \u2014 that would word-split a health command's spaces). Use a health check so readiness is awaited, e.g. [\"--health-cmd=mysqladmin ping -h 127.0.0.1\", \"--health-interval=5s\", \"--health-timeout=5s\", \"--health-retries=20\"]. Maintainer-controlled, read from the trusted base config."
+              }
+            }
+          }
+        },
+        "install": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Shell lines run verbatim (joined with newlines) after the language setups and service-container start. Put devflow's own deps first, then your project's (e.g. 'composer install --no-interaction'). Empty array \u2192 skipped."
+        },
+        "claude_code_executable": {
+          "type": "string",
+          "description": "Optional path (typically absolute) to a pre-installed Claude Code executable, passed to anthropics/claude-code-action's `path_to_claude_code_executable` input. Set it on a self-hosted runner whose OS the action's bundled installer cannot serve \u2014 notably a self-hosted WINDOWS runner (the installer is Unix-only), where you pre-install the CLI (e.g. `irm https://claude.ai/install.ps1 | iex`) and point this at the resulting `claude.exe`. When set, the action skips installation and uses this executable; when unset or empty (the default, and every Linux consumer) the input resolves to an empty string and the action's automatic-install path runs unchanged. Only a single-line, non-blank string is accepted: a non-string leaf (including a valid-falsy `false`), a non-object `setup` block, a string with an embedded newline/CR, and a whitespace-only string are each rejected and resolve to empty (auto-install), with a workflow `::warning::` naming the key so a mistyped path is not silently ignored (an absent key, a JSON `null`, and an explicit empty string are deliberate unsets and warn nothing). Read from config at TRIGGER time (the config/base-ref jobs), so its effect is post-merge-only \u2014 a PR that adds the key cannot exercise it in that PR's own run."
+        },
+        "git_dir_pin": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt in to exporting `GIT_DIR=<workspace>/.git` into the cloud job environment before the `Run Claude Code` step (issue #645). Default FALSE, and the default is the configuration that works everywhere. Enable it only on a self-hosted WINDOWS runner, where claude-code-action's `configureGitAuth` startup is INFERRED — in the both-pins-off default — to otherwise fail `fatal: not in a git directory` (exit 128) because it runs `git config` in the inherited working directory (issue #602). COSTS, all of which you accept by enabling it: `$GITHUB_ENV` is job-scoped and offers no removal verb, so the variable is in force for `Run Claude Code` AND every step after it, including the agent's own git operations; and any PRFlow helper that runs from a NON-ROOT working directory then resolves a `.prflow/` that does not exist, because the issue #295 repo-root readers (`config-get.sh`, `workpad.py`, `load-prompt-extension.sh` — on its fallback branch only, since issue #874 made it anchor on `DEVFLOW_PROMPT_EXTENSION_ROOT` instead whenever that variable is set and non-empty — `match-deferrals.py`) anchor on `git rev-parse --show-toplevel`, which under ambient GIT_DIR returns the subdirectory rather than the repository root. That failure is a SILENT MISS rather than an error, so a run with this key enabled is not a config-faithful run; the helper emits a `::warning::`-grade stderr breadcrumb on every run that exports the variable. NOT honored on the implement tier, which stages and pushes commits (ambient GIT_DIR makes a stage issued from a non-root working directory record deletions across the rest of the tree); that tier records that it ignored the key. The `configureGitAuth` benefit is INFERRED from the pinned action's upstream source and a local `git config` proxy; the one datum on record is a `/prflow:implement` job that completed on a self-hosted Windows runner (maintainer-reported from a consumer's runner, 2026-07-21; not independently reproducible from this repository, and no run identifier committed, because the run belongs to a third party's repository), establishing only that `configureGitAuth` did not abort on that run — GIT_DIR was necessarily absent because the implement tier suppresses it, while GIT_WORK_TREE is INFERRED absent from the completed plugin install rather than read, with a pre-existing marketplace checkout on a persistent self-hosted runner as the named falsifier and the run's git-env step output as the evidence that would replace the inference with a direct observation. Read at TRIGGER time from a trusted tree (the `config` job's default-branch checkout; on the review tier the base-ref config `baseprovision` materializes), so its effect is post-merge-only and a value present only in a PR-head checkout has no effect.",
+          "$comment": "issue #645 — decoupled from git_work_tree_pin; both default off."
+        },
+        "git_work_tree_pin": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt in to exporting `GIT_WORK_TREE=<workspace>` into the cloud job environment before the `Run Claude Code` step (issue #645). Default FALSE, and the default is the configuration that works everywhere. COST — read this before enabling: `GIT_WORK_TREE` also reaches the Claude Code CLI subprocess that installs plugins, where it makes `git clone` refuse an existing working tree, so a run that installs a REMOTE plugin marketplace dies at plugin install with `fatal: working tree '<path>' already exists.` before the agent does any work, producing no verdict at all — the outage this key was decoupled to end. Enable it ONLY if your composed marketplace list is LOCAL-ONLY, so no remote clone is ever performed; for that narrower population it fixes `configureGitAuth` while keeping working-tree resolution correct, which is the one combination that avoids the `git_dir_pin` relocation hazard entirely. Enabling it outside that population reproduces the outage. Like `git_dir_pin`, the export is job-scoped and therefore in force for `Run Claude Code` and every step after it. Read at TRIGGER time from a trusted tree, so its effect is post-merge-only and a value present only in a PR-head checkout has no effect.",
+          "$comment": "issue #645 — decoupled from git_dir_pin; both default off."
+        }
+      }
+    },
+    "docs": {
+      "type": "object",
+      "description": "Documentation paths used by the /prflow:docs suite.",
+      "properties": {
+        "internal": {
+          "type": "string",
+          "default": "docs/internal/"
+        },
+        "external": {
+          "type": "string",
+          "default": "docs/external/"
+        },
+        "internal_enabled": {
+          "type": "boolean",
+          "description": "When false, the /prflow:docs combined pass (and /prflow:implement's Phase 4.1 docs step) SKIPS internal-doc updates (Step 1, docs-sync-internal). Use it for repos with no internal docs tree, or to keep the implement pass from touching internal docs. Default true (run internal docs). Does not affect invoking /prflow:docs-sync-internal directly.",
+          "default": true
+        },
+        "external_enabled": {
+          "type": "boolean",
+          "description": "When false, the /prflow:docs combined pass (and /prflow:implement's Phase 4.1 docs step) SKIPS external-doc alignment (Step 2, docs-sync-external). Use it for repos with no separate customer-facing docs tree (e.g. a single flat docs/ directory). Default true (run external docs). Does not affect invoking /prflow:docs-sync-external directly.",
+          "default": true
+        },
+        "release_notes_file": {
+          "type": "string",
+          "description": "Customer-facing release-notes file maintained by /prflow:docs-release-notes.",
+          "default": "docs/external/release-notes.md"
+        },
+        "changelog_file": {
+          "type": "string",
+          "description": "Repository CHANGELOG file reconciled by /prflow:docs-release-notes Step 4b. The step reads the `## [version]` entry for the version in `.claude-plugin/plugin.json` (a `chore: bump version` commit only confirms a bump occurred; the version is never taken from its subject) and corrects any factual claims made stale by post-commit review corrections.",
+          "default": "CHANGELOG.md"
+        },
+        "labels": {
+          "type": "string",
+          "description": "Comma-separated list of labels applied by /prflow:implement once its docs pass has run. Each entry is trimmed and empty entries are dropped, so \"Documented, Shipped\" applies both Documented and Shipped. An explicit empty string applies no labels (the off-switch), as does a whitespace- or separators-only value (e.g. \",\"); the \"Documented\" default applies only when the key is absent from the config.",
+          "default": "Documented"
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "description": "Settings for /prflow:spec (formerly /prflow:create-issue).",
+      "properties": {
+        "investigation_record_enabled": {
+          "type": "boolean",
+          "description": "When false, /prflow:spec does NOT post the investigation-record comment on an issue it creates or updates. The brief/record SORTING still runs on every draft, and the record is still saved beside the draft in the run's scratch directory, whatever this value; this value gates only posting. Where that save or its leftover delete fails, the record is printed in chat and not posted. Default true (publish the investigation record as a comment on the issue spec creates or updates). Inherits from telemetry.enabled (issue #2035): when this key does not resolve to a value — absent, JSON null, or an empty string — and telemetry.enabled is the JSON boolean false, this gate resolves to false; a value that does resolve always wins.",
+          "default": true
+        }
+      }
+    },
+    "deferred": {
+      "type": "object",
+      "description": "Settings for the follow-up issues /prflow:implement files for deferred work.",
+      "properties": {
+        "labels": {
+          "type": "string",
+          "description": "Comma-separated list of labels applied to the follow-up issues /prflow:implement files for deferred work \u2014 both Phase 4.0 deferred-acceptance-criteria issues and Phase 4.0.5 deferred-review-finding issues. Each entry is trimmed and blank entries are dropped, so \"PRFlow, Deferred\" applies both PRFlow and Deferred. An explicit empty string applies no labels (the off-switch), as does a whitespace-only or all-separators value (e.g. \" , \"); the \"PRFlow,Deferred\" default applies only when the key is absent from the config. Labels are ensured to exist and applied best-effort after the issue is created, so a label hiccup never blocks filing. This is separate from the hardcoded `PRFlow` provenance label that retrospective detection (lib/scan.sh, lib/classify-pr-kind.jq) matches literally (it also still accepts the superseded `DevFlow` spelling on pre-rename artifacts) \u2014 only deferred-issue labeling is configurable here.",
+          "default": "PRFlow,Deferred"
+        }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "description": "Settings for the durable observability-telemetry store (issue #441). PRFlow persists every writable run's effectiveness records and durable review workpads to a dedicated long-lived orphan branch that shares no history with the base branch and is never merged into it, written via git plumbing without touching the current branch, HEAD, or the tracked working tree (it stages under gitignored .prflow/tmp/, which it removes afterwards), then pushed. The weekly retrospective reads that branch (unioned with any legacy tracked .prflow/logs/).",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Master switch (issue #2035) that turns off the enrolled optional telemetry mechanisms in one place — the five enrolled sub-keys enumerated here plus the telemetry-branch push. prflow.execution_transcript_artifact_enabled is deliberately NOT enrolled, so a consumer who set it true keeps it on. Set to the JSON boolean false to disable, all at once: the five enrolled optional-telemetry sub-keys (prflow_review_and_fix.efficiency_telemetry_enabled, prflow.execution_diagnostics_enabled, prflow.execution_denial_commands_enabled, prflow_review.live_progress_comment_enabled, spec.investigation_record_enabled) resolve to disabled wherever their own key does not resolve to a value — absent, JSON null, or an empty string — and the review-and-fix workpad-copy push to the telemetry branch (lib/efficiency-trace.sh --persist) is skipped. This master does not gate the weekly retrospective's learnings store (.prflow/logs/learnings/ on the telemetry branch): it is the retrospective's own state, so the run's saves, retro-helper.sh dismiss and the /prflow:init / install.sh --apply store copy write it whatever this key says. A sub-key set to a value that RESOLVES always wins over this master in the resolver, in both directions — there the master can only DISABLE a mechanism whose own key resolves to nothing, never re-enable one a sub-key set to false. The telemetry-branch push is gated on this master ALONE and reads no sub-key, so a master false skips the push even where efficiency_telemetry_enabled is explicitly true. ONLY the JSON boolean false disables: a string \"false\", the number 0, null, a wrong-typed telemetry object, a corrupt config, or a resolver error all leave this master ON; each mechanism still uses its own default. Default true (or absent) is a no-op: a master true can never switch a mechanism on. Read at RUNTIME through scripts/config-get.sh (and scripts/telemetry-master-off.py) against the checked-out tree, so a change is live in the same run."
+        },
+        "branch": {
+          "type": "string",
+          "description": "Name of the long-lived orphan branch PRFlow persists observability artifacts to. Auto-created on first use if absent; verified to be a telemetry store (its tip tree holds only .prflow/logs/-shaped paths) before appending, so PRFlow never commits onto a same-named branch a consumer uses for something else. A literal empty string resolves to this default (a string key \u2014 an empty branch name is never a valid selection). Keep every workflow `push:` trigger branch-filtered so a telemetry push runs no CI (PRFlow's own workflows filter `push:` to `main`; a consumer whose `on: push` is unfiltered should add a `branches-ignore` entry for this branch).",
+          "default": "prflow-telemetry"
+        }
+      }
+    },
+    "verification_flight": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Versioned verification-profile contract for the single-flight verification coordinator (issue #528, Wave 2). scripts/verification-flight.py is a NON-executing coordination ledger: it never launches the verification command and accepts no executable argv. Each profile DECLARES the command's identity and hermetic inputs; the helper canonicalizes {profile_version, argv, cwd, environment, toolchain, dependencies} as sorted-key compact UTF-8 JSON and derives the SHA-256 command descriptor itself (a caller cannot supply a static digest). A profile is REUSABLE only when it is fully declared and `external_services` is exactly `none`; a profile that truthfully names an external service its verification depends on is accepted and recorded non-reusable — it can satisfy verification and back completion evidence, but is never served as a clean prior result (issue #2080) — while a `claim` whose `external_services` is malformed (not a string, blank, or a value that names no service) is refused, and an undeclared profile is non-reusable. State lives under .prflow/tmp/verification-flights/, is published atomically, and is durable only within the current checkout.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "When true, Implement and inline Review-and-Fix coordinate each same-checkout full-verification flight through scripts/verification-flight.py (claim/mark-running/finish, attach/wait/consume) instead of relaunching the command directly. The off-switch is per-caller (issue #1087): for a standalone Review-and-Fix run, false means launch the verification command directly as before (ledger bypass); for an Implement run, false means REUSE bypass only — the run still executes the claim/mark-running/finish record transitions so it produces the machine-readable verification-flight record the terminal `workpad.py --status Complete` evidence gate requires, and only skips attaching to another owner's terminal evidence. Off never weakens a guarantee: a missing, partial, timed-out, unreadable, or stale handle always falls back to a direct launch and never becomes a pass.",
+          "default": true
+        },
+        "lease_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bounded owner-token lease on a `claimed` handle. An attacher waits while the lease is valid; a lease that expires before the owner records `mark-running` transitions the handle to `incomplete` (owner loss at the claim boundary), which blocks reuse and never authorizes an automatic relaunch. The helper's runtime default is the same 900s (DEFAULT_LEASE_SECONDS); callers may override per invocation via --lease-seconds. DECLARATIVE in Wave 2: the Implement / Review-and-Fix skill prose resolves only `.verification_flight.enabled` and does not yet thread this scalar into its `claim` call, so editing this key alone has no effect on a coordinated flight today — it documents the intended default and forward-compatible override surface.",
+          "default": 900
+        },
+        "wait_timeout_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Default bound for an attacher's `wait` poll. A wait-bound expiry returns a non-mutating `wait_expired` observation and leaves an active flight unchanged; only the owner records a terminal `timed_out` after its command invocation reports a real timeout. DECLARATIVE in Wave 2: the skill prose passes `wait`'s bound via its own `--timeout`, and does not yet thread this config scalar, so editing this key alone has no effect on a coordinated flight today — like `lease_seconds` it documents the intended default and forward-compatible override surface."
+        }
+      }
+    },
+    "prflow_retrospective": {
+      "type": "object",
+      "description": "PRFlow retrospective / self-improvement loop, consumed by the /prflow:retrospective-weekly orchestrator. The scheduled workflow (devflow-retrospective.yml) does NOT consult this block's `enabled` key; `workflows[\"prflow-retrospective\"]` is the sole gate on the scheduled path. These settings tune the loop's behavior on every tier (locally-run and the scheduled GitHub Actions workflow alike).",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "retrospective_model": {
+          "type": "string",
+          "description": "Optional --model override for the retrospective subagent."
+        },
+        "audit_model": {
+          "type": "string",
+          "description": "Optional --model override for the audit subagent."
+        },
+        "implementation_branch_prefix": {
+          "type": "string",
+          "description": "Branch prefix your implementation bot uses for its PRs. The loop processes a PR matching this prefix, or any PR carrying the PRFlow label or closing an issue.",
+          "default": "claude/"
+        },
+        "min_occurrences": {
+          "type": "integer",
+          "description": "Repetition gate on occurrence_count. A status == regressed pattern always bypasses this (lib/actionable-patterns.sh honours the bypass).",
+          "default": 2
+        },
+        "cooldown_days": {
+          "type": "integer",
+          "description": "Skip re-filing a pattern's retrospective issue if its youngest open filed issue is younger than this (createdAt-based).",
+          "default": 3
+        },
+        "max_issues_per_run": {
+          "type": "integer",
+          "description": "Filing back-pressure: a single retrospective run files at most this many meta-issues (issue #788).",
+          "default": 3
+        },
+        "max_open_issues": {
+          "type": "integer",
+          "description": "Filing back-pressure: file nothing for a non-regressed pattern once the count of `filed` meta-issue entries across all lifecycle records reaches this. A `regressed` pattern bypasses this ceiling (issue #788).",
+          "default": 10
+        },
+        "max_open_per_category": {
+          "type": "integer",
+          "description": "Filing back-pressure: file nothing for a pattern once the count of `filed` meta-issue entries summed across every lifecycle record whose stored `category` equals this pattern's category reaches this (issue #891; the count is per-category, not per-record). A `regressed` pattern still honours this per-category ceiling (issue #788).",
+          "default": 2
+        },
+        "max_prs_per_run": {
+          "type": "integer",
+          "description": "Soft cap on PRs processed per scheduled retrospective run.",
+          "default": 500
+        },
+        "audit_bundle_cap": {
+          "type": "integer",
+          "description": "Bounds the Stage B occurrence-bundle fetch (issue #894): for each actionable pattern, Step 8a fetches context bundles for at most this many occurrence PRs, most-recent-first by occurrence timestamp. This bounds the fetch, NOT the filing volume (that is max_issues_per_run / max_open_issues / max_open_per_category). When the cap drops older occurrences the run records a truncation entry naming the pattern, how many bundles Stage B was delivered, and how many occurrences the pattern has, rendered under a dedicated report section. A value of 0 or negative is rejected (a bundle cap of zero would starve Stage B of all evidence).",
+          "default": 10
+        },
+        "diff_byte_cap": {
+          "type": "integer",
+          "description": "Per-PR diff size ceiling (bytes) for the retrospective context bundle (lib/fetch-pr-context.sh). A PR whose embedded diff exceeds this \u2014 or whose diff can't be fetched \u2014 gets diff: null / diff_truncated: true and the analyst works from changed_files, reviews, and the issue instead. Generated/vendored file bodies (lockfiles, bundles, node_modules/vendor/dist/build) are elided before the cap is applied.",
+          "default": 204800
+        },
+        "watched_authors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Authors whose merged PRs the loop retrospects. Defaults to prflow.allowed_bots if unset. Each entry is matched by the same rule as allowed_bots — bare slug, '<slug>[bot]', or 'app/<slug>', case-insensitive."
+        }
+      }
+    },
+    "workflows": {
+      "type": "object",
+      "description": "Per-workflow enable/disable toggles.",
+      "properties": {
+        "prflow": {
+          "type": "boolean",
+          "description": "Enable the light /prflow:* command path (devflow.yml) and /prflow:implement (devflow-implement.yml)."
+        },
+        "prflow-review": {
+          "type": "boolean",
+          "description": "Enable the automatic pull-request-triggered reviewer. REMOVED from this release: the tier has been decommissioned (issues #930, #920 and #237) and its runner and telemetry-relay workflows are no longer in the plugin, so setting this true enables nothing. The property is retained so existing consumer configs keep validating. The always-available review path is a repository collaborator commenting /prflow:review on a pull request; a consumer can additionally opt into having that comment posted automatically once their CI is green, using a documented pull_request workflow snippet."
+        },
+        "prflow-retrospective": {
+          "type": "boolean",
+          "description": "Enable the weekly scheduled retrospective workflow (devflow-retrospective.yml), which runs /prflow:retrospective-weekly every Sunday at 05:23 UTC and on manual dispatch. Disabled by default: only the JSON boolean true enables the scheduled run — when the key is absent, false, or of any other shape (a string \"true\" included) the run ends with the retrospective skipped, so consumers pay no Actions or Claude cost until they opt in. Read from the default branch's .prflow/config.json at trigger time. This key is the sole gate on the scheduled path; prflow_retrospective.enabled is not consulted there."
+        }
+      }
+    }
+  }
+}

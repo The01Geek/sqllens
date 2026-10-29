@@ -11,7 +11,7 @@
   stream order:
     - {"type": "chart", ...}  → its own ECharts canvas
     - {"type": "table", ...}  → its own data grid with isolated sort/filter/page state
-    - {"type": "text",  ...}  → a Markdown paragraph
+    - {"type": "text",  ...}  → Markdown rendered by the vendored markdown-it (raw HTML escaped)
 
   The widget does not render the executed SQL: when ``agent.show_details`` is
   on, the SQL is already surfaced via the Markdown ``**Executed SQL:**`` block
@@ -22,9 +22,10 @@
   Empty/missing ``sqllens/blocks`` falls through to an empty-state notice (the
   plain text answer is rendered by the host outside the iframe).
 
-  No external origins: this file plus its two vendored bundles
-  (./vendor/echarts.min.js, ./vendor/app-with-deps.js) form the entire widget.
-  Both bundles are *inlined* into this HTML at serve time by
+  No external origins: this file plus its three vendored bundles
+  (./vendor/echarts.min.js, ./vendor/markdown-it.min.js,
+  ./vendor/app-with-deps.js) form the entire widget.
+  All bundles are *inlined* into this HTML at serve time by
   sqllens.ui.load_widget_html() — MCP App hosts ``document.write`` the HTML
   into an about:blank-base iframe with no access to sibling files on the MCP
   server, so any relative <script src=…> or `import "./vendor/…"` would 404 and
@@ -38,6 +39,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Query results</title>
 <script src="./vendor/echarts.min.js"></script>
+<script src="./vendor/markdown-it.min.js"></script>
 <style>
   :root {
     color-scheme: light dark;
@@ -82,7 +84,35 @@
   }
   .block { margin-bottom: 16px; }
   .block:last-child { margin-bottom: 0; }
-  .textblock { white-space: pre-wrap; }
+  /* Rendered Markdown text blocks — compact spacing to sit between tables and
+     charts; every colour comes from the theme tokens above. */
+  .textblock { overflow-wrap: anywhere; }
+  .textblock > :first-child { margin-top: 0; }
+  .textblock > :last-child { margin-bottom: 0; }
+  .textblock h1, .textblock h2, .textblock h3,
+  .textblock h4, .textblock h5, .textblock h6 { margin: 14px 0 6px; line-height: 1.3; font-weight: 600; }
+  .textblock h1 { font-size: 18px; }
+  .textblock h2 { font-size: 16px; }
+  .textblock h3 { font-size: 14px; }
+  .textblock h4, .textblock h5, .textblock h6 { font-size: 13px; }
+  .textblock p { margin: 0 0 8px; }
+  .textblock ul, .textblock ol { margin: 0 0 8px; padding-left: 22px; }
+  .textblock li > ul, .textblock li > ol { margin-bottom: 0; }
+  .textblock code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
+    background: var(--control-bg); border-radius: 4px; padding: 1px 4px;
+  }
+  .textblock pre {
+    margin: 0 0 8px; padding: 8px 10px; overflow: auto;
+    background: var(--control-bg); border: 1px solid var(--line); border-radius: 6px;
+  }
+  .textblock pre code { background: none; padding: 0; white-space: pre; }
+  .textblock blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
+  .textblock hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+  .textblock a { color: var(--accent); }
+  .textblock .wrap { margin-bottom: 8px; }
+  /* Markdown tables are static: drop the data grid's sticky / sortable header affordances. */
+  .textblock th { position: static; cursor: default; }
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
   .bar input, .bar button {
     font: inherit; color: var(--fg);
@@ -161,7 +191,9 @@ function applyHostContext(ctx) {
   const vars = ctx.styles && ctx.styles.variables;
   if (vars) {
     for (const [k, v] of Object.entries(vars)) {
-      if (typeof v === "string") document.documentElement.style.setProperty(k, v);
+      if (k.startsWith("--color-") && typeof v === "string") {
+        document.documentElement.style.setProperty(k, v);
+      }
     }
   }
   if (theme !== widgetState.theme) {
@@ -189,6 +221,10 @@ function renderTableBlock(block) {
   // controls fighting each other.
   const state = {
     columns: Array.isArray(block.columns) ? block.columns : [],
+    // Display-only humanized header labels (issue #259), parallel to columns.
+    // Header text reads these; sort/type/CSV keying stays on the raw columns
+    // below, and a missing/short labels array falls back to the raw name.
+    labels: Array.isArray(block.column_labels) ? block.column_labels : [],
     rows: Array.isArray(block.rows) ? block.rows : [],
     types: (block.column_types && typeof block.column_types === "object") ? block.column_types : {},
     rowCount: typeof block.row_count === "number" ? block.row_count : (Array.isArray(block.rows) ? block.rows.length : 0),
@@ -240,32 +276,47 @@ function renderTableBlock(block) {
 
   // ── CSV export (per-block) ────────────────────────────────────────────────
 
-  function csvEscape(v) {
-    const s = String(v);
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-  }
-
-  function buildCsvText() {
+  function buildCsvExport() {
+    let defanged = false;
+    function csvEscape(v) {
+      let s = String(v);
+      if (s.trim() && /^[=+@\-\t\r\n]/.test(s)) {
+        s = "'" + s;
+        defanged = true;
+      }
+      return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }
     const rows = sortedRows(filteredRows());
     const lines = [state.columns.map(csvEscape).join(",")];
     for (const r of rows) lines.push(r.map(csvEscape).join(","));
-    return lines.join("\r\n");
+    return {
+      text: lines.join("\r\n"),
+      warning: defanged
+        ? "Warning: CSV formula protection added apostrophes to some headers or cells; spreadsheets will treat them as text."
+        : "",
+    };
   }
+
+  let metaMessageVersion = 0;
 
   // Show a transient message in the meta span ("showing N of M") and restore
   // the count after a couple of seconds. Used to give CSV-export feedback
-  // without destroying the table.
-  function flashMeta(text) {
+  // without destroying the table. Warnings remain until the next table action.
+  function flashMeta(text, duration = 2500) {
     if (!metaSpan) return;
+    const version = ++metaMessageVersion;
     metaSpan.textContent = text;
-    setTimeout(() => { if (metaSpan) render(); }, 2500);
+    if (duration) setTimeout(() => {
+      if (metaSpan && metaMessageVersion === version) render();
+    }, duration);
   }
 
   // Last-resort fallback: render the CSV inline in a textarea so the user can
   // always read/copy it manually. Works in any sandbox because it requires no
   // permissions and no host capability. The "Back to table" button restores
   // the grid.
-  function showCsvOverlay(csvText) {
+  function showCsvOverlay(csvText, warning) {
+    ++metaMessageVersion; // An earlier success timer must not remove the CSV.
     gridHost.textContent = "";
     const wrap = document.createElement("div");
     wrap.className = "wrap";
@@ -274,7 +325,8 @@ function renderTableBlock(block) {
     hint.className = "meta";
     hint.style.marginBottom = "6px";
     hint.textContent =
-      "Host blocked the file download and clipboard. Select all and copy:";
+      "Host blocked the file download and clipboard. Select all and copy:" +
+      (warning ? " " + warning : "");
     const ta = document.createElement("textarea");
     ta.readOnly = true;
     ta.value = csvText;
@@ -332,7 +384,8 @@ function renderTableBlock(block) {
     //   2) navigator.clipboard.writeText — modern, needs clipboard-write.
     //   3) document.execCommand("copy") — legacy, works without that grant.
     //   4) Inline textarea overlay — always works; user copies manually.
-    const csvText = buildCsvText();
+    const { text: csvText, warning } = buildCsvExport();
+    const warningTail = warning ? " " + warning : "";
     const caps = (app.getHostCapabilities && app.getHostCapabilities()) || {};
     if (caps.downloadFile) {
       try {
@@ -348,7 +401,7 @@ function renderTableBlock(block) {
             },
           ],
         });
-        flashMeta("downloaded ✓");
+        flashMeta("downloaded ✓" + warningTail, warning ? 0 : 2500);
         return;
       } catch (err) {
         console.warn("ui/download-file failed:", err);
@@ -356,16 +409,16 @@ function renderTableBlock(block) {
     }
     try {
       await navigator.clipboard.writeText(csvText);
-      flashMeta("copied to clipboard ✓");
+      flashMeta("copied to clipboard ✓" + warningTail, warning ? 0 : 2500);
       return;
     } catch (err) {
       console.warn("clipboard.writeText failed:", err);
     }
     if (copyViaExecCommand(csvText)) {
-      flashMeta("copied to clipboard ✓");
+      flashMeta("copied to clipboard ✓" + warningTail, warning ? 0 : 2500);
       return;
     }
-    showCsvOverlay(csvText);
+    showCsvOverlay(csvText, warning);
   }
 
   // ── Bar (filter input + meta span) ───────────────────────────────────────
@@ -433,7 +486,8 @@ function renderTableBlock(block) {
     const htr = document.createElement("tr");
     state.columns.forEach((name, i) => {
       const th = document.createElement("th");
-      th.textContent = name + " ";
+      const label = (state.labels[i] != null && state.labels[i] !== "") ? state.labels[i] : name;
+      th.textContent = label + " ";
       const ind = document.createElement("span");
       ind.className = "ind";
       ind.textContent = state.sortCol === i ? (state.sortDir === 1 ? "▲" : "▼") : "";
@@ -706,14 +760,51 @@ function renderChartBlock(block) {
 
 // ───────────────────────────── text block ──────────────────────────────────
 
+/* md-renderer:start */
+// Text blocks are agent-authored Markdown, or a one-row query result the
+// server wrote as a `**column:** value` line or a one-row Markdown table, with database values
+// backslash-escaped (tools/_format.py), rendered with the vendored
+// markdown-it (UMD global `markdownit`, inlined from
+// ./vendor/markdown-it.min.js). The options are the security boundary:
+//   - html: false  → raw HTML in the text is escaped, never passed through,
+//                    so the rendered string is safe to assign to innerHTML.
+//   - validateLink → markdown-it's default drops javascript: / vbscript: /
+//                    file: / data: link targets (they stay literal text).
+//   - no images    → the widget makes no remote requests; ![alt](url)
+//                    degrades to "!" + a plain link instead of fetching the URL.
+//   - breaks: true → single newlines stay visible; the agent uses them for layout.
+function createMarkdownRenderer(markdownit) {
+  const md = markdownit({ html: false, linkify: false, typographer: false, breaks: true });
+  md.disable("image");
+  // Open links in a new browsing context instead of navigating the iframe away.
+  const defaultLinkOpen = md.renderer.rules.link_open
+    || ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+  md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+    tokens[idx].attrSet("target", "_blank");
+    tokens[idx].attrSet("rel", "noopener noreferrer");
+    return defaultLinkOpen(tokens, idx, options, env, self);
+  };
+  // Wrap tables in the scroll container so wide ones don't stretch the widget.
+  md.renderer.rules.table_open = () => '<div class="wrap"><table>\n';
+  md.renderer.rules.table_close = () => "</table></div>\n";
+  return md;
+}
+/* md-renderer:end */
+
+let markdownRenderer = null; // built on first text block
+
 function renderTextBlock(block) {
-  // Text blocks pass through verbatim as Markdown source — we render only the
-  // most basic structure (paragraphs preserved via white-space: pre-wrap). A
-  // full Markdown parser would inflate the bundle for marginal gain; the
-  // raw-text fallback the host already shows uses the same content.
   const container = document.createElement("div");
   container.className = "block textblock";
-  container.textContent = typeof block.text === "string" ? block.text : "";
+  const text = typeof block.text === "string" ? block.text : "";
+  if (typeof window.markdownit !== "function") {
+    // Bundle missing (inliner regression): degrade to raw text rather than
+    // breaking the whole widget — tables and charts still render.
+    container.textContent = text;
+    return container;
+  }
+  markdownRenderer ??= createMarkdownRenderer(window.markdownit);
+  container.innerHTML = markdownRenderer.render(text); // safe: html: false (see above)
   return container;
 }
 

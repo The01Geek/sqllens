@@ -11,6 +11,26 @@ SQL Lens remembers two kinds of entries:
 
 Both kinds live in the local vector store configured by the `[memory]` section. See the [Configuration reference](configuration.md#section-memory).
 
+## Near-Match Background Context
+
+By default, SQL Lens reaches into its memory in two ways: the assistant can search saved question-and-answer pairs on demand, and SQL Lens automatically adds any closely matching free-form notes to the assistant's background context before it answers. Both use the `similarity_threshold` setting as the bar a memory must clear. The assistant's on-demand search uses its own wording of the question, so it can miss a saved answer that matches the original question closely.
+
+You can optionally turn on a wider automatic background context. Set `context_similarity_threshold` **below** `similarity_threshold` in the `[memory]` section. SQL Lens then searches memory with the user's exact question and adds, as related context, up to five saved question-and-answer pairs and up to five free-form notes that score at or above `context_similarity_threshold` — including very close matches. A pair is shown to the assistant as a related example ("a similar earlier question was answered with this SQL"), not as an answer to copy. Very long SQL is shortened.
+
+For example, to keep the strict bar at the default `0.7` but also surface anything scoring `0.55` or higher as related context:
+
+```toml
+[memory]
+similarity_threshold = 0.7
+context_similarity_threshold = 0.55
+```
+
+`context_similarity_threshold` is not set by default, which keeps this tier off. Lower it gradually: the lower the value, the more loosely related memories SQL Lens includes, which can help on questions that never quite match but also adds length and noise to what the assistant reads. Question-and-answer pairs added this way count as retrieved in the memory statistics.
+
+If a request uses a named profile with its own `similarity_threshold`, that value is used as the strict bar for this tier too.
+
+If SQL Lens cannot reach its memory while assembling this context, it quietly proceeds without the extra context rather than failing the question.
+
 ## The Bundle File Format
 
 Import and export use a portable bundle file in one of two formats:
@@ -49,7 +69,9 @@ Realistic curated bundles fit comfortably under both limits. If you have more cu
 
 ### CSV files and spreadsheet formulas
 
-When SQL Lens writes a CSV bundle (or reads one back in), any cell whose first character is one of `=`, `+`, `-`, `@`, tab, or carriage return is prefixed with a single apostrophe (`'`). Excel and LibreOffice would otherwise interpret these cells as formulas when an operator opens the file in a spreadsheet — a CSV-injection vector (CWE-1236) by which a planted bundle could execute attacker-supplied formulas on the operator's machine. The apostrophe prefix is the documented spreadsheet convention for "treat this cell as text," so files open as expected.
+When SQL Lens writes a CSV bundle (or reads one back in), any nonblank cell whose first character is one of `=`, `+`, `-`, `@`, tab, carriage return, or newline is prefixed with a single apostrophe (`'`). Excel and LibreOffice would otherwise interpret these cells as formulas when an operator opens the file in a spreadsheet — a CSV-injection vector (CWE-1236) by which a planted bundle could execute attacker-supplied formulas on the operator's machine. The apostrophe prefix is the documented spreadsheet convention for "treat this cell as text," so files open as expected.
+
+The query-results widget applies the same prefix rule to CSV headers and cells. When a prefix is added, its download, clipboard and manual-copy outcomes warn that those values will be treated as text in spreadsheets, including negative numbers. CSV delimiter quoting also preserves embedded commas, quotes, carriage returns and newlines.
 
 The defang is idempotent — re-importing and re-exporting the same file does not accumulate apostrophes — and is applied only to CSV bundles. JSON bundles are unchanged, because the tools that consume JSON do not interpret leading `=`/`+`/`-`/`@` as formulas. One side effect: a legitimate value whose first character is one of the trigger characters (for example, a SQL fragment starting with `-` from a comment, or a `@`-prefixed identifier) is stored with a leading apostrophe after a CSV round-trip. If you need to preserve such values exactly, use the JSON bundle format.
 
@@ -91,7 +113,7 @@ sqllens export-memory PATH [--format json|csv] [-c CONFIG]
 
 Use `--format json` (the default) for a complete, lossless backup. Use `--format csv` only when you want a simple `question,sql` spreadsheet and do not need the free-form notes.
 
-`export-memory` prints a yellow `Warning:` line (and still writes the file) when the export is not a complete picture: the store is empty, some stored rows could not be represented, or `--format csv` dropped schema docs. If the store looks corrupt or was written by an incompatible version, `export-memory` refuses to write a misleading "successful" backup and exits non-zero with no file written — investigate before relying on a backup or running `--clear`.
+`export-memory` prints a yellow `Warning:` line (and still writes the file) when the export is not a complete picture: the store is empty, some stored rows could not be represented, or `--format csv` dropped schema docs. CSV formula-prefix additions also produce a nonfatal warning because the exported text changed; use JSON to preserve exact values. If the store looks corrupt or was written by an incompatible version, `export-memory` refuses to write a misleading "successful" backup and exits non-zero with no file written — investigate before relying on a backup or running `--clear`.
 
 ## Verifying Memory After an Import
 
@@ -144,6 +166,8 @@ The normalization step uses the dialect of the configured database, so two equal
 
 By default, only the command line can import memory. If you set `allow_import = true` in the `[memory]` section (or `SQLLENS_MEMORY__ALLOW_IMPORT=1`), SQL Lens additionally exposes an `import_memory` tool to the connected assistant, which accepts a JSON bundle and returns a summary of what was saved.
 
+Calls also require `auth.mode = "bearer"`, or an explicit `auth.insecure = true` acknowledgement on a closed network. With the default `auth.mode = "none"` and `auth.insecure = false`, the tool returns an error before parsing or importing the bundle. This applies to both stdio and HTTP connections.
+
 If any entry in the bundle fails to save, the tool reports the import as an error to the assistant rather than a success, even when some entries saved and only others failed. A partial import is treated as a failure so the assistant is never told an import succeeded when part of it did not. The reported message gives only the counts of saved, skipped and errored entries; the detailed reason for each failure is written to the server log, not returned to the client.
 
 The same 10 MiB / 10,000-item bundle size limits described under [Bundle size limits](#bundle-size-limits) apply to the tool. A bundle that exceeds either cap is refused with `Invalid memory bundle: ...` before any item is written, so a single oversized request cannot block the server.
@@ -161,7 +185,7 @@ The seven tools are:
 - **Delete memory**: removes a single entry by its identifier.
 - **Clear memories**: removes all entries, or only one kind, and reports how many were deleted.
 - **Add memories**: bulk-adds curated question-and-answer pairs and free-form notes, skipping duplicates automatically. If any entry fails, the tool reports an error to the assistant rather than a success, and lists which entries failed.
-- **Export memories**: returns the saved memory as a JSON or CSV blob. The JSON form can be fed straight back into the add tool. If the export would leave anything out, for example free-form notes in a CSV export, the tool reports it as an error so a partial backup is never mistaken for a complete one.
+- **Export memories**: returns the saved memory as a JSON or CSV blob. The JSON form can be fed straight back into the add tool. If the export would leave anything out, for example free-form notes in a CSV export, the tool reports it as an error so a partial backup is never mistaken for a complete one. CSV formula-prefix additions produce a nonfatal warning; they do not set the dropped-record `lossy` flag.
 - **Memory statistics**: returns counts of each kind of entry, how often saved patterns were reused in the last 30 days, and the most-reused patterns.
 
 Each entry has a stable identifier you can pass to the get and delete tools. SQL Lens connects to a single database per instance, so although the tools accept a data-source identifier for compatibility, the value does not change which database is used.
@@ -169,6 +193,12 @@ Each entry has a stable identifier you can pass to the get and delete tools. SQL
 **Note:** The tools that change memory (delete, clear and add) refuse to run when the server requires no authentication. To use them, configure authentication (see the [Configuration reference](configuration.md#section-auth)), or set `auth.insecure` to acknowledge that the server runs on a closed, trusted network.
 
 **Warning:** Leave `allow_admin_tools` off unless you trust every client that can reach the server. These tools can read and permanently delete the saved memory, and adding entries can influence the SQL that SQL Lens generates for future questions.
+
+If memory changes during a listing, the tool returns a retry error instead of
+partial rows or an unreliable total. Retry after the write finishes. This covers
+SQL Lens writes within one running process, including background agent writes.
+Do not run concurrent writers from separate processes against the same local
+memory directory; Chroma does not support that deployment.
 
 ### Interactive Memory-Administration Panel
 

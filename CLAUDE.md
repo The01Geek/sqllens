@@ -124,18 +124,34 @@ Three artifact types, all driven by tag pushes (`vX.Y.Z`):
 | **Docker** | tag `v*`, push to `main` | `docker.yml` | `ghcr.io/the01geek/sqllens:{X.Y.Z, X.Y, latest}` for tags; `:edge` and `:git-<sha>` for main. Multi-arch (amd64 + arm64), cosign-signed (keyless OIDC), SBOM (SPDX) and build provenance attached. |
 | **MCPB** | tag `v*` | `mcpb.yml` | Per-platform `.mcpb` bundles (macOS x86_64/arm64, Linux x86_64, Win32 x86_64) attached as GitHub Release assets. |
 
-**Cutting a release:**
+**Release notes:** Write one `changelog.d/<PR>.<category>.md` fragment per applicable
+category (`security`, `fixed`, `added`, `changed`, `deprecated`, `removed`). Do not
+append to `CHANGELOG.md` or `docs/external/release-notes.md`; the former is generated
+only during release preparation, and the latter is a frozen historical archive.
+Reuse the PR's fragment when revising a note. Developer-only changes need no note.
+
+**Cutting a release:** Follow [the release guide](docs/internal/releasing.md).
+After the intended fragments have merged, create `codex/release-X.Y.Z`, bump
+`project.version` in `pyproject.toml` and `__version__` in
+`src/sqllens/__init__.py`, and run:
 ```bash
-# Bump version in pyproject.toml first; release.yml's "Verify tag matches" step rejects mismatches.
-git tag v0.1.0 && git push origin v0.1.0
+python scripts/changelog.py prepare
+python scripts/changelog.py release --tag vX.Y.Z
 ```
+Commit the version, generated changelog, and consumed fragment deletions together;
+review and merge that preparation PR before manually tagging its merged commit.
+Tag workflows refuse mismatched/unprepared entries and unconsumed fragments before
+publishing. The documented `codex/changelog-history-*` route permits focused
+history corrections without changing draft notes or version headings. To correct
+already-merged draft prose, use `codex/changelog-notes-<reason>`: version, shared
+release files, and fragment filenames must stay unchanged.
+
 PyPI versions are immutable after publish — you can yank but not re-upload the same version. Pre-release with `v0.1.0a1` if uncertain. The `softprops/action-gh-release` step on `release.yml` flags any tag containing `-` as a GitHub pre-release automatically.
 
 ## Repo conventions
 
 - **`main` is protected.** Direct pushes are blocked. The ruleset (`main-protected`, ID 15633058) blocks force pushes and deletions, and these required status checks must pass before merge:
   - `Lint + unit + transport (py3.12)`
-  - `Devflow Review` — the `/devflow:review` verdict gate. `devflow-review.yml`'s `finalize_check` concludes this check `failure` on a **REJECT** verdict (read from the formal `--request-changes` review, or the `## Verdict: REJECT` report line on the comment fallback), `success` on APPROVE, and `neutral` when the review was superseded/cancelled/intentionally not run (a neutral required check does not block). A REJECT therefore blocks auto-merge until the finding is addressed and the check's **Re-run** button is clicked (or `@claude run /devflow:review` re-reviews). Because it is required, **the review must remain enabled in `project-config.yml`** — disabling it while it is a required context would block every PR.
   - `Lint + unit + transport (py3.11)` and `Connector tests (Postgres + MySQL)` run on every PR but are **not** currently in the ruleset's required set (only `py3.12` is). Treat them as must-pass by convention; promoting them to required is a separate ruleset change.
 - **No bypass actors** — even the owner cannot push directly. Use a feature branch + PR every time:
   ```bash

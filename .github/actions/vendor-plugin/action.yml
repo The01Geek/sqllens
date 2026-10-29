@@ -1,0 +1,67 @@
+name: 'Vendor PRFlow plugin'
+description: |
+  Materialize the PRFlow plugin into `.prflow/vendor/prflow/` at runtime, so
+  the cloud-tier workflows find their helper scripts at the literal workspace
+  path without the plugin tree having to be committed into the repo. Runs the
+  committed → fetch algorithm in vendor-slice.sh (the single source of
+  truth, shared with install.sh). Place this step right after `actions/checkout`
+  in any job that runs plugin scripts or `anthropics/claude-code-action`.
+
+inputs:
+  ref:
+    description: |
+      Git ref (tag, branch, or commit SHA) to fetch the plugin from on the fetch
+      branch. Sourced from `.prflow/config.json` `prflow_version`. Ignored on the
+      committed branch. The fetch branch fails loud when this is empty rather than
+      tracking mutable `main`.
+    required: false
+    default: ''
+  repo:
+    description: |
+      owner/name to fetch the plugin from on the fetch branch. Sourced from
+      `.prflow/config.json` `prflow_repo`; falls back to `The01Geek/prflow`
+      (the public repository) when empty.
+    required: false
+    default: 'The01Geek/prflow'
+  token:
+    description: |
+      Credential for the fetch clone. When non-empty the fetch branch runs its
+      clones with a one-shot git credential helper answering username
+      x-access-token and this token as the password, so a private or fork
+      repository can be fetched. Empty → the clone runs with no credential, as
+      for a public repository.
+    required: false
+    default: ''
+
+outputs:
+  vendor_source:
+    description: |
+      Which vendor-slice branch materialized the plugin this run:
+      `committed` (pre-existing committed copy, checked-out-tree content) or
+      `fetch` (freshly cloned from the repository the trusted base-ref config
+      names at the pinned ref).
+      Security consumers key trust on this — the devflow-runner.yml deny-list
+      floor executes the vendored filter helper only on `fetch`, because the
+      committed copy comes from the possibly-PR-head checkout.
+    value: ${{ steps.slice.outputs.vendor_source }}
+
+runs:
+  using: composite
+  steps:
+    - name: Vendor plugin
+      id: slice
+      shell: bash
+      env:
+        DEVFLOW_REF: ${{ inputs.ref }}
+        DEVFLOW_REPO: ${{ inputs.repo }}
+        DEVFLOW_TOKEN: ${{ inputs.token }}
+        # Seal the rest of vendor-slice.sh's env contract: these are test-only
+        # overrides, so blank them here to keep `ref`/`repo` the COMPLETE action
+        # surface — ambient job/runner env can't silently redirect the clone or
+        # the destination, nor flip the script into source-only mode (a stray
+        # ambient DEVFLOW_VENDOR_SOURCE=1 would make this step a silent no-op that
+        # materializes nothing). Empty values fall back to vendor-slice.sh's defaults.
+        DEVFLOW_REPO_URL: ''
+        DEVFLOW_DEST: ''
+        DEVFLOW_VENDOR_SOURCE: ''
+      run: bash "${GITHUB_ACTION_PATH}/vendor-slice.sh"

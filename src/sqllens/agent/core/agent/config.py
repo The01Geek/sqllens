@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from .._compat import StrEnum
+from ..llm.models import EffortLevel
 
 if TYPE_CHECKING:
     from ..user import User
@@ -117,7 +118,8 @@ class AgentConfig(BaseModel):
     stream_responses: bool = Field(default=True)
     auto_save_conversations: bool = Field(default=True)
     include_thinking_indicators: bool = Field(default=True)
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+    effort: Optional[EffortLevel] = Field(default=None)
     max_tokens: Optional[int] = Field(default=None, gt=0)
     ui_features: UiFeatures = Field(default_factory=UiFeatures)
     audit_config: AuditConfig = Field(default_factory=AuditConfig)

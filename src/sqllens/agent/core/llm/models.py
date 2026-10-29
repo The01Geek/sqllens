@@ -4,12 +4,15 @@ LLM domain models.
 This module contains data models for LLM communication.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
 from ..tool.models import ToolCall
 from ..user.models import User
+
+# Anthropic `output_config.effort` levels.
+EffortLevel = Literal["low", "medium", "high", "xhigh", "max"]
 
 
 class LlmMessage(BaseModel):
@@ -19,6 +22,8 @@ class LlmMessage(BaseModel):
     content: str = Field(description="Message content")
     tool_calls: Optional[List[ToolCall]] = Field(default=None)
     tool_call_id: Optional[str] = Field(default=None)
+    # Signed provider blocks must be replayed unchanged through tool rounds.
+    provider_content: Optional[List[Dict[str, Any]]] = None
 
 
 class LlmRequest(BaseModel):
@@ -30,7 +35,9 @@ class LlmRequest(BaseModel):
     )  # Will be ToolSchema but avoiding circular import
     user: User = Field(description="User making the request")
     stream: bool = Field(default=False, description="Whether to stream response")
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    # None omits the key: some models (Claude Opus 5.5) reject any temperature.
+    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+    effort: Optional[EffortLevel] = Field(default=None)
     max_tokens: Optional[int] = Field(default=None, gt=0)
     system_prompt: Optional[str] = Field(
         default=None, description="System prompt for the LLM"
@@ -46,6 +53,7 @@ class LlmResponse(BaseModel):
     finish_reason: Optional[str] = None
     usage: Optional[Dict[str, int]] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    provider_content: Optional[List[Dict[str, Any]]] = None
 
     def is_tool_call(self) -> bool:
         """Check if this response contains tool calls."""
@@ -59,3 +67,4 @@ class LlmStreamChunk(BaseModel):
     tool_calls: Optional[List[ToolCall]] = None
     finish_reason: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    provider_content: Optional[List[Dict[str, Any]]] = None

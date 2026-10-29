@@ -16,6 +16,7 @@ because the forms here remain mutually distinguishable under it.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Mapping
 from typing import Any
@@ -118,7 +119,8 @@ def _append_sql_block(markdown: str, query_info: dict | None) -> str:
     sql = query_info.get("sql")
     if not sql:
         return markdown
-    return f"{markdown}\n\n**Executed SQL:**\n\n```sql\n{sql}\n```"
+    fence = "`" * max(3, 1 + max((len(run) for run in re.findall(r"`+", sql)), default=0))
+    return f"{markdown}\n\n**Executed SQL:**\n\n{fence}sql\n{sql}\n{fence}"
 
 
 async def query_database_impl(
@@ -165,11 +167,14 @@ async def query_database_impl_with_widgets(
     :func:`~sqllens.tools._format.components_to_blocks`, which yields the
     Markdown answer (interleaved DataFrame tables, deliberate prose, and chart
     placeholders) and the ordered ``blocks`` array — one typed block per
-    DataFrame, chart, or answer-marked TEXT in stream order. The blocks array
+    DataFrame, chart, or answer-marked TEXT in stream order (a one-row
+    DataFrame of at most four columns that fits the size budget becomes a
+    text block rather than a table block). The blocks array
     is the single structured-data channel: apps-aware hosts render each block
     in order, and ``server.py`` attaches it to ``_meta["sqllens/blocks"]``.
 
-    Three error categories, unchanged: tool-internal failures raise
+    Invalid non-empty profile names raise ``ProfileNameError`` before agent work.
+    Tool-internal failures raise
     ``_INTERNAL_ERROR_MESSAGE``, agent-reported SQL failures raise
     ``_SQL_EXECUTION_ERROR_PREFIX + answer`` (as an :class:`AgentRunError`),
     and ``UnsafeSqlError`` is re-raised verbatim. ``blocks`` is an empty list
@@ -214,8 +219,8 @@ async def query_database_impl_with_widgets(
     # the ContextVar BEFORE the agent is invoked, so every downstream shaping
     # site (each integration runner's fetchmany cap, RowCapRunner, the agent
     # run-loop iteration cap, the search-memory threshold fallback) reads the
-    # request-local value. An unknown / omitted profile name resolves through
-    # ``default`` to base config — existing callers see no change.
+    # request-local value. An unknown valid or omitted profile name resolves through
+    # ``default`` to base config. Invalid non-empty names fail before agent work.
     effective: EffectiveSettings = resolve_effective_settings(
         cfg, profile, store=profile_store
     )

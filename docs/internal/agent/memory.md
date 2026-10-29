@@ -1,5 +1,7 @@
 # Agent memory (ChromaDB-backed vector store)
 
+<!-- verified-against: issue-251 branch 2026-09-17 -->
+
 How the agent recalls prior successful tool uses, and what tunables affect retrieval quality. Source-of-truth reference for [src/sqllens/agent/integrations/chromadb/agent_memory.py](../../../src/sqllens/agent/integrations/chromadb/agent_memory.py), [src/sqllens/agent/capabilities/agent_memory/](../../../src/sqllens/agent/capabilities/agent_memory/), and [src/sqllens/agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py).
 
 ## What the memory feature actually does
@@ -15,13 +17,46 @@ There are two persistence modes, both backed by the same Chroma collection:
 
 The question is the embedded text; the tool name and args ride along as Chroma metadata. The next time a similar question comes in, the agent calls `SearchSavedCorrectToolUsesTool` with the new question — Chroma returns the nearest neighbours by cosine similarity, and the agent uses the previous SQL as a starting point instead of re-deriving it from scratch.
 
+The on-demand search tool accepts `limit` values from 1 to 100 (default 10); an explicit null retains the default fallback. These bounds apply to its validated tool arguments.
+
 **Per-memory hit tracking.** When `ChromaAgentMemory.search_similar_usage` ([src/sqllens/agent/integrations/chromadb/agent_memory.py](../../../src/sqllens/agent/integrations/chromadb/agent_memory.py)) returns a memory that cleared the similarity threshold, it counts as *retrieved* this turn: the row's `hit_count` metadata is incremented and its `last_hit_date` is set to `datetime.now().isoformat()` (naive-local). The bumps for every hit in a turn are collected and written in a single `collection.update()` after the result loop. This is **best-effort telemetry** — a failure to persist the bumped counts logs at `WARNING` and is swallowed (the matched memories were still found and returned, so the user's query is not failed). These counters let the admin curation tools (`get_memory_stats`, `list_memories`) distinguish high-value pairs from dead weight; they are absent (`hit_count` defaults to `0`) on a never-retrieved memory.
 
 `SaveQuestionToolArgsTool` is registered **only when `cfg.memory.save_queries` is true** (it defaults to `false`). When the flag is off the tool is never wired into the agent, so the agent cannot write tool-use memory — reading existing tool-use memory via `SearchSavedCorrectToolUsesTool` is unaffected.
 
 **Text memory (free-form).** The agent can also call `SaveTextMemoryTool` to record free-form notes — domain vocabulary, semantic hints, "column X actually means Y in this schema", etc. These are stored in the same Chroma collection but as text-memory entries rather than tool-arg recordings. The default system prompt (`src/sqllens/agent/core/system_prompt/default.py`) gates its text-memory instructions on `has_text_memory = "save_text_memory" in tool_names`, so the tool must be registered for the LLM to be told about it.
 
-`cfg.memory.similarity_threshold` controls both: results with a similarity score below the threshold are filtered out before the agent sees them.
+There are two separate ways a memory reaches the model, and they use different thresholds:
+
+- **On-demand tool-use search.** The agent explicitly calls `SearchSavedCorrectToolUsesTool` to look up prior question → SQL pairs. Its cosine-similarity floor is `cfg.memory.similarity_threshold` (the server-configured default; the LLM may override it per call). Hits below the floor are dropped before the agent sees them.
+- **Automatic system-prompt injection.** Before the agent runs, the context enhancer searches memory on its own, **with the user's exact message**, and folds any relevant text memories — and, when opted in, question → SQL pairs — into the system prompt. This path is governed by *both* `similarity_threshold` and the new `context_similarity_threshold`. See [System-prompt context injection](#system-prompt-context-injection) below.
+
+## System-prompt context injection
+
+Separately from the on-demand `SearchSavedCorrectToolUsesTool` path, the agent runs a **context enhancer** before it starts answering. `DefaultLlmContextEnhancer.enhance_system_prompt` ([src/sqllens/agent/core/enhancer/default.py](../../../src/sqllens/agent/core/enhancer/default.py)) searches memory using the user's message and, when it finds anything relevant, appends a `## Relevant Context from Memory` block to the system prompt. The LLM never decides to run this search — it happens automatically on every request that has an `agent_memory` wired in.
+
+The enhancer holds two thresholds, both passed in by `build_agent` from `MemoryConfig`:
+
+- `similarity_threshold` — the **strict hit bar**. Text memories scoring at or above it are eligible for the bounded reference context below. For a request that runs under a named profile, the profile's `similarity_threshold` (read through `sqllens.runtime.get_effective_settings()`) replaces the constructor value, the same way it does for `SearchSavedCorrectToolUsesTool`.
+- `context_similarity_threshold` — the **opt-in context floor**. It defaults to `None` (unset), which keeps the context tier off regardless of `similarity_threshold`.
+
+**The context tier (opt-in).** The tier is on only when `context_similarity_threshold` is set **and** is below the effective strict bar. Then, under the same `## Relevant Context from Memory` heading:
+
+- **Text / schema-doc memories** are searched at the context floor (instead of the strict bar), with at most five results considered for injection.
+- **Saved question → SQL pairs** are searched with `search_similar_usage(question=<user message>, limit=5, similarity_threshold=<floor>, tool_name_filter="run_sql")`. Up to five returned pairs whose `args["sql"]` is a non-blank string are considered — **including pairs at or above the strict bar**. They carry a prior question and SQL in the reference records below.
+
+Strong pairs are eligible even though `SearchSavedCorrectToolUsesTool` could return them, because that tool searches with the **agent's own rewording** of the question. In live runs the agent searched for text like "…for a sales rep in a specific month", scored 0.71–0.76, and never saw the stored pair that scored 0.96 against the real question. A pair that the tool also returns is simply seen twice.
+
+When the floor is unset, or is not below the effective strict bar, the tier is off: no `search_similar_usage` call is issued, text memories are searched at the strict bar, and no pairs are injected.
+
+**Reference-data boundary.** Text memories and SQL examples are encoded as JSON records inside a `sqllens_memory_data` block, preceded by instructions to treat them as untrusted reference data. Angle brackets, ampersands, newlines and control characters in values are escaped so stored text cannot close the outer delimiter. Text, prior questions and SQL are capped at 4,000, 1,000 and 8,000 characters respectively, including a visible truncation marker. The entire appended section is capped at 32,768 characters. Records that would exceed the remaining encoded budget are omitted with a notice; escaping can make a record larger than its source text.
+
+This framing reduces ambiguity and bounds prompt growth; it cannot guarantee that a model will resist prompt injection. Give memory write access only to trusted curators, and review imported knowledge. Stored content, search thresholds and the current text-memory save default are unchanged. The separate text-save configuration proposal in #267 is not implemented here.
+
+**Hit counting.** `search_similar_usage` bumps `hit_count` / `last_hit_date` for every row it returns (see *Per-memory hit tracking*). With the tier on, each request therefore counts up to 5 pairs as retrieved, and a pair that the search tool also returns in the same request is counted twice.
+
+**Graceful degrade.** If the text-memory search raises, the enhancer logs a `WARNING` (with the traceback) and returns the **unmodified** system prompt. If only the pair search raises, it logs a `WARNING` and still injects the text memories it already found. A memory failure never fails the request.
+
+Before this feature landed, `similarity_threshold` did not reach the text-memory injection path at all: the framework's fallback enhancer froze its text-search floor at a hardcoded `0.7`. Wiring the enhancer explicitly in `build_agent` (see below) is what first brings the configured `similarity_threshold` to that floor. **This is a behavior change for deployments that set `similarity_threshold` away from `0.7`, even with the context tier off:** a low value (for example `0.3`) now injects up to 5 loosely related text memories into every prompt; a high value injects fewer.
 
 ## Wiring
 
@@ -33,6 +68,18 @@ memory = ChromaAgentMemory(
     collection_name=cfg.memory.collection,
 )
 ```
+
+It then builds the context enhancer explicitly, threading both memory thresholds into it, and passes it to the `Agent` constructor as `llm_context_enhancer`:
+
+```python
+context_enhancer = DefaultLlmContextEnhancer(
+    memory,
+    similarity_threshold=cfg.memory.similarity_threshold,
+    context_similarity_threshold=cfg.memory.context_similarity_threshold,
+)
+```
+
+This explicit wiring matters: if `llm_context_enhancer` is left unset, `Agent` falls back to a `DefaultLlmContextEnhancer` built with only `agent_memory`, which cannot see either configured threshold and therefore leaves the text-search floor at the enhancer's own `0.7` default and the context tier permanently off. See [System-prompt context injection](#system-prompt-context-injection) above.
 
 The memory tools are then registered alongside `RunSqlTool` inside `build_agent` ([factory.py](../../../src/sqllens/agent/factory.py)). The structured-save tool is gated on `cfg.memory.save_queries`; the search and text-memory tools are always registered:
 
@@ -64,9 +111,10 @@ These live under `[memory]` in `sqllens.toml` (or `SQLLENS_MEMORY__*` env vars).
 |---|---|---|---|
 | `persist_dir` | `./chroma` (relative to CWD) | `SQLLENS_MEMORY__PERSIST_DIR` | Directory on disk for the Chroma collection. Created on first use. |
 | `collection` | `sqllens` | `SQLLENS_MEMORY__COLLECTION` | Logical collection name inside the persisted store. Letting two processes share a `persist_dir` with different collections is supported but rarely useful. |
-| `similarity_threshold` | `0.7` | `SQLLENS_MEMORY__SIMILARITY_THRESHOLD` | Cosine similarity floor in `[0.0, 1.0]`. Hits below this are dropped. Used as the *server-configured default*: the LLM may override it per call via the `similarity_threshold` parameter on `search_saved_correct_tool_uses`, including the legitimate value `0.0` (return everything) which is preserved exactly — not coerced. |
+| `similarity_threshold` | `0.7` | `SQLLENS_MEMORY__SIMILARITY_THRESHOLD` | Cosine similarity floor in `[0.0, 1.0]`. Hits below this are dropped. Used as the *server-configured default* for the on-demand tool-use search: the LLM may override it per call via the `similarity_threshold` parameter on `search_saved_correct_tool_uses`, including the legitimate value `0.0` (return everything) which is preserved exactly — not coerced. It is also the strict hit bar for [system-prompt context injection](#system-prompt-context-injection). |
+| `context_similarity_threshold` | unset (`None`) | `SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD` | Opt-in floor in `[0.0, 1.0]` used **only** by [system-prompt context injection](#system-prompt-context-injection). When set below the effective `similarity_threshold`, text memories and saved question → SQL pairs scoring at or above it are eligible for bounded reference context. Unset keeps the tier off, whatever `similarity_threshold` is. |
 | `save_queries` | `false` | `SQLLENS_MEMORY__SAVE_QUERIES` | Registers `SaveQuestionToolArgsTool` so the agent can persist successful question → SQL pairs into tool-use memory. Off by default; when off the tool is not registered and the system prompt drops its save instructions. Reading saved memory is unaffected. |
-| `allow_import` | `false` | `SQLLENS_MEMORY__ALLOW_IMPORT` | Registers the single `import_memory` MCP tool. Off by default — a remote writer can poison future SQL generation. The CLI import/export commands are unaffected. |
+| `allow_import` | `false` | `SQLLENS_MEMORY__ALLOW_IMPORT` | Registers the single `import_memory` MCP tool. Off by default — a remote writer can poison future SQL generation. Calls require bearer authentication or an explicit closed-network `auth.insecure=true` opt-in. The CLI import/export commands are unaffected. |
 | `allow_admin_tools` | `false` | `SQLLENS_MEMORY__ALLOW_ADMIN_TOOLS` | Registers the seven memory-administration MCP tools (`list_memories`, `get_memory`, `delete_memory`, `clear_memories`, `add_memories`, `export_memories`, `get_memory_stats`) for curating the training set. Off by default — they enumerate and mutate the store. The destructive subset (`delete_memory` / `clear_memories` / `add_memories`) additionally refuses to run on an unauthenticated endpoint (`auth.mode='none'`) unless `auth.insecure` acknowledges a closed network. See [Memory-administration tools](#memory-administration-tools-opt-in-default-off) below. |
 
 Schema definition: `MemoryConfig` in [src/sqllens/config.py](../../../src/sqllens/config.py).
@@ -89,6 +137,8 @@ This is the single knob most worth tuning per-database.
 
 The configured value is the *server-side default*. The LLM may pass a per-call `similarity_threshold` argument to `search_saved_correct_tool_uses` to override it for one search; in particular, `0.0` is a legitimate value meaning "return all neighbours" and is preserved (not coerced to the default) thanks to the explicit `is not None` check in `SearchSavedCorrectToolUsesTool.execute()`. Restart the process to change the *default* once the LLM stops overriding it.
 
+**Turning on the context tier.** `context_similarity_threshold` is a second lever, and it applies only to the automatic [system-prompt injection](#system-prompt-context-injection), not to the tool-use search. Set it below `similarity_threshold` when the agent keeps missing saved answers that would help. The lower the floor, the more loosely related memories get folded into the prompt (at most 5 text memories and 5 pairs) — which helps recall but spends prompt budget, so lower it gradually. Leaving it unset keeps the tier off.
+
 ## Async-over-thread pattern
 
 `ChromaAgentMemory` exposes async methods (`save_tool_usage`, `search_similar_usage`, `get_recent_memories`, `delete_by_id`, `save_text_memory`, `search_text_memories`), all of which are reachable from the agent: the first two via `SaveQuestionToolArgsTool` / `SearchSavedCorrectToolUsesTool`, `save_text_memory` via the now-registered `SaveTextMemoryTool`, and the rest via internal code paths on `agent_memory` itself. ChromaDB's Python client is synchronous, so each method defines a sync inner function and runs it on a `ThreadPoolExecutor` so the agent's async loop doesn't block.
@@ -99,7 +149,7 @@ If you're profiling and see Chroma operations blocking, check that the executor 
 
 The upstream framework also defined memory backends other than Chroma; those were dropped during the lift. `ChromaAgentMemory` is the only concrete `AgentMemory` implementation in SQL Lens. The abstract `AgentMemory` interface lives at [src/sqllens/agent/capabilities/agent_memory/base.py](../../../src/sqllens/agent/capabilities/agent_memory/base.py) — if a second backend is ever needed, that's the contract to implement.
 
-All three memory tool classes defined in [agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py) — `SaveQuestionToolArgsTool`, `SearchSavedCorrectToolUsesTool`, and `SaveTextMemoryTool` — are now registered in `factory.py`. There is no dedicated search tool for text memories on the LLM surface today; text memories saved via `save_text_memory` are read back through the agent's internal code paths over `agent_memory.search_text_memories`.
+All three memory tool classes defined in [agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py) — `SaveQuestionToolArgsTool`, `SearchSavedCorrectToolUsesTool`, and `SaveTextMemoryTool` — are now registered in `factory.py`. There is no dedicated search tool for text memories on the LLM surface today; text memories saved via `save_text_memory` are read back through the agent's internal code paths over `agent_memory.search_text_memories` — chiefly the context enhancer's automatic [system-prompt injection](#system-prompt-context-injection).
 
 ## First-party import/export (`src/sqllens/memory/`)
 
@@ -219,6 +269,7 @@ Implementation lives outside the vendored agent tree in [src/sqllens/eval/](../.
 
 The tool accepts JSON only (no CSV over MCP), runs `import_bundle` with default `clear=False` / `dry_run=False`, and returns `ImportReport.to_markdown()` (a saved/skipped/errors table) **only when the import was fully clean**. Per the CLAUDE.md `isError` contract:
 
+- Before parsing or importing, `_require_write_auth("memory")` refuses calls when `auth.mode="none"` and `auth.insecure` is false. Configure bearer authentication or explicitly acknowledge a closed network with `auth.insecure=true`. This applies to both MCP transports; the CLI import/export commands are unaffected.
 - A parse failure raises `RuntimeError("Invalid memory bundle: ...")`.
 - A store/write failure or a corrupt-baseline `MemoryCorruptionError` raises a sanitized `RuntimeError` (logged via `logger.exception` / `logger.error`, never leaking the persist path or a raw traceback).
 - **Any per-item error is a failure — partial failure is failure.** When `report.errors` is non-empty the tool raises, *even if some pairs saved and only others errored*. The guard is `if report.errors:` (not the older `report.saved == 0 and report.errors`), so a run that saved some items and errored on the rest no longer reaches the client as `isError:false`. The client-facing message is counts-only — `"Memory import failed: N item(s) errored (X saved, Y skipped). A partial import is a failure; check the server logs."` — and the full per-item exception text (which can carry the on-disk persist path / driver internals) goes to the server log via `logger.error`, never to the client. This is pinned by `tests/unit/test_memory_mcp_tool.py::test_tool_signals_error_on_partial_failure`.
@@ -239,10 +290,11 @@ Every admin tool accepts a required `data_source_id` argument, but SQL Lens serv
 
 ### `MemoryRecord` and the raw `store.py` seam
 
-[src/sqllens/memory/store.py](../../../src/sqllens/memory/store.py) gained a frozen `MemoryRecord` dataclass (`memory_id`, `metadata`, optional `embedding`) and four raw collection operations that back the admin layer. Unlike `iter_all` (which only re-materializes the two bundle-representable kinds), these return metadata **verbatim** so the admin layer can surface every stored row — auto-learned tool memories included — with its discriminator (`is_text_memory`), tracking keys (`hit_count` / `last_hit_date`), and provenance intact:
+[src/sqllens/memory/store.py](../../../src/sqllens/memory/store.py) gained a frozen `MemoryRecord` dataclass (`memory_id`, `metadata`, optional `embedding`) and the raw collection operations that back the admin layer. Unlike `iter_all` (which only re-materializes the two bundle-representable kinds), these return metadata **verbatim** so the admin layer can surface every stored row — auto-learned tool memories included — with its discriminator (`is_text_memory`), tracking keys (`hit_count` / `last_hit_date`), and provenance intact:
 
 | Method | Behaviour |
 |---|---|
+| `iter_records(include_embeddings=False)` | Paged admin listing, retaining 256 rows per page. Raises `MemoryChangedError` if a managed write overlaps; callers must exhaust it before returning a result. The shared per-collection generation covers agent executor writes and direct admin deletes without blocking writes for the scan. |
 | `get_all(include_embeddings=False)` | Every stored row as a `MemoryRecord`. Rows whose metadata is missing/non-dict are skipped (they cannot be classified or addressed). |
 | `get_one(memory_id, include_embedding=False)` | One row by id, or `None` if absent. |
 | `delete_ids(ids)` | Deletes the given ids; returns how many *actually* left the store (present-before minus still-present-after), never an optimistic "asked to delete N" — so a partial-delete failure is not reported as a clean success. |
@@ -256,8 +308,8 @@ Embeddings (often numpy arrays) are coerced to plain `float` lists by `_coerce_e
 
 Notable contracts:
 
-- **`add_memories` round-trip / partial failure.** Per-item validation failures (a malformed `SqlPair` / `SchemaDoc`, including a non-dict item) are collected into `errors` with the original input index rather than aborting the batch; valid items go through `import_bundle` (the same dedup path the CLI/`import_memory` use). `import_bundle`'s own per-item errors are mapped back to the caller's original indices. Returns `{saved_count, duplicate_count, skipped_count, errors}` (`skipped_count` is always `0` today — dedup duplicates are counted under `duplicate_count`). The server treats any non-empty `errors` as an `isError` result.
-- **`export_memories` lossy contract.** Calls `store.iter_all()`, which raises `MemoryCorruptionError` on a wholesale-corrupt store so a destroyed backup never serializes as an empty success. `lossy` is `True` when data that **exists** in the store was dropped (unrepresentable rows reported by `last_skipped_rows`, or schema docs absent from a CSV export); the server raises `isError` on that. A merely-**empty** store is *not* lossy (nothing existed to lose) — it returns `lossy=False` with an explanatory warning, matching the non-fatal CLI `export_bundle`. JSON emits `{"sql_pairs": [{question, sql}], "schema_docs": [{content}]}` — the exact argument shape `add_memories` accepts, so an export round-trips straight back in. CSV carries SQL pairs only.
+- **`add_memories` partial failure.** Per-item validation failures (a malformed `SqlPair` / `SchemaDoc`, including a non-dict item) are collected into `errors` with the original input index rather than aborting the batch; valid items go through `import_bundle` (the same dedup path the CLI/`import_memory` use). `import_bundle`'s own per-item errors are mapped back to the caller's original indices. Returns `{saved_count, duplicate_count, skipped_count, errors}` (`skipped_count` is always `0` today — dedup duplicates are counted under `duplicate_count`). The server treats any non-empty `errors` as an `isError` result.
+- **`export_memories` lossy contract.** Calls `store.iter_all()`, which raises `MemoryCorruptionError` on a wholesale-corrupt store so a destroyed backup never serializes as an empty success. `lossy` is `True` when data that **exists** in the store was dropped (unrepresentable rows reported by `last_skipped_rows`, or schema docs absent from a CSV export); the server raises `isError` on that. A merely-**empty** store is *not* lossy (nothing existed to lose) — it returns `lossy=False` with an explanatory warning, matching the non-fatal CLI `export_bundle`. JSON emits `{"sql_pairs": [{question, sql}], "schema_docs": [{content}]}` — the argument shape `add_memories` accepts. Split larger exports into batches of at most 10,000 items per block before adding. CSV carries SQL pairs only.
 - **`get_memory_stats` recent-hit window.** Counts `tool_usage_count` / `text_count`, sums `hit_count` over the last 30 days into `total_hits_last_30d`, and returns the top-10 by `hit_count` as `top_hit_memories`. The 30-day cutoff is computed with `datetime.now().isoformat()` (naive-local) so its lexical ISO-8601 comparison against the stored `last_hit_date` (written the same way by `search_similar_usage`) is valid.
 
 ## Surfacing the hit/miss signal to MCP clients

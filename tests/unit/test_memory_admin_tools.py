@@ -13,6 +13,8 @@ branch the closure produces.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 
 import pytest
@@ -423,6 +425,25 @@ async def test_export_csv_dropping_schema_docs_is_lossy(tmp_path, monkeypatch) -
 
 
 # --- hit tracking -------------------------------------------------------------
+
+
+async def test_export_csv_protection_survives_mcp_tool_wrapper(tmp_path, monkeypatch) -> None:
+    patch_fake_embeddings(monkeypatch)
+    mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))
+    values = [prefix + f"synthetic-{index}" for index, prefix in enumerate("=+-@\t\r\n")]
+    await _fn(mcp, "add_memories")(
+        data_source_id=_DSID, sql_pairs=[{"question": v, "sql": v} for v in values],
+    )
+    result = await _fn(mcp, "export_memories")(data_source_id=_DSID, format="csv")
+    payload = _parse(result)
+    assert isinstance(result, str)  # Nonfatal warning, not isError.
+    assert payload["lossy"] is False
+    assert len(payload["warnings"]) == 1
+    assert "CSV formula protection" in payload["warnings"][0]
+    assert "synthetic" not in payload["warnings"][0]
+    rows = list(csv.reader(io.StringIO(payload["data"])))
+    assert rows[0] == ["question", "sql"]
+    assert sorted(rows[1:]) == sorted([["'" + v, "'" + v] for v in values])
 
 
 async def test_hit_count_advances_on_retrieval(tmp_path, monkeypatch) -> None:

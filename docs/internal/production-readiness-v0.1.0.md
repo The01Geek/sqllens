@@ -50,7 +50,7 @@ section at the end flags closed issues that are incomplete in practice.
 A line-by-line re-audit against the working tree on `main` (after PRs
 #41–#86). **The headline: the P0 safety set is genuinely closed, but almost
 nothing else is.** The large run of recent PRs (#57–#86) was overwhelmingly
-devflow/CI plumbing and test-infra scaffolding — not the substantive P1
+CI plumbing and test-infra scaffolding — not the substantive P1
 safety, ops, or product work the original release plan front-loaded. The
 audit doc's prose drifted ahead of the code; treat this section as the
 source of truth.

@@ -14,7 +14,7 @@ base_branch: "main"
 
 # Claude model to use for AI-powered workflows
 # Workflows may override this individually if needed
-claude_model: "claude-opus-4-7"
+claude_model: "claude-opus-5-5"
 
 # Project board status field values (must match your GitHub Project exactly)
 statuses:
@@ -56,8 +56,7 @@ claude:
   workpad_marker: "<!-- devflow:workpad -->"
   # Reasoning effort for Claude-action workflows below. Valid: low, medium,
   # high, xhigh, max. "medium" causes the workflow to omit --effort entirely
-  # so the model's built-in default applies (xhigh on Opus 4.7, high on Opus
-  # 4.6 / Sonnet 4.6). Pin explicitly when the model default would silently
+  # so the model's built-in default applies. Pin explicitly when it would
   # change depth on a model upgrade.
   effort: "medium"
 
@@ -79,14 +78,6 @@ setup:
     python -m pip install --upgrade pip pyyaml
     pip install -e ".[dev,all]"
 
-# WikiWizard settings
-wikiwizard:
-  claude_model: "claude-sonnet-4-6"
-  documented_label: "Documented"
-  release_notes_file: "docs/external/release-notes.md"
-  allowed_bots: "claude,radman-ai,dependabot"
-  effort: "low"
-
 security_audit:
   # medium is sufficient for the configured weekly cadence; bump to xhigh
   # if the audit needs deeper reasoning (max is per-session-only and
@@ -100,8 +91,8 @@ security_audit:
 # See .claude/plugins/devflow/README.md
 devflow_retrospective:
   enabled: true
-  retrospective_model: "claude-sonnet-4-6"
-  audit_model: "claude-opus-4-7"
+  retrospective_model: "claude-opus-5-5"
+  audit_model: "claude-opus-5-5"
   # Repetition gate. status == regressed always bypasses this.
   min_occurrences: 2
   # Skip audit if the youngest audit PR is younger than this (createdAt-based).
@@ -117,17 +108,7 @@ devflow_retrospective:
 # Per-workflow enable/disable toggles
 workflows:
   claude: true
-  # Disabled 2026-05-19: WikiWizard races devflow-review (both fire on
-  # pull_request opened/ready/synchronize) and pushes a docs commit to the
-  # PR head mid-review using GITHUB_TOKEN. GITHUB_TOKEN-authored pushes
-  # trigger no workflows (GitHub anti-recursion), so that commit orphans
-  # every required HEAD-pinned check (Devflow Review + CI) on the stale
-  # reviewed SHA → the PR is permanently BLOCKED (see PR #128). Re-enable
-  # only once docs delivery is decoupled from the PR head or pushed with a
-  # workflow-triggering token + self-trigger guard.
-  WikiWizard: false
   close-released-items: true
-  comment-on-draft-issues: true
   move-to-in-progress: true
   sync-pr-status-to-issue: true
   devflow-review: true

@@ -25,6 +25,9 @@ on:
   # and PRs stall in the queue indefinitely.
   merge_group:
 
+permissions:
+  contents: read
+
 jobs:
   unit:
     name: Lint + unit + transport (py${{ matrix.python-version }})
@@ -34,14 +37,27 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - run: pip install -e ".[dev,all]"
+      - run: pip install -c requirements.txt -c docker/requirements-drivers.txt -e ".[dev,all]"
+      - run: pip check
+      - name: Validate release fragments
+        run: python scripts/changelog.py check
+      - name: Guard generated release files on pull requests
+        if: github.event_name == 'pull_request'
+        env:
+          CHANGELOG_BASE: ${{ github.event.pull_request.base.sha }}
+          CHANGELOG_BRANCH: ${{ github.head_ref }}
+        run: |
+          git fetch --no-tags origin "$CHANGELOG_BASE"
+          python scripts/changelog.py policy --base "$CHANGELOG_BASE" --branch "$CHANGELOG_BRANCH"
       - run: ruff check .
       # Skip the connectors marker — those need real DB service containers
       # and run in the dedicated job below.
@@ -86,14 +102,17 @@ jobs:
       SQLLENS_TEST_MYSQL_URL: mysql+pymysql://sqllens:sqllens@127.0.0.1:3306/sqllens
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
           cache: pip
 
-      - run: pip install -e ".[dev,all]"
+      - run: pip install -c requirements.txt -c docker/requirements-drivers.txt -e ".[dev,all]"
+      - run: pip check
 
       # Wait for both DBs to accept ``SELECT 1``. Service-container health
       # checks usually catch this, but MySQL on first boot is slow.
@@ -116,3 +135,74 @@ jobs:
           fi
 
       - run: pytest -q -m connectors -v
+
+  # Auto-request a PRFlow review once both CI jobs above are green, by posting a
+  # standalone `/prflow:review` comment that devflow.yml's `command` job picks
+  # up, the same path a hand-typed comment takes. The vendored helper makes every
+  # post/skip/dedupe decision; this job supplies only the five eligibility
+  # clauses and the credential. See PRFlow's "Request a Review Automatically on
+  # Green CI" guide.
+  #
+  # `needs:` with no `if: always()` gates on every CI job succeeding, so a red
+  # run never requests a review. The job is skipped until the repository has a
+  # DEVFLOW_APP_ID variable and DEVFLOW_APP_PRIVATE_KEY secret, and the App's
+  # bot login must be in prflow.allowed_bots on main for the comment to start a
+  # review.
+  request-review:
+    needs: [unit, connectors]
+    # Keep this workflow on `pull_request`; never `pull_request_target`, which
+    # would expose secrets to fork runs. Non-draft, same-repository head (forks
+    # never request), not dependabot, and an App configured. Push and
+    # merge_group runs are skipped.
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.draft == false
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.actor != 'dependabot[bot]'
+      && vars.DEVFLOW_APP_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .prflow/config.json
+            .github/actions/read-project-config
+            .github/actions/vendor-plugin
+            .prflow/vendor/prflow/scripts
+            .prflow/vendor/prflow/lib
+          sparse-checkout-cone-mode: false
+      # Thin install: the plugin tree is fetched at run time at the pinned
+      # prflow_version from .prflow/config.json.
+      - id: cfg
+        uses: ./.github/actions/read-project-config
+      - uses: ./.github/actions/vendor-plugin
+        with:
+          ref: ${{ fromJSON(steps.cfg.outputs.json).prflow_version }}
+      - name: Mint downscoped review-trigger token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.DEVFLOW_APP_ID }}
+          private-key: ${{ secrets.DEVFLOW_APP_PRIVATE_KEY }}
+          permission-pull-requests: write
+      - name: Post review-trigger comment
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR: ${{ github.event.pull_request.number }}
+          # Keys the helper's per-SHA dedupe marker: a re-run over the same head
+          # posts nothing, a new head requests again.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_AUTHOR: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          HELPER=.prflow/vendor/prflow/scripts/post-ci-review-trigger.sh
+          # A missing helper is a named warning, never an error (must not redden CI).
+          if [ ! -x "$HELPER" ]; then
+            echo "::warning::auto-review: helper $HELPER is absent or not executable (was the plugin vendored at the pinned prflow_version?); no review requested for PR #$PR."
+            exit 0
+          fi
+          "$HELPER"

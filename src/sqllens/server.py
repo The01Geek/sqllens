@@ -19,14 +19,22 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Any, get_args
+from typing import Annotated, Any, get_args
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
+from sqllens._bounded_json import JsonBoundsError, copy_bounded_json
+from sqllens._memory_consistency import MemoryChangedError
 from sqllens.config import Config
-from sqllens.profiles import DEFAULT_PROFILE_NAME, Profile, ProfileStore
+from sqllens.profiles import (
+    DEFAULT_PROFILE_NAME,
+    Profile,
+    ProfileNameError,
+    ProfileStore,
+    validate_profile_name,
+)
 from sqllens.tools._format import append_conversation_footer
 from sqllens.tools.list_data_sources import list_data_sources_impl
 from sqllens.tools.query_database import AgentRunError, query_database_impl_with_widgets
@@ -93,6 +101,14 @@ _MEMORY_META_KEY = "sqllens/memory_info"
 # failure, a DB timeout, an LLM error) drive the turn down the error path. (The
 # conversation channel rides the error result too, via ``_trace_error_result``.)
 _AGENT_TRACE_META_KEY = "sqllens/agent_trace"
+# Configured-model channel (shape and posture in the tool docstring below).
+# Do not gate it behind ``show_details`` or a new knob, and do not attach it to
+# ``_trace_error_result``: a consumer renders it per stored answer, so a gate
+# would silently blank the model and effort on deployments that leave the flag
+# off. Both values are what sqllens was configured to *request* — the
+# ``LlmResponse`` the Anthropic integration builds carries no served model id
+# and no applied effort, so neither can be reported here instead.
+_MODEL_INFO_META_KEY = "sqllens/model_info"
 # Conversation continuity channel. The resolved conversation id is returned on
 # every answer turn that resolves a conversation — every successful turn, and
 # also the trace-carrying ``isError`` result (via ``_trace_error_result``).
@@ -182,21 +198,22 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
     declared field and is excluded). This is the dynamic-value source the
     row-level-security guard reads.
 
+    Forward at most 64 extra keys, 16 KiB of compact ASCII-escaped JSON,
+    1024 nodes (including keys), and eight nesting levels below the root.
+    Invalid or oversized trees are discarded as a whole. These bounds apply
+    after the MCP transport has parsed the request, not to HTTP body parsing.
+
     Fail-secure: any failure to read the request context yields ``{}`` — a
     dynamic RLS rule then sees its key as missing and blocks the query (static
     rules are unaffected), rather than the tool crashing or, worse, a request
-    influencing the query unfiltered. This is also why stdio (no per-request
-    ``_meta`` channel) only ever gets ``{}`` here, which is the documented
-    "dynamic rules are HTTP-only" behaviour.
+    influencing the query unfiltered. Metadata is read from the MCP request
+    context on either transport; requests without extras receive ``{}``.
     """
     try:
         meta = ctx.request_context.meta
     except ValueError:
-        # Documented, expected case: the MCP SDK raises ``ValueError`` from
-        # ``request_context`` when no request is active (stdio — the primary
-        # transport — and tests). This is the common path, not a fault, so it
-        # is logged at debug without a traceback; warning+traceback here would
-        # fire on every stdio query and drown out a genuine SDK drift.
+        # The MCP SDK raises ValueError when no request is active. This
+        # expected case needs no traceback; actual extraction faults do.
         logger.debug("no active request context; returning empty metadata")
         return {}
     except Exception:
@@ -213,19 +230,28 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
         return {}
     if meta is None:
         return {}
-    extra = getattr(meta, "model_extra", None)
-    if extra is None:
-        # meta present but no extras attribute — either the caller sent only
-        # declared fields, or the MCP SDK changed how _meta extras surface.
-        # Logged at debug so a "every dynamic RLS query suddenly blocks"
-        # incident is traceable to this seam rather than looking like the
-        # caller never sent metadata.
-        logger.debug(
-            "request _meta present but exposes no model_extra; "
-            "dynamic RLS rules will see no metadata"
-        )
+    # Keep extras diagnostics content-free, including unexpected SDK/helper
+    # faults: exception messages and tracebacks can contain metadata values.
+    try:
+        extra = getattr(meta, "model_extra", None)
+    except Exception:
+        logger.warning("failed to read request metadata extras; returning empty metadata")
         return {}
-    return dict(extra) if extra else {}
+    if extra is None:
+        logger.debug("request _meta exposes no model_extra; returning empty metadata")
+        return {}
+    try:
+        if type(extra) is not dict or len(extra) > 64:
+            raise JsonBoundsError("request metadata key limit or shape")
+        bounded, _ = copy_bounded_json(extra)
+        return bounded
+    except JsonBoundsError:
+        # A rejected tree is never partially forwarded to dynamic RLS rules.
+        logger.warning("invalid or oversized request metadata; returning empty metadata")
+        return {}
+    except Exception:
+        logger.warning("unexpected failure bounding request metadata; returning empty metadata")
+        return {}
 
 
 def build_server(cfg: Config) -> FastMCP:
@@ -297,9 +323,10 @@ def build_server(cfg: Config) -> FastMCP:
         ``profile`` selects a named config profile for this single request —
         the request-local overlay of result-shaping knobs (``show_details``,
         ``max_tool_iterations``, ``max_rows``, ``similarity_threshold``).
-        Omitting it (or passing an unknown name)
-        resolves through the reserved ``default`` profile, which falls back
-        to base config — existing callers see no change. Profiles are managed
+        A non-empty name must use 1-64 characters from ``[A-Za-z0-9_.-]``;
+        other names fail before the agent runs. Omitting it, passing an empty
+        string, or passing an unknown valid name resolves through the reserved
+        ``default`` profile, which falls back to base config. Profiles are managed
         through ``list_profiles`` / ``get_profile`` / ``upsert_profile`` /
         ``delete_profile`` (all gated on ``profiles.allow_admin_tools``).
 
@@ -316,6 +343,11 @@ def build_server(cfg: Config) -> FastMCP:
         run's ``terminal_error`` — on both successful and failed responses.
         The ``sqllens/agent_trace`` key is omitted entirely when the resolved
         profile's ``show_details`` is off.
+
+        Every successful answer also carries ``_meta["sqllens/model_info"]`` —
+        ``{"model", "reasoning_effort"}``, the model id and reasoning effort
+        this server is configured to request — gated by no flag. The error
+        result does not carry it.
         """
         metadata = _request_metadata(ctx)
         # Mint a stable id when the caller did not supply one, so the resolved
@@ -356,6 +388,10 @@ def build_server(cfg: Config) -> FastMCP:
             extra_meta[_MEMORY_META_KEY] = memory_info
         if agent_trace is not None:
             extra_meta[_AGENT_TRACE_META_KEY] = agent_trace
+        extra_meta[_MODEL_INFO_META_KEY] = {
+            "model": cfg.llm.model,
+            "reasoning_effort": cfg.llm.effort,
+        }
         return _conversation_result(markdown, conversation_id, extra_meta)
 
     @mcp.tool()
@@ -384,6 +420,7 @@ def build_server(cfg: Config) -> FastMCP:
             Exact-match duplicates (already stored or repeated in the bundle)
             are skipped. Returns a Markdown summary of saved / skipped / errors.
             """
+            _require_write_auth("memory")
             try:
                 bundle = parse_json(bundle_json)
             except BundleFormatError as exc:
@@ -487,7 +524,7 @@ def build_server(cfg: Config) -> FastMCP:
         async def list_memories(
             data_source_id: str,
             memory_type: str | None = None,
-            limit: int = 1000,
+            limit: Annotated[int, Field(ge=0, le=1000)] = 1000,
             include_embedding_preview: bool = False,
         ) -> str:
             """List stored memories (newest first), optionally filtered by type.
@@ -495,7 +532,9 @@ def build_server(cfg: Config) -> FastMCP:
             ``data_source_id`` is accepted for client-contract stability but is
             advisory: this server serves a single database. ``memory_type`` is
             ``tool_usage``, ``text``, or omitted for all. Returns a JSON object
-            ``{"memories": [...], "total": N}``.
+            ``{"memories": [...], "total": N}``. ``limit`` ranges from 0 to 1000;
+            zero returns no rows while still counting all matching memories.
+            A concurrent managed write aborts listing with a retryable tool error.
             """
             mtype = _parse_memory_type(memory_type)
             try:
@@ -505,6 +544,8 @@ def build_server(cfg: Config) -> FastMCP:
                     limit=limit,
                     include_embedding_preview=include_embedding_preview,
                 )
+            except (memory_admin.MemoryInputError, MemoryChangedError) as exc:
+                raise RuntimeError(str(exc)) from None
             except Exception:
                 logger.exception("list_memories tool failed")
                 raise RuntimeError(
@@ -591,7 +632,8 @@ def build_server(cfg: Config) -> FastMCP:
             """Bulk-add curated SQL pairs and schema docs, with server-side dedup.
 
             ``sql_pairs`` items are ``{"question", "sql"}``; ``schema_docs`` items
-            are ``{"content"}``. Exact ``(question, sql)`` / ``content`` matches
+            are ``{"content"}``. Each block accepts up to 10,000 items.
+            Exact ``(question, sql)`` / ``content`` matches
             (already stored or repeated in the batch) are skipped. Write-guarded:
             refuses on an unauthenticated endpoint unless auth.insecure is set.
 
@@ -607,6 +649,8 @@ def build_server(cfg: Config) -> FastMCP:
                     result = await memory_admin.add_memories(
                         admin_store, sql_pairs=sql_pairs, schema_docs=schema_docs
                     )
+            except memory_admin.MemoryInputError as exc:
+                raise RuntimeError(str(exc)) from None
             except Exception:
                 logger.exception("add_memories tool failed")
                 raise RuntimeError(
@@ -631,8 +675,9 @@ def build_server(cfg: Config) -> FastMCP:
         ) -> str | CallToolResult:
             """Export the store as a JSON or CSV blob.
 
-            JSON round-trips: its ``{"sql_pairs": [...], "schema_docs": [...]}``
-            output feeds straight back into ``add_memories``. Returns
+            JSON uses the ``{"sql_pairs": [...], "schema_docs": [...]}``
+            shape accepted by ``add_memories``. Split larger exports into
+            batches of at most 10,000 items per block before adding. Returns
             ``{"format", "data", "warnings", "lossy"}``; when ``lossy`` is true
             (data that exists was dropped) the result is an ``isError``, and a
             wholesale-corrupt store fails loudly rather than exporting an empty
@@ -717,6 +762,13 @@ def build_server(cfg: Config) -> FastMCP:
 
         _profile_error = _json_error_result
 
+        def _profile_name_error(name: str) -> CallToolResult | None:
+            try:
+                validate_profile_name(name)
+            except ProfileNameError as exc:
+                return _profile_error({"error": str(exc)})
+            return None
+
         # Bounds derived from the live Profile pydantic model so the wire
         # shape (and the widget's bounded inputs) cannot drift from the
         # validator the upsert path enforces. Adding a fifth knob to
@@ -766,6 +818,8 @@ def build_server(cfg: Config) -> FastMCP:
         async def get_profile(name: str) -> str | CallToolResult:
             """Fetch one named profile by name.
 
+            Names must be 1-64 characters from ``[A-Za-z0-9_.-]``.
+
             Returns the profile's JSON object, or an ``isError`` result with
             ``{"error": "profile not found", "name": ...}`` when no profile
             has that name. Per CLAUDE.md's isError discipline an unknown name
@@ -774,6 +828,8 @@ def build_server(cfg: Config) -> FastMCP:
             instead — a plain "not found" against a corrupt store would
             silently mask the real reason the profile is unreachable.
             """
+            if error := _profile_name_error(name):
+                return error
             store = profile_store
             if store.load_error:
                 return _profile_error(
@@ -798,6 +854,8 @@ def build_server(cfg: Config) -> FastMCP:
         ) -> str | CallToolResult:
             """Create or replace ``name`` with ``knobs`` (write-guarded).
 
+            Names must be 1-64 characters from ``[A-Za-z0-9_.-]``.
+
             ``knobs`` is a dict of the four profile fields; omit a field to
             mean "inherit from base config". Refuses on an unauthenticated
             endpoint unless ``auth.insecure`` is set. Returns the saved
@@ -806,10 +864,8 @@ def build_server(cfg: Config) -> FastMCP:
             success that merely reports the failure.
             """
             _profile_write_auth()
-            if not isinstance(name, str) or not name.strip():
-                return _profile_error(
-                    {"error": "profile name must be a non-empty string"}
-                )
+            if error := _profile_name_error(name):
+                return error
             if not isinstance(knobs, dict):
                 return _profile_error(
                     {"error": "knobs must be a JSON object"}
@@ -833,6 +889,8 @@ def build_server(cfg: Config) -> FastMCP:
             try:
                 async with profile_admin_lock:
                     saved = await store.upsert(name, profile)
+            except ProfileNameError as exc:
+                return _profile_error({"error": str(exc)})
             except Exception:
                 logger.exception("upsert_profile tool failed")
                 raise RuntimeError(
@@ -846,6 +904,8 @@ def build_server(cfg: Config) -> FastMCP:
         async def delete_profile(name: str) -> str | CallToolResult:
             """Delete the named profile (write-guarded).
 
+            Names must be 1-64 characters from ``[A-Za-z0-9_.-]``.
+
             The reserved ``default`` name cannot be deleted; the call returns
             ``isError`` with a clear message. An unknown name also returns
             ``isError``. Refuses on an unauthenticated endpoint unless
@@ -854,6 +914,8 @@ def build_server(cfg: Config) -> FastMCP:
             ``get_profile`` for the same short-circuit rationale.
             """
             _profile_write_auth()
+            if error := _profile_name_error(name):
+                return error
             if name == DEFAULT_PROFILE_NAME:
                 return _profile_error(
                     {"error": "cannot delete the reserved 'default' profile",
@@ -871,6 +933,8 @@ def build_server(cfg: Config) -> FastMCP:
             try:
                 async with profile_admin_lock:
                     await store.delete(name)
+            except ProfileNameError as exc:
+                return _profile_error({"error": str(exc)})
             except KeyError:
                 return _profile_error(
                     {"error": "profile not found", "name": name}

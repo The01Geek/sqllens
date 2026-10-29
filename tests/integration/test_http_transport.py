@@ -23,6 +23,47 @@ from sqllens.tools import _agent as agent_module
 pytestmark = pytest.mark.asyncio
 
 
+async def test_query_metadata_limits_over_mcp_http(make_server, monkeypatch) -> None:
+    from sqllens import server as server_module
+
+    seen = []
+
+    async def fake_query(cfg, question, **kwargs):
+        seen.append(kwargs["metadata"])
+        return "ok", [], None, None, None
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_query)
+    handle = make_server(AuthConfig(mode="none"))
+    async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            for meta in ({"tenant": "alpha"}, {"tenant": "alpha", "padding": "x" * 20000}):
+                result = await session.call_tool(
+                    "query_database", {"question": "synthetic metadata check"}, meta=meta
+                )
+                assert result.isError is False
+    assert seen == [{"tenant": "alpha"}, {}]
+
+
+async def test_insecure_posture_and_json_headers_on_real_http(make_server) -> None:
+    handle = make_server(AuthConfig(mode="none", insecure=True), configured_host="0.0.0.0")
+    async with httpx.AsyncClient() as client:
+        for path in ("/healthz", "/readyz"):
+            response = await client.get(handle.base_url + path)
+            assert response.status_code == 200
+            assert response.headers["x-content-type-options"] == "nosniff"
+            assert response.headers["x-sqllens-auth"] == "insecure-loopback-override"
+
+
+async def test_bearer_refusal_json_header_on_real_http(make_server) -> None:
+    handle = make_server(AuthConfig(mode="bearer", bearer_token=SecretStr("x" * 40)))
+    async with httpx.AsyncClient() as client:
+        response = await client.get(handle.mcp_url)
+    assert response.status_code == 401
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "x-sqllens-auth" not in response.headers
+
+
 # ─────────────────────── happy path: auth=none ──────────────────────────────
 
 
