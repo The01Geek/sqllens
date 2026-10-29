@@ -1,0 +1,602 @@
+[
+  {
+    "id": "VC-1",
+    "category": "absolute_claim",
+    "claim": "Trace argument string values retain up to 1,024 characters plus a `…(truncated)` marker; a per-step argument tree over 16 KiB compact ASCII-escaped JSON, 1,024 nodes including keys, or eight nesting levels below its root is replaced by `{}`; invalid JSON-shaped values are dropped; both truncation and dropping set `arguments_truncated: true`; the whole-trace size cap remains.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Trace argument string values retain up to 1,024 characters plus `…(truncated)`. A per-step argument tree exceeding 16 KiB of compact ASCII-escaped JSON, 1,024 nodes (including keys), or eight nesting levels below its root is replaced by `{}`. Invalid JSON-shaped values are also dropped. Both truncation and dropping set `arguments_truncated: true`; the existing whole-trace size cap remains. Short values are preserved, including any sensitive content they contain: this is a size bound, not secret redaction. Enable details only for trusted debugging clients.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 252,
+    "verify_against": "trace-building code in src/sqllens/tools/_format.py",
+    "verify_hint": "Check `build_agent_trace` and the argument-bounding helpers/constants in `src/sqllens/tools/_format.py`: the 1024-char prefix and marker text, the 16 KiB/1024-node/8-depth thresholds, replacement with `{}`, invalid-JSON handling, and `arguments_truncated` being set on both paths; falsify with an exactly-1024-char string, a 9-level-deep tree, and a 1025-node tree.",
+    "claim_signature": "absolute_claim:tools.md:trace-argument-bounds:252",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "absolute_claim",
+    "claim": "`_request_metadata(ctx)` returns `{}` on extraction failures or invalid/oversized metadata; extras are limited to 64 top-level keys, 16 KiB of compact ASCII-escaped JSON, 1,024 nodes including keys, and eight nesting levels below the root; traversal stops at the limits and oversized trees are never partially forwarded.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- **Fail-secure on metadata extraction.** `_request_metadata(ctx)` in [src/sqllens/server.py](../../../src/sqllens/server.py) returns `{}` on extraction failures or invalid/oversized metadata. Extras are limited to 64 top-level keys, 16 KiB of compact ASCII-escaped JSON, 1,024 nodes including keys, and eight nesting levels below the root. Traversal stops at the limits; oversized trees are never partially forwarded. Dynamic rules then block on missing values. This bounds propagation after MCP parsing, not HTTP request parsing.",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 161,
+    "verify_against": "`_request_metadata` and its limit constants in src/sqllens/server.py",
+    "verify_hint": "Check `_request_metadata` in `src/sqllens/server.py`: the exception types caught, the key-count/byte/node/depth constants, whether the whole tree is discarded (not partially copied) when any limit trips, and whether a tree at exactly the limits is accepted.",
+    "claim_signature": "absolute_claim:row-level-security.md:metadata-extraction-bounds:161",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "absolute_claim",
+    "claim": "Request metadata extras must fit within 64 top-level keys, 16 KiB of compact ASCII-escaped JSON, 1,024 nodes including object keys, and eight nesting levels below the root; invalid or oversized metadata is discarded completely so dynamic RLS queries fail on missing values, and these limits apply after the MCP request has been parsed.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Request metadata extras must fit within 64 top-level keys, 16 KiB of compact ASCII-escaped JSON, 1,024 nodes including object keys, and eight nesting levels below the root. Invalid or oversized metadata is discarded completely, so dynamic RLS queries fail on missing values. These limits apply after the MCP request has been parsed.",
+    "source_file": "docs/external/row-level-security.md",
+    "source_line": 105,
+    "verify_against": "`_request_metadata` limit constants in src/sqllens/server.py and the RLS dynamic-value path",
+    "verify_hint": "Check the limit constants and traversal in `_request_metadata` (`src/sqllens/server.py`) and `apply_rls`'s missing-metadata branch in the RLS guard module; confirm the user-facing numbers match the code constants.",
+    "claim_signature": "absolute_claim:row-level-security.md:metadata-extras-limits:105",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "absolute_claim",
+    "claim": "Dynamic RLS rules work on both HTTP and stdio because the MCP request context can carry `_meta` on either transport; missing or rejected metadata blocks the query on either transport.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The MCP request context can carry `_meta` on HTTP and stdio. Dynamic rules require the calling application to supply the configured metadata key; missing or rejected metadata blocks the query. Static rules need no request metadata and work on either transport. The application supplying metadata remains the identity authority.",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 198,
+    "verify_against": "stdio transport metadata plumbing in src/sqllens/server.py and the MCP SDK request context",
+    "verify_hint": "Check how `ctx.request_context.meta` is populated on the stdio path in `src/sqllens/server.py` (and `tests/unit/test_server.py` / any stdio metadata test) to confirm stdio really delivers caller `_meta`.",
+    "claim_signature": "absolute_claim:row-level-security.md:stdio-carries-meta:198",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "absolute_claim",
+    "claim": "Dynamic RLS rules require only caller-supplied metadata, not the HTTP transport; both HTTP and stdio carry MCP metadata.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- **Dynamic rules require caller-supplied metadata.** Both HTTP and stdio carry MCP metadata, but the calling application must supply the required keys.",
+    "source_file": "docs/external/row-level-security.md",
+    "source_line": 161,
+    "verify_against": "stdio metadata extraction in src/sqllens/server.py",
+    "verify_hint": "Check `_request_metadata` and the stdio serve path in `src/sqllens/server.py` for whether `_meta` reaches `RequestContext.metadata` under stdio.",
+    "claim_signature": "absolute_claim:row-level-security.md:dynamic-rules-transport-neutral:161",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "absolute_claim",
+    "claim": "Dynamic rules require the calling application to supply the configured metadata keys, and missing or rejected metadata blocks the query on either transport.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "**Note:** Dynamic rules require the calling application to supply the configured metadata keys. Missing or rejected metadata blocks the query on either transport.",
+    "source_file": "docs/external/row-level-security.md",
+    "source_line": 82,
+    "verify_against": "RLS dynamic-value resolution in the RLS guard module",
+    "verify_hint": "Check `apply_rls`'s handling of a missing/empty/suspicious metadata value (raising `RlsError`) in `src/sqllens/safety/` RLS module, and the stdio metadata path in `src/sqllens/server.py`.",
+    "claim_signature": "absolute_claim:row-level-security.md:dynamic-blocks-either-transport:82",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "absolute_claim",
+    "claim": "Dynamic RLS metadata values are resolved per request from caller-supplied MCP `_meta` with no transport restriction stated.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- **Dynamic**: a value resolved per request from metadata supplied by the calling assistant.",
+    "source_file": "docs/external/row-level-security.md",
+    "source_line": 26,
+    "verify_against": "metadata extraction path in src/sqllens/server.py for both transports",
+    "verify_hint": "Check `_request_metadata` in `src/sqllens/server.py` and the stdio vs HTTP wiring to confirm dropping the previous HTTP-only qualifier is accurate.",
+    "claim_signature": "absolute_claim:row-level-security.md:dynamic-no-transport-qualifier:26",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "absolute_claim",
+    "claim": "The `value_from_metadata` config field is resolved per request from caller-supplied MCP `_meta` with no transport restriction.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `value_from_metadata` | String | Metadata key resolved per request from caller-supplied MCP `_meta`. Mutually exclusive with `value`. Must be a bare identifier with the same rules as `table` and `column`. |",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 184,
+    "verify_against": "RlsRule model and metadata resolution in src/sqllens/config.py and the RLS guard",
+    "verify_hint": "Check the `RlsRule` model in `src/sqllens/config.py` and `_request_metadata` in `src/sqllens/server.py` to confirm the removed stdio caveat no longer applies.",
+    "claim_signature": "absolute_claim:configuration.md:value-from-metadata-transport:184",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "absolute_claim",
+    "claim": "Only the statement that static rules need no metadata and work on every transport remains; the authentication overview no longer asserts any HTTP-only restriction on dynamic RLS.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Static rules (`value = ...`) need no metadata and work on every transport.",
+    "source_file": "docs/internal/authentication/overview.md",
+    "source_line": 116,
+    "verify_against": "RLS guard static-rule path and metadata extraction in src/sqllens/server.py",
+    "verify_hint": "Check that static `value` rules bypass `context.metadata` entirely in `RlsGuardRunner`/`apply_rls`, and that no remaining line in `docs/internal/authentication/overview.md` contradicts the dynamic-on-stdio behaviour in `_request_metadata`.",
+    "claim_signature": "absolute_claim:overview.md:static-rules-every-transport:116",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "absolute_claim",
+    "claim": "Oversized request metadata is discarded before reaching the agent so dynamic RLS queries fail closed; debug trace strings retain up to 1,024 characters plus a truncation marker; oversized argument structures are dropped with a flag; short sensitive values remain visible.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- **[Security] Bound request metadata and debug arguments** — Oversized request metadata is discarded before reaching the agent, causing dynamic RLS queries to fail closed. Debug trace strings retain up to 1,024 characters plus a truncation marker; oversized argument structures are dropped with a flag. Short sensitive values are still visible to trusted debugging clients. (#200)",
+    "source_file": "docs/external/release-notes.md",
+    "source_line": 13,
+    "verify_against": "src/sqllens/server.py `_request_metadata` and src/sqllens/tools/_format.py trace argument bounding",
+    "verify_hint": "Check `_request_metadata` in `src/sqllens/server.py` and the argument-bounding code in `build_agent_trace` (`src/sqllens/tools/_format.py`) for the 1,024-character prefix, marker, and drop-with-flag behaviour.",
+    "claim_signature": "absolute_claim:release-notes.md:bound-metadata-and-trace:13",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "absolute_claim",
+    "claim": "The change bounds MCP metadata propagation by key count, serialized bytes, nodes, and depth, and bounds debug trace argument strings and structures while preserving truncation flags.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- Bound MCP metadata propagation by key count, serialized bytes, nodes, and depth; bound debug trace argument strings and structures while preserving truncation flags. (#200)",
+    "source_file": "CHANGELOG.md",
+    "source_line": 8,
+    "verify_against": "the diff's code changes in src/sqllens/server.py and src/sqllens/tools/_format.py",
+    "verify_hint": "Check that all four metadata limits (keys, bytes, nodes, depth) exist in `_request_metadata` (`src/sqllens/server.py`) and that `arguments_truncated` flags are still emitted in `src/sqllens/tools/_format.py`.",
+    "claim_signature": "absolute_claim:CHANGELOG.md:bound-metadata-propagation:8",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "absolute_claim",
+    "claim": "Dynamic RLS values resolved from caller-supplied MCP `_meta` carry no transport-only restriction; the embedding application is the identity source of truth and SQL Lens does not authenticate the principal.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- **Dynamic** — value resolved per request from caller-supplied MCP `_meta`. The embedding application is the source of truth for identity. SQL Lens itself does not authenticate the caller for the purpose of identifying the principal.",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 12,
+    "verify_against": "metadata extraction in src/sqllens/server.py and auth modules under src/sqllens/auth/",
+    "verify_hint": "Check `_request_metadata` in `src/sqllens/server.py` for transport independence and `src/sqllens/auth/` for any principal-claim-to-predicate wiring.",
+    "claim_signature": "absolute_claim:row-level-security.md:dynamic-identity-source:12",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "data_format_assumption",
+    "claim": "The bounded metadata limits are described as applying to \"extras\" (top-level keys of the `_meta` extras mapping) after reserved keys are handled, matching the structure `_request_metadata` actually inspects.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 161,
+    "verify_against": "the `meta` object shape used by `_request_metadata` in src/sqllens/server.py",
+    "verify_hint": "Check what `_request_metadata` reads off `ctx.request_context.meta` in `src/sqllens/server.py` (e.g. a pydantic `Meta` model's `model_extra`) and whether the counted keys are the extras only or the whole `_meta` object.",
+    "claim_signature": "data_format_assumption:row-level-security.md:extras-key-scope:161",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "dependency_interaction",
+    "claim": "The MCP SDK surfaces caller-supplied per-request `_meta` extras as a plain `dict` on `ctx.request_context.meta.model_extra`, so a `type(extra) is not dict` check is the right shape test and `copy_bounded_json` receives a mapping.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 233,
+    "source_line_end": 239,
+    "verify_against": "mcp.types.RequestParams.Meta / pydantic BaseModel.model_extra typing in the installed mcp SDK",
+    "verify_hint": "Check `RequestParams.Meta` in `mcp/types.py` and pydantic's `BaseModel.model_extra` property return type",
+    "claim_signature": "dependency_interaction:server.py:meta-model-extra-dict:233",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "dependency_interaction",
+    "claim": "`ctx.request_context` raises `ValueError` (and nothing narrower/other that must be handled separately) when no request is active, so the `except ValueError` debug path is the no-request case while all other failures fall to the warning path.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 211,
+    "source_line_end": 229,
+    "verify_against": "mcp.server.fastmcp Context.request_context implementation",
+    "verify_hint": "Check the `request_context` property on `Context` in `mcp/server/fastmcp/server.py` for the exception it raises",
+    "claim_signature": "dependency_interaction:server.py:request-context-valueerror:211",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "api_contract",
+    "claim": "Dynamic RLS metadata is now available on the stdio transport as well as HTTP, so the docstring's \"Metadata is read from the MCP request context on either transport\" holds and no remaining doc states dynamic RLS is HTTP-only.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "influencing the query unfiltered. Metadata is read from the MCP request\n    context on either transport; requests without extras receive ``{}``.",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 208,
+    "source_line_end": 209,
+    "verify_against": "docs/internal/database-connectors/row-level-security.md and docs/external RLS pages",
+    "verify_hint": "Grep `docs/` for \"HTTP transport only\"/\"HTTP-only\" near dynamic RLS, especially `docs/internal/database-connectors/row-level-security.md`",
+    "claim_signature": "api_contract:repo:dynamic-rls-transport-scope",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "absolute_claim",
+    "claim": "The config-loading table asserts that a dynamic `value_from_metadata` rule's key is resolved per request from caller-supplied MCP `_meta` with no transport restriction.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`value_from_metadata` (dynamic — key resolved per request from caller-supplied MCP `_meta`)",
+    "source_file": "docs/internal/setup/config-loading.md",
+    "source_line": 35,
+    "verify_against": "`_request_metadata` in src/sqllens/server.py and the RLS guard resolution path",
+    "verify_hint": "Check `_request_metadata` in `src/sqllens/server.py` and `apply_rls` in `src/sqllens/safety/rls.py` for whether any transport yields no metadata channel",
+    "claim_signature": "absolute_claim:config-loading.md:value-from-metadata-any-transport:35",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "absolute_claim",
+    "claim": "The CLI template comment asserts that for a dynamic RLS rule a missing or suspicious value blocks the query, with no transport caveat.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# A missing or suspicious value blocks the query. The embedding application",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 616,
+    "verify_against": "src/sqllens/safety/rls.py suspicious-value predicate and missing-key branch",
+    "verify_hint": "Check `_is_suspicious_scalar` and the missing-metadata branch in `src/sqllens/safety/rls.py`",
+    "claim_signature": "absolute_claim:cli.py:rls-missing-value-blocks:616",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "absolute_claim",
+    "claim": "`copy_bounded_json`'s docstring asserts that every scalar is bounded before encoding and that traversal stops on budget overflow.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Every\n    scalar is bounded before encoding, and traversal stops on budget overflow.",
+    "source_file": "src/sqllens/_bounded_json.py",
+    "source_line": 22,
+    "source_line_end": 23,
+    "verify_against": "the visit() branches in copy_bounded_json itself",
+    "verify_hint": "Craft a scalar type reaching `json.dumps` without a prior size check (e.g. a huge `float`, a very large `int` just under the bit_length bound, a `bool`/`None`) and a str key of unbounded length in `visit` in `src/sqllens/_bounded_json.py`",
+    "claim_signature": "absolute_claim:_bounded_json.py:every-scalar-bounded:22",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "absolute_claim",
+    "claim": "`copy_bounded_json`'s docstring asserts that byte accounting counts compact ASCII-escaped JSON, depth starts at zero, nodes include object keys, and optional string truncation applies to values only.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Bytes count compact ASCII-escaped JSON. Depth starts at zero; nodes include\n    object keys. Optional string truncation applies to values only.",
+    "source_file": "src/sqllens/_bounded_json.py",
+    "source_line": 21,
+    "source_line_end": 22,
+    "verify_against": "the charge()/visit() accounting in copy_bounded_json",
+    "verify_hint": "Compare `charge(2 + max(0, len(item) - 1))` plus colon charges against `len(json.dumps(tree, separators=(',',':'), ensure_ascii=True))` for a nested sample in `src/sqllens/_bounded_json.py`",
+    "claim_signature": "absolute_claim:_bounded_json.py:byte-accounting-model:21",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "data_format_assumption",
+    "claim": "`copy_bounded_json` accepts exactly `str`, `dict`, `list`, `int`, `float`, `bool`, `None` by exact `type()` identity and rejects everything else, so subclasses and other mapping/sequence types the MCP SDK may produce (e.g. pydantic models, tuples, `int` subclasses) are rejected rather than copied.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/_bounded_json.py",
+    "source_line": 39,
+    "source_line_end": 64,
+    "verify_against": "the JSON value types the MCP SDK's _meta parsing can produce",
+    "verify_hint": "Check what Python types pydantic puts in `model_extra` for parsed JSON `_meta` in the installed mcp SDK, and whether `enum`/`tuple`/subclass values can appear",
+    "claim_signature": "data_format_assumption:_bounded_json.py:exact-type-identity-allowlist:39",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "dependency_interaction",
+    "claim": "A very large `int`'s JSON length is bounded by `item.bit_length() > remaining_bytes * 4`, i.e. this rejects before `json.dumps` can materialize an oversized decimal string and stays within Python's int-to-str digit limit.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/_bounded_json.py",
+    "source_line": 60,
+    "source_line_end": 62,
+    "verify_against": "CPython `sys.set_int_max_str_digits` / int→str conversion limit behaviour on 3.11+",
+    "verify_hint": "Check CPython's default `sys.get_int_max_str_digits()` and whether `json.dumps` of an int passing this bound can raise `ValueError` for an int that is in-budget",
+    "claim_signature": "dependency_interaction:_bounded_json.py:int-bit-length-bound:60",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "absolute_claim",
+    "claim": "`_request_metadata`'s docstring asserts the forwarded bounds are at most 64 extra keys, 16 KiB of compact ASCII-escaped JSON, 1024 nodes including keys, and eight nesting levels below the root, and that invalid or oversized trees are discarded as a whole.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Forward at most 64 extra keys, 16 KiB of compact ASCII-escaped JSON,\n    1024 nodes (including keys), and eight nesting levels below the root.\n    Invalid or oversized trees are discarded as a whole.",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 200,
+    "source_line_end": 203,
+    "verify_against": "copy_bounded_json default arguments in src/sqllens/_bounded_json.py",
+    "verify_hint": "Compare the stated numbers to `max_bytes=16 * 1024, max_nodes=1024, max_depth=8` and the `depth > max_depth` comparison (depth of the root dict's children) in `copy_bounded_json`",
+    "claim_signature": "absolute_claim:server.py:metadata-bound-numbers:200",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "absolute_claim",
+    "claim": "The comment asserts the diagnostic echoes neither metadata nor exception content and that a rejected tree is never partially forwarded to dynamic RLS rules.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Do not echo metadata or exception content into the diagnostic. A\n        # rejected tree is never partially forwarded to dynamic RLS rules.",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 242,
+    "source_line_end": 243,
+    "verify_against": "the try/except block in _request_metadata and CLAUDE.md's structured-signal rule",
+    "verify_hint": "Check whether `copy_bounded_json` can return a partially built dict on overflow, and whether `logger.warning` without `exc_info` loses signal needed by the CLAUDE.md \"structured signal\" rule",
+    "claim_signature": "absolute_claim:server.py:no-partial-forward-no-echo:242",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "absolute_claim",
+    "claim": "`build_agent_trace`'s docstring asserts argument strings retain at most 1024 characters plus a truncation suffix, that per-step argument trees exceeding 16 KiB of ASCII-escaped JSON, 1024 nodes, or eight nesting levels are replaced by an empty object, and that either form of elision sets `arguments_truncated`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Argument strings retain at most 1024 characters plus a truncation suffix.\n    Per-step argument trees exceeding 16 KiB of ASCII-escaped JSON, 1024 nodes,\n    or eight nesting levels are replaced by an empty object. Either form of\n    elision sets ``arguments_truncated``. This bounds content, not secrets.",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 659,
+    "source_line_end": 662,
+    "verify_against": "the copy_bounded_json call site in build_agent_trace and copy_bounded_json defaults",
+    "verify_hint": "Check `copy_bounded_json(metadata, max_string_chars=1024)` at line 716 of `src/sqllens/tools/_format.py` against `max_bytes`/`max_nodes`/`max_depth` defaults, and whether a second `running` card for an id already in `by_id` bypasses the bounding",
+    "claim_signature": "absolute_claim:_format.py:trace-argument-bound-numbers:659",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "dependency_interaction",
+    "claim": "`build_agent_trace` catches only `JsonBoundsError` from `copy_bounded_json`, assuming no other exception (e.g. `RecursionError` from a deeply nested or cyclic tree, or a `TypeError` from a mapping whose `.items()` misbehaves) can escape the call.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 714,
+    "source_line_end": 719,
+    "verify_against": "copy_bounded_json in src/sqllens/_bounded_json.py",
+    "verify_hint": "Check which exception types `visit`/`charge` in `src/sqllens/_bounded_json.py` can raise before the node/depth budget trips, including recursion on cyclic input",
+    "claim_signature": "dependency_interaction:_format.py:jsonboundserror-only-catch:714",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "data_format_assumption",
+    "claim": "The trace payload's `arguments_truncated` key is only added when truthy and is a boolean `True`, compatible with `_cap_trace_size`, which also sets the same key, so consumers see one consistent flag.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 795,
+    "verify_against": "_cap_trace_size in src/sqllens/tools/_format.py and the _meta trace consumers",
+    "verify_hint": "Check how `_cap_trace_size` sets `arguments_truncated`/`steps_truncated` and whether it can overwrite or conflict with the pre-set flag",
+    "claim_signature": "data_format_assumption:_format.py:arguments-truncated-flag:795",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "test_mock_alignment",
+    "claim": "The HTTP test's `fake_query(cfg, question, **kwargs)` returning a 5-tuple matches the real `query_database_impl_with_widgets` signature and return shape, and `kwargs[\"metadata\"]` is how the server passes request metadata.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_http_transport.py",
+    "source_line": 26,
+    "source_line_end": 34,
+    "verify_against": "query_database_impl_with_widgets definition and its call site in src/sqllens/server.py",
+    "verify_hint": "Check `query_database_impl_with_widgets` in `src/sqllens/tools/query_database.py` and the keyword arguments used where `server.py` invokes it",
+    "claim_signature": "test_mock_alignment:test_http_transport.py:fake-query-signature:26",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "dependency_interaction",
+    "claim": "`ClientSession.call_tool` accepts a `meta=` keyword that places the mapping into the request's `_meta`, for both the streamable-HTTP and stdio clients used by these tests.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_metadata_stdio.py",
+    "source_line": 29,
+    "source_line_end": 32,
+    "verify_against": "mcp.ClientSession.call_tool signature in the installed mcp SDK",
+    "verify_hint": "Check `call_tool` on `ClientSession` in `mcp/client/session.py` for a `meta` parameter and how it serializes into `params._meta`",
+    "claim_signature": "dependency_interaction:test_metadata_stdio.py:call-tool-meta-kwarg:29",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "test_mock_alignment",
+    "claim": "The stdio test's inline `-c` server script runs with an env of only `PYTHONDONTWRITEBYTECODE`, which suffices for the child to import `sqllens` and `mcp` and for `stdio_client` to connect on every supported platform.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_metadata_stdio.py",
+    "source_line": 23,
+    "source_line_end": 25,
+    "verify_against": "mcp.client.stdio StdioServerParameters env handling and the project's test environment assumptions",
+    "verify_hint": "Check whether `stdio_client` in `mcp/client/stdio/__init__.py` merges a default environment, and whether an empty-but-one env drops `PATH`/`SYSTEMROOT`/venv variables the child interpreter needs",
+    "claim_signature": "test_mock_alignment:test_metadata_stdio.py:stdio-child-env:23",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "test_mock_alignment",
+    "claim": "The stdio test asserts `_request_metadata` returns exactly `{\"tenant\": \"alpha\"}` for ordinary extras — i.e. the MCP SDK adds no other `_meta` extras (such as a progress token or client-injected keys) that would appear in the serialized output.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "assert ordinary.content[0].text == '{\"tenant\": \"alpha\"}'",
+    "source_file": "tests/integration/test_metadata_stdio.py",
+    "source_line": 34,
+    "verify_against": "mcp.types.RequestParams.Meta declared fields and ClientSession.call_tool meta merging",
+    "verify_hint": "Check which `_meta` keys `ClientSession.call_tool` sets besides the caller's mapping, and which are declared (hence excluded from `model_extra`) on `RequestParams.Meta`",
+    "claim_signature": "test_mock_alignment:test_metadata_stdio.py:exact-ordinary-extras:34",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "test_mock_alignment",
+    "claim": "The updated assertion asserts an oversized SQL argument is retained as its first 1024 characters plus the `…(truncated)` suffix and that the resulting trace still fits `_MAX_TABLE_PAYLOAD_BYTES`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    assert trace[\"steps\"][0][\"arguments\"] == {\"sql\": huge_sql[:1024] + \"…(truncated)\"}",
+    "source_file": "tests/unit/test_format.py",
+    "source_line": 1505,
+    "verify_against": "build_agent_trace + _cap_trace_size in src/sqllens/tools/_format.py",
+    "verify_hint": "Check whether `_cap_trace_size` strips `arguments` for this input (which would make the equality fail) and the exact suffix literal used in `copy_bounded_json`",
+    "claim_signature": "test_mock_alignment:test_format.py:truncated-sql-assertion:1505",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "test_mock_alignment",
+    "claim": "The byte-boundary test asserts the exact cutoff is 16376 accepted / 16377 rejected characters for a single `{\"a\": \"x\"*N}` extras dict under `copy_bounded_json`'s default 16 KiB budget.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    assert metadata({\"a\": \"x\" * 16376}) == {\"a\": \"x\" * 16376}\n    assert metadata({\"a\": \"x\" * 16377}) == {}",
+    "source_file": "tests/unit/test_metadata_bounds.py",
+    "source_line": 51,
+    "source_line_end": 52,
+    "verify_against": "charge()/visit() accounting in src/sqllens/_bounded_json.py",
+    "verify_hint": "Recompute the byte charges in `copy_bounded_json` for a one-key dict (braces, colon, key quotes, value quotes) and confirm the boundary is exactly 16376",
+    "claim_signature": "test_mock_alignment:test_metadata_bounds.py:byte-boundary-16376:51",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "test_mock_alignment",
+    "claim": "The test monkeypatches `sqllens._bounded_json.json.dumps` and asserts no string longer than 16384 characters is ever passed to it, i.e. patching the shared `json` module attribute observes only this module's calls and the recorded `lengths` list is non-empty.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_metadata_bounds.py",
+    "source_line": 93,
+    "source_line_end": 106,
+    "verify_against": "copy_bounded_json's use of the module-level `json` import",
+    "verify_hint": "Note that `_bounded_json.json` is the global `json` module, so the patch is process-wide; check `copy_bounded_json` in `src/sqllens/_bounded_json.py` for whether any `json.dumps` call receives the full 100000-char string",
+    "claim_signature": "test_mock_alignment:test_metadata_bounds.py:global-json-dumps-patch:93",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "data_format_assumption",
+    "claim": "`apply_rls` raises `RlsError` whose message contains \"not supplied\" when a dynamic rule's `value_from_metadata` key is absent from the (now empty) metadata dict.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_metadata_bounds.py",
+    "source_line": 37,
+    "source_line_end": 40,
+    "verify_against": "apply_rls in src/sqllens/safety/rls.py",
+    "verify_hint": "Check the missing-metadata-key branch and its error wording in `apply_rls` / `src/sqllens/safety/rls.py`",
+    "claim_signature": "data_format_assumption:test_metadata_bounds.py:rls-not-supplied-message:37",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  }
+]
