@@ -67,7 +67,7 @@ def test_unprefixed_env_var_does_not_leak_into_sub_models(
     assert cfg.database.url == "sqlite:///./demo.db"
     assert cfg.database.name == "primary"
     assert cfg.llm.provider == "anthropic"
-    assert cfg.llm.model == "claude-sonnet-4-5-20250929"
+    assert cfg.llm.model == "claude-opus-5-5"
     assert cfg.llm.api_key.get_secret_value() == "sk-ant-test"
     assert cfg.memory.collection == "sqllens"
 
