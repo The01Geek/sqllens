@@ -23,6 +23,8 @@ pytest
 
 ## Reporting bugs
 
+For suspected vulnerabilities, follow the [security policy](SECURITY.md) and report privately instead of opening a public issue.
+
 Use the bug issue template. Include `sqllens --version`, your `sqllens.toml` (with secrets redacted), and the MCP client you're using.
 
 ## Code style
