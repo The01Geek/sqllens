@@ -1,0 +1,938 @@
+[
+  {
+    "id": "VC-1",
+    "category": "dependency_interaction",
+    "claim": "tempfile.mkstemp creates the sibling tempfile with owner-only (0600) permissions before any content is written, so the replaced destination ends up mode 0600 on POSIX.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/_atomic.py",
+    "source_line": 38,
+    "source_line_end": 42,
+    "verify_against": "Python stdlib tempfile.mkstemp documented permission behavior",
+    "verify_hint": "Check `atomic_write_bytes` in `src/sqllens/_atomic.py` against CPython's `tempfile.mkstemp` mode documentation (0600, no explicit os.chmod call here)",
+    "claim_signature": "dependency_interaction:_atomic.py:mkstemp-owner-only-mode:38",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "absolute_claim",
+    "claim": "The module docstring asserts tempfiles are always created with owner-only POSIX permissions before content is written, for every caller of the shared writer.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Used for configuration, profile and installer files. Tempfiles are created\nwith owner-only POSIX permissions before content is written.",
+    "source_file": "src/sqllens/_atomic.py",
+    "source_line": 12,
+    "source_line_end": 15,
+    "verify_against": "The implementation of atomic_write_text/atomic_write_bytes and the umask/platform behavior",
+    "verify_hint": "Check whether any path in `atomic_write_bytes` (`src/sqllens/_atomic.py`) can produce a non-0600 tempfile (e.g. a pre-existing destination's mode being preserved is explicitly NOT done); the falsifying input is an existing destination with mode 0644 replaced by --force",
+    "claim_signature": "absolute_claim:_atomic.py:tempfile-owner-only-always:12",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "api_contract",
+    "claim": "`atomic_write_bytes` is a new public seam in `_atomic.py` whose callers (installer JSON/backup/rollback writes, profile store) pass bytes, and `atomic_write_text` keeps its previous str signature and behavior for existing callers.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/_atomic.py",
+    "source_line": 25,
+    "source_line_end": 30,
+    "verify_against": "All call sites of atomic_write_text / atomic_write_bytes",
+    "verify_hint": "Grep for `atomic_write_text` and `atomic_write_bytes` in `src/sqllens/installers/claude_desktop.py` and `src/sqllens/profiles.py` and check argument types",
+    "claim_signature": "api_contract:_atomic.py:atomic-write-bytes-seam:25",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "dependency_interaction",
+    "claim": "`Config.load(..., llm_api_key=...)` passing `cls(llm={\"api_key\": llm_api_key})` supplies only the API key while every other `llm.*` field (model, max_tokens, etc.) still resolves from env/TOML/defaults rather than being reset by the partial init dict.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 642,
+    "verify_against": "pydantic-settings nested-model merge semantics for init kwargs vs env/TOML sources",
+    "verify_hint": "Check `settings_customise_sources` in `src/sqllens/config.py` (init_settings ordered first) and the `LlmSettings` model to confirm a partial nested init dict is deep-merged with TOML/env values, not substituted",
+    "claim_signature": "data_format_assumption:config.py:partial-llm-init-dict-merge:642",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "absolute_claim",
+    "claim": "The `load` docstring asserts that `llm_api_key` overrides the key without exporting it into the process environment and that all other values keep their usual precedence.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "``llm_api_key`` supplies an explicit key override without exporting it\n        into the process environment. Other values keep their usual precedence.",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 617,
+    "source_line_end": 618,
+    "verify_against": "The init_settings source precedence in Config.settings_customise_sources",
+    "verify_hint": "Falsifying input: `SQLLENS_LLM__API_KEY` set in env plus an explicit `llm_api_key` argument — check which wins in `settings_customise_sources` in `src/sqllens/config.py`, and whether env precedence for other llm fields is unchanged",
+    "claim_signature": "absolute_claim:config.py:llm-api-key-precedence:617",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "dependency_interaction",
+    "claim": "`sqllens init` only needs to guard `OSError` around the symlink check and `atomic_write_text`: no other exception type (e.g. a non-OSError from mkstemp/os.replace or a PermissionError subclass path) escapes unstructured to the MCP/CLI caller.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 167,
+    "source_line_end": 173,
+    "verify_against": "Exceptions raised by atomic_write_text / tempfile.mkstemp / os.replace",
+    "verify_hint": "Check `atomic_write_bytes` in `src/sqllens/_atomic.py` for non-OSError failure modes and compare with the `except OSError` in `init` in `src/sqllens/cli.py`",
+    "claim_signature": "dependency_interaction:cli.py:init-oserror-only-guard:167",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "api_contract",
+    "claim": "`sqllens init` refuses a final-component symlink destination (including a broken symlink) before writing, and exits non-zero with the \"Could not write config\" message rather than following the link.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 168,
+    "source_line_end": 169,
+    "verify_against": "Tests for `sqllens init` symlink handling and the documented behavior in docs/external/configuration.md",
+    "verify_hint": "Check the init CLI tests (grep `init` + `symlink` under `tests/`) and note that `path.exists()` on line 164 returns False for a broken symlink, so --force may not be required for that case",
+    "claim_signature": "api_contract:cli.py:init-symlink-rejection:168",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "absolute_claim",
+    "claim": "The external doc asserts that `sqllens init` writes the sample via a private temporary file and atomic replacement at mode 0600 on POSIX including under `--force`, that the desktop installer uses the same protection for new/replaced files and backups and refuses symlink file destinations, and that unchanged files retain their existing permissions.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`sqllens init` writes a sample through a private temporary file and atomic\nreplacement (mode 0600 on POSIX), including when `--force` replaces a file.\nWindows uses the destination directory ACL. The desktop installer uses the\nsame protection for new/replaced files and backups, and refuses symlink\nfile destinations. Unchanged files retain their existing permissions.",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 22,
+    "source_line_end": 26,
+    "verify_against": "src/sqllens/cli.py init, src/sqllens/_atomic.py, src/sqllens/installers/claude_desktop.py",
+    "verify_hint": "Trace each clause: `init` in `src/sqllens/cli.py`; the TOML/launcher/JSON/backup write paths and symlink checks in `src/sqllens/installers/claude_desktop.py`; and the skip-identical-write branch that leaves permissions untouched",
+    "claim_signature": "absolute_claim:configuration.md:generated-file-permissions:22",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "absolute_claim",
+    "claim": "The internal installer doc asserts that new or replaced TOML, launcher, JSON and backup files all use sibling tempfiles at mode 0600 before any content is written, that rollbacks use the same writer, and that byte-identical skipped writes retain existing permissions.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "New or replaced TOML, launcher, JSON and backup files use sibling temporary\nfiles with mode 0600 on POSIX before any content is written, then atomic\nreplacement. Rollbacks use the same writer. Byte-identical files whose writes\nare skipped retain their existing permissions.",
+    "source_file": "docs/internal/installation/claude-desktop-installer.md",
+    "source_line": 65,
+    "source_line_end": 69,
+    "verify_against": "src/sqllens/installers/claude_desktop.py write and rollback paths",
+    "verify_hint": "Check every write/backup/rollback call in `src/sqllens/installers/claude_desktop.py` goes through `atomic_write_text`/`atomic_write_bytes` (falsifying case: a rollback or `.bak` copy done with `shutil.copy2`/`write_text`)",
+    "claim_signature": "absolute_claim:claude-desktop-installer.md:local-file-safety-writers:65",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "absolute_claim",
+    "claim": "The internal installer doc asserts the installer rejects final symlink destinations, including broken links, before reading or writing its config/launcher paths and before creating a backup.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The installer rejects final symlink destinations, including broken links,\nbefore reading or writing its config/launcher paths and before creating a\nbackup.",
+    "source_file": "docs/internal/installation/claude-desktop-installer.md",
+    "source_line": 71,
+    "source_line_end": 73,
+    "verify_against": "The symlink guard in src/sqllens/installers/claude_desktop.py (around lines 355-357, 540, 566)",
+    "verify_hint": "Check the symlink-rejection helper in `src/sqllens/installers/claude_desktop.py` is invoked on the TOML path, the `.cmd` launcher path, the JSON config path and the `.bak` path, before each read and each write",
+    "claim_signature": "absolute_claim:claude-desktop-installer.md:symlink-rejection-all-paths:71",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "absolute_claim",
+    "claim": "The internal installer doc asserts API-key validation uses an explicit loader argument, preserves other TOML/environment settings, and that invalid database-URL messages omit the input value.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "API-key validation uses an explicit loader argument and preserves other\nTOML/environment settings. Invalid database-URL messages omit the input value.",
+    "source_file": "docs/internal/installation/claude-desktop-installer.md",
+    "source_line": 74,
+    "source_line_end": 75,
+    "verify_against": "validate_toml in src/sqllens/installers/claude_desktop.py and the DB URL error messages in src/sqllens/preflight.py / config.py",
+    "verify_hint": "Check `validate_toml` passes `llm_api_key=` to `Config.load` with no `os.environ` assignment, and grep the database-URL ValueError messages for interpolated URL values",
+    "claim_signature": "absolute_claim:claude-desktop-installer.md:validate-toml-explicit-key:74",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "absolute_claim",
+    "claim": "The installer doc table asserts `validate_toml` round-trips the generated TOML through `Config.load()` with an explicit `llm_api_key` argument and makes no assignment of the supplied key to the process environment.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `validate_toml` | Round-trips the generated TOML through `sqllens.config.Config.load()` with an explicit `llm_api_key` argument; it does not assign the supplied key to the process environment. |",
+    "source_file": "docs/internal/installation/claude-desktop-installer.md",
+    "source_line": 45,
+    "verify_against": "validate_toml in src/sqllens/installers/claude_desktop.py",
+    "verify_hint": "Read `validate_toml` in `src/sqllens/installers/claude_desktop.py`: confirm the `Config.load(..., llm_api_key=...)` call and the absence of any `os.environ[...]` set/restore of the key",
+    "claim_signature": "absolute_claim:claude-desktop-installer.md:validate-toml-table-row:45",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "absolute_claim",
+    "claim": "The installer doc asserts `run_install` writes the generated TOML with the shared atomic UTF-8 writer, which never adds a BOM.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`generate_toml` produces a plain Python string and `run_install` writes it with the shared atomic UTF-8 writer, which never adds a BOM.",
+    "source_file": "docs/internal/installation/claude-desktop-installer.md",
+    "source_line": 54,
+    "verify_against": "The TOML write in run_install (src/sqllens/installers/claude_desktop.py) and atomic_write_text encoding",
+    "verify_hint": "Check the TOML write call in `run_install` uses `atomic_write_text` and that `atomic_write_text` in `src/sqllens/_atomic.py` encodes with plain `utf-8` (not `utf-8-sig`)",
+    "claim_signature": "absolute_claim:claude-desktop-installer.md:atomic-utf8-no-bom:54",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "absolute_claim",
+    "claim": "The config-loading doc asserts `sqllens claude-desktop install` always writes BOM-free UTF-8 via the shared atomic UTF-8 writer.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Mitigation: `sqllens claude-desktop install` always writes BOM-free UTF-8 via the shared atomic UTF-8 writer, so users who let the installer generate the file never hit this trap.",
+    "source_file": "docs/internal/setup/config-loading.md",
+    "source_line": 85,
+    "verify_against": "All file writes in src/sqllens/installers/claude_desktop.py",
+    "verify_hint": "Falsifying input: any installer write path (launcher, JSON, backup) that still uses `Path.write_text`/`write_bytes` instead of `sqllens._atomic`; grep `write_text` in `src/sqllens/installers/claude_desktop.py`",
+    "claim_signature": "absolute_claim:config-loading.md:installer-always-bom-free:85",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "dependency_interaction",
+    "claim": "The preflight doc's MySQL row asserts the probe catches `pymysql.MySQLError` plus a URL-parser `ValueError` raised before connecting, and that all other exception types still propagate as themselves.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `probe_database` (mysql) | `pymysql.MySQLError`; URL-parser `ValueError` before connecting | everything else (same: the explicit `ImportError` branch handles a missing driver) |",
+    "source_file": "docs/internal/setup/preflight.md",
+    "source_line": 112,
+    "verify_against": "probe_database's mysql branch in src/sqllens/preflight.py",
+    "verify_hint": "Read the mysql branch of `probe_database` in `src/sqllens/preflight.py` and confirm the `ValueError` catch wraps only the URL parse, not the `pymysql.connect` call",
+    "claim_signature": "dependency_interaction:preflight.md:mysql-valueerror-parse-catch:112",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "absolute_claim",
+    "claim": "The preflight doc asserts database driver messages are withheld from the printed diagnostic, the original exception stays available via `__cause__` to in-process callers, and the sanitization is scoped to database URL/driver failures only.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Database driver messages are withheld from the printed diagnostic because they may include connection details. The original exception remains available through `__cause__` to in-process callers. This sanitization is scoped to database URL/driver failures.",
+    "source_file": "docs/internal/setup/preflight.md",
+    "source_line": 127,
+    "verify_against": "probe_database and the CLI printing path in src/sqllens/cli.py",
+    "verify_hint": "Check every `raise PreflightError(\"database\", ...)` in `src/sqllens/preflight.py` for interpolated `exc` text and confirm `from exc` is present; falsifying input: a driver error whose message is echoed by the serve/validate print path in `src/sqllens/cli.py`",
+    "claim_signature": "absolute_claim:preflight.md:db-driver-message-withheld:127",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "data_format_assumption",
+    "claim": "The preflight doc asserts the printed `<detail>` for the database probe is a driver exception class name plus fixed connection-failure guidance, with URL-format errors omitting supplied values.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- A driver exception class and fixed connection-failure guidance (database probe); URL-format errors also omit supplied values.",
+    "source_file": "docs/internal/setup/preflight.md",
+    "source_line": 121,
+    "verify_against": "The detail strings constructed in probe_database (src/sqllens/preflight.py)",
+    "verify_hint": "Compare the exact detail format strings in `probe_database` in `src/sqllens/preflight.py` (sqlite/postgres/mysql branches) with this documented shape",
+    "claim_signature": "data_format_assumption:preflight.md:database-detail-format:121",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "absolute_claim",
+    "claim": "The changelog fragment asserts that generated configuration and installer backups/rollbacks are written through private atomic files, that installer symlink destinations are rejected, that the supplied API key is validated without being exported, and that database URL/driver diagnostics omit raw values.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Write generated configuration and installer backups/rollbacks through private\natomic files; reject installer symlink destinations and validate the supplied\nAPI key without exporting it. Database URL/driver diagnostics omit raw values.",
+    "source_file": "changelog.d/286.fixed.md",
+    "source_line": 1,
+    "source_line_end": 3,
+    "verify_against": "src/sqllens/cli.py, src/sqllens/installers/claude_desktop.py, src/sqllens/config.py, src/sqllens/preflight.py",
+    "verify_hint": "Trace each of the four clauses to its implementing line; also check `changelog.d` fragment category/filename conventions described in CLAUDE.md's release-notes section",
+    "claim_signature": "absolute_claim:286.fixed.md:changelog-four-clauses:1",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "api_contract",
+    "claim": "Removing the sentence \"The command never returns half-applied state.\" leaves the remaining doc paragraph an accurate description of the installer's revert behavior on TOML-validation and JSON-write failure.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "If TOML validation fails the TOML write is reverted and the JSON is left untouched. If the JSON write fails the JSON backup is kept alongside the original file.",
+    "source_file": "docs/internal/installation/claude-desktop-installer.md",
+    "source_line": 36,
+    "verify_against": "run_install's revert/rollback branches in src/sqllens/installers/claude_desktop.py",
+    "verify_hint": "Check `run_install` in `src/sqllens/installers/claude_desktop.py` for a state (e.g. launcher written, TOML reverted) the new wording still fails to describe",
+    "claim_signature": "api_contract:claude-desktop-installer.md:half-applied-state-removal:36",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "dependency_interaction",
+    "claim": "`escape(str(exc))` on the init failure path renders the OSError without leaking the config path contents and matches the Rich markup escaping convention used by the other CLI error prints.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 172,
+    "verify_against": "rich.markup.escape usage elsewhere in src/sqllens/cli.py and the _format_config_error helper",
+    "verify_hint": "Compare with `_format_config_error` and the other `err_console.print` calls in `src/sqllens/cli.py` for the repo's error-message formatting convention",
+    "claim_signature": "dependency_interaction:cli.py:init-error-escape-convention:172",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "dependency_interaction",
+    "claim": "`sqllens._atomic` exports `atomic_write_bytes(path, data)` alongside `atomic_write_text`, writing the destination via tempfile + os.replace with mode 0600.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/installers/claude_desktop.py",
+    "source_line": 32,
+    "verify_against": "the atomic writer helper module",
+    "verify_hint": "Check `atomic_write_bytes` and `atomic_write_text` signatures and permission handling in `src/sqllens/_atomic.py`",
+    "claim_signature": "dependency_interaction:claude_desktop.py:atomic-write-bytes-helper:32",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "api_contract",
+    "claim": "`Config.load` accepts a keyword argument `llm_api_key` that supplies the API key without exporting it to `os.environ`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/installers/claude_desktop.py",
+    "source_line": 352,
+    "verify_against": "the Config loader",
+    "verify_hint": "Check the `load` classmethod signature and key-injection path in `src/sqllens/config.py`",
+    "claim_signature": "api_contract:claude_desktop.py:config-load-llm-api-key:352",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "api_contract",
+    "claim": "`Config.load(..., llm_api_key=...)` still applies TOML values and `SQLLENS_*` env precedence for every other field, with the explicit key overriding only `llm.api_key`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_local_config_security.py",
+    "source_line": 136,
+    "verify_against": "the Config settings-source precedence implementation",
+    "verify_hint": "Check `Config.load` and its `settings_customise_sources` ordering in `src/sqllens/config.py`",
+    "claim_signature": "api_contract:test_local_config_security.py:key-override-precedence:136",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "dependency_interaction",
+    "claim": "The backup is now produced by `_read_bytes_or_none` plus `_atomic_write_bytes` instead of `shutil.copy2`, so the backup file no longer inherits the original config's mode/timestamps and `shutil` remains needed only for `which`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/installers/claude_desktop.py",
+    "source_line": 606,
+    "source_line_end": 613,
+    "verify_against": "the prior backup contract and any callers/docs describing backup permissions",
+    "verify_hint": "Check backup expectations in `tests/unit/test_cli_claude_desktop.py` and `docs/internal/installation/claude-desktop-installer.md`",
+    "claim_signature": "dependency_interaction:claude_desktop.py:backup-copy2-replacement:606",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "api_contract",
+    "claim": "Inside the backup `try`, only `OSError` is caught, so the `InstallError(\"Configuration disappeared before backup; retry the install.\")` and any `InstallError` from `_reject_symlink` propagate uncaught to the caller rather than being wrapped in the \"Failed to back up\" message.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/installers/claude_desktop.py",
+    "source_line": 609,
+    "source_line_end": 617,
+    "verify_against": "the CLI error-handling contract for InstallError",
+    "verify_hint": "Check how `InstallError` is surfaced in the install command in `src/sqllens/cli.py`",
+    "claim_signature": "api_contract:claude_desktop.py:backup-installerror-not-wrapped:609",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts that on dry-run `run_install` never writes to disk.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "On dry-run, the function never writes to disk and reports the plan.",
+    "source_file": "src/sqllens/installers/claude_desktop.py",
+    "source_line": 430,
+    "verify_against": "the dry-run path of run_install",
+    "verify_hint": "Trace every filesystem call reachable before the `if dry_run:` return in `run_install` (`_reject_symlink`, `_read_existing_config`, `make_backup_path`) in `src/sqllens/installers/claude_desktop.py`",
+    "claim_signature": "absolute_claim:claude_desktop.py:dry-run-never-writes:430",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "data_format_assumption",
+    "claim": "The docstring asserts that `probe_database` raises `PreflightError` with `subsystem='database'` and a sanitized category as the detail, chaining the original driver exception via `__cause__`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "PreflightError: with ``subsystem='database'`` and a sanitized category\n        as the detail. The original driver exception is chained via ``__cause__``.",
+    "source_file": "src/sqllens/preflight.py",
+    "source_line": 56,
+    "source_line_end": 58,
+    "verify_against": "every raise site in probe_database",
+    "verify_hint": "Compare each `raise PreflightError(\"database\", ...)` detail string and `from exc` in `probe_database` in `src/sqllens/preflight.py`",
+    "claim_signature": "data_format_assumption:preflight.py:sanitized-category-detail:56",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "dependency_interaction",
+    "claim": "`urlparse` raises `ValueError` only when `.port` is accessed on a non-numeric port, so wrapping `urlparse(url)` and the `hostname/username/port` attribute reads in one `try: ... except ValueError` is what prevents a non-numeric MySQL port from escaping as a bare ValueError.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/preflight.py",
+    "source_line": 119,
+    "source_line_end": 125,
+    "verify_against": "CPython urllib.parse ParseResult.port behavior",
+    "verify_hint": "Check `urllib.parse.SplitResult.port` / `_NetlocResultMixinBase` in the Python standard library",
+    "claim_signature": "dependency_interaction:preflight.py:urlparse-port-valueerror:119",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "data_format_assumption",
+    "claim": "Database connection-failure details still embed `type(exc).__name__`, which is assumed to carry no URL- or credential-derived value for sqlite3, psycopg2 and pymysql exception classes.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/preflight.py",
+    "source_line": 82,
+    "source_line_end": 84,
+    "verify_against": "the sanitization requirement the PR claims and the driver exception class names",
+    "verify_hint": "Check the diagnostic-privacy requirements in `docs/internal/setup/preflight.md` against these detail strings",
+    "claim_signature": "data_format_assumption:preflight.py:exc-typename-in-detail:82",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "api_contract",
+    "claim": "Callers and docs that previously relied on the driver error text, the offending URL, or the unsupported scheme name appearing in `PreflightError.detail` are updated for the sanitized messages.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/preflight.py",
+    "source_line": 151,
+    "source_line_end": 154,
+    "verify_against": "preflight error consumers and documentation",
+    "verify_hint": "Check preflight error rendering in `src/sqllens/cli.py` and the message assertions in `tests/unit/test_preflight.py`",
+    "claim_signature": "api_contract:preflight.py:sanitized-detail-consumers:151",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "test_mock_alignment",
+    "claim": "Patching `sqllens._atomic.os.replace` intercepts the rename for the Claude Desktop JSON write, i.e. `_atomic` performs the replace through its own module-level `os` and the installer no longer calls `os.replace` itself.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli_claude_desktop.py",
+    "source_line": 1191,
+    "source_line_end": 1200,
+    "verify_against": "the atomic writer implementation",
+    "verify_hint": "Check how `os.replace` is invoked in `src/sqllens/_atomic.py`",
+    "claim_signature": "test_mock_alignment:test_cli_claude_desktop.py:atomic-os-replace-patch:1191",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "test_mock_alignment",
+    "claim": "The `boom_replace` stub's two-positional-argument signature `(source, destination)` matches how `_atomic` calls `os.replace` (positionally, with no extra keyword arguments such as `src_dir_fd`).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli_claude_desktop.py",
+    "source_line": 1195,
+    "verify_against": "the atomic writer's os.replace call site",
+    "verify_hint": "Check the argument form of the `os.replace` call in `src/sqllens/_atomic.py`",
+    "claim_signature": "test_mock_alignment:test_cli_claude_desktop.py:boom-replace-signature:1195",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "test_mock_alignment",
+    "claim": "Patching the string target `sqllens.installers.claude_desktop._atomic_write_bytes` replaces the symbol `_revert_cmd_bytes` actually calls, so the simulated `PermissionError` reaches its warning branch.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli_claude_desktop.py",
+    "source_line": 1292,
+    "verify_against": "the import alias and call site in the installer",
+    "verify_hint": "Check the `atomic_write_bytes as _atomic_write_bytes` import and `_revert_cmd_bytes` in `src/sqllens/installers/claude_desktop.py`",
+    "claim_signature": "test_mock_alignment:test_cli_claude_desktop.py:revert-cmd-patch-target:1292",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "test_mock_alignment",
+    "claim": "The new test module's cross-module imports resolve: `_fixed_now`, `base_options` and `fake_config_json` exist in `tests/unit/test_cli_claude_desktop.py` as module-level fixtures usable when re-exported, `_cfg` in `tests/unit/test_preflight.py` accepts a `db_url` keyword, and `ConfigBomError` is exported by `sqllens.config`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_local_config_security.py",
+    "source_line": 12,
+    "source_line_end": 20,
+    "verify_against": "the referenced test modules and config module",
+    "verify_hint": "Check `_fixed_now`, `base_options`, `fake_config_json` in `tests/unit/test_cli_claude_desktop.py`, `_cfg` in `tests/unit/test_preflight.py`, and `ConfigBomError` in `src/sqllens/config.py`",
+    "claim_signature": "test_mock_alignment:test_local_config_security.py:imported-fixtures-exist:12",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "test_mock_alignment",
+    "claim": "The assertion covers both parametrizations: that the symlink target still holds `b\"{}\"` when not broken, and that it does not exist when broken.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    assert target.read_bytes() == b\"{}\" if not broken else not target.exists()",
+    "source_file": "tests/unit/test_local_config_security.py",
+    "source_line": 102,
+    "verify_against": "Python conditional-expression precedence versus the intended assertion",
+    "verify_hint": "Evaluate how `assert A == B if C else D` parses and whether the broken-link branch asserts anything, in `tests/unit/test_local_config_security.py`",
+    "claim_signature": "test_mock_alignment:test_local_config_security.py:symlink-target-assert-precedence:102",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "test_mock_alignment",
+    "claim": "Patching `os._Environ.__setitem__` with a 3-parameter function captures every assignment made through `os.environ[...]`, so a key exported by `Config.load` would be recorded.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_local_config_security.py",
+    "source_line": 113,
+    "source_line_end": 125,
+    "verify_against": "CPython os._Environ and any environment writes in the config loader",
+    "verify_hint": "Check `os._Environ.__setitem__` in the standard library and all `os.environ` / `putenv` writes in `src/sqllens/config.py`",
+    "claim_signature": "test_mock_alignment:test_local_config_security.py:environ-setitem-patch:113",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-37",
+    "category": "dependency_interaction",
+    "claim": "`sqllens init` writes its generated TOML through a private atomic replacement so the file ends up mode 0600 even under umask 0 and when replacing an existing 0666 file.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_local_config_security.py",
+    "source_line": 64,
+    "source_line_end": 75,
+    "verify_against": "the init command implementation",
+    "verify_hint": "Check the `init` command's config-writing call in `src/sqllens/cli.py`",
+    "claim_signature": "dependency_interaction:test_local_config_security.py:init-private-write:64",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-38",
+    "category": "test_mock_alignment",
+    "claim": "The permissions test's expectation that each artifact's temp file is already 0600 before `os.replace` matches how `_atomic` sets the mode (on the temp file, before rename, rather than on the destination afterwards).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_local_config_security.py",
+    "source_line": 40,
+    "source_line_end": 43,
+    "verify_against": "the atomic writer's chmod ordering",
+    "verify_hint": "Check where the mode is applied relative to `os.replace` in `src/sqllens/_atomic.py`",
+    "claim_signature": "test_mock_alignment:test_local_config_security.py:temp-mode-before-replace:40",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-39",
+    "category": "dependency_interaction",
+    "claim": "`Path.is_symlink()` returns True for a dangling (broken) symlink and False for a non-existent path, which is what makes `_reject_symlink` reject broken links while still allowing first-time creation.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/installers/claude_desktop.py",
+    "source_line": 355,
+    "source_line_end": 357,
+    "verify_against": "pathlib.Path.is_symlink semantics",
+    "verify_hint": "Check `Path.is_symlink` behavior for dangling and missing paths in the Python standard library docs",
+    "claim_signature": "dependency_interaction:claude_desktop.py:is-symlink-broken-link:355",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-40",
+    "category": "api_contract",
+    "claim": "`_revert_toml` and `_revert_cmd_bytes` restoring through the atomic writer leaves the reverted file at mode 0600 rather than its pre-existing mode, which the rollback test treats as the contract.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/installers/claude_desktop.py",
+    "source_line": 714,
+    "source_line_end": 738,
+    "verify_against": "documented rollback behavior",
+    "verify_hint": "Check the rollback/permissions description in `docs/internal/installation/claude-desktop-installer.md`",
+    "claim_signature": "api_contract:claude_desktop.py:revert-mode-0600:714",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-41",
+    "category": "absolute_claim",
+    "claim": "The comment asserts that the TOML just written can contain the user's `--db` secret and no longer the `--api-key`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    # just wrote a TOML that can contain the user's --db secret, so on",
+    "source_file": "src/sqllens/installers/claude_desktop.py",
+    "source_line": 573,
+    "verify_against": "the TOML generator's fields",
+    "verify_hint": "Check whether `generate_toml` emits any api-key field in `src/sqllens/installers/claude_desktop.py`",
+    "claim_signature": "absolute_claim:claude_desktop.py:toml-contains-db-secret-only:573",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-42",
+    "category": "dependency_interaction",
+    "claim": "Adding `_reject_symlink` to `_read_existing_config`, `_read_text_or_none` and `_read_bytes_or_none` does not break existing callers that legitimately point at symlinked configs or launchers.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/installers/claude_desktop.py",
+    "verify_against": "The `_reject_symlink` definition and its call sites in the head copy of the installer, plus the documented behavior in docs/internal/installation/claude-desktop-installer.md and docs/external/configuration.md",
+    "verify_hint": "Check `_reject_symlink` and its callers `_read_existing_config`, `_read_text_or_none`, `_read_bytes_or_none` in `src/sqllens/installers/claude_desktop.py`, and `tests/unit/test_local_config_security.py`",
+    "prior_ref": "VC-27",
+    "prior_evidence": "Head claude_desktop.py:355-357 _reject_symlink raises InstallError for any symlink; it is called at 662 (_read_existing_config), 686 (_read_text_or_none), 696 (_read_bytes_or_none). Base view has no 'symlink' handling in the installer, so symlinked configs/launchers (e.g. dotfile-managed claude_desktop_config.json) were previously read and worked, and now fail. The change is deliberate and documented (docs/internal/installation/claude-desktop-installer.md:145, docs/external/configuration.md:267; test tests/unit/test_local_config_security.py:80-101 expects rejection), but the claim that legitimately symlinked callers are not broken is false.",
+    "claim_signature": "dependency_interaction:claude_desktop.py:symlink-rejection-caller-compatibility",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-43",
+    "category": "data_format_assumption",
+    "claim": "The `probe_database` docstring's assertion holds at the head: every `PreflightError` it raises carries a sanitized category as the detail and chains the original driver exception via `__cause__`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/preflight.py",
+    "verify_against": "The `probe_database` docstring and every `raise PreflightError` site in the head copy of preflight.py",
+    "verify_hint": "Check the `probe_database` docstring and all `raise PreflightError(...)` statements in `src/sqllens/preflight.py`",
+    "prior_ref": "VC-30",
+    "prior_evidence": "Docstring (preflight.py:56-58) says PreflightError carries a sanitized category and the original driver exception is chained via __cause__. Raises at lines 62, 127 and 151 (missing '://', 'mysql url must include user and host', unsupported scheme) have no 'from exc' and no driver exception, so __cause__ is None. The driver-not-installed raises (91, 114) chain an ImportError, not a driver connection exception, and carry fixed pip-install text rather than a category. The docstring is inaccurate about 'every'/'the original driver exception'. The details are fixed strings with no user-supplied values, so no leak.",
+    "claim_signature": "data_format_assumption:preflight.py:probe-database-docstring-cause",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-44",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 1. The database preflight probe now replaces every driver message with one fixed sentence, and the operator has no way to read the real reason. In `src/sqllens/preflight.py` the SQLite, PostgreSQL and MySQL arms all render the detail as `f\"{type(exc).__name__}: connection failed; check connection settings.\"`, and the only two places that print a `PreflightError` (`src/sqllens/cli.py`, in `serve` and in `validate`) print the message alone and never the chained `__cause__`. A wrong password, an unreachable host, a missing database and an unreadable SQLite file therefore all look identical to the person running the command. The SQLite arm is the weakest case for the trade, because a `sqlite3.Error` message describes a local file the operator configured themselves and cannot carry a remote credential. (raised by 2/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/preflight.py",
+    "verify_against": "The SQLite/PostgreSQL/MySQL exception arms in preflight.py and the two PreflightError printers in cli.py",
+    "verify_hint": "Check the `except` arms of `probe_database` in `src/sqllens/preflight.py` and the `PreflightError` handling in the `serve` and `validate` commands in `src/sqllens/cli.py`",
+    "prior_ref": "finding 1 (Important / Major)",
+    "prior_evidence": "1. The database preflight probe now replaces every driver message with one fixed sentence, and the operator has no way to read the real reason. In `src/sqllens/preflight.py` the SQLite, PostgreSQL and MySQL arms all render the detail as `f\"{type(exc).__name__}: connection failed; check connection settings.\"`, and the only two places that print a `PreflightError` (`src/sqllens/cli.py`, in `serve` and in `validate`) print the message alone and never the chained `__cause__`. A wrong password, an unreachable host, a missing database and an unreadable SQLite file therefore all look identical to the person running the command. The SQLite arm is the weakest case for the trade, because a `sqlite3.Error` message describes a local file the operator configured themselves and cannot carry a remote credential. (raised by 2/5 agents)",
+    "claim_signature": "api_contract:preflight.py:database-detail-indistinguishable",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-45",
+    "category": "dependency_interaction",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 1. `src/sqllens/installers/claude_desktop.py` uses `assert backup_path is not None` as the guard in front of `_reject_symlink` and the backup write. Python removes assertions under `-O`, and the `AttributeError` that would follow is not caught by the surrounding `except OSError`. The state is unreachable today, because `planned_backup` is set under the same `not dry_run and json_after != json_before` test, so this is a robustness point rather than a reachable defect; a plain `if ... raise InstallError(...)` is the shape the next few lines already use. (raised by 3/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/installers/claude_desktop.py",
+    "verify_against": "The backup block in run_install and the `planned_backup` computation that precedes it",
+    "verify_hint": "Check the backup write block in `run_install` in `src/sqllens/installers/claude_desktop.py` and the `planned_backup` assignment earlier in the same function",
+    "prior_ref": "finding 1 (Suggestion / Minor)",
+    "prior_evidence": "1. `src/sqllens/installers/claude_desktop.py` uses `assert backup_path is not None` as the guard in front of `_reject_symlink` and the backup write. Python removes assertions under `-O`, and the `AttributeError` that would follow is not caught by the surrounding `except OSError`. The state is unreachable today, because `planned_backup` is set under the same `not dry_run and json_after != json_before` test, so this is a robustness point rather than a reachable defect; a plain `if ... raise InstallError(...)` is the shape the next few lines already use. (raised by 3/5 agents)",
+    "claim_signature": "dependency_interaction:claude_desktop.py:assert-backup-path-guard",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-46",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 2. A new assertion in `tests/unit/test_local_config_security.py` is written as `assert target.read_bytes() == b\"{}\" if not broken else not target.exists()`, which Python parses as one conditional expression. It happens to test the intended thing in both parameter sets, but it reads as if it asserts two things at once, and editing either branch would silently change what is checked. (raised by 3/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_local_config_security.py",
+    "verify_against": "The assertion at the end of the symlink-rejection test in the head copy of the test module",
+    "verify_hint": "Check the post-condition assertion in the symlink-destination test in `tests/unit/test_local_config_security.py`",
+    "prior_ref": "finding 2 (Suggestion / Minor)",
+    "prior_evidence": "2. A new assertion in `tests/unit/test_local_config_security.py` is written as `assert target.read_bytes() == b\"{}\" if not broken else not target.exists()`, which Python parses as one conditional expression. It happens to test the intended thing in both parameter sets, but it reads as if it asserts two things at once, and editing either branch would silently change what is checked. (raised by 3/5 agents)",
+    "claim_signature": "test_mock_alignment:test_local_config_security.py:conditional-expression-assert",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-47",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 3. `docs/internal/installation/claude-desktop-installer.md` still says the generated TOML file contains the user's `--api-key` value. It does not: `generate_toml` writes only a comment saying the key is supplied at run time through an environment variable, and the key reaches Claude Desktop through the JSON `env` block instead. This change corrected exactly that sentence in the matching code comment while editing the same paragraph of the document. (raised by 2/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/installation/claude-desktop-installer.md",
+    "verify_against": "`generate_toml` in src/sqllens/installers/claude_desktop.py and the JSON `env` block it emits",
+    "verify_hint": "Check `generate_toml` in `src/sqllens/installers/claude_desktop.py` against the TOML-contents paragraph of `docs/internal/installation/claude-desktop-installer.md`",
+    "prior_ref": "finding 3 (Suggestion / Minor)",
+    "prior_evidence": "3. `docs/internal/installation/claude-desktop-installer.md` still says the generated TOML file contains the user's `--api-key` value. It does not: `generate_toml` writes only a comment saying the key is supplied at run time through an environment variable, and the key reaches Claude Desktop through the JSON `env` block instead. This change corrected exactly that sentence in the matching code comment while editing the same paragraph of the document. (raised by 2/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: the sentence describes where a value is written and changes no output, branch or covered set; no shell, Python, jq, YAML or workflow file and no agent-instruction file reads this page for behavior — the only reference to it is a cross-link from docs/internal/production-readiness-v0.1.0.md; docs/internal is removed from published artifacts by .github/actions/vendor-plugin/vendor-slice.sh line 106 -->",
+    "claim_signature": "data_format_assumption:claude-desktop-installer.md:toml-embeds-api-key",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-48",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 4. The new symlink refusal in `sqllens init` has no test. The matching installer guard is covered four ways, so the gap is the asymmetry: nothing runs `init` against a symlinked destination, and neither branch of the new `except OSError` is exercised, so a regression that dropped the guard or let an `OSError` escape as a traceback would still pass the suite. (raised by 2/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "verify_against": "The init symlink guard and OSError handler in cli.py, and the unit tests covering the init command",
+    "verify_hint": "Check the `init` command's symlink guard in `src/sqllens/cli.py` against `tests/unit/test_local_config_security.py` and the other init tests under `tests/unit/`",
+    "prior_ref": "finding 4 (Suggestion / Minor)",
+    "prior_evidence": "4. The new symlink refusal in `sqllens init` has no test. The matching installer guard is covered four ways, so the gap is the asymmetry: nothing runs `init` against a symlinked destination, and neither branch of the new `except OSError` is exercised, so a regression that dropped the guard or let an `OSError` escape as a traceback would still pass the suite. (raised by 2/5 agents)",
+    "claim_signature": "test_mock_alignment:cli.py:init-symlink-guard-untested",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-49",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 5. A new test patches `os._Environ.__setitem__`, a private attribute of a private CPython class, to prove the API key is never exported. It misses `os.putenv` and `os.environ.update`, and it breaks if CPython changes that class. The durable half of the check — that the environment value is unchanged after the call — is already asserted beside it. (raised by 2/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_local_config_security.py",
+    "verify_against": "The env-assignment recording test in the head copy of the test module and the real `os` module API it patches",
+    "verify_hint": "Check the test that patches `os._Environ.__setitem__` in `tests/unit/test_local_config_security.py` against `validate_toml` in `src/sqllens/installers/claude_desktop.py` and `Config.load` in `src/sqllens/config.py`",
+    "prior_ref": "finding 5 (Suggestion / Minor)",
+    "prior_evidence": "5. A new test patches `os._Environ.__setitem__`, a private attribute of a private CPython class, to prove the API key is never exported. It misses `os.putenv` and `os.environ.update`, and it breaks if CPython changes that class. The durable half of the check — that the environment value is unchanged after the call — is already asserted beside it. (raised by 2/5 agents)",
+    "claim_signature": "test_mock_alignment:test_local_config_security.py:private-os-environ-patch",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-50",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 6. `docs/internal/setup/preflight.md` lists what a preflight detail can contain. This change rewrote the database bullet to describe the new fixed guidance and left the next bullet reading \"The constructor exception rendered the same way (llm probe)\". The LLM probe still renders the whole exception text, so \"the same way\" is now false, and it contradicts a later line in the same section that scopes the new behavior to database failures. (raised by 2/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/setup/preflight.md",
+    "verify_against": "`probe_llm` in src/sqllens/preflight.py and the surrounding bullets of the same documentation section",
+    "verify_hint": "Check `probe_llm` in `src/sqllens/preflight.py` against the database and llm bullets in `docs/internal/setup/preflight.md`",
+    "prior_ref": "finding 6 (Suggestion / Minor)",
+    "prior_evidence": "6. `docs/internal/setup/preflight.md` lists what a preflight detail can contain. This change rewrote the database bullet to describe the new fixed guidance and left the next bullet reading \"The constructor exception rendered the same way (llm probe)\". The LLM probe still renders the whole exception text, so \"the same way\" is now false, and it contradicts a later line in the same section that scopes the new behavior to database failures. (raised by 2/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: the sentence describes how a message is formatted and changes no output, branch or covered set; no shell, Python, jq, YAML or workflow file and no agent-instruction file reads this page for behavior — the only reference to it is a cross-link from docs/internal/production-readiness-v0.1.0.md; docs/internal is removed from published artifacts by .github/actions/vendor-plugin/vendor-slice.sh line 106 -->",
+    "claim_signature": "data_format_assumption:preflight.md:llm-probe-same-way",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-51",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 7. The new \"Generated file permissions\" section in `docs/external/configuration.md` describes symlink refusal only for the desktop installer. `sqllens init` now also fails with exit code 1 when its destination is a symlink, which this pull request's own description lists as a behavior break. A user whose configuration file is a symlink reads this section and is not warned. (raised by 1/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/external/configuration.md",
+    "verify_against": "The init symlink guard in src/sqllens/cli.py and the installer guard in claude_desktop.py",
+    "verify_hint": "Check the `init` symlink guard in `src/sqllens/cli.py` against the \"Generated file permissions\" section of `docs/external/configuration.md`",
+    "prior_ref": "finding 7 (Suggestion / Minor)",
+    "prior_evidence": "7. The new \"Generated file permissions\" section in `docs/external/configuration.md` describes symlink refusal only for the desktop installer. `sqllens init` now also fails with exit code 1 when its destination is a symlink, which this pull request's own description lists as a behavior break. A user whose configuration file is a symlink reads this section and is not warned. (raised by 1/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=not-held; evidence: the sentence describes which commands refuse a symlink and changes no output, branch or covered set; no shell, Python, jq, YAML or workflow file and no agent-instruction file reads this page for behavior; this page is customer-facing documentation, so limb two does not hold and the finding is capped at Important, which is at or below its filed Suggestion severity -->",
+    "claim_signature": "api_contract:configuration.md:init-symlink-refusal-undocumented",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-52",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 8. The `run_install` docstring in `src/sqllens/installers/claude_desktop.py` still scopes crash safety to \"the JSON itself\". After this change the TOML file, the launcher script, the backup and both rollback paths all go through the same temporary-file-and-rename writer, so singling out the JSON could lead a maintainer to think the other writes can still land truncated. (raised by 1/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/installers/claude_desktop.py",
+    "verify_against": "Every write call inside `run_install` and its rollback helpers in the head copy of the installer",
+    "verify_hint": "Check the `run_install` docstring against all `_atomic_write_*` call sites in `src/sqllens/installers/claude_desktop.py`, including the rollback helpers",
+    "prior_ref": "finding 8 (Suggestion / Minor)",
+    "prior_evidence": "8. The `run_install` docstring in `src/sqllens/installers/claude_desktop.py` still scopes crash safety to \"the JSON itself\". After this change the TOML file, the launcher script, the backup and both rollback paths all go through the same temporary-file-and-rename writer, so singling out the JSON could lead a maintainer to think the other writes can still land truncated. (raised by 1/5 agents)",
+    "claim_signature": "data_format_assumption:claude_desktop.py:run-install-docstring-atomicity-scope",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-53",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 9. In `src/sqllens/cli.py` the symlink refusal is expressed as `raise OSError(\"refusing a symlink config destination\")` so that the shared handler can print it, and the resulting line names neither the path nor what to do about it. The installer's equivalent message does include the path. (raised by 1/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "verify_against": "The installer's `_reject_symlink` message in claude_desktop.py as the comparison point",
+    "verify_hint": "Check the `raise OSError(...)` symlink refusal in the `init` command of `src/sqllens/cli.py` against `_reject_symlink` in `src/sqllens/installers/claude_desktop.py`",
+    "prior_ref": "finding 9 (Suggestion / Minor)",
+    "prior_evidence": "9. In `src/sqllens/cli.py` the symlink refusal is expressed as `raise OSError(\"refusing a symlink config destination\")` so that the shared handler can print it, and the resulting line names neither the path nor what to do about it. The installer's equivalent message does include the path. (raised by 1/5 agents)",
+    "claim_signature": "api_contract:cli.py:symlink-message-lacks-path",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-54",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 10. The symlink refusal applies to the JSON configuration, the TOML, the launcher and the backup, and to `sqllens init`, with no way to opt out. A user who keeps either file as a symlink into a dotfiles repository can no longer run the installer and must replace the link with a regular file. The break is recorded in the pull request description, the changelog and the external documentation, and the guard only covers the final path component in any case. (raised by 1/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/installers/claude_desktop.py",
+    "verify_against": "The symlink guard call sites, the CHANGELOG fragment and docs/external/configuration.md's compatibility statement",
+    "verify_hint": "Check `_reject_symlink` call sites in `src/sqllens/installers/claude_desktop.py` and the `init` guard in `src/sqllens/cli.py` against `changelog.d/286.fixed.md` and `docs/external/configuration.md`",
+    "prior_ref": "finding 10 (Suggestion / Minor)",
+    "prior_evidence": "10. The symlink refusal applies to the JSON configuration, the TOML, the launcher and the backup, and to `sqllens init`, with no way to opt out. A user who keeps either file as a symlink into a dotfiles repository can no longer run the installer and must replace the link with a regular file. The break is recorded in the pull request description, the changelog and the external documentation, and the guard only covers the final path component in any case. (raised by 1/5 agents)",
+    "claim_signature": "api_contract:claude_desktop.py:symlink-refusal-no-optout",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-55",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 11. The backup step now reads the old bytes and writes them through the atomic writer instead of copying the file, which adds a branch for \"the configuration disappeared before the backup\". No test reaches that branch, and the backup's contents are only checked indirectly through its permission bits, never compared byte for byte with the original. (raised by 1/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/installers/claude_desktop.py",
+    "verify_against": "The backup read-then-write block in the installer and the backup assertions in the installer tests",
+    "verify_hint": "Check the backup block in `run_install` in `src/sqllens/installers/claude_desktop.py` against the backup assertions in `tests/unit/test_cli_claude_desktop.py` and `tests/unit/test_local_config_security.py`",
+    "prior_ref": "finding 11 (Suggestion / Minor)",
+    "prior_evidence": "11. The backup step now reads the old bytes and writes them through the atomic writer instead of copying the file, which adds a branch for \"the configuration disappeared before the backup\". No test reaches that branch, and the backup's contents are only checked indirectly through its permission bits, never compared byte for byte with the original. (raised by 1/5 agents)",
+    "claim_signature": "test_mock_alignment:claude_desktop.py:backup-branch-and-bytes-untested",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-56",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 12. Both documents state that unchanged files keep their existing permissions. That is true against this revision, because the installer skips the write when the new bytes match the old, but no test pins it, so a later change that wrote unconditionally would re-permission a file an operator had hardened without failing the suite. (raised by 1/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/external/configuration.md",
+    "verify_against": "The byte-identical write-skip gates in claude_desktop.py and the permission assertions in the test suite",
+    "verify_hint": "Check the byte-identical comparison gates before the TOML and JSON writes in `src/sqllens/installers/claude_desktop.py` against the permission assertions in `tests/unit/test_local_config_security.py`",
+    "prior_ref": "finding 12 (Suggestion / Minor)",
+    "prior_evidence": "12. Both documents state that unchanged files keep their existing permissions. That is true against this revision, because the installer skips the write when the new bytes match the old, but no test pins it, so a later change that wrote unconditionally would re-permission a file an operator had hardened without failing the suite. (raised by 1/5 agents)",
+    "claim_signature": "test_mock_alignment:configuration.md:unchanged-permissions-unpinned",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-57",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 13. Two smaller cases of the same loss of detail as the Important finding above: the \"unsupported database scheme\" message in `src/sqllens/preflight.py` no longer names the scheme it rejected, and the \"missing `://`\" message no longer shows the value. Neither of those two values is a secret, and naming them is how a user finds a typo. (raised by 1/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/preflight.py",
+    "verify_against": "The URL-format `raise PreflightError` sites in preflight.py and the message expectations in tests/unit/test_preflight.py",
+    "verify_hint": "Check the unsupported-scheme and missing-`://` raises in `probe_database` in `src/sqllens/preflight.py` against `tests/unit/test_preflight.py`",
+    "prior_ref": "finding 13 (Suggestion / Minor)",
+    "prior_evidence": "13. Two smaller cases of the same loss of detail as the Important finding above: the \"unsupported database scheme\" message in `src/sqllens/preflight.py` no longer names the scheme it rejected, and the \"missing `://`\" message no longer shows the value. Neither of those two values is a secret, and naming them is how a user finds a typo. (raised by 1/5 agents)",
+    "claim_signature": "api_contract:preflight.py:url-format-message-detail",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-58",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 14. The test named for rejecting symlink destinations \"before mutation\" only asserts that the symlink and its target survive. For the backup case the point of the guard is that it fires before the TOML and launcher are written, and nothing asserts those two files were never created, so moving the check later would not fail this test. (raised by 1/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_local_config_security.py",
+    "verify_against": "The ordering of `_reject_symlink` relative to the TOML and launcher writes in run_install",
+    "verify_hint": "Check `test_installer_rejects_symlink_destinations_before_mutation` in `tests/unit/test_local_config_security.py` against the write ordering in `run_install` in `src/sqllens/installers/claude_desktop.py`",
+    "prior_ref": "finding 14 (Suggestion / Minor)",
+    "prior_evidence": "14. The test named for rejecting symlink destinations \"before mutation\" only asserts that the symlink and its target survive. For the backup case the point of the guard is that it fires before the TOML and launcher are written, and nothing asserts those two files were never created, so moving the check later would not fail this test. (raised by 1/5 agents)",
+    "claim_signature": "test_mock_alignment:test_local_config_security.py:before-mutation-assertions",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  }
+]
