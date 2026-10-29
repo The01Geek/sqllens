@@ -1,0 +1,1145 @@
+[
+  {
+    "id": "VC-1",
+    "category": "dependency_interaction",
+    "claim": "`list_memories` assumes `MemoryStore` exposes `iter_records(include_embeddings=...)` returning an iterable of `MemoryRecord` and raising `MemoryChangedError` when a managed write overlaps the scan.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/admin.py",
+    "source_line": 169,
+    "verify_against": "The `MemoryStore` class in src/sqllens/memory/store.py",
+    "verify_hint": "Check that `iter_records` exists on `MemoryStore` in `src/sqllens/memory/store.py` with an `include_embeddings` keyword, yields `MemoryRecord`, and raises `MemoryChangedError`.",
+    "claim_signature": "dependency_interaction:admin.py:iter-records-seam:169",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "dependency_interaction",
+    "claim": "`list_memories` assumes `heapq.nlargest(limit, records, key=_sort_key)` yields the newest-first ordering the previous `records.sort(key=_sort_key, reverse=True)` produced, including tie behaviour on equal timestamps.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/admin.py",
+    "source_line": 176,
+    "verify_against": "Python stdlib `heapq.nlargest` ordering/tie semantics versus the prior sort in list_memories",
+    "verify_hint": "Compare `heapq.nlargest` output ordering with the base-revision `records.sort(key=_sort_key, reverse=True)` in `list_memories` (src/sqllens/memory/admin.py).",
+    "claim_signature": "dependency_interaction:admin.py:nlargest-newest-first:176",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "absolute_claim",
+    "claim": "The comment asserts `heapq.nlargest(0, ...)` never consumes its input iterator, so the explicit drain loop is required for `total` to be complete when `limit=0`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# nlargest(0, ...) does not consume its input, but total still counts\n        # the complete filtered scan when no rows are requested.",
+    "source_file": "src/sqllens/memory/admin.py",
+    "source_line": 178,
+    "source_line_end": 179,
+    "verify_against": "CPython `heapq.nlargest` implementation for n <= 0",
+    "verify_hint": "Check `heapq.nlargest` with n=0 against a generator that records consumption; confirm the drain branch at admin.py:180 fully exhausts `store.iter_records` so the consistency check at iterator completion runs.",
+    "claim_signature": "absolute_claim:admin.py:nlargest-zero-no-consume:178",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts that concurrent SQL Lens writes cause `MemoryChangedError` and that no partial result is ever returned from `list_memories`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Concurrent SQL Lens writes cause MemoryChangedError; no partial result is\n    returned. The store iterator must be exhausted before publishing this result.",
+    "source_file": "src/sqllens/memory/admin.py",
+    "source_line": 160,
+    "source_line_end": 161,
+    "verify_against": "`iter_records` check placement in src/sqllens/memory/store.py and the branches of `list_memories`",
+    "verify_hint": "Find an interleaving where a write starts and finishes between two generation checks (or after the final check) in `MemoryStore.iter_records`; confirm `heapq.nlargest` fully exhausts the generator on the `limit > 0` path.",
+    "claim_signature": "absolute_claim:admin.py:no-partial-listing:160",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "dependency_interaction",
+    "claim": "`validation_message` assumes `sqllens._errors.validation_error_lines(exc, with_type=False)` accepts a pydantic `ValidationError` with that keyword and returns an iterable of strings that omit the offending input values.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/admin.py",
+    "source_line": 250,
+    "verify_against": "`validation_error_lines` in src/sqllens/_errors.py",
+    "verify_hint": "Check the signature and body of `validation_error_lines` in `src/sqllens/_errors.py`, especially whether `with_type=False` output can still echo the rejected input value.",
+    "claim_signature": "dependency_interaction:admin.py:validation-error-lines:250",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "dependency_interaction",
+    "claim": "`add_memories` assumes `SqlPair(**raw)` / `SchemaDoc(**raw)` raise `ValidationError` or `TypeError` for every malformed item, so the generic fallback branch covers only unexpected failures.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/admin.py",
+    "source_line": 248,
+    "source_line_end": 254,
+    "verify_against": "`SqlPair` / `SchemaDoc` models in src/sqllens/memory/schema.py and pydantic v2 exception types",
+    "verify_hint": "Check which exceptions `SqlPair(**raw)` raises for a non-dict `raw` (e.g. a bare string, a list) and for validator failures in `src/sqllens/memory/schema.py`.",
+    "claim_signature": "dependency_interaction:admin.py:item-exception-breadth:248",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "data_format_assumption",
+    "claim": "The per-item error envelope assumes `question` is echoed back only when it is a `str` no longer than `QUESTION_MAX`, otherwise `None`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/admin.py",
+    "source_line": 266,
+    "source_line_end": 271,
+    "verify_against": "`QUESTION_MAX` in src/sqllens/memory/schema.py and the admin tests asserting the error shape",
+    "verify_hint": "Check `QUESTION_MAX` in `src/sqllens/memory/schema.py` (char vs byte semantics) and the `add_memories` error-shape assertions in the memory admin unit tests.",
+    "claim_signature": "data_format_assumption:admin.py:error-question-echo:266",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "api_contract",
+    "claim": "`add_memories` rejects a block larger than `MAX_BUNDLE_ITEMS` by raising `MemoryInputError`, and the MCP server layer turns that into a bounded `isError` result rather than an unstructured crash.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/admin.py",
+    "source_line": 243,
+    "source_line_end": 245,
+    "verify_against": "The `add_memories` tool wiring in src/sqllens/server.py",
+    "verify_hint": "Check that `src/sqllens/server.py`'s `add_memories` tool catches `MemoryInputError` (or ValueError) and returns an `isError` result with the bounded message.",
+    "claim_signature": "api_contract:admin.py:memoryinputerror-add-cap:243",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "api_contract",
+    "claim": "`list_memories` raising `MemoryInputError` for a non-int or out-of-range `limit` is surfaced by the server as a bounded input error, and the server's tool schema accepts the same 0–1000 range with default 1000.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/admin.py",
+    "source_line": 163,
+    "source_line_end": 164,
+    "verify_against": "The `list_memories` tool definition and error handling in src/sqllens/server.py",
+    "verify_hint": "Check the `list_memories` tool signature, annotated limit bounds and exception handling in `src/sqllens/server.py`, plus any widget caller in `src/sqllens/ui/memory_admin.html`.",
+    "claim_signature": "api_contract:admin.py:list-limit-bounds:163",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "dependency_interaction",
+    "claim": "`collection_state` assumes the persistence directory already exists on disk when called (it `stat()`s the path) because `chromadb.PersistentClient(...)` has created or opened it on the preceding line.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/_memory_consistency.py",
+    "source_line": 69,
+    "source_line_end": 70,
+    "verify_against": "`chromadb.PersistentClient` directory-creation behaviour and the call site in src/sqllens/agent/integrations/chromadb/agent_memory.py:138",
+    "verify_hint": "Check whether `chromadb.PersistentClient(path=...)` eagerly creates the directory in the pinned chromadb version, and what happens on each outcome (missing dir -> `FileNotFoundError` from `Path.stat()`).",
+    "claim_signature": "dependency_interaction:_memory_consistency.py:stat-requires-existing-dir:69",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "dependency_interaction",
+    "claim": "`_states` being a `WeakValueDictionary` assumes some live caller holds a strong reference to each `CollectionState` for as long as a reader and a writer must share it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/_memory_consistency.py",
+    "source_line": 59,
+    "source_line_end": 76,
+    "verify_against": "Strong references to the returned `CollectionState` in src/sqllens/memory/store.py and src/sqllens/agent/integrations/chromadb/agent_memory.py",
+    "verify_hint": "Check whether `MemoryStore` (src/sqllens/memory/store.py) stores the `collection_state(...)` result in an attribute, or re-fetches it per call so an entry can be garbage-collected between a writer and a reader.",
+    "claim_signature": "dependency_interaction:_memory_consistency.py:weak-state-lifetime:59",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "api_contract",
+    "claim": "`CollectionState.snapshot()` and `CollectionState.check(generation)` are the methods the paged reader calls, with `check` run after each page and before iterator completion.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/_memory_consistency.py",
+    "source_line": 47,
+    "source_line_end": 56,
+    "verify_against": "The `iter_records` implementation in src/sqllens/memory/store.py",
+    "verify_hint": "Check that `MemoryStore.iter_records` in `src/sqllens/memory/store.py` calls `snapshot()` before the first page and `check(generation)` after each page and at completion.",
+    "claim_signature": "api_contract:_memory_consistency.py:snapshot-check-protocol:47",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "absolute_claim",
+    "claim": "The module docstring asserts the coordination covers SQL Lens instances in one process using Chroma's default local tenant/database, and is not a cross-process lock or a guard for raw Chroma clients.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "This coordinates SQL Lens instances in one process, using Chroma's default\nlocal tenant/database. It is not a cross-process lock or a guard for raw Chroma\nclients. Chroma does not support concurrent local writers in separate processes.",
+    "source_file": "src/sqllens/_memory_consistency.py",
+    "source_line": 6,
+    "source_line_end": 8,
+    "verify_against": "Tenant/database arguments used where Chroma clients and collections are created (agent_memory.py, memory/store.py) and the key built in `collection_state`",
+    "verify_hint": "Check whether any SQL Lens code path creates a Chroma client with a non-default tenant/database, which the `(st_dev, st_ino, collection_name)` key would collapse into one state.",
+    "claim_signature": "absolute_claim:_memory_consistency.py:in-process-default-tenant:6",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "dependency_interaction",
+    "claim": "Every mutating Chroma call in `ChromaAgentMemory` (`upsert`, `update`, `delete`) is wrapped in `self._collection_state.writing()`, and `_collection_state` is non-`None` at each of those sites because `_get_client()` has set `_write_state`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/chromadb/agent_memory.py",
+    "source_line": 125,
+    "source_line_end": 140,
+    "verify_against": "All `collection.upsert` / `collection.update` / `collection.delete` / `client.delete_collection` / `reset` call sites in this file and other vendored Chroma writers",
+    "verify_hint": "Grep `src/sqllens/agent/integrations/chromadb/` for mutating Chroma calls and confirm each is inside a `writing()` block; check paths where `_get_collection()` is reached without `_write_state` being set.",
+    "claim_signature": "dependency_interaction:agent_memory.py:all-writes-wrapped:125",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "api_contract",
+    "claim": "The first-party write paths (`MemoryStore` add/delete/clear and `import_bundle`) also participate in the same `CollectionState` generation, so an admin write during a listing is detected.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/_memory_consistency.py",
+    "source_line": 33,
+    "source_line_end": 45,
+    "verify_against": "Write methods in src/sqllens/memory/store.py (`delete_ids`, `clear`, add/upsert paths)",
+    "verify_hint": "Check each mutating method of `MemoryStore` in `src/sqllens/memory/store.py` for a `writing()` context; an unwrapped one breaks the documented detection of 'direct admin deletes'.",
+    "claim_signature": "api_contract:_memory_consistency.py:admin-writes-tracked:33",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "api_contract",
+    "claim": "`SearchSavedCorrectToolUsesParams.limit` constrained with `ge=1, le=100` on an `Optional[int]` still accepts an explicit JSON `null` and falls back to the default of 10 downstream.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/tools/agent_memory.py",
+    "source_line": 48,
+    "source_line_end": 50,
+    "verify_against": "pydantic v2 constraint application to Optional fields, and the tool body consuming `params.limit` in this file",
+    "verify_hint": "Check how `SearchSavedCorrectToolUsesTool.execute` handles `params.limit is None` in `src/sqllens/agent/tools/agent_memory.py`, and whether pydantic applies `ge`/`le` to a `None` value for `Optional[int]`.",
+    "claim_signature": "api_contract:agent_memory.py:optional-limit-null-fallback:48",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "api_contract",
+    "claim": "Replacing the per-item import error message with the fixed string \"Failed to save memory item; check the server logs.\" keeps every consumer of `ImportItemError.message` (CLI import output, admin `add_memories` error mapping, tests) working.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/importer.py",
+    "source_line": 107,
+    "source_line_end": 113,
+    "verify_against": "Consumers of `ImportItemError.message` in src/sqllens/cli.py, src/sqllens/memory/admin.py and tests asserting import error text",
+    "verify_hint": "Grep for `ImportItemError` and `report.errors` across `src/sqllens/` and `tests/` for assertions on the former `str(exc)` message content.",
+    "claim_signature": "api_contract:importer.py:sanitized-item-error-message:107",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "absolute_claim",
+    "claim": "The docs assert that a shared mutation generation detects overlapping SQL Lens writes including background agent saves, deletes and hit-count updates, that checks run after each page and before iterator completion without holding a lock across storage work, and that pages are 256 rows.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`list_memories` scans Chroma in pages of 256 and retains at most `limit` candidates. This bounds retained rows, while the full matching count and global newest-first ordering still require an O(N) scan. A shared mutation generation detects overlapping SQL Lens writes (including background agent saves, deletes and hit-count updates); a changed or active generation aborts the listing with a retryable tool error and no partial result.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 392,
+    "verify_against": "`MemoryStore.iter_records` page size and check placement in src/sqllens/memory/store.py; the `writing()` wrappers in agent_memory.py",
+    "verify_hint": "Confirm the 256 page constant and the post-page/pre-completion checks in `src/sqllens/memory/store.py`, and that hit-count `collection.update` and both `collection.delete` sites in `agent_memory.py` are wrapped.",
+    "claim_signature": "absolute_claim:tools.md:listing-consistency-claims:392",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "absolute_claim",
+    "claim": "The docs table asserts `list_memories` accepts `limit` 0–1000 (default 1000) and that `total` counts all rows matching `memory_type` including when `limit=0`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `list_memories` | `data_source_id`, `memory_type?`, `limit=1000` (0–1000), `include_embedding_preview=False` | `{\"memories\": [...], \"total\": N}` | Newest first. `total` counts all rows matching `memory_type`, including when `limit=0`. Preview adds an 8-float `embedding_preview` + `embedding_dim`. |",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 384,
+    "verify_against": "The `list_memories` tool signature in src/sqllens/server.py and `list_memories` in src/sqllens/memory/admin.py",
+    "verify_hint": "Check the server tool's declared default and bounds, and that the `limit=0` drain branch in `admin.list_memories` produces the same `total` as a `limit>0` call.",
+    "claim_signature": "absolute_claim:tools.md:list-limit-table-row:384",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "absolute_claim",
+    "claim": "The error-handling paragraph asserts that unexpected admin failures are logged and returned as sanitized tool errors and that invalid list limits and oversized add batches return bounded input-error messages before store work.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "**Error handling** follows the CLAUDE.md `isError` contract. Unexpected admin failures are logged and returned as sanitized tool errors. Invalid list limits and oversized add batches return bounded input-error messages before store work.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 394,
+    "verify_against": "The memory admin tool wrappers in src/sqllens/server.py",
+    "verify_hint": "Check in `src/sqllens/server.py` whether `MemoryInputError` is caught distinctly from the generic `except Exception` sanitizer, and that the bounded message reaches the client rather than the generic 'check the server logs' text.",
+    "claim_signature": "absolute_claim:tools.md:bounded-input-error-handling:394",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "absolute_claim",
+    "claim": "The user-facing doc asserts that if memory changes during a listing the tool returns a retry error instead of partial rows or an unreliable total, covering SQL Lens writes within one running process including background agent writes.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "If memory changes during a listing, the tool returns a retry error instead of\npartial rows or an unreliable total. Retry after the write finishes. This covers\nSQL Lens writes within one running process, including background agent writes.",
+    "source_file": "docs/external/managing-memory.md",
+    "source_line": 148,
+    "source_line_end": 150,
+    "verify_against": "`list_memories` tool error mapping in src/sqllens/server.py and `MemoryChangedError` propagation from store.py",
+    "verify_hint": "Trace `MemoryChangedError` from `MemoryStore.iter_records` through `admin.list_memories` to the `list_memories` tool in `src/sqllens/server.py`; confirm it is not swallowed by the generic sanitizing `except Exception` into an unretryable message.",
+    "claim_signature": "absolute_claim:managing-memory.md:listing-retry-error:148",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "absolute_claim",
+    "claim": "The changelog asserts memory listings now return a retryable error when SQL Lens writes overlap the paged scan, preserving exact totals and ordering without returning partial data.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- Memory listings now return a retryable error when SQL Lens writes overlap the\n  paged scan, preserving exact totals and ordering without returning partial data.",
+    "source_file": "CHANGELOG.md",
+    "source_line": 8,
+    "source_line_end": 9,
+    "verify_against": "src/sqllens/memory/store.py `iter_records` and src/sqllens/memory/admin.py `list_memories`",
+    "verify_hint": "Find a write that begins and completes entirely between two generation checks in `iter_records`; that interleaving would falsify 'exact totals and ordering'.",
+    "claim_signature": "absolute_claim:CHANGELOG.md:listing-exact-totals:8",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "absolute_claim",
+    "claim": "The internal doc asserts the on-demand search tool accepts `limit` 1–100 with default 10 and that an explicit null retains the default fallback.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The on-demand search tool accepts `limit` values from 1 to 100 (default 10); an explicit null retains the default fallback. These bounds apply to its validated tool arguments.",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 20,
+    "verify_against": "`SearchSavedCorrectToolUsesParams` in src/sqllens/agent/tools/agent_memory.py",
+    "verify_hint": "Validate `SearchSavedCorrectToolUsesParams(question='q', limit=None)` and `limit=0` against the pydantic model in `src/sqllens/agent/tools/agent_memory.py`.",
+    "claim_signature": "absolute_claim:memory.md:search-limit-bounds:20",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "absolute_claim",
+    "claim": "The doc table row asserts `iter_records(include_embeddings=False)` retains 256 rows per page, raises `MemoryChangedError` if a managed write overlaps, and that its shared per-collection generation covers agent executor writes and direct admin deletes without blocking writes for the scan.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `iter_records(include_embeddings=False)` | Paged admin listing, retaining 256 rows per page. Raises `MemoryChangedError` if a managed write overlaps; callers must exhaust it before returning a result. The shared per-collection generation covers agent executor writes and direct admin deletes without blocking writes for the scan. |",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 254,
+    "verify_against": "`MemoryStore.iter_records` in src/sqllens/memory/store.py and the `writing()` wrappers in agent_memory.py / store.py",
+    "verify_hint": "Confirm the page size constant and `include_embeddings` default in `iter_records`, and that admin delete paths (`delete_ids`, `clear`) enter `CollectionState.writing()`.",
+    "claim_signature": "absolute_claim:memory.md:iter-records-row:254",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "absolute_claim",
+    "claim": "The `MAX_BUNDLE_ITEMS` docstring asserts the cap is enforced by `memory.io` after parse and by admin add before validating items or touching the store.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"Per-block item cap enforced by ``memory.io`` after parse and by admin add\nbefore validating items or touching the store.",
+    "source_file": "src/sqllens/memory/schema.py",
+    "source_line": 42,
+    "source_line_end": 43,
+    "verify_against": "`_enforce_item_caps` in src/sqllens/memory/io.py and the cap check in `add_memories` (src/sqllens/memory/admin.py:243)",
+    "verify_hint": "Check that `memory/io.py` still enforces `MAX_BUNDLE_ITEMS` after parse and that nothing in `add_memories` touches the store before the cap check.",
+    "claim_signature": "absolute_claim:schema.py:max-bundle-items-enforcers:42",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "absolute_claim",
+    "claim": "The admin module docstring and `export_memories` docstring assert the JSON export shape is the argument shape `add_memories` accepts, now qualified by a per-block item cap requiring larger exports to be split into batches.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": ":func:`export_memories` (JSON) emits the\n``{\"sql_pairs\": [...], \"schema_docs\": [...]}`` shape :func:`add_memories`\naccepts. Split larger exports into batches within the per-block item cap.",
+    "source_file": "src/sqllens/memory/admin.py",
+    "source_line": 18,
+    "source_line_end": 20,
+    "verify_against": "`export_memories` JSON emission (admin.py:359-368) versus the `add_memories` argument validation and cap",
+    "verify_hint": "Compare the keys emitted at `src/sqllens/memory/admin.py:359-368` with what `add_memories` accepts, and confirm no other round-trip claim elsewhere in the repo still says 'exactly'/'round-trips straight back in'.",
+    "claim_signature": "absolute_claim:admin.py:export-roundtrip-scope:18",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "dependency_interaction",
+    "claim": "ChromaAgentMemory instances expose a `_collection_state` attribute whose `writing()` is a context manager usable around a synchronous `collection.delete(...)` in MemoryStore.clear.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/store.py",
+    "source_line": 219,
+    "source_line_end": 220,
+    "verify_against": "ChromaAgentMemory and the collection-state helper",
+    "verify_hint": "Check `_collection_state` on `ChromaAgentMemory` in `src/sqllens/agent/integrations/chromadb/agent_memory.py` and `writing()` in `src/sqllens/_memory_consistency.py`",
+    "claim_signature": "dependency_interaction:store.py:collection-state-writing:219",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "dependency_interaction",
+    "claim": "MemoryStore.delete_ids wraps only the delete call in `_collection_state.writing()`, while the before/after read-backs run outside the write window.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/store.py",
+    "source_line": 344,
+    "source_line_end": 346,
+    "verify_against": "collection-state semantics",
+    "verify_hint": "Check `writing()` and `check()` in `src/sqllens/_memory_consistency.py` against `delete_ids` in `src/sqllens/memory/store.py`",
+    "claim_signature": "dependency_interaction:store.py:collection-state-writing:344",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "dependency_interaction",
+    "claim": "`collection.get(include=..., limit=256, offset=N)` on the vendored Chroma collection returns a stable, non-overlapping ordered page, and a short page (< 256 ids) means the scan is complete.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/store.py",
+    "source_line": 273,
+    "source_line_end": 282,
+    "verify_against": "ChromaDB collection.get pagination contract",
+    "verify_hint": "Check the pinned chromadb `Collection.get` signature/ordering semantics for `limit`/`offset` and `_get_collection()` in `src/sqllens/agent/integrations/chromadb/agent_memory.py`",
+    "claim_signature": "dependency_interaction:store.py:chroma-get-pagination",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "dependency_interaction",
+    "claim": "`state.snapshot()` and `state.check(generation)` raise the error type the server catches (`MemoryChangedError`) when a managed write overlaps the scan.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/store.py",
+    "source_line": 269,
+    "verify_against": "CollectionState API",
+    "verify_hint": "Check `CollectionState.snapshot` / `check` and `MemoryChangedError` in `src/sqllens/_memory_consistency.py`",
+    "claim_signature": "dependency_interaction:store.py:snapshot-check-raises",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts that a concurrent write invalidating already-yielded rows is always caught by the next check, which raises MemoryChangedError instead of returning an incomplete listing.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Consumers must exhaust this iterator before publishing a result. A\n        concurrent write can invalidate already yielded rows; the next check\n        raises MemoryChangedError instead of returning an incomplete listing.",
+    "source_file": "src/sqllens/memory/store.py",
+    "source_line": 263,
+    "source_line_end": 265,
+    "verify_against": "iter_records implementation and CollectionState",
+    "verify_hint": "Falsify with an unmanaged write (a direct `collection.delete` not wrapped in `writing()`) or a write that begins and completes entirely between two `state.check` calls; check `src/sqllens/_memory_consistency.py`",
+    "claim_signature": "absolute_claim:store.py:iter-records-change-detection",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "dependency_interaction",
+    "claim": "`sqllens._memory_consistency` exports `MemoryChangedError`, and `memory_admin.list_memories` can raise it plus `memory_admin.MemoryInputError`, which server.py converts into a RuntimeError carrying the exception message.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 547,
+    "source_line_end": 548,
+    "verify_against": "memory admin module and consistency module",
+    "verify_hint": "Check `MemoryInputError` and `list_memories` in `src/sqllens/memory/admin.py` and `MemoryChangedError` in `src/sqllens/_memory_consistency.py`",
+    "claim_signature": "dependency_interaction:server.py:list-memories-error-types:547",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "dependency_interaction",
+    "claim": "`memory_admin.add_memories` raises `memory_admin.MemoryInputError` for over-cap blocks before any store work, so the dedicated except clause (not the generic one) produces the message.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 652,
+    "source_line_end": 653,
+    "verify_against": "memory admin add_memories",
+    "verify_hint": "Check `add_memories` and `_enforce_item_caps` in `src/sqllens/memory/admin.py`",
+    "claim_signature": "dependency_interaction:server.py:add-memories-input-error:652",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "api_contract",
+    "claim": "`limit: Annotated[int, Field(ge=0, le=1000)] = 1000` on the MCP tool yields an input schema with `maximum` 1000 and makes out-of-range limits fail before `memory_admin.list_memories` is called.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 527,
+    "verify_against": "FastMCP tool schema generation",
+    "verify_hint": "Check how `mcp.server.fastmcp` `@mcp.tool` builds `inputSchema` from Annotated/Field, and the assertion in `tests/integration/test_memory_bounds.py`",
+    "claim_signature": "api_contract:server.py:list-limit-schema-bounds:527",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "absolute_claim",
+    "claim": "The list_memories docstring asserts limit ranges 0 to 1000 and that zero returns no rows while still counting all matching memories.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "``limit`` ranges from 0 to 1000;\n            zero returns no rows while still counting all matching memories.",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 535,
+    "source_line_end": 536,
+    "verify_against": "memory_admin.list_memories counting logic",
+    "verify_hint": "Falsify with limit=0 on a store where the scan aborts or the total is computed from the truncated selection; check `list_memories` in `src/sqllens/memory/admin.py`",
+    "claim_signature": "absolute_claim:server.py:zero-limit-counts-all:535",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts that a concurrent managed write aborts listing with a retryable tool error.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A concurrent managed write aborts listing with a retryable tool error.",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 537,
+    "verify_against": "iter_records / CollectionState and the server error path",
+    "verify_hint": "Falsify with a write that starts and finishes between consecutive `state.check` calls in `MemoryStore.iter_records`; confirm the raised RuntimeError text reads as retryable",
+    "claim_signature": "absolute_claim:server.py:concurrent-write-retryable:537",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-37",
+    "category": "absolute_claim",
+    "claim": "The add_memories docstring asserts each of sql_pairs and schema_docs accepts up to 10,000 items.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Each block accepts up to 10,000 items.",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 635,
+    "verify_against": "MAX_BUNDLE_ITEMS and the cap enforcement",
+    "verify_hint": "Check `MAX_BUNDLE_ITEMS` in `src/sqllens/memory/schema.py` and `_enforce_item_caps` in `src/sqllens/memory/admin.py`; falsify with exactly 10,000 items per block",
+    "claim_signature": "absolute_claim:server.py:add-block-10000-cap:635",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-38",
+    "category": "api_contract",
+    "claim": "The export_memories docstring asserts the JSON export shape `{\"sql_pairs\": [...], \"schema_docs\": [...]}` is accepted by add_memories and that exports must be split into blocks of at most 10,000 items before adding.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "JSON uses the ``{\"sql_pairs\": [...], \"schema_docs\": [...]}``\n            shape accepted by ``add_memories``. Split larger exports into\n            batches of at most 10,000 items per block before adding.",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 678,
+    "source_line_end": 680,
+    "verify_against": "exporter output shape vs add_memories input shape",
+    "verify_hint": "Compare `export_memories` output in `src/sqllens/memory/exporter.py` / `admin.py` with the `sql_pairs`/`schema_docs` parameters of `add_memories` in `src/sqllens/memory/admin.py`",
+    "claim_signature": "api_contract:server.py:export-roundtrip-shape:678",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-39",
+    "category": "test_mock_alignment",
+    "claim": "The stub store built with `object.__new__(MemoryStore)` and a SimpleNamespace `_mem` exposing only `_get_collection` and `_collection_state=CollectionState()` provides everything `admin.list_memories` and `MemoryStore.iter_records` touch, and `CollectionState()` is constructible with no arguments.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_memory_bounds.py",
+    "source_line": 94,
+    "source_line_end": 99,
+    "verify_against": "MemoryStore and CollectionState",
+    "verify_hint": "Check `CollectionState.__init__` in `src/sqllens/_memory_consistency.py` and the attributes used by `list_memories` in `src/sqllens/memory/admin.py`",
+    "claim_signature": "test_mock_alignment:test_memory_bounds.py:store-with-pages-stub:94",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-40",
+    "category": "test_mock_alignment",
+    "claim": "The PagedCollection fake's `get(*, include, limit=None, offset=0)` signature and its `{ids, metadatas, embeddings}` return (embeddings None when not requested) match how MemoryStore.iter_records calls the real Chroma collection.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_memory_bounds.py",
+    "source_line": 80,
+    "source_line_end": 91,
+    "verify_against": "real chromadb Collection.get call shape used in store.py",
+    "verify_hint": "Compare with the `collection.get(include=include, limit=page_size, offset=offset)` call in `MemoryStore.iter_records` (`src/sqllens/memory/store.py`)",
+    "claim_signature": "test_mock_alignment:test_memory_bounds.py:paged-collection-fake:80",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-41",
+    "category": "data_format_assumption",
+    "claim": "A listed memory row carries `memory_id`, `embedding_preview` of 8 floats and `embedding_dim` equal to the stored vector length when include_embedding_preview is set.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_memory_bounds.py",
+    "source_line": 111,
+    "source_line_end": 113,
+    "verify_against": "admin.list_memories row serialization",
+    "verify_hint": "Check the record-to-wire conversion (`_record_to_wire`) and preview length constant in `src/sqllens/memory/admin.py`",
+    "claim_signature": "data_format_assumption:test_memory_bounds.py:embedding-preview-shape:111",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-42",
+    "category": "data_format_assumption",
+    "claim": "`admin.list_memories` raises a ValueError whose message contains \"limit\" for -1, 1001 and None, before any collection read.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_memory_bounds.py",
+    "source_line": 140,
+    "source_line_end": 145,
+    "verify_against": "admin.list_memories limit validation",
+    "verify_hint": "Check the limit validation branch and `MemoryInputError` definition (is it a ValueError subclass?) in `src/sqllens/memory/admin.py`",
+    "claim_signature": "data_format_assumption:test_memory_bounds.py:list-limit-validation:140",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-43",
+    "category": "api_contract",
+    "claim": "`SearchSavedCorrectToolUsesParams.limit` accepts None, 1 and 100 but rejects 0, -1 and values above 100, and the tool substitutes 10 for None when calling `search_similar_usage(limit=...)`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_memory_bounds.py",
+    "source_line": 148,
+    "source_line_end": 182,
+    "verify_against": "SearchSavedCorrectToolUses params and tool body",
+    "verify_hint": "Check `SearchSavedCorrectToolUsesParams` and `SearchSavedCorrectToolUsesTool.execute` in `src/sqllens/agent/tools/agent_memory.py`",
+    "claim_signature": "api_contract:test_memory_bounds.py:search-limit-range:148",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-44",
+    "category": "test_mock_alignment",
+    "claim": "`ToolRegistry.execute` returns a result whose `.success` is False and `.error` mentions both \"limit\" and \"100\" when parameter validation fails, without awaiting the backend.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_memory_bounds.py",
+    "source_line": 176,
+    "source_line_end": 179,
+    "verify_against": "ToolRegistry validation error surfacing",
+    "verify_hint": "Check `ToolRegistry.execute` parameter validation in `src/sqllens/agent/core/registry.py`",
+    "claim_signature": "test_mock_alignment:test_memory_bounds.py:registry-validation-error:176",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-45",
+    "category": "api_contract",
+    "claim": "A per-item save failure in the importer produces exactly the message \"Failed to save memory item; check the server logs.\" with no driver detail.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "assert report.errors[0].message == \"Failed to save memory item; check the server logs.\"",
+    "source_file": "tests/unit/test_memory_import_export.py",
+    "source_line": 223,
+    "verify_against": "importer per-item error construction",
+    "verify_hint": "Check the per-item except block around line 109 of `src/sqllens/memory/importer.py`",
+    "claim_signature": "api_contract:test_memory_import_export.py:sanitized-item-error:223",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-46",
+    "category": "test_mock_alignment",
+    "claim": "Replacing `admin.list_memories` and `admin.import_bundle` with Mocks on the `sqllens.memory.admin` module intercepts the calls the registered MCP tools actually make, so `assert_not_called` proves no store work ran.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_memory_bounds.py",
+    "source_line": 24,
+    "source_line_end": 30,
+    "verify_against": "server tool bodies' call targets",
+    "verify_hint": "Check how `list_memories` and `add_memories` in `src/sqllens/server.py` reference `memory_admin`, and whether `add_memories` reaches `import_bundle` in `src/sqllens/memory/admin.py`",
+    "claim_signature": "test_mock_alignment:test_memory_bounds.py:admin-module-monkeypatch:24",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-47",
+    "category": "api_contract",
+    "claim": "A MemoryChangedError surfaces to the MCP client as isError with the exact text \"Memory store changed during listing; retry the request.\" and no structuredContent.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "assert \"Memory store changed during listing; retry the request.\" in message",
+    "source_file": "tests/integration/test_memory_bounds.py",
+    "source_line": 76,
+    "verify_against": "MemoryChangedError message text",
+    "verify_hint": "Check the default message of `MemoryChangedError` in `src/sqllens/_memory_consistency.py` (raised bare as `MemoryChangedError` in the test) and the `str(exc)` re-raise in `src/sqllens/server.py`",
+    "claim_signature": "api_contract:test_memory_bounds.py:changed-error-message:76",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-48",
+    "category": "test_mock_alignment",
+    "claim": "The over-cap add_memories error reaching the client contains the substring \"item cap\".",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_memory_bounds.py",
+    "source_line": 56,
+    "verify_against": "the cap error message",
+    "verify_hint": "Check the message raised by `_enforce_item_caps` in `src/sqllens/memory/admin.py`",
+    "claim_signature": "test_mock_alignment:test_memory_bounds.py:item-cap-message:56",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-49",
+    "category": "test_mock_alignment",
+    "claim": "The consistency test fixture's direct `collection.add(ids=..., embeddings=..., metadatas=...)` with these metadata keys and the attributes it reaches for (`_get_collection`, `_executor`, `_client._system`, `persist_directory`, `collection_name`, `_collection`) exist on the vendored ChromaAgentMemory.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_memory_listing_consistency.py",
+    "source_line": 21,
+    "source_line_end": 37,
+    "verify_against": "ChromaAgentMemory internals",
+    "verify_hint": "Check `ChromaAgentMemory.__init__`, `_get_collection`, `_executor` and `_collection` in `src/sqllens/agent/integrations/chromadb/agent_memory.py`",
+    "claim_signature": "test_mock_alignment:test_memory_listing_consistency.py:chroma-memory-internals:21",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-50",
+    "category": "dependency_interaction",
+    "claim": "Each agent writer (`save_tool_usage`, `save_text_memory`, `delete_by_id`, `delete_text_memory`, `clear_memories`, and the hit-count update inside `search_similar_usage`) runs inside the managed write window so it invalidates an in-flight scan.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_memory_listing_consistency.py",
+    "source_line": 141,
+    "source_line_end": 174,
+    "verify_against": "ChromaAgentMemory write methods",
+    "verify_hint": "Check each write method in `src/sqllens/agent/integrations/chromadb/agent_memory.py` for the `_collection_state.writing()` wrapper, including the hit_count update path in `search_similar_usage`",
+    "claim_signature": "dependency_interaction:test_memory_listing_consistency.py:agent-writers-managed:141",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-51",
+    "category": "dependency_interaction",
+    "claim": "`collection_state(persist_dir, collection)` returns the identical object for path aliases that resolve to the same directory (symlink, trailing `/.`, case alias on case-insensitive filesystems) and distinct objects for different collection names.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_memory_listing_consistency.py",
+    "source_line": 187,
+    "source_line_end": 206,
+    "verify_against": "collection_state keying",
+    "verify_hint": "Check the path canonicalization and registry key in `collection_state` in `src/sqllens/_memory_consistency.py`; state what happens on both case-sensitive and case-insensitive filesystems",
+    "claim_signature": "dependency_interaction:test_memory_listing_consistency.py:collection-state-keying:187",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-52",
+    "category": "data_format_assumption",
+    "claim": "Real Chroma returns records in insertion-id order so `iter_records` yields `id-0000..id-0512` with metadata dicts equal to what was written and embeddings preserved exactly as floats.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_memory_listing_consistency.py",
+    "source_line": 45,
+    "source_line_end": 48,
+    "verify_against": "chromadb get ordering and metadata round-trip",
+    "verify_hint": "Check the pinned chromadb `Collection.get` ordering guarantee and whether `_records_from_result` in `src/sqllens/memory/store.py` preserves metadata verbatim",
+    "claim_signature": "data_format_assumption:test_memory_listing_consistency.py:chroma-order-roundtrip:45",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-53",
+    "category": "dependency_interaction",
+    "claim": "A failed managed write (an exception inside `writing()`) still releases the collection state so later scans succeed, and leaves the stored row count unchanged.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_memory_listing_consistency.py",
+    "source_line": 209,
+    "source_line_end": 235,
+    "verify_against": "CollectionState.writing error handling",
+    "verify_hint": "Check the try/finally and generation bump in `CollectionState.writing` in `src/sqllens/_memory_consistency.py`",
+    "claim_signature": "dependency_interaction:test_memory_listing_consistency.py:failed-write-releases-state:209",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-54",
+    "category": "dependency_interaction",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 1. `src/sqllens/memory/store.py` lines 259 to 272 replace one `collection.get()` snapshot with an offset-paged loop, and `src/sqllens/memory/admin.py` lines 161 to 189 build both the returned rows and `total` from that loop, so the listing is no longer a single consistent read. Read-side admin tools deliberately do not take `admin_write_lock`, which `docs/internal/mcp-server/tools.md` line 375 records, while `delete_memory` and `clear_memories` mutate under it. A delete that lands between two page reads moves later rows to lower offsets, so the next page starts past them: those rows never appear and `total` is reported lower than the store holds, as an unqualified success. The strengthened claim at `docs/internal/mcp-server/tools.md` line 384 reads as exact and now holds only when nothing else is writing. (raised by 4/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/store.py",
+    "verify_against": "the paging loop in `iter_records` and its consumer, against the locking policy for admin tools",
+    "verify_hint": "Check `iter_records` in `src/sqllens/memory/store.py` (the `collection.get(limit=..., offset=...)` loop), `list_memories` in `src/sqllens/memory/admin.py`, the `admin_write_lock` usage of `delete_memory`/`clear_memories` in `src/sqllens/server.py`, and the locking note in `docs/internal/mcp-server/tools.md`",
+    "prior_ref": "1 (Important / Major)",
+    "prior_evidence": "1. `src/sqllens/memory/store.py` lines 259 to 272 replace one `collection.get()` snapshot with an offset-paged loop, and `src/sqllens/memory/admin.py` lines 161 to 189 build both the returned rows and `total` from that loop, so the listing is no longer a single consistent read. Read-side admin tools deliberately do not take `admin_write_lock`, which `docs/internal/mcp-server/tools.md` line 375 records, while `delete_memory` and `clear_memories` mutate under it. A delete that lands between two page reads moves later rows to lower offsets, so the next page starts past them: those rows never appear and `total` is reported lower than the store holds, as an unqualified success. The strengthened claim at `docs/internal/mcp-server/tools.md` line 384 reads as exact and now holds only when nothing else is writing. (raised by 4/6 agents)",
+    "claim_signature": "dependency_interaction:store.py:paged-listing-snapshot-consistency",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-55",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 2. The paging contract in `src/sqllens/memory/store.py` lines 259 to 272 is proven only against a stub that implements the contract under test. The loop stops when a page returns fewer ids than the page size, so it trusts the installed Chroma to both clamp `limit` and advance `offset`. The only coverage that crosses a page boundary is `PagedCollection` in `tests/unit/test_memory_bounds.py`, which returns contiguous slices by construction, and every real-store test in `tests/unit/test_memory_admin_tools.py` holds fewer than 256 rows. A backend that clamps or ignores either argument would make the loop re-yield page one, producing duplicate rows and an inflated `total` with the whole suite still green, or never terminate and block the event loop, because `admin.list_memories` is a synchronous scan called from the `async def list_memories` tool. (raised by 2/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/store.py",
+    "verify_against": "the real Chroma collection `get` semantics versus the `PagedCollection` stub and real-store tests",
+    "verify_hint": "Check `iter_records` in `src/sqllens/memory/store.py`, the `PagedCollection` double in `tests/unit/test_memory_bounds.py`, the real-store cases in `tests/unit/test_memory_admin_tools.py`, and the `async def list_memories` tool in `src/sqllens/server.py`",
+    "prior_ref": "2 (Important / Major)",
+    "prior_evidence": "2. The paging contract in `src/sqllens/memory/store.py` lines 259 to 272 is proven only against a stub that implements the contract under test. The loop stops when a page returns fewer ids than the page size, so it trusts the installed Chroma to both clamp `limit` and advance `offset`. The only coverage that crosses a page boundary is `PagedCollection` in `tests/unit/test_memory_bounds.py`, which returns contiguous slices by construction, and every real-store test in `tests/unit/test_memory_admin_tools.py` holds fewer than 256 rows. A backend that clamps or ignores either argument would make the loop re-yield page one, producing duplicate rows and an inflated `total` with the whole suite still green, or never terminate and block the event loop, because `admin.list_memories` is a synchronous scan called from the `async def list_memories` tool. (raised by 2/6 agents)",
+    "claim_signature": "test_mock_alignment:store.py:paging-contract-stub-only",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-56",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 1. The list bound is written out as the literal `1000` in four places instead of being derived from one constant. `src/sqllens/memory/admin.py` line 59 defines `MAX_LIST_LIMIT`, but the wire schema at `src/sqllens/server.py` line 526, the tool docstring at line 534, and the table row in `docs/internal/mcp-server/tools.md` line 384 each repeat the number. The per-block item cap is restated the same way, including a third copy of `10,000` in `src/sqllens/server.py` line 633, and it is enforced twice over different shapes with two different exception types. Changing one copy would leave the advertised schema and the enforced value disagreeing. (raised by 3/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "verify_against": "`MAX_LIST_LIMIT` / `MAX_BUNDLE_ITEMS` definitions versus their restatements",
+    "verify_hint": "Check `MAX_LIST_LIMIT` in `src/sqllens/memory/admin.py`, the `list_memories` parameter annotation and docstring in `src/sqllens/server.py`, the 10,000 restatement later in `src/sqllens/server.py`, and the limits row in `docs/internal/mcp-server/tools.md`",
+    "prior_ref": "1 (Suggestion / Minor)",
+    "prior_evidence": "1. The list bound is written out as the literal `1000` in four places instead of being derived from one constant. `src/sqllens/memory/admin.py` line 59 defines `MAX_LIST_LIMIT`, but the wire schema at `src/sqllens/server.py` line 526, the tool docstring at line 534, and the table row in `docs/internal/mcp-server/tools.md` line 384 each repeat the number. The per-block item cap is restated the same way, including a third copy of `10,000` in `src/sqllens/server.py` line 633, and it is enforced twice over different shapes with two different exception types. Changing one copy would leave the advertised schema and the enforced value disagreeing. (raised by 3/6 agents)",
+    "claim_signature": "api_contract:server.py:duplicated-limit-literals",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-57",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 2. `docs/internal/agent/memory.md` line 250 still says the store gained \"four raw collection operations that back the admin layer\", and the table that follows lists only `get_all`, `get_one`, `delete_ids` and `clear()`. This change adds a fifth operation in the same block, `iter_records`, and that is now the only read backing `admin.list_memories`. The count is wrong and the table leaves the new paged read undocumented while presenting the un-paged `get_all` as how the admin layer enumerates rows. (raised by 3/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/agent/memory.md",
+    "verify_against": "the raw admin enumeration/mutation block in the store",
+    "verify_hint": "Check the operations listed in the `# --- Raw admin enumeration / mutation ---` block of `src/sqllens/memory/store.py` against the count sentence and table in `docs/internal/agent/memory.md`",
+    "prior_ref": "2 (Suggestion / Minor)",
+    "prior_evidence": "2. `docs/internal/agent/memory.md` line 250 still says the store gained \"four raw collection operations that back the admin layer\", and the table that follows lists only `get_all`, `get_one`, `delete_ids` and `clear()`. This change adds a fifth operation in the same block, `iter_records`, and that is now the only read backing `admin.list_memories`. The count is wrong and the table leaves the new paged read undocumented while presenting the un-paged `get_all` as how the admin layer enumerates rows. (raised by 3/6 agents)",
+    "claim_signature": "data_format_assumption:memory.md:raw-operations-count",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-58",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 3. `docs/internal/mcp-server/tools.md` line 392, a line this change adds, says \"Per-item validation errors omit input values\". The error entry built at `src/sqllens/memory/admin.py` lines 264 to 269 still returns the item's own `question` string, replaced by `None` only when it is not a string or is longer than `QUESTION_MAX`. The `error` message omits input values; the entry around it does not. (raised by 2/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "the per-item error entry construction in the admin layer",
+    "verify_hint": "Check the error-entry construction in `add_memories` in `src/sqllens/memory/admin.py` (the branch that sets `question`) against the per-item validation sentence in `docs/internal/mcp-server/tools.md`",
+    "prior_ref": "3 (Suggestion / Minor)",
+    "prior_evidence": "3. `docs/internal/mcp-server/tools.md` line 392, a line this change adds, says \"Per-item validation errors omit input values\". The error entry built at `src/sqllens/memory/admin.py` lines 264 to 269 still returns the item's own `question` string, replaced by `None` only when it is not a string or is longer than `QUESTION_MAX`. The `error` message omits input values; the entry around it does not. (raised by 2/6 agents)",
+    "claim_signature": "api_contract:tools.md:per-item-errors-omit-inputs",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-59",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 4. `CHANGELOG.md` lines 84 and 85, lines this change adds, say per-item failures \"keep their indices without returning raw validation inputs or exception details\". The same `question` echo described above is a caller-supplied input value returned for a rejected item, bounded rather than withheld. The checklist verifier reached the same reading independently and recorded it as item VC-15 below. (raised by 2/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "CHANGELOG.md",
+    "verify_against": "the per-item error entries produced by the admin and importer paths",
+    "verify_hint": "Check the error entries built in `add_memories` in `src/sqllens/memory/admin.py` and the per-item failure message in `src/sqllens/memory/importer.py` against the changelog entry",
+    "prior_ref": "4 (Suggestion / Minor)",
+    "prior_evidence": "4. `CHANGELOG.md` lines 84 and 85, lines this change adds, say per-item failures \"keep their indices without returning raw validation inputs or exception details\". The same `question` echo described above is a caller-supplied input value returned for a rejected item, bounded rather than withheld. The checklist verifier reached the same reading independently and recorded it as item VC-15 below. (raised by 2/6 agents)",
+    "claim_signature": "data_format_assumption:CHANGELOG.md:no-raw-inputs-claim",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-60",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 5. The per-item storage failure message in `src/sqllens/memory/importer.py` lines 107 to 114 tells the reader to \"check the server logs\". The same message is printed by `sqllens import-memory` at `src/sqllens/cli.py` line 502, where there is no server, and no module under `src/sqllens` configures logging, so the logged detail reaches a local operator only through Python's last-resort handler. The message also carries no identifier the operator could match against a log line. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/importer.py",
+    "verify_against": "the message's emitting sites and the repository's logging configuration",
+    "verify_hint": "Check the per-item failure message in `src/sqllens/memory/importer.py`, its printing in the `import-memory` command in `src/sqllens/cli.py`, and whether any module under `src/sqllens` configures logging handlers",
+    "prior_ref": "5 (Suggestion / Minor)",
+    "prior_evidence": "5. The per-item storage failure message in `src/sqllens/memory/importer.py` lines 107 to 114 tells the reader to \"check the server logs\". The same message is printed by `sqllens import-memory` at `src/sqllens/cli.py` line 502, where there is no server, and no module under `src/sqllens` configures logging, so the logged detail reaches a local operator only through Python's last-resort handler. The message also carries no identifier the operator could match against a log line. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:importer.py:check-server-logs-message",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-61",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 6. `src/sqllens/memory/admin.py` lines 264 to 266 replace an oversized or non-string `question` with `None` in the error entry, and nothing tells the caller the value was withheld rather than absent. The only remaining handle on that row is its index, and neither the function docstring nor the tools table records the condition. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/admin.py",
+    "verify_against": "the error-entry shape and its documentation",
+    "verify_hint": "Check the branch in `add_memories` in `src/sqllens/memory/admin.py` that nulls an oversized or non-string `question`, its function docstring, and the error-entry row in `docs/internal/mcp-server/tools.md`",
+    "prior_ref": "6 (Suggestion / Minor)",
+    "prior_evidence": "6. `src/sqllens/memory/admin.py` lines 264 to 266 replace an oversized or non-string `question` with `None` in the error entry, and nothing tells the caller the value was withheld rather than absent. The only remaining handle on that row is its index, and neither the function docstring nor the tools table records the condition. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:admin.py:withheld-question-indistinguishable",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-62",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 7. Two user-facing surfaces still carry the unqualified round-trip claim this change softened everywhere else. `docs/external/managing-memory.md` line 139 says the JSON form \"can be fed straight back into the add tool\", and `src/sqllens/ui/memory_admin.html` line 292 says \"JSON export round-trips back into Import.\" Both are now wrong for a store holding more than 10,000 pairs or docs, which is why the change rewrote the equivalent internal sentences. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/external/managing-memory.md",
+    "verify_against": "the per-block item cap enforced on the add path",
+    "verify_hint": "Check the round-trip sentences in `docs/external/managing-memory.md` and `src/sqllens/ui/memory_admin.html` against the `MAX_BUNDLE_ITEMS` enforcement in `add_memories` in `src/sqllens/memory/admin.py`",
+    "prior_ref": "7 (Suggestion / Minor)",
+    "prior_evidence": "7. Two user-facing surfaces still carry the unqualified round-trip claim this change softened everywhere else. `docs/external/managing-memory.md` line 139 says the JSON form \"can be fed straight back into the add tool\", and `src/sqllens/ui/memory_admin.html` line 292 says \"JSON export round-trips back into Import.\" Both are now wrong for a store holding more than 10,000 pairs or docs, which is why the change rewrote the equivalent internal sentences. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:managing-memory.md:unqualified-round-trip-claim",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-63",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 8. `src/sqllens/memory/schema.py` lines 41 to 45 now say the item cap is enforced by `memory.io` after parse and by admin add before any store work, but the page that enumerates the enforcement sites was not updated. `docs/internal/agent/memory.md` line 182 still names only `_enforce_item_caps(bundle)`, and line 186 still argues that putting the cap at the parse boundary leaves in-process writers unrestricted, which no longer describes the `add_memories` path. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/agent/memory.md",
+    "verify_against": "the cap-enforcement sites in code",
+    "verify_hint": "Check `_enforce_item_caps` in `src/sqllens/memory/io.py` and the cap check at the top of `add_memories` in `src/sqllens/memory/admin.py` against the enforcement enumeration and rationale paragraph in `docs/internal/agent/memory.md`",
+    "prior_ref": "8 (Suggestion / Minor)",
+    "prior_evidence": "8. `src/sqllens/memory/schema.py` lines 41 to 45 now say the item cap is enforced by `memory.io` after parse and by admin add before any store work, but the page that enumerates the enforcement sites was not updated. `docs/internal/agent/memory.md` line 182 still names only `_enforce_item_caps(bundle)`, and line 186 still argues that putting the cap at the parse boundary leaves in-process writers unrestricted, which no longer describes the `add_memories` path. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:memory.md:cap-enforcement-site-list",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-64",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 9. The `add_memories` docstring at `src/sqllens/memory/admin.py` lines 230 to 240 still describes only per-item error collection. The function now raises `MemoryInputError` for an over-cap block before validating anything, which rejects the whole call, and the docstring does not mention it even though the tools table and `schema.py` were updated for it. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/admin.py",
+    "verify_against": "the body of `add_memories`",
+    "verify_hint": "Check the `MemoryInputError` raise at the top of `add_memories` in `src/sqllens/memory/admin.py` against that function's docstring",
+    "prior_ref": "9 (Suggestion / Minor)",
+    "prior_evidence": "9. The `add_memories` docstring at `src/sqllens/memory/admin.py` lines 230 to 240 still describes only per-item error collection. The function now raises `MemoryInputError` for an over-cap block before validating anything, which rejects the whole call, and the docstring does not mention it even though the tools table and `schema.py` were updated for it. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:admin.py:add-memories-docstring-raise",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-65",
+    "category": "dependency_interaction",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 10. `src/sqllens/memory/admin.py` lines 249 and 250 return a fixed client message for a `TypeError` without calling `logger.exception`, unlike the fallback branch just below. For the expected case, a non-mapping item, that is fine. Any other `TypeError` raised while constructing a `SqlPair` or `SchemaDoc` becomes invisible in both the client reply and the server log. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/admin.py",
+    "verify_against": "the exception branches around `SqlPair`/`SchemaDoc` construction",
+    "verify_hint": "Check the `except TypeError` branch and the following fallback branch in the item-validation helper of `src/sqllens/memory/admin.py`, and what `SqlPair`/`SchemaDoc` construction can raise",
+    "prior_ref": "10 (Suggestion / Minor)",
+    "prior_evidence": "10. `src/sqllens/memory/admin.py` lines 249 and 250 return a fixed client message for a `TypeError` without calling `logger.exception`, unlike the fallback branch just below. For the expected case, a non-mapping item, that is fine. Any other `TypeError` raised while constructing a `SqlPair` or `SchemaDoc` becomes invisible in both the client reply and the server log. (raised by 1/6 agents)",
+    "claim_signature": "dependency_interaction:admin.py:typeerror-unlogged",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-66",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 11. The `limit` parameter of `admin.list_memories` is annotated `int` with a default of 1000, yet the body guards with `isinstance(limit, int)` and a new test asserts that `limit=None` raises. The guard therefore exists only for callers that already violate the annotation, and the same check accepts a `bool`, so `True` quietly means a limit of one. The docstring records neither the accepted range nor that the function can raise. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/admin.py",
+    "verify_against": "the signature, guard and docstring of `list_memories`, and the tests asserting its rejection behavior",
+    "verify_hint": "Check `list_memories` in `src/sqllens/memory/admin.py` (annotation, `isinstance(limit, int)` guard, docstring) and the `limit=None` test in `tests/unit/test_memory_bounds.py`",
+    "prior_ref": "11 (Suggestion / Minor)",
+    "prior_evidence": "11. The `limit` parameter of `admin.list_memories` is annotated `int` with a default of 1000, yet the body guards with `isinstance(limit, int)` and a new test asserts that `limit=None` raises. The guard therefore exists only for callers that already violate the annotation, and the same check accepts a `bool`, so `True` quietly means a limit of one. The docstring records neither the accepted range nor that the function can raise. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:admin.py:list-limit-type-contract",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-67",
+    "category": "dependency_interaction",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 12. `src/sqllens/memory/admin.py` lines 173 to 180 still honour `include_embedding_preview` on the `limit=0` path. A caller asking for zero rows with previews on makes the drain loop fetch embeddings for every page and discard all of them, when the only purpose of that scan is the count. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/admin.py",
+    "verify_against": "the `limit == 0` drain branch and what it passes to `iter_records`",
+    "verify_hint": "Check the `limit == 0` branch of `list_memories` in `src/sqllens/memory/admin.py` and how `include_embedding_preview` reaches `iter_records` in `src/sqllens/memory/store.py`",
+    "prior_ref": "12 (Suggestion / Minor)",
+    "prior_evidence": "12. `src/sqllens/memory/admin.py` lines 173 to 180 still honour `include_embedding_preview` on the `limit=0` path. A caller asking for zero rows with previews on makes the drain loop fetch embeddings for every page and discard all of them, when the only purpose of that scan is the count. (raised by 1/6 agents)",
+    "claim_signature": "dependency_interaction:admin.py:limit-zero-embedding-fetch",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-68",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 13. `src/sqllens/memory/schema.py` lines 25 to 27 still say both caps are \"enforced in `memory.io` at the parse boundary\", a few lines above the docstring this change edited to record the second enforcement site. Two adjacent statements of one rule now disagree. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/schema.py",
+    "verify_against": "the cap-enforcement sites in `memory.io` and `memory.admin`",
+    "verify_hint": "Check the module comment near the cap constants in `src/sqllens/memory/schema.py` against the adjacent edited docstring, `_enforce_item_caps` in `src/sqllens/memory/io.py`, and the cap check in `add_memories` in `src/sqllens/memory/admin.py`",
+    "prior_ref": "13 (Suggestion / Minor)",
+    "prior_evidence": "13. `src/sqllens/memory/schema.py` lines 25 to 27 still say both caps are \"enforced in `memory.io` at the parse boundary\", a few lines above the docstring this change edited to record the second enforcement site. Two adjacent statements of one rule now disagree. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:schema.py:cap-parse-boundary-comment",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-69",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 14. The sanitized error paths move the only copy of the failure detail into `logger.exception`, and the updated assertions in `tests/unit/test_memory_import_export.py` now pin just the fixed message. Nothing asserts that the original exception still reaches the log, so a later change that drops `logger.exception` would leave per-item storage failures undiagnosable with the suite still passing. The non-`ValidationError`, non-`TypeError` fallback at `src/sqllens/memory/admin.py` lines 251 and 252 is also unexercised. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_memory_import_export.py",
+    "verify_against": "the sanitized error branches and the assertions covering them",
+    "verify_hint": "Check the updated assertions in `tests/unit/test_memory_import_export.py` against the `logger.exception` calls in `src/sqllens/memory/importer.py` and the fallback `except` branch in `src/sqllens/memory/admin.py`",
+    "prior_ref": "14 (Suggestion / Minor)",
+    "prior_evidence": "14. The sanitized error paths move the only copy of the failure detail into `logger.exception`, and the updated assertions in `tests/unit/test_memory_import_export.py` now pin just the fixed message. Nothing asserts that the original exception still reaches the log, so a later change that drops `logger.exception` would leave per-item storage failures undiagnosable with the suite still passing. The non-`ValidationError`, non-`TypeError` fallback at `src/sqllens/memory/admin.py` lines 251 and 252 is also unexercised. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:test_memory_import_export.py:log-detail-unasserted",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-70",
+    "category": "data_format_assumption",
+    "claim": "Per-item validation and storage failures keep their indices and return no raw caller-supplied validation input and no exception detail.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "CHANGELOG.md",
+    "verify_against": "the per-item error envelope built by the admin and importer paths",
+    "verify_hint": "Check `validation_error_lines` in `src/sqllens/_errors.py`, the error-entry construction and storage-failure entries in `src/sqllens/memory/admin.py`, and the fixed message in `src/sqllens/memory/importer.py`",
+    "prior_ref": "VC-15",
+    "prior_evidence": "Exception details are scrubbed: validation_error_lines (_errors.py:16-25) emits only loc/msg, admin.py:246-252 maps TypeError/other to fixed strings, importer.py:107-114 uses fixed message 'Failed to save memory item; check the server logs.'. But admin.py:264-269 echoes the caller's raw `question` (<=1000 chars, any string) in the error entry of a pair that failed validation (e.g. bad sql), and admin.py:293,300 echoes the question for storage failures. So raw caller-supplied input from a rejected item is returned, contradicting the CHANGELOG's absolute wording (CHANGELOG.md:84-85). Impact is minor: it is the caller's own value, length-capped, used for identification.",
+    "claim_signature": "data_format_assumption:CHANGELOG.md:no-raw-inputs-claim",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  }
+]
