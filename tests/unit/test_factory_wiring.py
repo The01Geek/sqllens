@@ -250,13 +250,26 @@ async def _prompt_from_agent_tools(agent: object) -> str:
     return prompt
 
 
-async def test_save_text_memory_tool_omitted_by_default(tmp_path: Path) -> None:
+async def test_save_text_memory_tool_omitted_when_field_unset(
+    tmp_path: Path,
+) -> None:
     """``memory.save_text_memories`` is OFF by default, so the agent must not
     get the ``save_text_memory`` tool and the default system prompt must carry
     no TEXT MEMORY section — otherwise a wrong guess the agent writes becomes a
     note later questions receive as trusted context (issue #267).
+
+    ``MemoryConfig`` is built without the field, not through
+    ``build_test_config``, which always passes it: this is the config a
+    deployment written before #267 loads, and it is the only arm here that
+    exercises the field default rather than an explicit value.
     """
-    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    cfg = Config(
+        database=DatabaseConfig(url="sqlite:///:memory:"),
+        llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
+        memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
+        auth=AuthConfig(mode="none"),
+        agent=AgentRuntimeConfig(),
+    )
     agent = build_agent(cfg)
 
     assert "save_text_memory" not in agent.tool_registry._tools
@@ -266,8 +279,9 @@ async def test_save_text_memory_tool_omitted_by_default(tmp_path: Path) -> None:
 async def test_save_text_memory_tool_omitted_when_explicitly_false(
     tmp_path: Path,
 ) -> None:
-    """An explicit ``save_text_memories=False`` is the same as leaving it unset
-    — the registration and the prompt section both stay absent."""
+    """An explicit ``save_text_memories=False`` reaches the same outcome as
+    leaving the field unset — the registration and the prompt section both
+    stay absent."""
     cfg = build_test_config(
         persist_dir=tmp_path / "chroma", save_text_memories=False
     )

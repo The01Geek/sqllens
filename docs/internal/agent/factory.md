@@ -37,7 +37,9 @@ ToolRegistry    →  RunSqlTool                          (executes generated SQL
                                                         registered only when cfg.memory.save_queries)
                    SearchSavedCorrectToolUsesTool      (memory read; default_similarity_threshold
                                                         bound to cfg.memory.similarity_threshold)
-                   SaveTextMemoryTool                  (memory write — free-form text notes)
+                   SaveTextMemoryTool                  (memory write — free-form text notes;
+                                                        registered only when
+                                                        cfg.memory.save_text_memories)
                                                           ↓
                                                         Agent(llm, tool_registry, user_resolver,
                                                               agent_memory, conversation_store,

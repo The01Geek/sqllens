@@ -185,9 +185,10 @@ class MemoryConfig(BaseModel):
             "becomes a note later questions receive as trusted context. When "
             "disabled the tool is not registered and the default system prompt "
             "drops its TEXT MEMORY section automatically. Notes already stored "
-            "— including curated imports — are untouched and still injected as "
-            "context. A blank value (an empty or whitespace-only environment "
-            "variable or TOML string) reads as OFF."
+            "— including curated imports — are untouched, and the context "
+            "enhancer still injects the ones matching a question. A blank "
+            "value (an empty or whitespace-only environment variable or TOML "
+            "string) reads as OFF."
         ),
     )
     allow_import: bool = Field(
