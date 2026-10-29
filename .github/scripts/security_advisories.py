@@ -331,7 +331,7 @@ def prepare(client: GitHub, sha: str, days: str) -> None:
     effort = config.get("security_audit", {}).get("effort", "medium")
     if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", model):
         raise AuditError("Invalid audit model")
-    if effort not in ["low", "medium", "high", "max"]:
+    if effort not in ["low", "medium", "high", "xhigh", "max"]:
         raise AuditError("Invalid audit effort")
     drafts = list_drafts(client)
     draft_index(drafts)

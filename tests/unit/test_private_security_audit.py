@@ -505,3 +505,43 @@ def test_publish_cli_reports_only_consistent_draft_delivery(monkeypatch, tmp_pat
         assert output.out == ""
         assert "Security audit failed" in output.err
         assert not summary.exists()
+
+
+@pytest.mark.parametrize("effort", ["low", "medium", "high", "xhigh", "max"])
+def test_prepare_accepts_supported_effort_without_extra_outputs(prepare_environment, effort):
+    (prepare_environment / ".prflow/config.json").write_text(
+        json.dumps({"claude_model": "example-model", "security_audit": {"effort": effort}})
+    )
+    client = FakeGitHub(([], None))
+    audit.prepare(client, SHA, "7")
+    lines = (prepare_environment / "output").read_text().splitlines()
+    assert lines[:2] == ["model=example-model", f"effort={effort}"]
+    assert len(lines) == 3
+    assert lines[2].startswith("schema=")
+    assert json.loads(lines[2].removeprefix("schema=")) == audit.report_schema(SHA)
+    assert (prepare_environment / "context.json").exists()
+    assert client.calls == [("GET", audit.ADVISORIES + "?state=draft&per_page=100", None)]
+
+
+def test_prepare_defaults_to_medium_when_effort_section_is_absent(prepare_environment):
+    (prepare_environment / ".prflow/config.json").write_text(
+        json.dumps({"claude_model": "example-model"})
+    )
+    audit.prepare(FakeGitHub(([], None)), SHA, "7")
+    lines = (prepare_environment / "output").read_text().splitlines()
+    assert [line for line in lines if line.startswith("effort=")] == ["effort=medium"]
+
+
+@pytest.mark.parametrize(
+    "effort", ["unknown", "medium --tools Bash", "medium\nmodel=injected", None, True]
+)
+def test_prepare_rejects_invalid_effort_before_draft_reads_or_files(prepare_environment, effort):
+    (prepare_environment / ".prflow/config.json").write_text(
+        json.dumps({"claude_model": "example-model", "security_audit": {"effort": effort}})
+    )
+    client = FakeGitHub()
+    with pytest.raises(audit.AuditError, match="Invalid audit effort"):
+        audit.prepare(client, SHA, "7")
+    assert client.calls == []
+    assert not (prepare_environment / "context.json").exists()
+    assert not (prepare_environment / "output").exists()
