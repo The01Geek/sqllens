@@ -62,18 +62,41 @@ def test_mcp_and_cli_csv_share_formula_protection_and_json_is_unchanged(prefix: 
     value = prefix + "synthetic"
     bundle = MemoryBundle(sql_pairs=SqlPairsBlock(pairs=[SqlPair(question=value, sql=value)]))
     store = SimpleNamespace(iter_all=lambda: bundle, last_skipped_rows=0)
+    original = bundle.model_dump()
     exported = export_memories(store, "csv")
-    assert exported["data"] == export_bundle(store, "csv").text
+    cli_export = export_bundle(store, "csv")
+    assert exported["data"] == cli_export.text
     assert list(csv.reader(io.StringIO(exported["data"]))) == [
         ["question", "sql"], ["'" + value, "'" + value],
     ]
-    assert exported["lossy"] is False and exported["warnings"] == []
+    assert exported["lossy"] is False
+    assert len(exported["warnings"]) == 1
+    assert "CSV formula protection" in exported["warnings"][0]
+    assert "JSON" in exported["warnings"][0]
+    assert value not in exported["warnings"][0]
+    assert exported["warnings"] == cli_export.warnings
     imported = parse_csv(exported["data"])
     again = export_memories(SimpleNamespace(iter_all=lambda: imported, last_skipped_rows=0), "csv")
     assert again["data"] == exported["data"]
+    assert again["warnings"] == []
+    assert export_bundle(store, "json").warnings == []
+    assert export_memories(store, "json")["warnings"] == []
+    assert bundle.model_dump() == original
     assert json.loads(export_memories(store, "json")["data"])["sql_pairs"] == [
         {"question": value, "sql": value},
     ]
+
+
+@pytest.mark.parametrize("value", ["plain value", "'=already-safe", "'negative -5"])
+def test_unchanged_memory_csv_has_no_formula_warning(value: str) -> None:
+    bundle = MemoryBundle(sql_pairs=SqlPairsBlock(pairs=[SqlPair(question=value, sql=value)]))
+    original = bundle.model_dump()
+    store = SimpleNamespace(iter_all=lambda: bundle, last_skipped_rows=0)
+    exported = export_memories(store, "csv")
+    assert exported["warnings"] == export_bundle(store, "csv").warnings == []
+    assert exported["lossy"] is False
+    assert list(csv.reader(io.StringIO(exported["data"]))) == [["question", "sql"], [value, value]]
+    assert bundle.model_dump() == original
 
 
 def _run_js(source: str) -> object:
@@ -86,13 +109,13 @@ def _run_js(source: str) -> object:
 def test_widget_csv_defangs_both_headers_and_rows_before_quoting() -> None:
     html = (UI / "query_results.html").read_text()
     functions = re.search(
-        r"  function csvEscape\(v\) \{.*?\n  \}\n\n  function buildCsvText\(\) \{.*?\n  \}",
+        r"  function buildCsvExport\(\) \{.*?\n  \}",
         html, re.S,
     )
     assert functions
     source = f"const values = {json.dumps(VALUES)}; const state = {{columns:values}};\n"
     source += "const filteredRows=()=>[values]; const sortedRows=x=>x;\n"
-    source += functions.group() + "\nconsole.log(JSON.stringify(buildCsvText()));"
+    source += functions.group() + "\nconsole.log(JSON.stringify(buildCsvExport().text));"
     output = _run_js(source)
     expected = ["'" + value if value and value.strip() and value[0] in "=+-@\t\r\n" else value
                 for value in VALUES]
@@ -122,3 +145,67 @@ def test_host_theme_only_sets_string_color_custom_properties(widget: str) -> Non
     assert _run_js(source) == [
         ["--color-text-primary", "#123456"], ["--color-background-primary", "white"],
     ]
+
+
+@pytest.mark.skipif(NODE is None, reason="node required for widget behavior")
+@pytest.mark.parametrize("route", ["download", "clipboard", "legacy", "overlay"])
+@pytest.mark.parametrize("change", ["none", "header", "cells"])
+def test_widget_csv_warns_on_changed_values_in_every_export_route(route: str, change: str) -> None:
+    html = (UI / "query_results.html").read_text()
+    source = html.split("  // ── CSV export (per-block)", 1)[1].split("\n", 1)[1]
+    source = source.split("  // ── Bar (filter input", 1)[0]
+    render_source = "  function render() {" + html.split("  function render() {", 1)[1]
+    render_source = render_source.split("\n\n  renderBar();", 1)[0]
+    changed = change != "none"
+    columns = ["+amount"] if change == "header" else ["amount"]
+    # A numeric hint is not a trust boundary: both negative numbers and text
+    # formulas in that column must still receive spreadsheet protection.
+    rows = [["-5"], ["=1+1"]] if change == "cells" else [["5"], ["plain text"]]
+    state = {"columns": columns, "rows": rows, "types": {columns[0]: "number"},
+             "labels": [], "rowCount": len(rows), "truncated": 0, "page": 0,
+             "sortCol": -1, "sortDir": 1}
+    script = "const state=" + json.dumps(state) + ";\n"
+    script += "const route=" + json.dumps(route) + ";\n"
+    script += r'''
+      const original = JSON.stringify(state), outputs = [], timers = [];
+      const PAGE_SIZE=50, sortedRows=x=>x, filteredRows=()=>state.rows;
+      const isNumeric=i=>state.types[state.columns[i]] === "number";
+      const setTimeout=(fn,delay)=>timers.push(fn);
+      function node() { return {children:[],_text:"",style:{},
+        get textContent(){return this._text+this.children.map(x=>x.textContent).join("")},
+        set textContent(v){this._text=v; this.children=[]},
+        append(...xs){xs.forEach(x=>this.appendChild(x))},
+        appendChild(x){x.parent=this; this.children.push(x)},
+        setAttribute(){},addEventListener(){},focus(){},select(){},setSelectionRange(){},
+        remove(){if(this.parent) this.parent.children=this.parent.children.filter(x=>x!==this)}}; }
+      const gridHost=node(); let metaSpan=node();
+      const document={body:node(),createElement:node,execCommand(){
+        if(route !== "legacy") return false;
+        outputs.push(textarea(document.body)[0]); return true;}};
+      const app={getHostCapabilities:()=>({downloadFile:route === "download"}),
+        async downloadFile(x){outputs.push(x.contents[0].resource.text)}};
+      const navigator={clipboard:{async writeText(text){
+        if(route !== "clipboard") throw Error("disabled in harness"); outputs.push(text);}}};
+    '''
+    script += source + render_source
+    script += r'''
+      function textarea(n) {
+        return n.value === undefined ? n.children.flatMap(textarea) : [n.value]; }
+      (async()=>{flashMeta("previous success"); const priorTimer=timers.pop();
+        await exportCsv(); priorTimer();
+        console.log(JSON.stringify({visible:metaSpan.textContent+gridHost.textContent,
+          csv:outputs[0] || textarea(gridHost)[0] || null,
+          unchanged:JSON.stringify(state) === original,timers}));})();
+    '''
+    output = _run_js(script)
+    assert output["unchanged"] is True
+    expected_header = ["'+amount"] if change == "header" else columns
+    expected_rows = [["'-5"], ["'=1+1"]] if change == "cells" else rows
+    expected = [expected_header, *expected_rows]
+    assert output["csv"] is not None, "Exported CSV was removed by a stale callback"
+    assert list(csv.reader(io.StringIO(output["csv"]))) == expected
+    assert ("Warning:" in output["visible"]) is changed
+    if changed:
+        assert "CSV formula protection" in output["visible"]
+        assert "-5" not in output["visible"] and "=1+1" not in output["visible"]
+        assert output["timers"] == []  # Do not erase the warning after 2.5 seconds.

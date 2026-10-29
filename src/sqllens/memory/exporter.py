@@ -14,13 +14,14 @@ from sqllens.memory.store import MemoryStore
 
 @dataclass
 class ExportResult:
-    """Serialized bundle plus any non-fatal data-loss warnings.
+    """Serialized bundle plus any non-fatal export warnings.
 
     ``warnings`` is empty for a clean, complete export. A caller (CLI / MCP
     tool) MUST surface these: an empty store, rows ``iter_all`` could not
     represent, or schema docs dropped by the CSV format all look like a
     successful backup otherwise — which is dangerous given the documented
-    "export before ``--clear``" procedure.
+    "export before ``--clear``" procedure. CSV formula-prefix additions also
+    warn because their text differs from the stored values.
     """
 
     text: str
@@ -56,5 +57,5 @@ def export_bundle(store: MemoryStore, fmt: Literal["json", "csv"]) -> ExportResu
             "this export. Use --format json for a lossless backup."
         )
 
-    text = serialize_json(bundle) if fmt == "json" else serialize_csv(bundle)
+    text = serialize_json(bundle) if fmt == "json" else serialize_csv(bundle, warnings=warnings)
     return ExportResult(text=text, warnings=warnings)

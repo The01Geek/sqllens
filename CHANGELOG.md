@@ -81,7 +81,8 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
 - Escape table headers and cells in Markdown, keep SQL inside a sufficiently
   long code fence, share CSV formula protection across memory exports, protect
   widget CSV headers/cells, and restrict host theme updates to string-valued
-  `--color-*` properties. JSON data is unchanged. (#211, #218, #221, #226, #229, #261)
+  `--color-*` properties. CSV exports warn when formula protection adds an
+  apostrophe; JSON data is unchanged. (#211, #218, #221, #226, #229, #261)
 - Apply the unauthenticated non-loopback policy to HTTP app factories and
   launchers as well as the CLI. The explicit insecure override adds response
   markers and throttled reminders; status/auth JSON includes `nosniff`.

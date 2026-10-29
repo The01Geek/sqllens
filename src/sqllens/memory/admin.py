@@ -283,7 +283,8 @@ def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str
     (unrepresentable rows, or schema docs absent from a CSV) — the caller raises
     on that. A merely-empty store is not lossy (nothing existed to lose): it
     returns ``lossy=False`` with an explanatory warning, matching the non-fatal
-    behaviour of the CLI ``export_bundle``.
+    behaviour of the CLI ``export_bundle``. CSV formula-prefix additions also
+    return a non-fatal warning; ``lossy`` still refers to dropped records.
     """
     bundle = store.iter_all()
     pairs = list(bundle.sql_pairs.pairs) if bundle.sql_pairs else []
@@ -307,7 +308,7 @@ def export_memories(store: MemoryStore, fmt: Literal["json", "csv"]) -> dict[str
                 f"CSV carries SQL pairs only — {len(docs)} schema doc(s) are NOT "
                 "in this export. Use format='json' for a lossless backup."
             )
-        data = serialize_csv(bundle)
+        data = serialize_csv(bundle, warnings=warnings)
     else:
         data = json.dumps(
             {

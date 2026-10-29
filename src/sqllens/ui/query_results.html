@@ -276,33 +276,47 @@ function renderTableBlock(block) {
 
   // ── CSV export (per-block) ────────────────────────────────────────────────
 
-  function csvEscape(v) {
-    let s = String(v);
-    if (s.trim() && /^[=+@\-\t\r\n]/.test(s)) s = "'" + s;
-    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-  }
-
-  function buildCsvText() {
+  function buildCsvExport() {
+    let defanged = false;
+    function csvEscape(v) {
+      let s = String(v);
+      if (s.trim() && /^[=+@\-\t\r\n]/.test(s)) {
+        s = "'" + s;
+        defanged = true;
+      }
+      return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }
     const rows = sortedRows(filteredRows());
     const lines = [state.columns.map(csvEscape).join(",")];
     for (const r of rows) lines.push(r.map(csvEscape).join(","));
-    return lines.join("\r\n");
+    return {
+      text: lines.join("\r\n"),
+      warning: defanged
+        ? "Warning: CSV formula protection added apostrophes to some headers or cells; spreadsheets will treat them as text."
+        : "",
+    };
   }
+
+  let metaMessageVersion = 0;
 
   // Show a transient message in the meta span ("showing N of M") and restore
   // the count after a couple of seconds. Used to give CSV-export feedback
-  // without destroying the table.
-  function flashMeta(text) {
+  // without destroying the table. Warnings remain until the next table action.
+  function flashMeta(text, duration = 2500) {
     if (!metaSpan) return;
+    const version = ++metaMessageVersion;
     metaSpan.textContent = text;
-    setTimeout(() => { if (metaSpan) render(); }, 2500);
+    if (duration) setTimeout(() => {
+      if (metaSpan && metaMessageVersion === version) render();
+    }, duration);
   }
 
   // Last-resort fallback: render the CSV inline in a textarea so the user can
   // always read/copy it manually. Works in any sandbox because it requires no
   // permissions and no host capability. The "Back to table" button restores
   // the grid.
-  function showCsvOverlay(csvText) {
+  function showCsvOverlay(csvText, warning) {
+    ++metaMessageVersion; // An earlier success timer must not remove the CSV.
     gridHost.textContent = "";
     const wrap = document.createElement("div");
     wrap.className = "wrap";
@@ -311,7 +325,8 @@ function renderTableBlock(block) {
     hint.className = "meta";
     hint.style.marginBottom = "6px";
     hint.textContent =
-      "Host blocked the file download and clipboard. Select all and copy:";
+      "Host blocked the file download and clipboard. Select all and copy:" +
+      (warning ? " " + warning : "");
     const ta = document.createElement("textarea");
     ta.readOnly = true;
     ta.value = csvText;
@@ -369,7 +384,8 @@ function renderTableBlock(block) {
     //   2) navigator.clipboard.writeText — modern, needs clipboard-write.
     //   3) document.execCommand("copy") — legacy, works without that grant.
     //   4) Inline textarea overlay — always works; user copies manually.
-    const csvText = buildCsvText();
+    const { text: csvText, warning } = buildCsvExport();
+    const warningTail = warning ? " " + warning : "";
     const caps = (app.getHostCapabilities && app.getHostCapabilities()) || {};
     if (caps.downloadFile) {
       try {
@@ -385,7 +401,7 @@ function renderTableBlock(block) {
             },
           ],
         });
-        flashMeta("downloaded ✓");
+        flashMeta("downloaded ✓" + warningTail, warning ? 0 : 2500);
         return;
       } catch (err) {
         console.warn("ui/download-file failed:", err);
@@ -393,16 +409,16 @@ function renderTableBlock(block) {
     }
     try {
       await navigator.clipboard.writeText(csvText);
-      flashMeta("copied to clipboard ✓");
+      flashMeta("copied to clipboard ✓" + warningTail, warning ? 0 : 2500);
       return;
     } catch (err) {
       console.warn("clipboard.writeText failed:", err);
     }
     if (copyViaExecCommand(csvText)) {
-      flashMeta("copied to clipboard ✓");
+      flashMeta("copied to clipboard ✓" + warningTail, warning ? 0 : 2500);
       return;
     }
-    showCsvOverlay(csvText);
+    showCsvOverlay(csvText, warning);
   }
 
   // ── Bar (filter input + meta span) ───────────────────────────────────────

@@ -436,7 +436,11 @@ async def test_export_csv_protection_survives_mcp_tool_wrapper(tmp_path, monkeyp
     )
     result = await _fn(mcp, "export_memories")(data_source_id=_DSID, format="csv")
     payload = _parse(result)
-    assert payload["lossy"] is False and payload["warnings"] == []
+    assert isinstance(result, str)  # Nonfatal warning, not isError.
+    assert payload["lossy"] is False
+    assert len(payload["warnings"]) == 1
+    assert "CSV formula protection" in payload["warnings"][0]
+    assert "synthetic" not in payload["warnings"][0]
     rows = list(csv.reader(io.StringIO(payload["data"])))
     assert rows[0] == ["question", "sql"]
     assert sorted(rows[1:]) == sorted([["'" + v, "'" + v] for v in values])
