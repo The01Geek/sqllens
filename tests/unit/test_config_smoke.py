@@ -166,7 +166,7 @@ def test_missing_api_key_loads(tmp_path: Path, toml_body: str) -> None:
     cfg = Config.load(cfg_path)
     assert cfg.llm.api_key is None
     assert cfg.llm.provider == "anthropic"
-    assert cfg.llm.model == "claude-sonnet-4-5-20250929"
+    assert cfg.llm.model == "claude-opus-5-5"
 
 
 def test_cli_validate_exits_one_without_api_key(tmp_path: Path) -> None:

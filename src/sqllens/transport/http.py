@@ -4,20 +4,9 @@
 """Streamable HTTP transport for SQL Lens.
 
 The MCP Python SDK's ``FastMCP.streamable_http_app()`` returns a Starlette app
-that registers its endpoint at the path ``/mcp``. We wrap it with:
-
-1. **Path normalization.** The bare path (``/``) and the all-but-trailing-slash
-   form (``/mcp``) both redirect or get rewritten to ``/mcp/``, so clients that
-   forget the trailing slash still work — fixing the routing footgun we hit in
-   the parent project where bare ``/mcp/sql`` silently fell through to the
-   all-in-one mount.
-2. **Authentication middleware.** Every request hits the configured
-   ``Authenticator`` before the MCP handler sees it. Failures return ``401``
-   with a short reason; auth-mode ``none`` is a passthrough.
-3. **Session-manager lifespan.** FastMCP's session manager must be started
-   inside an async context for requests to succeed; we wrap the stack in an
-   ASGI lifespan adapter so any host (uvicorn, FastAPI mount, custom server)
-   that drives lifespan events will start/stop it correctly.
+that registers its endpoint at the path ``/mcp``. See ``_build_asgi_app_bare``
+for the HTTP middleware composition and ``build_asgi_app`` for the outer
+session-manager lifespan adapter.
 
 Public surface: ``build_asgi_app(cfg)`` returns the mount-ready app;
 ``run(cfg)`` is the uvicorn launcher used by ``sqllens serve``.
@@ -25,10 +14,10 @@ Public surface: ``build_asgi_app(cfg)`` returns the mount-ready app;
 
 from __future__ import annotations
 
-import ipaddress
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from time import monotonic
 from typing import TYPE_CHECKING
 
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -36,6 +25,11 @@ from starlette.responses import RedirectResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from sqllens.auth import Authenticator, AuthError, build_authenticator
+from sqllens.auth.policy import (
+    INSECURE_NON_LOOPBACK_MESSAGE,
+    unauthenticated_non_loopback,
+)
+from sqllens.auth.policy import is_loopback_host as _is_loopback_host
 from sqllens.config import Config
 from sqllens.server import build_server
 from sqllens.tools.query_database import prime_agent
@@ -113,31 +107,6 @@ class _Readiness:
         self._ready = True
 
 
-def _is_loopback_host(host: str) -> bool:
-    """True iff ``host`` is a loopback name/address.
-
-    Semantics deliberately mirror ``sqllens.cli._is_loopback_host`` (which is
-    off-limits to import from here): the entire 127.0.0.0/8 IPv4 range, ``::1``,
-    IPv4-mapped IPv6 loopback (``::ffff:127.0.0.1`` — unwrapped explicitly
-    because ``IPv6Address.is_loopback`` returns False for these on Python
-    3.11.x and 3.12.0-3.12.3, gh-117566), and the single literal hostname
-    ``localhost`` matched case-insensitively (RFC 1035). No DNS resolution;
-    wildcards (``0.0.0.0``, ``::``) and arbitrary hostnames fail closed.
-    Non-string input fails closed rather than raising — this feeds a
-    security-relevant warning, and a traceback would be misread as "the
-    check didn't apply".
-    """
-    try:
-        if host.lower() == "localhost":
-            return True
-        addr = ipaddress.ip_address(host)
-    except (ValueError, AttributeError, TypeError):
-        return False
-    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
-        return addr.ipv4_mapped.is_loopback
-    return addr.is_loopback
-
-
 def _allowed_hosts(cfg: Config) -> list[str]:
     """Derive the ``TrustedHostMiddleware`` allowlist from ``cfg.server.host``.
 
@@ -164,9 +133,9 @@ def _warn_if_plaintext_credentials(cfg: Config) -> None:
     SQL Lens delegates TLS termination to a fronting proxy. If the operator
     serves ``bearer``/``jwt`` auth while binding a non-loopback interface, the
     credential travels in cleartext on the wire SQL Lens itself listens on.
-    This is advisory only — it does not refuse to start (the
-    unauthenticated-non-loopback *refusal* lives in ``cli.py`` and is out of
-    scope here). No warning for ``auth.mode == "none"`` or a loopback host.
+    This warning is advisory only. The separate construction guard refuses
+    unauthenticated non-loopback binds without the explicit insecure opt-out.
+    No credential warning for ``auth.mode == "none"`` or a loopback host.
 
     ``jwt`` is included for forward-compatibility with the Phase-4 scaffold:
     a validated ``Config`` cannot currently carry ``mode == "jwt"`` (the
@@ -192,7 +161,9 @@ def build_asgi_app(cfg: Config) -> ASGIApp:
     mount under any ASGI host (uvicorn, FastAPI, Starlette) that drives
     lifespan events.
 
-    No Starlette ``Mount`` is used internally — that's deliberate: ``Mount``
+    Construction enforces the configured HTTP bind/auth policy regardless of
+    ``cfg.server.transport``. Embedders must match ``cfg.server.host`` to their
+    actual listener. No Starlette ``Mount`` is used internally — that's deliberate: ``Mount``
     has surprising trailing-slash semantics, and a single-server transport
     doesn't need path-based dispatch.
     """
@@ -238,8 +209,9 @@ def _build_asgi_app_bare(cfg: Config, readiness: _Readiness) -> tuple[ASGIApp, F
     at a single guarded site.
 
     Composition (outermost → innermost):
-    ``TrustedHostMiddleware`` → ``_PathNormalizer`` → ``_AuthMiddleware`` →
-    FastMCP. ``TrustedHostMiddleware`` fronts the stack so a disallowed
+    ``TrustedHostMiddleware`` → optional insecure-mode response marker →
+    ``_PathNormalizer`` → ``_AuthMiddleware`` →
+    FastMCP. ``TrustedHostMiddleware`` gates the handlers so a disallowed
     ``Host`` is rejected with 400 before *anything* downstream sees the
     request — including the ``/healthz`` / ``/readyz`` short-circuits in
     ``_PathNormalizer``. This denies the DNS-rebinding fingerprint of a
@@ -252,16 +224,19 @@ def _build_asgi_app_bare(cfg: Config, readiness: _Readiness) -> tuple[ASGIApp, F
     ``Authorization`` header (loopback and the configured host are in the
     default allowlist).
     """
+    # An embedder calling this HTTP factory may leave server.transport=stdio.
+    # Enforce the HTTP policy here regardless of that dispatch setting.
+    insecure_bind = unauthenticated_non_loopback(cfg)
+    if insecure_bind and not cfg.auth.insecure:
+        raise ValueError(INSECURE_NON_LOOPBACK_MESSAGE.format(host=cfg.server.host))
     mcp = build_server(cfg)
     inner = mcp.streamable_http_app()
     authenticator = build_authenticator(cfg.auth)
     normalized = _PathNormalizer(
         _AuthMiddleware(inner, authenticator), readiness
     )
-    return (
-        TrustedHostMiddleware(normalized, allowed_hosts=_allowed_hosts(cfg)),
-        mcp,
-    )
+    marked: ASGIApp = _InsecureAuthMarker(normalized) if insecure_bind else normalized
+    return TrustedHostMiddleware(marked, allowed_hosts=_allowed_hosts(cfg)), mcp
 
 
 def run(cfg: Config) -> None:
@@ -275,6 +250,37 @@ def run(cfg: Config) -> None:
 
 
 # ─────────────────────────── ASGI middleware ────────────────────────────────
+
+
+class _InsecureAuthMarker:
+    """Mark HTTP responses while the unauthenticated non-loopback opt-out is active."""
+
+    def __init__(self, inner: ASGIApp) -> None:
+        self.inner = inner
+        self._last_warning: float | None = None
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.inner(scope, receive, send)
+            return
+        now = monotonic()
+        if self._last_warning is None or now - self._last_warning >= 60:
+            self._last_warning = now
+            logger.warning(
+                "Serving unauthenticated non-loopback HTTP with auth.insecure=1. "
+                "Closed-network deployments only."
+            )
+
+        async def marked_send(message: dict) -> None:
+            if message["type"] == "http.response.start":
+                message = dict(message)
+                headers = [(k, v) for k, v in message.get("headers", [])
+                           if k.lower() != b"x-sqllens-auth"]
+                headers.append((b"x-sqllens-auth", b"insecure-loopback-override"))
+                message["headers"] = headers
+            await send(message)
+
+        await self.inner(scope, receive, marked_send)
 
 
 class _PathNormalizer:
@@ -717,6 +723,7 @@ async def _send_json(
             "status": status,
             "headers": [
                 (b"content-type", b"application/json"),
+                (b"x-content-type-options", b"nosniff"),
                 (b"content-length", str(len(body)).encode()),
                 *extra_headers,
             ],
