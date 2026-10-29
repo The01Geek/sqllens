@@ -4,6 +4,9 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Removed
+- Unused shell-execution capability (`run_bash`) and its `CommandResult` model from the agent file-system API. SQL scratch-file operations remain available. (#211, #218, #223, #241, #261)
+
 ### Added
 - `llm.temperature` (`SQLLENS_LLM__TEMPERATURE`, 0–2) and `llm.effort`
   (`SQLLENS_LLM__EFFORT`, `low|medium|high|xhigh|max`). Both are unset by
