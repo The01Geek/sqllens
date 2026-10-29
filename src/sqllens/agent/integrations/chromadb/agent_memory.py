@@ -40,6 +40,7 @@ from sqllens.agent.capabilities.agent_memory import (
     ToolMemorySearchResult,
 )
 from sqllens.agent.core.tool import ToolContext
+from sqllens._memory_consistency import collection_state
 
 
 class ChromaAgentMemory(AgentMemory):
@@ -115,18 +116,27 @@ class ChromaAgentMemory(AgentMemory):
 
         self.persist_directory = persist_directory
         self.collection_name = collection_name
+        self._write_state = None
         self._client = None
         self._collection = None
         self._executor = ThreadPoolExecutor(max_workers=2)
         self._embedding_function = embedding_function
 
+    @property
+    def _collection_state(self):
+        # Bind identity after Chroma has initialized the persistence directory.
+        self._get_client()
+        return self._write_state
+
     def _get_client(self):
         """Get or create ChromaDB client."""
         if self._client is None:
-            self._client = chromadb.PersistentClient(
+            client = chromadb.PersistentClient(
                 path=self.persist_directory,
                 settings=Settings(anonymized_telemetry=False, allow_reset=True),
             )
+            self._write_state = collection_state(self.persist_directory, self.collection_name)
+            self._client = client
         return self._client
 
     def _get_embedding_function(self):
@@ -195,9 +205,10 @@ class ChromaAgentMemory(AgentMemory):
             }
 
             # Use question as document text for embedding
-            collection.upsert(
-                ids=[memory_id], documents=[question], metadatas=[memory_data]
-            )
+            with self._collection_state.writing():
+                collection.upsert(
+                    ids=[memory_id], documents=[question], metadatas=[memory_data]
+                )
 
         await asyncio.get_event_loop().run_in_executor(self._executor, _save)
 
@@ -287,7 +298,8 @@ class ChromaAgentMemory(AgentMemory):
                 # found and returned). Surface it server-side instead of silently
                 # swallowing it.
                 try:
-                    collection.update(ids=hit_ids, metadatas=hit_metadatas)
+                    with self._collection_state.writing():
+                        collection.update(ids=hit_ids, metadatas=hit_metadatas)
                 except Exception:
                     logger.warning(
                         "failed to update hit_count/last_hit_date for %d memory "
@@ -358,7 +370,8 @@ class ChromaAgentMemory(AgentMemory):
             try:
                 results = collection.get(ids=[memory_id])
                 if results["ids"] and len(results["ids"]) > 0:
-                    collection.delete(ids=[memory_id])
+                    with self._collection_state.writing():
+                        collection.delete(ids=[memory_id])
                     return True
                 return False
             except Exception:
@@ -381,9 +394,10 @@ class ChromaAgentMemory(AgentMemory):
                 "is_text_memory": True,
             }
 
-            collection.upsert(
-                ids=[memory_id], documents=[content], metadatas=[memory_data]
-            )
+            with self._collection_state.writing():
+                collection.upsert(
+                    ids=[memory_id], documents=[content], metadatas=[memory_data]
+                )
 
             return TextMemory(memory_id=memory_id, content=content, timestamp=timestamp)
 
@@ -478,7 +492,8 @@ class ChromaAgentMemory(AgentMemory):
             try:
                 results = collection.get(ids=[memory_id])
                 if results["ids"] and len(results["ids"]) > 0:
-                    collection.delete(ids=[memory_id])
+                    with self._collection_state.writing():
+                        collection.delete(ids=[memory_id])
                     return True
                 return False
             except Exception:
@@ -518,7 +533,8 @@ class ChromaAgentMemory(AgentMemory):
                     ids_to_delete.append(results["ids"][i])
 
             if ids_to_delete:
-                collection.delete(ids=ids_to_delete)
+                with self._collection_state.writing():
+                    collection.delete(ids=ids_to_delete)
 
             return len(ids_to_delete)
 
