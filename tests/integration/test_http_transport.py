@@ -45,6 +45,25 @@ async def test_query_metadata_limits_over_mcp_http(make_server, monkeypatch) -> 
     assert seen == [{"tenant": "alpha"}, {}]
 
 
+async def test_insecure_posture_and_json_headers_on_real_http(make_server) -> None:
+    handle = make_server(AuthConfig(mode="none", insecure=True), configured_host="0.0.0.0")
+    async with httpx.AsyncClient() as client:
+        for path in ("/healthz", "/readyz"):
+            response = await client.get(handle.base_url + path)
+            assert response.status_code == 200
+            assert response.headers["x-content-type-options"] == "nosniff"
+            assert response.headers["x-sqllens-auth"] == "insecure-loopback-override"
+
+
+async def test_bearer_refusal_json_header_on_real_http(make_server) -> None:
+    handle = make_server(AuthConfig(mode="bearer", bearer_token=SecretStr("x" * 40)))
+    async with httpx.AsyncClient() as client:
+        response = await client.get(handle.mcp_url)
+    assert response.status_code == 401
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "x-sqllens-auth" not in response.headers
+
+
 # ─────────────────────── happy path: auth=none ──────────────────────────────
 
 
