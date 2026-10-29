@@ -613,8 +613,7 @@ port = 8765
 # value = "us-east"
 #
 # Dynamic value — resolved per request from caller-supplied MCP metadata.
-# Only meaningful on the http transport (stdio has no per-request channel);
-# a missing or suspicious value blocks the query. The embedding application
+# A missing or suspicious value blocks the query. The embedding application
 # is the source of truth for identity — SQL Lens does not authenticate it.
 # [[rls]]
 # table = "orders"

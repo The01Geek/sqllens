@@ -181,7 +181,7 @@ The predicate is combined with whatever filter the assistant already produced us
 | `column` | String | The column on `table` the predicate compares. Same identifier rules as `table`. |
 | `operator` | String | One of `=`, `!=`, `<`, `<=`, `>`, `>=`, or `in`. Matched case-insensitively. |
 | `value` | Scalar or list | Static predicate value. Mutually exclusive with `value_from_metadata`. For `operator = "in"`, this must be a non-empty list. |
-| `value_from_metadata` | String | Metadata key resolved per request from caller-supplied MCP `_meta`. Mutually exclusive with `value`. Must be a bare identifier with the same rules as `table` and `column`. Only meaningful on the HTTP transport; the stdio transport has no per-request metadata channel. |
+| `value_from_metadata` | String | Metadata key resolved per request from caller-supplied MCP `_meta`. Mutually exclusive with `value`. Must be a bare identifier with the same rules as `table` and `column`. |
 
 A static rule with the same value for every request:
 

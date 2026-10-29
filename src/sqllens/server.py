@@ -25,6 +25,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
 from pydantic import ValidationError
 
+from sqllens._bounded_json import JsonBoundsError, copy_bounded_json
 from sqllens.config import Config
 from sqllens.profiles import (
     DEFAULT_PROFILE_NAME,
@@ -196,21 +197,22 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
     declared field and is excluded). This is the dynamic-value source the
     row-level-security guard reads.
 
+    Forward at most 64 extra keys, 16 KiB of compact ASCII-escaped JSON,
+    1024 nodes (including keys), and eight nesting levels below the root.
+    Invalid or oversized trees are discarded as a whole. These bounds apply
+    after the MCP transport has parsed the request, not to HTTP body parsing.
+
     Fail-secure: any failure to read the request context yields ``{}`` — a
     dynamic RLS rule then sees its key as missing and blocks the query (static
     rules are unaffected), rather than the tool crashing or, worse, a request
-    influencing the query unfiltered. This is also why stdio (no per-request
-    ``_meta`` channel) only ever gets ``{}`` here, which is the documented
-    "dynamic rules are HTTP-only" behaviour.
+    influencing the query unfiltered. Metadata is read from the MCP request
+    context on either transport; requests without extras receive ``{}``.
     """
     try:
         meta = ctx.request_context.meta
     except ValueError:
-        # Documented, expected case: the MCP SDK raises ``ValueError`` from
-        # ``request_context`` when no request is active (stdio — the primary
-        # transport — and tests). This is the common path, not a fault, so it
-        # is logged at debug without a traceback; warning+traceback here would
-        # fire on every stdio query and drown out a genuine SDK drift.
+        # The MCP SDK raises ValueError when no request is active. This
+        # expected case needs no traceback; actual extraction faults do.
         logger.debug("no active request context; returning empty metadata")
         return {}
     except Exception:
@@ -227,19 +229,28 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
         return {}
     if meta is None:
         return {}
-    extra = getattr(meta, "model_extra", None)
-    if extra is None:
-        # meta present but no extras attribute — either the caller sent only
-        # declared fields, or the MCP SDK changed how _meta extras surface.
-        # Logged at debug so a "every dynamic RLS query suddenly blocks"
-        # incident is traceable to this seam rather than looking like the
-        # caller never sent metadata.
-        logger.debug(
-            "request _meta present but exposes no model_extra; "
-            "dynamic RLS rules will see no metadata"
-        )
+    # Keep extras diagnostics content-free, including unexpected SDK/helper
+    # faults: exception messages and tracebacks can contain metadata values.
+    try:
+        extra = getattr(meta, "model_extra", None)
+    except Exception:
+        logger.warning("failed to read request metadata extras; returning empty metadata")
         return {}
-    return dict(extra) if extra else {}
+    if extra is None:
+        logger.debug("request _meta exposes no model_extra; returning empty metadata")
+        return {}
+    try:
+        if type(extra) is not dict or len(extra) > 64:
+            raise JsonBoundsError("request metadata key limit or shape")
+        bounded, _ = copy_bounded_json(extra)
+        return bounded
+    except JsonBoundsError:
+        # A rejected tree is never partially forwarded to dynamic RLS rules.
+        logger.warning("invalid or oversized request metadata; returning empty metadata")
+        return {}
+    except Exception:
+        logger.warning("unexpected failure bounding request metadata; returning empty metadata")
+        return {}
 
 
 def build_server(cfg: Config) -> FastMCP:

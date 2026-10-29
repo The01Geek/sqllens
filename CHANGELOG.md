@@ -4,6 +4,9 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Security
+- Bound MCP metadata propagation by key count, serialized bytes, nodes, and depth; bound debug trace argument strings and structures while preserving truncation flags. (#200)
+
 ### Removed
 - Unused shell-execution capability (`run_bash`) and its `CommandResult` model from the agent file-system API. SQL scratch-file operations remain available. (#211, #218, #223, #241, #261)
 
