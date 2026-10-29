@@ -69,7 +69,9 @@ Realistic curated bundles fit comfortably under both limits. If you have more cu
 
 ### CSV files and spreadsheet formulas
 
-When SQL Lens writes a CSV bundle (or reads one back in), any cell whose first character is one of `=`, `+`, `-`, `@`, tab, or carriage return is prefixed with a single apostrophe (`'`). Excel and LibreOffice would otherwise interpret these cells as formulas when an operator opens the file in a spreadsheet — a CSV-injection vector (CWE-1236) by which a planted bundle could execute attacker-supplied formulas on the operator's machine. The apostrophe prefix is the documented spreadsheet convention for "treat this cell as text," so files open as expected.
+When SQL Lens writes a CSV bundle (or reads one back in), any nonblank cell whose first character is one of `=`, `+`, `-`, `@`, tab, carriage return, or newline is prefixed with a single apostrophe (`'`). Excel and LibreOffice would otherwise interpret these cells as formulas when an operator opens the file in a spreadsheet — a CSV-injection vector (CWE-1236) by which a planted bundle could execute attacker-supplied formulas on the operator's machine. The apostrophe prefix is the documented spreadsheet convention for "treat this cell as text," so files open as expected.
+
+The query-results widget applies the same prefix rule to CSV headers and cells. When a prefix is added, its download, clipboard and manual-copy outcomes warn that those values will be treated as text in spreadsheets, including negative numbers. CSV delimiter quoting also preserves embedded commas, quotes, carriage returns and newlines.
 
 The defang is idempotent — re-importing and re-exporting the same file does not accumulate apostrophes — and is applied only to CSV bundles. JSON bundles are unchanged, because the tools that consume JSON do not interpret leading `=`/`+`/`-`/`@` as formulas. One side effect: a legitimate value whose first character is one of the trigger characters (for example, a SQL fragment starting with `-` from a comment, or a `@`-prefixed identifier) is stored with a leading apostrophe after a CSV round-trip. If you need to preserve such values exactly, use the JSON bundle format.
 
@@ -111,7 +113,7 @@ sqllens export-memory PATH [--format json|csv] [-c CONFIG]
 
 Use `--format json` (the default) for a complete, lossless backup. Use `--format csv` only when you want a simple `question,sql` spreadsheet and do not need the free-form notes.
 
-`export-memory` prints a yellow `Warning:` line (and still writes the file) when the export is not a complete picture: the store is empty, some stored rows could not be represented, or `--format csv` dropped schema docs. If the store looks corrupt or was written by an incompatible version, `export-memory` refuses to write a misleading "successful" backup and exits non-zero with no file written — investigate before relying on a backup or running `--clear`.
+`export-memory` prints a yellow `Warning:` line (and still writes the file) when the export is not a complete picture: the store is empty, some stored rows could not be represented, or `--format csv` dropped schema docs. CSV formula-prefix additions also produce a nonfatal warning because the exported text changed; use JSON to preserve exact values. If the store looks corrupt or was written by an incompatible version, `export-memory` refuses to write a misleading "successful" backup and exits non-zero with no file written — investigate before relying on a backup or running `--clear`.
 
 ## Letting the Assistant Import Memory
 
@@ -136,7 +138,7 @@ The seven tools are:
 - **Delete memory**: removes a single entry by its identifier.
 - **Clear memories**: removes all entries, or only one kind, and reports how many were deleted.
 - **Add memories**: bulk-adds curated question-and-answer pairs and free-form notes, skipping duplicates automatically. If any entry fails, the tool reports an error to the assistant rather than a success, and lists which entries failed.
-- **Export memories**: returns the saved memory as a JSON or CSV blob. The JSON form can be fed straight back into the add tool. If the export would leave anything out, for example free-form notes in a CSV export, the tool reports it as an error so a partial backup is never mistaken for a complete one.
+- **Export memories**: returns the saved memory as a JSON or CSV blob. The JSON form can be fed straight back into the add tool. If the export would leave anything out, for example free-form notes in a CSV export, the tool reports it as an error so a partial backup is never mistaken for a complete one. CSV formula-prefix additions produce a nonfatal warning; they do not set the dropped-record `lossy` flag.
 - **Memory statistics**: returns counts of each kind of entry, how often saved patterns were reused in the last 30 days, and the most-reused patterns.
 
 Each entry has a stable identifier you can pass to the get and delete tools. SQL Lens connects to a single database per instance, so although the tools accept a data-source identifier for compatibility, the value does not change which database is used.
