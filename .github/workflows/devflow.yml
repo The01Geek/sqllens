@@ -40,8 +40,9 @@ jobs:
       config_json: ${{ steps.extract.outputs.json }}
     steps:
       # Pin the default branch explicitly; an empty ref would fall back to the event ref.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false
           ref: ${{ github.event.repository.default_branch }}
       - id: extract
         uses: ./.github/actions/read-project-config
@@ -71,8 +72,9 @@ jobs:
     outputs:
       suppress: ${{ steps.guard.outputs.suppress }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false
           ref: ${{ github.event.repository.default_branch }}
       # Use the same vendored command detector as the gate.
       - uses: ./.github/actions/vendor-plugin
@@ -289,7 +291,7 @@ jobs:
       - name: Mint downscoped notice token (optional)
         id: dedupe_app_token
         if: ${{ vars.DEVFLOW_APP_ID != '' && steps.guard.outputs.suppress == 'true' }}
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
           client-id: ${{ vars.DEVFLOW_APP_ID }}
           private-key: ${{ secrets.DEVFLOW_APP_PRIVATE_KEY }}
@@ -362,8 +364,9 @@ jobs:
       should_run: ${{ steps.resolve.outputs.should_run }}
       command: ${{ steps.resolve.outputs.command }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false
           ref: ${{ github.event.repository.default_branch }}
       - uses: ./.github/actions/vendor-plugin
         with:
@@ -395,7 +398,7 @@ jobs:
       - name: Mint downscoped reaction token (optional)
         id: gate_app_token
         if: ${{ vars.DEVFLOW_APP_ID != '' && steps.resolve.outputs.should_run == 'true' }}
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
           client-id: ${{ vars.DEVFLOW_APP_ID }}
           private-key: ${{ secrets.DEVFLOW_APP_PRIVATE_KEY }}
@@ -458,14 +461,15 @@ jobs:
       - name: Mint workflow-capable token (optional)
         id: app-token
         if: ${{ vars.DEVFLOW_APP_ID != '' && !startsWith(needs.gate.outputs.command, '/prflow:review ') }}
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
           client-id: ${{ vars.DEVFLOW_APP_ID }}
           private-key: ${{ secrets.DEVFLOW_APP_PRIVATE_KEY }}
 
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: true
           ref: ${{ github.event.repository.default_branch }}
           # Full history supports merge-base diffs, reviewed-head reads and fixed test baselines.
           fetch-depth: 0
@@ -623,7 +627,7 @@ jobs:
       - name: Mint downscoped DevFlow-Reviewer token (optional)
         id: reviewer-token
         if: ${{ vars.DEVFLOW_REVIEWER_APP_ID != '' && startsWith(needs.gate.outputs.command, '/prflow:review ') }}
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
           client-id: ${{ vars.DEVFLOW_REVIEWER_APP_ID }}
           private-key: ${{ secrets.DEVFLOW_REVIEWER_PRIVATE_KEY }}
@@ -1961,7 +1965,7 @@ jobs:
       - name: Mint review-backstop token (optional)
         id: backstop-token
         if: ${{ always() && startsWith(needs.gate.outputs.command, '/prflow:review ') && (steps.engine.outputs.is_error == 'true' || steps.claude.outcome == 'failure' || (!cancelled() && steps.verdict-post.outputs.failed == 'true')) && vars.DEVFLOW_APP_ID != '' }}
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
           client-id: ${{ vars.DEVFLOW_APP_ID }}
           private-key: ${{ secrets.DEVFLOW_APP_PRIVATE_KEY }}
@@ -2234,7 +2238,7 @@ jobs:
 
       - name: Upload execution transcript artifact
         if: always() && steps.scrub_transcript.outputs.path != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: claude-execution-transcript-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ steps.scrub_transcript.outputs.path }}
@@ -2459,14 +2463,15 @@ jobs:
         id: finalize-token
         if: ${{ vars.DEVFLOW_APP_ID != '' }}
         continue-on-error: true
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
         with:
           client-id: ${{ vars.DEVFLOW_APP_ID }}
           private-key: ${{ secrets.DEVFLOW_APP_PRIVATE_KEY }}
 
       - name: Checkout repository (finalizer)
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false
           ref: ${{ github.event.repository.default_branch }}
       # Materialize trusted default-branch helpers for thin consumer checkouts.
       - uses: ./.github/actions/vendor-plugin
