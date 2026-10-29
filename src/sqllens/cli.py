@@ -535,6 +535,13 @@ def verify_memory(
     prove semantic equivalence, so a different-but-correct query (different
     JOIN order, ``IN`` vs ``EXISTS``) registers as CHANGED, not PASS.
 
+    Each case is a full live agent run: typically several billed LLM
+    requests, plus the queries the agent runs against the configured
+    database. The run never writes to memory
+    (the agent's save tools are disabled whatever the config says). An ERROR
+    row shows the same sanitized message an MCP client would get; the
+    underlying cause is logged to stderr.
+
     Exits non-zero on any non-PASS case (or, with ``--fail-under``, when the
     PASS rate is below the threshold). An empty golden file is itself an
     error — there is nothing to verify, so the command refuses to exit 0.

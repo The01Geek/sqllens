@@ -119,6 +119,10 @@ Use `--format json` (the default) for a complete, lossless backup. Use `--format
 
 `import-memory` writes curated question-and-answer pairs straight into the memory the assistant uses at query time, with no safety net of its own. `verify-memory` is the post-import regression guard: it runs a curated **golden file** of reference questions through the live assistant and reports, per question, whether SQL Lens still produces the SQL you expected.
 
+Each reference question is a full live run of the assistant, the same as a real `query_database` call. It typically makes several billed requests to your language-model provider and runs the SQL the assistant generates against your configured database. Size your golden file with that cost in mind.
+
+`verify-memory` does not write to memory. For the duration of the run, the assistant's tools for saving question-and-answer pairs and notes are turned off, even if your configuration enables saving queries. A verification run therefore cannot change the memory it is checking, and one reference question cannot influence the next. The assistant still reads memory as usual, which is what you are testing.
+
 ```bash
 sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]
 ```
@@ -150,7 +154,7 @@ When the command finishes it prints a table of results and a summary line, for e
 PASS 7 | CHANGED 2 | ERROR 1 (total 10, pass-rate 70.0%)
 ```
 
-Per-case details follow the summary for any non-PASS result, showing the expected SQL, the actual SQL the assistant produced (when one was produced), and the underlying error message (when one was raised).
+Per-case details follow the summary for any non-PASS result, showing the expected SQL, the actual SQL the assistant produced (when one was produced), and an error message (when the run failed). That error message is the same sanitized text a connected assistant would receive, for example `SQL execution error: An unexpected error occurred while processing your message. Please try again.` or `internal error; see server logs`. It deliberately omits connection details. The underlying cause, with its traceback, is logged to the command's standard error.
 
 The normalization step uses the dialect of the configured database, so two equally valid renderings for that dialect — for example, quoted versus unquoted identifiers where case-sensitivity allows — compare equal.
 

@@ -9,6 +9,13 @@ path the ``query_database`` MCP tool uses, extracts the agent's generated SQL,
 and hands the ``(expected, actual)`` pair to the pluggable comparator in
 :mod:`sqllens.eval.compare` for the verdict.
 
+A verification run never writes to memory: the production driver uses a
+dedicated agent built with ``build_agent(..., allow_memory_writes=False)``
+(no ``save_question_tool_args``, no ``save_text_memory``) from a config clone
+with ``memory.save_queries=False``, instead of the process-wide cached agent.
+Otherwise a run could persist CHANGED (wrong) SQL as a trusted pair, or let an
+earlier case's notes steer a later case.
+
 The runner deliberately does **not** know the PASS / CHANGED / ERROR taxonomy.
 A future row-execution comparator (execute both queries against the configured
 database, compare result sets) drops in by satisfying the same comparator
@@ -86,6 +93,22 @@ AgentDriver = Callable[
 ]
 
 
+def verification_config(cfg: Config) -> Config:
+    """Return the clone of ``cfg`` a verification run uses; ``cfg`` is untouched.
+
+    Forces ``agent.show_details=True`` (so ``query_info["sql"]`` is populated)
+    and ``memory.save_queries=False`` (so ``save_question_tool_args`` is never
+    registered). ``save_text_memory`` has no config gate to flip here; the
+    production driver drops it via ``build_agent(..., allow_memory_writes=False)``.
+    """
+    return cfg.model_copy(
+        update={
+            "agent": cfg.agent.model_copy(update={"show_details": True}),
+            "memory": cfg.memory.model_copy(update={"save_queries": False}),
+        }
+    )
+
+
 async def run_verification(
     cfg: Config,
     cases: Iterable[GoldenCase],
@@ -108,7 +131,8 @@ async def run_verification(
     with a clear diagnostic message rather than being silently scored against
     an empty string.
 
-    The runner clones ``cfg`` with ``agent.show_details=True`` rather than
+    The runner clones ``cfg`` (see :func:`verification_config`) with
+    ``agent.show_details=True`` and ``memory.save_queries=False`` rather than
     mutating it: a concurrent request path that holds the same ``cfg``
     reference must see no change. This relies on the runner never passing a
     ``profile=`` arg to the agent driver — if it ever did, the per-request
@@ -116,22 +140,30 @@ async def run_verification(
     here makes that explicit; revisit if verify-memory grows profile awareness.
 
     ``driver`` is the injection seam for tests; production callers leave it
-    ``None`` and the runner wires :func:`query_database_impl_with_widgets`.
+    ``None`` and the runner wires :func:`query_database_impl_with_widgets`
+    with a dedicated agent built once per run by
+    ``build_agent(forced_cfg, allow_memory_writes=False)``, never the
+    process-wide cached agent (which may carry memory write tools). A failure
+    building that agent (e.g. an unsupported database URL) propagates to the
+    caller before any case runs.
     """
+    forced_cfg = verification_config(cfg)
     if driver is None:
+        from sqllens.agent.factory import build_agent
         from sqllens.tools.query_database import query_database_impl_with_widgets
+
+        verify_agent = build_agent(forced_cfg, allow_memory_writes=False)
 
         async def _prod_driver(
             forced: Config, question: str
         ) -> tuple[str, list[dict], dict | None, dict | None, dict | None]:
-            return await query_database_impl_with_widgets(forced, question)
+            return await query_database_impl_with_widgets(
+                forced, question, agent=verify_agent
+            )
 
         impl: AgentDriver = _prod_driver
     else:
         impl = driver
-    forced_cfg = cfg.model_copy(
-        update={"agent": cfg.agent.model_copy(update={"show_details": True})}
-    )
     dialect = forced_cfg.database.dialect
     results: list[CaseResult] = []
     for case in cases:

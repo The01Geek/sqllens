@@ -21,7 +21,7 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from sqllens.agent import RequestContext
+from sqllens.agent import Agent, RequestContext
 from sqllens.config import RESERVED_METADATA_KEYS, Config
 from sqllens.profiles import ProfileStore, resolve_effective_settings
 from sqllens.runtime import (
@@ -157,6 +157,7 @@ async def query_database_impl_with_widgets(
     conversation_id: str | None = None,
     profile: str | None = None,
     profile_store: ProfileStore | None = None,
+    agent: Agent | None = None,
 ) -> tuple[str, list[dict], dict | None, dict | None, dict | None]:
     """Translate ``question`` to SQL, execute, return ordered ``blocks`` + ``memory_info``.
 
@@ -214,6 +215,13 @@ async def query_database_impl_with_widgets(
     loads the prior ``Conversation`` (its message history) and the agent can
     answer its own clarifying question. ``None`` lets the agent mint a fresh id
     internally; the MCP server layer mints and returns a stable id to the caller.
+
+    ``agent`` overrides the process-wide singleton from
+    :func:`~sqllens.tools._agent.get_agent`. ``None`` (every MCP request path)
+    uses the singleton. ``sqllens verify-memory`` passes its own agent, built
+    with ``build_agent(..., allow_memory_writes=False)``, so the verification
+    run goes through this exact pipeline without the cached agent's memory
+    write tools.
     """
     # Resolve the named profile into an EffectiveSettings and publish it on
     # the ContextVar BEFORE the agent is invoked, so every downstream shaping
@@ -227,7 +235,8 @@ async def query_database_impl_with_widgets(
     _profile_token = set_effective_settings(effective)
     try:
         try:
-            agent = await get_agent(cfg)
+            if agent is None:
+                agent = await get_agent(cfg)
         except Exception as e:
             logger.exception("agent construction failed")
             raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e

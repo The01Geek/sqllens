@@ -420,3 +420,17 @@ def test_build_sql_runner_mysql_percent_decodes_credentials() -> None:
     assert isinstance(runner, MySQLRunner)
     assert runner.user == "user@corp"
     assert runner.password == "p/w:s"
+
+
+def test_allow_memory_writes_false_drops_every_save_tool(tmp_path: Path) -> None:
+    """``allow_memory_writes=False`` (the verify-memory build) must omit both
+    memory-writing tools even when the operator config enables query saving,
+    while keeping the read-only memory search and the SQL tool."""
+    cfg = build_test_config(persist_dir=tmp_path / "chroma", save_queries=True)
+    agent = build_agent(cfg, allow_memory_writes=False)
+
+    tools = agent.tool_registry._tools
+    assert "save_question_tool_args" not in tools
+    assert "save_text_memory" not in tools
+    assert "search_saved_correct_tool_uses" in tools
+    assert "run_sql" in tools

@@ -52,8 +52,18 @@ class _StaticUserResolver(UserResolver):
         )
 
 
-def build_agent(cfg: Config) -> Agent:
-    """Wire the agent from config. One call per process; the agent is reusable."""
+def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
+    """Wire the agent from config. One call per process; the agent is reusable.
+
+    ``allow_memory_writes=False`` omits every memory-*writing* tool
+    (``save_question_tool_args`` and ``save_text_memory``) regardless of
+    ``cfg.memory``, so the resulting agent can read memory but never persist
+    to it. ``sqllens verify-memory`` builds its agent this way so a
+    verification run cannot mutate the store it is checking. The flag only
+    ever *removes* write tools: it composes with any per-tool config gate
+    (``memory.save_queries`` today, a future text-memory flag) as a logical
+    AND.
+    """
     # Every CLI-launched transport already exits 2 in ``cli.serve`` before reaching
     # here. This guard catches the residual bypass paths — programmatic embedders
     # and tests that call ``build_agent`` directly — so a ``None`` key surfaces as
@@ -121,7 +131,7 @@ def build_agent(cfg: Config) -> Agent:
     # memory. Gated by memory.save_queries (OFF by default); the default system
     # prompt switches its save instructions on the tool's presence, so dropping
     # the registration cleanly drops the prompt guidance too.
-    if cfg.memory.save_queries:
+    if cfg.memory.save_queries and allow_memory_writes:
         tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
     tools.register_local_tool(
         SearchSavedCorrectToolUsesTool(
@@ -132,7 +142,11 @@ def build_agent(cfg: Config) -> Agent:
     # save_text_memory persists free-form domain knowledge (vocabulary, semantic
     # notes) so subsequent questions can land on the right tables/columns. The
     # default system prompt switches on its presence via has_text_memory.
-    tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
+    # ``allow_memory_writes=False`` (verify-memory) suppresses it; if a config
+    # flag later gates this registration, AND it with ``allow_memory_writes``
+    # so the read-only build stays write-free whatever the operator config.
+    if allow_memory_writes:
+        tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
 
     # The framework default gates the tool-arguments card to admin-only. We
     # *always* admit DEFAULT_USER_GROUP so the executed-SQL / tool-args card

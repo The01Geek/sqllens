@@ -81,10 +81,10 @@ context_enhancer = DefaultLlmContextEnhancer(
 
 This explicit wiring matters: if `llm_context_enhancer` is left unset, `Agent` falls back to a `DefaultLlmContextEnhancer` built with only `agent_memory`, which cannot see either configured threshold and therefore leaves the text-search floor at the enhancer's own `0.7` default and the context tier permanently off. See [System-prompt context injection](#system-prompt-context-injection) above.
 
-The memory tools are then registered alongside `RunSqlTool` inside `build_agent` ([factory.py](../../../src/sqllens/agent/factory.py)). The structured-save tool is gated on `cfg.memory.save_queries`; the search and text-memory tools are always registered:
+The memory tools are then registered alongside `RunSqlTool` inside `build_agent` ([factory.py](../../../src/sqllens/agent/factory.py)). The structured-save tool is gated on `cfg.memory.save_queries`; the search tool is always registered; the text-memory tool is registered unless the caller passed `allow_memory_writes=False` (only `verify-memory` does, see [Verifying an import](#verifying-an-import-verify-memory)), which also suppresses the structured-save tool:
 
 ```python
-if cfg.memory.save_queries:
+if cfg.memory.save_queries and allow_memory_writes:
     tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
 tools.register_local_tool(
     SearchSavedCorrectToolUsesTool(
@@ -92,7 +92,8 @@ tools.register_local_tool(
     ),
     access_groups=access,
 )
-tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
+if allow_memory_writes:
+    tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
 ```
 
 Three things to note about this wiring:
@@ -242,13 +243,23 @@ Implementation lives outside the vendored agent tree in [src/sqllens/eval/](../.
 |---|---|
 | `eval/golden.py` | Loads the golden file via the *existing* `parse_json` / `parse_csv` bundle parser. No new file format — a golden file is structurally a memory bundle's `sql_pairs` block. Inherits every safety cap (`MAX_BUNDLE_BYTES`, `MAX_BUNDLE_ITEMS`, JSON-recursion guard, CSV-injection defang). |
 | `eval/compare.py` | `Status` enum (`PASS` / `CHANGED` / `ERROR`), `normalize_sql(sql, *, dialect)` (parse → re-render with consistent casing/whitespace via `sqlglot`), and `compare(expected, actual, *, dialect)` — the only place that knows the PASS/CHANGED/ERROR taxonomy. Isolated so a future "execute and compare rows" comparator drops in without changes to the runner. |
-| `eval/runner.py` | Clones the loaded `Config` with `agent.show_details=True` so [`query_database_impl_with_widgets`](../../../src/sqllens/tools/query_database.py) returns the agent's generated SQL on `query_info["sql"]` (the explicit `query_info = None` branch in that function only fires when effective `show_details` is off). Loops cases through the agent, extracts the SQL, hands it to the comparator. Tests inject a stub driver via the `driver=` parameter. |
+| `eval/runner.py` | `verification_config(cfg)` clones the loaded `Config` with `agent.show_details=True` (so [`query_database_impl_with_widgets`](../../../src/sqllens/tools/query_database.py) returns the agent's generated SQL on `query_info["sql"]`; the explicit `query_info = None` branch in that function only fires when effective `show_details` is off) and `memory.save_queries=False`. The caller's `cfg` is never mutated. The production driver builds one dedicated agent per run with `build_agent(forced_cfg, allow_memory_writes=False)` and passes it to `query_database_impl_with_widgets(..., agent=...)`, bypassing the `get_agent` singleton. Loops cases through that agent, extracts the SQL, hands it to the comparator. Tests inject a stub driver via the `driver=` parameter. |
+
+**No memory writes.** A verify run must not mutate the store it is checking. Otherwise it could persist CHANGED (wrong) SQL as a trusted pair, or let notes saved during an earlier case steer a later one. Three things enforce this:
+
+- `build_agent(..., allow_memory_writes=False)` ([src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py)) skips registering both `save_question_tool_args` and `save_text_memory`, whatever `cfg.memory` says. The default system prompt switches its save guidance on tool presence, so that guidance drops out too. The flag only removes tools: any config gate on a save tool (today `memory.save_queries`; a future text-memory flag) must be ANDed with it.
+- The cloned config forces `memory.save_queries=False`, so the config itself agrees with the agent.
+- The verify agent is never the process-wide cached agent from `tools/_agent.py`. That singleton is keyed on whichever `Config` built it first and may carry both save tools. The runner neither reads nor populates it.
+
+The read side is unchanged: the verify agent still searches memory and receives memory context exactly like a serving agent, which is the behavior under test.
+
+**Cost.** Each golden case is a full live agent run with no shared conversation. That means typically several billed LLM requests (roughly one per agent-loop iteration; `agent.max_tool_iterations` caps the loop), plus the SQL the agent executes against the configured database through the same guarded runner stack `build_agent` gives `serve`. The first case also pays the lazy ChromaDB open and embedding-model load, because the verify agent is not warmed the way `serve` warms the singleton.
 
 **Status semantics** (and what each one means for the operator):
 
 - **PASS** — the normalised generated SQL `==` the normalised expected SQL.
 - **CHANGED** — both sides parsed cleanly but the normalised forms differ. CHANGED means "the agent's SQL changed — review it," **not** "definitely wrong." Normalised-SQL comparison cannot prove semantic equivalence: two valid queries with different JOIN order, or `IN` vs `EXISTS`, register as CHANGED. The accepted trade-off (#208) is that this lets the verifier run without a database. If `actual` SQL is unparseable, the case is CHANGED — the well-formed golden side stands, the agent's output regressed.
-- **ERROR** — the **expected** SQL failed to parse (the golden file itself is malformed) or the agent path raised (LLM down, sanitized tool-internal failure, etc.). Surfaced separately so a single bad golden row doesn't silently change every case to CHANGED.
+- **ERROR** — the **expected** SQL failed to parse (the golden file itself is malformed), the agent path raised, or the agent answered without producing any SQL. Surfaced separately so a single bad golden row doesn't silently change every case to CHANGED. A raised failure's `CaseResult.error` is `"<ExceptionType>: <message>"` of what `query_database_impl_with_widgets` raised, which is the same **sanitized** client-facing taxonomy an MCP caller sees, not the root cause. The vendored `Agent.send_message` catches LLM and other in-loop failures itself and yields a generic error answer, so these usually appear as `AgentRunError: SQL execution error: An unexpected error occurred while processing your message. Please try again.`; an exception escaping the stream appears as `RuntimeError: internal error; see server logs`. The root cause, including the traceback, is logged (`sqllens.agent.core.agent.agent` / `sqllens.tools.query_database` loggers). The CLI installs no logging handler, so Python's last-resort handler prints those records to stderr.
 
 **Structured-signal contract** (CLAUDE.md "never silent success"). The CLI's `_exit_for_report` explicitly refuses to exit 0 in four vacuous-success traps:
 

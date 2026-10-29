@@ -263,3 +263,77 @@ def test_pass_rate_calculation(
     )
     assert report.passed == expected_pass
     assert report.pass_rate == expected_rate
+
+
+def _config_saving_queries(tmp_path: Path) -> Config:
+    """A config whose operator opted into agent-side query saving."""
+    cfg = _config(tmp_path)
+    saving = cfg.model_copy(
+        update={"memory": cfg.memory.model_copy(update={"save_queries": True})}
+    )
+    assert saving.memory.save_queries is True
+    return saving
+
+
+def test_driver_sees_save_queries_off_without_mutating_caller(tmp_path: Path) -> None:
+    """The cfg a verify run hands its driver has ``memory.save_queries=False``
+    even when the operator enabled it; the caller's cfg keeps its value."""
+    cfg = _config_saving_queries(tmp_path)
+    seen: list[bool] = []
+
+    async def _spy_driver(c: Config, q: str):
+        seen.append(c.memory.save_queries)
+        return ("ok", [], {"sql": "SELECT 1"}, None, None)
+
+    asyncio.run(
+        run_verification(cfg, [GoldenCase("q", "SELECT 1")], driver=_spy_driver)
+    )
+    assert seen == [False]
+    assert cfg.memory.save_queries is True
+
+
+def test_production_driver_agent_has_no_memory_write_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The default (production) driver must run every case on an agent that
+    cannot write memory: neither ``save_question_tool_args`` nor
+    ``save_text_memory`` may be registered, even with ``save_queries=True``,
+    and the process-wide cached agent (built from the operator cfg, so it may
+    carry both tools) must not be the one used."""
+    from sqllens.agent.factory import build_agent
+    from sqllens.tools import _agent as agent_module
+    from sqllens.tools import query_database as qd_module
+
+    cfg = _config_saving_queries(tmp_path)
+    cached = build_agent(cfg)
+    assert "save_question_tool_args" in cached.tool_registry._tools
+    assert "save_text_memory" in cached.tool_registry._tools
+    monkeypatch.setattr(agent_module, "_AGENT_STATE", (cached, cfg))
+
+    captured: list[tuple[Config, object]] = []
+
+    async def _spy_impl(c: Config, question: str, **kwargs):
+        captured.append((c, kwargs.get("agent")))
+        return ("ok", [], {"sql": "SELECT 1"}, None, None)
+
+    monkeypatch.setattr(qd_module, "query_database_impl_with_widgets", _spy_impl)
+
+    report = asyncio.run(
+        run_verification(
+            cfg, [GoldenCase("q1", "SELECT 1"), GoldenCase("q2", "SELECT 1")]
+        )
+    )
+
+    assert report.passed == 2
+    assert len(captured) == 2
+    # One dedicated agent per run, reused across cases.
+    assert captured[0][1] is captured[1][1]
+    used_cfg, used_agent = captured[0]
+    assert used_agent is not None
+    assert used_agent is not cached
+    tools = used_agent.tool_registry._tools
+    assert "save_question_tool_args" not in tools
+    assert "save_text_memory" not in tools
+    assert "run_sql" in tools
+    assert used_cfg.memory.save_queries is False
+    assert used_cfg.agent.show_details is True
