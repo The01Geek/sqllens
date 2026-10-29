@@ -110,7 +110,7 @@ All flags resolve through `resolve_options`. Defaults marked "OS-specific" are d
 | `--db`, `-d` | required | SQLAlchemy DSN. Identical form to `[database].url` in TOML. |
 | `--api-key`, `-k` | `$SQLLENS_LLM__API_KEY` | Required — falls back to the env var. The key is written into the JSON `env` block, never into the TOML. |
 | `--name` | `derive_default_name(db)` | Used as both the display label and the `mcpServers` key. |
-| `--model` | `claude-sonnet-4-5-20250929` | Anthropic model id. |
+| `--model` | `claude-opus-5-5` | Anthropic model id. |
 | `--memory-dir` | `<working-dir>/chroma` | ChromaDB persistence directory. |
 | `--working-dir` | OS-specific | Where `sqllens.toml` (and the launcher on Windows) live. |
 | `--config-path` | OS-specific | Override the detected `claude_desktop_config.json` location. |
