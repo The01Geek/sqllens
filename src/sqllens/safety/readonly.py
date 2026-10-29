@@ -400,7 +400,6 @@ def _mysql_parse_sql(sql: str, *, mysql_line_comments: bool) -> str:
             end = sql.find("\n", i)
             if end < 0:
                 end = len(sql)
-            # MySQL line comments end at LF; sqlglot also treats CR as an end.
             # Normalize only comment text, never literals or identifiers.
             for offset in range(i, end):
                 if chars[offset] == "\r":
