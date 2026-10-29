@@ -74,8 +74,9 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
   repair and restart so excluded entries are not lost. (#211, #214)
 - Pin remote GitHub Actions to verified commit references, preserve the
   checkout/Python/Node v7 upgrades, and disable persisted checkout credentials
-  outside the three PRFlow branch-writing jobs. CI explicitly requests only
-  repository read permission.
+  outside the three PRFlow branch-writing jobs. CI's default token has repository
+  read permission; its review-request job separately retains pull-request write
+  permission for posting review requests.
 - Agent looped on tool calls cut off by the output-token cap until
   `max_tool_iterations` (#247). A `tool_use` block in a `max_tokens` response is
   now marked `truncated` and refused by `ToolRegistry.execute` with an
