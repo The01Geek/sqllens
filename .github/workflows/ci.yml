@@ -48,6 +48,16 @@ jobs:
 
       - run: pip install -c requirements.txt -c docker/requirements-drivers.txt -e ".[dev,all]"
       - run: pip check
+      - name: Validate release fragments
+        run: python scripts/changelog.py check
+      - name: Guard generated release files on pull requests
+        if: github.event_name == 'pull_request'
+        env:
+          CHANGELOG_BASE: ${{ github.event.pull_request.base.sha }}
+          CHANGELOG_BRANCH: ${{ github.head_ref }}
+        run: |
+          git fetch --no-tags origin "$CHANGELOG_BASE"
+          python scripts/changelog.py policy --base "$CHANGELOG_BASE" --branch "$CHANGELOG_BRANCH"
       - run: ruff check .
       # Skip the connectors marker — those need real DB service containers
       # and run in the dedicated job below.
