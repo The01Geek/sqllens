@@ -88,6 +88,8 @@ The `_readonly_uri(path)` helper in [src/sqllens/agent/integrations/sqlite/sql_r
 
 ## Statement timeout
 
+PostgreSQL connection establishment separately uses a five-second `connect_timeout` by default, matching the preflight probe's default duration. The runtime runner preserves an explicit DSN value (including `0`), then a constructor `connect_timeout` option, then `PGCONNECT_TIMEOUT`; otherwise it supplies `5`. libpq applies this timeout per host, so it is not an overall query deadline. A timeout configured only through a libpq service file is overridden by the application default unless supplied through one of these explicit channels. Unit regressions cover URI/keyword DSNs and constructor parameters without opening network connections.
+
 `DatabaseConfig.statement_timeout_ms` (default `30_000`) is threaded through `build_sql_runner` into each runner ([src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py)). Each runner applies the bound using its engine's native primitive — there is no shared cross-engine mechanism, because each driver's idea of "timeout" differs in scope and failure mode:
 
 | Engine | Primitive | Where it lives |
