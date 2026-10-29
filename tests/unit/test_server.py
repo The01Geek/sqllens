@@ -47,7 +47,7 @@ class _StubCtx:
     """Minimal FastMCP ``Context`` stand-in with no per-request metadata.
 
     ``_request_metadata`` reads ``ctx.request_context.meta``; a ``None`` meta
-    is the no-extras case and yields ``{}`` (the stdio / no-_meta behaviour).
+    is the no-extras case and yields ``{}`` (the no-`_meta` behaviour).
     """
 
     class _RC:

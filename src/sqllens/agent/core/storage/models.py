@@ -21,6 +21,8 @@ class Message(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     tool_calls: Optional[List[ToolCall]] = Field(default=None)
+    # Keep opaque thinking signatures with the assistant turn that produced them.
+    provider_content: Optional[List[Dict[str, Any]]] = None
     tool_call_id: Optional[str] = Field(
         default=None, description="ID if this is a tool response"
     )

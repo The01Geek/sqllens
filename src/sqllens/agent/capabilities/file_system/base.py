@@ -5,9 +5,9 @@ This module contains the abstract base class for file system operations.
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List
 
-from .models import CommandResult, FileSearchMatch
+from .models import FileSearchMatch
 
 if TYPE_CHECKING:
     from sqllens.agent.core.tool import ToolContext
@@ -57,15 +57,4 @@ class FileSystem(ABC):
         include_content: bool = False,
     ) -> List[FileSearchMatch]:
         """Search for files matching a query within the accessible namespace."""
-        pass
-
-    @abstractmethod
-    async def run_bash(
-        self,
-        command: str,
-        context: "ToolContext",
-        *,
-        timeout: Optional[float] = None,
-    ) -> CommandResult:
-        """Execute a bash command within the accessible namespace."""
         pass

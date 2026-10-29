@@ -56,6 +56,10 @@ TrustedHostMiddleware      — rejects a disallowed Host with 400 (DNS-rebinding
                              Fronts everything below, including the /healthz
                              and /readyz short-circuits (issue #186 S-13).
   ↓
+_InsecureAuthMarker        — optional, for the explicit unauthenticated
+                             non-loopback override; see "HTTP construction
+                             policy and posture" below
+  ↓
 _PathNormalizer            — fixes "/" and "/mcp/" path mismatches; serves
                              /healthz and /readyz (post-host-check, pre-auth)
   ↓
@@ -90,7 +94,7 @@ FastMCP registers its endpoint at the **bare** path `/mcp`. Every MCP client we 
 | `/readyz` | **Short-circuit**: emit a 200/503 readiness JSON and return, with the same pre-auth / post-host-check ordering as `/healthz`. See "Readiness probe" below. |
 | Anything else | Pass through to `_AuthMiddleware`; FastMCP will 404 if the path is unrecognized. `TrustedHostMiddleware` has already validated `Host` upstream. |
 
-The reason this isn't done with a Starlette `Mount` is recorded in the docstring at the top of `transport/http.py`: `Mount` has surprising trailing-slash semantics, and the single-server SQL Lens transport doesn't need path-based dispatch.
+See the `build_asgi_app` docstring in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py) for why this uses middleware instead of a Starlette `Mount`.
 
 ## Liveness probe: `GET /healthz`
 
@@ -141,9 +145,13 @@ The allowlist comes from `_allowed_hosts(cfg)`:
 
 Separately, FastMCP defaults to rejecting non-loopback `Host` headers with HTTP 421 ("Misdirected Request") — its own DNS-rebinding defense, which bites when running SQL Lens in a container and connecting from a host process. CLAUDE.md "Gotchas" covers the specifics — short version: connect from the same network namespace so `127.0.0.1` resolves locally, or configure FastMCP's transport security explicitly when exposing remotely. SQL Lens does not currently expose a knob for relaxing this; it inherits the FastMCP default. Note this is a *distinct* layer from our `TrustedHostMiddleware`: a disallowed host hits our 400 first; an allowed-but-non-loopback host can still trip FastMCP's 421.
 
+## HTTP construction policy and posture
+
+The CLI and transport share the loopback predicate in `auth.policy`. For the explicit unauthenticated non-loopback override, `_InsecureAuthMarker` sits inside the host guard and stamps HTTP responses to Host-accepted requests with `X-SQLLens-Auth: insecure-loopback-override`. It logs on the first Host-accepted HTTP request and at most once per 60 seconds thereafter; non-HTTP scopes pass through. The shared JSON response writer adds `X-Content-Type-Options: nosniff` to status and authentication error responses. Wildcard probe Host acceptance remains as documented above.
+
 ## Plain-HTTP credential warning (S-9)
 
-At build time, `build_asgi_app` calls `_warn_if_plaintext_credentials(cfg)`. When `auth.mode` is `bearer` or `jwt` **and** `cfg.server.host` is non-loopback (per `_is_loopback_host`, which mirrors `cli._is_loopback_host`: full `127.0.0.0/8`, `::1`, IPv4-mapped IPv6 loopback, and the literal `localhost`, no DNS), it emits a single `logger.warning` advising that SQL Lens delegates TLS to a fronting proxy, so bearer/JWT credentials would cross this hop in cleartext. This is **advisory only** — it does **not** refuse to start (the unauthenticated-non-loopback *refusal* lives in `cli.py` and is out of scope here). No warning fires for `auth.mode = "none"` or a loopback host. `jwt` is included for forward-compat with the Phase-4 scaffold, but a validated `Config` cannot carry `mode == "jwt"` today, so in practice this fires only for `bearer`.
+At build time, `build_asgi_app` calls `_warn_if_plaintext_credentials(cfg)`. When `auth.mode` is `bearer` or `jwt` **and** `cfg.server.host` is non-loopback (per the shared `auth.policy.is_loopback_host`: full `127.0.0.0/8`, `::1`, IPv4-mapped IPv6 loopback, and the literal `localhost`, no DNS), it emits a single `logger.warning` advising that SQL Lens delegates TLS to a fronting proxy, so bearer/JWT credentials would cross this hop in cleartext. The credential warning is advisory. A separate guard in `_build_asgi_app_bare` rejects unauthenticated non-loopback binds unless `auth.insecure` is true, including calls through `build_asgi_app` and HTTP `run` when the configuration still selects stdio. No warning fires for `auth.mode = "none"` or a loopback host. `jwt` is included for forward-compat with the Phase-4 scaffold, but a validated `Config` cannot carry `mode == "jwt"` today, so in practice this fires only for `bearer`.
 
 ## Footgun 3 (Docker Desktop / WSL2): `--network=host`
 

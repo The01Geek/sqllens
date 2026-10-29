@@ -1,20 +1,27 @@
 # SPDX-FileCopyrightText: 2026 Daniel Radman
 # SPDX-License-Identifier: Apache-2.0
 
-"""The import_memory MCP tool is gated by SQLLENS_MEMORY__ALLOW_IMPORT."""
+"""Memory import requires explicit registration and write authorization."""
 
 from __future__ import annotations
 
 import pytest
+from pydantic import SecretStr
 
-from sqllens.config import Config
+from sqllens.config import AuthConfig, Config
 from sqllens.server import build_server
 from tests.unit._config_builders import build_test_config
 from tests.unit._memory_helpers import patch_fake_embeddings
 
 
-def _cfg(tmp_path, *, allow_import: bool) -> Config:
-    return build_test_config(tmp_path / "chroma", allow_import=allow_import)
+def _cfg(tmp_path, *, allow_import: bool, auth: AuthConfig | None = None) -> Config:
+    return build_test_config(
+        tmp_path / "chroma",
+        allow_import=allow_import,
+        auth=auth or AuthConfig(
+            mode="bearer", bearer_token=SecretStr("test-token-01234567890123456789012")
+        ),
+    )
 
 
 async def _tool_names(mcp) -> set[str]:
@@ -32,9 +39,13 @@ async def test_tool_present_when_enabled(tmp_path) -> None:
     assert "import_memory" in names
 
 
-async def test_tool_imports_and_reports(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("auth", [
+    AuthConfig(mode="bearer", bearer_token=SecretStr("test-token-01234567890123456789012")),
+    AuthConfig(mode="none", insecure=True),
+])
+async def test_tool_imports_and_reports(tmp_path, monkeypatch, auth) -> None:
     patch_fake_embeddings(monkeypatch)
-    mcp = build_server(_cfg(tmp_path, allow_import=True))
+    mcp = build_server(_cfg(tmp_path, allow_import=True, auth=auth))
     result = await mcp.call_tool(
         "import_memory",
         {"bundle_json": '{"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]}}'},
@@ -43,6 +54,25 @@ async def test_tool_imports_and_reports(tmp_path, monkeypatch) -> None:
     assert "| saved | 1 |" in text
     assert "| skipped (duplicate) | 0 |" in text
     assert "| errors | 0 |" in text
+
+
+@pytest.mark.parametrize("bundle_json", ["{ not json", '{"schema_docs": [{"content": "test"}]}'])
+async def test_tool_refuses_unauthenticated_import_before_parsing(
+    tmp_path, monkeypatch, bundle_json
+) -> None:
+    from unittest.mock import AsyncMock, Mock
+
+    parse = Mock(side_effect=AssertionError("unauthorized bundle was parsed"))
+    import_bundle = AsyncMock(side_effect=AssertionError("unauthorized import reached storage"))
+    monkeypatch.setattr("sqllens.memory.io.parse_json", parse)
+    monkeypatch.setattr("sqllens.memory.import_bundle", import_bundle)
+    mcp = build_server(_cfg(tmp_path, allow_import=True, auth=AuthConfig(mode="none")))
+
+    with pytest.raises(Exception, match="disabled on an unauthenticated endpoint"):
+        await mcp.call_tool("import_memory", {"bundle_json": bundle_json})
+
+    parse.assert_not_called()
+    import_bundle.assert_not_awaited()
 
 
 async def test_tool_errors_on_bad_input(tmp_path, monkeypatch) -> None:
