@@ -18,6 +18,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 from pydantic import SecretStr, ValidationError
+from sqlglot.errors import TokenError
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
@@ -507,6 +508,20 @@ class TestApplyRlsDynamicFailSecure:
         assert "IN" in out.upper() and "'a'" in out
         _assert_filtered_and_readonly(out)
 
+    @pytest.mark.parametrize(("sql", "dialect"), [
+        ("SELECT 'unterminated", "sqlite"),
+        ("SELECT 'unterminated", "postgres"),
+        ("SELECT 'unterminated", "mysql"),
+        ("SELECT 'unterminated", None),
+        ("SELECT `unterminated", "mysql"),
+    ])
+    def test_tokenization_failure_is_a_structured_rls_error(
+        self, sql: str, dialect: str | None,
+    ) -> None:
+        with pytest.raises(RlsError, match="could not parse SQL") as exc:
+            apply_rls(sql, [_rule(value="acme")], dialect=dialect)
+        assert isinstance(exc.value.__cause__, TokenError)
+
     def test_parse_failure_blocks(self) -> None:
         with pytest.raises(RlsError, match="could not parse"):
             apply_rls(
@@ -543,6 +558,14 @@ def _ctx(metadata: dict | None = None) -> ToolContext:
 
 
 class TestRlsGuardRunner:
+    @pytest.mark.asyncio
+    async def test_tokenization_failure_blocks_with_parse_diagnostic(self) -> None:
+        inner = _RecordingRunner()
+        guard = RlsGuardRunner(inner, [_rule(value="acme")], dialect="sqlite")
+        with pytest.raises(RlsError, match="could not parse SQL"):
+            await guard.run_sql(RunSqlToolArgs(sql="SELECT 'unterminated"), _ctx())
+        assert inner.calls == []
+
     @pytest.mark.asyncio
     async def test_rewritten_sql_reaches_inner_runner(self) -> None:
         inner = _RecordingRunner()
