@@ -2,7 +2,7 @@
 Anthropic LLM service implementation.
 
 Implements the LlmService interface using Anthropic's Messages API
-(anthropic>=0.8.0). Supports non-streaming and streaming text output.
+(anthropic>=0.49). Supports non-streaming and streaming text output.
 Tool-calls (tool_use blocks) are surfaced at the end of a stream or after a
 non-streaming call as ToolCall entries.
 """
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from copy import deepcopy
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -28,8 +29,8 @@ class AnthropicLlmService(LlmService):
     """Anthropic Messages-backed LLM service.
 
     Args:
-        model: Anthropic model name (e.g., "claude-sonnet-4-5", "claude-opus-4").
-            Defaults to "claude-sonnet-4-5". Can also be set via ANTHROPIC_MODEL env var.
+        model: Anthropic model name (e.g., "claude-opus-5-5").
+            Defaults to "claude-opus-5-5". Can also be set via ANTHROPIC_MODEL env var.
         api_key: API key; falls back to env `ANTHROPIC_API_KEY`.
         base_url: Optional custom base URL; env `ANTHROPIC_BASE_URL` if unset.
         extra_client_kwargs: Extra kwargs forwarded to `anthropic.Anthropic()`.
@@ -50,7 +51,7 @@ class AnthropicLlmService(LlmService):
             ) from e
 
         # Model selection - use environment variable or default
-        self.model = model or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+        self.model = model or os.getenv("ANTHROPIC_MODEL", "claude-opus-5-5")
         api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         base_url = base_url or os.getenv("ANTHROPIC_BASE_URL")
 
@@ -87,6 +88,7 @@ class AnthropicLlmService(LlmService):
             tool_calls=tool_calls or None,
             finish_reason=getattr(resp, "stop_reason", None),
             usage=usage or None,
+            provider_content=self._provider_content(resp),
         )
 
     async def stream_request(
@@ -114,10 +116,12 @@ class AnthropicLlmService(LlmService):
                 yield LlmStreamChunk(
                     tool_calls=tool_calls,
                     finish_reason=getattr(final, "stop_reason", None),
+                    provider_content=self._provider_content(final),
                 )
             else:
                 yield LlmStreamChunk(
-                    finish_reason=getattr(final, "stop_reason", None) or "stop"
+                    finish_reason=getattr(final, "stop_reason", None) or "stop",
+                    provider_content=self._provider_content(final),
                 )
 
     async def validate_tools(self, tools: List[ToolSchema]) -> List[str]:
@@ -133,10 +137,26 @@ class AnthropicLlmService(LlmService):
         # Anthropic requires messages content as list of content blocks per message
         # We need to group consecutive tool messages into single user messages
         messages: List[Dict[str, Any]] = []
+        # Memories/system instructions may change on each new user turn.
+        last_user = max(
+            (index for index, message in enumerate(request.messages) if message.role == "user"),
+            default=-1,
+        )
         i = 0
 
         while i < len(request.messages):
             m = request.messages[i]
+
+            if m.role == "assistant" and m.provider_content is not None:
+                content = deepcopy(m.provider_content)
+                if i < last_user:
+                    # Keep only the current turn's signed thinking, never older signatures.
+                    content = [block for block in content
+                               if block.get("type") not in {"thinking", "redacted_thinking"}]
+                if content:
+                    messages.append({"role": "assistant", "content": content})
+                i += 1
+                continue
 
             if m.role == "tool":
                 # Group consecutive tool messages into one user message
@@ -210,13 +230,13 @@ class AnthropicLlmService(LlmService):
             "model": self.model,
             "messages": messages,
             # Anthropic requires max_tokens; default if not provided
-            "max_tokens": request.max_tokens if request.max_tokens is not None else 512,
+            "max_tokens": request.max_tokens if request.max_tokens is not None else 8192,
         }
         # Omit unset values: models such as Claude Opus 5.5 reject any temperature.
         if request.temperature is not None:
             payload["temperature"] = request.temperature
         # Via extra_body, not an `output_config` kwarg: SDK versions at the
-        # anthropic>=0.40 floor are not known to accept that keyword.
+        # anthropic>=0.49 floor are not known to accept that keyword.
         if request.effort is not None:
             payload["extra_body"] = {"output_config": {"effort": request.effort}}
         if tools_payload:
@@ -228,6 +248,15 @@ class AnthropicLlmService(LlmService):
             payload["system"] = request.system_prompt
 
         return payload
+
+    @staticmethod
+    def _provider_content(msg: Any) -> List[Dict[str, Any]]:
+        # exclude_unset preserves wire fields without injecting SDK defaults.
+        return [
+            deepcopy(block) if isinstance(block, dict)
+            else block.model_dump(mode="json", exclude_unset=True)
+            for block in msg.content
+        ]
 
     def _parse_message_content(self, msg: Any) -> Tuple[str, List[ToolCall]]:
         text_parts: List[str] = []
