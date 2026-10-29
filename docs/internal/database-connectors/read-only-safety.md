@@ -35,8 +35,8 @@ No single layer alone is sufficient: a misconfigured role + a code path that byp
   | Dialect | Denied functions |
   |---|---|
   | `sqlite` | `load_extension` |
-  | `postgres` | File access, remote-query `dblink` operations, session changes, advisory locks, notifications, administrative resets, and XML query/table export helpers. The exact names are maintained in `_SIDE_EFFECT_FUNCS["postgres"]` in [readonly.py](../../../src/sqllens/safety/readonly.py). |
-  | `mysql` | `sleep`, `load_file`, `benchmark`, `sys_exec`, `sys_eval` |
+  | `postgres` | The exact names are maintained in `_SIDE_EFFECT_FUNCS["postgres"]` in [readonly.py](../../../src/sqllens/safety/readonly.py). |
+  | `mysql` | The exact names are maintained in `_SIDE_EFFECT_FUNCS["mysql"]` in [readonly.py](../../../src/sqllens/safety/readonly.py). |
   | all dialects | `generate_series`, `exploding_generate_series` (resource-exhaustion DoS) |
 
   Issue #186 (2026-05-30 security audit) extended the Postgres entry with `pg_stat_file` / `pg_read_server_files` / `pg_ls_logdir` / `pg_ls_waldir` — built-ins (pg_stat_file from 9.x, pg_ls_logdir / pg_ls_waldir from 10, pg_read_server_files from 11) that disclose the on-disk WAL/log layout to anyone who can issue a `SELECT`; they parse as `exp.Anonymous` and would otherwise slip the guard. The MySQL entry gained `sys_exec` / `sys_eval`, the `lib_mysqludf_sys` UDFs: when the UDF is installed and the configured DB role has `EXECUTE`, they are an RCE seam, so they need explicit naming to stay refused. Both additions are pinned by `tests/unit/test_safety.py::TestCorpusStaysRejected::test_corpus_entry_still_rejected` (they are entries in `_BYPASS_CORPUS`; the narrower `TestSideEffectFunctionsRejected` parametrize list does not enumerate them).
@@ -233,4 +233,4 @@ Connector-level read-only against live Postgres/MySQL is exercised by [tests/int
 
 ### MySQL lexical boundaries
 
-For MySQL (and unspecified dialects), the guard refuses double dashes without the ASCII whitespace/control character required for a MySQL line comment, nested block-comment openers, and backslash-escaped closing quotes. Use spaced arithmetic and doubled quotes instead. This keeps inspection independent of `NO_BACKSLASH_ESCAPES` and `ANSI_QUOTES` quote-boundary changes. Ordinary backslashes, quoted comment markers, and standard comments remain accepted; carriage returns inside line comments are normalized only for parser inspection because MySQL ends those comments at LF. The original SQL still reaches the connector after validation.
+For MySQL (and unspecified dialects), the guard refuses double dashes without the ASCII whitespace/control character required for a MySQL line comment, nested block-comment openers, and backslash-escaped closing quotes. Use spaced arithmetic and doubled quotes instead. This keeps inspection independent of `NO_BACKSLASH_ESCAPES` and `ANSI_QUOTES` quote-boundary changes. With an unspecified dialect, bare carriage returns inside line comments are rejected because comment termination rules depend on the engine.

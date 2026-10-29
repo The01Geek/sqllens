@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import sqlglot
 from sqlglot import expressions as exp
+from sqlglot.dialects.mysql import MySQL
 
 
 class UnsafeSqlError(Exception):
@@ -234,6 +235,11 @@ _SIDE_EFFECT_FUNCS: dict[str, frozenset[str]] = {
             "pg_sleep",
             "pg_terminate_backend",
             "pg_cancel_backend",
+            "pg_file_write",
+            "pg_file_rename",
+            "pg_file_unlink",
+            "pg_file_sync",
+            "pg_logdir_ls",
             "pg_read_file",
             "pg_read_binary_file",
             "pg_ls_dir",
@@ -246,15 +252,39 @@ _SIDE_EFFECT_FUNCS: dict[str, frozenset[str]] = {
             "pg_read_server_files",
             "pg_ls_logdir",
             "pg_ls_waldir",
+            "pg_ls_tmpdir",
+            "pg_ls_archive_statusdir",
+            "pg_ls_logicalmapdir",
+            "pg_ls_logicalsnapdir",
+            "pg_ls_replslotdir",
             "lo_import",
             "lo_export",
+            "lo_create",
+            "lo_creat",
+            "lo_from_bytea",
+            "lo_put",
+            "lowrite",
+            "lo_truncate",
+            "lo_truncate64",
+            "lo_unlink",
         }
     ),
     # ``sys_exec`` / ``sys_eval`` are lib_mysqludf_sys UDFs: where the UDF is
     # installed and the configured DB role has EXECUTE, they are an RCE seam.
     # They parse as exp.Anonymous and need explicit naming to stay refused.
     "mysql": frozenset(
-        {"sleep", "load_file", "benchmark", "sys_exec", "sys_eval"}
+        {
+            "sleep",
+            "load_file",
+            "benchmark",
+            "sys_exec",
+            "sys_eval",
+            "get_lock",
+            "release_lock",
+            "release_all_locks",
+            "master_pos_wait",
+            "source_pos_wait",
+        }
     ),
 }
 
@@ -324,7 +354,7 @@ def _func_name_candidates(node: exp.Func) -> set[str]:
     return {n.lower() for n in sql_names()}
 
 
-def _mysql_parse_sql(sql: str) -> str:
+def _mysql_parse_sql(sql: str, *, mysql_line_comments: bool) -> str:
     """Keep MySQL and parser token boundaries aligned, or refuse ambiguity.
 
     MySQL SQL modes can change quote escaping. Refuse backslash-escaped quote
@@ -374,6 +404,10 @@ def _mysql_parse_sql(sql: str) -> str:
             # Normalize only comment text, never literals or identifiers.
             for offset in range(i, end):
                 if chars[offset] == "\r":
+                    if not mysql_line_comments and sql[offset:offset + 2] != "\r\n":
+                        raise UnsafeSqlError(
+                            "Ambiguous line-comment carriage return without a SQL dialect"
+                        )
                     chars[offset] = " "
             i = end
             continue
@@ -391,9 +425,14 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
         raise UnsafeSqlError("empty SQL")
 
     try:
-        if dialect in ("mysql", None):
-            sql = _mysql_parse_sql(sql)
-        statements = sqlglot.parse(sql, dialect=dialect)
+        parser_dialect = sqlglot.Dialect.get_or_raise(dialect)
+    except ValueError as e:
+        raise UnsafeSqlError(f"could not resolve SQL dialect: {e}") from e
+
+    try:
+        if type(parser_dialect) in (MySQL, sqlglot.Dialect):
+            sql = _mysql_parse_sql(sql, mysql_line_comments=type(parser_dialect) is MySQL)
+        statements = sqlglot.parse(sql, dialect=parser_dialect)
     except (sqlglot.errors.ParseError, sqlglot.errors.TokenError) as e:
         raise UnsafeSqlError(f"could not parse SQL: {e}") from e
 

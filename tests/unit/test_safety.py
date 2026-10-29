@@ -74,13 +74,25 @@ class TestExecutableComments:
         "SELECT 1 /* # ordinary */ /*! + 1 */",
         "SELECT 1--x /*! + 1 */",
         "SELECT 1 # ordinary\n/*! + 1 */",
-        "SELECT 1 # ordinary\r'ignored\n/*! + sleep(0) */#'",
-        "SELECT 1 -- ordinary\r'ignored\n/*! + sleep(0) */#'",
     ])
     @pytest.mark.parametrize("dialect", ["mysql", None])
     def test_executable_comments_rejected(self, sql, dialect) -> None:
         with pytest.raises(UnsafeSqlError, match=r"executable comments|double-dash"):
             assert_select_only(sql, dialect=dialect)
+
+    @pytest.mark.parametrize("comment", ["#", "--"])
+    @pytest.mark.parametrize(("dialect", "reason"), [
+        ("mysql", "executable comments"),
+        (None, "line-comment carriage return"),
+    ])
+    def test_comment_after_carriage_return(
+        self, comment: str, dialect: str | None, reason: str,
+    ) -> None:
+        with pytest.raises(UnsafeSqlError, match=reason):
+            assert_select_only(
+                f"SELECT 1 {comment} ordinary\r'ignored\n/*! + sleep(0) */#'",
+                dialect=dialect,
+            )
 
     @pytest.mark.parametrize("sql", [
         "SELECT '/*!50000 text */'",
@@ -772,6 +784,147 @@ class TestIsIntrospectionQuery:
         # Fail-open-to-False: a query we cannot parse is not classified as
         # introspection, so it does not silently withhold a recovered answer.
         assert is_introspection_query("this is not sql ;;;") is False
+
+class TestResolvedDialectBoundaries:
+    @pytest.mark.parametrize("dialect", [
+        "mysql ",
+        "mysql, version=8.0",
+        "mysql, normalization_strategy=lowercase",
+        " ",
+        ", normalization_strategy=lowercase",
+    ])
+    def test_dialect_options_cannot_skip_executable_comment_guard(self, dialect: str) -> None:
+        with pytest.raises(UnsafeSqlError, match="executable comments"):
+            assert_select_only("SELECT 1 /*! + sleep(0) */", dialect=dialect)
+
+    @pytest.mark.parametrize("dialect", [" ", ", normalization_strategy=lowercase"])
+    def test_default_dialect_options_keep_ambiguous_comments_rejected(self, dialect: str) -> None:
+        with pytest.raises(UnsafeSqlError, match="line-comment carriage return"):
+            assert_select_only("SELECT 1 -- c\r; DROP TABLE t", dialect=dialect)
+
+    @pytest.mark.parametrize("dialect", ["mysql ", "mysql, version=8.0"])
+    def test_mysql_options_keep_known_comment_semantics(self, dialect: str) -> None:
+        assert_select_only("SELECT 1 -- c\r; DROP TABLE t", dialect=dialect)
+        assert_select_only("SELECT `column` FROM t", dialect=dialect)
+
+    @pytest.mark.parametrize("dialect", ["starrocks", "doris"])
+    def test_other_dialects_keep_their_comment_boundaries(self, dialect: str) -> None:
+        with pytest.raises(UnsafeSqlError, match="single SQL statement"):
+            assert_select_only("SELECT 1 -- c\r; DROP TABLE t", dialect=dialect)
+        assert_select_only("SELECT 1 /*! ordinary comment */", dialect=dialect)
+
+    def test_unknown_dialect_is_structured_refusal(self) -> None:
+        with pytest.raises(UnsafeSqlError, match="SQL dialect"):
+            assert_select_only("SELECT 1", dialect="not-a-dialect")
+
+
+class TestAdditionalSideEffectFunctions:
+    @pytest.mark.parametrize(("sql", "dialect", "function"), [
+        ("SELECT lo_create(0)", "postgres", "lo_create"),
+        ("SELECT lo_creat(0)", "postgres", "lo_creat"),
+        ("SELECT lo_from_bytea(0, 'x')", "postgres", "lo_from_bytea"),
+        ("SELECT lo_put(1, 0, 'x')", "postgres", "lo_put"),
+        ("SELECT lowrite(1, 'x')", "postgres", "lowrite"),
+        ("SELECT lo_truncate(1, 0)", "postgres", "lo_truncate"),
+        ("SELECT lo_truncate64(1, 0)", "postgres", "lo_truncate64"),
+        ("SELECT lo_unlink(1)", "postgres", "lo_unlink"),
+        ("SELECT pg_file_write('a', 'b', false)", "postgres", "pg_file_write"),
+        ("SELECT pg_file_rename('a', 'b', 'c')", "postgres", "pg_file_rename"),
+        ("SELECT pg_file_unlink('a')", "postgres", "pg_file_unlink"),
+        ("SELECT pg_file_sync('a')", "postgres", "pg_file_sync"),
+        ("SELECT pg_logdir_ls()", "postgres", "pg_logdir_ls"),
+        ("SELECT pg_ls_tmpdir()", "postgres", "pg_ls_tmpdir"),
+        ("SELECT pg_ls_archive_statusdir()", "postgres", "pg_ls_archive_statusdir"),
+        ("SELECT pg_ls_logicalmapdir()", "postgres", "pg_ls_logicalmapdir"),
+        ("SELECT pg_ls_logicalsnapdir()", "postgres", "pg_ls_logicalsnapdir"),
+        ("SELECT pg_ls_replslotdir('a')", "postgres", "pg_ls_replslotdir"),
+        ("SELECT get_lock('a', 1)", "mysql", "get_lock"),
+        ("SELECT release_lock('a')", "mysql", "release_lock"),
+        ("SELECT release_all_locks()", "mysql", "release_all_locks"),
+        ("SELECT master_pos_wait('a', 1)", "mysql", "master_pos_wait"),
+        ("SELECT source_pos_wait('a', 1)", "mysql", "source_pos_wait"),
+    ])
+    @pytest.mark.parametrize("unspecified", [False, True])
+    def test_mutation_and_server_file_calls_refused(
+        self, sql: str, dialect: str, function: str, unspecified: bool,
+    ) -> None:
+        with pytest.raises(UnsafeSqlError, match=f"function '{function}' is not allowed"):
+            assert_select_only(sql, dialect=None if unspecified else dialect)
+
+    @pytest.mark.parametrize(("sql", "dialect", "function"), [
+        ("SELECT pg_catalog.lo_unlink(1)", "postgres", "lo_unlink"),
+        ("SELECT public.pg_file_write('a', 'b', false)", "postgres", "pg_file_write"),
+        ("SELECT GET_LOCK('a', 1)", "mysql", "get_lock"),
+    ])
+    def test_qualified_and_uppercase_calls_refused(
+        self, sql: str, dialect: str, function: str,
+    ) -> None:
+        with pytest.raises(UnsafeSqlError, match=f"function '{function}' is not allowed"):
+            assert_select_only(sql, dialect=dialect)
+
+    @pytest.mark.parametrize(("sql", "dialect"), [
+        ("SELECT lo_get(1)", "postgres"),
+        ("SELECT lower('lo_unlink')", "postgres"),
+        ("SELECT is_free_lock('a')", "mysql"),
+        ("SELECT length('get_lock')", "mysql"),
+    ])
+    def test_nonmutating_reads_and_literal_names_pass(self, sql: str, dialect: str) -> None:
+        assert_select_only(sql, dialect=dialect)
+
+
+class TestUnspecifiedDialectBoundaries:
+    @pytest.mark.parametrize("dialect", [None, ""])
+    @pytest.mark.parametrize("sql", [
+        "SELECT 1 -- c\r; DROP TABLE t",
+        "SELECT 1 # c\r; DROP TABLE t",
+        "SELECT 1 -- c\r + pg_sleep(0)",
+        "SELECT 1 # c\r + sleep(0)",
+        "SELECT 1 -- c\r/*! + sleep(0) */",
+        "SELECT 1 # c\r/*! + sleep(0) */",
+    ])
+    def test_unknown_line_comment_boundary_rejected(
+        self, sql: str, dialect: str | None,
+    ) -> None:
+        with pytest.raises(UnsafeSqlError, match="line-comment carriage return"):
+            assert_select_only(sql, dialect=dialect)
+
+    @pytest.mark.parametrize("sql", [
+        "SELECT 1 /*!50000 + sleep(0) */",
+        "SELECT 1 /*M!100100 + sleep(0) */",
+    ])
+    def test_empty_dialect_uses_unspecified_lexical_guard(self, sql: str) -> None:
+        with pytest.raises(UnsafeSqlError, match="executable comments"):
+            assert_select_only(sql, dialect="")
+
+    @pytest.mark.parametrize("dialect", [None, ""])
+    @pytest.mark.parametrize("sql", [
+        "SELECT 'a\rb'",
+        "SELECT 1\r + 2",
+        "SELECT 1 -- ordinary\n + 2",
+        "SELECT 1 -- ordinary\r\n + 2",
+        "SELECT 1 /* ordinary\rcomment */ + 2",
+    ])
+    def test_unambiguous_reads_pass(self, sql: str, dialect: str | None) -> None:
+        assert_select_only(sql, dialect=dialect)
+
+    async def test_ambiguous_comment_never_reaches_runner(self) -> None:
+        runner = _RecordingRunner()
+        with pytest.raises(UnsafeSqlError, match="line-comment carriage return"):
+            await ReadOnlyGuardRunner(runner).run_sql(
+                RunSqlToolArgs(sql="SELECT 1 -- c\r; DROP TABLE t"),
+                ToolContext.model_construct(),
+            )
+        assert runner.calls == []
+
+    async def test_mysql_comment_keeps_original_sql_for_runner(self) -> None:
+        runner = _RecordingRunner()
+        sql = "SELECT 1 -- comment\r; DROP TABLE t"
+        await ReadOnlyGuardRunner(runner, dialect="mysql").run_sql(
+            RunSqlToolArgs(sql=sql), ToolContext.model_construct(),
+        )
+        assert len(runner.calls) == 1
+        assert runner.calls[0][0].sql == sql
+
 
 class TestMysqlLexicalBoundaries:
     @pytest.mark.parametrize("sql", [
