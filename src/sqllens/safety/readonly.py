@@ -328,8 +328,9 @@ def _func_name_candidates(node: exp.Func) -> set[str]:
 
 
 # Only inspect comment gaps between tokens, so quoted strings and identifiers
-# containing these markers remain ordinary data. Preserve line-comment scope.
-_MYSQL_COMMENTS = re.compile(r"/\*.*?\*/|\#[^\r\n]*|--(?=\s|$)[^\r\n]*", re.DOTALL)
+# containing these markers remain ordinary data. MySQL line comments end at
+# LF; the byte after -- must be ASCII whitespace/control, not Unicode \s.
+_MYSQL_COMMENTS = re.compile(r"/\*.*?\*/|\#[^\n]*|--(?=[\x00-\x20\x7f]|$)[^\n]*", re.DOTALL)
 
 
 def _reject_mysql_executable_comments(sql: str) -> None:
@@ -343,7 +344,15 @@ def _reject_mysql_executable_comments(sql: str) -> None:
         for comment in _MYSQL_COMMENTS.finditer(sql, start, stop):
             if comment.group().startswith(("/*!", "/*M!")):
                 raise UnsafeSqlError("MySQL executable comments are not allowed")
-        start = next_start
+            # sqlglot ends a line comment at CR; MySQL only ends it at LF.
+            # Keep the server's scope even across tokens sqlglot emitted.
+            start = comment.end()
+            if comment.group().startswith(("#", "--")):
+                newline = sql.find("\n", comment.start())
+                start = len(sql) if newline < 0 else newline
+            if start >= stop:
+                break
+        start = max(start, next_start)
 
 
 def assert_select_only(sql: str, *, dialect: str | None = None) -> None:

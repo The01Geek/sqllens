@@ -60,6 +60,11 @@ class TestRejectsWrites:
 
 
 class TestExecutableComments:
+    @pytest.mark.parametrize("separator", ["\u00a0", "\u0085", "\u2028"])
+    def test_unicode_space_does_not_hide_executable_comment(self, separator) -> None:
+        with pytest.raises(UnsafeSqlError, match="executable comments"):
+            assert_select_only(f"SELECT 1--{separator}/*! + sleep(0) */", dialect="mysql")
+
     @pytest.mark.parametrize("sql", [
         "SELECT 1 /*!50000 + 1 */",
         "/*!50000 SELECT 1 */",
@@ -83,6 +88,10 @@ class TestExecutableComments:
         r"SELECT 'quote\'/*! marker */'",
         "SELECT 1 /* ordinary comment */",
         "SELECT 1 -- /*! ignored */\n",
+        "SELECT 1 -- ordinary\r/*! ignored */",
+        "SELECT 1 # ordinary\r/*! ignored */",
+        "SELECT 1 # ordinary\rword /*! ignored */",
+        "SELECT 1 --\t/*! ignored */\n",
         "SELECT 1 # /*! ignored */\n",
         "SELECT 1 /* -- ordinary */",
     ])
