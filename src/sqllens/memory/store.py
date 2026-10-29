@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -215,7 +216,8 @@ class MemoryStore:
         collection = self._mem._get_collection()
         ids = collection.get(include=[]).get("ids") or []
         if ids:
-            collection.delete(ids=ids)
+            with self._mem._collection_state.writing():
+                collection.delete(ids=ids)
         return len(ids)
 
     # --- Raw admin enumeration / mutation -------------------------------------
@@ -253,6 +255,34 @@ class MemoryStore:
         collection = self._mem._get_collection()
         include = ["metadatas", "embeddings"] if include_embeddings else ["metadatas"]
         got = collection.get(include=include)
+        return self._records_from_result(got, include_embeddings=include_embeddings)
+
+    def iter_records(self, *, include_embeddings: bool = False) -> Iterator[MemoryRecord]:
+        """Page through records, refusing success if a managed write overlaps.
+
+        Consumers must exhaust this iterator before publishing a result. A
+        concurrent write can invalidate already yielded rows; the next check
+        raises MemoryChangedError instead of returning an incomplete listing.
+        """
+        collection = self._mem._get_collection()
+        state = self._mem._collection_state
+        generation = state.snapshot()
+        include = ["metadatas", "embeddings"] if include_embeddings else ["metadatas"]
+        offset, page_size = 0, 256
+        while True:
+            got = collection.get(include=include, limit=page_size, offset=offset)
+            state.check(generation)
+            ids = got.get("ids") or []
+            if not ids:
+                return
+            yield from self._records_from_result(got, include_embeddings=include_embeddings)
+            state.check(generation)
+            if len(ids) < page_size:
+                return
+            offset += len(ids)
+
+    @staticmethod
+    def _records_from_result(got: dict, *, include_embeddings: bool) -> list[MemoryRecord]:
         ids = got.get("ids") or []
         metadatas = got.get("metadatas") or []
         embeddings = got.get("embeddings") if include_embeddings else None
@@ -264,7 +294,7 @@ class MemoryStore:
                 continue
             embedding = None
             if embeddings is not None and i < len(embeddings):
-                embedding = self._coerce_embedding(embeddings[i])
+                embedding = MemoryStore._coerce_embedding(embeddings[i])
             records.append(
                 MemoryRecord(
                     memory_id=memory_id, metadata=dict(metadata), embedding=embedding
@@ -311,6 +341,7 @@ class MemoryStore:
         present = collection.get(ids=ids, include=[]).get("ids") or []
         if not present:
             return 0
-        collection.delete(ids=present)
+        with self._mem._collection_state.writing():
+            collection.delete(ids=present)
         still_present = collection.get(ids=present, include=[]).get("ids") or []
         return len(present) - len(still_present)

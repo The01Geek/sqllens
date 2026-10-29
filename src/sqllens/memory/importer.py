@@ -104,9 +104,13 @@ async def import_bundle(
                         index,
                     )
                     raise
-                except Exception as exc:
+                except Exception:
+                    logger.exception("failed to save memory item %s[%d]", kind, index)
                     report.errors.append(
-                        ImportItemError(kind=kind, index=index, message=str(exc))
+                        ImportItemError(
+                            kind=kind, index=index,
+                            message="Failed to save memory item; check the server logs.",
+                        )
                     )
                     continue
             report.saved += 1

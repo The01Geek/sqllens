@@ -46,7 +46,7 @@ class SearchSavedCorrectToolUsesParams(BaseModel):
         description="The question to find similar tool usage patterns for"
     )
     limit: Optional[int] = Field(
-        default=10, description="Maximum number of results to return"
+        default=10, ge=1, le=100, description="Maximum number of results to return (1–100)"
     )
     similarity_threshold: Optional[float] = Field(
         default=None,
