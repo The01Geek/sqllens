@@ -5,6 +5,10 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Security
+- Memory listings now return a retryable error when SQL Lens writes overlap the
+  paged scan, preserving exact totals and ordering without returning partial data.
+  Coordination covers managed writes within one process; concurrent local writers
+  from separate processes remain unsupported by Chroma.
 - Bound MCP metadata propagation by key count, serialized bytes, nodes, and depth; bound debug trace argument strings and structures while preserving truncation flags. (#200)
 
 ### Removed
@@ -78,10 +82,12 @@ All notable changes to SQL Lens will be documented here. The format follows [Kee
   query selection, with short errors that do not echo rejected names. Invalid
   legacy names require manual repair; profile writes stay disabled until
   repair and restart so excluded entries are not lost. (#211, #214)
-- Retrieved memory context is quoted as untrusted reference data with escaped
-  delimiters, per-field limits, and a 32,768-character total cap. This bounds
-  prompt growth and clarifies its role; it does not guarantee prompt-injection
-  resistance or change the text-memory save default. (#221)
+- Memory administration bounds add batches to 10,000 items per block and
+  list results to 0–1000 rows, scanning storage in pages while retaining
+  newest-first ordering and the full matching count. Saved-query searches
+  accept limits from 1–100. Per-item validation and storage failures keep
+  their indices without returning raw validation inputs or exception details.
+  (#221, #223)
 - Apply the unauthenticated non-loopback policy to HTTP app factories and
   launchers as well as the CLI. The explicit insecure override adds response
   markers and throttled reminders; status/auth JSON includes `nosniff`.
