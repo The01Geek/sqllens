@@ -24,7 +24,14 @@ import shlex
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -165,8 +172,25 @@ class MemoryConfig(BaseModel):
             "Expose the save_question_tool_args agent tool, which lets the agent "
             "persist successful question -> SQL pairs into vector memory. OFF by "
             "default: when disabled the tool is not registered and the system "
-            "prompt drops its save instructions automatically. Reading saved "
+            "prompt drops its save bullet and the example workflow's save "
+            "step; the 'Do NOT forget to save successful executions.' sentence "
+            "rides on the always-registered search tool and still prints. "
+            "Reading saved "
             "memory (search_saved_correct_tool_uses) is unaffected."
+        ),
+    )
+    save_text_memories: bool = Field(
+        default=False,
+        description=(
+            "Expose the save_text_memory agent tool, which lets the agent "
+            "persist free-form notes (schema vocabulary, semantic hints) into "
+            "vector memory. OFF by default. When "
+            "disabled the tool is not registered and the default system prompt "
+            "drops its TEXT MEMORY section automatically. Notes already stored "
+            "— including curated imports — are untouched, and the context "
+            "enhancer still injects the ones matching a question. A blank "
+            "value (an empty or whitespace-only environment variable or TOML "
+            "string) reads as OFF."
         ),
     )
     allow_import: bool = Field(
@@ -192,6 +216,17 @@ class MemoryConfig(BaseModel):
             "network."
         ),
     )
+
+    @field_validator("save_text_memories", mode="before")
+    @classmethod
+    def _blank_save_text_memories_is_off(cls, value: object) -> object:
+        # Keep the blank test narrow — widening it to any unparseable string
+        # would accept a typo like "ture" as OFF instead of failing config
+        # validation, silently leaving note saving disabled for an operator
+        # who asked for it.
+        if isinstance(value, str) and not value.strip():
+            return False
+        return value
 
 
 class ProfilesConfig(BaseModel):

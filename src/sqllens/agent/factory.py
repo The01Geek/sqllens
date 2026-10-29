@@ -119,8 +119,10 @@ def build_agent(cfg: Config) -> Agent:
     tools.register_local_tool(EmitTextTool(), access_groups=access)
     # save_question_tool_args lets the agent write question -> SQL pairs into
     # memory. Gated by memory.save_queries (OFF by default); the default system
-    # prompt switches its save instructions on the tool's presence, so dropping
-    # the registration cleanly drops the prompt guidance too.
+    # prompt gates its save bullet and the example workflow's save step on
+    # has_save, so dropping the registration drops those. The "Do NOT forget to
+    # save successful executions." sentence rides on has_search instead, and the
+    # search tool is registered unconditionally, so that sentence still prints.
     if cfg.memory.save_queries:
         tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
     tools.register_local_tool(
@@ -130,9 +132,15 @@ def build_agent(cfg: Config) -> Agent:
         access_groups=access,
     )
     # save_text_memory persists free-form domain knowledge (vocabulary, semantic
-    # notes) so subsequent questions can land on the right tables/columns. The
-    # default system prompt switches on its presence via has_text_memory.
-    tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
+    # notes) so subsequent questions can land on the right tables/columns. Gated
+    # by memory.save_text_memories (OFF by default); the default system prompt
+    # switches its TEXT MEMORY section on the tool's presence via
+    # has_text_memory, so dropping the registration cleanly drops the prompt
+    # guidance too. Do not move this gate into SaveTextMemoryTool.execute or
+    # ChromaAgentMemory.save_text_memory: curated imports (sqllens.memory.store)
+    # call the same storage method, so a gate there would drop curated notes.
+    if cfg.memory.save_text_memories:
+        tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
 
     # The framework default gates the tool-arguments card to admin-only. We
     # *always* admit DEFAULT_USER_GROUP so the executed-SQL / tool-args card
