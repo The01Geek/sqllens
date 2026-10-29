@@ -72,7 +72,7 @@ class PostgresRunner(SqlRunner):
             dsn_params = self.psycopg2.extensions.parse_dsn(connection_string)
             self._connection_options = {}
             if "connect_timeout" not in dsn_params:
-                if "connect_timeout" in kwargs:
+                if kwargs.get("connect_timeout") is not None:
                     self._connection_options["connect_timeout"] = kwargs["connect_timeout"]
                 elif not os.environ.get("PGCONNECT_TIMEOUT"):
                     self._connection_options["connect_timeout"] = _DEFAULT_CONNECT_TIMEOUT_SECONDS
@@ -86,7 +86,7 @@ class PostgresRunner(SqlRunner):
                 "password": password,
                 **kwargs,
             }
-            if "connect_timeout" not in kwargs and not os.environ.get("PGCONNECT_TIMEOUT"):
+            if kwargs.get("connect_timeout") is None and not os.environ.get("PGCONNECT_TIMEOUT"):
                 self.connection_params["connect_timeout"] = _DEFAULT_CONNECT_TIMEOUT_SECONDS
         else:
             raise ValueError(
