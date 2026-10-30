@@ -1,5 +1,7 @@
 # Agent factory (the only sanctioned seam into `sqllens.agent`)
 
+<!-- verified-against: 0fbeec6 2026-10-30 -->
+
 `build_agent(cfg)` and `build_sql_runner(url)` in [src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py) are the **only** entry points that callers outside `sqllens.agent` should use. Everything else in `agent/` is vendored framework code — reach into it directly and the next sync from upstream will silently break your call sites.
 
 ## What `build_agent` wires together
@@ -129,13 +131,13 @@ Pinned by `tests/unit/test_conversation_store.py` (LRU eviction, recency-on-read
 
 ## `show_details` — UI-feature unlock
 
-The framework gates per-UI-feature visibility via `AgentConfig.ui_features` (a `UiFeatures` object whose `feature_group_access` maps each `UiFeature` enum value to the list of user-group names allowed to see it). The framework default, `DEFAULT_UI_FEATURES` from [src/sqllens/agent/core/agent/config.py](../../../src/sqllens/agent/core/agent/config.py), gates `UI_FEATURE_SHOW_TOOL_ARGUMENTS` to `["admin"]`. The static `UserResolver` above puts every request in `["default"]` (see [`DEFAULT_USER_GROUP`](../../../src/sqllens/agent/__init__.py)), so out of the box the `run_sql` tool-arguments STATUS_CARD — the only place the executed SQL appears in the component stream — never reaches the calling client.
+The framework gates per-UI-feature visibility via `AgentConfig.ui_features` (a `UiFeatures` object whose `feature_group_access` maps each `UiFeature` enum value to the list of user-group names allowed to see it). The framework default, `DEFAULT_UI_FEATURES` from [src/sqllens/agent/core/agent/config.py](../../../src/sqllens/agent/core/agent/config.py), gates `UI_FEATURE_SHOW_TOOL_ARGUMENTS` to `["admin"]`. The static `UserResolver` above puts every request in `["default"]` (see [`DEFAULT_USER_GROUP`](../../../src/sqllens/agent/__init__.py)). The `run_sql` tool-arguments STATUS_CARD carries the executed SQL in its metadata.
 
-`cfg.agent.show_details` defaults to **`false`**: exposing the generated SQL to MCP clients can leak schema details and query logic, so the executed-SQL card stays admin-gated unless an operator opts in. When `show_details` is `false`, the factory leaves `UiFeatures()` at the framework defaults and the tool-arguments card stays admin-gated; the static user fails `can_user_access_feature(UI_FEATURE_SHOW_TOOL_ARGUMENTS, user)` and the agent never emits the `run_sql` card. This is the invariant `tools/_format.py` relies on for the "no SQL card → no `query_info`" branch documented in [mcp-server/tools.md](../mcp-server/tools.md#executed-sql-channel--agentshow_details).
+`cfg.agent.show_details` defaults to **`false`**: exposing the generated SQL to MCP clients can leak schema details and query logic, so `query_database` withholds the executed SQL unless an operator opts in. Whatever `show_details` is, `build_agent` admits `DEFAULT_USER_GROUP` to `UI_FEATURE_SHOW_TOOL_ARGUMENTS`, so the agent always emits the `run_sql` card and `tools/_format.py` always sees its SQL — which it uses to withhold schema-introspection results from the user. `query_database` drops `query_info` and the agent trace when the resolved `show_details` is off; see [mcp-server/tools.md](../mcp-server/tools.md#executed-sql-channel--agentshow_details).
 
-When `cfg.agent.show_details` is set to `true`, `build_agent` constructs a *fresh* `UiFeatures()` for that agent (never mutating `DEFAULT_UI_FEATURES` in place — a single mutation would leak across all subsequently-built agents in the process) and appends `DEFAULT_USER_GROUP` to **only** the `UI_FEATURE_SHOW_TOOL_ARGUMENTS` access list. Every other admin-gated feature (`UI_FEATURE_SHOW_TOOL_ERROR`, `UI_FEATURE_SHOW_MEMORY_DETAILED_RESULTS`, etc.) stays `["admin"]`-only — the unlock is deliberately narrow. The resulting `UiFeatures` is threaded into the framework via `AgentConfig(ui_features=...)`.
+`build_agent` constructs a *fresh* `UiFeatures()` for each agent (never mutating `DEFAULT_UI_FEATURES` in place — a single mutation would leak across all subsequently-built agents in the process) and appends `DEFAULT_USER_GROUP` to **only** the `UI_FEATURE_SHOW_TOOL_ARGUMENTS` access list. Every other admin-gated feature (`UI_FEATURE_SHOW_TOOL_ERROR`, `UI_FEATURE_SHOW_MEMORY_DETAILED_RESULTS`, etc.) stays `["admin"]`-only — the unlock is deliberately narrow. The resulting `UiFeatures` is threaded into the framework via `AgentConfig(ui_features=...)`.
 
-Pinned end-to-end by `tests/unit/test_factory_wiring.py::test_show_details_on_unlocks_only_tool_arguments`, `::test_show_details_off_keeps_tool_arguments_admin_only`, and `::test_show_details_on_grants_static_user_access_to_tool_arguments` — the last two exercise the actual `can_user_access_feature` gate function the agent calls, not just the access-list state.
+Pinned end-to-end by `tests/unit/test_factory_wiring.py::test_show_details_on_unlocks_only_tool_arguments`, `::test_show_details_off_still_admits_default_group_at_build_time`, and `::test_show_details_on_grants_static_user_access_to_tool_arguments` — the last two exercise the actual `can_user_access_feature` gate function the agent calls, not just the access-list state.
 
 ## `build_sql_runner` — URL → SqlRunner
 
@@ -151,7 +153,7 @@ Unsupported schemes raise `ValueError` — the calling CLI layer turns that into
 
 `statement_timeout_ms`, `max_rows`, and `read_only` are threaded as keyword arguments into every runner. `read_only` (default `True`) causes each connector to enforce read-only at the driver/session layer before any user SQL runs — SQLite via the `mode=ro` URI plus `PRAGMA query_only=ON`, Postgres via psycopg2's `conn.set_session(readonly=True)`, MySQL via `SET SESSION TRANSACTION READ ONLY`. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full story. Callers outside `build_agent` (programmatic embedders, tests) can pass any of these keywords; defaults match `DatabaseConfig` (`30_000` ms timeout, `10_000` rows, `read_only=True`).
 
-`_sqlglot_dialect(url)` maps the same scheme to a sqlglot dialect name (`"sqlite"`, `"postgres"`, `"mysql"`) for the read-only guard. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md).
+`sqlglot_dialect_for_url(url)` (in `sqllens.safety`) maps the same scheme to a sqlglot dialect name (`"sqlite"`, `"postgres"`, `"mysql"`) that `build_agent` hands to the read-only guard and the RLS guard; `query_database` passes the same dialect to the formatter's introspection classifier. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md).
 
 ## The user resolver is intentionally static
 

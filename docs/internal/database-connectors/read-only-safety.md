@@ -1,5 +1,7 @@
 # SQL safety guards
 
+<!-- verified-against: 0fbeec6 2026-10-30 -->
+
 Why the agent can't accidentally `DROP TABLE`, can't hang the server on `SELECT generate_series(1, 1e9)`, and can't OOM the process by materialising a billion-row result. Source-of-truth reference for [src/sqllens/safety/readonly.py](../../../src/sqllens/safety/readonly.py), [src/sqllens/safety/limits.py](../../../src/sqllens/safety/limits.py), and [src/sqllens/safety/__init__.py](../../../src/sqllens/safety/__init__.py).
 
 ## The safety layers
@@ -52,7 +54,7 @@ The guard relies on sqlglot's parse-tree shape and the `walk()` contract: which 
 - **Procedure calls.** `CALL some_proc()` parses as a `Command` in sqlglot; that's not in the allow-list, so it's rejected.
 - **Read amplification / pathological queries** (other than the denylisted functions). A `SELECT * FROM huge CROSS JOIN huge` that does not invoke a denylisted function passes the parser — the statement-timeout and row-cap layers are what bound its cost.
 - **Functions not in the denylist.** The denylist covers the highest-risk known functions per dialect; a newly added database function that isn't listed will pass the guard. Use a database role with minimal privileges as the authoritative backstop — the guard is defence-in-depth, not a substitute for least-privilege access control.
-- **Schema introspection.** The guard is write-protection, not access control: a plain `SELECT` against a system catalog (`information_schema.*`, `sqlite_master`, `pg_catalog.*`) is a valid read, so it passes — there is no table allow/deny-list. The structural `SHOW` variants in the allowlist (rule 4) likewise pass, as a single read-only schema-discovery statement; `DESCRIBE` / `PRAGMA` and the non-allowlisted `SHOW` variants are still rejected (they parse as `exp.Command` / non-allowlisted `exp.Show` roots). The guard does not block schema *reads* per se. SQL Lens is reached only through natural-language tool calls (the MCP client cannot send SQL directly; only the internal agent runs SQL), so the *soft* control over what the agent reveals about the schema is the **Data Confidentiality** directive in the default system prompt ([src/sqllens/agent/core/system_prompt/default.py](../../../src/sqllens/agent/core/system_prompt/default.py)). That directive deliberately **allows** the agent to run catalog `SELECT`s (or the allowlisted structural `SHOW` variants on MySQL) internally when it needs them to write a correct query — e.g. to confirm a column name after an "Unknown column" error, or when memory holds no schema for the table. What the directive forbids is *exposing* the result: the agent must not echo, list, or DDL-dump the schema to the user, and still declines explicit "dump the schema" requests. A prompt directive is bypassable; the authoritative boundary for keeping the schema confidential is a database role scoped to specific tables/views with no catalog access.
+- **Schema introspection.** The guard is write-protection, not access control: a plain `SELECT` against a system catalog (`information_schema.*`, `sqlite_master`, `pg_catalog.*`) is a valid read, so it passes — there is no table allow/deny-list. The structural `SHOW` variants in the allowlist (rule 4) likewise pass, as a single read-only schema-discovery statement; `DESCRIBE` / `PRAGMA` and the non-allowlisted `SHOW` variants are still rejected (they parse as `exp.Command` / non-allowlisted `exp.Show` roots). The guard does not block schema *reads* per se. SQL Lens is reached only through natural-language tool calls (the MCP client cannot send SQL directly; only the internal agent runs SQL), so the *soft* control over what the agent reveals about the schema is the **Data Confidentiality** directive in the default system prompt ([src/sqllens/agent/core/system_prompt/default.py](../../../src/sqllens/agent/core/system_prompt/default.py)). That directive deliberately **allows** the agent to run catalog `SELECT`s (or the allowlisted structural `SHOW` variants on MySQL) internally when it needs them to write a correct query — e.g. to confirm a column name after an "Unknown column" error, or when memory holds no schema for the table. What the directive forbids is *exposing* the result: the agent must not echo, list, or DDL-dump the schema to the user, and still declines explicit "dump the schema" requests. The MCP formatter enforces part of this in code: it withholds from the user the DataFrame result of every `run_sql` query the [introspection classifier](#schema-introspection-classifier-is_introspection_query) marks as introspection (a `SHOW` statement returns a row-count notification instead of a DataFrame, which is not withheld), while the system prompt alone still governs what the agent writes in its own answer prose. A prompt directive is bypassable; the authoritative boundary for keeping the schema confidential is a database role scoped to specific tables/views with no catalog access.
 
 ## Schema-introspection classifier (`is_introspection_query`)
 
@@ -60,15 +62,17 @@ The guard relies on sqlglot's parse-tree shape and the `walk()` contract: which 
 
 It exists for the agent self-correction case: the system prompt lets the agent run a catalog `SELECT` or a structural `SHOW` internally to confirm a column/table name after a failed query, then re-issue a corrected query. When the MCP formatter collapses the component stream it must distinguish "the agent looked up the schema" (a step toward an answer) from "the agent re-ran the actual query and got data" (the recovered answer that supersedes an earlier error). Counting an introspection success as the recovered answer would let *data query failed → introspect → give up* report a silent success — exactly the failure CLAUDE.md forbids. See [mcp-server/tools.md](../mcp-server/tools.md#agent-self-correction-supersedes-an-earlier-error) for the consuming logic.
 
+The formatter also uses it to keep catalog results internal: a DataFrame that follows a `run_sql` card whose SQL classifies as introspection adds no block and no Markdown, while the agent still receives the result through its own tool result. `query_database` calls the formatter with the configured database's dialect (`sqlglot_dialect_for_url(cfg.database.url)`, see [Dialect handling](#dialect-handling)), so both uses classify under that dialect.
+
 Classification rules (returns `True` for introspection):
 
-- A statement whose leading keyword is `SHOW` (the structural schema-discovery `SHOW` variants the guard allowlists — `SHOW TABLES`/`COLUMNS`/...).
-- A `SELECT` referencing any table whose schema is a catalog: `information_schema`, `pg_catalog`, `mysql`, `sys`, or `performance_schema` (`_CATALOG_SCHEMAS`).
-- A `SELECT` referencing any table whose **name** begins with a catalog object prefix: `pg_` (Postgres system tables like `pg_class`) or `sqlite_` (`sqlite_master`, `sqlite_schema`) (`_CATALOG_NAME_PREFIXES`).
+- A statement whose leading keyword, after any leading comments, is `SHOW` (the structural schema-discovery `SHOW` variants the guard allowlists — `SHOW TABLES`/`COLUMNS`/...).
+- A statement referencing any table whose schema is a catalog of the given dialect, even alongside data tables: `information_schema` for every dialect, plus `pg_catalog` for `postgres`, and `mysql`, `sys` and `performance_schema` for `mysql`.
+- A statement referencing any table, or table-valued function called in `FROM`, whose **name** begins (in any casing) with a catalog object prefix of the given dialect: `pg_` for `postgres` (`pg_class`), `sqlite_` and `pragma_` for `sqlite` (`sqlite_master`, `pragma_table_info('t')`, `pragma_table_list`). A data table whose name starts with the configured engine's prefix (a SQLite table named `pragma_…`) therefore counts too.
 
-Everything else — including a normal `SELECT` over user tables — classifies as a data query (`False`).
+With `dialect=None`, or a dialect not listed above, every engine's schemas and prefixes count; a dialect name sqlglot does not know is logged at `WARNING` and parsed as no dialect. With a listed dialect, another engine's catalog names do not: on MySQL, `SELECT amount FROM pg_payments` is a data query. Everything else — including a normal `SELECT` over user tables — classifies as a data query (`False`).
 
-**Fail-open to `False`.** Unlike the guard (which fails *closed* to `UnsafeSqlError`), this classifier returns `False` on a parse failure or `None` parse result. The bias is deliberate and opposite the guard's: a string reaching this function has *already executed* through `run_sql`, so a misparse here is rare; treating an unparseable string as a data query biases toward **surfacing a recovered answer** rather than swallowing a real one as "just introspection". Misclassification is a UX concern (a recovered answer shown or hidden), not a safety one — the guard already vetted what was allowed to run.
+**Fail-open to `False`.** Unlike the guard (which fails *closed* to `UnsafeSqlError`), this classifier returns `False` on a sqlglot `ParseError` / `TokenError` or a `None` parse result (logged at `INFO`), except for a `SHOW`-leading statement, which returns `True` before any parse. Any other exception from the parser is not a parse failure and propagates: `query_database` logs it and returns its sanitized internal error (`isError: true`), so the turn neither shows a possible catalog result nor hides a possible data result. The bias is deliberate and opposite the guard's: a string reaching this function has *already executed* through `run_sql`, so a misparse here is rare; treating an unparseable string as a data query biases toward **surfacing a recovered answer** rather than swallowing a real one as "just introspection". A misclassification decides whether a recovered answer is shown and whether a catalog result reaches the user; it never changes what was allowed to run — the guard already vetted that.
 
 Pinned by `tests/unit/test_safety.py`.
 
@@ -161,7 +165,7 @@ sql_runner = build_sql_runner(
     read_only=cfg.database.read_only,
 )
 sql_runner = RowCapRunner(sql_runner, max_rows=cfg.database.max_rows)
-dialect = _sqlglot_dialect(cfg.database.url)
+dialect = sqlglot_dialect_for_url(cfg.database.url)
 if cfg.database.read_only:
     sql_runner = ReadOnlyGuardRunner(sql_runner, dialect=dialect)
 if cfg.rls:
@@ -184,7 +188,7 @@ Full reference in [row-level-security.md](row-level-security.md).
 
 ## Dialect handling
 
-`_sqlglot_dialect(url)` in [src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py) maps URL schemes to sqlglot dialect names:
+`sqlglot_dialect_for_url(url)` in [src/sqllens/safety/readonly.py](../../../src/sqllens/safety/readonly.py) (exported from `sqllens.safety`) maps URL schemes to sqlglot dialect names:
 
 | URL prefix | Dialect |
 |---|---|
