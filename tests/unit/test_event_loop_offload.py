@@ -20,6 +20,8 @@ import asyncio
 import sys
 import threading
 import types
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -272,6 +274,33 @@ async def test_anthropic_stream_request_keeps_event_loop_live() -> None:
     assert chunks[-1].finish_reason == "end_turn"
 
 
+async def test_anthropic_send_request_response_matches_prior_shape() -> None:
+    """The non-streaming ``LlmResponse`` is unchanged by the offload (criterion 7).
+
+    The thread hop hands the same SDK response object to the same unchanged
+    parsing, so every field the agent reads carries what it carried before.
+    This is the non-streaming half of the pin its streaming sibling below
+    makes; between them they cover both modes criterion 7 names.
+    """
+    client = MagicMock()
+
+    def _create(**_payload: Any) -> _FakeMessage:
+        message = _FakeMessage("the answer")
+        message.usage = SimpleNamespace(input_tokens=11, output_tokens=22)
+        return message
+
+    client.messages.create.side_effect = _create
+
+    service = _llm_service_with_fake_client(client)
+    response = await service.send_request(_llm_request())
+
+    assert response.content == "the answer"
+    assert response.tool_calls is None
+    assert response.finish_reason == "end_turn"
+    assert response.usage == {"input_tokens": 11, "output_tokens": 22}
+    assert response.provider_content == [{"type": "text", "text": "the answer"}]
+
+
 async def test_anthropic_stream_request_chunks_match_prior_shape() -> None:
     """The yielded chunk sequence is unchanged by the offload (criterion 7).
 
@@ -331,3 +360,97 @@ async def test_profile_row_cap_reaches_offloaded_runner(
         reset_effective_settings(token)
 
     cursor.fetchmany.assert_called_once_with(8)
+
+
+# ---------------------------------------------------------------------------
+# Criterion 8: errors still reach their established outcomes across the hop
+# ---------------------------------------------------------------------------
+
+
+class _AnthropicApiError(Exception):
+    """Stand-in for an ``anthropic.APIStatusError``."""
+
+
+class _PrimaryTimeout(Exception):
+    """Stand-in for a driver statement-timeout error."""
+
+
+async def test_anthropic_api_error_crosses_the_thread_boundary() -> None:
+    """An Anthropic error raised in the worker thread reaches the awaiting caller.
+
+    ``asyncio.to_thread`` re-raises the worker's exception at the ``await``, so
+    the error still reaches the tool's ``except Exception`` handler and the
+    ``isError: true`` result it produces. Covers both Anthropic modes, since
+    each has its own thread hop.
+    """
+    client = MagicMock()
+    client.messages.create.side_effect = _AnthropicApiError("rate limited")
+    client.messages.stream.side_effect = _AnthropicApiError("overloaded")
+
+    service = _llm_service_with_fake_client(client)
+
+    with pytest.raises(_AnthropicApiError, match="rate limited"):
+        await service.send_request(_llm_request())
+
+    with pytest.raises(_AnthropicApiError, match="overloaded"):
+        [chunk async for chunk in service.stream_request(_llm_request())]
+
+
+async def test_anthropic_error_still_yields_iserror_from_the_tool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The tool turns an Anthropic failure into the established error category.
+
+    The sanitized ``_INTERNAL_ERROR_MESSAGE`` is what the FastMCP wrapper maps
+    to ``isError: true``; this pins that an error arriving through the new
+    thread hop lands in that same category rather than a success-shaped result.
+    """
+    from sqllens.tools import _agent as agent_module
+    from sqllens.tools.query_database import query_database_impl
+
+    from ._agent_stubs import StubAgent
+    from ._config_builders import build_test_config
+
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    stub = StubAgent(raise_exc=_AnthropicApiError("rate limited"))
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await query_database_impl(cfg, "q", conversation_id="conv-err")
+
+    assert str(excinfo.value) == "internal error; see server logs"
+    assert isinstance(excinfo.value.__cause__, _AnthropicApiError)
+
+
+async def test_runner_error_becomes_a_failed_run_sql_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A driver error from the offloaded runner still yields a re-plannable step.
+
+    ``RunSqlTool.execute`` catches the runner's exception and returns
+    ``ToolResult(success=False)`` carrying the message, which is what lets the
+    agent re-plan. The error now originates on a worker thread, so this pins
+    that the hop does not convert it into a crash or a success.
+    """
+    from sqllens.agent.tools.run_sql import RunSqlTool
+
+    conn = MagicMock()
+    cursor = MagicMock()
+    cursor.execute.side_effect = _PrimaryTimeout("statement timeout exceeded")
+    conn.cursor.return_value = cursor
+    _install_fake_psycopg2(monkeypatch, conn)
+
+    from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
+
+    runner = PostgresRunner(connection_string="postgresql://u:p@h/d")
+
+    # The runner itself propagates the primary error across the thread hop.
+    with pytest.raises(_PrimaryTimeout, match="statement timeout"):
+        await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
+
+    # And the tool wrapping it turns that into a failed, re-plannable step.
+    tool = RunSqlTool(sql_runner=runner)
+    result = await tool.execute(MagicMock(), RunSqlToolArgs(sql="SELECT 1"))
+    assert result.success is False
+    assert "statement timeout exceeded" in result.result_for_llm
