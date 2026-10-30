@@ -53,7 +53,8 @@ _SYNC_STORE_METHODS = tuple(
     and inspect.isfunction(attr)
     and not inspect.iscoroutinefunction(attr)
 )
-"""Every public synchronous ``MemoryStore`` method, so a new one is checked too."""
+"""Every public synchronous ``MemoryStore`` instance method (plain ``def``), so a new
+one is checked too; static/class methods and properties are not collected."""
 
 _SEED_PAIR = {"question": "how many users?", "sql": "SELECT count(*) FROM users"}
 
