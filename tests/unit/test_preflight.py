@@ -339,6 +339,20 @@ def test_probe_memory_read_only_store_file_raises(tmp_path: Path) -> None:
     assert isinstance(exc_info.value.__cause__, PermissionError)
 
 
+def test_probe_memory_store_path_that_is_a_directory_raises_without_claiming_permissions(
+    tmp_path: Path,
+) -> None:
+    # An open failure that is not about permissions must not be reported as
+    # "not writable by this process".
+    (tmp_path / "chroma.sqlite3").mkdir()
+    with pytest.raises(PreflightError) as exc_info:
+        probe_memory(_cfg(persist_dir=tmp_path))
+    assert exc_info.value.subsystem == "memory"
+    assert "cannot open memory store file" in exc_info.value.detail
+    assert "not writable by this process" not in exc_info.value.detail
+    assert not isinstance(exc_info.value.__cause__, PermissionError)
+
+
 def test_probe_memory_writable_store_file_is_left_unchanged(tmp_path: Path) -> None:
     db_file = tmp_path / "chroma.sqlite3"
     db_file.write_bytes(b"existing store")

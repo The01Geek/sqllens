@@ -23,6 +23,7 @@ missing a token).
 from __future__ import annotations
 
 import contextlib
+import errno
 from pathlib import Path
 from typing import Literal
 from urllib.parse import unquote, urlparse
@@ -230,11 +231,12 @@ def probe_memory(cfg: Config) -> None:
     except FileNotFoundError:
         return
     except OSError as exc:
-        raise PreflightError(
-            "memory",
-            f"memory store file {store_file} is not writable by this process: "
-            f"{exc.strerror or type(exc).__name__}",
-        ) from exc
+        reason = exc.strerror or type(exc).__name__
+        if isinstance(exc, PermissionError) or exc.errno == errno.EROFS:
+            detail = f"memory store file {store_file} is not writable by this process: {reason}"
+        else:
+            detail = f"cannot open memory store file {store_file} for writing: {reason}"
+        raise PreflightError("memory", detail) from exc
 
 
 def probe_auth(cfg: Config) -> None:
