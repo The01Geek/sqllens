@@ -136,7 +136,6 @@ def slow_model(monkeypatch: pytest.MonkeyPatch) -> Iterator[_SlowModel]:
 async def test_health_and_list_data_sources_answer_during_slow_agent_runs(
     make_server, slow_model: _SlowModel, runs: int
 ) -> None:
-    """Issue #299 reported failures whenever several agent runs were active."""
     handle = make_server(AuthConfig(mode="none"))
 
     async with streamablehttp_client(handle.mcp_url) as (read, write, _), \

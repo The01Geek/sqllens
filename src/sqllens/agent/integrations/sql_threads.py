@@ -118,7 +118,11 @@ def _release_slot(loop: asyncio.AbstractEventLoop, slot: asyncio.Semaphore) -> N
     except RuntimeError as exc:
         if loop.is_closed():
             return  # Its semaphore goes with it.
-        logger.error("A SQL worker slot could not be returned: %s", type(exc).__name__)
+        logger.error(
+            "A SQL worker slot could not be returned (%s); this event loop has one "
+            "fewer slot for the rest of its life.",
+            type(exc).__name__,
+        )
 
 
 def _log_call_after_cancel(future: Future[Any]) -> None:
