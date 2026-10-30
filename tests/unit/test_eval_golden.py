@@ -121,7 +121,7 @@ def test_load_golden_csv_preserves_question_and_sql(prefix: str) -> None:
 
 def test_csv_parser_error_is_a_bundle_format_error() -> None:
     text = "question,sql\nq," + "x" * (csv.field_size_limit() + 1) + "\n"
-    with pytest.raises(BundleFormatError, match="invalid CSV.*field larger"):
+    with pytest.raises(BundleFormatError, match=r"invalid CSV.*field larger"):
         load_golden(text, "csv")
 
 

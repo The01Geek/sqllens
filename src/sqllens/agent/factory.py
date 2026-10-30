@@ -57,10 +57,9 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
 
     ``allow_memory_writes=False`` omits every memory-*writing* tool
     (``save_question_tool_args`` and ``save_text_memory``) regardless of
-    ``cfg.memory``, so the resulting agent can read memory but never persist
-    to it. ``sqllens verify-memory`` builds its agent this way so a
-    verification run cannot mutate the store it is checking. The flag only
-    ever *removes* write tools: it composes with any per-tool config gate
+    ``cfg.memory``, and disables retrieval counter and timestamp updates.
+    ``sqllens verify-memory`` builds its agent this way.
+    Save-tool registration composes with any per-tool config gate
     (``memory.save_queries`` today, a future text-memory flag) as a logical
     AND.
     """
@@ -96,6 +95,7 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     memory = ChromaAgentMemory(
         persist_directory=str(cfg.memory.persist_dir),
         collection_name=cfg.memory.collection,
+        track_usage=allow_memory_writes,
     )
 
     # Wire the system-prompt context enhancer explicitly so both memory
@@ -143,8 +143,7 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     # notes) so subsequent questions can land on the right tables/columns. The
     # default system prompt switches on its presence via has_text_memory.
     # ``allow_memory_writes=False`` (verify-memory) suppresses it; if a config
-    # flag later gates this registration, AND it with ``allow_memory_writes``
-    # so the read-only build stays write-free whatever the operator config.
+    # flag later gates this registration, AND it with ``allow_memory_writes``.
     if allow_memory_writes:
         tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
 

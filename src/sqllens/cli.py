@@ -442,8 +442,9 @@ def import_memory(
         err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
         raise typer.Exit(code=2) from e
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as e:
+        with path.open(encoding="utf-8", newline="") as source:
+            text = source.read()
+    except (OSError, UnicodeError) as e:
         err_console.print(f"[red]Error:[/red] cannot read {escape(str(path))}: {escape(str(e))}")
         raise typer.Exit(code=1) from e
     try:
@@ -537,8 +538,7 @@ def verify_memory(
 
     Each case is a full live agent run: typically several billed LLM
     requests, plus the queries the agent runs against the configured
-    database. The run never writes to memory
-    (the agent's save tools are disabled whatever the config says).
+    database. The run disables memory saving and retrieval-counter updates.
 
     Exits non-zero on any non-PASS case (or, with ``--fail-under``, when the
     PASS rate is below the threshold). Empty and all-non-PASS runs always
@@ -562,8 +562,9 @@ def verify_memory(
         err_console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
         raise typer.Exit(code=2)
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as e:
+        with path.open(encoding="utf-8", newline="") as source:
+            text = source.read()
+    except (OSError, UnicodeError) as e:
         err_console.print(f"[red]Error:[/red] cannot read {escape(str(path))}: {escape(str(e))}")
         raise typer.Exit(code=1) from e
     try:
@@ -625,6 +626,8 @@ def _print_report(report: RunReport) -> None:
         console.print(f"  [bold]Expected SQL:[/bold] {escape(case.expected_sql)}")
         if case.actual_sql is not None:
             console.print(f"  [bold]Actual SQL:[/bold]   {escape(case.actual_sql)}")
+        else:
+            console.print("  [bold]Actual SQL:[/bold] (not available)")
         if case.error is not None:
             console.print(f"  [bold red]Error:[/bold red] {escape(case.error)}")
 
@@ -642,6 +645,8 @@ def _exit_for_report(report: RunReport, fail_under: float | None) -> None:
     success" rule overrides ``--fail-under 0``, which would otherwise score
     ``0% >= 0%`` as a green result on a fully-broken agent.
     """
+    from decimal import Decimal
+
     from sqllens.eval import Status
 
     # Defence-in-depth symmetry: ``verify_memory`` already refuses an empty
@@ -667,8 +672,9 @@ def _exit_for_report(report: RunReport, fail_under: float | None) -> None:
             "All-non-PASS runs always fail regardless of --fail-under."
         )
         raise typer.Exit(code=1)
+    threshold = Decimal(str(fail_under))
     pct = report.pass_rate * 100
-    if pct >= fail_under:
+    if threshold.is_finite() and report.passed * 100 >= threshold * report.total:
         return
     err_console.print(
         f"[red]Pass rate {pct:.1f}% below threshold {fail_under:.1f}%.[/red]"

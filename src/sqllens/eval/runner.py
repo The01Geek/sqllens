@@ -86,11 +86,21 @@ def verification_config(cfg: Config) -> Config:
     return cfg.model_copy(
         update={
             "agent": cfg.agent.model_copy(
-                update={"show_details": True, "max_tool_iterations": effective.max_tool_iterations}
+                update={
+                    "show_details": True,
+                    "max_tool_iterations": min(
+                        cfg.agent.max_tool_iterations, effective.max_tool_iterations
+                    ),
+                }
             ),
-            "database": cfg.database.model_copy(update={"max_rows": effective.max_rows}),
+            "database": cfg.database.model_copy(
+                update={"max_rows": min(cfg.database.max_rows, effective.max_rows)}
+            ),
             "memory": cfg.memory.model_copy(
-                update={"save_queries": False, "similarity_threshold": effective.similarity_threshold}
+                update={
+                    "save_queries": False,
+                    "similarity_threshold": effective.similarity_threshold,
+                }
             ),
         }
     )
@@ -151,10 +161,12 @@ async def _run_one_case(
             forced_cfg, case.question
         )
     except Exception as exc:
+        from sqllens.tools.query_database import AgentRunError
+
         return CaseResult(
             question=case.question,
             expected_sql=case.expected_sql,
-            actual_sql=None,
+            actual_sql=_extract_sql(exc.query_info) if isinstance(exc, AgentRunError) else None,
             status=Status.ERROR,
             error=f"{type(exc).__name__}: {exc}",
         )

@@ -129,3 +129,18 @@ def test_unknown_dialect_raises_not_swallowed() -> None:
     """Unknown dialects retain their diagnostic instead of a bare ERROR status."""
     with pytest.raises(ValueError, match="Unknown dialect"):
         compare("SELECT 1", "select 1", dialect="cockroachdb_no_such")
+
+
+@pytest.mark.parametrize(
+    "expected, actual, status",
+    [
+        ("SELECT 1; SELECT 2", "SELECT 1; SELECT 3", Status.CHANGED),
+        ("SELECT 1; SELECT 2", "select 1 ; select 2;", Status.PASS),
+        ("SELECT 1", "SELECT 1; SELECT 2", Status.CHANGED),
+        ("SELECT 1; SELECT 2", "SELECT 1; SELECT (", Status.ERROR),
+        ("SELECT 1; SELECT (", "SELECT 1; SELECT 2", Status.ERROR),
+        ("", "SELECT 1", Status.ERROR),
+    ],
+)
+def test_comparison_covers_every_statement(expected: str, actual: str, status: Status) -> None:
+    assert compare(expected, actual, dialect="sqlite") is status

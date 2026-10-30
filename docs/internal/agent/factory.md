@@ -47,9 +47,9 @@ ToolRegistry    →  RunSqlTool                          (executes generated SQL
                                                                           temperature, effort))
 ```
 
-## `allow_memory_writes` — the write-free build
+## `allow_memory_writes` — verification builds
 
-`build_agent(cfg, *, allow_memory_writes=True)`. Passing `False` omits both memory-writing tools (`save_question_tool_args`, `save_text_memory`) regardless of `cfg.memory`, leaving memory search and context injection intact. Only `sqllens verify-memory` (`src/sqllens/eval/runner.py`) passes `False`, so a verification run cannot write to the store it is checking. The flag can only remove tools. Any config gate on a save tool must be ANDed with it, never ORed. See [memory.md § Verifying an import](memory.md#verifying-an-import-verify-memory).
+`build_agent(cfg, *, allow_memory_writes=True)`. Passing `False` omits both memory-writing tools (`save_question_tool_args`, `save_text_memory`) regardless of `cfg.memory`, and disables retrieval counter and timestamp updates with `ChromaAgentMemory(track_usage=False)`. Memory search and context injection remain available. Only `sqllens verify-memory` (`src/sqllens/eval/runner.py`) passes `False`. Any config gate on a save tool must be ANDed with it, never ORed. See [memory.md § Verifying an import](memory.md#verifying-an-import-verify-memory).
 
 ## Opus 5.5 defaults and conversation history
 

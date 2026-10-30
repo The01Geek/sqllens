@@ -132,12 +132,10 @@ def test_mixed_pass_changed_error(tmp_path: Path) -> None:
 
 
 def test_missing_query_info_classifies_as_error(tmp_path: Path) -> None:
-    """A driver that swallowed show_details upstream must not silently pass."""
     cfg = _config(tmp_path)
     cases = [GoldenCase("q", "SELECT 1")]
     driver = _scripted_driver(
         [
-            # query_info is None — would mean show_details was filtered out.
             ("answer text", [], None, None, None),
         ]
     )
@@ -289,7 +287,7 @@ def test_production_driver_agent_has_no_memory_write_tools(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The default (production) driver must run every case on an agent that
-    cannot write memory: neither ``save_question_tool_args`` nor
+    omits both save tools: neither ``save_question_tool_args`` nor
     ``save_text_memory`` may be registered, even with ``save_queries=True``,
     and the process-wide cached agent (built from the operator cfg, so it may
     carry both tools) must not be the one used."""
@@ -353,8 +351,9 @@ def test_parse_failure_identifies_side_and_keeps_actual_sql(
     assert side in result.error
 
 
+@pytest.mark.parametrize("rows, iterations", [(17, 3), (2000, 100)])
 def test_production_driver_uses_default_profile_and_forces_details(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rows: int, iterations: int
 ) -> None:
     from sqllens.profiles import Profile, ProfileStore
     from sqllens.runtime import get_effective_settings
@@ -365,7 +364,8 @@ def test_production_driver_uses_default_profile_and_forces_details(
     original = cfg.model_dump()
     store = ProfileStore(cfg)
     asyncio.run(store.upsert("default", Profile(
-        show_details=False, similarity_threshold=0.91, max_rows=17, max_tool_iterations=3,
+        show_details=False, similarity_threshold=0.91,
+        max_rows=rows, max_tool_iterations=iterations,
     )))
     profile_bytes = store.path.read_bytes()
     seen = []
@@ -389,8 +389,8 @@ def test_production_driver_uses_default_profile_and_forces_details(
     assert report.passed == 1
     assert seen[0].show_details is True
     assert seen[0].similarity_threshold == 0.91
-    assert seen[0].max_rows == 17
-    assert seen[0].max_tool_iterations == 3
+    assert seen[0].max_rows == min(cfg.database.max_rows, rows)
+    assert seen[0].max_tool_iterations == min(cfg.agent.max_tool_iterations, iterations)
     assert cfg.model_dump() == original
     assert store.path.read_bytes() == profile_bytes
 
@@ -445,3 +445,49 @@ def test_report_keeps_a_snapshot_of_its_results() -> None:
     results.clear()
     assert report.total == 1
     assert isinstance(report.results, tuple)
+
+
+def test_failed_sql_kept_through_production_driver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent_stub_factory
+) -> None:
+    from ._agent_stubs import make_tool_cards
+
+    sql = "SELECT '" + "x" * 1500 + "' FROM missing_table"
+    stub = agent_stub_factory(make_tool_cards("run_sql", {"sql": sql}, ok=False, error="boom"))
+    monkeypatch.setattr("sqllens.agent.factory.build_agent", lambda *a, **kw: stub)
+    report = asyncio.run(run_verification(_config(tmp_path), [GoldenCase("q", "SELECT 1")]))
+    result = report.results[0]
+    assert result.status is Status.ERROR
+    assert result.actual_sql == sql
+    assert "boom" in result.error
+
+
+async def test_verification_retrieval_preserves_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqllens.agent.factory import build_agent
+
+    from ._memory_helpers import patch_fake_embeddings
+
+    patch_fake_embeddings(monkeypatch)
+    cfg = _config(tmp_path)
+    serving = build_agent(cfg).agent_memory
+    verifying = build_agent(cfg, allow_memory_writes=False).agent_memory
+    try:
+        await serving.save_tool_usage("q", "run_sql", {"sql": "SELECT 1"}, context=None)
+        collection = serving._get_collection()
+        before = collection.get(include=["documents", "metadatas"])
+        hits = await verifying.search_similar_usage(
+            "q", context=None, similarity_threshold=0.0,
+        )
+        assert len(hits) == 1
+        assert collection.get(include=["documents", "metadatas"]) == before
+        hits = await serving.search_similar_usage("q", context=None, similarity_threshold=0.0)
+        assert len(hits) == 1
+        after = collection.get(include=["documents", "metadatas"])
+        assert after["documents"] == before["documents"]
+        assert after["metadatas"][0]["hit_count"] == 1
+        assert after["metadatas"][0]["last_hit_date"]
+    finally:
+        serving._executor.shutdown(wait=True)
+        verifying._executor.shutdown(wait=True)

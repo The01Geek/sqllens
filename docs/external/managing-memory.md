@@ -25,7 +25,7 @@ similarity_threshold = 0.7
 context_similarity_threshold = 0.55
 ```
 
-`context_similarity_threshold` is not set by default, which keeps this tier off. Lower it gradually: the lower the value, the more loosely related memories SQL Lens includes, which can help on questions that never quite match but also adds length and noise to what the assistant reads. Question-and-answer pairs added this way count as retrieved in the memory statistics.
+`context_similarity_threshold` is not set by default, which keeps this tier off. Lower it gradually: the lower the value, the more loosely related memories SQL Lens includes, which can help on questions that never quite match but also adds length and noise to what the assistant reads. During normal serving, question-and-answer pairs added this way count as retrieved in the memory statistics.
 
 If a request uses a named profile with its own `similarity_threshold`, that value is used as the strict bar for this tier too.
 
@@ -119,9 +119,9 @@ Use `--format json` (the default) for a complete, lossless backup. Use `--format
 
 `import-memory` writes curated question-and-answer pairs straight into the memory the assistant uses at query time, with no safety net of its own. `verify-memory` is the post-import regression guard: it runs a curated **golden file** of reference questions through the live assistant and reports, per question, whether SQL Lens still produces the SQL you expected.
 
-Each reference question is a full live run of the assistant using the persisted `default` profile's retrieval threshold, row limit, and iteration limit. SQL details are forced on for comparison. It typically makes several billed requests to your language-model provider and runs the SQL the assistant generates against your configured database. Size your golden file with that cost in mind.
+Each reference question is a full live run of the assistant using the persisted `default` profile's retrieval threshold and limits, capped by the configured row and iteration limits. SQL details are forced on for comparison. It typically makes several billed requests to your language-model provider and runs the SQL the assistant generates against your configured database. Size your golden file with that cost in mind.
 
-`verify-memory` does not write to memory. For the duration of the run, the assistant's tools for saving question-and-answer pairs and notes are turned off, even if your configuration enables saving queries. A verification run therefore cannot change the memory it is checking, and one reference question cannot influence the next. The assistant still reads memory as usual, which is what you are testing.
+`verify-memory` does not save memories or update retrieval counters. For the duration of the run, the assistant's tools for saving question-and-answer pairs and notes are turned off, even if your configuration enables saving queries. The assistant still reads memory as usual, which is what you are testing.
 
 ```bash
 sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]
@@ -154,7 +154,7 @@ When the command finishes it prints a table of results and a summary line, for e
 PASS 7 | CHANGED 2 | ERROR 1 (total 10, pass-rate 70.0%)
 ```
 
-Per-case details follow the summary for any non-PASS result, showing the expected SQL, the actual SQL the assistant produced (when one was produced), and an error message (when the run failed). Parse-failure diagnostics identify whether the golden SQL or the assistant's SQL could not be parsed. A missing SQL statement has its own diagnostic.
+Per-case details follow the summary for any non-PASS result, showing the expected SQL, the captured actual SQL (or `(not available)`), and an error message (when the run failed). Parse-failure diagnostics identify whether the golden SQL or the assistant's SQL could not be parsed. A missing SQL statement has its own diagnostic.
 
 Normalization uses the configured database dialect. Quoted and unquoted identifiers can still compare differently; the comparison does not prove semantic equivalence.
 

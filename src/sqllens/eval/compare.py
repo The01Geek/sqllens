@@ -46,8 +46,14 @@ def normalize_sql(sql: str, *, dialect: str | None = None) -> str:
     Parse errors and unknown-dialect errors propagate to the caller.
     """
     resolved = _resolve_sqlglot_dialect(dialect)
-    parsed = sqlglot.parse_one(sql, read=resolved)
-    return parsed.sql(dialect=resolved, normalize=True, pretty=False)
+    statements = [
+        statement for statement in sqlglot.parse(sql, read=resolved) if statement is not None
+    ]
+    if not statements:
+        raise sqlglot.errors.ParseError("No SQL statement found")
+    return "; ".join(
+        statement.sql(dialect=resolved, normalize=True, pretty=False) for statement in statements
+    )
 
 
 def compare_sql(expected: str, actual: str, *, dialect: str | None = None) -> Status:

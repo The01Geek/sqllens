@@ -56,11 +56,21 @@ class AgentRunError(RuntimeError):
     ``_meta`` when ``agent.show_details`` is on. It is ``None`` when details are
     off — in which case the server re-raises and FastMCP formats the failure
     exactly as before, with no trace leaked into a details-off deployment.
+
+    ``query_info`` retains captured SQL for the verification runner, under
+    the same resolved ``show_details`` gate as the trace.
     """
 
-    def __init__(self, message: str, *, agent_trace: dict | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        agent_trace: dict | None = None,
+        query_info: dict | None = None,
+    ) -> None:
         super().__init__(message)
         self.agent_trace = agent_trace
+        self.query_info = query_info
 
 # Client-facing error taxonomy. The MCP wrapper collapses every failure into
 # one ``isError: true`` result, so the *message* is the only category signal
@@ -307,7 +317,9 @@ async def query_database_impl_with_widgets(
         if is_error:
             logger.warning("agent reported query failure: %s", answer)
             raise AgentRunError(
-                f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}", agent_trace=agent_trace
+                f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}",
+                agent_trace=agent_trace,
+                query_info=query_info,
             )
         markdown = _append_sql_block(answer, query_info)
         return markdown, blocks, query_info, memory_info, agent_trace

@@ -123,6 +123,8 @@ def test_error_case_exits_nonzero_and_shows_message(
     assert r.exit_code == 1, r.output
     assert "ERROR 1" in r.output
     assert "LLM down" in r.output
+    assert "Expected SQL:" in r.output
+    assert "Actual SQL: (not available)" in r.output
 
 
 def test_empty_golden_file_exits_nonzero(tmp_path: Path, monkeypatch) -> None:
@@ -377,3 +379,55 @@ def test_csv_comment_and_question_are_not_rewritten(tmp_path: Path, monkeypatch)
     assert result.exit_code == 0, result.output
     assert "PASS 1" in result.output
     assert "- question" in result.output
+
+
+@pytest.mark.parametrize("passed, total, threshold", [(29, 50, 58.0), (29, 100, 29.0),
+                                                      (291, 1000, 29.1)])
+def test_decimal_threshold_is_inclusive(passed: int, total: int, threshold: float) -> None:
+    import typer
+
+    from sqllens.cli import _exit_for_report
+    from sqllens.eval import CaseResult, RunReport, Status
+
+    good = CaseResult("q", "SELECT 1", "SELECT 1", Status.PASS)
+    changed = CaseResult("q", "SELECT 1", "SELECT 2", Status.CHANGED)
+    report = RunReport((good,) * passed + (changed,) * (total - passed))
+    _exit_for_report(report, threshold)
+    with pytest.raises(typer.Exit) as caught:
+        _exit_for_report(report, threshold + 0.01)
+    assert caught.value.exit_code == 1
+
+
+@pytest.mark.parametrize("command", ["verify-memory", "import-memory"])
+def test_invalid_utf8_file_has_structured_diagnostic(tmp_path: Path, command: str) -> None:
+    cfg = _config(tmp_path)
+    path = tmp_path / "invalid.json"
+    path.write_bytes(b"\xff")
+    result = runner.invoke(app, [command, str(path), "-c", str(cfg)])
+    assert result.exit_code == 1
+    assert "cannot read" in result.stderr
+    assert not isinstance(result.exception, UnicodeError)
+
+
+def test_csv_preserves_embedded_crlf_through_cli(tmp_path: Path, monkeypatch) -> None:
+    import csv
+
+    from sqllens.eval import CaseResult, RunReport, Status
+
+    cfg = _config(tmp_path)
+    path = tmp_path / "golden.csv"
+    question, sql = "first\r\nsecond", "SELECT 'a\r\nb'"
+    with path.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["question", "sql"])
+        writer.writerow([question, sql])
+    seen = []
+
+    async def capture(cfg, cases):
+        seen.extend(cases)
+        return RunReport((CaseResult(question, sql, sql, Status.PASS),))
+
+    monkeypatch.setattr("sqllens.eval.run_verification", capture)
+    result = runner.invoke(app, ["verify-memory", str(path), "--format", "csv", "-c", str(cfg)])
+    assert result.exit_code == 0, result.output
+    assert [(case.question, case.expected_sql) for case in seen] == [(question, sql)]
