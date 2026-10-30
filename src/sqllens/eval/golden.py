@@ -12,7 +12,7 @@ file format is introduced. The on-disk shape is identical to an
 - In a golden file, each ``(question, sql)`` pair is the *expected agent
   output to match against* (the ``sql`` is ground truth, not a hint).
 
-The bundle size and item caps and JSON recursion guard apply. CSV cells are
+The bundle size and item caps and JSON nesting-depth limit apply. CSV cells are
 preserved verbatim because both the question and SQL are ground truth.
 """
 
