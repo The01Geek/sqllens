@@ -148,9 +148,8 @@ def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
 def _verify_relations(cursor: Any, relations: list[exp.Table], dialect: str) -> None:
     """Raise ``RlsError`` for a relation that is not a verified base table.
 
-    A failed lookup or an unexpected catalog row (a short row, a non-boolean
-    child flag) raises another exception, which the caller, ``verify_base_tables``,
-    logs before refusing the query.
+    A failed lookup or a non-boolean child flag raises another exception, which
+    the caller, ``verify_base_tables``, logs before refusing the query.
     """
     mysql_fold = False
     if dialect == "mysql":
@@ -255,8 +254,8 @@ def _refuse_database_routines(cursor: Any, names: list[str], dialect: str) -> No
     if row is not None:
         raise RlsError(
             "functions defined in the database are not supported while "
-            "row-level security is active; the database defines a function named "
-            f"{str(row[0])!r}, so calls by that name are blocked"
+            "row-level security is active; a call in this query matches the database "
+            f"function {str(row[0])!r} (names are compared ignoring case)"
         )
 
 

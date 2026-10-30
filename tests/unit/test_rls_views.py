@@ -458,8 +458,9 @@ class _FakeCatalog:
     """Fake cursor answering the relation, child and routine lookups.
 
     ``relations`` maps a resolved relation name to its ``pg_class`` row tail
-    (relkind, child flag); ``routines`` holds lower-case routine names, matched
-    against the lookup's parameters as the database would.
+    (relkind, child flag); ``routines`` holds routine names as stored, matched
+    against the lookup's parameters ignoring case, as the lookup's SQL does. A
+    match returns the stored name.
     """
 
     def __init__(self, relations=None, routines=(), *, fail_on=None) -> None:
@@ -486,7 +487,8 @@ class _FakeCatalog:
             self._row = ("BASE TABLE",)
         elif "pg_proc" in sql or "ROUTINES" in sql:
             names = params[1] if "pg_proc" in sql else params
-            matched = sorted({n.lower() for n in names} & self.routines)
+            called = {n.lower() for n in names}
+            matched = sorted(r for r in self.routines if r.lower() in called)
             self._row = (matched[0],) if matched else None
         else:
             raise AssertionError(f"unexpected catalog query: {sql}")
@@ -575,15 +577,16 @@ def test_database_routine_calls_are_refused(sql, dialect) -> None:
 
 
 def test_routine_lookup_is_parameterized_and_scoped() -> None:
-    cursor = _FakeCatalog(routines={"all_orders"})
-    # The refusal names the matched routine so the agent knows which call to drop.
-    with pytest.raises(RlsError, match="function named 'all_orders'"):
+    # The refusal names the matched routine as stored (not as called) so the
+    # agent knows which call to drop.
+    cursor = _FakeCatalog(routines={"All_Orders"})
+    with pytest.raises(RlsError, match="database function 'All_Orders'"):
         verify_base_tables(_catalog_connection(cursor), "SELECT ALL_ORDERS()", dialect="postgres")
     [(sql, params)] = cursor.queries
     assert "nspname NOT IN ('pg_catalog', 'information_schema')" in sql
     assert "all_orders" in params[0] and "ALL_ORDERS" not in sql
-    cursor = _FakeCatalog(routines={"all_orders"})
-    with pytest.raises(RlsError, match="function named 'all_orders'"):
+    cursor = _FakeCatalog(routines={"All_Orders"})
+    with pytest.raises(RlsError, match="database function 'All_Orders'"):
         verify_base_tables(_catalog_connection(cursor), "SELECT ALL_ORDERS()", dialect="mysql")
     [(sql, params)] = cursor.queries
     assert "ROUTINE_TYPE = 'FUNCTION'" in sql
