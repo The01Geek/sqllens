@@ -852,6 +852,10 @@ class TestIsIntrospectionQueryPerDialect:
             # before the parse rather than failing open.
             ("/* c */ SHOW 'abc", "mysql"),
             ("-- c\nSHOW 'abc", "postgres"),
+            # An inline comment right after SHOW is caught by the parse root.
+            ("SHOW/**/TABLES", "mysql"),
+            ("SHOW/* c */ COLUMNS FROM widgets", "mysql"),
+            ("/* a /* b */ c */ SHOW TABLES", "postgres"),
         ],
     )
     def test_own_engine_catalogs_detected(self, sql: str, dialect: str) -> None:

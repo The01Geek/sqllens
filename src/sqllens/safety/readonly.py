@@ -162,6 +162,13 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
             dialect,
         )
         return False
+    # The keyword check above misses a SHOW split by an inline comment
+    # (``SHOW/**/TABLES``) or behind a nested one; the parse root still
+    # identifies it (exp.Show, or a SHOW Command fallback).
+    if isinstance(parsed, exp.Show) or (
+        isinstance(parsed, exp.Command) and parsed.name.upper() == "SHOW"
+    ):
+        return True
     schemas, prefixes = _catalog_names(dialect)
     for table in parsed.find_all(exp.Table):
         schema = (table.db or "").lower()
