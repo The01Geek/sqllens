@@ -4,10 +4,9 @@ Guidance for Claude Code (and other AI assistants) working in this repo.
 
 ## Project overview
 
-**SQL Lens** is a standalone MCP server that exposes a natural-language SQL agent and a vector memory store. It connects MCP-aware AI assistants (Cursor, Claude Desktop, Windsurf, custom clients) to a single configured database. Three tools are exposed:
+**SQL Lens** is a standalone MCP server that exposes a natural-language SQL agent and a vector memory store. It connects MCP-aware AI assistants (Cursor, Claude Desktop, Windsurf, custom clients) to a single configured database. Two tools are always exposed (opt-in memory and profile admin tools are registered only when an operator enables them):
 
-- `query_database(question)` — NL → SQL → executed → Markdown table.
-- `visualize_data(question)` — NL → SQL → ECharts chart payload + text answer.
+- `query_database(question)` — NL → SQL → executed → Markdown answer, plus ordered table/chart/text blocks that app-widget hosts render as an interactive table or ECharts chart.
 - `list_data_sources()` — describes the configured database.
 
 One database per running instance. Read-only by default, enforced by a `sqlglot` parser guard. Anthropic-only LLM in v1; the LLM interface is pluggable for future providers.
@@ -44,7 +43,7 @@ The agent's `send_message` returns an async stream of `UiComponent` objects; `to
 
 ## The pruning choice (lifted agent code)
 
-When extracting `sqllens.agent` we made a deliberate **aggressive-pruning** choice: copy only the modules transitively required by the MCP tools we ship, rather than carry the entire upstream framework. The original tree had 283 Python files; we kept ~110. v0.2 reintroduces a chart-emitting tool as a first-party `EmitChartTool` (`src/sqllens/agent/tools/emit_chart.py`) — not lifted from upstream — to back the `visualize_data` MCP tool.
+When extracting `sqllens.agent` we made a deliberate **aggressive-pruning** choice: copy only the modules transitively required by the MCP tools we ship, rather than carry the entire upstream framework. The original tree had 283 Python files; we kept ~110. v0.2 reintroduces a chart-emitting tool as a first-party `EmitChartTool` (`src/sqllens/agent/tools/emit_chart.py`) — not lifted from upstream. It is an agent-side tool, not an MCP tool: the chart blocks it emits are returned by `query_database` (the former separate `visualize_data` MCP tool was folded into `query_database`).
 
 **What this means for debugging:**
 
@@ -114,7 +113,7 @@ Before you write or keep any behavioral claim, **trace it to the line that imple
 - **Guard / validation scope.** If a doc claims an input is "blocked," "rejected," or "validated," find the branch that rejects it. Match the doc to the *actual* predicate: don't claim type-mismatch blocking, empty-string blocking, or load-time rejection unless the code does exactly that (#136 claimed RLS type-mismatch and load-time-reject behavior the guard never implemented; empty-string slipped through `_is_suspicious_scalar`).
 - **Exception breadth.** A docstring promising "fail-secure to `{}`" must catch the exceptions that can actually be raised, not a narrower subset (#136 caught only `(ValueError, AttributeError)`).
 - **Counting claims.** "Three orthogonal protections" / "two halves" / "N tools" must equal what the file now contains after your change. Adding a fourth guard means the count updates (#136 left "Three orthogonal protections" after adding `RlsGuardRunner`).
-- **Sibling surfaces.** If two tools share a wrapped runner (`query_database` + `visualize_data`), a claim about "every query" must hold for both, or scope the claim and record the gap as an explicit follow-up — do not let the doc imply coverage the sibling lacks.
+- **Sibling surfaces.** If two surfaces share a wrapped runner (the `query_database` MCP tool + the `verify-memory` CLI runner, which both call `query_database_impl_with_widgets`), a claim about "every query" must hold for both, or scope the claim and record the gap as an explicit follow-up — do not let the doc imply coverage the sibling lacks.
 
 When a claim cannot yet be backed by code, either cut it or write it as an explicit "not yet / follow-up," and call that out in the PR body. A claim you can't trace to a line is a defect, not a placeholder.
 
