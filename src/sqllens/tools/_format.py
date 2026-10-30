@@ -116,11 +116,10 @@ def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
     return info
 
 
-# The agent emits one of these placeholders on a normal turn's finalization
-# ChatInputUpdateComponent (agent/core/agent/agent.py emits "Ask a question...",
-# "Ask a follow-up question...", "Continue the task or ask me something else...",
-# and "Try again..." on the error path). None is a clarifying question, so they
-# must never be surfaced as the answer when a turn produces no TEXT/DATAFRAME —
+# Generic ChatInputUpdateComponent placeholders that agent/core/agent/agent.py
+# emits when a turn ends, normally or on its error and repeated-invalid-tool-call
+# stop paths. None carries content for the user, so they must
+# never be surfaced as the answer when a turn produces no TEXT/DATAFRAME —
 # otherwise an empty result would render the generic placeholder instead of the
 # "(no answer)" fallback. Compared case-insensitively.
 _GENERIC_INPUT_PLACEHOLDERS = frozenset(
@@ -129,6 +128,7 @@ _GENERIC_INPUT_PLACEHOLDERS = frozenset(
         "ask a follow-up question...",
         "continue the task or ask me something else...",
         "try again...",
+        "try rephrasing or narrowing the question...",
     }
 )
 
@@ -176,19 +176,18 @@ def _alert_text(rich) -> str:  # type: ignore[no-untyped-def]
 
 
 def render_interactive(components: Iterable[UiComponent]) -> str:
-    """Render the agent's interactive/follow-up affordances as plain Markdown.
+    """Render interactive components as plain Markdown.
 
-    Surfaces a clarifying question the agent expressed *only* as an interactive
-    component — a ``CHAT_INPUT_UPDATE`` prompt, ``BUTTON``/``BUTTON_GROUP``
+    Surfaces the content of a turn whose only output is interactive
+    components — a ``CHAT_INPUT_UPDATE`` prompt, ``BUTTON``/``BUTTON_GROUP``
     choices, or an ``ALERT``/``NOTIFICATION`` message — so the calling model
-    receives the question instead of a useless ``"(no answer)"``. The output is
-    plain Markdown, independent of the MCP Apps widget channel, so non-apps
-    clients get the question too.
+    receives it instead of a useless ``"(no answer)"``. The output is plain
+    Markdown, independent of the MCP Apps widget channel, so non-apps clients
+    get it too. The agent's own clarifying question is not one of these: it is
+    answer-marked text and renders as a text block.
 
-    Returns ``""`` when no renderable interactive affordance is present, which
-    the callers treat as "fall back to ``(no answer)``". Used only when a turn
-    produced no ``TEXT``/``DATAFRAME`` answer, so a normal answer's trailing
-    finalization components are never surfaced.
+    Returns ``""`` when no renderable interactive component is present, which
+    the callers treat as "fall back to ``(no answer)``".
     """
     pieces: list[str] = []
     choices: list[str] = []
@@ -547,9 +546,9 @@ def components_to_blocks(
     blocks = _trim_blocks_to_budget(blocks)
 
     # Markdown answer: serialize the blocks; fall back to the interactive-only
-    # surface (clarifying question, button choices) before the literal
-    # ``"(no answer)"`` so a turn that produced only an interactive affordance
-    # still surfaces the question to non-apps clients.
+    # surface (chat-input prompt, button choices) before the literal
+    # ``"(no answer)"`` so a turn that produced only interactive components
+    # still surfaces their content to non-apps clients.
     if blocks:
         markdown = _serialize_blocks_to_markdown(blocks)
         if not markdown:
