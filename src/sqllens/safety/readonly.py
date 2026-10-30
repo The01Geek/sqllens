@@ -65,14 +65,16 @@ def is_read_shaped(sql: str) -> bool:
 
 
 def sqlglot_dialect_for_url(url: str) -> str | None:
-    """Map a database URL to the sqlglot dialect name used by the safety guards."""
+    """Map a database URL to the sqlglot dialect name used by the safety guards.
+
+    The dialect is the ``_CATALOGS_BY_DIALECT`` key the URL scheme starts with
+    (``postgresql+psycopg`` → ``postgres``), so every dialect this returns has
+    a catalog entry; any other scheme returns ``None``.
+    """
     scheme = url.split("://", 1)[0].lower()
-    if scheme.startswith("sqlite"):
-        return "sqlite"
-    if scheme.startswith("postgres"):
-        return "postgres"
-    if scheme.startswith("mysql"):
-        return "mysql"
+    for dialect in _CATALOGS_BY_DIALECT:
+        if scheme.startswith(dialect):
+            return dialect
     return None
 
 
@@ -80,8 +82,8 @@ def sqlglot_dialect_for_url(url: str) -> str | None:
 # introspection rather than a data-answering query. Keyed by sqlglot dialect:
 # an engine-specific catalog counts only on its own engine, so a data table
 # that merely starts with another engine's prefix (``pg_payments`` on MySQL)
-# is not misread as a catalog. Keep these keys in sync with
-# ``sqlglot_dialect_for_url`` — an unmapped dialect falls back to the union.
+# is not misread as a catalog. ``sqlglot_dialect_for_url`` derives its
+# dialects from these keys; any other dialect falls back to the union.
 _SHARED_CATALOG_SCHEMAS: frozenset[str] = frozenset({"information_schema"})
 # dialect -> (catalog schemas, catalog object-name prefixes)
 _CATALOGS_BY_DIALECT: dict[str, tuple[frozenset[str], tuple[str, ...]]] = {

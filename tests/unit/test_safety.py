@@ -905,15 +905,25 @@ class TestIsIntrospectionQueryPerDialect:
         monkeypatch.setattr(readonly_mod.sqlglot, "parse_one", boom)
         assert is_introspection_query("SELECT id FROM widgets", dialect="mysql") is True
 
-    def test_unknown_sqlglot_dialect_counts_every_engine(self) -> None:
-        assert is_introspection_query("SELECT * FROM pg_class", dialect="postgresql") is True
+    @pytest.mark.parametrize("dialect", ["postgresql", "no-such-dialect"])
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT * FROM pg_class",
+            "SELECT name FROM sqlite_master",
+            "SELECT name FROM pragma_table_info('widgets')",
+            "SELECT name FROM mysql.user",
+        ],
+    )
+    def test_unknown_sqlglot_dialect_counts_every_engine(
+        self, sql: str, dialect: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level("WARNING", logger="sqllens.safety.readonly"):
+            assert is_introspection_query(sql, dialect=dialect) is True
+        assert "unknown sqlglot dialect" in caplog.text
+
+    def test_unknown_sqlglot_dialect_data_query_is_data(self) -> None:
         assert is_introspection_query("SELECT id FROM widgets", dialect="postgresql") is False
-
-    def test_mapped_dialects_have_catalog_entries(self) -> None:
-        from sqllens.safety.readonly import _CATALOGS_BY_DIALECT, sqlglot_dialect_for_url
-
-        for url in ("sqlite:///x.db", "postgresql+psycopg://h/db", "mysql+pymysql://h/db"):
-            assert sqlglot_dialect_for_url(url) in _CATALOGS_BY_DIALECT
 
     def test_hash_is_not_a_comment_outside_mysql(self) -> None:
         # "#" opens a line comment only in MySQL; on Postgres this is not a SHOW.
