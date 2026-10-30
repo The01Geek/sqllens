@@ -105,11 +105,12 @@ def _catalog_names(dialect: str | None) -> tuple[frozenset[str], tuple[str, ...]
     return _SHARED_CATALOG_SCHEMAS | schemas, prefixes
 
 
-def _strip_leading_comments(sql: str) -> str:
-    """Drop leading whitespace and ``--``, ``#`` and ``/* */`` comments."""
+def _strip_leading_comments(sql: str, dialect: str | None) -> str:
+    """Drop leading whitespace and ``--`` / ``/* */`` comments (and ``#`` on MySQL)."""
+    line_markers = ("--", "#") if dialect in (None, "mysql") else ("--",)
     rest = sql.lstrip()
     while True:
-        if rest.startswith(("--", "#")):
+        if rest.startswith(line_markers):
             _line, _newline, rest = rest.partition("\n")
         elif rest.startswith("/*"):
             end = rest.find("*/", 2)
@@ -143,7 +144,7 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     does not parse under ``dialect`` (a parse error or an empty parse) is
     treated as a data query, so its result is shown.
     """
-    if first_sql_keyword(_strip_leading_comments(sql)) == "SHOW":
+    if first_sql_keyword(_strip_leading_comments(sql, dialect)) == "SHOW":
         return True
     try:
         parsed = sqlglot.parse_one(sql, dialect=dialect)

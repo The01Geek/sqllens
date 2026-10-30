@@ -847,9 +847,9 @@ class TestIsIntrospectionQueryPerDialect:
             ("-- columns\nSHOW COLUMNS FROM widgets", "mysql"),
             ("/* look up tables */ SHOW TABLES", "postgres"),
             ("/* look up tables */ SHOW TABLES", "sqlite"),
-            ("# tables\n/* again */ SHOW TABLES", "mysql"),
             # A comment-led SHOW that sqlglot cannot tokenize is still caught
             # before the parse rather than failing open.
+            ("# tables\n/* again */ SHOW 'abc", "mysql"),
             ("/* c */ SHOW 'abc", "mysql"),
             ("-- c\nSHOW 'abc", "postgres"),
             # An inline comment right after SHOW is caught by the parse root.
@@ -891,6 +891,10 @@ class TestIsIntrospectionQueryPerDialect:
     def test_no_dialect_counts_every_engine(self, sql: str) -> None:
         # Control: these catalogs already count without a dialect before #301.
         assert is_introspection_query(sql) is True
+
+    def test_hash_is_not_a_comment_outside_mysql(self) -> None:
+        # "#" opens a line comment only in MySQL; on Postgres this is not a SHOW.
+        assert is_introspection_query("#x\nSHOW 'abc", dialect="postgres") is False
 
     @pytest.mark.parametrize(
         "sql",
