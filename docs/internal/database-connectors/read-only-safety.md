@@ -100,6 +100,8 @@ PostgreSQL connection establishment separately uses a five-second `connect_timeo
 
 `statement_timeout_ms = 0` disables the timeout on Postgres and MySQL (Postgres's standard "0 = disabled" semantics, MySQL's `SET SESSION` is skipped entirely). On SQLite, `0` means no progress handler is registered.
 
+The runners make these driver calls on the SQL worker pool ([src/sqllens/agent/integrations/sql_threads.py](../../../src/sqllens/agent/integrations/sql_threads.py)), not on the event loop, and nothing interrupts a call that has started. A cancelled request's database query therefore keeps running on its worker thread until it finishes or the engine's statement timeout stops it. Where the timeout does not apply (a MySQL statement other than `SELECT`, or `statement_timeout_ms = 0`), only the query's own end frees the thread. See the cancellation limit in [mcp-server/transport.md](../mcp-server/transport.md#keeping-the-event-loop-free-during-agent-runs-issue-299).
+
 The timeout error surfaces as whatever the driver raises (`psycopg2.errors.QueryCanceled`, `pymysql.err.OperationalError` with `ER_QUERY_TIMEOUT`, `sqlite3.OperationalError('interrupted')`); `RunSqlTool.execute` catches that and returns a `ToolResult(success=False)` so the LLM can re-plan.
 
 ## Row cap and truncation surface

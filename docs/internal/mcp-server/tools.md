@@ -221,6 +221,12 @@ a worker thread; see the cancellation limit in
 [transport.md](transport.md#keeping-the-event-loop-free-during-agent-runs-issue-299).
 The rollback removes only conversation messages.
 
+The queue covers `query_database` only. `import_memory` and the
+memory-administration tools still make synchronous memory-store calls inside
+their `async` handlers, so while one of them runs it blocks the event loop and
+every other request waits (tracked in #303; see "Not yet covered" in
+[transport.md](transport.md#keeping-the-event-loop-free-during-agent-runs-issue-299)).
+
 Pinned by `tests/unit/test_query_database_queue.py` (concurrency across ids,
 ordering on a shared id, entry cleanup, cancel rollback, and the
 `truncate_messages` seam).

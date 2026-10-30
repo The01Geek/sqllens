@@ -144,7 +144,8 @@ class _ConversationQueueEntry:
 # Safe as plain dict mutations: every read-modify-write below runs on the event
 # loop with no intervening ``await``, so no other task can interleave. The agent
 # loop and the conversation store stay on the event loop for exactly this
-# reason; only the database driver calls run on worker threads.
+# reason. Work that does run on worker threads (SQL driver calls, ChromaDB
+# memory calls) never touches this registry.
 _CONVERSATION_QUEUES: dict[str, _ConversationQueueEntry] = {}
 
 

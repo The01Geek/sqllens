@@ -21,14 +21,15 @@ mutations run without an intervening ``await``, so they are atomic under
 cooperative scheduling; the store is **not** thread-safe and would need a lock
 if ever driven from multiple OS threads. That holds for the synchronous
 ``truncate_messages`` too — it is synchronous so a cancelled task can call it
-without suspending, not so it can be called from a worker thread. Database
-driver calls run on worker threads, but every store call stays on the event
-loop.
+without suspending, not so it can be called from a worker thread. Some work
+runs on worker threads (SQL driver calls, ChromaDB memory calls), but every
+store call stays on the event loop.
 """
 
 from __future__ import annotations
 
 from collections import OrderedDict
+from datetime import UTC, datetime
 
 from sqllens.agent.core.storage import Conversation, ConversationStore, Message
 from sqllens.agent.core.user import User
@@ -104,7 +105,9 @@ class BoundedConversationStore(ConversationStore):
         is needed.
 
         Does not touch LRU recency: a rollback is cleanup for a turn that never
-        happened, not a use of the conversation.
+        happened, not a use of the conversation. It does stamp ``updated_at``,
+        as ``Conversation.add_message`` does, so that field never reflects
+        messages that are no longer there.
 
         Returns True when messages were actually dropped, False when there was
         nothing to roll back — an unknown or evicted conversation id, a
@@ -121,6 +124,9 @@ class BoundedConversationStore(ConversationStore):
         if length >= len(conversation.messages):
             return False
         del conversation.messages[length:]
+        # Naive UTC, the same kind of value ``Conversation.add_message`` stores,
+        # so ``list_conversations`` can still compare and sort them.
+        conversation.updated_at = datetime.now(UTC).replace(tzinfo=None)
         return True
 
     def _remember(self, conversation: Conversation) -> None:

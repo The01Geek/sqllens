@@ -19,13 +19,16 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from sqllens.agent.core.storage import Message
 from sqllens.agent.factory import _StaticUserResolver
+from sqllens.config import AgentRuntimeConfig
 from sqllens.conversation_store import BoundedConversationStore
 from sqllens.tools import _agent as agent_module
 from sqllens.tools import query_database as query_database_module
@@ -181,6 +184,48 @@ async def test_same_conversation_id_runs_one_at_a_time(gated) -> None:
     assert await _messages(store, "conv-a") == ["first", "second"]
 
 
+async def test_queue_wait_is_not_part_of_the_reported_duration(
+    gated, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The run timer starts after the turn lock is taken.
+
+    A call that waited 100 s behind an earlier call on the same conversation
+    and then ran for 1.5 s reports 1.5 s in its agent trace, not 101.5 s.
+    """
+    _cfg, agent, _store = gated
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma", agent=AgentRuntimeConfig(show_details=True)
+    )
+    # A fake clock for this module only, so the event loop keeps real time.
+    now = [1000.0]
+    monkeypatch.setattr(
+        query_database_module, "time", SimpleNamespace(monotonic=lambda: now[0])
+    )
+
+    first = asyncio.create_task(
+        query_database_impl_with_widgets(cfg, "first", conversation_id="conv-a")
+    )
+    await _settle()
+    second = asyncio.create_task(
+        query_database_impl_with_widgets(cfg, "second", conversation_id="conv-a")
+    )
+    await _settle()
+    assert agent.entered == ["conv-a"]
+
+    now[0] += 100.0  # the second call waits this long for its turn
+    agent.gates[0].set()
+    await first
+    await _settle()
+    assert agent.entered == ["conv-a", "conv-a"]
+
+    now[0] += 1.5  # the second call's own run time
+    agent.gates[1].set()
+    *_, trace = await second
+
+    assert trace is not None
+    assert trace["total_duration_ms"] == 1500
+
+
 async def test_second_call_starts_after_first_fails(gated) -> None:
     """A failed first call releases the turn, like a returning one (criterion 3)."""
     cfg, agent, _store = gated
@@ -324,6 +369,57 @@ async def test_cancelled_call_returns_no_result(gated) -> None:
     assert task.cancelled()
 
 
+async def test_cancel_while_reading_the_baseline_leaves_history_intact(gated) -> None:
+    """A call cancelled before its agent run began adds and removes nothing.
+
+    The cancellation lands while ``_conversation_baseline`` is still awaiting
+    the user resolver, after the turn lock is taken and before the agent run's
+    ``try``. Nothing has been appended yet, so the earlier history must stay
+    as it was, no queue entry may remain, and the next call must run.
+    """
+    cfg, agent, store = gated
+
+    first = asyncio.create_task(
+        query_database_impl_with_widgets(cfg, "kept", conversation_id="conv-a")
+    )
+    await _settle()
+    agent.gates[0].set()
+    await first
+
+    real_resolver = agent.user_resolver
+    resolver_entered = asyncio.Event()
+
+    class _StalledResolver:
+        async def resolve_user(self, request_context: Any) -> Any:
+            resolver_entered.set()
+            await asyncio.Event().wait()  # never set: the call is cancelled here
+
+    agent.user_resolver = _StalledResolver()
+    doomed = asyncio.create_task(
+        query_database_impl_with_widgets(cfg, "doomed", conversation_id="conv-a")
+    )
+    await resolver_entered.wait()
+    assert "conv-a" in query_database_module._CONVERSATION_QUEUES
+
+    doomed.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await doomed
+
+    assert agent.entered == ["conv-a"], "the cancelled call never began its run"
+    assert query_database_module._CONVERSATION_QUEUES == {}
+    assert await _messages(store, "conv-a") == ["kept"]
+
+    agent.user_resolver = real_resolver
+    follow_up = asyncio.create_task(
+        query_database_impl_with_widgets(cfg, "next", conversation_id="conv-a")
+    )
+    await _settle()
+    agent.gates[-1].set()
+    await follow_up
+
+    assert await _messages(store, "conv-a") == ["kept", "next"]
+
+
 # ---------------------------------------------------------------------------
 # A ``None`` conversation id takes no lock and no rollback
 # ---------------------------------------------------------------------------
@@ -359,9 +455,12 @@ async def test_truncate_messages_reports_what_it_did() -> None:
     assert conversation is not None
     conversation.add_message(Message(role="user", content="two"))
 
-    # Dropped something.
+    # Dropped something, and stamped ``updated_at`` as ``add_message`` does.
+    conversation.updated_at = datetime(2000, 1, 1)
     assert store.truncate_messages("conv-a", user.id, 1) is True
     assert [m.content for m in conversation.messages] == ["one"]
+    assert conversation.updated_at > datetime(2000, 1, 1)
+    assert conversation.updated_at.tzinfo is None  # comparable with add_message's
 
     # Already at or below the target length — nothing to roll back.
     assert store.truncate_messages("conv-a", user.id, 1) is False
