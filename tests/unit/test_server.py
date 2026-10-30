@@ -589,3 +589,72 @@ async def test_query_database_error_result_carries_no_model_info(
     assert isinstance(result, CallToolResult)
     assert result.isError is True
     assert "sqllens/model_info" not in result.meta
+
+
+# ─────────────────────────── clarifying questions ───────────────────────────
+
+
+async def test_query_database_description_tells_caller_to_relay_clarifying_question(
+    tmp_path: Path,
+) -> None:
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    mcp = build_server(cfg)
+
+    tools = {t.name: t for t in await mcp.list_tools()}
+    description = " ".join(tools["query_database"].description.split())
+
+    assert "When a result is a clarifying question rather than an answer" in description
+    assert "ask the user that question" in description
+    assert "or use the answer the user's earlier messages already give" in description
+    assert (
+        "call ``query_database`` again with that answer as ``question`` and the "
+        "``conversation_id`` the result returned" in description
+    )
+
+
+async def test_clarifying_question_round_trip_through_query_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A question-only turn reaches the caller, and the reply continues it.
+
+    A real agent behind the registered tool, with a scripted model, a fake
+    ``run_sql`` tool and stub memory, so the server, stream collapse and
+    conversation store all run for real.
+    """
+    from sqllens.agent.core.llm import LlmResponse
+    from sqllens.tools import query_database as qd
+
+    from .test_truncated_tool_calls import _agent, _FakeRunSql, _ScriptedLlm
+
+    original = "Show me revenue by month for last year"
+    clarifying = "Should partially paid orders count toward revenue?"
+    reply = "Exclude them"
+    llm = _ScriptedLlm(
+        [LlmResponse(content=clarifying), LlmResponse(content="Revenue excluding them.")]
+    )
+    agent = _agent(llm, _FakeRunSql())
+
+    async def _fake_get_agent(_cfg: Config):
+        return agent
+
+    monkeypatch.setattr(qd, "get_agent", _fake_get_agent)
+    mcp = build_server(build_test_config(persist_dir=tmp_path / "chroma"))
+    query_database = _query_database_fn(mcp)
+
+    first = await query_database(original, _StubCtx())
+    assert isinstance(first, CallToolResult)
+    assert first.isError is False
+    assert first.content[0].text.startswith(clarifying)
+    conversation_id = first.meta["sqllens/conversation"]["conversation_id"]
+    assert conversation_id
+
+    second = await query_database(reply, _StubCtx(), conversation_id=conversation_id)
+    assert isinstance(second, CallToolResult)
+    assert second.isError is False
+
+    assert len(llm.requests) == 2
+    contents = [m.content for m in llm.requests[1].messages]
+    positions = [contents.index(text) for text in (original, clarifying, reply)]
+    assert positions == sorted(positions)
+    for request in llm.requests:
+        assert "Ambiguous Questions:" in request.system_prompt
