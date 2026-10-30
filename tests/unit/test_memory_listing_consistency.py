@@ -235,15 +235,19 @@ async def test_active_failed_writer_refuses_scan_then_releases_state(populated_s
     assert admin.list_memories(store, limit=0) == {"memories": [], "total": 513}
 
 
-def test_case_aliases_share_collection_state_when_filesystem_supports_them(tmp_path):
+def test_case_variant_paths_share_collection_state_only_when_same_directory(tmp_path):
     from sqllens._memory_consistency import collection_state
 
     actual = tmp_path / "MixedCase"
     actual.mkdir()
-    alias = tmp_path / "mixedcase"
-    if not alias.exists():
-        pytest.skip("case-sensitive filesystem")
-    assert collection_state(str(actual), "one") is collection_state(str(alias), "one")
+    variant = tmp_path / "mixedcase"
+    if variant.exists():
+        # Case-insensitive filesystem: both spellings name one directory.
+        assert collection_state(str(actual), "one") is collection_state(str(variant), "one")
+    else:
+        # Case-sensitive filesystem: the other spelling is a separate directory.
+        variant.mkdir()
+        assert collection_state(str(actual), "one") is not collection_state(str(variant), "one")
 
 
 async def test_one_completed_writer_does_not_hide_another_active_writer(populated_store):

@@ -57,7 +57,7 @@ Regression coverage lives in [`tests/unit/test_sql_runner_cleanup.py`](../../../
 | `BaseException` (cancellation / Ctrl+C) propagates through cleanup | `test_mysql_runner_propagates_cancellation` (`asyncio.CancelledError`) | `test_postgres_runner_propagates_keyboard_interrupt` (`KeyboardInterrupt`) |
 | `conn.cursor()` itself raises — connection still closed (no leak) | — | `test_postgres_runner_closes_conn_when_cursor_allocation_raises` |
 
-Each test installs a fake `pymysql` / `psycopg2` module via `monkeypatch.setitem(sys.modules, ...)`, so the suite does **not** require either driver to be installed and runs in the default `pytest -q` (non-`connectors`) pass.
+Each test installs a fake `pymysql` / `psycopg2` module via `monkeypatch.setitem(sys.modules, ...)`, so the suite does **not** require either driver to be installed and runs in the default `pytest -q` pass (which does not collect `tests/connectors/`).
 
 ## Why this matters at the architecture level
 
