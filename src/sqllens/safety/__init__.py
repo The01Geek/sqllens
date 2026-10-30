@@ -22,6 +22,7 @@ Four orthogonal protections, composed at the factory:
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import TYPE_CHECKING
 
@@ -131,6 +132,13 @@ class RlsGuardRunner(SqlRunner):
         *,
         dialect: str | None = None,
     ) -> None:
+        if rules and not _accepts_relation_check(inner):
+            # Checked once at construction so a runner that cannot verify
+            # relations is a wiring error at startup, not a per-query failure.
+            raise TypeError(
+                f"{type(inner).__name__}.run_sql must accept the require_base_tables "
+                "keyword to run beneath RlsGuardRunner"
+            )
         self._inner = inner
         self._rules = rules
         self._dialect = dialect
@@ -169,9 +177,17 @@ class RlsGuardRunner(SqlRunner):
                 f"({type(e).__name__}: {e})"
             ) from e
         options = {"require_base_tables": True} if self._rules or require_base_tables else {}
-        try:
-            return await self._inner.run_sql(
-                args.model_copy(update={"sql": rewritten}), context, **options
-            )
-        except TypeError as exc:
-            raise RlsError("SQL runner could not enforce the RLS relation check") from exc
+        return await self._inner.run_sql(
+            args.model_copy(update={"sql": rewritten}), context, **options
+        )
+
+
+def _accepts_relation_check(runner: object) -> bool:
+    """True if ``runner.run_sql`` can receive the ``require_base_tables`` keyword."""
+    try:
+        params = inspect.signature(runner.run_sql).parameters  # type: ignore[attr-defined]
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return "require_base_tables" in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )

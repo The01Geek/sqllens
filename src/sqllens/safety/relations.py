@@ -13,6 +13,27 @@ from sqlglot.optimizer.scope import traverse_scope
 
 from sqllens.safety.rls import RlsError, normalize_rls_identifiers
 
+# Metadata-only system views the agent's schema introspection relies on. They
+# describe structure, not stored rows. Statistics views that expose sampled
+# column values (PostgreSQL ``pg_stats``, MySQL ``COLUMN_STATISTICS``) are
+# deliberately absent and stay blocked like any other view.
+_METADATA_VIEWS: dict[str, frozenset[tuple[str, str]]] = {
+    "postgres": frozenset(
+        [("information_schema", name) for name in (
+            "schemata", "tables", "columns", "views", "table_constraints",
+            "key_column_usage", "referential_constraints", "constraint_column_usage",
+            "check_constraints",
+        )]
+        + [("pg_catalog", name) for name in ("pg_tables", "pg_views", "pg_indexes")]
+    ),
+    "mysql": frozenset(
+        ("information_schema", name) for name in (
+            "schemata", "tables", "columns", "views", "statistics", "table_constraints",
+            "key_column_usage", "referential_constraints", "check_constraints",
+        )
+    ),
+}
+
 
 def _relations(sql: str, dialect: str) -> list[exp.Table]:
     tree = sqlglot.parse_one(sql, dialect=dialect)
@@ -42,6 +63,8 @@ def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
 
     The caller supplies its live execution connection. No catalog result is
     cached across queries; CTE names are resolved by SQL scope analysis.
+    Metadata-only system views in ``_METADATA_VIEWS`` remain readable so
+    schema introspection keeps working; every other view is refused.
     """
     try:
         relations = _relations(sql, dialect)
@@ -62,14 +85,27 @@ def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
                 if dialect == "sqlite":
                     kind = _sqlite_kind(cursor, relation)
                 elif dialect == "postgres":
+                    # Match the allowlist on the namespace the connection
+                    # resolved, so an unqualified name shadowed via search_path
+                    # cannot borrow a system view's exemption.
                     cursor.execute(
-                        "SELECT relkind FROM pg_catalog.pg_class "
-                        "WHERE oid = pg_catalog.to_regclass(%s)",
+                        "SELECT c.relkind, n.nspname, c.relname "
+                        "FROM pg_catalog.pg_class c "
+                        "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+                        "WHERE c.oid = pg_catalog.to_regclass(%s)",
                         (relation.sql(dialect="postgres"),),
                     )
                     row = cursor.fetchone()
                     kind = row[0] if row else None
+                    if kind == "v" and tuple(row[1:3]) in _METADATA_VIEWS["postgres"]:
+                        continue
                 elif dialect == "mysql":
+                    # information_schema cannot hold user objects and its names
+                    # are case-insensitive, so a qualified name identifies it.
+                    if (
+                        (relation.db or "").lower(), relation.name.lower()
+                    ) in _METADATA_VIEWS["mysql"]:
+                        continue
                     schema, name = "TABLE_SCHEMA", "TABLE_NAME"
                     schema_arg, name_arg = "COALESCE(%s, DATABASE())", "%s"
                     if mysql_fold:

@@ -128,6 +128,45 @@ async def test_mysql_rls_views(mysql_url) -> None:
     await _assert_rls_view_blocked(mysql_url, "mysql")
 
 
+def _rls_guard(url: str, dialect: str) -> RlsGuardRunner:
+    return RlsGuardRunner(
+        ReadOnlyGuardRunner(RowCapRunner(build_sql_runner(url), max_rows=10), dialect=dialect),
+        [RlsRule(table="rls_unused_table", column="tenant_id", value="alpha")],
+        dialect=dialect,
+    )
+
+
+@pytest.mark.parametrize(("dialect", "allowed", "blocked"), [
+    (
+        "postgres",
+        [
+            "SELECT column_name FROM information_schema.columns LIMIT 1",
+            "SELECT table_name FROM information_schema.tables LIMIT 1",
+            "SELECT tablename FROM pg_catalog.pg_tables LIMIT 1",
+        ],
+        ["SELECT * FROM pg_catalog.pg_stats LIMIT 1"],
+    ),
+    (
+        "mysql",
+        [
+            "SELECT column_name FROM information_schema.columns LIMIT 1",
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES LIMIT 1",
+        ],
+        ["SELECT * FROM information_schema.COLUMN_STATISTICS LIMIT 1"],
+    ),
+])
+async def test_rls_keeps_metadata_views_and_blocks_value_statistics(
+    request, dialect, allowed, blocked
+) -> None:
+    url = request.getfixturevalue(f"{dialect}_url")
+    guard = _rls_guard(url, dialect)
+    for sql in allowed:
+        await guard.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+    for sql in blocked:
+        with pytest.raises(RlsError, match="view"):
+            await guard.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+
+
 # ─────────────────────────────── postgres ───────────────────────────────────
 
 

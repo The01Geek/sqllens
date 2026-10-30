@@ -96,7 +96,7 @@ async def test_catalog_results_are_not_cached_between_queries(database) -> None:
 @pytest.mark.parametrize("kind", ["v", "m", "f", None])
 def test_postgres_views_and_unverified_relations_are_blocked(kind) -> None:
     cursor = Mock()
-    cursor.fetchone.return_value = (kind,) if kind else None
+    cursor.fetchone.return_value = (kind, "public", "Orders") if kind else None
     connection = Mock()
     connection.cursor.return_value = cursor
     with pytest.raises(RlsError):
@@ -125,22 +125,31 @@ def test_catalog_failure_is_closed_and_does_not_echo_driver_detail() -> None:
     assert "synthetic-private-driver-detail" not in str(error.value)
 
 
-async def test_custom_runner_without_relation_check_fails_closed() -> None:
+def test_custom_runner_without_relation_check_is_rejected_at_construction() -> None:
     class LegacyRunner:
-        called = False
-
         async def run_sql(self, args, context):
-            self.called = True
+            raise AssertionError("must not run")
 
-    inner = LegacyRunner()
+    with pytest.raises(TypeError, match="require_base_tables"):
+        RlsGuardRunner(
+            LegacyRunner(), [RlsRule(table="orders", column="tenant_id", value="alpha")],
+            dialect="sqlite",
+        )
+
+
+async def test_execution_type_errors_are_not_relabelled_as_rls_failures() -> None:
+    class FailingRunner:
+        async def run_sql(self, args, context, *, require_base_tables=False):
+            raise TypeError("synthetic execution failure")
+
     guard = RlsGuardRunner(
-        inner, [RlsRule(table="orders", column="tenant_id", value="alpha")], dialect="sqlite"
+        FailingRunner(), [RlsRule(table="orders", column="tenant_id", value="alpha")],
+        dialect="sqlite",
     )
-    with pytest.raises(RlsError, match="could not enforce the RLS relation check"):
+    with pytest.raises(TypeError, match="synthetic execution failure"):
         await guard.run_sql(
             RunSqlToolArgs(sql="SELECT * FROM orders"), ToolContext.model_construct()
         )
-    assert not inner.called
 
 
 @pytest.mark.parametrize("sql", [
@@ -149,7 +158,7 @@ async def test_custom_runner_without_relation_check_fails_closed() -> None:
 ])
 def test_postgres_cte_case_does_not_hide_a_database_view(sql) -> None:
     cursor = Mock()
-    cursor.fetchone.return_value = ("v",)
+    cursor.fetchone.return_value = ("v", "public", "all_orders")
     connection = Mock()
     connection.cursor.return_value = cursor
     with pytest.raises(RlsError, match="view"):
@@ -203,3 +212,62 @@ def test_sqlite_missing_table_list_capability_blocks_execution() -> None:
     cursor.execute.side_effect = sqlite3.OperationalError("no such table: pragma_table_list")
     with pytest.raises(RlsError, match="could not verify relation types"):
         verify_base_tables(connection, "SELECT * FROM main.orders", dialect="sqlite")
+
+
+def _postgres_connection(row):
+    cursor = Mock()
+    cursor.fetchone.return_value = row
+    connection = Mock()
+    connection.cursor.return_value = cursor
+    return connection
+
+
+@pytest.mark.parametrize(("sql", "row"), [
+    (
+        "SELECT column_name FROM INFORMATION_SCHEMA.COLUMNS",
+        ("v", "information_schema", "columns"),
+    ),
+    ("SELECT tablename FROM pg_tables", ("v", "pg_catalog", "pg_tables")),
+])
+def test_postgres_metadata_views_remain_readable(sql, row) -> None:
+    verify_base_tables(_postgres_connection(row), sql, dialect="postgres")
+
+
+@pytest.mark.parametrize("row", [
+    ("v", "pg_catalog", "pg_stats"),
+    ("v", "public", "columns"),
+])
+def test_postgres_value_bearing_or_user_views_stay_blocked(row) -> None:
+    # pg_stats exposes sampled column values; a user view named like a catalog
+    # view is matched by its resolved namespace, not by its name.
+    with pytest.raises(RlsError, match="view"):
+        verify_base_tables(
+            _postgres_connection(row), f"SELECT * FROM {row[2]}", dialect="postgres"
+        )
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT column_name FROM information_schema.columns",
+    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES",
+])
+def test_mysql_metadata_views_remain_readable(sql) -> None:
+    cursor = Mock()
+    cursor.fetchone.return_value = (0,)
+    connection = Mock()
+    connection.cursor.return_value = cursor
+    verify_base_tables(connection, sql, dialect="mysql")
+    # Only the identifier-case probe runs; no relation-type lookup is needed.
+    cursor.execute.assert_called_once_with("SELECT @@lower_case_table_names")
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT * FROM information_schema.COLUMN_STATISTICS",
+    "SELECT * FROM columns",
+])
+def test_mysql_value_bearing_or_unqualified_views_stay_blocked(sql) -> None:
+    cursor = Mock()
+    cursor.fetchone.side_effect = [(0,), ("SYSTEM VIEW",)]
+    connection = Mock()
+    connection.cursor.return_value = cursor
+    with pytest.raises(RlsError, match="view"):
+        verify_base_tables(connection, sql, dialect="mysql")
