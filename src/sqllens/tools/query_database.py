@@ -220,14 +220,19 @@ def _rollback_conversation(
     happen. ``BoundedConversationStore.truncate_messages`` is synchronous for
     exactly this call site.
 
-    A store without that method cannot be rolled back. This logs at ERROR
+    ``agent.conversation_store`` is read unguarded: ``Agent.__init__`` always
+    sets it, and ``_conversation_baseline`` already dereferenced it before the
+    run. The method lookup *is* guarded, because the ``ConversationStore`` ABC
+    does not declare ``truncate_messages`` — an embedder that constructs
+    ``Agent`` with a different store (the framework's own
+    ``MemoryConversationStore``, say) reaches this branch. It logs at ERROR
     naming the store class rather than raising, because the caller is
     propagating a cancellation that must not be replaced by a different
     exception — and a swallowed rollback would otherwise leave the next call on
     this conversation reading a half-finished turn's messages with no signal at
     all.
     """
-    store = getattr(agent, "conversation_store", None)
+    store = agent.conversation_store
     truncate = getattr(store, "truncate_messages", None)
     if truncate is None:
         logger.error(
@@ -393,9 +398,10 @@ async def query_database_impl_with_widgets(
         # an earlier call on the same conversation does not report that wait as
         # part of its own duration.
         async with _conversation_turn(conversation_id) as queued_id:
-            baseline: tuple[str, int] | None = None
+            baseline_user_id = ""
+            baseline_messages = 0
             if queued_id is not None:
-                baseline = await _conversation_baseline(
+                baseline_user_id, baseline_messages = await _conversation_baseline(
                     agent, request_context, queued_id
                 )
             started = time.monotonic()
@@ -411,9 +417,9 @@ async def query_database_impl_with_widgets(
                 # a BaseException, so the ``except Exception`` handler below
                 # never catches it; this clause must come first and re-raise,
                 # returning no result.
-                if queued_id is not None and baseline is not None:
+                if queued_id is not None:
                     _rollback_conversation(
-                        agent, queued_id, baseline[0], baseline[1]
+                        agent, queued_id, baseline_user_id, baseline_messages
                     )
                 raise
             except UnsafeSqlError as e:

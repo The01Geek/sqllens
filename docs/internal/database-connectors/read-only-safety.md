@@ -113,8 +113,9 @@ whose MCP request was cancelled keeps running until it finishes or the engine's
 statement timeout above stops it.** Two cases leave nothing but the query's own
 end to stop it: `statement_timeout_ms = 0`, which registers no timeout at all;
 and a MySQL statement other than a `SELECT`, which `MAX_EXECUTION_TIME` does not
-cover. Server shutdown waits for these threads — `asyncio.run` gives the default
-executor five minutes to drain. See
+cover. Server shutdown waits for these threads rather than killing them (on
+Python 3.11 indefinitely, on 3.12+ up to five minutes — see
+[cleanup-error-handling.md](cleanup-error-handling.md)). See
 [cleanup-error-handling.md](cleanup-error-handling.md) for how cancellation
 unwinds, and
 [../mcp-server/tools.md](../mcp-server/tools.md#concurrency-worker-threads-and-the-per-conversation-queue)

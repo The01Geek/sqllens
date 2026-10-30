@@ -90,11 +90,9 @@ class SqliteRunner(SqlRunner):
         # The whole body runs in ONE worker thread. Never split connect from
         # execute across threads: sqlite3 connections default to
         # ``check_same_thread=True``, so touching the connection from another
-        # thread raises ProgrammingError. The progress-handler deadline is
-        # installed on this same connection and works unchanged inside the
-        # thread. ``asyncio.to_thread`` (not ``loop.run_in_executor``) because
-        # it copies the caller's ``contextvars.Context``, which
-        # ``effective_row_cap`` reads the per-request profile from.
+        # thread raises ProgrammingError. Do not switch to
+        # ``loop.run_in_executor``: it would cap rows at the base ``max_rows``
+        # instead of the per-request profile's (see sqllens.runtime).
         return await asyncio.to_thread(self._run_sql_blocking, args)
 
     def _run_sql_blocking(self, args: RunSqlToolArgs) -> pd.DataFrame:

@@ -207,8 +207,10 @@ calls onto worker threads, so the loop stays free while a question waits.
   agent run. A call that arrives while another call on the same id is running
   waits for it to finish, then runs; the lock is taken *before* the run timer,
   so queue wait is not reported as the call's own duration. Each registry entry
-  counts holders and waiters and is deleted when that count reaches zero, so no
-  entry accumulates per conversation ever seen. A `None` `conversation_id`
+  counts holders *and* waiters, and is deleted once that count reaches zero and
+  the entry is still the one registered under its id (a superseded entry is
+  left alone, so a late release cannot collect its successor) — so no entry
+  accumulates per conversation ever seen. A `None` `conversation_id`
   (reachable only by a direct `_impl` caller — the MCP tool body always mints
   one) takes no lock: the agent mints a private id no other caller can name.
 - **A cancelled call's messages are removed from its conversation.** After

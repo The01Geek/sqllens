@@ -69,10 +69,7 @@ class AnthropicLlmService(LlmService):
         payload = self._build_payload(request)
 
         # The SDK client is synchronous, so this request would otherwise hold
-        # the event loop for the whole round trip. ``asyncio.to_thread`` (not
-        # ``loop.run_in_executor``) because it copies the caller's
-        # ``contextvars.Context`` into the worker thread, which the
-        # per-request profile settings depend on.
+        # the event loop for the whole round trip.
         def _create() -> Any:
             return self._client.messages.create(**payload)
 

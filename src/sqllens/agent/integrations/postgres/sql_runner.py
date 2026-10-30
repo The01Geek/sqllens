@@ -121,9 +121,9 @@ class PostgresRunner(SqlRunner):
 
         # The whole body — connect, session set-up, execute, fetch, close —
         # runs in ONE worker thread, so a slow connect or query no longer holds
-        # the event loop. ``asyncio.to_thread`` (not ``loop.run_in_executor``)
-        # because it copies the caller's ``contextvars.Context``, which
-        # ``effective_row_cap`` reads the per-request profile from.
+        # the event loop. Do not switch to ``loop.run_in_executor``: it would
+        # cap rows at the base ``max_rows`` instead of the per-request
+        # profile's (see sqllens.runtime).
         return await asyncio.to_thread(self._run_sql_blocking, args)
 
     def _run_sql_blocking(self, args: RunSqlToolArgs) -> pd.DataFrame:
