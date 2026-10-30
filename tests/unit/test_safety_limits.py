@@ -284,7 +284,7 @@ class TestFirstSqlKeyword:
         def boom(*_args: object, **_kwargs: object) -> None:
             raise RecursionError("too deep")
 
-        monkeypatch.setattr(readonly_mod.sqlglot, "tokenize", boom)
+        monkeypatch.setattr(readonly_mod.sqlglot.Dialect, "tokenize", boom)
         with pytest.raises(RecursionError):
             readonly_mod.first_sql_keyword("SELECT 1", "postgres")
 

@@ -4,7 +4,7 @@ How `RunSqlTool` persists per-query CSVs to disk, how the `LocalFileSystem` capa
 
 ## What gets written, and when
 
-`RunSqlTool.execute()` ([src/sqllens/agent/tools/run_sql.py](../../../src/sqllens/agent/tools/run_sql.py)) does the following on every successful read-shaped statement that returns rows — any statement `is_read_shaped` (in [src/sqllens/safety/readonly.py](../../../src/sqllens/safety/readonly.py)) classifies as read-shaped under the configured database's dialect, the same classifier and dialect the runner routes with: a `SELECT`, a `WITH` query, a parenthesized set operation, a comment-led read, or a MySQL `SHOW`:
+`RunSqlTool.execute()` ([src/sqllens/agent/tools/run_sql.py](../../../src/sqllens/agent/tools/run_sql.py)) does the following on every successful read-shaped statement that returns rows — any statement `is_read_shaped` (in [src/sqllens/safety/readonly.py](../../../src/sqllens/safety/readonly.py)) classifies as read-shaped under the configured database's dialect, the same classifier and dialect the runner routes with. That is a statement whose leading keyword, after comments and opening parentheses, is `SELECT`, `WITH`, `UNION`, `INTERSECT`, `EXCEPT` or `SHOW` — including a parenthesized set operation, a comment-led read, and a MySQL `SHOW`:
 
 1. Runs the SQL via the injected `SqlRunner` and gets a `pd.DataFrame`.
 2. Generates a short random file id (`uuid4().hex[:8]`).

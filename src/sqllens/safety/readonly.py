@@ -50,19 +50,20 @@ def first_sql_keyword(sql: str, dialect: str | None = None) -> str:
     (``#`` opens a comment only for ``mysql``; block comments nest only where
     the tokenizer nests them). The first remaining token is returned,
     uppercased, when it is a keyword or an unquoted identifier; a string,
-    number, quoted identifier or symbol gives ``""``, and so does empty or
-    whitespace-only SQL. A dialect name sqlglot does not know is treated as no
+    number, quoted identifier or symbol gives ``""``, and so does SQL with no
+    remaining token (empty, whitespace-only, or only comments and opening
+    parentheses). A dialect name sqlglot does not know is treated as no
     dialect.
 
     SQL the tokenizer rejects (``TokenError``, e.g. an unterminated string or
     comment) gives ``""``; any other exception from the tokenizer propagates.
     """
-    resolved = sqlglot.Dialect.get(dialect) if dialect is not None else None
+    resolved = sqlglot.Dialect.get_or_raise(sqlglot.Dialect.get(dialect))
     try:
-        tokens = sqlglot.tokenize(sql, read=resolved)
+        tokens = resolved.tokenize(sql)
     except sqlglot.errors.TokenError:
         return ""
-    keywords = sqlglot.Dialect.get_or_raise(resolved).tokenizer_class.KEYWORDS
+    keywords = resolved.tokenizer_class.KEYWORDS
     for token in tokens:
         if token.token_type is TokenType.L_PAREN:
             continue
@@ -178,9 +179,11 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     result from the user and to keep a catalog lookup's success from clearing
     an earlier query failure.
 
-    Best-effort, fail-open-to-``False``: a query that does not parse under
-    ``dialect`` (a sqlglot parse or tokenize error, or an empty parse) is
-    treated as a data query, so its result is shown. Any other exception from
+    Best-effort, fail-open-to-``False``: a query whose leading keyword is not
+    ``SHOW`` and that does not parse under ``dialect`` (a sqlglot parse or
+    tokenize error, or an empty parse) is treated as a data query, so its
+    result is shown; a ``SHOW``-led statement returns ``True`` before any
+    parse. Any other exception from
     the parser propagates, so the caller reports an error rather than guessing
     (``query_database`` returns its sanitized internal error). An exception
     from identifier normalization or scope analysis excludes no CTE reference.
