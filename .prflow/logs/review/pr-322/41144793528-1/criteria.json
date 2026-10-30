@@ -1,0 +1,42 @@
+[
+  {
+    "criterion": 1,
+    "text": "Each call that fails with `SqlWorkersBusyError` produces exactly one rejection `WARNING` record (distinct from the saturation warning) on the `sqllens.agent.integrations.sql_threads` logger, including rejections that occur within `SATURATION_WARNING_INTERVAL_S` of a saturation warning; a unit test that times out several queued calls in one burst sees one rejection record per rejected call. No rejection record contains the call's SQL, arguments or exception message."
+  },
+  {
+    "criterion": 2,
+    "text": "On Python 3.11 and 3.12, a unit test that grants a waiting call its slot and cancels that call in the same loop tick sees the caller raise `CancelledError`, the call never run, and the slot still available to a later call."
+  },
+  {
+    "criterion": 3,
+    "text": "The `sql_threads.py` module docstring and `docs/internal/mcp-server/transport.md` state that the slot limit, the wait limit and the saturation warning assume all SQL calls run on one event loop at a time, and that calls from a second concurrently running loop get their own slots and may wait in the shared executor's queue, where neither the wait limit nor the warning applies."
+  },
+  {
+    "criterion": 4,
+    "text": "When the release of a slot fails because its event loop is closed, no `ERROR` record is written on the `sqllens.agent.integrations.sql_threads` logger and nothing propagates; when scheduling the release raises a `RuntimeError` while the loop is still open, one `ERROR` record naming the exception type is written on that logger and nothing propagates. Unit tests cover both cases."
+  },
+  {
+    "criterion": 5,
+    "text": "A unit test makes `submit` raise and then shows that `SQL_WORKER_THREADS` calls on that loop all start without waiting for a slot."
+  },
+  {
+    "criterion": 6,
+    "text": "Every SQL worker pool test in `tests/unit/test_sql_runner_event_loop.py` runs on an executor no earlier test used."
+  },
+  {
+    "criterion": 7,
+    "text": "Every test under `tests/integration/` starts with `sqllens.tools._agent._AGENT_STATE` set to `None`, as every unit test already does."
+  },
+  {
+    "criterion": 8,
+    "text": "The `run_sql` docstrings of the SQLite, MySQL and Postgres runners list `SqlWorkersBusyError` under `Raises:`."
+  },
+  {
+    "criterion": 9,
+    "text": "An integration test holds two `query_database` runs, from two different conversations, open at the local model stand-in at the same time; while both are held, `/healthz` and `list_data_sources` on another session each answer within 2 s, and once released both runs return a result that is not an error."
+  },
+  {
+    "criterion": 10,
+    "text": "The change leaves the slot semaphore keyed per event loop and the worker executor process-wide, adds no file under `changelog.d/`, and leaves `changelog.d/300.fixed.md` unchanged, including its sentence that a query waiting more than a minute for a free worker fails with \"All database workers are busy; try again shortly.\""
+  }
+]
