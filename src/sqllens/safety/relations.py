@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import sqlglot
@@ -12,6 +13,8 @@ from sqlglot import expressions as exp
 from sqlglot.optimizer.scope import traverse_scope
 
 from sqllens.safety.rls import RlsError, normalize_rls_identifiers
+
+logger = logging.getLogger(__name__)
 
 # Metadata-only system views the agent's schema introspection relies on. They
 # describe structure, not stored rows. Statistics views that expose sampled
@@ -33,6 +36,24 @@ _METADATA_VIEWS: dict[str, frozenset[tuple[str, str]]] = {
         )
     ),
 }
+
+# Relation kinds in each dialect's own catalog vocabulary: SQLite
+# ``pragma_table_list.type``, PostgreSQL ``pg_class.relkind`` and MySQL
+# ``information_schema.TABLES.TABLE_TYPE``. Anything outside both sets is refused.
+_VIEW_KINDS: dict[str, frozenset[str]] = {
+    "sqlite": frozenset({"view"}),
+    "postgres": frozenset({"v", "m"}),
+    "mysql": frozenset({"VIEW", "SYSTEM VIEW"}),
+}
+_BASE_TABLE_KINDS: dict[str, frozenset[str]] = {
+    "sqlite": frozenset({"table"}),
+    "postgres": frozenset({"r", "p"}),
+    "mysql": frozenset({"BASE TABLE"}),
+}
+
+_SQLITE_SCHEMA_TABLES = frozenset(
+    {"sqlite_master", "sqlite_schema", "sqlite_temp_master", "sqlite_temp_schema"}
+)
 
 
 def _relations(sql: str, dialect: str) -> list[exp.Table]:
@@ -121,11 +142,11 @@ def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
                     kind = row[0] if row else None
                 else:
                     raise RlsError("row-level security cannot verify this database dialect")
-                if kind in ("view", "v", "m", "VIEW", "SYSTEM VIEW"):
+                if kind in _VIEW_KINDS[dialect]:
                     raise RlsError(
                         "database views are not supported while row-level security is active"
                     )
-                if kind not in ("table", "r", "p", "BASE TABLE"):
+                if kind not in _BASE_TABLE_KINDS[dialect]:
                     raise RlsError(
                         "row-level security could not verify a base table; query blocked"
                     )
@@ -134,20 +155,25 @@ def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
     except RlsError:
         raise
     except Exception as exc:
+        # The client sees only the sanitized message; log the cause so a guard
+        # bug, a revoked catalog grant and a lost connection stay distinguishable.
+        logger.warning(
+            "row-level-security relation check raised an unexpected %s; failing closed",
+            type(exc).__name__,
+            exc_info=True,
+        )
         raise RlsError("row-level security could not verify relation types; query blocked") from exc
 
 
 def _sqlite_kind(cursor: Any, relation: exp.Table) -> str | None:
+    if relation.name.lower() in _SQLITE_SCHEMA_TABLES:
+        return "table"
     if relation.db:
         schemas = [relation.db]
     else:
         cursor.execute("PRAGMA database_list")
         schemas = ["temp", "main"] + [row[1] for row in cursor.fetchall() if row[1] != "main"]
     for schema in schemas:
-        if relation.name.lower() in (
-            "sqlite_master", "sqlite_schema", "sqlite_temp_master", "sqlite_temp_schema"
-        ):
-            return "table"
         cursor.execute(
             "SELECT type FROM pragma_table_list(?) WHERE schema = ? COLLATE NOCASE",
             (relation.name, schema),

@@ -181,7 +181,14 @@ def _predicate(rule: RlsRule, qualifier: str, value: _Scalar | list[_Scalar]) ->
 
 
 def normalize_rls_identifiers(tree: exp.Expression, dialect: str | None) -> None:
-    """Preserve PostgreSQL's quoted/unquoted distinction before scope analysis."""
+    """Fold unquoted PostgreSQL identifiers in ``tree`` to lowercase, in place.
+
+    Mirrors the server's folding so scope analysis keeps PostgreSQL's
+    quoted/unquoted distinction. Other dialects are left unchanged.
+
+    Raises:
+        RlsError: An unquoted identifier contains non-ASCII characters.
+    """
     if dialect != "postgres":
         return
     for identifier in tree.find_all(exp.Identifier):

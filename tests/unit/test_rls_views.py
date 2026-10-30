@@ -3,8 +3,9 @@
 
 """RLS must not delegate database views that hide protected relations."""
 
+import logging
 import sqlite3
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 
@@ -15,6 +16,10 @@ from sqllens.config import RlsRule
 from sqllens.safety import ReadOnlyGuardRunner, RlsError, RlsGuardRunner, RowCapRunner
 from sqllens.safety.relations import verify_base_tables
 from sqllens.safety.rls import apply_rls
+
+from .test_sql_runner_cleanup import _install_fake_psycopg2, _install_fake_pymysql
+
+_RULE = RlsRule(table="orders", column="tenant_id", value="alpha")
 
 
 @pytest.fixture
@@ -48,6 +53,9 @@ def _guard(database, *, read_only=True):
     'SELECT id FROM "all orders"',
     "WITH q AS (SELECT * FROM all_orders) SELECT id FROM q",
     "SELECT v.id FROM main.all_orders v JOIN public_values p ON v.id=p.id",
+    "SELECT id FROM ALL_ORDERS",
+    "SELECT (SELECT max(id) FROM all_orders) AS id FROM public_values",
+    "SELECT id FROM public_values WHERE id IN (SELECT id FROM all_orders)",
 ])
 async def test_views_blocked_when_rls_is_active(database, sql) -> None:
     with pytest.raises(RlsError, match="view"):
@@ -65,6 +73,16 @@ async def test_base_tables_remain_scoped_and_unprotected_tables_readable(databas
     assert protected["id"].tolist() == [1]
     assert public["id"].tolist() == [1, 2]
     assert shadow["id"].tolist() == [3]
+
+
+@pytest.mark.parametrize(("sql", "expected"), [
+    ("SELECT id FROM PUBLIC_VALUES", [1, 2]),
+    ("SELECT id FROM public_values WHERE id IN (SELECT id FROM orders)", [1]),
+    ("SELECT (SELECT max(id) FROM orders) AS id FROM public_values", [1, 1]),
+])
+async def test_base_table_subquery_and_case_shapes_pass(database, sql, expected) -> None:
+    result = await _guard(database).run_sql(RunSqlToolArgs(sql=sql), ToolContext.model_construct())
+    assert result["id"].tolist() == expected
 
 
 async def test_view_reads_without_rls_are_unchanged(database) -> None:
@@ -125,16 +143,44 @@ def test_catalog_failure_is_closed_and_does_not_echo_driver_detail() -> None:
     assert "synthetic-private-driver-detail" not in str(error.value)
 
 
-def test_custom_runner_without_relation_check_is_rejected_at_construction() -> None:
-    class LegacyRunner:
-        async def run_sql(self, args, context):
-            raise AssertionError("must not run")
+class _LegacyRunner:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
 
-    with pytest.raises(TypeError, match="require_base_tables"):
-        RlsGuardRunner(
-            LegacyRunner(), [RlsRule(table="orders", column="tenant_id", value="alpha")],
-            dialect="sqlite",
-        )
+    async def run_sql(self, args, context):
+        self.calls.append(args.sql)
+        return None
+
+
+class _KwargsRunner:
+    async def run_sql(self, args, context, **kwargs):
+        raise AssertionError("must not run")
+
+
+@pytest.mark.parametrize("make_inner", [
+    lambda: _LegacyRunner(),
+    lambda: _KwargsRunner(),
+    lambda: ReadOnlyGuardRunner(RowCapRunner(_LegacyRunner(), max_rows=10), dialect="sqlite"),
+    lambda: RowCapRunner(_KwargsRunner(), max_rows=10),
+])
+def test_runner_without_declared_relation_check_is_rejected_at_construction(
+    make_inner,
+) -> None:
+    # The shipped wrappers only forward the flag, so the check must reach the
+    # runner beneath them; ``**kwargs`` alone does not show the check is done.
+    with pytest.raises(TypeError, match=r"(_LegacyRunner|_KwargsRunner)\.run_sql must declare"):
+        RlsGuardRunner(make_inner(), [_RULE], dialect="sqlite")
+
+
+async def test_rules_appended_after_construction_are_not_applied() -> None:
+    rules: list[RlsRule] = []
+    inner = _LegacyRunner()
+    guard = RlsGuardRunner(inner, rules, dialect="sqlite")
+    rules.append(_RULE)
+    await guard.run_sql(RunSqlToolArgs(sql="SELECT id FROM orders"), ToolContext.model_construct())
+    # The guard keeps its own copy, so the unchecked runner never receives a
+    # relation-check requirement it cannot honor.
+    assert inner.calls == ["SELECT id FROM orders"]
 
 
 async def test_execution_type_errors_are_not_relabelled_as_rls_failures() -> None:
@@ -204,6 +250,104 @@ def test_postgres_quoted_non_ascii_cte_remains_supported() -> None:
     verify_base_tables(connection, rewritten, dialect="postgres")
     connection.cursor.assert_not_called()
     assert 'FROM "Ä"' in rewritten
+
+
+def test_unexpected_catalog_failure_is_logged(caplog) -> None:
+    connection = Mock()
+    connection.cursor.side_effect = RuntimeError("synthetic-private-driver-detail")
+    with caplog.at_level(logging.WARNING, logger="sqllens.safety.relations"):
+        with pytest.raises(RlsError, match="could not verify relation types"):
+            verify_base_tables(connection, "SELECT * FROM orders", dialect="postgres")
+    record = caplog.records[-1]
+    assert "RuntimeError" in record.getMessage()
+    assert record.exc_info is not None
+
+
+@pytest.mark.parametrize(("sql", "dialect", "message"), [
+    ("SELECT * FROM generate_series(1, 3)", "postgres", "relation shape"),
+    ("UPDATE orders SET tenant_id = 'beta'", "sqlite", "relation shape"),
+    ("SELECT * FROM orders", "duckdb", "dialect"),
+])
+def test_unverifiable_relations_fail_closed(sql, dialect, message) -> None:
+    connection = Mock()
+    with pytest.raises(RlsError, match=message):
+        verify_base_tables(connection, sql, dialect=dialect)
+    if message == "relation shape":
+        connection.cursor.assert_not_called()
+
+
+async def test_sqlite_transaction_failure_is_sanitized(monkeypatch) -> None:
+    connection = MagicMock()
+    connection.execute.side_effect = sqlite3.OperationalError("synthetic-begin-failure")
+    monkeypatch.setattr(sqlite3, "connect", lambda *_a, **_k: connection)
+    runner = SqliteRunner("unused.db", read_only=False)
+    with pytest.raises(RlsError, match="read transaction") as error:
+        await runner.run_sql(
+            RunSqlToolArgs(sql="SELECT 1"), ToolContext.model_construct(),
+            require_base_tables=True,
+        )
+    assert "synthetic-begin-failure" not in str(error.value)
+    connection.cursor.return_value.execute.assert_not_called()
+
+
+def _refusing_check(calls):
+    def check(connection, sql, *, dialect):
+        calls.append((connection, sql, dialect))
+        raise RlsError("synthetic relation refusal")
+
+    return check
+
+
+@pytest.mark.parametrize("require", [True, False])
+async def test_postgres_runner_checks_relations_on_its_connection(monkeypatch, require) -> None:
+    conn = MagicMock()
+    conn.cursor.return_value.fetchmany.return_value = []
+    _install_fake_psycopg2(monkeypatch, lambda *_a, **_k: conn)
+    from sqllens.agent.integrations.postgres import sql_runner
+
+    calls: list = []
+    monkeypatch.setattr(sql_runner, "verify_base_tables", _refusing_check(calls))
+    runner = sql_runner.PostgresRunner(connection_string="postgresql://u:p@h/d")
+    run = runner.run_sql(
+        RunSqlToolArgs(sql="SELECT id FROM orders"), MagicMock(), require_base_tables=require
+    )
+    if require:
+        with pytest.raises(RlsError, match="synthetic relation refusal"):
+            await run
+        assert calls == [(conn, "SELECT id FROM orders", "postgres")]
+        assert not any(
+            call.args == ("SELECT id FROM orders",)
+            for call in conn.cursor.return_value.execute.call_args_list
+        )
+    else:
+        await run
+        assert calls == []
+
+
+@pytest.mark.parametrize("require", [True, False])
+async def test_mysql_runner_checks_relations_on_its_connection(monkeypatch, require) -> None:
+    conn = MagicMock()
+    conn.cursor.return_value.fetchmany.return_value = []
+    _install_fake_pymysql(monkeypatch, lambda **_k: conn)
+    from sqllens.agent.integrations.mysql import sql_runner
+
+    calls: list = []
+    monkeypatch.setattr(sql_runner, "verify_base_tables", _refusing_check(calls))
+    runner = sql_runner.MySQLRunner(host="h", database="d", user="u", password="p")
+    run = runner.run_sql(
+        RunSqlToolArgs(sql="SELECT id FROM orders"), MagicMock(), require_base_tables=require
+    )
+    if require:
+        with pytest.raises(RlsError, match="synthetic relation refusal"):
+            await run
+        assert calls == [(conn, "SELECT id FROM orders", "mysql")]
+        assert not any(
+            call.args == ("SELECT id FROM orders",)
+            for call in conn.cursor.return_value.execute.call_args_list
+        )
+    else:
+        await run
+        assert calls == []
 
 
 def test_sqlite_missing_table_list_capability_blocks_execution() -> None:

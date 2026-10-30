@@ -9,9 +9,11 @@ Four orthogonal protections, composed at the factory:
   anything that isn't a single ``SELECT``/``WITH``.
 * ``apply_rls`` / ``RlsGuardRunner`` — per-request row-level-security
   predicate injection via sqlglot AST rewrite; the rewritten SQL is what
-  flows on to the read-only guard. Fail-secure: any rewrite failure
-  (parse error, scope-analysis error, missing/suspicious dynamic value,
-  unprovable protected-table reference) blocks the query.
+  flows on to the read-only guard, and the engine runner then verifies on
+  its execution connection that every referenced relation is a base table.
+  Fail-secure: any rewrite failure (parse error, scope-analysis error,
+  missing/suspicious dynamic value, unprovable protected-table reference)
+  and any view or unverifiable relation blocks the query.
 * Per-runner statement timeouts (``SET statement_timeout`` on Postgres,
   ``SET SESSION MAX_EXECUTION_TIME`` on MySQL, ``set_progress_handler``
   deadline on SQLite) — server- or driver-side time bound.
@@ -132,15 +134,18 @@ class RlsGuardRunner(SqlRunner):
         *,
         dialect: str | None = None,
     ) -> None:
-        if rules and not _accepts_relation_check(inner):
+        executor = _relation_check_executor(inner)
+        if rules and not _declares_relation_check(executor):
             # Checked once at construction so a runner that cannot verify
             # relations is a wiring error at startup, not a per-query failure.
             raise TypeError(
-                f"{type(inner).__name__}.run_sql must accept the require_base_tables "
+                f"{type(executor).__name__}.run_sql must declare the require_base_tables "
                 "keyword to run beneath RlsGuardRunner"
             )
         self._inner = inner
-        self._rules = rules
+        # Copied so a caller mutating its list cannot add rules the
+        # construction check above never saw.
+        self._rules = list(rules)
         self._dialect = dialect
 
     async def run_sql(
@@ -182,12 +187,29 @@ class RlsGuardRunner(SqlRunner):
         )
 
 
-def _accepts_relation_check(runner: object) -> bool:
-    """True if ``runner.run_sql`` can receive the ``require_base_tables`` keyword."""
+def _relation_check_executor(runner: object) -> object:
+    """Return the runner that receives ``require_base_tables`` beneath the guards.
+
+    The SQL Lens wrappers only forward the requirement, so the runner that must
+    honor it is the first one beneath them.
+    """
+    while isinstance(runner, (RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner)):
+        runner = runner._inner
+    return runner
+
+
+def _declares_relation_check(runner: object) -> bool:
+    """True if ``runner.run_sql`` names a ``require_base_tables`` parameter.
+
+    A bare ``**kwargs`` does not count: it accepts the keyword without
+    showing that the runner acts on it.
+    """
     try:
         params = inspect.signature(runner.run_sql).parameters  # type: ignore[attr-defined]
     except (AttributeError, TypeError, ValueError):
         return False
-    return "require_base_tables" in params or any(
-        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    param = params.get("require_base_tables")
+    return param is not None and param.kind in (
+        inspect.Parameter.KEYWORD_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
     )
