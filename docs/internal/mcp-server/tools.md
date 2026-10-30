@@ -1,6 +1,6 @@
 # MCP tools (the public surface)
 
-<!-- verified-against: 366514f 2026-10-22 -->
+<!-- verified-against: 0fbeec6 2026-10-30 -->
 
 The tools that MCP clients see. Source-of-truth reference for [src/sqllens/server.py](../../../src/sqllens/server.py), [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py), [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py), [src/sqllens/tools/list_data_sources.py](../../../src/sqllens/tools/list_data_sources.py), and [src/sqllens/tools/_format.py](../../../src/sqllens/tools/_format.py).
 
