@@ -330,6 +330,27 @@ _SIDE_EFFECT_FUNCS: dict[str, frozenset[str]] = {
             "database_to_xml_and_xmlschema",
             "cursor_to_xml",
             "cursor_to_xmlschema",
+            # Like ``query_to_xml``, these run query text passed as a string,
+            # or read a relation named by a text argument, so the statement
+            # they read is never part of the parsed tree. Blocking by name
+            # covers every overload (e.g. the tsquery-only ``ts_rewrite``).
+            # Text search: ts_stat, ts_rewrite. tablefunc: crosstab*,
+            # connectby. xml2: xpath_table. dblink: dblink_build_sql_insert /
+            # _update (copy a named table's row into the returned text).
+            # pageinspect: get_raw_page, bt_page_items (raw page / index
+            # contents of a named relation).
+            "ts_stat",
+            "ts_rewrite",
+            "crosstab",
+            "crosstab2",
+            "crosstab3",
+            "crosstab4",
+            "connectby",
+            "xpath_table",
+            "dblink_build_sql_insert",
+            "dblink_build_sql_update",
+            "get_raw_page",
+            "bt_page_items",
             "pg_sleep",
             "pg_terminate_backend",
             "pg_cancel_backend",
