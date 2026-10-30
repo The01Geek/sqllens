@@ -11,6 +11,8 @@ this file covers the probe-level behavior the CLI cannot ergonomically reach
 
 from __future__ import annotations
 
+import os
+import stat
 from pathlib import Path
 from unittest.mock import patch
 
@@ -313,6 +315,80 @@ def test_probe_memory_unwritable_parent_raises(tmp_path: Path) -> None:
         probe_memory(_cfg(persist_dir=blocker / "child"))
     assert exc_info.value.subsystem == "memory"
     assert "cannot create persist_dir" in exc_info.value.detail
+
+
+_running_as_root = pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root bypasses file permission bits",
+)
+
+
+@_running_as_root
+def test_probe_memory_read_only_store_file_raises(tmp_path: Path) -> None:
+    db_file = tmp_path / "chroma.sqlite3"
+    db_file.write_bytes(b"existing store")
+    os.chmod(db_file, stat.S_IREAD)
+    try:
+        with pytest.raises(PreflightError) as exc_info:
+            probe_memory(_cfg(persist_dir=tmp_path))
+    finally:
+        os.chmod(db_file, stat.S_IREAD | stat.S_IWRITE)
+    assert exc_info.value.subsystem == "memory"
+    assert str(db_file) in exc_info.value.detail
+    assert "not writable by this process" in exc_info.value.detail
+    assert isinstance(exc_info.value.__cause__, PermissionError)
+
+
+def test_probe_memory_writable_store_file_is_left_unchanged(tmp_path: Path) -> None:
+    db_file = tmp_path / "chroma.sqlite3"
+    db_file.write_bytes(b"existing store")
+    # Back-date the mtime so a write during the probe would be visible even on
+    # filesystems with coarse timestamp resolution.
+    os.utime(db_file, ns=(1_000_000_000_000_000_000, 1_000_000_000_000_000_000))
+    before = db_file.stat().st_mtime_ns
+
+    probe_memory(_cfg(persist_dir=tmp_path))
+
+    assert db_file.read_bytes() == b"existing store"
+    assert db_file.stat().st_mtime_ns == before
+
+
+def test_probe_memory_absent_store_file_passes_without_creating_it(tmp_path: Path) -> None:
+    probe_memory(_cfg(persist_dir=tmp_path))
+    assert not (tmp_path / "chroma.sqlite3").exists()
+
+
+@_running_as_root
+def test_probe_memory_ignores_segment_directories(tmp_path: Path) -> None:
+    # Only chroma.sqlite3 is checked: a read-only segment file must not fail
+    # the probe, and no file under a segment directory is opened.
+    segment = tmp_path / "2f1c0f3e-segment"
+    segment.mkdir()
+    segment_file = segment / "data_level0.bin"
+    segment_file.write_bytes(b"segment")
+    os.chmod(segment_file, stat.S_IREAD)
+    (tmp_path / "chroma.sqlite3").write_bytes(b"existing store")
+
+    opened: list[Path] = []
+    real_open = open
+
+    def recording_open(file, *args, **kwargs):  # type: ignore[no-untyped-def]
+        opened.append(Path(file))
+        return real_open(file, *args, **kwargs)
+
+    try:
+        with patch("builtins.open", recording_open):
+            probe_memory(_cfg(persist_dir=tmp_path))
+    finally:
+        os.chmod(segment_file, stat.S_IREAD | stat.S_IWRITE)
+    assert opened == [tmp_path / "chroma.sqlite3"]
+
+
+def test_probe_memory_constructs_no_chroma_client(tmp_path: Path) -> None:
+    (tmp_path / "chroma.sqlite3").write_bytes(b"existing store")
+    with patch("chromadb.PersistentClient", side_effect=AssertionError("opened Chroma")) as pc:
+        probe_memory(_cfg(persist_dir=tmp_path))
+    pc.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

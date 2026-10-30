@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import os
+import stat
 import textwrap
 from pathlib import Path
 from unittest.mock import patch
@@ -123,6 +125,34 @@ def test_serve_preflight_blocks_on_unwritable_persist_dir(tmp_path: Path) -> Non
     assert result.exit_code == 2
     # Operator errors route to stderr to keep the stdio JSON-RPC channel clean.
     assert "Preflight failed: memory:" in result.stderr
+    mock_run.assert_not_called()
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root bypasses file permission bits",
+)
+@pytest.mark.parametrize("command", ["serve", "validate"])
+def test_preflight_blocks_on_read_only_memory_store_file(tmp_path: Path, command: str) -> None:
+    persist_dir = tmp_path / "chroma"
+    persist_dir.mkdir()
+    db_file = persist_dir / "chroma.sqlite3"
+    db_file.write_bytes(b"existing store")
+    os.chmod(db_file, stat.S_IREAD)
+    cfg_path = _write_config(tmp_path / "sqllens.toml", memory_dir=str(persist_dir))
+    args = [command, "--config", str(cfg_path)]
+    if command == "validate":
+        args.append("--check-memory")
+
+    try:
+        with patch("sqllens.server.run") as mock_run:
+            result = runner.invoke(app, args)
+    finally:
+        os.chmod(db_file, stat.S_IREAD | stat.S_IWRITE)
+
+    assert result.exit_code == 2, result.stdout
+    assert "Preflight failed: memory:" in result.stderr
+    assert "chroma.sqlite3" in result.stderr
     mock_run.assert_not_called()
 
 
