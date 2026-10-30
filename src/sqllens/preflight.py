@@ -187,13 +187,15 @@ def probe_memory(cfg: Config) -> None:
     with a sentinel file — ``os.access`` alone gives wrong answers under
     EUID/ACL setups and races with the actual write. When the directory
     already holds ``chroma.sqlite3``, also opens it for writing (``r+b``,
-    nothing written), because Chroma cannot open a store whose database file
-    this process cannot write, even to read it. Segment directories are not
-    checked. Does **not** open a Chroma collection (that would trigger the
-    ~80 MB embedding model download, which stays lazy by design).
+    nothing written), because Chroma (observed on 1.5.9) cannot open a store
+    whose database file this process cannot write, even to read it. Segment
+    directories are not checked. Does **not** open a Chroma collection (that
+    would trigger the ~80 MB embedding model download, which stays lazy by
+    design).
 
-    Must run before this process opens the store: closing any descriptor on
-    ``chroma.sqlite3`` drops every SQLite lock the process holds on it.
+    Must run before this process opens the store: on unix, closing any
+    descriptor on ``chroma.sqlite3`` drops every SQLite lock the process
+    holds on it.
     """
     persist_dir = Path(cfg.memory.persist_dir)
 

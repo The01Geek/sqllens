@@ -152,7 +152,8 @@ def test_preflight_blocks_on_read_only_memory_store_file(tmp_path: Path, command
 
     assert result.exit_code == 2, result.stdout
     assert "Preflight failed: memory:" in result.stderr
-    assert "chroma.sqlite3" in result.stderr
+    # Rich folds long paths across lines at 80 columns.
+    assert "chroma.sqlite3" in result.stderr.replace("\n", "")
     mock_run.assert_not_called()
 
 

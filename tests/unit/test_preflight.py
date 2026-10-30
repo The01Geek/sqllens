@@ -317,13 +317,13 @@ def test_probe_memory_unwritable_parent_raises(tmp_path: Path) -> None:
     assert "cannot create persist_dir" in exc_info.value.detail
 
 
-_running_as_root = pytest.mark.skipif(
+_skip_when_root = pytest.mark.skipif(
     hasattr(os, "geteuid") and os.geteuid() == 0,
     reason="root bypasses file permission bits",
 )
 
 
-@_running_as_root
+@_skip_when_root
 def test_probe_memory_read_only_store_file_raises(tmp_path: Path) -> None:
     db_file = tmp_path / "chroma.sqlite3"
     db_file.write_bytes(b"existing store")
@@ -358,10 +358,10 @@ def test_probe_memory_absent_store_file_passes_without_creating_it(tmp_path: Pat
     assert not (tmp_path / "chroma.sqlite3").exists()
 
 
-@_running_as_root
+@_skip_when_root
 def test_probe_memory_ignores_segment_directories(tmp_path: Path) -> None:
-    # Only chroma.sqlite3 is checked: a read-only segment file must not fail
-    # the probe, and no file under a segment directory is opened.
+    # Segment directories are never checked: a read-only segment file must not
+    # fail the probe, and of the store's files only chroma.sqlite3 is opened.
     segment = tmp_path / "2f1c0f3e-segment"
     segment.mkdir()
     segment_file = segment / "data_level0.bin"
