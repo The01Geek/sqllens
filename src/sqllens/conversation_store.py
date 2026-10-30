@@ -41,6 +41,10 @@ from sqllens.agent.core.user import User
 DEFAULT_MAX_CONVERSATIONS = 1000
 
 
+class ConversationOwnerMismatchError(LookupError):
+    """``truncate_messages`` was asked to roll back another user's conversation."""
+
+
 class BoundedConversationStore(ConversationStore):
     """In-process LRU conversation store with a hard size cap."""
 
@@ -110,17 +114,24 @@ class BoundedConversationStore(ConversationStore):
         messages that are no longer there.
 
         Returns True when messages were actually dropped, False when there was
-        nothing to roll back — an unknown or evicted conversation id, a
-        conversation belonging to a different user, or a message list already
-        at or below ``length``. The caller logs that outcome; it is never an
-        error, because a cancelled call that was evicted mid-flight has nothing
-        to restore.
+        nothing to roll back: an unknown or evicted conversation id, or a
+        message list already at or below ``length``. Neither is an error,
+        because a cancelled call that was evicted mid-flight has nothing to
+        restore.
+
+        Raises:
+            ConversationOwnerMismatchError: the conversation belongs to a
+                different user. Nothing is dropped, so the rollback did not
+                happen, and the caller must be able to tell that apart.
+            ValueError: ``length`` is negative.
         """
         if length < 0:
             raise ValueError(f"length must be >= 0 (got {length})")
         conversation = self._conversations.get(conversation_id)
-        if conversation is None or conversation.user.id != user_id:
+        if conversation is None:
             return False
+        if conversation.user.id != user_id:
+            raise ConversationOwnerMismatchError(conversation_id)
         if length >= len(conversation.messages):
             return False
         del conversation.messages[length:]

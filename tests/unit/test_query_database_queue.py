@@ -29,7 +29,10 @@ import pytest
 from sqllens.agent.core.storage import Message
 from sqllens.agent.factory import _StaticUserResolver
 from sqllens.config import AgentRuntimeConfig
-from sqllens.conversation_store import BoundedConversationStore
+from sqllens.conversation_store import (
+    BoundedConversationStore,
+    ConversationOwnerMismatchError,
+)
 from sqllens.tools import _agent as agent_module
 from sqllens.tools import query_database as query_database_module
 from sqllens.tools.query_database import query_database_impl_with_widgets
@@ -60,7 +63,9 @@ class _GatedAgent:
     began a turn — a call still parked on the queue has not entered.
 
     Every turn appends one message to its conversation, as the real agent does,
-    so history ordering and rollback are observable.
+    so history ordering and rollback are observable. ``seen`` records the
+    history each turn started from, and a turn whose message is in ``fail_on``
+    raises once released.
     """
 
     def __init__(self, store: BoundedConversationStore) -> None:
@@ -69,6 +74,8 @@ class _GatedAgent:
         self.agent_memory = None
         self.gates: list[asyncio.Event] = []
         self.entered: list[str | None] = []
+        self.seen: list[list[str]] = []
+        self.fail_on: set[str] = set()
 
     def send_message(
         self,
@@ -85,8 +92,12 @@ class _GatedAgent:
         self, gate: asyncio.Event, message: str, conversation_id: str | None
     ) -> AsyncIterator[Any]:
         self.entered.append(conversation_id)
+        if conversation_id is not None:
+            self.seen.append(await _messages(self.conversation_store, conversation_id))
         await self._append(conversation_id, message)
         await gate.wait()
+        if message in self.fail_on:
+            raise RuntimeError("driver exploded")
         yield make_text_component(f"answered {message}")
 
     async def _append(self, conversation_id: str | None, message: str) -> None:
@@ -227,20 +238,68 @@ async def test_queue_wait_is_not_part_of_the_reported_duration(
 
 
 async def test_second_call_starts_after_first_fails(gated) -> None:
-    """A failed first call releases the turn, like a returning one (criterion 3)."""
-    cfg, agent, _store = gated
+    """A failed first call releases the turn to a parked waiter (criterion 3)."""
+    cfg, agent, store = gated
+    agent.fail_on = {"fails"}
 
-    async def _boom(*_a: Any, **_k: Any) -> AsyncIterator[Any]:
-        raise RuntimeError("driver exploded")
-        yield  # pragma: no cover - makes this an async generator
+    first = asyncio.create_task(
+        query_database_impl_with_widgets(cfg, "fails", conversation_id="conv-a")
+    )
+    await _settle()
+    second = asyncio.create_task(
+        query_database_impl_with_widgets(cfg, "second", conversation_id="conv-a")
+    )
+    await _settle()
+    assert agent.entered == ["conv-a"], "the second call should be parked"
 
-    agent.send_message = lambda *_a, **_k: _boom()  # type: ignore[method-assign]
-
+    agent.gates[0].set()
     with pytest.raises(RuntimeError):
-        await query_database_impl_with_widgets(
-            cfg, "fails", conversation_id="conv-a"
-        )
+        await first
+    await _settle()
 
+    assert agent.entered == ["conv-a", "conv-a"]
+    agent.gates[1].set()
+    await second
+
+    # A failed call is not rolled back, so its message stays ahead of the next.
+    assert await _messages(store, "conv-a") == ["fails", "second"]
+    assert query_database_module._CONVERSATION_QUEUES == {}
+
+
+async def test_third_call_queues_behind_a_waiter_that_took_the_turn(gated) -> None:
+    """The entry outlives its first holder while a waiter is still counted.
+
+    The holder finishes while a second call is parked; a third call arriving
+    right after must queue behind the second rather than mint a fresh lock.
+    """
+    cfg, agent, store = gated
+
+    first = asyncio.create_task(
+        query_database_impl_with_widgets(cfg, "one", conversation_id="conv-a")
+    )
+    await _settle()
+    second = asyncio.create_task(
+        query_database_impl_with_widgets(cfg, "two", conversation_id="conv-a")
+    )
+    await _settle()
+
+    agent.gates[0].set()
+    await first
+    third = asyncio.create_task(
+        query_database_impl_with_widgets(cfg, "three", conversation_id="conv-a")
+    )
+    await _settle()
+
+    assert agent.entered == ["conv-a", "conv-a"], "the third call should be parked"
+    agent.gates[1].set()
+    await second
+    await _settle()
+
+    assert agent.entered == ["conv-a", "conv-a", "conv-a"]
+    agent.gates[2].set()
+    await third
+
+    assert await _messages(store, "conv-a") == ["one", "two", "three"]
     assert query_database_module._CONVERSATION_QUEUES == {}
 
 
@@ -352,6 +411,43 @@ async def test_cancel_keeps_an_earlier_calls_messages(gated) -> None:
         await doomed
 
     assert await _messages(store, "conv-a") == ["kept"]
+
+
+async def test_waiter_starts_from_the_rolled_back_history(gated) -> None:
+    """Cancelling the holder rolls back before a parked waiter takes the turn."""
+    cfg, agent, store = gated
+
+    first = asyncio.create_task(
+        query_database_impl_with_widgets(cfg, "kept", conversation_id="conv-a")
+    )
+    await _settle()
+    agent.gates[0].set()
+    await first
+
+    holder = asyncio.create_task(
+        query_database_impl_with_widgets(cfg, "doomed", conversation_id="conv-a")
+    )
+    await _settle()
+    waiter = asyncio.create_task(
+        query_database_impl_with_widgets(cfg, "waiter", conversation_id="conv-a")
+    )
+    await _settle()
+    assert agent.entered == ["conv-a", "conv-a"], "the waiter should be parked"
+
+    holder.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await holder
+    await _settle()
+
+    # The waiter's turn began from the history without the cancelled message.
+    assert agent.entered == ["conv-a", "conv-a", "conv-a"]
+    assert agent.seen[-1] == ["kept"]
+
+    agent.gates[-1].set()
+    await waiter
+
+    assert await _messages(store, "conv-a") == ["kept", "waiter"]
+    assert query_database_module._CONVERSATION_QUEUES == {}
 
 
 async def test_cancelled_call_returns_no_result(gated) -> None:
@@ -466,9 +562,13 @@ async def test_truncate_messages_reports_what_it_did() -> None:
     assert store.truncate_messages("conv-a", user.id, 1) is False
     assert store.truncate_messages("conv-a", user.id, 5) is False
 
-    # Unknown id, and a conversation belonging to someone else.
+    # Unknown id.
     assert store.truncate_messages("conv-missing", user.id, 0) is False
-    assert store.truncate_messages("conv-a", "someone-else", 0) is False
+
+    # A conversation belonging to someone else is refused, not reported as
+    # "nothing to roll back", and is left as it was.
+    with pytest.raises(ConversationOwnerMismatchError):
+        store.truncate_messages("conv-a", "someone-else", 0)
     assert [m.content for m in conversation.messages] == ["one"]
 
 
@@ -536,3 +636,28 @@ async def test_rollback_whose_truncate_raises_is_logged_and_does_not_escape(
         and "_RaisingStore" in record.getMessage()
         for record in caplog.records
     )
+
+
+async def test_rollback_of_another_users_conversation_is_logged_as_an_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An owner mismatch is a rollback that did not happen, so it logs at ERROR."""
+    store = BoundedConversationStore()
+    user = await _StaticUserResolver().resolve_user(None)
+    await store.create_conversation("conv-a", user, "one")
+
+    class _Agent:
+        conversation_store = store
+
+    with caplog.at_level("INFO", logger="sqllens.tools.query_database"):
+        query_database_module._rollback_conversation(
+            _Agent(), "conv-a", "someone-else", 0
+        )
+
+    assert await _messages(store, "conv-a") == ["one"]
+    assert [
+        record.levelname
+        for record in caplog.records
+        if "belongs to a different user" in record.getMessage()
+    ] == ["ERROR"]
+    assert not any("nothing to roll back" in r.getMessage() for r in caplog.records)

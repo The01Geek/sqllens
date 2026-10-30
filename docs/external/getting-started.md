@@ -57,7 +57,7 @@ The first time SQL Lens runs, it downloads roughly 80 MB of embedding model weig
 
 Note: A slow startup or first query never blocks the server from accepting requests. If the warm-up cannot finish (for example, the database is briefly unreachable), SQL Lens still starts and retries the next time you ask a question.
 
-Note: A question that is waiting on the AI service or on your database does not stop the server from accepting other requests. The exceptions are the optional `import_memory` tool and the memory-administration tools (see [Managing memory](managing-memory.md)): while one of them runs, other requests can briefly wait.
+Note: A question that is waiting on the AI service or on your database does not stop the server from accepting other requests. A request can still wait in two cases. A second question in the same conversation waits until the first one has been answered. And while the optional `import_memory` tool or one of the memory-administration tools runs (see [Managing memory](managing-memory.md)), other requests can briefly wait.
 
 Note: SQL Lens may run more than one query to answer a single question. When its first attempt does not match your database, for example because a column or table name is not what it expected, it checks the schema, corrects the query, and tries again. This is most common on a brand-new database, after memory has been cleared, or when column names are unusual. As long as a corrected attempt succeeds, you receive the answer. Earlier versions could report a "SQL execution error" in this case even though the agent had already found the right answer on its retry; that recovered answer now reaches you.
 

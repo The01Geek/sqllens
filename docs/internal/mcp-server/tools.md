@@ -192,9 +192,11 @@ same message history. Issue #255 adds two rules in
 
 - **Calls sharing a `conversation_id` run one at a time.** The tool holds a
   per-conversation `asyncio.Lock` around the agent run. A call that arrives
-  while another call on the same id is running waits for it to finish, fail or
-  be cancelled, then runs, so the history holds the first call's messages
-  followed by the second's. The lock is taken *before* the run timer, so time
+  while another call on the same id is running waits until that call's agent
+  run returns, fails or is cancelled, then runs, so the history holds the first
+  call's messages followed by the second's. The lock is released when the
+  agent run ends, before the first call formats its result, not when the whole
+  call returns. The lock is taken *before* the run timer, so time
   spent waiting is not reported as the call's own duration. Each registry entry
   counts holders *and* waiters, and is deleted once that count reaches zero and
   the entry is still the one registered under its id (a superseded entry is
@@ -221,11 +223,17 @@ a worker thread; see the cancellation limit in
 [transport.md](transport.md#keeping-the-event-loop-free-during-agent-runs-issue-299).
 The rollback removes only conversation messages.
 
-The queue covers `query_database` only. `import_memory` and the
-memory-administration tools still make synchronous memory-store calls inside
-their `async` handlers, so while one of them runs it blocks the event loop and
-every other request waits (tracked in #303; see "Not yet covered" in
+The queue covers `query_database` only, and other tools can still hold the
+event loop. The memory-administration tools other than `add_memories` call the
+synchronous `MemoryStore` directly inside their `async` handlers, so each one
+blocks the loop for its whole call (tracked in #303; see "Not yet covered" in
 [transport.md](transport.md#keeping-the-event-loop-free-during-agent-runs-issue-299)).
+`import_memory` and `add_memories` both go through `import_bundle`
+([src/sqllens/memory/importer.py](../../../src/sqllens/memory/importer.py)):
+its per-entry writes use the `async` `MemoryStore` methods, which run on
+ChromaDB's own executor, but it first reads the existing entries for
+de-duplication with the synchronous `MemoryStore.iter_all`, which blocks the
+loop while it reads the collection.
 
 Pinned by `tests/unit/test_query_database_queue.py` (concurrency across ids,
 ordering on a shared id, entry cleanup, cancel rollback, and the

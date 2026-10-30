@@ -26,6 +26,7 @@ from typing import Any
 
 from sqllens.agent import Agent, RequestContext
 from sqllens.config import RESERVED_METADATA_KEYS, Config
+from sqllens.conversation_store import ConversationOwnerMismatchError
 from sqllens.profiles import ProfileStore, resolve_effective_settings
 from sqllens.runtime import (
     EffectiveSettings,
@@ -258,15 +259,28 @@ def _rollback_conversation(
         return
     try:
         rolled_back = truncate(conversation_id, user_id, length)
+    except ConversationOwnerMismatchError:
+        # Unlike the "nothing to roll back" outcomes below, the messages are
+        # still there. Not reachable with the shipped _StaticUserResolver,
+        # which always resolves the same user.
+        logger.error(
+            "cancelled query_database call on conversation %s was not rolled "
+            "back: the conversation belongs to a different user than the one "
+            "the call resolved; the next call on this conversation will see "
+            "the cancelled call's messages",
+            conversation_id,
+        )
+        return
     except Exception:
         # Same rationale as the missing-method branch above: the caller is
         # propagating a cancellation that must not be replaced by a different
         # exception, so a store whose truncate_messages raises is logged at
         # ERROR rather than allowed to escape and displace the CancelledError
-        # with nothing recording that the rollback did not happen. The shipped
-        # BoundedConversationStore raises only ValueError for a negative
-        # length, which this caller's len()-derived baseline cannot produce, so
-        # this is unreachable with the default wiring.
+        # with nothing recording that the rollback did not happen. Apart from
+        # the owner mismatch handled above, the shipped BoundedConversationStore
+        # raises only ValueError for a negative length, which this caller's
+        # len()-derived baseline cannot produce, so this is unreachable with the
+        # default wiring.
         logger.exception(
             "cancelled query_database call on conversation %s was not rolled "
             "back: conversation store %s raised from truncate_messages; the "
