@@ -1,0 +1,40 @@
+{
+  "root_completeness": "established",
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "severity": "Suggestion",
+      "agents": ["prflow:silent-failure-hunter", "prflow:requesting-code-review"],
+      "corroboration": 2,
+      "defect_signature": {"file": "src/sqllens/preflight.py", "line_range": [232, 237], "kind": "other"},
+      "description": "The single except OSError branch labels every error other than FileNotFoundError (IsADirectoryError, ELOOP, Windows sharing violation) as 'not writable by this process'; the probe fails closed, but the message can misstate the cause."
+    },
+    {
+      "finding_id": "F-2",
+      "severity": "Suggestion",
+      "agents": ["prflow:silent-failure-hunter"],
+      "corroboration": 1,
+      "defect_signature": {"file": "src/sqllens/preflight.py", "line_range": [230, 231], "kind": "test_gap"},
+      "description": "except FileNotFoundError: return also passes a chroma.sqlite3 that is a dangling symlink, so preflight reports memory OK while Chroma may still fail at runtime; untested."
+    },
+    {
+      "finding_id": "F-3",
+      "severity": "Suggestion",
+      "agents": ["prflow:pr-test-analyzer"],
+      "corroboration": 1,
+      "defect_signature": {"file": "tests/unit/test_preflight.py", "line_range": [375, 384], "kind": "test_gap"},
+      "description": "The segment-directory test spies only builtins.open, so reads of segment files via Path.open, Path.read_bytes or os.open would not be caught."
+    }
+  ],
+  "phase3_dispatched": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:pr-test-analyzer"],
+  "expected_reviewers": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:pr-test-analyzer"],
+  "plan_eligible": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:pr-test-analyzer"],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {"small_diff": false, "config_only": false, "has_new_types": false, "test_relevant": true, "detect_all_audit": false, "file_count": 3, "changed_lines": 142},
+  "cap_drops": {"count": 0, "by_category": {}},
+  "phase4_demoted": [],
+  "reject_drivers": [],
+  "criterion_exempt": [],
+  "verdict": "APPROVE with notes"
+}

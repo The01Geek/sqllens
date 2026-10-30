@@ -1,0 +1,48 @@
+{
+  "root_completeness": "established",
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "severity": "suggestion",
+      "agents": ["prflow:pr-test-analyzer", "prflow:silent-failure-hunter"],
+      "corroboration": 2,
+      "defect_signature": {"file": "tests/unit/test_preflight.py", "line_range": [351, 384], "kind": "test_gap"},
+      "description": "test_probe_memory_ignores_segment_directories records only builtins.open calls, so its check that only chroma.sqlite3 is opened cannot see opens through os.open, io.open / Path.open or sqlite3.connect; a later read of a segment file through those routes would still pass."
+    },
+    {
+      "finding_id": "F-2",
+      "severity": "suggestion",
+      "agents": ["prflow:requesting-code-review"],
+      "corroboration": 1,
+      "defect_signature": {"file": "tests/unit/test_preflight.py", "line_range": [182, 194], "kind": "test_gap"},
+      "description": "Same gap in test_probe_memory_ignores_segment_directories: patching builtins.open leaves os.open, io.open and Path.open opens unrecorded. The cited line range does not match the head file (test at lines 362-386), so it does not corroborate F-1 by signature."
+    },
+    {
+      "finding_id": "F-3",
+      "severity": "suggestion",
+      "agents": ["prflow:silent-failure-hunter"],
+      "corroboration": 1,
+      "defect_signature": {"file": "src/sqllens/preflight.py", "line_range": [232, 237], "kind": "other"},
+      "description": "The except OSError branch always says the store file is 'not writable by this process', even for non-permission errors (IsADirectoryError, ELOOP, EIO, ETXTBSY); it formats differently from the sentinel branch, which uses {exc}."
+    },
+    {
+      "finding_id": "F-4",
+      "severity": "suggestion",
+      "agents": ["prflow:silent-failure-hunter"],
+      "corroboration": 1,
+      "defect_signature": {"file": "src/sqllens/preflight.py", "line_range": [230, 231], "kind": "logic_error"},
+      "description": "except FileNotFoundError: return treats a chroma.sqlite3 symlink with a missing target the same as an absent file, so preflight passes and the store may fail to open later at the target."
+    }
+  ],
+  "phase3_dispatched": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:pr-test-analyzer"],
+  "expected_reviewers": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:pr-test-analyzer"],
+  "plan_eligible": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:pr-test-analyzer"],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {"small_diff": false, "config_only": false, "has_new_types": false, "test_relevant": true, "detect_all_audit": false, "checklist_skipped": null},
+  "cap_drops": {"count": 0, "by_category": {}},
+  "phase4_demoted": [],
+  "reject_drivers": [],
+  "criterion_exempt": [],
+  "verdict": "APPROVE with notes"
+}

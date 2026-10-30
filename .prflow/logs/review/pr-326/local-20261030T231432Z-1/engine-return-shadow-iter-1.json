@@ -1,0 +1,269 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "severity": "Suggestion",
+   "agents": [
+    "prflow:silent-failure-hunter",
+    "prflow:requesting-code-review"
+   ],
+   "corroboration": 2,
+   "defect_signature": {
+    "file": "src/sqllens/preflight.py",
+    "line_range": [
+     232,
+     237
+    ],
+    "kind": "other"
+   },
+   "description": "The single except OSError branch labels every error other than FileNotFoundError (IsADirectoryError, ELOOP, Windows sharing violation) as 'not writable by this process'; the probe fails closed, but the message can misstate the cause."
+  },
+  {
+   "finding_id": "F-2",
+   "severity": "Suggestion",
+   "agents": [
+    "prflow:silent-failure-hunter"
+   ],
+   "corroboration": 1,
+   "defect_signature": {
+    "file": "src/sqllens/preflight.py",
+    "line_range": [
+     230,
+     231
+    ],
+    "kind": "test_gap"
+   },
+   "description": "except FileNotFoundError: return also passes a chroma.sqlite3 that is a dangling symlink, so preflight reports memory OK while Chroma may still fail at runtime; untested."
+  },
+  {
+   "finding_id": "F-3",
+   "severity": "Suggestion",
+   "agents": [
+    "prflow:pr-test-analyzer"
+   ],
+   "corroboration": 1,
+   "defect_signature": {
+    "file": "tests/unit/test_preflight.py",
+    "line_range": [
+     375,
+     384
+    ],
+    "kind": "test_gap"
+   },
+   "description": "The segment-directory test spies only builtins.open, so reads of segment files via Path.open, Path.read_bytes or os.open would not be caught."
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "file_count": 3,
+  "changed_lines": 142
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (four Suggestion-level notes; no blocking findings)\nThe PR is ready to merge: the new check fails closed on a read-only `chroma.sqlite3`, every acceptance criterion has a passing checklist item, and the remaining notes are minor wording and test-scope points.\nRule applied: rule 6 — only findings or checklist FAILs below the threshold remain → APPROVE with notes\n\n## Code Review Findings\n### 🟡 Suggestion / Minor (4)\n<details><summary>4 items</summary>\n\n1. In `src/sqllens/preflight.py` lines 232-237, the single `except OSError` branch reports every error other than `FileNotFoundError` as \"not writable by this process\". This includes errors that are not about permissions, such as `IsADirectoryError` when `chroma.sqlite3` is a directory, a symlink loop, or a Windows sharing violation. The probe still fails closed, so the behavior is correct, but the headline can point the operator at the wrong cause. (raised by 2/5 agents)\n2. In `src/sqllens/preflight.py` lines 230-231, `except FileNotFoundError: return` also passes a `chroma.sqlite3` that is a dangling symlink, so preflight reports the memory store as OK even though Chroma can still fail when it opens the store. No test covers this path. (raised by 1/5 agents)\n3. In `tests/unit/test_preflight.py` lines 375-384, the test that the probe opens no segment-directory file only records calls to `builtins.open`. A later change that reads segment files through `Path.open`, `Path.read_bytes` or `os.open` would not be caught. (raised by 1/5 agents)\n- VC-7: FAIL (suggestion) — The module docstring asserts that an existing chroma.sqlite3 is opened for writing but left unchanged, and that the remaining probes are non-mutating. [src/sqllens/preflight.py:14]\n\n  <details><summary>Evidence</summary>\n\n  First half holds: probe_memory (src/sqllens/preflight.py:226-237) only does open(store_file, 'r+b') then pass; there is no write, truncate, utime or flush, so a back-dated chroma.sqlite3 keeps its content and mtime. Second half is false as an absolute claim: the docstring (lines 17-20) says the remaining probes are non-mutating, but probe_database's sqlite branch (lines 69-86) calls sqlite3.connect(path) on the configured path. For a sqlite database.url pointing at a nonexistent file, that creates an empty file on disk, which is a mutation. That sentence is pre-existing text, not added by the PR, so the defect is minor. Reachable by any serve run with a sqlite URL to a missing path.\n\n  </details>\n\n</details>\n\n\n## Run details\n<details><summary>Run details</summary>\n\n- Diff profile: test_relevant (no small_diff, config_only or has_new_types), 3 changed files, 142 changed lines.\n- Phase 0 working tree: skipped in PR mode (head-override review of e63899f).\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. Reviewer extension `requesting-code-review`: content-present.\n- CI evidence for the reviewed head: missing (no CI results or in-environment suite result were held for this head).\n- Normalized (wording-only): 0\n- Re-verification: none (no disputed checklist FAIL at or above the threshold).\n- Dirty-tree check: ran clean.\n- Checklist: 18 passed, 1 failed, 0 inconclusive\n- <details><summary>✅ Passed items (18 of 19)</summary>\n\n  - VC-1: Opening an existing chroma.sqlite3 with Python's built-in open() in mode 'r+b' and closing it without writing changes neither the file's bytes nor its modification time, and does not create the file when it is absent (it raises FileNotFoundError instead). [src/sqllens/preflight.py:226]\n  - VC-2: probe_memory maps outcomes of open(store_file, 'r+b') as follows: FileNotFoundError returns (probe passes); every other OSError (including PermissionError, IsADirectoryError when chroma.sqlite3 is a directory, and a read-only-filesystem error) raises PreflightError('memory', ...) whose detail says the file 'is not writable by this process' and appends exc.strerror, or the exception class name when strerror is empty; non-OSError exceptions propagate. [src/sqllens/preflight.py:227]\n  - VC-3: The comment asserts that a SQLite connection opened with mode=rw silently falls back to read-only on a 0444 file, so a SQLite-based check would pass on the read-only store this probe exists to catch. [src/sqllens/preflight.py:223]\n  - VC-4: The docstring asserts that Chroma (observed on 1.5.9) cannot open a store whose chroma.sqlite3 this process cannot write, even to read it; the chromadb version range the project depends on includes the observed version. [src/sqllens/preflight.py:190]\n  - VC-5: The docstring asserts probe_memory must run before this process opens the store, because on unix closing any descriptor on chroma.sqlite3 drops every SQLite lock the process holds on it. [src/sqllens/preflight.py:196]\n  - VC-6: The docstring asserts that segment directories are not checked by probe_memory and that it does not open a Chroma collection. [src/sqllens/preflight.py:191]\n  - VC-8: With preflight on, sqllens serve calls run_preflight (which runs probe_memory after probe_database and probe_llm) before sqllens.server.run binds the transport, and on PreflightError prints 'Preflight failed: memory: <detail>' to stderr and exits with code 2. [tests/unit/test_cli.py:136]\n  - VC-9: sqllens validate --check-memory runs probe_memory and, on PreflightError, prints 'Preflight failed: memory: ...' to stderr and exits with code 2. [tests/unit/test_cli.py:143]\n  - VC-10: Patching 'sqllens.server.run' intercepts the call the serve command makes to start the transport, so mock_run.assert_not_called() proves the transport never bound; for the validate parametrization the patch target is still importable. [tests/unit/test_cli.py:148]\n  - VC-11: The test comment asserts that Rich folds long paths across lines at 80 columns, so joining stderr lines recovers 'chroma.sqlite3'; the CLI error output goes through a Rich Console on stderr whose width under CliRunner is 80 and which inserts newlines (not other characters) when wrapping. [tests/unit/test_cli.py:155]\n  - VC-12: On every supported platform, os.chmod(db_file, stat.S_IREAD) makes open(db_file, 'r+b') fail for a non-root process with PermissionError (asserted as exc_info.value.__cause__); on Windows (no os.geteuid) the test is not skipped and relies on the read-only attribute producing PermissionError. [tests/unit/test_preflight.py:326]\n  - VC-13: Patching builtins.open with recording_open captures every file open probe_memory performs inside persist_dir, so opened == [chroma.sqlite3] shows no segment-directory file was opened; this relies on Path.touch, Path.unlink and Path.mkdir not routing through builtins.open. [tests/unit/test_preflight.py:372]\n  - VC-14: Patching 'chromadb.PersistentClient' would detect a Chroma client construction by probe_memory; this holds only if Chroma clients in sqllens are constructed via a chromadb.PersistentClient attribute lookup at call time and chromadb is importable in the test environment. [tests/unit/test_preflight.py:387]\n  - VC-15: The test comment asserts that back-dating the mtime makes a write during the probe visible even on filesystems with coarse timestamp resolution; os.utime with ns=1_000_000_000_000_000_000 sets a timestamp (2001) earlier than any write time the probe could produce. [tests/unit/test_preflight.py:345]\n  - VC-16: When `persist_dir` is writable and contains a `chroma.sqlite3` that the server process cannot open for writing, `probe_memory` raises `PreflightError` with subsystem `memory` and a detail naming that file as not writable by this process; `sqllens serve` with preflight on and the earlier probes passing exits with code 2 printing `Preflight failed: memory: …` before the transport binds, and `sqllens validate --check-memory` exits with code 2. [src/sqllens/preflight.py:232]\n  - VC-17: When `persist_dir` is writable and `chroma.sqlite3` is absent from it, or present and writable by this process, `probe_memory` passes, and a present file's bytes and modification time are the same after the probe as before it. [src/sqllens/preflight.py:226]\n  - VC-18: A test in `tests/unit/test_preflight.py` makes an existing `chroma.sqlite3` read-only and asserts the `PreflightError`; it is skipped when the process runs as root (`os.geteuid` exists and returns 0), where file permission bits are bypassed. [tests/unit/test_preflight.py:320]\n  - VC-19: `probe_memory` constructs no Chroma client and starts no embedding-model download, and it opens no file inside the store's segment directories. [src/sqllens/preflight.py:183]\n\n  </details>\n- Reviewed against issue #250 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] When `persist_dir` is writable and contains a `chroma.sqlite3` that the server process cannot open for writing, `probe_memory` raises `PreflightError` with subsystem `memory` and a detail naming that file as not writable by this process; `sqllens serve` with preflight on and the earlier probes passing exits with code 2 printing `Preflight failed: memory: …` before the transport binds, and `sqllens validate --check-memory` exits with code 2.\n- [ ] When `persist_dir` is writable and `chroma.sqlite3` is absent from it, or present and writable by this process, `probe_memory` passes, and a present file's bytes and modification time are the same after the probe as before it.\n- [ ] A test in `tests/unit/test_preflight.py` makes an existing `chroma.sqlite3` read-only and asserts the `PreflightError`; it is skipped when the process runs as root (`os.geteuid` exists and returns 0), where file permission bits are bypassed.\n- [ ] `probe_memory` constructs no Chroma client and starts no embedding-model download, and it opens no file inside the store's segment directories.",
+ "diff_produced_at_head": "e63899fadf71c3223cc241c762fa498cce5151bc",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:preflight.py:rplus-open-nonmutating:228",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "dependency_interaction:preflight.py:store-open-error-mapping:232",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "dependency_interaction:preflight.py:sqlite-rw-readonly-fallback:223",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "dependency_interaction:preflight.py:chroma-readonly-open-failure:190",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "absolute_claim:preflight.py:close-drops-sqlite-locks:196",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "absolute_claim:preflight.py:segment-dirs-not-checked:191",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "category": "absolute_claim",
+   "claim": "The module docstring asserts that an existing chroma.sqlite3 is opened for writing but left unchanged, and that the remaining probes are non-mutating.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "an\nexisting ``chroma.sqlite3`` is opened for writing but left unchanged.",
+   "source_file": "src/sqllens/preflight.py",
+   "source_line": 14,
+   "source_line_end": 15,
+   "verify_against": "probe_memory in src/sqllens/preflight.py",
+   "verify_hint": "Falsifying input: an existing chroma.sqlite3 with a back-dated mtime; trace the open(store_file, 'r+b') block in probe_memory for any write, truncate or utime",
+   "claim_signature": "absolute_claim:preflight.py:store-left-unchanged:14",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "First half holds: probe_memory (src/sqllens/preflight.py:226-237) only does open(store_file, 'r+b') then pass; there is no write, truncate, utime or flush, so a back-dated chroma.sqlite3 keeps its content and mtime. Second half is false as an absolute claim: the docstring (lines 17-20) says the remaining probes are non-mutating, but probe_database's sqlite branch (lines 69-86) calls sqlite3.connect(path) on the configured path. For a sqlite database.url pointing at a nonexistent file, that creates an empty file on disk, which is a mutation. That sentence is pre-existing text, not added by the PR, so the defect is minor. Reachable by any serve run with a sqlite URL to a missing path.",
+   "file_checked": "src/sqllens/preflight.py:17-20,69-86,226-237",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "api_contract:cli.py:serve-preflight-memory-exit2",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "api_contract:cli.py:validate-check-memory-exit2",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "test_mock_alignment:test_cli.py:server-run-patch-target:148",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "data_format_assumption:test_cli.py:rich-path-folding:155",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "dependency_interaction:test_preflight.py:readonly-raises-permissionerror:339",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "test_mock_alignment:test_preflight.py:builtins-open-recorder:380",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "test_mock_alignment:test_preflight.py:chromadb-client-patch:389",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "data_format_assumption:test_preflight.py:mtime-backdate:347",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-16",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-17",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-18",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-19",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}

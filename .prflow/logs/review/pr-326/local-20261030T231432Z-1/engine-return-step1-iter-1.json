@@ -1,0 +1,277 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "severity": "suggestion",
+   "agents": [
+    "prflow:pr-test-analyzer",
+    "prflow:silent-failure-hunter"
+   ],
+   "corroboration": 2,
+   "defect_signature": {
+    "file": "tests/unit/test_preflight.py",
+    "line_range": [
+     351,
+     384
+    ],
+    "kind": "test_gap"
+   },
+   "description": "test_probe_memory_ignores_segment_directories records only builtins.open calls, so its check that only chroma.sqlite3 is opened cannot see opens through os.open, io.open / Path.open or sqlite3.connect; a later read of a segment file through those routes would still pass."
+  },
+  {
+   "finding_id": "F-2",
+   "severity": "suggestion",
+   "agents": [
+    "prflow:requesting-code-review"
+   ],
+   "corroboration": 1,
+   "defect_signature": {
+    "file": "tests/unit/test_preflight.py",
+    "line_range": [
+     182,
+     194
+    ],
+    "kind": "test_gap"
+   },
+   "description": "Same gap in test_probe_memory_ignores_segment_directories: patching builtins.open leaves os.open, io.open and Path.open opens unrecorded. The cited line range does not match the head file (test at lines 362-386), so it does not corroborate F-1 by signature."
+  },
+  {
+   "finding_id": "F-3",
+   "severity": "suggestion",
+   "agents": [
+    "prflow:silent-failure-hunter"
+   ],
+   "corroboration": 1,
+   "defect_signature": {
+    "file": "src/sqllens/preflight.py",
+    "line_range": [
+     232,
+     237
+    ],
+    "kind": "other"
+   },
+   "description": "The except OSError branch always says the store file is 'not writable by this process', even for non-permission errors (IsADirectoryError, ELOOP, EIO, ETXTBSY); it formats differently from the sentinel branch, which uses {exc}."
+  },
+  {
+   "finding_id": "F-4",
+   "severity": "suggestion",
+   "agents": [
+    "prflow:silent-failure-hunter"
+   ],
+   "corroboration": 1,
+   "defect_signature": {
+    "file": "src/sqllens/preflight.py",
+    "line_range": [
+     230,
+     231
+    ],
+    "kind": "logic_error"
+   },
+   "description": "except FileNotFoundError: return treats a chroma.sqlite3 symlink with a missing target the same as an absent file, so preflight passes and the store may fail to open later at the target."
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (four Suggestion findings and one inconclusive checklist item; no Critical finding and no checklist failure)\nThe pull request is ready to merge: the preflight check now fails on a `chroma.sqlite3` this process cannot write, every acceptance criterion is met and tested, and nothing found reaches the Critical threshold.\nRule applied: rule 6 — findings below the threshold and an INCONCLUSIVE item remain → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (4)\n\n<details><summary>4 items</summary>\n\n1. `tests/unit/test_preflight.py` lines 362-384 (`test_probe_memory_ignores_segment_directories`): the test records only calls made through `builtins.open`, so its check that only `chroma.sqlite3` is opened cannot see a file opened through `os.open`, `io.open` / `Path.open` or `sqlite3.connect`. A later change that reads a segment file through one of those routes would still pass. The read-only segment file still catches a write-mode open, but only when the tests do not run as root. (raised by 2/5 agents)\n2. `tests/unit/test_preflight.py` (`test_probe_memory_ignores_segment_directories`, cited as lines 182-194): the same gap in the same test. Patching `builtins.open` leaves opens through `os.open`, `io.open` and `Path.open` unrecorded. This return's line range does not match the head file, where the test spans lines 362-386, so it does not corroborate item 1 by its signature. (raised by 1/5 agents)\n3. `src/sqllens/preflight.py` lines 232-237: the `except OSError` branch always reports the store file as \"not writable by this process\", even for errors that are not about permissions, such as `IsADirectoryError`, `ELOOP`, `EIO` or `ETXTBSY`. Failing is still correct, and the appended `strerror` shows the real cause. Only the wording is wrong for those cases. The sentinel branch above it formats its error with `{exc}`, so the two branches report errors in different shapes. (raised by 1/5 agents)\n4. `src/sqllens/preflight.py` lines 230-231: `except FileNotFoundError: return` treats a `chroma.sqlite3` symlink whose target is missing the same as a missing file. Preflight then passes, and SQLite or Chroma later follows the link at the target and may fail there. This is a narrow edge case; the acceptance criteria only define the case where the file is absent. (raised by 1/5 agents)\n\n</details>\n\n### ℹ️ Informational — Deferred (1)\n\n<details><summary>1 item</summary>\n\n- VC-2: INCONCLUSIVE (suggestion) — Chroma (observed on 1.5.9) cannot open a store whose `chroma.sqlite3` this process cannot write, even to read it. [src/sqllens/preflight.py:190]\n\n  <details><summary>Evidence</summary>\n\n  The claim (src/sqllens/preflight.py:189-191) is an empirical statement about chromadb 1.5.9's behavior. pyproject.toml:33 declares chromadb>=0.5,<2, so 1.5.9 is admitted, and the comment is scoped as 'observed on 1.5.9'. No chromadb source is in the view or the worktree (Glob for chromadb/db/mixins/embeddings_queue.py found nothing), so I could not read chromadb's SqliteDB open path. I did not run chromadb against a 0444 chroma.sqlite3 either. The behavior is neither confirmed nor refuted.\n\n  </details>\n\n</details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: `test_relevant`, three changed files (142 changed lines).\n- Phase 0 working tree: the check was skipped, because this is a pull-request review of the checked-out head.\n- Review prompt extension: `PROMPT-EXTENSION-STATUS: content-present`. Final-pass reviewer extension (`requesting-code-review`): `PROMPT-EXTENSION-STATUS: content-present`.\n- CI evidence for head `e63899f`: missing. No CI result for this head was available to this run, and no tests were run.\n- Normalized (wording-only): 0\n- Re-verification: none. No checklist item failed.\n- prior-report: none\n- Verdict severity threshold: `critical`.\n- Phase 3 reviewers: all five returned results (code-reviewer, silent-failure-hunter, comment-analyzer, pr-test-analyzer, requesting-code-review). code-reviewer and comment-analyzer reported no findings.\n- Dirty-tree check: clean; the reviewers did not change the working tree.\n- Items 1 and 2 under Suggestion describe the same test. They are listed separately because their signature line ranges do not overlap.\n\n- Checklist: 17 passed, 0 failed, 1 inconclusive\n- <details><summary>✅ Passed items (17 of 18)</summary>\n\n  - VC-1: Chroma's persistent client keeps its SQLite database in a file named `chroma.sqlite3` directly inside the configured persist directory, so `persist_dir / \"chroma.sqlite3\"` is the file Chroma will open for writing. [src/sqllens/preflight.py:226]\n  - VC-3: A SQLite `mode=rw` connection on a 0444 file silently falls back to read-only, so such a check would pass on the read-only store this probe is meant to catch. [src/sqllens/preflight.py:223]\n  - VC-4: On unix, closing any descriptor on `chroma.sqlite3` drops every SQLite lock the process holds on it, so `probe_memory` must run before this process opens the store. [src/sqllens/preflight.py:196]\n  - VC-5: Every caller of `probe_memory` / `run_preflight` invokes it before any code in the same process opens a Chroma client on the persist directory (as the docstring's 'Must run before this process opens the store' requires). [src/sqllens/preflight.py:196]\n  - VC-6: Opening the store file with `open(store_file, \"r+b\")` and closing it without writing requires write permission, does not create, truncate or modify the file; a `FileNotFoundError` (absent file, or a dangling symlink at that path) makes the probe pass, and any other `OSError` (e.g. `PermissionError`, `IsADirectoryError` when `chroma.sqlite3` is a directory, read-only filesystem) becomes `PreflightError(\"memory\", ...)`; non-`OSError` exceptions propagate. [src/sqllens/preflight.py:227]\n  - VC-7: The PreflightError detail is formatted as `memory store file <path> is not writable by this process: <strerror or exception class name>`, so it names the file and falls back to the exception type when `strerror` is None. [src/sqllens/preflight.py:233]\n  - VC-8: Patching `chromadb.PersistentClient` intercepts the Chroma client construction path SQL Lens uses, so `pc.assert_not_called()` would detect a probe that built a Chroma client. [tests/unit/test_preflight.py:389]\n  - VC-9: Patching `builtins.open` records every file `probe_memory` opens: `Path.mkdir`, `Path.touch` and `Path.unlink` do not go through `builtins.open`, so the recorded list containing exactly `chroma.sqlite3` reflects the probe's file opens, and the code path in `probe_memory` resolves `open` from builtins at call time. [tests/unit/test_preflight.py:375]\n  - VC-10: Of the store's files, only `chroma.sqlite3` is opened, and segment directories are never checked, so a read-only segment file does not fail the probe. [tests/unit/test_preflight.py:363]\n  - VC-11: Patching `sqllens.server.run` replaces the function the CLI `serve` command actually calls to start the transport, so `mock_run.assert_not_called()` shows the transport never started. [tests/unit/test_cli.py:148]\n  - VC-12: `sqllens validate --check-memory` runs `probe_memory` (after any earlier probes it runs pass with the test config `sqlite:///:memory:` and `api_key = \"sk-ant-test\"`) and on `PreflightError` writes `Preflight failed: memory: ...` to stderr and exits with code 2. [tests/unit/test_cli.py:143]\n  - VC-13: The CLI's stderr output is rendered by Rich at 80 columns under CliRunner and may fold the long path across lines, so the test removes newlines before searching for `chroma.sqlite3`. [tests/unit/test_cli.py:155]\n  - VC-14: On a non-root process, opening a file chmod'ed to `stat.S_IREAD` with mode `r+b` raises `PermissionError`, which the probe chains as `__cause__`; the test's `finally` restores write permission so tmp_path cleanup succeeds. [tests/unit/test_preflight.py:326]\n  - VC-15: When `persist_dir` is writable and contains a `chroma.sqlite3` that the server process cannot open for writing, `probe_memory` raises `PreflightError` with subsystem `memory` and a detail naming that file as not writable by this process; `sqllens serve` with preflight on and the earlier probes passing exits with code 2 printing `Preflight failed: memory: …` before the transport binds, and `sqllens validate --check-memory` exits with code 2. [src/sqllens/preflight.py:226]\n  - VC-16: When `persist_dir` is writable and `chroma.sqlite3` is absent from it, or present and writable by this process, `probe_memory` passes, and a present file's bytes and modification time are the same after the probe as before it. [src/sqllens/preflight.py:227]\n  - VC-17: A test in `tests/unit/test_preflight.py` makes an existing `chroma.sqlite3` read-only and asserts the `PreflightError`; it is skipped when the process runs as root (`os.geteuid` exists and returns 0), where file permission bits are bypassed. [tests/unit/test_preflight.py:320]\n  - VC-18: `probe_memory` constructs no Chroma client and starts no embedding-model download, and it opens no file inside the store's segment directories. [src/sqllens/preflight.py:183]\n\n  </details>\n- Reviewed against issue #250 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] When `persist_dir` is writable and contains a `chroma.sqlite3` that the server process cannot open for writing, `probe_memory` raises `PreflightError` with subsystem `memory` and a detail naming that file as not writable by this process; `sqllens serve` with preflight on and the earlier probes passing exits with code 2 printing `Preflight failed: memory: …` before the transport binds, and `sqllens validate --check-memory` exits with code 2.\n- [ ] When `persist_dir` is writable and `chroma.sqlite3` is absent from it, or present and writable by this process, `probe_memory` passes, and a present file's bytes and modification time are the same after the probe as before it.\n- [ ] A test in `tests/unit/test_preflight.py` makes an existing `chroma.sqlite3` read-only and asserts the `PreflightError`; it is skipped when the process runs as root (`os.geteuid` exists and returns 0), where file permission bits are bypassed.\n- [ ] `probe_memory` constructs no Chroma client and starts no embedding-model download, and it opens no file inside the store's segment directories.",
+ "diff_produced_at_head": "e63899fadf71c3223cc241c762fa498cce5151bc",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:preflight.py:chroma-sqlite3-file-location:226",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "category": "dependency_interaction",
+   "claim": "Chroma (observed on 1.5.9) cannot open a store whose `chroma.sqlite3` this process cannot write, even to read it.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "because Chroma (observed on 1.5.9) cannot open a store\n    whose database file this process cannot write, even to read it.",
+   "source_file": "src/sqllens/preflight.py",
+   "source_line": 190,
+   "source_line_end": 191,
+   "verify_against": "chromadb's SQLite open path and the chromadb version range declared in pyproject.toml",
+   "verify_hint": "Check the `chromadb` dependency range in `pyproject.toml` (does it admit 1.5.9 and versions where the behavior may differ) and the chromadb `SqliteDB` startup path (migrations / PRAGMA writes on open) that would fail on a read-only database file.",
+   "claim_signature": "dependency_interaction:preflight.py:chroma-needs-writable-db:190",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The claim (src/sqllens/preflight.py:189-191) is an empirical statement about chromadb 1.5.9's behavior. pyproject.toml:33 declares chromadb>=0.5,<2, so 1.5.9 is admitted, and the comment is scoped as 'observed on 1.5.9'. No chromadb source is in the view or the worktree (Glob for chromadb/db/mixins/embeddings_queue.py found nothing), so I could not read chromadb's SqliteDB open path. I did not run chromadb against a 0444 chroma.sqlite3 either. The behavior is neither confirmed nor refuted.",
+   "file_checked": "src/sqllens/preflight.py:189-191",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "dependency_interaction:preflight.py:sqlite-rw-readonly-fallback:223",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "absolute_claim:preflight.py:close-drops-sqlite-locks:196",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "api_contract:preflight.py:probe-before-store-open:196",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "dependency_interaction:preflight.py:r-plus-b-open-outcomes:227",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "data_format_assumption:preflight.py:store-file-error-detail:233",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "test_mock_alignment:test_preflight.py:persistentclient-patch-target:389",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "test_mock_alignment:test_preflight.py:builtins-open-recording:375",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "absolute_claim:test_preflight.py:only-sqlite-file-opened:363",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "test_mock_alignment:test_cli.py:server-run-patch-target:148",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "api_contract:test_cli.py:validate-check-memory-exit:143",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "dependency_interaction:test_cli.py:rich-folds-paths:155",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "test_mock_alignment:test_preflight.py:readonly-raises-permissionerror:326",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-15",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-16",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-17",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-18",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}

@@ -1,0 +1,48 @@
+{
+  "root_completeness": "established",
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "severity": "suggestion",
+      "agents": ["prflow:pr-test-analyzer", "prflow:requesting-code-review"],
+      "corroboration": 2,
+      "description": "The read-only-filesystem (errno.EROFS) branch of probe_memory that reports 'not writable by this process' has no test; a regression would only change the message wording, the probe still fails with exit 2.",
+      "defect_signature": {"file": "src/sqllens/preflight.py", "line_range": [233, 239], "kind": "test_gap"}
+    },
+    {
+      "finding_id": "F-2",
+      "severity": "suggestion",
+      "agents": ["prflow:silent-failure-hunter"],
+      "corroboration": 1,
+      "description": "A dangling chroma.sqlite3 symlink raises FileNotFoundError on the r+b open, so the probe passes as if no store existed; SQLite later follows the link and creates an empty store or fails at first memory query. Outside the issue's scope (criterion 2: absent file passes); untested.",
+      "defect_signature": {"file": "src/sqllens/preflight.py", "line_range": [231, 232], "kind": "logic_error"}
+    },
+    {
+      "finding_id": "F-3",
+      "severity": "suggestion",
+      "agents": ["prflow:silent-failure-hunter"],
+      "corroboration": 1,
+      "description": "On Windows, opening a directory raises PermissionError, so a chroma.sqlite3 path that is a directory would be reported as 'not writable by this process' and the directory test's negative assertions would fail. CI runs unit tests only on ubuntu-latest; issue records Windows behavior as not established.",
+      "defect_signature": {"file": "src/sqllens/preflight.py", "line_range": [234, 238], "kind": "other"}
+    },
+    {
+      "finding_id": "F-4",
+      "severity": "suggestion",
+      "agents": ["prflow:pr-test-analyzer"],
+      "corroboration": 1,
+      "description": "test_probe_memory_constructs_no_chroma_client patches only chromadb.PersistentClient and nothing asserts no embedding-model download; the segment-directory test records only builtins.open. Criterion 4 holds today; the gap weakens regression detection only.",
+      "defect_signature": {"file": "tests/unit/test_preflight.py", "line_range": [401, 405], "kind": "test_gap"}
+    }
+  ],
+  "phase3_dispatched": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:pr-test-analyzer"],
+  "expected_reviewers": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:pr-test-analyzer"],
+  "plan_eligible": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:pr-test-analyzer"],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {"small_diff": false, "config_only": false, "has_new_types": false, "test_relevant": true, "detect_all_audit": false, "file_count": 3, "changed_lines": 158},
+  "cap_drops": {"count": 0, "by_category": {}},
+  "phase4_demoted": [],
+  "reject_drivers": [],
+  "criterion_exempt": [],
+  "verdict": "APPROVE with notes"
+}
