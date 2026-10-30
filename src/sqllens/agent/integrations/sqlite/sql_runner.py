@@ -91,6 +91,8 @@ class SqliteRunner(SqlRunner):
         Raises:
             sqlite3.Error: If query execution fails (the progress-handler deadline
                 raises ``sqlite3.OperationalError('interrupted')``).
+            SqlWorkersBusyError: If no SQL worker slot freed in time; the query
+                never ran.
         """
         # The driver calls below block, so they run on the SQL worker pool and
         # the event loop stays free for health checks and other requests. See
