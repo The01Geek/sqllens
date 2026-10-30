@@ -130,6 +130,29 @@ async def test_real_sdk_stream_retains_signature_and_tool_input() -> None:
 
     assert chunks[-1].provider_content == [_BLOCKS[0], _BLOCKS[2]]
 
+
+async def test_real_sdk_create_retains_signature_and_tool_input() -> None:
+    message = {
+        "id": "msg-create", "type": "message", "role": "assistant",
+        "model": "claude-opus-5-5", "content": deepcopy(_BLOCKS), "stop_reason": "tool_use",
+        "stop_sequence": None, "usage": {"input_tokens": 3, "output_tokens": 12},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=message)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        service = AnthropicLlmService(api_key="test-key", http_client=client)
+        response = await service.send_request(LlmRequest(messages=[], user=User(id="test")))
+
+    assert response.content == "Looking up sales."
+    assert response.finish_reason == "tool_use"
+    assert response.usage == {"input_tokens": 3, "output_tokens": 12}
+    assert response.provider_content == _BLOCKS
+    assert [(call.name, call.arguments) for call in response.tool_calls or []] == [
+        ("run_sql", {"sql": "SELECT 1"}),
+    ]
+
 @pytest.mark.parametrize("stream", [False, True])
 async def test_followup_refreshes_memories_without_replaying_old_thinking(stream: bool) -> None:
     service = AnthropicLlmService(model="claude-opus-5-5", api_key="test-key")

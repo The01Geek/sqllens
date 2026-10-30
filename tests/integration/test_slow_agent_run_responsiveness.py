@@ -11,9 +11,9 @@ model answers, and short client timeouts fail.
 
 This test points the real Anthropic SDK at a local stand-in that holds each
 ``/v1/messages`` request open until the test releases it. No real model is
-called and no API key is used. While the agent run is held, ``/healthz`` and
-``list_data_sources`` on a second MCP session must both answer within a short
-timeout.
+called and no real credential is needed. While the agent run is held,
+``/healthz`` and ``list_data_sources`` on a second MCP session must both
+answer within a short timeout.
 """
 
 from __future__ import annotations
@@ -77,6 +77,8 @@ class _SlowModel:
     def __init__(self) -> None:
         self.arrived = threading.Event()
         self.release = threading.Event()
+        self.hold_expired = False
+        """True if a request was answered because the hold limit ran out."""
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -84,7 +86,8 @@ class _SlowModel:
                 length = int(self.headers.get("content-length") or 0)
                 payload = json.loads(self.rfile.read(length) or b"{}")
                 outer.arrived.set()
-                outer.release.wait(HOLD_LIMIT_S)
+                if not outer.release.wait(HOLD_LIMIT_S):
+                    outer.hold_expired = True
                 if payload.get("stream"):
                     body, ctype = _sse_body(), "text/event-stream"
                 else:
@@ -154,11 +157,24 @@ async def test_health_and_list_data_sources_answer_during_slow_agent_run(
                     assert isinstance(content, TextContent)
                     return content.text
 
-            text = await asyncio.wait_for(list_sources(), QUICK_TIMEOUT_S)
-            assert "chinook-test" in text
+            quick = asyncio.create_task(list_sources())
+            done, _ = await asyncio.wait({quick}, timeout=QUICK_TIMEOUT_S)
+            if not done:
+                quick.cancel()
+                await asyncio.gather(quick, return_exceptions=True)
+                pytest.fail(f"list_data_sources did not answer within {QUICK_TIMEOUT_S} s")
+            assert "chinook-test" in quick.result()
             # The quick requests finished while the agent run was still held.
             assert not run.done()
-        finally:
+        except BaseException:
+            # Stop the held run before the session closes, so the failure
+            # above is what the test reports rather than teardown errors.
             slow_model.release.set()
+            run.cancel()
+            await asyncio.gather(run, return_exceptions=True)
+            raise
 
+        slow_model.release.set()
         await asyncio.wait_for(run, HOLD_LIMIT_S)
+
+    assert not slow_model.hold_expired, "the stand-in answered only after its hold limit"
