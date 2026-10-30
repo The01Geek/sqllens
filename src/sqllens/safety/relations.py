@@ -115,9 +115,10 @@ def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
     Metadata-only system views in ``_METADATA_VIEWS`` remain readable so
     schema introspection keeps working; every other view is refused. On
     PostgreSQL a relation recorded as a child in ``pg_inherits`` (a partition
-    or an inheritance child) is refused. On PostgreSQL and MySQL a name in call
-    position that matches, ignoring case, a routine defined in the database is
-    refused, whether or not the statement references a relation.
+    or an inheritance child) is refused. A name in call position that matches,
+    ignoring case, a PostgreSQL function outside ``pg_catalog`` and
+    ``information_schema`` or a MySQL stored function is refused, whether or
+    not the statement references a relation.
     """
     try:
         relations = _relations(sql, dialect)

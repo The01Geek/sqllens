@@ -558,7 +558,7 @@ def _refuse_denied_function(node: exp.Expression, denied_funcs: frozenset[str]) 
             name = sorted(offending)[0]
             raise UnsafeSqlError(
                 f"function {name!r} is not allowed: side-effecting / DoS / RCE "
-                "function refused by the read-only guard"
+                "function refused by the read-only guard's function denylist"
             )
 
 

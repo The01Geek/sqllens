@@ -391,8 +391,7 @@ def test_sqlite_missing_table_list_capability_blocks_execution() -> None:
     connection = Mock()
     cursor = connection.cursor.return_value
     cursor.execute.side_effect = sqlite3.OperationalError("no such table: pragma_table_list")
-    # SQLite runs no function-call check, so the refusal names relation types only.
-    with pytest.raises(RlsError, match="could not verify relation types; query blocked"):
+    with pytest.raises(RlsError, match="could not verify relation types"):
         verify_base_tables(connection, "SELECT * FROM main.orders", dialect="sqlite")
 
 
@@ -658,6 +657,14 @@ def test_untokenizable_or_unparsable_sql_fails_closed(dialect, sql) -> None:
     with pytest.raises(RlsError, match="could not verify relation types"):
         verify_base_tables(connection, sql, dialect=dialect)
     connection.cursor.assert_not_called()
+
+
+def test_sqlite_lookup_failure_names_relation_types_only() -> None:
+    # SQLite runs no function-call check, so its refusal does not name one.
+    connection = Mock()
+    connection.cursor.side_effect = sqlite3.OperationalError("synthetic")
+    with pytest.raises(RlsError, match=r"could not verify relation types; query blocked$"):
+        verify_base_tables(connection, "SELECT * FROM orders", dialect="sqlite")
 
 
 def test_sqlite_runs_no_routine_lookup(database) -> None:

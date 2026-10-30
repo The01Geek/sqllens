@@ -9,13 +9,14 @@ Four orthogonal protections, composed at the factory:
   anything that isn't a single ``SELECT``/``WITH``.
 * ``apply_rls`` / ``RlsGuardRunner`` — per-request row-level-security
   predicate injection via sqlglot AST rewrite; the rewritten SQL is what
-  flows on to the read-only guard. With rules configured, the guard also
-  applies the read-only guard's function denylist to the rewritten SQL,
+  flows on to the read-only guard. With rules configured, ``RlsGuardRunner``
+  also applies the read-only guard's function denylist to the rewritten SQL,
   whatever ``database.read_only`` is. The engine runner then verifies on
   its execution connection that every referenced relation is a base table
   or an allowlisted metadata-only system view, that no PostgreSQL relation
   is a partition or inheritance child, and that no called name matches a
-  routine defined in a PostgreSQL or MySQL database. Fail-secure: any rewrite
+  PostgreSQL function outside ``pg_catalog`` and ``information_schema`` or a
+  MySQL stored function. Fail-secure: any rewrite
   failure (parse error, scope-analysis error, missing/suspicious dynamic
   value, unprovable protected-table reference), any other view or
   unverifiable relation, and any failed catalog lookup blocks the query.
@@ -133,9 +134,9 @@ class RlsGuardRunner(SqlRunner):
 
     With active rules, the rewritten SQL must pass the read-only guard's
     function denylist (``UnsafeSqlError``), and the inner runner must also
-    verify relations and called routines on its execution connection; stored
-    views, child tables and database-defined routines are refused rather
-    than expanded.
+    verify relations and called functions on its execution connection; stored
+    views, child tables and calls matching database-defined functions (as
+    ``verify_base_tables`` scopes them) are refused rather than expanded.
     """
 
     def __init__(
