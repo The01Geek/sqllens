@@ -82,13 +82,6 @@ def test_load_golden_inherits_size_cap() -> None:
 def test_load_golden_inherits_recursion_guard() -> None:
     """A deeply-nested JSON payload must surface as ``BundleFormatError``,
     not propagate ``RecursionError`` past every guarded caller.
-
-    Depth is set to the same 10,000 the canonical
-    ``test_parse_json_rejects_deeply_nested_under_size_cap`` uses — CPython's
-    ``_json`` C scanner has a native-stack budget several thousand levels
-    deep, so a smaller depth may not trigger the guard at all (the array
-    parses fine and bounces off the later root-must-be-dict check, which
-    would make this test pass for the wrong reason).
     """
     depth = 10_000
     payload = "[" * depth + "1" + "]" * depth

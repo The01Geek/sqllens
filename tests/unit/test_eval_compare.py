@@ -76,7 +76,7 @@ def test_sqlalchemy_dialect_name_postgresql_normalises() -> None:
     """
     # PASS path — the mapping must be applied.
     assert compare("SELECT 1", "select 1", dialect="postgresql") is Status.PASS
-    # CHANGED path — the mapping must still apply (otherwise both sides ERROR).
+    # CHANGED path — the mapping must still apply.
     assert (
         compare("SELECT id FROM users", "SELECT id FROM accounts", dialect="postgresql")
         is Status.CHANGED

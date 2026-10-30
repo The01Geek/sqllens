@@ -231,13 +231,11 @@ mode = "none"
 @pytest.mark.parametrize(
     "scripted, expected_pass, expected_rate",
     [
-        # All-PASS — pass_rate=1.0.
         (
             [("ok", [], {"sql": "SELECT 1"}, None, None)],
             1,
             1.0,
         ),
-        # All-ERROR — pass_rate=0.0, every case driver-raised.
         ([RuntimeError("boom")], 0, 0.0),
     ],
 )

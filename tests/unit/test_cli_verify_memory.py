@@ -55,12 +55,8 @@ def _golden(tmp_path: Path, pairs: list[tuple[str, str]]) -> Path:
 def _patch_driver(monkeypatch, responses: list) -> None:
     """Patch the runner's default driver path with a scripted responder.
 
-    ``cli.verify_memory`` imports ``run_verification`` lazily via
-    ``from sqllens.eval import ...`` inside the function body. The lazy
-    import resolves the name as an attribute on the already-loaded
-    ``sqllens.eval`` module at call time — so patching that attribute
-    intercepts the call. A patch on ``sqllens.cli.run_verification`` would
-    be ineffective because no such binding exists at module scope.
+    Patch ``sqllens.eval.run_verification``; the CLI imports it lazily
+    and has no module-level ``run_verification`` binding.
     """
     iterator = iter(responses)
 
@@ -161,7 +157,7 @@ def test_fail_under_allows_partial_pass_rate(
         [
             ("ok", [], {"sql": "SELECT 1"}, None, None),
             ("ok", [], {"sql": "SELECT 2"}, None, None),
-            ("ok", [], {"sql": "SELECT 4"}, None, None),  # CHANGED — 2/3 pass.
+            ("ok", [], {"sql": "SELECT 4"}, None, None),
         ],
     )
 
@@ -169,7 +165,6 @@ def test_fail_under_allows_partial_pass_rate(
         app,
         ["verify-memory", str(golden), "-c", str(cfg), "--fail-under", "60"],
     )
-    # 66.7% >= 60% → pass under tolerance.
     assert r.exit_code == 0, r.output
 
 
@@ -235,7 +230,6 @@ def test_fail_under_rejects_below_threshold(tmp_path: Path, monkeypatch) -> None
         app,
         ["verify-memory", str(golden), "-c", str(cfg), "--fail-under", "60"],
     )
-    # 33% < 60% → reject.
     assert r.exit_code == 1, r.output
     assert "below threshold" in r.output
 
