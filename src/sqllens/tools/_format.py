@@ -358,7 +358,7 @@ def components_to_blocks(
     # ``test_query_info_row_count_recovered_from_raw_rows_on_payload_reject``.
     last_sql_row_count: int | None = None
     # Whether the latest run_sql card's SQL reads a catalog. Its DataFrame is
-    # for the agent only and adds no block; row counting above still sees it.
+    # for the agent only and adds no block; the row count still counts it.
     last_sql_is_introspection = False
     # Candidate blocks. Prose text blocks carry a private "_is_answer" tag and
     # one-row results use the private "result_text" type; both are normalized
@@ -386,7 +386,12 @@ def components_to_blocks(
         elif ctype == ComponentType.DATAFRAME:
             payload = _build_table_payload(rich)
             if payload is not None:
-                if not last_sql_is_introspection:
+                if last_sql_is_introspection:
+                    logger.info(
+                        "withheld a schema-introspection run_sql result from the "
+                        "user-visible blocks; the agent still received it"
+                    )
+                else:
                     small = _small_result_to_markdown(payload)
                     if small is not None:
                         candidates.append({"type": "result_text", "text": small})

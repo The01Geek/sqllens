@@ -1955,3 +1955,22 @@ def test_unparseable_sql_result_still_shown() -> None:
     stream = [*_sql_call("SELECT FROM WHERE ;;;"), _catalog_df()]
     _md, _err, blocks, _qi, _mi = components_to_blocks(stream)
     assert [b["type"] for b in blocks] == ["table"]
+
+
+@pytest.mark.parametrize("dialect", ["mysql", "postgres", "sqlite"])
+def test_unparseable_sql_result_still_shown_with_dialect(dialect: str) -> None:
+    stream = [*_sql_call("SELECT FROM WHERE ;;;"), _catalog_df()]
+    _md, _err, blocks, _qi, _mi = components_to_blocks(stream, dialect=dialect)
+    assert [b["type"] for b in blocks] == ["table"]
+
+
+def test_chart_after_introspection_card_is_kept() -> None:
+    stream = [
+        *_sql_call(_CATALOG_COLUMNS_SQL),
+        _catalog_df(),
+        make_chart(make_chart_spec([{"x": "a", "y": 1}])),
+        _answer_text("Chart above."),
+    ]
+    _md, is_error, blocks, _qi, _mi = components_to_blocks(stream, dialect="postgres")
+    assert is_error is False
+    assert [b["type"] for b in blocks] == ["chart", "text"]

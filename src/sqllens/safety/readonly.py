@@ -14,10 +14,13 @@ path, which makes prompt-injection attacks harder.
 
 from __future__ import annotations
 
+import logging
+
 import sqlglot
 from sqlglot import expressions as exp
 from sqlglot.dialects.mysql import MySQL
 
+logger = logging.getLogger("sqllens.safety.readonly")
 
 class UnsafeSqlError(Exception):
     """Raised when SQL fails the read-only check."""
@@ -79,38 +82,34 @@ def sqlglot_dialect_for_url(url: str) -> str | None:
 # is not misread as a catalog. Keep these keys in sync with
 # ``sqlglot_dialect_for_url`` — an unmapped dialect falls back to the union.
 _SHARED_CATALOG_SCHEMAS: frozenset[str] = frozenset({"information_schema"})
-_CATALOG_SCHEMAS_BY_DIALECT: dict[str, frozenset[str]] = {
-    "postgres": frozenset({"pg_catalog"}),
-    "mysql": frozenset({"mysql", "sys", "performance_schema"}),
-    "sqlite": frozenset(),
-}
-_CATALOG_NAME_PREFIXES_BY_DIALECT: dict[str, tuple[str, ...]] = {
-    "postgres": ("pg_",),
-    "mysql": (),
-    "sqlite": ("sqlite_", "pragma_"),
+# dialect -> (catalog schemas, catalog object-name prefixes)
+_CATALOGS_BY_DIALECT: dict[str, tuple[frozenset[str], tuple[str, ...]]] = {
+    "postgres": (frozenset({"pg_catalog"}), ("pg_",)),
+    "mysql": (frozenset({"mysql", "sys", "performance_schema"}), ()),
+    "sqlite": (frozenset(), ("sqlite_", "pragma_")),
 }
 _ALL_CATALOG_SCHEMAS: frozenset[str] = _SHARED_CATALOG_SCHEMAS.union(
-    *_CATALOG_SCHEMAS_BY_DIALECT.values()
+    *(schemas for schemas, _prefixes in _CATALOGS_BY_DIALECT.values())
 )
 _ALL_CATALOG_NAME_PREFIXES: tuple[str, ...] = tuple(
-    prefix for prefixes in _CATALOG_NAME_PREFIXES_BY_DIALECT.values() for prefix in prefixes
+    prefix for _schemas, prefixes in _CATALOGS_BY_DIALECT.values() for prefix in prefixes
 )
 
 
 def _catalog_names(dialect: str | None) -> tuple[frozenset[str], tuple[str, ...]]:
-    if dialect not in _CATALOG_SCHEMAS_BY_DIALECT:
+    catalogs = _CATALOGS_BY_DIALECT.get(dialect) if dialect is not None else None
+    if catalogs is None:
         return _ALL_CATALOG_SCHEMAS, _ALL_CATALOG_NAME_PREFIXES
-    return (
-        _SHARED_CATALOG_SCHEMAS | _CATALOG_SCHEMAS_BY_DIALECT[dialect],
-        _CATALOG_NAME_PREFIXES_BY_DIALECT[dialect],
-    )
+    schemas, prefixes = catalogs
+    return _SHARED_CATALOG_SCHEMAS | schemas, prefixes
 
 
 def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     """Return True if ``sql`` is a schema-introspection read, not a data query.
 
-    Schema introspection = a statement whose first keyword is ``SHOW``, or a
-    statement that references any catalog table, even alongside data tables.
+    Schema introspection = a statement whose first keyword is ``SHOW`` (leading
+    comments aside), or a statement that references any catalog table, even
+    alongside data tables.
     The catalogs are
     ``information_schema`` for every dialect, plus the engine's own: the
     ``pg_catalog`` schema and ``pg_`` name prefix for ``postgres``; the
@@ -132,10 +131,22 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
         return True
     try:
         parsed = sqlglot.parse_one(sql, dialect=dialect)
-    except Exception:
+    except Exception as exc:
+        logger.debug(
+            "is_introspection_query: SQL did not parse under dialect %r (%s); "
+            "classifying it as a data query",
+            dialect,
+            type(exc).__name__,
+        )
         return False
     if parsed is None:
         return False
+    # A SHOW behind a leading comment slips past the first-keyword check; the
+    # parse root still identifies it (exp.Show, or a SHOW Command fallback).
+    if isinstance(parsed, exp.Show) or (
+        isinstance(parsed, exp.Command) and parsed.name.upper() == "SHOW"
+    ):
+        return True
     schemas, prefixes = _catalog_names(dialect)
     for table in parsed.find_all(exp.Table):
         schema = (table.db or "").lower()

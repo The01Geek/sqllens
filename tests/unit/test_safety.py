@@ -843,6 +843,10 @@ class TestIsIntrospectionQueryPerDialect:
             ("SELECT * FROM information_schema.tables", "sqlite"),
             ("SHOW TABLES", "postgres"),
             ("SHOW TABLES", "sqlite"),
+            ("/* look up tables */ SHOW TABLES", "mysql"),
+            ("-- columns\nSHOW COLUMNS FROM widgets", "mysql"),
+            ("/* look up tables */ SHOW TABLES", "postgres"),
+            ("/* look up tables */ SHOW TABLES", "sqlite"),
         ],
     )
     def test_own_engine_catalogs_detected(self, sql: str, dialect: str) -> None:
