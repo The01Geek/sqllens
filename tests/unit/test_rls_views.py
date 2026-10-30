@@ -486,7 +486,8 @@ class _FakeCatalog:
             self._row = ("BASE TABLE",)
         elif "pg_proc" in sql or "ROUTINES" in sql:
             names = params[1] if "pg_proc" in sql else params
-            self._row = (1,) if any(n.lower() in self.routines for n in names) else None
+            matched = sorted({n.lower() for n in names} & self.routines)
+            self._row = (matched[0],) if matched else None
         else:
             raise AssertionError(f"unexpected catalog query: {sql}")
 
@@ -575,13 +576,15 @@ def test_database_routine_calls_are_refused(sql, dialect) -> None:
 
 def test_routine_lookup_is_parameterized_and_scoped() -> None:
     cursor = _FakeCatalog(routines={"all_orders"})
-    with pytest.raises(RlsError, match="functions defined in the database"):
+    # The refusal names the matched routine so the agent knows which call to drop.
+    with pytest.raises(RlsError, match="function named 'all_orders'"):
         verify_base_tables(_catalog_connection(cursor), "SELECT ALL_ORDERS()", dialect="postgres")
     [(sql, params)] = cursor.queries
+    assert sql.startswith("SELECT p.proname ")
     assert "nspname NOT IN ('pg_catalog', 'information_schema')" in sql
     assert "all_orders" in params[0] and "ALL_ORDERS" not in sql
     cursor = _FakeCatalog(routines={"all_orders"})
-    with pytest.raises(RlsError, match="functions defined in the database"):
+    with pytest.raises(RlsError, match="function named 'all_orders'"):
         verify_base_tables(_catalog_connection(cursor), "SELECT ALL_ORDERS()", dialect="mysql")
     [(sql, params)] = cursor.queries
     assert "ROUTINE_TYPE = 'FUNCTION'" in sql
@@ -590,7 +593,7 @@ def test_routine_lookup_is_parameterized_and_scoped() -> None:
 
 def test_tokenizer_reads_replace_as_a_keyword() -> None:
     # The routine check must not rely on VAR tokens alone: this pins the token
-    # shape the keyword branch exists for, across the supported sqlglot range.
+    # shape the keyword branch exists for.
     import sqlglot
     from sqlglot.tokens import TokenType
 

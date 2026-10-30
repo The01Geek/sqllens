@@ -216,7 +216,7 @@ async def test_postgres_rls_blocks_child_tables_and_functions(postgres_url) -> N
             with pytest.raises(RlsError, match="child tables"):
                 await guard.run_sql(RunSqlToolArgs(sql=f"SELECT id FROM {table}"), _ctx())
         for call in (f"SELECT {function}()", f"SELECT public.{function}()"):
-            with pytest.raises(RlsError, match="functions defined in the database"):
+            with pytest.raises(RlsError, match=f"function named '{function}'"):
                 await guard.run_sql(RunSqlToolArgs(sql=call), _ctx())
         result = await guard.run_sql(
             RunSqlToolArgs(sql=(
@@ -250,7 +250,7 @@ async def test_mysql_rls_blocks_stored_functions(mysql_url) -> None:
         )
         guard = _rls_guard_with(mysql_url, "mysql", [table])
         for call in (f"SELECT {function}()", f"SELECT {database}.{function}()"):
-            with pytest.raises(RlsError, match="functions defined in the database"):
+            with pytest.raises(RlsError, match=f"function named '{function}'"):
                 await guard.run_sql(RunSqlToolArgs(sql=call), _ctx())
         result = await guard.run_sql(
             RunSqlToolArgs(sql=f"SELECT count(*) AS n, upper(min(tenant_id)) AS t FROM {table}"),

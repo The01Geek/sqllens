@@ -87,9 +87,9 @@ def _called_names(sql: str, dialect: str) -> list[str]:
     Read from tokens rather than typed function nodes: sqlglot renames many
     built-ins (``strpos`` parses to ``StrPosition``), and a keyword such as
     ``replace`` is a call name too. Keyword and type names before ``(``
-    (``IN (``, ``DECIMAL(``) are collected as well; they only cost a catalog
-    match. Each name is returned as written, lower-cased and ASCII-lower-cased,
-    since PostgreSQL folds only ASCII in unquoted names.
+    (``IN (``, ``DECIMAL(``) are collected as well. Each name is returned as
+    written, lower-cased and ASCII-lower-cased, since PostgreSQL's folding of
+    non-ASCII letters in unquoted names depends on the server encoding.
     """
     parser_dialect = sqlglot.Dialect.get_or_raise(dialect)
     keywords = type(parser_dialect).tokenizer_class.KEYWORDS
@@ -146,6 +146,12 @@ def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
 
 
 def _verify_relations(cursor: Any, relations: list[exp.Table], dialect: str) -> None:
+    """Raise ``RlsError`` for a relation that is not a verified base table.
+
+    A failed lookup or an unexpected catalog row (a short row, a non-boolean
+    child flag) raises another exception, which the caller, ``verify_base_tables``,
+    logs before refusing the query.
+    """
     mysql_fold = False
     if dialect == "mysql":
         cursor.execute("SELECT @@lower_case_table_names")
@@ -230,7 +236,7 @@ def _refuse_database_routines(cursor: Any, names: list[str], dialect: str) -> No
     """
     if dialect == "postgres":
         cursor.execute(
-            "SELECT 1 FROM pg_catalog.pg_proc p "
+            "SELECT p.proname FROM pg_catalog.pg_proc p "
             "JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace "
             "WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') "
             "AND (p.proname::text = ANY(%s) OR lower(p.proname::text) = ANY(%s)) "
@@ -240,15 +246,17 @@ def _refuse_database_routines(cursor: Any, names: list[str], dialect: str) -> No
     else:
         placeholders = ", ".join(["%s"] * len(names))
         cursor.execute(
-            "SELECT 1 FROM information_schema.ROUTINES "
+            "SELECT ROUTINE_NAME FROM information_schema.ROUTINES "
             "WHERE ROUTINE_TYPE = 'FUNCTION' "
             f"AND LOWER(ROUTINE_NAME) IN ({placeholders}) LIMIT 1",
             tuple(names),
         )
-    if cursor.fetchone() is not None:
+    row = cursor.fetchone()
+    if row is not None:
         raise RlsError(
             "functions defined in the database are not supported while "
-            "row-level security is active"
+            "row-level security is active; the database defines a function named "
+            f"{str(row[0])!r}, so calls by that name are blocked"
         )
 
 
