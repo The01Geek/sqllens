@@ -1,0 +1,46 @@
+[
+  {
+    "criterion": 1,
+    "text": "While a `query_database` call is blocked inside a synchronous Anthropic client call or inside a synchronous database driver call (connect, execute or fetch), the event loop keeps running other tasks, and the HTTP transport answers `GET /healthz`. This holds for non-streaming and streaming Anthropic requests and for each of the Postgres, MySQL and SQLite runners."
+  },
+  {
+    "criterion": 2,
+    "text": "Two `query_database` calls with different conversation ids, each blocked inside a synchronous Anthropic or database call, are blocked at the same time: neither waits for the other call to finish before entering its own blocking call."
+  },
+  {
+    "criterion": 3,
+    "text": "Two `query_database` calls with the same conversation id do not overlap: the second call's agent run starts only after the first call has returned, failed or been cancelled. When both calls return or fail, the conversation's history afterwards holds the first call's messages followed by the second call's messages."
+  },
+  {
+    "criterion": 4,
+    "text": "After every call on a conversation has returned, failed or been cancelled — including a call cancelled while it was waiting for its turn — the server holds no per-conversation queue entry for that conversation id."
+  },
+  {
+    "criterion": 5,
+    "text": "When a `query_database` call is cancelled while it is running, the conversation holds none of the messages that call added and keeps every message that was in it when the cancelled call's turn began (after any earlier call on that conversation id finished). The next call on that conversation id runs with that history."
+  },
+  {
+    "criterion": 6,
+    "text": "When a `query_database` call is cancelled, the tool function raises the cancellation and returns no result."
+  },
+  {
+    "criterion": 7,
+    "text": "For the same conversation id, the same sequence of Anthropic responses and the same query results, a `query_database` call returns the same text content and the same `_meta` as before this change, apart from the duration values in the agent trace. This holds for both streaming and non-streaming Anthropic requests."
+  },
+  {
+    "criterion": 8,
+    "text": "An Anthropic API error raised during a call still produces an `isError: true` result, and a database error or statement timeout raised by a runner still produces a failed `run_sql` step that the agent can re-plan from, as before this change."
+  },
+  {
+    "criterion": 9,
+    "text": "A database query run under a profile whose `max_rows` is lower than the base config's fetches at most that profile's `max_rows` plus one rows from the driver."
+  },
+  {
+    "criterion": 10,
+    "text": "The change leaves these as they are: - It adds no interruption of work already running on a worker thread. A cancelled call's database query keeps running on its SQL worker thread until it finishes or the engine's statement timeout stops it. Nothing but the query's own end stops it when `statement_timeout_ms = 0`, or when it is a MySQL statement other than `SELECT`, which MySQL's `MAX_EXECUTION_TIME` does not cover. Server shutdown waits for such threads. - It adds no thread pool of its own. Since #300, Anthropic calls are awaited on the async Anthropic client and use no worker thread, so cancelling a call cancels its Anthropic request's await. Database driver work runs on SQL Lens's dedicated SQL worker pool from #300 (`src/sqllens/agent/integrations/sql_threads.py`: eight threads behind an `asyncio.Semaphore`), kept apart from asyncio's default executor; a query that finds every slot busy waits up to 60 s for one, then fails with `SqlWorkersBusyError` without running. The ChromaDB memory store keeps its own two-thread pool. - It leaves the synchronous memory-store calls of `import_memory` and the memory-administration MCP tools on the event loop, so those tools still block it while they run. - It leaves the scratch CSV write after each query, `df.to_csv`, and the read-only and row-level-security guards' SQL parsing on the event loop. - It adds no progress notifications and no acknowledge-now / fetch-later job API. A `query_database` call still holds its request open until the agent run ends, so a question that takes longer than a client's timeout still times out for that client."
+  },
+  {
+    "criterion": 11,
+    "text": "After the change: - `docs/internal/mcp-server/tools.md` states that `query_database`'s Anthropic calls and database queries do not hold the event loop (pointing to `docs/internal/mcp-server/transport.md`, which describes #300's async Anthropic client and SQL worker pool), that calls sharing a conversation id run one at a time, that a cancelled call's messages are removed from its conversation, and that `import_memory` and the memory-administration tools still block the event loop. - `docs/internal/database-connectors/cleanup-error-handling.md` and `docs/internal/database-connectors/read-only-safety.md` state that a cancelled request's database query keeps running on its worker thread until it finishes or the engine's statement timeout stops it. - `docs/external/getting-started.md` states that a question waiting on the AI service or the database does not stop the server from accepting other requests, and that `import_memory` and the memory-administration tools can still briefly block them."
+  }
+]
