@@ -31,6 +31,16 @@ If a request uses a named profile with its own `similarity_threshold`, that valu
 
 If SQL Lens cannot reach its memory while assembling this context, it quietly proceeds without the extra context rather than failing the question.
 
+## Settling Ambiguous Questions
+
+When a question can be read more than one way and the readings would count different records, a different period, or a different measure, the assistant is instructed to ask one short clarifying question instead of answering. Memory lets you control which of those choices it asks about.
+
+- **Mark a known ambiguity** with a free-form note that states, as a fact, that a term has more than one meaning. For example: "Revenue has two meanings here: gross revenue includes shipping and tax, net revenue excludes them." A question about revenue that the note reaches then gets a clarifying question unless something settles which meaning is meant: the question itself, an earlier turn of the conversation, or one of the two kinds of memory below.
+- **Stop the question with a note** that names the meaning to use. For example: "When someone asks about revenue, use net revenue: exclude shipping and tax."
+- **Stop the question with a saved question-and-answer pair** for that question. For example, the question "What was revenue last month?" saved with SQL that sums order totals minus shipping and tax. When the assistant's memory search finds the pair, it uses the reading that the pair's SQL uses.
+
+A note reaches the assistant only on a turn whose message the automatic background context retrieves it for (see [Near-Match Background Context](#near-match-background-context)). A note that does not match the current message closely enough neither marks nor settles the choice on that turn. The assistant's memory search uses its own wording of the question, so it can miss a saved pair that would have settled the choice, and then it asks.
+
 ## The Bundle File Format
 
 Import and export use a portable bundle file in one of two formats:
@@ -157,6 +167,8 @@ PASS 7 | CHANGED 2 | ERROR 1 (total 10, pass-rate 70.0%)
 Per-case details follow the summary for any non-PASS result, showing the expected SQL, the captured actual SQL (or `(not available)`), and an error message (when the run failed). Parse-failure diagnostics identify whether the golden SQL or the assistant's SQL could not be parsed. A missing SQL statement has its own diagnostic.
 
 Normalization uses the configured database dialect. Quoted and unquoted identifiers can still compare differently; the comparison does not prove semantic equivalence.
+
+A golden question that leaves a choice open, such as "What was revenue last month?" when revenue has two meanings and nothing settles which one, may get a clarifying question instead of SQL (see [Settling Ambiguous Questions](#settling-ambiguous-questions)). When no query ran before the question, the case is reported as ERROR. When the assistant ran a lookup query first, for example to find which customers match a name, that lookup's SQL is the actual SQL compared. State the choice in your golden questions ("What was net revenue, excluding shipping and tax, last month?") so they test the SQL rather than the question.
 
 **Exit codes** follow SQL Lens's strict "never silent success" rule:
 

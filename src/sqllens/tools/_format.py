@@ -116,11 +116,9 @@ def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
     return info
 
 
-# The agent emits one of these placeholders on a normal turn's finalization
-# ChatInputUpdateComponent (agent/core/agent/agent.py emits "Ask a question...",
-# "Ask a follow-up question...", "Continue the task or ask me something else...",
-# and "Try again..." on the error path). None carries content for the user, so
-# they must never be surfaced as the answer when a turn produces no TEXT/DATAFRAME —
+# Generic ChatInputUpdateComponent placeholders that agent/core/agent/agent.py
+# emits when a turn finishes. None carries content for the user, so they must
+# never be surfaced as the answer when a turn produces no TEXT/DATAFRAME —
 # otherwise an empty result would render the generic placeholder instead of the
 # "(no answer)" fallback. Compared case-insensitively.
 _GENERIC_INPUT_PLACEHOLDERS = frozenset(
@@ -187,9 +185,7 @@ def render_interactive(components: Iterable[UiComponent]) -> str:
     answer-marked text and renders as a text block.
 
     Returns ``""`` when no renderable interactive component is present, which
-    the callers treat as "fall back to ``(no answer)``". Used only when a turn
-    produced no ``TEXT``/``DATAFRAME`` answer, so a normal answer's trailing
-    finalization components are never surfaced.
+    the callers treat as "fall back to ``(no answer)``".
     """
     pieces: list[str] = []
     choices: list[str] = []

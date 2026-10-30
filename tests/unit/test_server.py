@@ -617,8 +617,9 @@ async def test_clarifying_question_round_trip_through_query_database(
 ) -> None:
     """A question-only turn reaches the caller, and the reply continues it.
 
-    A real agent behind the registered tool, with only the model scripted, so
-    the server, stream collapse and conversation store all run for real.
+    A real agent behind the registered tool, with a scripted model, a fake
+    ``run_sql`` tool and stub memory, so the server, stream collapse and
+    conversation store all run for real.
     """
     from sqllens.agent.core.llm import LlmResponse
     from sqllens.tools import query_database as qd
