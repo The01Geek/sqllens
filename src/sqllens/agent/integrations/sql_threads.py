@@ -7,10 +7,13 @@
 request on one event loop. Each runner's ``run_sql`` therefore hands its driver
 work to :func:`run_blocking_sql`, which runs it on a pool reserved for SQL:
 
-- At most :data:`SQL_WORKER_THREADS` queries run at once. Further calls wait in
-  the pool's queue, so a burst of slow queries holds no more than that many
-  threads and database connections. A call that finds no idle thread is logged
-  at debug level.
+- The pool has exactly :data:`SQL_WORKER_THREADS` worker threads, all started
+  on first use, so at most that many queries run at once and a burst of slow
+  queries holds no more than that many threads and database connections.
+  Further calls wait in the pool's queue for as long as it takes; there is no
+  queue timeout. When a call arrives while every worker is busy, a warning
+  with the number of queued calls is logged, at most once every
+  :data:`SATURATION_WARNING_INTERVAL_S` seconds.
 - The pool is separate from the event loop's default executor, which
   ``asyncio.to_thread`` uses elsewhere (for example, profile-store writes), so
   that work never queues behind slow queries.
@@ -25,8 +28,10 @@ work to :func:`run_blocking_sql`, which runs it on a pool reserved for SQL:
 
 Cancelling the awaiting caller drops a call that is still queued. A call that
 has started cannot be interrupted from here: its thread, connection and cursor
-stay in use until the driver returns. If it then raises, the exception type
-(never its message, which can quote the SQL) is logged as a warning.
+stay in use until the driver returns. When it does, a log line records that a
+call outlived its caller: INFO if it succeeded (a write may have been
+committed), WARNING with the exception type if it raised. Neither line carries
+the SQL, the data or the exception message, which can quote the SQL.
 ``statement_timeout_ms`` ends a started call early only for the statements each
 runner applies it to, and 0 disables it; see
 ``docs/internal/mcp-server/transport.md``.
@@ -40,6 +45,7 @@ import functools
 import logging
 import queue
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import Future
 from typing import Any, ParamSpec, TypeVar
@@ -52,67 +58,95 @@ logger = logging.getLogger(__name__)
 SQL_WORKER_THREADS = 8
 """Most SQL driver calls that run at once, across all runners in the process."""
 
+SATURATION_WARNING_INTERVAL_S = 60.0
+"""Shortest gap between two "all SQL workers are busy" warnings."""
+
 
 class _DaemonThreadPool:
-    """A fixed-size thread pool whose workers are daemon threads.
-
-    Workers start on demand, up to ``max_workers``, and then wait for more work
-    for the life of the process.
-    """
+    """A fixed set of daemon worker threads taking calls from one queue."""
 
     def __init__(self, max_workers: int, name: str) -> None:
+        if max_workers < 1:
+            raise ValueError(f"max_workers must be >= 1 (got {max_workers})")
         self._max_workers = max_workers
         self._name = name
         self._work: queue.SimpleQueue[tuple[Future[Any], Callable[[], Any]]] = (
             queue.SimpleQueue()
         )
-        self._idle = threading.Semaphore(0)
         self._lock = threading.Lock()
-        self._workers = 0
+        self._threads: list[threading.Thread] = []
+        self._busy = 0
+        self._last_saturation_warning: float | None = None
 
     def submit(self, call: Callable[[], T]) -> Future[T]:
+        # Workers are started before the call is queued, so a failed start
+        # raises to the caller and leaves nothing behind in the queue.
+        if len(self._threads) < self._max_workers:
+            self._start_workers()
         future: Future[T] = Future()
-        self._work.put((future, call))
-        if self._idle.acquire(blocking=False):
-            return future
         with self._lock:
-            if self._workers < self._max_workers:
-                threading.Thread(
-                    target=self._run, name=f"{self._name}_{self._workers}", daemon=True
-                ).start()
-                self._workers += 1
-                return future
-        logger.debug(
-            "All %d SQL worker threads are busy; the query waits for one.",
-            self._max_workers,
-        )
+            saturated = self._busy >= self._max_workers
+        self._work.put((future, call))
+        if saturated:
+            self._warn_saturated()
         return future
+
+    def _start_workers(self) -> None:
+        with self._lock:
+            while len(self._threads) < self._max_workers:
+                thread = threading.Thread(
+                    target=self._run,
+                    name=f"{self._name}_{len(self._threads)}",
+                    daemon=True,
+                )
+                thread.start()
+                self._threads.append(thread)
+
+    def _warn_saturated(self) -> None:
+        now = time.monotonic()
+        with self._lock:
+            last = self._last_saturation_warning
+            if last is not None and now - last < SATURATION_WARNING_INTERVAL_S:
+                return
+            self._last_saturation_warning = now
+        logger.warning(
+            "All %d SQL worker threads are busy; queued calls: %d.",
+            self._max_workers,
+            self._work.qsize(),
+        )
 
     def _run(self) -> None:
         while True:
+            future, call = self._work.get()
             try:
-                future, call = self._work.get_nowait()
-            except queue.Empty:
-                self._idle.release()
-                future, call = self._work.get()
-            if future.set_running_or_notify_cancel():
-                try:
-                    result = call()
-                except BaseException as exc:
-                    future.set_exception(exc)
-                else:
-                    future.set_result(result)
-            del future, call
+                # False when the caller cancelled the call while it was queued.
+                if future.set_running_or_notify_cancel():
+                    with self._lock:
+                        self._busy += 1
+                    try:
+                        future.set_result(call())
+                    except BaseException as exc:
+                        future.set_exception(exc)
+                    finally:
+                        with self._lock:
+                            self._busy -= 1
+            except BaseException:
+                # Never let one call end the worker; the pool size is fixed.
+                logger.exception("A SQL worker thread failed to hand back a result.")
+            finally:
+                del future, call
 
 
 _POOL = _DaemonThreadPool(SQL_WORKER_THREADS, "sqllens-sql")
 
 
-def _log_failure_after_cancel(future: Future[Any]) -> None:
+def _log_call_after_cancel(future: Future[Any]) -> None:
     if future.cancelled():
         return
     exc = future.exception()
-    if exc is not None:
+    if exc is None:
+        logger.info("A SQL query finished after its caller was cancelled.")
+    else:
         logger.warning(
             "A SQL query failed after its caller was cancelled: %s", type(exc).__name__
         )
@@ -125,5 +159,5 @@ async def run_blocking_sql(func: Callable[P, T], /, *args: P.args, **kwargs: P.k
     try:
         return await asyncio.wrap_future(future)
     except asyncio.CancelledError:
-        future.add_done_callback(_log_failure_after_cancel)
+        future.add_done_callback(_log_call_after_cancel)
         raise

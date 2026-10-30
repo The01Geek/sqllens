@@ -120,11 +120,17 @@ async def test_postgres_runner_does_not_block_event_loop(
 # carrying request-local settings into the worker thread.
 # --------------------------------------------------------------------------
 
+POOL_LOGGER = "sqllens.agent.integrations.sql_threads"
+
+
+def _pool_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.name == POOL_LOGGER]
+
 
 async def _fill_pool(
     release: threading.Event,
 ) -> tuple[list[asyncio.Future[None]], dict[str, int]]:
-    """Occupy every SQL worker thread until ``release`` is set."""
+    """Occupy every SQL worker thread until ``release`` is set, then queue three more."""
     from sqllens.agent.integrations.sql_threads import SQL_WORKER_THREADS, run_blocking_sql
 
     lock = threading.Lock()
@@ -141,31 +147,76 @@ async def _fill_pool(
                 counts["running"] -= 1
 
     holders = [
-        asyncio.ensure_future(run_blocking_sql(hold)) for _ in range(SQL_WORKER_THREADS + 3)
+        asyncio.ensure_future(run_blocking_sql(hold)) for _ in range(SQL_WORKER_THREADS)
     ]
     deadline = time.monotonic() + 5
     while counts["running"] < SQL_WORKER_THREADS:
-        assert time.monotonic() < deadline, "the SQL workers never filled"
+        assert time.monotonic() < deadline, (
+            f"only {counts['running']} of {SQL_WORKER_THREADS} SQL calls ever ran at once"
+        )
         await asyncio.sleep(TICK_S)
+    holders += [asyncio.ensure_future(run_blocking_sql(hold)) for _ in range(3)]
     return holders, counts
 
 
 async def test_sql_pool_runs_at_most_its_worker_count_at_once(
-    caplog: pytest.LogCaptureFixture,
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from sqllens.agent.integrations.sql_threads import SQL_WORKER_THREADS
+    from sqllens.agent.integrations import sql_threads
 
-    caplog.set_level(logging.DEBUG, logger="sqllens.agent.integrations.sql_threads")
+    monkeypatch.setattr(sql_threads._POOL, "_last_saturation_warning", None)
+    caplog.set_level(logging.INFO, logger=POOL_LOGGER)
     release = threading.Event()
     holders, counts = await _fill_pool(release)
     try:
         # Give the three extra calls time to start if the pool let them.
         await asyncio.sleep(0.2)
-        assert counts["peak"] == SQL_WORKER_THREADS
+        assert counts["peak"] == sql_threads.SQL_WORKER_THREADS
     finally:
         release.set()
         await asyncio.gather(*holders)
-    assert any("waits for one" in r.getMessage() for r in caplog.records)
+    # Three calls arrived while every worker was busy; the warning is rate-limited.
+    [warning] = _pool_records(caplog)
+    assert warning.levelno == logging.WARNING
+    assert warning.getMessage() == (
+        f"All {sql_threads.SQL_WORKER_THREADS} SQL worker threads are busy; queued calls: 1."
+    )
+
+
+def test_sql_pool_rejects_a_size_below_one() -> None:
+    from sqllens.agent.integrations.sql_threads import _DaemonThreadPool
+
+    with pytest.raises(ValueError, match="max_workers must be >= 1"):
+        _DaemonThreadPool(0, "test")
+
+
+class _Abort(BaseException):
+    """A BaseException that is not an Exception, which a worker must also survive."""
+
+
+async def test_sql_pool_workers_survive_failing_calls() -> None:
+    from sqllens.agent.integrations.sql_threads import SQL_WORKER_THREADS, run_blocking_sql
+
+    # The barrier makes every worker run one failing call at the same time.
+    barrier = threading.Barrier(SQL_WORKER_THREADS, timeout=5)
+
+    def fail() -> None:
+        barrier.wait()
+        raise _Abort
+
+    results = await asyncio.wait_for(
+        asyncio.gather(
+            *(run_blocking_sql(fail) for _ in range(SQL_WORKER_THREADS)),
+            return_exceptions=True,
+        ),
+        5,
+    )
+    assert all(isinstance(r, _Abort) for r in results)
+    # The pool still runs a full set of calls at once.
+    release = threading.Event()
+    holders, _ = await _fill_pool(release)
+    release.set()
+    await asyncio.gather(*holders)
 
 
 async def test_sql_pool_drops_a_queued_call_when_its_caller_is_cancelled() -> None:
@@ -186,22 +237,35 @@ async def test_sql_pool_drops_a_queued_call_when_its_caller_is_cancelled() -> No
     assert ran == []
 
 
-
-async def test_sql_pool_lets_a_started_call_finish_and_logs_its_failure(
-    caplog: pytest.LogCaptureFixture,
+@pytest.mark.parametrize(
+    ("fails", "level", "message"),
+    [
+        (False, logging.INFO, "A SQL query finished after its caller was cancelled."),
+        (
+            True,
+            logging.WARNING,
+            "A SQL query failed after its caller was cancelled: RuntimeError",
+        ),
+    ],
+)
+async def test_sql_pool_lets_a_started_call_finish_and_logs_it(
+    caplog: pytest.LogCaptureFixture, fails: bool, level: int, message: str
 ) -> None:
-    """A started call outlives its cancelled caller; its error type is logged, not its text."""
+    """A started call outlives its cancelled caller and leaves a log line without its SQL."""
     from sqllens.agent.integrations.sql_threads import run_blocking_sql
 
+    caplog.set_level(logging.INFO, logger=POOL_LOGGER)
     started = threading.Event()
     release = threading.Event()
     finished = threading.Event()
 
-    def query() -> None:
+    def query() -> str:
         started.set()
         try:
             assert release.wait(5), "the test never released the query"
-            raise RuntimeError("SELECT secret FROM t")
+            if fails:
+                raise RuntimeError("SELECT secret FROM t")
+            return "secret row"
         finally:
             finished.set()
 
@@ -215,13 +279,11 @@ async def test_sql_pool_lets_a_started_call_finish_and_logs_its_failure(
     release.set()
     assert await asyncio.to_thread(finished.wait, 5)
     deadline = time.monotonic() + 5
-    while not caplog.records:
-        assert time.monotonic() < deadline, "the failure was never logged"
+    while not _pool_records(caplog):
+        assert time.monotonic() < deadline, "the abandoned call was never logged"
         await asyncio.sleep(TICK_S)
-    [record] = caplog.records
-    assert record.levelno == logging.WARNING
-    assert record.getMessage().endswith(": RuntimeError")
-    assert "secret" not in record.getMessage()
+    [record] = _pool_records(caplog)
+    assert (record.levelno, record.getMessage()) == (level, message)
 
 
 def test_a_query_still_running_does_not_hold_up_process_exit() -> None:
