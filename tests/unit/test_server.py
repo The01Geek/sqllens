@@ -591,7 +591,7 @@ async def test_query_database_error_result_carries_no_model_info(
     assert "sqllens/model_info" not in result.meta
 
 
-# ───────────────────── clarifying questions (issue #298) ────────────────────
+# ─────────────────────────── clarifying questions ───────────────────────────
 
 
 async def test_query_database_description_tells_caller_to_relay_clarifying_question(

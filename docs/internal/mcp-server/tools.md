@@ -161,7 +161,7 @@ The agent's own clarifying question does not take this path. The rule for when t
 
 | Component type | What `render_interactive` does |
 |---|---|
-| `CHAT_INPUT_UPDATE` | Surface the `placeholder` as a prompt — **unless** it is one of the generic placeholders the agent emits when a turn finishes (`_GENERIC_INPUT_PLACEHOLDERS`: `"ask a question..."`, `"ask a follow-up question..."`, `"continue the task or ask me something else..."`, `"try again..."`, compared case-insensitively). Those carry no content for the user, so they must never render as the answer. |
+| `CHAT_INPUT_UPDATE` | Surface the `placeholder` as a prompt — **unless** it is one of the generic placeholders the agent emits when a turn finishes (`_GENERIC_INPUT_PLACEHOLDERS`: `"ask a question..."`, `"ask a follow-up question..."`, `"continue the task or ask me something else..."`, `"try again..."`, `"try rephrasing or narrowing the question..."`, compared case-insensitively). Those carry no content for the user, so they must never render as the answer. |
 | `BUTTON` / `BUTTON_GROUP` | Collect each button's `label`; rendered as a `Please choose one of the following:` bulleted list. |
 | `ALERT` / `NOTIFICATION` | Surface the message (`message` / `content` / `description`, then a bolded `title:` prefix), reading from a first-party component attribute *or* the generic `RichComponent.data` dict — `ALERT` has no first-party component class in this pruned tree, so an emitted `ALERT` is a bare `RichComponent` whose text lives in `data`. An **error-level** notification is treated as "not an answer" (returns `""`) so the raw, unsanitized driver exception it may carry does not leak as a normal `is_error=False` answer, bypassing the sanitized error taxonomy. |
 

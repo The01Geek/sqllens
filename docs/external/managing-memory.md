@@ -33,13 +33,13 @@ If SQL Lens cannot reach its memory while assembling this context, it quietly pr
 
 ## Settling Ambiguous Questions
 
-When a question can be read more than one way and the readings would count different records, a different period, or a different measure, the assistant is instructed to ask one short clarifying question instead of answering. Memory lets you control which of those choices it asks about.
+When a question can be read more than one way and the readings would count different records, a different period, or a different measure, the assistant is instructed to ask one short clarifying question instead of answering. Memory lets you steer which of those choices it asks about. These are instructions to the assistant, not enforced rules, so it may occasionally ask or answer when it should not.
 
-- **Mark a known ambiguity** with a free-form note that states, as a fact, that a term has more than one meaning. For example: "Revenue has two meanings here: gross revenue includes shipping and tax, net revenue excludes them." A question about revenue that the note reaches then gets a clarifying question unless something settles which meaning is meant: the question itself, an earlier turn of the conversation, or one of the two kinds of memory below.
+- **Mark a known ambiguity** with a free-form note that states, as a fact, that a term has more than one meaning. For example: "Revenue has two meanings here: gross revenue includes shipping and tax, net revenue excludes them." A question about revenue that the note reaches is then meant to get a clarifying question unless something settles which meaning is meant: the question itself, an earlier turn of the conversation, or one of the two kinds of memory below.
 - **Stop the question with a note** that names the meaning to use. For example: "When someone asks about revenue, use net revenue: exclude shipping and tax."
-- **Stop the question with a saved question-and-answer pair** for that question. For example, the question "What was revenue last month?" saved with SQL that sums order totals minus shipping and tax. When the assistant's memory search finds the pair, it uses the reading that the pair's SQL uses.
+- **Stop the question with a saved question-and-answer pair** for that question. For example, the question "What was revenue last month?" saved with SQL that sums order totals minus shipping and tax. When the assistant's memory search finds the pair, it is instructed to use the reading that the pair's SQL uses.
 
-A note reaches the assistant only on a turn whose message the automatic background context retrieves it for (see [Near-Match Background Context](#near-match-background-context)). A note that does not match the current message closely enough neither marks nor settles the choice on that turn. The assistant's memory search uses its own wording of the question, so it can miss a saved pair that would have settled the choice, and then it asks.
+A note reaches the assistant only on a turn whose message the automatic background context retrieves it for (see [Near-Match Background Context](#near-match-background-context)). A note that does not match the current message closely enough neither marks nor settles the choice on that turn. The assistant's memory search uses its own wording of the question, so it can miss a saved pair that would have settled the choice and ask anyway.
 
 ## The Bundle File Format
 

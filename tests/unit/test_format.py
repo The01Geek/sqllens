@@ -1258,6 +1258,7 @@ def test_error_level_notification_not_surfaced_as_answer() -> None:
         "Ask a follow-up question...",
         "Continue the task or ask me something else...",
         "Try again...",
+        "Try rephrasing or narrowing the question...",
     ],
 )
 def test_generic_finalization_placeholder_not_surfaced(placeholder: str) -> None:

@@ -285,7 +285,7 @@ def _ambiguity_section(prompt: str) -> str:
 
 @pytest.mark.parametrize("tool_names", [(), _ALL_TOOLS], ids=["no-tools", "all-tools"])
 async def test_ambiguous_questions_section_always_present(tool_names: tuple[str, ...]) -> None:
-    """Issue #298: the clarifying-question rule is always on and names no tool."""
+    """The clarifying-question rule is always on and names no tool."""
     tools = [_ToolSchemaStub(name) for name in tool_names]
     prompt = await DefaultSystemPromptBuilder().build_system_prompt(User(id="t"), tools=tools)
     section = _ambiguity_section(prompt)

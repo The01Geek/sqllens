@@ -127,6 +127,7 @@ _GENERIC_INPUT_PLACEHOLDERS = frozenset(
         "ask a follow-up question...",
         "continue the task or ask me something else...",
         "try again...",
+        "try rephrasing or narrowing the question...",
     }
 )
 
