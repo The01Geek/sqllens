@@ -310,7 +310,6 @@ async def test_sql_pool_drops_a_call_cancelled_in_the_tick_its_slot_is_granted()
         queued.cancel()
         await asyncio.wait({queued}, timeout=1)
         assert queued.cancelled()
-        # The granted slot passed on rather than being lost with the call.
         assert not slot.locked()
     finally:
         release.set()

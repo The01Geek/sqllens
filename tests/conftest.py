@@ -18,7 +18,8 @@ Four responsibilities:
    async generator of ``UiComponent``; tests that exercise the MCP tool layer
    (``query_database`` etc.) need to drive it without standing up a real LLM
    or DB. The factory builds an async-generator callable with the same shape
-   as ``Agent.send_message`` for several canned scenarios.
+   as ``Agent.send_message`` for several canned scenarios; its companion
+   ``default_stub_rows`` exposes the default scenario's rows.
 
 3. ``collect_ignore`` keeps ``tests/connectors/`` (live Postgres/MySQL tests)
    out of a default run. Naming the directory on the command line still runs
