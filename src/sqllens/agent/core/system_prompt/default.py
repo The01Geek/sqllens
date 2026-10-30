@@ -178,8 +178,11 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
                     if has_save
                     else "",
                     "",
-                    "Do NOT skip the search step, even if you think you know how to answer. Do NOT forget to save successful executions."
+                    "Do NOT skip the search step, even if you think you know how to answer."
                     if has_search
+                    else "",
+                    "Do NOT forget to save successful executions."
+                    if has_save
                     else "",
                     "",
                     "The only exceptions to searching first are:",

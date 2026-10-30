@@ -1085,6 +1085,7 @@ async def test_with_widgets_raises_agent_run_error_with_trace_on_failure(
     assert trace["terminal_error"] == "tool 'run_sql' failed: timeout after 240s"
     assert trace["steps"][0]["status"] == "error"
     assert trace["steps"][0]["error"] == "timeout after 240s"
+    assert excinfo.value.query_info["sql"] == "SELECT * FROM orders"
 
 
 @pytest.mark.asyncio
@@ -1104,3 +1105,30 @@ async def test_with_widgets_failure_without_show_details_has_no_trace(
     with pytest.raises(AgentRunError) as excinfo:
         await query_database_impl_with_widgets(cfg, "q")
     assert excinfo.value.agent_trace is None
+    assert excinfo.value.query_info is None
+
+
+@pytest.mark.asyncio
+async def test_with_widgets_injected_agent_bypasses_singleton(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+) -> None:
+    """An explicit ``agent=`` is used as-is: the process-wide singleton is
+    neither built nor consulted (verify-memory relies on this to run with its
+    dedicated agent instead of a cached one that may carry save tools)."""
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    injected = agent_stub_factory([make_text_component("from injected")])
+
+    def _must_not_build(_c: Config):
+        raise AssertionError("singleton build_agent must not be called")
+
+    monkeypatch.setattr(agent_module, "build_agent", _must_not_build)
+
+    markdown, _, _, _, _ = await query_database_impl_with_widgets(
+        cfg, "q", agent=injected
+    )
+
+    assert "from injected" in markdown
+    assert len(injected.send_message_calls) == 1
+    assert agent_module._AGENT_STATE is None

@@ -19,7 +19,7 @@ The question is the embedded text; the tool name and args ride along as Chroma m
 
 The on-demand search tool accepts `limit` values from 1 to 100 (default 10); an explicit null retains the default fallback. These bounds apply to its validated tool arguments.
 
-**Per-memory hit tracking.** When `ChromaAgentMemory.search_similar_usage` ([src/sqllens/agent/integrations/chromadb/agent_memory.py](../../../src/sqllens/agent/integrations/chromadb/agent_memory.py)) returns a memory that cleared the similarity threshold, it counts as *retrieved* this turn: the row's `hit_count` metadata is incremented and its `last_hit_date` is set to `datetime.now().isoformat()` (naive-local). The bumps for every hit in a turn are collected and written in a single `collection.update()` after the result loop. This is **best-effort telemetry** — a failure to persist the bumped counts logs at `WARNING` and is swallowed (the matched memories were still found and returned, so the user's query is not failed). These counters let the admin curation tools (`get_memory_stats`, `list_memories`) distinguish high-value pairs from dead weight; they are absent (`hit_count` defaults to `0`) on a never-retrieved memory.
+**Per-memory hit tracking.** With `track_usage=True` (the default), when `ChromaAgentMemory.search_similar_usage` ([src/sqllens/agent/integrations/chromadb/agent_memory.py](../../../src/sqllens/agent/integrations/chromadb/agent_memory.py)) returns a memory that cleared the similarity threshold, it counts as *retrieved* this turn: the row's `hit_count` metadata is incremented and its `last_hit_date` is set to `datetime.now().isoformat()` (naive-local). The bumps for every hit in a turn are collected and written in a single `collection.update()` after the result loop. This is **best-effort telemetry** — a failure to persist the bumped counts logs at `WARNING` and is swallowed (the matched memories were still found and returned, so the user's query is not failed). These counters let the admin curation tools (`get_memory_stats`, `list_memories`) distinguish high-value pairs from dead weight; they are absent (`hit_count` defaults to `0`) on a never-retrieved memory.
 
 `SaveQuestionToolArgsTool` is registered **only when `cfg.memory.save_queries` is true** (it defaults to `false`). When the flag is off the tool is never wired into the agent, so the agent cannot write tool-use memory — reading existing tool-use memory via `SearchSavedCorrectToolUsesTool` is unaffected.
 
@@ -50,7 +50,7 @@ When the floor is unset, or is not below the effective strict bar, the tier is o
 
 **Reference-data boundary.** Text memories and SQL examples are encoded as JSON records inside a `sqllens_memory_data` block, preceded by instructions to treat them as untrusted reference data. Angle brackets, ampersands, newlines and control characters in values are escaped so stored text cannot close the outer delimiter. Text, prior questions and SQL are capped at 4,000, 1,000 and 8,000 characters respectively, including a visible truncation marker. The entire appended section is capped at 32,768 characters. Records that would exceed the remaining encoded budget are omitted with a notice; escaping can make a record larger than its source text.
 
-This framing reduces ambiguity and bounds prompt growth; it cannot guarantee that a model will resist prompt injection. Give memory write access only to trusted curators, and review imported knowledge. Stored content, search thresholds and the current text-memory save default are unchanged. The separate text-save configuration proposal in #267 is not implemented here.
+This framing reduces ambiguity and bounds prompt growth; it cannot guarantee that a model will resist prompt injection. Give memory write access only to trusted curators, and review imported knowledge.
 
 **Hit counting.** `search_similar_usage` bumps `hit_count` / `last_hit_date` for every row it returns (see *Per-memory hit tracking*). With the tier on, each request therefore counts up to 5 pairs as retrieved, and a pair that the search tool also returns in the same request is counted twice.
 
@@ -81,10 +81,10 @@ context_enhancer = DefaultLlmContextEnhancer(
 
 This explicit wiring matters: if `llm_context_enhancer` is left unset, `Agent` falls back to a `DefaultLlmContextEnhancer` built with only `agent_memory`, which cannot see either configured threshold and therefore leaves the text-search floor at the enhancer's own `0.7` default and the context tier permanently off. See [System-prompt context injection](#system-prompt-context-injection) above.
 
-The memory tools are then registered alongside `RunSqlTool` inside `build_agent` ([factory.py](../../../src/sqllens/agent/factory.py)). Each save tool is gated on its own flag — the structured-save tool on `cfg.memory.save_queries`, the text-memory tool on `cfg.memory.save_text_memories` — and the search tool is always registered:
+The memory tools are then registered alongside `RunSqlTool` inside `build_agent` ([factory.py](../../../src/sqllens/agent/factory.py)). Each save tool requires its own config flag and `allow_memory_writes=True`; the search tool is always registered:
 
 ```python
-if cfg.memory.save_queries:
+if cfg.memory.save_queries and allow_memory_writes:
     tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
 tools.register_local_tool(
     SearchSavedCorrectToolUsesTool(
@@ -92,14 +92,14 @@ tools.register_local_tool(
     ),
     access_groups=access,
 )
-if cfg.memory.save_text_memories:
+if cfg.memory.save_text_memories and allow_memory_writes:
     tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
 ```
 
 Three things to note about this wiring:
 
 - `cfg.memory.similarity_threshold` is threaded into `SearchSavedCorrectToolUsesTool` as a constructor argument. The LLM can still override it per call via the tool's `similarity_threshold` parameter, but when the LLM omits it the operator-facing config knob takes effect. (Before this wiring landed, the configured value was dead — the runtime fallback was a hardcoded `0.7` inside the tool's `execute()`. See issue #76.)
-- `SaveQuestionToolArgsTool` is registered only when `cfg.memory.save_queries` is true. The default system prompt switches its save bullet (`you MUST call save_question_tool_args …`) and the example workflow's save step on `has_save = "save_question_tool_args" in tool_names` (in [src/sqllens/agent/core/system_prompt/default.py](../../../src/sqllens/agent/core/system_prompt/default.py)), so leaving the flag off drops the tool and those lines together. One save instruction does survive: the sentence `Do NOT forget to save successful executions.` is emitted under `if has_search`, not `has_save`, and the search tool is registered unconditionally — so it prints even with both save flags off. Reading saved memory is unaffected either way.
+- `SaveQuestionToolArgsTool` is registered only when `cfg.memory.save_queries` is true. The default system prompt switches its save guidance on `has_save = "save_question_tool_args" in tool_names` (in [src/sqllens/agent/core/system_prompt/default.py](../../../src/sqllens/agent/core/system_prompt/default.py)), so leaving the flag off drops the tool and its save guidance together. Reading saved memory is unaffected.
 - `SaveTextMemoryTool` is registered only when `cfg.memory.save_text_memories` is true, and the default system prompt's text-memory branch (`has_text_memory` check in [src/sqllens/agent/core/system_prompt/default.py](../../../src/sqllens/agent/core/system_prompt/default.py)) follows it. With the flag off the LLM never sees the tool, so the agent writes no free-form notes; curated notes still arrive through `sqllens import-memory` and the memory-administration tools, which call `ChromaAgentMemory.save_text_memory` directly rather than through this tool. Do not move the gate into the tool's `execute()` or into `ChromaAgentMemory.save_text_memory`: those paths are shared with curated imports ([src/sqllens/memory/store.py](../../../src/sqllens/memory/store.py)), so a gate there would drop curated notes too.
 
 The memory itself is handed to the `Agent` constructor as `agent_memory=memory` so the framework can reference it from internal code paths.
@@ -114,7 +114,7 @@ These live under `[memory]` in `sqllens.toml` (or `SQLLENS_MEMORY__*` env vars).
 | `collection` | `sqllens` | `SQLLENS_MEMORY__COLLECTION` | Logical collection name inside the persisted store. Letting two processes share a `persist_dir` with different collections is supported but rarely useful. |
 | `similarity_threshold` | `0.7` | `SQLLENS_MEMORY__SIMILARITY_THRESHOLD` | Cosine similarity floor in `[0.0, 1.0]`. Hits below this are dropped. Used as the *server-configured default* for the on-demand tool-use search: the LLM may override it per call via the `similarity_threshold` parameter on `search_saved_correct_tool_uses`, including the legitimate value `0.0` (return everything) which is preserved exactly — not coerced. It is also the strict hit bar for [system-prompt context injection](#system-prompt-context-injection). |
 | `context_similarity_threshold` | unset (`None`) | `SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD` | Opt-in floor in `[0.0, 1.0]` used **only** by [system-prompt context injection](#system-prompt-context-injection). When set below the effective `similarity_threshold`, text memories and saved question → SQL pairs scoring at or above it are eligible for bounded reference context. Unset keeps the tier off, whatever `similarity_threshold` is. |
-| `save_queries` | `false` | `SQLLENS_MEMORY__SAVE_QUERIES` | Registers `SaveQuestionToolArgsTool` so the agent can persist successful question → SQL pairs into tool-use memory. Off by default; when off the tool is not registered and the system prompt drops its save bullet and the example workflow's save step (the `Do NOT forget to save successful executions.` sentence rides `has_search` and still prints). Reading saved memory is unaffected. |
+| `save_queries` | `false` | `SQLLENS_MEMORY__SAVE_QUERIES` | Registers `SaveQuestionToolArgsTool` so the agent can persist successful question → SQL pairs into tool-use memory. Off by default; when off the tool is not registered and the system prompt drops its save guidance. Reading saved memory is unaffected. |
 | `save_text_memories` | `false` | `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` | Registers `SaveTextMemoryTool` so the agent can persist free-form notes into text memory. Off by default (issue #267). When off the tool is not registered and the prompt's `2. TEXT MEMORY` section is not printed. A blank value (an empty or whitespace-only env var or TOML string) reads as `false`; any other non-boolean still fails config load. Notes already stored, curated imports included, are untouched and still injected by the context enhancer. |
 | `allow_import` | `false` | `SQLLENS_MEMORY__ALLOW_IMPORT` | Registers the single `import_memory` MCP tool. Off by default — a remote writer can poison future SQL generation. Calls require bearer authentication or an explicit closed-network `auth.insecure=true` opt-in. The CLI import/export commands are unaffected. |
 | `allow_admin_tools` | `false` | `SQLLENS_MEMORY__ALLOW_ADMIN_TOOLS` | Registers the seven memory-administration MCP tools (`list_memories`, `get_memory`, `delete_memory`, `clear_memories`, `add_memories`, `export_memories`, `get_memory_stats`) for curating the training set. Off by default — they enumerate and mutate the store. The destructive subset (`delete_memory` / `clear_memories` / `add_memories`) additionally refuses to run on an unauthenticated endpoint (`auth.mode='none'`) unless `auth.insecure` acknowledges a closed network. See [Memory-administration tools](#memory-administration-tools-opt-in-default-off) below. |
@@ -193,7 +193,7 @@ Enforcing as a Pydantic `Field` constraint would propagate the cap to *every* co
 
 ### CSV-injection defang (CWE-1236, issue #186)
 
-CSV cells whose first character is one of `{=, +, -, @, \t, \r}` are interpreted as formulas by Excel and LibreOffice when the file is opened — a planted bundle could execute attacker-supplied formulas in an operator's spreadsheet after a round-trip through `sqllens export-memory`. `_defang_csv_cell(value)` in [src/sqllens/memory/io.py](../../../src/sqllens/memory/io.py) prefixes such cells with a single apostrophe (`'`) at **both** the parse boundary (`parse_csv` defangs each cell *before* constructing the `SqlPair`) and the serialize boundary (`serialize_csv` defangs each cell on the way out, so a value that reaches a store unprefixed — e.g. a value imported via JSON, or rows the agent itself learned — is still defanged on export).
+CSV cells whose first character is one of `{=, +, -, @, \t, \r}` are interpreted as formulas by Excel and LibreOffice when the file is opened — a planted bundle could execute attacker-supplied formulas in an operator's spreadsheet after a round-trip through `sqllens export-memory`. `_defang_csv_cell(value)` in [src/sqllens/memory/io.py](../../../src/sqllens/memory/io.py) prefixes such cells with a single apostrophe (`'`) at **both** the parse boundary (`parse_csv` defaults to defanging each cell *before* constructing the `SqlPair`; golden verification opts out to preserve reference values) and the serialize boundary (`serialize_csv` defangs each cell on the way out, so a value that reaches a store unprefixed — e.g. a value imported via JSON, or rows the agent itself learned — is still defanged on export).
 
 Three deliberate properties:
 
@@ -217,14 +217,64 @@ The defang trigger set (`_CSV_FORMULA_TRIGGERS`) is a module-level `frozenset` s
 
 ### CLI commands
 
-Two Typer commands in [src/sqllens/cli.py](../../../src/sqllens/cli.py):
+Three Typer commands in [src/sqllens/cli.py](../../../src/sqllens/cli.py):
 
 ```bash
 sqllens import-memory PATH [--format json|csv] [--clear] [--dry-run] [--batch-size N] [-c CONFIG]
 sqllens export-memory PATH [--format json|csv] [-c CONFIG]
+sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]
 ```
 
 `import-memory` exit codes: `2` for a config-load error (consistent with `serve`/`validate`), `1` for a bad `--format`, an unreadable file, an invalid bundle, a store/import failure, or any per-item import error in the report. `--clear` prompts for confirmation (`typer.confirm(..., abort=True)`) unless combined with `--dry-run`. If a `--clear` import fails *after* the store was constructed, the error message states the collection may now be empty/partial (the wipe already ran). Store/import errors carry the standard "embedding model downloads on first use (~80 MB); check persist_dir" hint. **The CLI commands work regardless of `allow_import`** — that flag only gates the MCP tool.
+
+### Verifying an import (`verify-memory`)
+
+`import-memory` writes curated pairs straight into the live retrieval path with no safety net — the same memory the agent recalls at query time. `verify-memory` is the post-import regression guard: it runs a curated **golden set** (operator-authored question → expected-SQL pairs) through the live agent and reports, per case, whether the agent still produces the expected SQL.
+
+```bash
+sqllens import-memory new-bundle.json
+sqllens verify-memory golden.json
+#  per-case table + summary: PASS 7 | CHANGED 2 | ERROR 1
+#  non-zero exit on any non-PASS case
+```
+
+Implementation lives outside the vendored agent tree in [src/sqllens/eval/](../../../src/sqllens/eval/):
+
+| Module | Responsibility |
+|---|---|
+| `eval/golden.py` | Loads the golden file with the existing bundle parsers, retaining byte/item caps, JSON recursion protection, and schema validation. CSV uses `parse_csv(..., defang=False)` to preserve the question and expected SQL. |
+| `eval/compare.py` | Normalizes SQL using the configured dialect. `compare_sql` returns PASS/CHANGED or raises a side-specific parse diagnostic; `compare` returns ERROR for either parse failure. |
+| `eval/runner.py` | Resolves the persisted `default` profile into a cloned config, forces details on and query saving off, and builds a dedicated agent with `allow_memory_writes=False`. Missing SQL produces an ERROR diagnostic. Tests can inject `driver=`. An async `comparator=` accepts expected/actual SQL and can capture a database connection for row comparison without rewriting the runner. |
+
+**Memory content and retrieval metadata stay unchanged.** The verifier disables saving and retrieval usage updates through these controls:
+
+- `build_agent(..., allow_memory_writes=False)` ([src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py)) skips registering both `save_question_tool_args` and `save_text_memory`, whatever `cfg.memory` says. The default system prompt switches its save guidance on tool presence, so that guidance drops out too. Any config gate on a save tool must be ANDed with this flag.
+- The factory sets `ChromaAgentMemory(track_usage=False)`, suppressing retrieval hit-counter and timestamp updates from both search tools and context injection.
+- The cloned config forces `memory.save_queries=False` and `memory.save_text_memories=False`, so the config itself agrees with the agent.
+- The verify agent is never the process-wide cached agent from `tools/_agent.py`. That singleton is keyed on whichever `Config` built it first and may carry both save tools. The runner neither reads nor populates it.
+
+The verifier uses the persisted `default` profile's similarity threshold and limits, capped by the configured row and iteration limits. It overrides `show_details` to retain executed SQL without changing the caller's config or the stored profile. It does not select named profiles.
+
+**Cost.** Each golden case is a full live agent run with no shared conversation. That means typically several billed LLM requests (roughly one per agent-loop iteration; `agent.max_tool_iterations` caps the loop), plus the SQL the agent executes against the configured database through the same guarded runner stack `build_agent` gives `serve`. The first case also pays the lazy ChromaDB open and embedding-model load, because the verify agent is not warmed the way `serve` warms the singleton.
+
+**Status semantics** (and what each one means for the operator):
+
+- **PASS** — the normalised generated SQL `==` the normalised expected SQL.
+- **CHANGED** — both sides parsed cleanly but the normalised forms differ. This is a review signal, not proof of a wrong answer: different JOIN order or `IN` versus `EXISTS` can describe equivalent results.
+- **ERROR** — either side failed to parse, the agent path raised, or the agent answered without SQL. Every `CaseResult` with this status requires a diagnostic. SQL parse failures identify the expected or actual side; missing SQL has its own message. Driver and comparator exceptions are reported as `<ExceptionType>: <message>`.
+
+**Structured-signal contract** (CLAUDE.md "never silent success"). The CLI's `_exit_for_report` explicitly refuses to exit 0 in four vacuous-success traps:
+
+- **Empty golden file** — `{}` or an empty `sql_pairs.pairs` list exits 1 with `golden file is empty (no sql_pairs). There is nothing to verify.` `_exit_for_report` re-asserts the same `report.total == 0` guard so a future caller that bypassed the upstream check still fails closed rather than letting `all([])` vacuously succeed.
+- **Any non-PASS case** — without `--fail-under`, any CHANGED or ERROR row exits 1.
+- **All-non-PASS run, regardless of threshold** — when `report.passed == 0`, the run exits 1 **even with `--fail-under 0`**, which would otherwise score `0% >= 0%` as a green result on a fully-broken agent. This guard sits *before* the percentage compare so an explicitly-permissive threshold cannot mask a fully-failed verification.
+- **Below-threshold PASS rate** — with `--fail-under PCT` and at least one PASS, exits 1 when `passed / total * 100 < PCT`.
+
+**Dialect.** Normalisation uses `cfg.database.dialect`, translating SQLAlchemy schemes through `_SQLGLOT_DIALECT_MAP` (`postgresql → postgres`, `mssql → tsql`, `mariadb → mysql`). Other names pass through. `normalize=True` normalizes unquoted identifiers; quoting remains significant to string comparison.
+
+**Parse-error scope.** `compare_sql` catches `sqlglot.errors.SqlglotError`, including grammar and tokenization errors, and raises `SqlComparisonError` identifying the failing side. Unknown-dialect errors propagate unchanged. The runner captures either as a per-case diagnostic; the status-only `compare` wrapper maps `SqlComparisonError` to ERROR.
+
+**Determinism caveat.** LLM output is non-deterministic. CHANGED on a re-run does not necessarily indicate a real regression — a flaky cell may have re-rolled. Operators expecting noise should use `--fail-under` (e.g. `--fail-under 90` to pass if ≥90% of cases PASS).
 
 ### The `import_memory` MCP tool (opt-in, default OFF)
 

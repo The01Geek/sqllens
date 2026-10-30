@@ -1035,7 +1035,7 @@ def test_query_info_row_count_attributed_to_last_run_sql_when_empty() -> None:
     }
 
 
-def test_query_info_none_on_error_path() -> None:
+def test_query_info_retains_sql_on_error_path() -> None:
     card = StatusCardComponent(
         title="Executing run_sql",
         status="running",
@@ -1051,7 +1051,7 @@ def test_query_info_none_on_error_path() -> None:
         [running, completed]
     )
     assert is_error is True
-    assert query_info is None
+    assert query_info == {"sql": "DELETE FROM users", "query_type": "DELETE"}
     assert blocks == []
     assert "DELETE FROM users" not in markdown
     assert markdown == "Tool failed: refusing to execute non-SELECT SQL"

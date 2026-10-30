@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from sqllens.agent.core.system_prompt.default import DefaultSystemPromptBuilder
 from sqllens.agent.core.user.models import User
 
@@ -86,6 +88,20 @@ async def test_internal_schema_introspection_is_allowed() -> None:
 class _ToolSchemaStub:
     def __init__(self, name: str) -> None:
         self.name = name
+
+
+@pytest.mark.parametrize("save_enabled", [False, True])
+async def test_save_guidance_requires_save_tool(save_enabled: bool) -> None:
+    tools = [_ToolSchemaStub("search_saved_correct_tool_uses"), _ToolSchemaStub("run_sql")]
+    if save_enabled:
+        tools.extend([
+            _ToolSchemaStub("save_question_tool_args"), _ToolSchemaStub("save_text_memory"),
+        ])
+    prompt = await DefaultSystemPromptBuilder().build_system_prompt(User(id="test"), tools=tools)
+    assert "Do NOT skip the search step" in prompt
+    assert ("save successful executions" in prompt) is save_enabled
+    assert ("save_question_tool_args" in prompt) is save_enabled
+    assert ("save_text_memory" in prompt) is save_enabled
 
 
 async def test_tool_error_directive_present_with_memory_tools() -> None:

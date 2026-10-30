@@ -468,7 +468,10 @@ def components_to_blocks(
                     last_memory = memory_search
 
     if error_message:
-        return error_message, True, [], None, None
+        query_info = (
+            _query_info_from_sql(last_sql, last_sql_row_count) if last_sql is not None else None
+        )
+        return error_message, True, [], query_info, None
 
     # Resolve text-block inclusion: prefer the explicit answer-marker (set by
     # EmitTextTool and the agent's terminal answer); if the stream carries no
