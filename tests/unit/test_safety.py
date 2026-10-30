@@ -847,6 +847,11 @@ class TestIsIntrospectionQueryPerDialect:
             ("-- columns\nSHOW COLUMNS FROM widgets", "mysql"),
             ("/* look up tables */ SHOW TABLES", "postgres"),
             ("/* look up tables */ SHOW TABLES", "sqlite"),
+            ("# tables\n/* again */ SHOW TABLES", "mysql"),
+            # A comment-led SHOW that sqlglot cannot tokenize is still caught
+            # before the parse rather than failing open.
+            ("/* c */ SHOW 'abc", "mysql"),
+            ("-- c\nSHOW 'abc", "postgres"),
         ],
     )
     def test_own_engine_catalogs_detected(self, sql: str, dialect: str) -> None:

@@ -22,6 +22,7 @@ from sqlglot.dialects.mysql import MySQL
 
 logger = logging.getLogger("sqllens.safety.readonly")
 
+
 class UnsafeSqlError(Exception):
     """Raised when SQL fails the read-only check."""
 
@@ -104,13 +105,28 @@ def _catalog_names(dialect: str | None) -> tuple[frozenset[str], tuple[str, ...]
     return _SHARED_CATALOG_SCHEMAS | schemas, prefixes
 
 
+def _strip_leading_comments(sql: str) -> str:
+    """Drop leading whitespace and ``--``, ``#`` and ``/* */`` comments."""
+    rest = sql.lstrip()
+    while True:
+        if rest.startswith(("--", "#")):
+            _line, _newline, rest = rest.partition("\n")
+        elif rest.startswith("/*"):
+            end = rest.find("*/", 2)
+            if end == -1:
+                return ""
+            rest = rest[end + 2 :]
+        else:
+            return rest
+        rest = rest.lstrip()
+
+
 def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     """Return True if ``sql`` is a schema-introspection read, not a data query.
 
     Schema introspection = a statement whose first keyword is ``SHOW`` (leading
     comments aside), or a statement that references any catalog table, even
-    alongside data tables.
-    The catalogs are
+    alongside data tables. The catalogs are
     ``information_schema`` for every dialect, plus the engine's own: the
     ``pg_catalog`` schema and ``pg_`` name prefix for ``postgres``; the
     ``mysql``, ``sys`` and ``performance_schema`` schemas for ``mysql``; the
@@ -127,12 +143,12 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     does not parse under ``dialect`` (a parse error or an empty parse) is
     treated as a data query, so its result is shown.
     """
-    if first_sql_keyword(sql) == "SHOW":
+    if first_sql_keyword(_strip_leading_comments(sql)) == "SHOW":
         return True
     try:
         parsed = sqlglot.parse_one(sql, dialect=dialect)
     except Exception as exc:
-        logger.debug(
+        logger.info(
             "is_introspection_query: SQL did not parse under dialect %r (%s); "
             "classifying it as a data query",
             dialect,
@@ -140,13 +156,12 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
         )
         return False
     if parsed is None:
+        logger.info(
+            "is_introspection_query: SQL parsed to nothing under dialect %r; "
+            "classifying it as a data query",
+            dialect,
+        )
         return False
-    # A SHOW behind a leading comment slips past the first-keyword check; the
-    # parse root still identifies it (exp.Show, or a SHOW Command fallback).
-    if isinstance(parsed, exp.Show) or (
-        isinstance(parsed, exp.Command) and parsed.name.upper() == "SHOW"
-    ):
-        return True
     schemas, prefixes = _catalog_names(dialect)
     for table in parsed.find_all(exp.Table):
         schema = (table.db or "").lower()

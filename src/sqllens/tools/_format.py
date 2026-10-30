@@ -424,7 +424,10 @@ def components_to_blocks(
             metadata = getattr(rich, "metadata", None)
             sql = metadata.get("sql") if isinstance(metadata, dict) else None
             is_run_sql = isinstance(sql, str) and bool(sql.strip())
-            if is_run_sql and sql != last_sql:
+            # One comparison drives both the classification cache and the
+            # row-count reset below, so they stay in step with ``last_sql``.
+            sql_changed = is_run_sql and sql != last_sql
+            if sql_changed:
                 last_sql_is_introspection = is_introspection_query(sql, dialect=dialect)
             if status == "error":
                 error_message = (
@@ -475,7 +478,7 @@ def components_to_blocks(
                 #      keeps the iter-1 regression
                 #      ``test_query_info_row_count_attributed_to_last_run_sql
                 #      _when_empty`` honest against emission drift.
-                if status == "running" or sql != last_sql:
+                if status == "running" or sql_changed:
                     last_sql_row_count = None
                 last_sql = sql
             if isinstance(metadata, dict):
