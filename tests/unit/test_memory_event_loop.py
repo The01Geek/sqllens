@@ -46,7 +46,14 @@ HOLD_LIMIT_S = 15.0
 
 _DSID = "ds-test-uuid"
 
-_SYNC_STORE_METHODS = ("iter_all", "iter_records", "get_all", "get_one", "delete_ids", "clear")
+_SYNC_STORE_METHODS = tuple(
+    name
+    for name, attr in vars(MemoryStore).items()
+    if not name.startswith("_")
+    and inspect.isfunction(attr)
+    and not inspect.iscoroutinefunction(attr)
+)
+"""Every public synchronous ``MemoryStore`` method, so a new one is checked too."""
 
 _SEED_PAIR = {"question": "how many users?", "sql": "SELECT count(*) FROM users"}
 
@@ -305,9 +312,48 @@ async def test_loop_side_memory_work_stays_on_the_event_loop(
 
     assert len(threads["validate"]) == 1
     assert len(threads["parse"]) == 1
-    # One add + one import item, each normalized on the loop; the store baseline
-    # normalizes the stored rows on the worker.
     assert len(threads["dumps"]) == 7
     for key in ("validate", "parse", "dumps"):
         assert all(t is loop_thread for t in threads[key]), key
+    # The per-item dedup check runs on the loop: the added pair's question and
+    # SQL are normalized separately (2) plus the imported schema doc (1). The
+    # store baseline normalizes the stored rows on the worker.
     assert sum(t is loop_thread for t in threads["dedup"]) == 3
+
+
+def _held_call(started: threading.Event, release: threading.Event, fail: bool) -> str:
+    started.set()
+    release.wait(HOLD_LIMIT_S)
+    if fail:
+        raise RuntimeError("store failure")
+    return "done"
+
+
+@pytest.mark.parametrize(
+    ("fail", "level", "text"),
+    [(False, "INFO", "finished after"), (True, "WARNING", "failed after")],
+)
+async def test_started_call_outcome_is_logged_after_caller_cancel(
+    caplog: pytest.LogCaptureFixture, fail: bool, level: str, text: str
+) -> None:
+    from sqllens.memory.store import run_memory_call
+
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    caplog.set_level("INFO", logger="sqllens.memory")
+    task = asyncio.create_task(run_memory_call(_held_call, started, release, fail))
+    try:
+        assert await asyncio.to_thread(started.wait, HOLD_LIMIT_S)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        release.set()
+    # A call queued behind the cancelled one runs after it, so its done callback
+    # (which logs) has fired once this returns.
+    await run_memory_call(finished.set)
+
+    records = [r for r in caplog.records if "_held_call" in r.getMessage()]
+    assert len(records) == 1
+    assert records[0].levelname == level
+    assert text in records[0].getMessage()
+    assert (records[0].exc_info is not None) is fail
