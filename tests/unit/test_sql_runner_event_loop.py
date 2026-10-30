@@ -6,14 +6,16 @@
 The database drivers (``sqlite3``, PyMySQL, psycopg2) are synchronous. Each
 runner's ``run_sql`` is a coroutine, so calling the driver directly inside it
 would freeze every other request the server handles until the query returned.
-These tests make the driver deliberately slow and count how often a concurrent
-heartbeat task gets to run while ``run_sql`` is in progress.
+The runner tests make the driver deliberately slow and count how often a concurrent
+heartbeat task gets to run while ``run_sql`` is in progress. The tests at the end
+cover the shared SQL worker pool those calls run on.
 """
 
 from __future__ import annotations
 
 import asyncio
 import sqlite3
+import threading
 import time
 from types import SimpleNamespace
 from typing import Any
@@ -108,3 +110,110 @@ async def test_postgres_runner_does_not_block_event_loop(
 
     assert df.to_dict(orient="records") == [{"x": 1}]
     assert ticks >= MIN_TICKS
+
+
+# --------------------------------------------------------------------------
+# The SQL worker pool: bounded, separate from the default executor, and
+# carrying request-local settings into the worker thread.
+# --------------------------------------------------------------------------
+
+
+async def _fill_pool(
+    release: threading.Event,
+) -> tuple[list[asyncio.Future[None]], dict[str, int]]:
+    """Occupy every SQL worker thread until ``release`` is set."""
+    from sqllens.agent.integrations.sql_threads import SQL_WORKER_THREADS, run_blocking_sql
+
+    lock = threading.Lock()
+    counts = {"running": 0, "peak": 0}
+
+    def hold() -> None:
+        with lock:
+            counts["running"] += 1
+            counts["peak"] = max(counts["peak"], counts["running"])
+        try:
+            assert release.wait(5), "the test never released the SQL workers"
+        finally:
+            with lock:
+                counts["running"] -= 1
+
+    holders = [
+        asyncio.ensure_future(run_blocking_sql(hold)) for _ in range(SQL_WORKER_THREADS + 3)
+    ]
+    deadline = time.monotonic() + 5
+    while counts["running"] < SQL_WORKER_THREADS:
+        assert time.monotonic() < deadline, "the SQL workers never filled"
+        await asyncio.sleep(TICK_S)
+    return holders, counts
+
+
+async def test_sql_pool_runs_at_most_its_worker_count_at_once() -> None:
+    from sqllens.agent.integrations.sql_threads import SQL_WORKER_THREADS
+
+    release = threading.Event()
+    holders, counts = await _fill_pool(release)
+    try:
+        # Give the three extra calls time to start if the pool let them.
+        await asyncio.sleep(0.2)
+        assert counts["peak"] == SQL_WORKER_THREADS
+    finally:
+        release.set()
+        await asyncio.gather(*holders)
+
+
+async def test_sql_pool_drops_a_queued_call_when_its_caller_is_cancelled() -> None:
+    from sqllens.agent.integrations.sql_threads import run_blocking_sql
+
+    release = threading.Event()
+    holders, _ = await _fill_pool(release)
+    ran: list[bool] = []
+    queued = asyncio.ensure_future(run_blocking_sql(ran.append, True))
+    try:
+        await asyncio.sleep(TICK_S)
+        queued.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await queued
+    finally:
+        release.set()
+        await asyncio.gather(*holders)
+    assert ran == []
+
+
+async def test_sql_pool_is_not_the_default_executor() -> None:
+    from sqllens.agent.integrations.sql_threads import run_blocking_sql
+
+    name = await run_blocking_sql(lambda: threading.current_thread().name)
+    assert name.startswith("sqllens-sql")
+
+
+async def test_profile_row_cap_reaches_the_sql_worker_thread(tmp_path: Any) -> None:
+    from sqllens.agent.integrations.sqlite.sql_runner import SqliteRunner
+    from sqllens.runtime import (
+        EffectiveSettings,
+        reset_effective_settings,
+        set_effective_settings,
+    )
+
+    db = tmp_path / "t.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE t (x INTEGER)")
+    conn.executemany("INSERT INTO t VALUES (?)", [(i,) for i in range(20)])
+    conn.commit()
+    conn.close()
+
+    runner = SqliteRunner(str(db), max_rows=100)
+    token = set_effective_settings(
+        EffectiveSettings(
+            show_details=False,
+            max_tool_iterations=20,
+            max_rows=5,
+            similarity_threshold=0.7,
+        )
+    )
+    try:
+        df = await runner.run_sql(RunSqlToolArgs(sql="SELECT x FROM t"), context=MagicMock())
+    finally:
+        reset_effective_settings(token)
+
+    assert len(df) == 5
+    assert df.attrs["truncated"] is True

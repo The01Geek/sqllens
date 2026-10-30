@@ -1,6 +1,5 @@
 """SQLite implementation of SqlRunner interface."""
 
-import asyncio
 import sqlite3
 import time
 from urllib.parse import quote
@@ -9,6 +8,7 @@ import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
+from sqllens.agent.integrations.sql_threads import run_blocking_sql
 # Minimal documented dependency on sqllens.safety so a per-request profile
 # can narrow the streaming row cap without rebuilding the agent. The
 # integration runners (mysql/postgres/sqlite) each call this shared helper
@@ -86,16 +86,12 @@ class SqliteRunner(SqlRunner):
             sqlite3.Error: If query execution fails (the progress-handler deadline
                 raises ``sqlite3.OperationalError('interrupted')``).
         """
-        # The driver calls below block. Run them on a worker thread so a slow
-        # query does not stall the event loop, which also serves health checks
-        # and every other request. The row cap is read here, on the caller's
-        # context, and handed to the thread. If the caller is cancelled, the
-        # thread still runs until the driver returns, which a configured
-        # statement timeout bounds.
-        cap = effective_row_cap(self._max_rows)
-        return await asyncio.to_thread(self._run_sql_blocking, args.sql, cap)
+        # The driver calls below block, so they run on the SQL worker pool and
+        # the event loop stays free for health checks and other requests. See
+        # ``sql_threads`` for its concurrency limit and cancellation behaviour.
+        return await run_blocking_sql(self._run_sql_blocking, args.sql)
 
-    def _run_sql_blocking(self, sql: str, cap: int) -> pd.DataFrame:
+    def _run_sql_blocking(self, sql: str) -> pd.DataFrame:
         """Execute ``sql`` synchronously; called on a worker thread by ``run_sql``."""
         if self._read_only and self.database_path != ":memory:":
             conn = sqlite3.connect(_readonly_uri(self.database_path), uri=True)
@@ -131,6 +127,7 @@ class SqliteRunner(SqlRunner):
             cursor.execute(sql)
 
             if is_read_shaped(sql):
+                cap = effective_row_cap(self._max_rows)
                 rows = cursor.fetchmany(cap + 1)
                 return rows_to_capped_df(rows, cap)
 

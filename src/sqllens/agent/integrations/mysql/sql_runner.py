@@ -1,12 +1,12 @@
 """MySQL implementation of SqlRunner interface."""
 
-import asyncio
 import logging
 from typing import Optional
 import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
+from sqllens.agent.integrations.sql_threads import run_blocking_sql
 # See the sqlite runner for the rationale on this shared helper.
 from sqllens.safety.limits import effective_row_cap, rows_to_capped_df
 from sqllens.safety.readonly import is_read_shaped
@@ -85,16 +85,12 @@ class MySQLRunner(SqlRunner):
         Raises:
             pymysql.Error: If query execution fails (including MAX_EXECUTION_TIME firing).
         """
-        # The driver calls below block. Run them on a worker thread so a slow
-        # query does not stall the event loop, which also serves health checks
-        # and every other request. The row cap is read here, on the caller's
-        # context, and handed to the thread. If the caller is cancelled, the
-        # thread still runs until the driver returns, which a configured
-        # statement timeout bounds.
-        cap = effective_row_cap(self._max_rows)
-        return await asyncio.to_thread(self._run_sql_blocking, args.sql, cap)
+        # The driver calls below block, so they run on the SQL worker pool and
+        # the event loop stays free for health checks and other requests. See
+        # ``sql_threads`` for its concurrency limit and cancellation behaviour.
+        return await run_blocking_sql(self._run_sql_blocking, args.sql)
 
-    def _run_sql_blocking(self, sql: str, cap: int) -> pd.DataFrame:
+    def _run_sql_blocking(self, sql: str) -> pd.DataFrame:
         """Execute ``sql`` synchronously; called on a worker thread by ``run_sql``."""
         conn = self.pymysql.connect(
             host=self.host,
@@ -137,6 +133,7 @@ class MySQLRunner(SqlRunner):
                 # ``finally: conn.close()`` tears the socket down server-side.
                 cursor = conn.cursor(self.pymysql.cursors.SSDictCursor)
                 cursor.execute(sql)
+                cap = effective_row_cap(self._max_rows)
                 rows = cursor.fetchmany(cap + 1)
                 return rows_to_capped_df(rows, cap)
 
