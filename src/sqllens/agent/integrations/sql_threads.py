@@ -15,8 +15,16 @@ work to :func:`run_blocking_sql`, which runs it on a ``ThreadPoolExecutor`` of
 - A call that finds every slot taken logs a warning (at most once every
   :data:`SATURATION_WARNING_INTERVAL_S` seconds) and waits. If no slot frees
   within :data:`WORKER_WAIT_TIMEOUT_S` seconds, it fails with
-  :class:`SqlWorkersBusyError` and never runs. The limit covers only that wait,
-  never the query's own run time. A caller cancelled while waiting never runs.
+  :class:`SqlWorkersBusyError` and never runs, and each such rejection logs its
+  own warning, which that interval does not limit. The limit covers only that
+  wait, never the query's own run time. A caller cancelled while waiting never
+  runs.
+- The slot limit, the wait limit and the saturation warning assume every SQL
+  call runs on one event loop at a time, as the server does. Calls from a
+  second loop running at the same time get their own slots, so together the
+  loops can admit more calls than the executor has threads; the extra calls
+  wait in the shared executor's queue, where neither the wait limit nor the
+  warning applies.
 - The pool is separate from the event loop's default executor, which
   ``asyncio.to_thread`` uses elsewhere (for example, profile-store writes), so
   that work never queues behind slow queries.
@@ -107,8 +115,10 @@ def _warn_saturated() -> None:
 def _release_slot(loop: asyncio.AbstractEventLoop, slot: asyncio.Semaphore) -> None:
     try:
         loop.call_soon_threadsafe(slot.release)
-    except RuntimeError:
-        pass  # The loop is closed; its semaphore goes with it.
+    except RuntimeError as exc:
+        if loop.is_closed():
+            return  # Its semaphore goes with it.
+        logger.error("A SQL worker slot could not be returned: %s", type(exc).__name__)
 
 
 def _log_call_after_cancel(future: Future[Any]) -> None:
@@ -136,9 +146,16 @@ async def run_blocking_sql(func: Callable[P, T], /, *args: P.args, **kwargs: P.k
         slot = _slots[loop] = asyncio.Semaphore(SQL_WORKER_THREADS)
     if slot.locked():
         _warn_saturated()
+        # Not asyncio.wait_for: on 3.11 it returns a slot granted in the same
+        # tick as a cancellation, so a cancelled call would run anyway.
         try:
-            await asyncio.wait_for(slot.acquire(), WORKER_WAIT_TIMEOUT_S)
+            async with asyncio.timeout(WORKER_WAIT_TIMEOUT_S):
+                await slot.acquire()
         except TimeoutError:
+            logger.warning(
+                "A SQL query was rejected: no SQL worker slot freed within %g s.",
+                WORKER_WAIT_TIMEOUT_S,
+            )
             raise SqlWorkersBusyError() from None
     else:
         await slot.acquire()

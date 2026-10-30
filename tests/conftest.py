@@ -3,7 +3,7 @@
 
 """Shared fixtures for all SQL Lens tests (unit + integration).
 
-Three responsibilities:
+Four responsibilities:
 
 1. Autouse env scrub. Runners can export unprefixed names (``MODE=``, ``HOST=``,
    ``PORT=``, ...) — pydantic-settings sub-models in ``sqllens.config`` lack
@@ -23,11 +23,15 @@ Three responsibilities:
 3. ``collect_ignore`` keeps ``tests/connectors/`` (live Postgres/MySQL tests)
    out of a default run. Naming the directory on the command line still runs
    it: ``pytest -q tests/connectors``.
+
+4. Autouse agent-singleton reset. ``_reset_query_database_singleton`` sets the
+   process-wide ``sqllens.tools._agent._AGENT_STATE`` to ``None`` entering and
+   leaving each test, so test ordering can't mask isolation bugs.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Iterator
 from typing import Any
 
 import pytest
@@ -36,6 +40,7 @@ from sqllens.agent.components.rich.data.dataframe import DataFrameComponent
 from sqllens.agent.components.rich.feedback.status_card import StatusCardComponent
 from sqllens.agent.components.rich.text import RichTextComponent
 from sqllens.agent.core.components import UiComponent
+from sqllens.tools import _agent as agent_module
 
 collect_ignore = ["connectors"]
 
@@ -83,6 +88,23 @@ def _scrub_leaky_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Strip env vars that could leak into pydantic-settings or the Anthropic SDK."""
     for key in _LEAKY_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _reset_query_database_singleton() -> Iterator[None]:
+    """Guarantee the agent singleton state is reset entering each test.
+
+    The module-level singleton lives in ``sqllens.tools._agent`` (used by
+    ``query_database`` and the transport-layer warmup) and is process-wide. Without
+    this fixture, a test that builds the agent leaks state into the next: an
+    integration server's startup fills an empty singleton, so a later test would
+    reuse an agent built for an earlier test's config. ``_AGENT_STATE`` is a
+    single ``(agent, cfg)`` tuple, so one reset clears both the agent and the
+    config that built it — they cannot drift apart.
+    """
+    agent_module._AGENT_STATE = None
+    yield
+    agent_module._AGENT_STATE = None
 
 
 # ---------------------------------------------------------------------------
