@@ -250,6 +250,8 @@ def _text_is_answer_marked(rich) -> bool:  # type: ignore[no-untyped-def]
 
 def components_to_blocks(
     components: Iterable[UiComponent],
+    *,
+    dialect: str | None = None,
 ) -> tuple[str, bool, list[dict], dict | None, dict | None]:
     """Collapse a stream into ``(markdown, is_error, blocks, query_info, memory_info)``.
 
@@ -257,13 +259,19 @@ def components_to_blocks(
     and the narrower :func:`components_to_markdown` view. One ordered pass over
     the stream:
 
-    - Every ``DATAFRAME`` becomes a ``{"type": "table", ...table payload...}``
-      block at its stream position — except a result whose table payload holds
+    - Every ``DATAFRAME`` other than an introspection result (below) becomes a
+      ``{"type": "table", ...table payload...}`` block at its stream position
+      — except a result whose table payload holds
       exactly one row, at most :data:`_SMALL_RESULT_MAX_COLUMNS` columns and
       nothing truncated, which becomes a ``{"type": "text", "text": ...}``
       block instead — one ``**column:** value`` line for a single column,
       otherwise a one-row Markdown table
       (:func:`_small_result_to_markdown`).
+    - **Introspection results stay internal.** A ``DATAFRAME`` that follows a
+      ``run_sql`` card whose SQL :func:`~sqllens.safety.is_introspection_query`
+      classifies as introspection under ``dialect`` (the configured database's
+      sqlglot dialect; ``None`` counts every engine's catalogs) adds no block.
+      The agent already received the result through its tool result.
     - Every ``CHART`` becomes a ``{"type": "chart", ...chart payload...}``
       block at its stream position.
     - Every **answer-marked** ``TEXT`` (deliberate prose: ``EmitTextTool``
@@ -283,7 +291,8 @@ def components_to_blocks(
       is the error message.
     - **Later-success-supersedes-earlier-failure.** A later *data* ``run_sql``
       success card (one carrying ``metadata["sql"]`` and not an
-      ``is_introspection_query``) clears an earlier error within the same turn,
+      ``is_introspection_query`` under ``dialect``) clears an earlier error
+      within the same turn,
       so the recovered answer reaches the caller.
     - **Last-wins for executed SQL and memory hit/miss.** ``query_info`` is
       built from the *last* ``run_sql`` STATUS_CARD's ``metadata["sql"]``;
@@ -348,6 +357,9 @@ def components_to_blocks(
     # pins; the over-budget / payload-fail nuance is pinned by
     # ``test_query_info_row_count_recovered_from_raw_rows_on_payload_reject``.
     last_sql_row_count: int | None = None
+    # Whether the latest run_sql card's SQL reads a catalog. Its DataFrame is
+    # for the agent only and adds no block; the row count still counts it.
+    last_sql_is_introspection = False
     # Candidate blocks. Prose text blocks carry a private "_is_answer" tag and
     # one-row results use the private "result_text" type; both are normalized
     # to the public ``text`` shape before emitting — never expose internal
@@ -374,11 +386,20 @@ def components_to_blocks(
         elif ctype == ComponentType.DATAFRAME:
             payload = _build_table_payload(rich)
             if payload is not None:
-                small = _small_result_to_markdown(payload)
-                if small is not None:
-                    candidates.append({"type": "result_text", "text": small})
+                if last_sql_is_introspection:
+                    logger.info(
+                        "withheld a schema-introspection run_sql result (%d rows, "
+                        "dialect %r) from the user-visible blocks; the agent still "
+                        "received it",
+                        payload.get("row_count", 0) + payload.get("truncated", 0),
+                        dialect,
+                    )
                 else:
-                    candidates.append({"type": "table", **payload})
+                    small = _small_result_to_markdown(payload)
+                    if small is not None:
+                        candidates.append({"type": "result_text", "text": small})
+                    else:
+                        candidates.append({"type": "table", **payload})
                 # The size-capped payload may have dropped a tail; row_count
                 # is the kept prefix and truncated the dropped tail, so the
                 # sum is the TRUE row count the SQL produced.
@@ -406,15 +427,16 @@ def components_to_blocks(
             metadata = getattr(rich, "metadata", None)
             sql = metadata.get("sql") if isinstance(metadata, dict) else None
             is_run_sql = isinstance(sql, str) and bool(sql.strip())
+            # One comparison drives both the classification cache and the
+            # row-count reset below, so they stay in step with ``last_sql``.
+            sql_changed = is_run_sql and sql != last_sql
+            if sql_changed:
+                last_sql_is_introspection = is_introspection_query(sql, dialect=dialect)
             if status == "error":
                 error_message = (
                     getattr(rich, "description", "") or "Agent reported an error"
                 )
-            elif (
-                status == "success"
-                and is_run_sql
-                and not is_introspection_query(sql)
-            ):
+            elif status == "success" and is_run_sql and not last_sql_is_introspection:
                 # See the docstring's "later-success-supersedes-earlier-failure"
                 # invariant: a successful *data* run_sql clears an earlier error
                 # within the same turn (the agent re-issued a corrected query).
@@ -459,7 +481,7 @@ def components_to_blocks(
                 #      keeps the iter-1 regression
                 #      ``test_query_info_row_count_attributed_to_last_run_sql
                 #      _when_empty`` honest against emission drift.
-                if status == "running" or sql != last_sql:
+                if status == "running" or sql_changed:
                     last_sql_row_count = None
                 last_sql = sql
             if isinstance(metadata, dict):
@@ -572,11 +594,9 @@ def components_to_markdown(
 # the underlying error lives in the server logs, never in ``_meta``.
 _AGENT_ERROR_CARD_TITLE = "Error Processing Message"
 # The agent's per-tool-call lifecycle STATUS_CARD carries the invoked tool name
-# in its title as ``Executing {tool}`` (agent/core/agent/agent.py). These cards
-# are only emitted when ``UI_FEATURE_SHOW_TOOL_ARGUMENTS`` is unlocked — which
-# is exactly what ``agent.show_details`` does for the single static user group —
-# so a trace is only ever assembled for a deployment that already opted into the
-# SQL-leaking debugging surface. The running card (status="running") carries the
+# in its title as ``Executing {tool}`` (agent/core/agent/agent.py). The factory
+# always admits these cards; ``query_database`` builds the trace only when the
+# resolved ``show_details`` is on. The running card (status="running") carries the
 # call ``arguments`` in ``metadata``; the completed card shares the same
 # component ``id`` (``set_status`` copies it) and flips ``status`` to
 # "success"/"error", with a ``Tool failed: ...`` description on failure.

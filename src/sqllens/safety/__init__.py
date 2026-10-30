@@ -44,6 +44,7 @@ from sqllens.safety.readonly import (
     first_sql_keyword,
     is_introspection_query,
     is_read_shaped,
+    sqlglot_dialect_for_url,
 )
 from sqllens.safety.rls import RlsError, apply_rls
 
@@ -67,6 +68,7 @@ __all__ = [
     "is_introspection_query",
     "is_read_shaped",
     "mark_truncation",
+    "sqlglot_dialect_for_url",
 ]
 
 

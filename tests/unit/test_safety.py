@@ -811,6 +811,151 @@ class TestIsIntrospectionQuery:
         # introspection, so it does not silently withhold a recovered answer.
         assert is_introspection_query("this is not sql ;;;") is False
 
+
+class TestIsIntrospectionQueryPerDialect:
+    """Engine-specific catalogs count only on their own engine (issue #301)."""
+
+    @pytest.mark.parametrize(
+        ("sql", "dialect"),
+        [
+            ("SELECT tablename FROM pg_catalog.pg_tables", "postgres"),
+            ("SELECT relname FROM pg_class", "postgres"),
+            ("SELECT name FROM mysql.user", "mysql"),
+            ("SELECT * FROM sys.schema_table_statistics", "mysql"),
+            ("SELECT * FROM performance_schema.threads", "mysql"),
+            (
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = DATABASE()",
+                "mysql",
+            ),
+            ("SELECT name FROM sqlite_master", "sqlite"),
+            ("SELECT name FROM pragma_table_info('widgets')", "sqlite"),
+            ("SELECT name FROM PRAGMA_Index_List('widgets')", "sqlite"),
+            ("SELECT name FROM pragma_table_list", "sqlite"),
+            ("SELECT * FROM pragma_widgets", "sqlite"),
+            (
+                "SELECT w.id FROM widgets w JOIN pragma_table_info('widgets') p "
+                "ON p.name = 'id'",
+                "sqlite",
+            ),
+            ("SELECT * FROM information_schema.tables", "postgres"),
+            ("SELECT * FROM information_schema.tables", "mysql"),
+            ("SELECT * FROM information_schema.tables", "sqlite"),
+            ("SHOW TABLES", "postgres"),
+            ("SHOW TABLES", "sqlite"),
+            ("/* look up tables */ SHOW TABLES", "mysql"),
+            ("-- columns\nSHOW COLUMNS FROM widgets", "mysql"),
+            ("/* look up tables */ SHOW TABLES", "postgres"),
+            ("/* look up tables */ SHOW TABLES", "sqlite"),
+            # A comment-led SHOW that sqlglot cannot tokenize is still caught
+            # before the parse rather than failing open.
+            ("# tables\n/* again */ SHOW 'abc", "mysql"),
+            ("/* c */ SHOW 'abc", "mysql"),
+            ("-- c\nSHOW 'abc", "postgres"),
+            # An inline comment right after SHOW is caught by the parse root.
+            ("SHOW/**/TABLES", "mysql"),
+            ("SHOW/* c */ COLUMNS FROM widgets", "mysql"),
+            ("/* a /* b */ c */ SHOW TABLES", "postgres"),
+        ],
+    )
+    def test_own_engine_catalogs_detected(self, sql: str, dialect: str) -> None:
+        assert is_introspection_query(sql, dialect=dialect) is True
+
+    @pytest.mark.parametrize(
+        ("sql", "dialect"),
+        [
+            ("SELECT amount FROM pg_payments", "mysql"),
+            ("SELECT amount FROM pg_payments", "sqlite"),
+            ("SELECT id FROM sys.accounts", "postgres"),
+            ("SELECT id FROM mysql.accounts", "postgres"),
+            ("SELECT id FROM performance_schema.runs", "sqlite"),
+            ("SELECT id FROM sqlite_events", "postgres"),
+            ("SELECT name FROM pragma_widgets", "mysql"),
+            ("SELECT id FROM widgets", "sqlite"),
+        ],
+    )
+    def test_other_engine_catalogs_are_data(self, sql: str, dialect: str) -> None:
+        assert is_introspection_query(sql, dialect=dialect) is False
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT relname FROM pg_catalog.pg_class",
+            "SELECT * FROM pg_attribute",
+            "SELECT id FROM sys.accounts",
+            "SELECT name FROM mysql.user",
+            "SELECT * FROM performance_schema.threads",
+            "SELECT name FROM sqlite_master",
+        ],
+    )
+    def test_no_dialect_counts_every_engine(self, sql: str) -> None:
+        # Control: these catalogs already count without a dialect before #301.
+        assert is_introspection_query(sql) is True
+
+    def test_unexpected_parser_error_propagates(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Only sqlglot parse/tokenize errors fail open; any other parser
+        # exception propagates instead of guessing a classification.
+        import sqllens.safety.readonly as readonly_mod
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RecursionError("too deep")
+
+        monkeypatch.setattr(readonly_mod.sqlglot, "parse_one", boom)
+        with pytest.raises(RecursionError):
+            is_introspection_query("SELECT id FROM widgets", dialect="mysql")
+
+    @pytest.mark.parametrize("dialect", ["postgresql", "no-such-dialect"])
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT * FROM pg_class",
+            "SELECT name FROM sqlite_master",
+            "SELECT name FROM pragma_table_info('widgets')",
+            "SELECT name FROM mysql.user",
+        ],
+    )
+    def test_unknown_sqlglot_dialect_counts_every_engine(
+        self, sql: str, dialect: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level("WARNING", logger="sqllens.safety.readonly"):
+            assert is_introspection_query(sql, dialect=dialect) is True
+        assert "unknown sqlglot dialect" in caplog.text
+
+    def test_unknown_sqlglot_dialect_data_query_is_data(self) -> None:
+        assert is_introspection_query("SELECT id FROM widgets", dialect="postgresql") is False
+
+    def test_hash_is_not_a_comment_outside_mysql(self) -> None:
+        # "#" opens a line comment only in MySQL; on Postgres this is not a SHOW.
+        assert is_introspection_query("#x\nSHOW 'abc", dialect="postgres") is False
+
+    @pytest.mark.parametrize(
+        "sql",
+        ["SELECT name FROM pragma_table_info('widgets')", "SELECT name FROM pragma_table_list"],
+    )
+    def test_no_dialect_counts_pragma_functions(self, sql: str) -> None:
+        assert is_introspection_query(sql) is True
+
+
+class TestSqlglotDialectForUrl:
+    @pytest.mark.parametrize(
+        ("url", "expected"),
+        [
+            ("sqlite:///demo.db", "sqlite"),
+            ("postgresql+psycopg://u:p@h/db", "postgres"),
+            ("postgres://u:p@h/db", "postgres"),
+            ("mysql+pymysql://u:p@h/db", "mysql"),
+            ("MySQL://u:p@h/db", "mysql"),
+            ("mssql://u:p@h/db", None),
+        ],
+    )
+    def test_maps_url_scheme(self, url: str, expected: str | None) -> None:
+        from sqllens.safety.readonly import sqlglot_dialect_for_url
+
+        assert sqlglot_dialect_for_url(url) == expected
+
+
 class TestResolvedDialectBoundaries:
     @pytest.mark.parametrize("dialect", [
         "mysql ",

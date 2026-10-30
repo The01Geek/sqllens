@@ -29,7 +29,7 @@ from sqllens.runtime import (
     reset_effective_settings,
     set_effective_settings,
 )
-from sqllens.safety import RlsError, UnsafeSqlError
+from sqllens.safety import RlsError, UnsafeSqlError, sqlglot_dialect_for_url
 from sqllens.tools._agent import get_agent, prime_agent
 from sqllens.tools._format import build_agent_trace, components_to_blocks
 
@@ -180,7 +180,9 @@ async def query_database_impl_with_widgets(
     placeholders) and the ordered ``blocks`` array — one typed block per
     DataFrame, chart, or answer-marked TEXT in stream order (a one-row
     DataFrame of at most four columns that fits the size budget becomes a
-    text block rather than a table block). The blocks array
+    text block rather than a table block). A DataFrame from a schema-
+    introspection query, classified under the configured database's sqlglot
+    dialect, adds no block: only the agent sees it. The blocks array
     is the single structured-data channel: apps-aware hosts render each block
     in order, and ``server.py`` attaches it to ``_meta["sqllens/blocks"]``.
 
@@ -285,9 +287,16 @@ async def query_database_impl_with_widgets(
             raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
 
         total_duration_ms = int((time.monotonic() - started) * 1000)
-        answer, is_error, blocks, query_info, memory_info = components_to_blocks(
-            components
-        )
+        try:
+            answer, is_error, blocks, query_info, memory_info = components_to_blocks(
+                components, dialect=sqlglot_dialect_for_url(cfg.database.url)
+            )
+        except Exception as e:
+            # A formatter failure (e.g. an unexpected sqlglot exception from the
+            # introspection classifier) must not decide what the user sees by
+            # guessing; surface it as the sanitized internal error.
+            logger.exception("formatting the agent's response failed")
+            raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
         # The build-time UiFeatures gate now always admits the tool-args card,
         # so the run_sql STATUS_CARD is always present in the component stream
         # — meaning ``query_info`` is always populated when SQL ran. The

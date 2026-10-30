@@ -1808,3 +1808,169 @@ def test_small_result_multi_column_table_uses_humanized_labels() -> None:
     _, _, blocks, _qi, _mi = components_to_blocks([_ui(df)])
     assert blocks[0]["type"] == "text"
     assert blocks[0]["text"].splitlines()[0] == "| Customer ID | Order Date |"
+
+
+# ---------------------------------------------------------------------------
+# Schema-introspection results stay internal (issue #301)
+# ---------------------------------------------------------------------------
+
+_CATALOG_COLUMNS_SQL = (
+    "SELECT table_name, column_name, data_type FROM information_schema.columns"
+)
+_MYSQL_CATALOG_SQL = (
+    "SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE()"
+)
+
+
+def _sql_call(sql: str, *, ok: bool = True) -> list[UiComponent]:
+    # The agent streams a running card, then a success/error card, both with
+    # the same SQL; the DataFrame (if any) follows the pair.
+    return [_sql_card(sql, status="running"), _sql_card(sql, status="success" if ok else "error")]
+
+
+def _catalog_df() -> UiComponent:
+    rows = [
+        {"table_name": "widgets", "column_name": f"col_{i}", "data_type": "int"}
+        for i in range(5)
+    ]
+    return _ui(DataFrameComponent(rows=rows, columns=["table_name", "column_name", "data_type"]))
+
+
+def test_introspection_dataframe_adds_no_table_block() -> None:
+    stream = [*_sql_call(_CATALOG_COLUMNS_SQL), _catalog_df()]
+    markdown, is_error, blocks, _qi, _mi = components_to_blocks(stream)
+    assert is_error is False
+    assert blocks == []
+    assert "col_0" not in markdown
+    assert markdown == "(no answer)"
+
+
+def test_introspection_one_row_result_adds_no_text_block() -> None:
+    stream = [
+        *_sql_call("SELECT sql FROM sqlite_master WHERE name = 'widgets'"),
+        _one_row({"sql": "CREATE TABLE widgets (id INTEGER)"}),
+        _answer_text("Widgets has an id column."),
+    ]
+    markdown, _is_error, blocks, _qi, _mi = components_to_blocks(stream, dialect="sqlite")
+    assert blocks == [{"type": "text", "text": "Widgets has an id column."}]
+    assert "CREATE TABLE" not in markdown
+
+
+def test_introspection_then_data_query_keeps_only_data_and_answer_in_order() -> None:
+    stream = [
+        *_sql_call(_CATALOG_COLUMNS_SQL),
+        _catalog_df(),
+        *_sql_call("SELECT id, label FROM widgets"),
+        _ui(
+            DataFrameComponent(
+                rows=[{"id": 1, "label": "a"}, {"id": 2, "label": "b"}],
+                columns=["id", "label"],
+            )
+        ),
+        _answer_text("There are 2 widgets."),
+    ]
+    markdown, is_error, blocks, query_info, _mi = components_to_blocks(stream, dialect="mysql")
+    assert is_error is False
+    assert [b["type"] for b in blocks] == ["table", "text"]
+    assert blocks[0]["columns"] == ["id", "label"]
+    assert blocks[1] == {"type": "text", "text": "There are 2 widgets."}
+    assert "col_0" not in markdown
+    assert query_info is not None and query_info["row_count"] == 2
+
+
+def test_mysql_database_function_catalog_query_hidden_with_dialect() -> None:
+    stream = [*_sql_call(_MYSQL_CATALOG_SQL), _catalog_df(), _answer_text("Done.")]
+    _markdown, _is_error, blocks, _qi, _mi = components_to_blocks(stream, dialect="mysql")
+    assert blocks == [{"type": "text", "text": "Done."}]
+
+
+@pytest.mark.parametrize("with_answer", [True, False])
+def test_introspection_only_turn_matches_turn_without_dataframes(with_answer: bool) -> None:
+    tail = [_answer_text("Widgets has five columns.")] if with_answer else []
+    with_df = [*_sql_call(_CATALOG_COLUMNS_SQL), _catalog_df(), *tail]
+    without_df = [*_sql_call(_CATALOG_COLUMNS_SQL), *tail]
+    got = components_to_blocks(with_df, dialect="postgres")
+    want = components_to_blocks(without_df, dialect="postgres")
+    assert got[:3] == want[:3]
+    if not with_answer:
+        assert got[0] == "(no answer)"
+
+
+def test_mysql_database_function_introspection_does_not_clear_error() -> None:
+    stream = [
+        *_sql_call("SELECT order_dt FROM orders", ok=False),
+        *_sql_call(_MYSQL_CATALOG_SQL),
+        _catalog_df(),
+    ]
+    _markdown, is_error, blocks, _qi, _mi = components_to_blocks(stream, dialect="mysql")
+    assert is_error is True
+    assert blocks == []
+
+
+def test_sqlite_pragma_introspection_does_not_clear_error() -> None:
+    stream = [
+        *_sql_call("SELECT order_dt FROM orders", ok=False),
+        *_sql_call("SELECT name FROM pragma_table_info('orders')"),
+    ]
+    _markdown, is_error, _blocks, _qi, _mi = components_to_blocks(stream, dialect="sqlite")
+    assert is_error is True
+
+
+@pytest.mark.parametrize(
+    ("sql", "dialect"),
+    [("SELECT amount FROM pg_payments", "mysql"), ("SELECT amount FROM sys.payments", "postgres")],
+)
+def test_other_engine_catalog_name_data_query_shown_and_clears_error(
+    sql: str, dialect: str
+) -> None:
+    stream = [
+        *_sql_call("SELECT amount FROM payments", ok=False),
+        *_sql_call(sql),
+        _ui(DataFrameComponent(rows=[{"amount": 1}, {"amount": 2}], columns=["amount"])),
+    ]
+    _markdown, is_error, blocks, _qi, _mi = components_to_blocks(stream, dialect=dialect)
+    assert is_error is False
+    assert [b["type"] for b in blocks] == ["table"]
+
+
+@pytest.mark.parametrize("dialect", ["mysql", "postgres", "sqlite"])
+def test_unparseable_sql_result_still_shown_with_dialect(dialect: str) -> None:
+    stream = [*_sql_call("SELECT FROM WHERE ;;;"), _catalog_df()]
+    _md, _err, blocks, _qi, _mi = components_to_blocks(stream, dialect=dialect)
+    assert [b["type"] for b in blocks] == ["table"]
+
+
+def test_chart_after_introspection_card_is_kept() -> None:
+    stream = [
+        *_sql_call(_CATALOG_COLUMNS_SQL),
+        _catalog_df(),
+        make_chart(make_chart_spec([{"x": "a", "y": 1}])),
+        _answer_text("Chart above."),
+    ]
+    _md, is_error, blocks, _qi, _mi = components_to_blocks(stream, dialect="postgres")
+    assert is_error is False
+    assert [b["type"] for b in blocks] == ["chart", "text"]
+
+
+# Controls below pass without a dialect, so they hold on the code before #301.
+
+
+def test_data_only_turn_keeps_table_and_answer() -> None:
+    stream = [
+        *_sql_call("SELECT id FROM widgets"),
+        _ui(DataFrameComponent(rows=[{"id": 1}, {"id": 2}], columns=["id"])),
+        _answer_text("Two widgets."),
+    ]
+    _md, _err, blocks, _qi, _mi = components_to_blocks(stream)
+    assert [b["type"] for b in blocks] == ["table", "text"]
+
+
+def test_dataframe_without_preceding_run_sql_card_is_shown() -> None:
+    _md, _err, blocks, _qi, _mi = components_to_blocks([_catalog_df()])
+    assert [b["type"] for b in blocks] == ["table"]
+
+
+def test_unparseable_sql_result_still_shown() -> None:
+    stream = [*_sql_call("SELECT FROM WHERE ;;;"), _catalog_df()]
+    _md, _err, blocks, _qi, _mi = components_to_blocks(stream)
+    assert [b["type"] for b in blocks] == ["table"]
