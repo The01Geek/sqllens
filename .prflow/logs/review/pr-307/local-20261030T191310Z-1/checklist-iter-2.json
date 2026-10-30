@@ -1,0 +1,777 @@
+[
+  {
+    "id": "VC-1",
+    "category": "absolute_claim",
+    "claim": "The MCP formatter withholds from the user the DataFrame result of every run_sql query the introspection classifier marks as introspection, while a SHOW statement's row-count notification is not withheld.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "it withholds from the user the DataFrame result of every `run_sql` query the [introspection classifier](#schema-introspection-classifier-is_introspection_query) marks as introspection (a `SHOW` statement returns a row-count notification instead of a DataFrame, which is not withheld)",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 55,
+    "verify_against": "components_to_blocks in src/sqllens/tools/_format.py; RunSqlTool in src/sqllens/agent/tools/",
+    "verify_hint": "Trace a turn where the introspection run_sql card is not immediately followed by its DataFrame (e.g. a memory-search card or a second run_sql card interleaved, or the running card arriving after the DataFrame), and a turn with two introspection queries in a row, through the withholding branch in components_to_blocks; also confirm RunSqlTool returns a NotificationComponent rather than a DataFrame for a non-SELECT-leading statement",
+    "claim_signature": "absolute_claim:read-only-safety.md:every-introspection-dataframe-withheld:55",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "absolute_claim",
+    "claim": "A DataFrame that follows a run_sql card whose SQL classifies as introspection adds no block and no Markdown, while the agent still receives the result through its own tool result; query_database calls the formatter with sqlglot_dialect_for_url(cfg.database.url) so both uses of the classifier classify under that dialect.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "a DataFrame that follows a `run_sql` card whose SQL classifies as introspection adds no block and no Markdown, while the agent still receives the result through its own tool result. `query_database` calls the formatter with the configured database's dialect (`sqlglot_dialect_for_url(cfg.database.url)`, see [Dialect handling](#dialect-handling)), so both uses classify under that dialect.",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 63,
+    "verify_against": "components_to_blocks in src/sqllens/tools/_format.py (both the error-supersede and the withholding call sites of is_introspection_query); query_database_impl_with_widgets in src/sqllens/tools/query_database.py",
+    "verify_hint": "Check that both is_introspection_query calls in _format.py pass the same dialect argument, and that the withheld DataFrame cannot reach the Markdown through a fallback path (render_interactive, the unmarked-TEXT fallback, or the result_text small-result path); trace an introspection DataFrame with one row and up to four columns",
+    "claim_signature": "absolute_claim:read-only-safety.md:introspection-adds-no-block-markdown:63",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "dependency_interaction",
+    "claim": "is_introspection_query returns True for a statement whose leading keyword is SHOW after any leading comments, and does so before any parse (so a SHOW statement that does not parse still classifies as introspection).",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A statement whose leading keyword, after any leading comments, is `SHOW`",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 67,
+    "verify_against": "is_introspection_query in src/sqllens/safety/readonly.py",
+    "verify_hint": "Check the SHOW detection in is_introspection_query: how it strips leading `--` line comments and `/* */` block comments and leading whitespace, and that it runs before the sqlglot parse and its fail-open except",
+    "claim_signature": "dependency_interaction:read-only-safety.md:show-after-leading-comments:67",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "data_format_assumption",
+    "claim": "A statement referencing any table whose schema is a catalog of the given dialect counts as introspection even alongside data tables: information_schema for every dialect, pg_catalog only for postgres, and mysql, sys and performance_schema only for mysql.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A statement referencing any table whose schema is a catalog of the given dialect, even alongside data tables: `information_schema` for every dialect, plus `pg_catalog` for `postgres`, and `mysql`, `sys` and `performance_schema` for `mysql`.",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 68,
+    "verify_against": "_CATALOG_SCHEMAS_BY_DIALECT and _catalog_names in src/sqllens/safety/readonly.py",
+    "verify_hint": "Check the per-dialect schema sets in _CATALOG_SCHEMAS_BY_DIALECT and how is_introspection_query reads a table's schema (exp.Table.db) and compares it (casing), including a JOIN of a data table with information_schema.columns and a catalog reference inside a subquery or CTE",
+    "claim_signature": "data_format_assumption:read-only-safety.md:per-dialect-catalog-schemas:68",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "data_format_assumption",
+    "claim": "A statement referencing a table, or a table-valued function called in FROM, whose name begins in any casing with a catalog prefix of the given dialect (pg_ for postgres; sqlite_ and pragma_ for sqlite) counts as introspection, including a SQLite data table named pragma_...",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A statement referencing any table, or table-valued function called in `FROM`, whose **name** begins (in any casing) with a catalog object prefix of the given dialect: `pg_` for `postgres` (`pg_class`), `sqlite_` and `pragma_` for `sqlite` (`sqlite_master`, `pragma_table_info('t')`, `pragma_table_list`).",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 69,
+    "verify_against": "_CATALOG_NAME_PREFIXES_BY_DIALECT and is_introspection_query in src/sqllens/safety/readonly.py; sqlglot's parse tree for table-valued functions",
+    "verify_hint": "Check how is_introspection_query finds a table-valued function in FROM (sqlglot may parse `pragma_table_info('t')` as exp.Table wrapping an exp.Anonymous, or as exp.Anonymous under exp.From) and whether its name match lowercases; trace `SELECT name FROM PRAGMA_TABLE_INFO('w')` and `SELECT * FROM Pg_Class` under dialects sqlite and postgres",
+    "claim_signature": "data_format_assumption:read-only-safety.md:per-dialect-name-prefixes:69",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "api_contract",
+    "claim": "With dialect=None, or a dialect not among postgres/mysql/sqlite, every engine's catalog schemas and name prefixes count; with a listed dialect another engine's catalog names do not (on MySQL, SELECT amount FROM pg_payments is a data query).",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "With `dialect=None`, or a dialect not listed above, every engine's schemas and prefixes count. With a listed dialect, another engine's catalog names do not: on MySQL, `SELECT amount FROM pg_payments` is a data query.",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 71,
+    "verify_against": "_catalog_names (or equivalent lookup) in src/sqllens/safety/readonly.py",
+    "verify_hint": "Check the fallback branch for a dialect key absent from _CATALOG_SCHEMAS_BY_DIALECT (e.g. 'duckdb'): does it return the union of all engines' schemas and prefixes, or does an unknown dialect make sqlglot.parse_one raise first so the classifier fails open to False before the union is consulted",
+    "claim_signature": "api_contract:read-only-safety.md:unlisted-dialect-union:71",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "absolute_claim",
+    "claim": "The classifier returns False on a parse failure or None parse result, except a SHOW-leading statement returns True before any parse; a misclassification never changes what was allowed to run.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "this classifier returns `False` on a parse failure or `None` parse result, except for a `SHOW`-leading statement, which returns `True` before any parse.",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 73,
+    "verify_against": "is_introspection_query in src/sqllens/safety/readonly.py",
+    "verify_hint": "Trace an input that parses to a list with a None element or multiple statements (e.g. `SELECT 1; SELECT * FROM information_schema.tables`) and an input that raises inside the tree walk rather than the parse, and confirm each lands in the documented False/True outcome",
+    "claim_signature": "absolute_claim:read-only-safety.md:fail-open-except-show:73",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "api_contract",
+    "claim": "The read-only-safety doc's runner-composition snippet matches build_agent: dialect = sqlglot_dialect_for_url(cfg.database.url) passed to ReadOnlyGuardRunner.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 164,
+    "verify_against": "build_agent in src/sqllens/agent/factory.py",
+    "verify_hint": "Check the runner-composition block of build_agent in src/sqllens/agent/factory.py for the sqlglot_dialect_for_url call and its use in ReadOnlyGuardRunner",
+    "claim_signature": "api_contract:read-only-safety.md:factory-uses-dialect-mapper:164",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "api_contract",
+    "claim": "sqlglot_dialect_for_url in src/sqllens/safety/readonly.py, exported from sqllens.safety, maps the URL prefixes in the Dialect handling table to sqlite/postgres/mysql/None, including postgresql+psycopg:// to postgres.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 187,
+    "source_line_end": 194,
+    "verify_against": "sqlglot_dialect_for_url in src/sqllens/safety/readonly.py and src/sqllens/safety/__init__.py",
+    "verify_hint": "Check the scheme-splitting logic in sqlglot_dialect_for_url (base scheme before '+') against each table row, including `mysql+pymysql://` and `postgresql+psycopg://`, and the __all__/import in src/sqllens/safety/__init__.py",
+    "claim_signature": "api_contract:read-only-safety.md:dialect-table-mapping:187",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "api_contract",
+    "claim": "Each withheld introspection DataFrame logs at INFO server-side, and the withheld DataFrame adds no block and nothing to the Markdown.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "a DataFrame that follows a `run_sql` card whose SQL `is_introspection_query` classifies as introspection under the configured dialect adds no block and nothing to the Markdown (each withheld result logs `INFO` server-side)",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 102,
+    "verify_against": "the withholding branch of components_to_blocks in src/sqllens/tools/_format.py",
+    "verify_hint": "Check the logger call level (logger.info vs debug/warning) on the branch that skips an introspection DataFrame in components_to_blocks, and that it fires once per withheld DataFrame",
+    "claim_signature": "api_contract:tools.md:withheld-result-logs-info:102",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "api_contract",
+    "claim": "The error-clearing check on a run_sql success card classifies the SQL with is_introspection_query under the configured database's dialect.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 105,
+    "verify_against": "components_to_blocks in src/sqllens/tools/_format.py",
+    "verify_hint": "Check that the is_introspection_query call guarding the error_message clear passes the dialect parameter components_to_blocks received from query_database",
+    "claim_signature": "api_contract:tools.md:supersede-uses-configured-dialect:105",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "absolute_claim",
+    "claim": "The factory always emits the run_sql STATUS_CARD whatever show_details is; its SQL also decides whether the following DataFrame is shown, and query_database drops query_info when the resolved show_details is off.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The factory always emits this card, whatever `show_details` is; its SQL also decides whether the following DataFrame is shown (introspection results are not), and `query_database` drops `query_info` when the resolved `show_details` is off.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 106,
+    "verify_against": "build_agent in src/sqllens/agent/factory.py; the tool-arguments card emission in src/sqllens/agent/core/agent/agent.py; query_database_impl_with_widgets in src/sqllens/tools/query_database.py",
+    "verify_hint": "Trace a request where a caller passes a pre-built agent or a custom UiFeatures (not built by build_agent) and check whether agent.py emits the run_sql card with metadata['sql'] only when can_user_access_feature(UI_FEATURE_SHOW_TOOL_ARGUMENTS) holds",
+    "claim_signature": "absolute_claim:tools.md:factory-always-emits-card:106",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "api_contract",
+    "claim": "render_interactive runs when a turn produces no blocks, where introspection DataFrames do not count as producing a block.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 156,
+    "verify_against": "components_to_blocks and render_interactive in src/sqllens/tools/_format.py",
+    "verify_hint": "Check that the no-blocks fallback condition tests the blocks list after withholding, so a turn whose only output is an introspection DataFrame falls through to render_interactive / '(no answer)'",
+    "claim_signature": "api_contract:tools.md:introspection-only-falls-to-interactive:156",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "api_contract",
+    "claim": "With show_details resolved False per request, components_to_blocks still sees the run_sql card's SQL and uses it to withhold introspection results, and query_database drops query_info and the agent trace, so there is no SQL Markdown block and no _meta['sqllens/query'].",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`agent.show_details = False` (resolved per request): the factory still admits the `run_sql` STATUS_CARD, so `components_to_blocks` always sees its SQL (and uses it to withhold introspection results); `query_database` then drops `query_info` and the agent trace. No SQL Markdown block, no `_meta[\"sqllens/query\"]`.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 244,
+    "verify_against": "query_database_impl_with_widgets in src/sqllens/tools/query_database.py; the query_database tool body in src/sqllens/server.py",
+    "verify_hint": "Check that with show_details off no SQL Markdown rail is appended to the text content (server.py / query_database.py Markdown assembly) and that _meta['sqllens/query'] is only set when query_info is truthy",
+    "claim_signature": "api_contract:tools.md:show-details-off-no-sql-rail:244",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "api_contract",
+    "claim": "A successful query whose only DataFrames are introspection results returns render_interactive output or '(no answer)' with isError false.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 448,
+    "verify_against": "components_to_blocks in src/sqllens/tools/_format.py and the query_database tool body in src/sqllens/server.py",
+    "verify_hint": "Trace a stream of [run_sql running card, run_sql success card with information_schema SQL, DataFrame] through components_to_blocks and check the returned markdown and is_error",
+    "claim_signature": "api_contract:tools.md:introspection-only-no-answer:448",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "data_format_assumption",
+    "claim": "The release note states query_database no longer shows results of catalog reads including SQLite pragma_* functions as table or text blocks while the agent still receives them, and that with dialect-scoped classification a data table starting with another engine's catalog prefix (pg_payments on MySQL) is shown.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Catalog queries are now classified with the\nconfigured database's SQL dialect, so a data table that only starts with\nanother engine's catalog prefix (for example `pg_payments` on MySQL) is shown,",
+    "source_file": "changelog.d/307.fixed.md",
+    "source_line": 4,
+    "source_line_end": 6,
+    "verify_against": "is_introspection_query in src/sqllens/safety/readonly.py and components_to_blocks in src/sqllens/tools/_format.py",
+    "verify_hint": "Check whether the base revision already showed pg_payments results on MySQL (i.e. whether the old union classifier only affected error-clearing, not display), so 'is shown' describes a real behavior change rather than an unchanged one",
+    "claim_signature": "data_format_assumption:307.fixed.md:other-engine-prefix-shown:4",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts that schema introspection is any statement whose first keyword is SHOW, leading comments aside, or any statement that references any catalog table, even alongside data tables.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Schema introspection = a statement whose first keyword is ``SHOW`` (leading\n    comments aside), or a statement that references any catalog table, even\n    alongside data tables.",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 110,
+    "source_line_end": 112,
+    "verify_against": "is_introspection_query body in src/sqllens/safety/readonly.py (first_sql_keyword check, exp.Show / exp.Command root check, parsed.find_all(exp.Table) walk)",
+    "verify_hint": "Trace these inputs through is_introspection_query: a SHOW behind a MySQL '#' line comment under dialect='mysql'; a catalog referenced only inside a WHERE EXISTS subquery or a CTE (e.g. 'WITH c AS (SELECT * FROM information_schema.columns) SELECT * FROM c'); a catalog reached only through a function in the SELECT list rather than a FROM table (e.g. a pg_catalog function call); and a '(SHOW TABLES)' wrapped form",
+    "claim_signature": "absolute_claim:readonly.py:introspection-definition-universal:110",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts that a catalog name prefix matches, in any casing, both a table name and a table-valued function called in FROM, and that with no dialect or an unlisted dialect every engine's catalogs count.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A name prefix\n    matches, in any casing, a table name or a table-valued function called in\n    ``FROM`` (``pragma_table_info('t')``). With no dialect, or one not listed,\n    every engine's catalogs count.",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 117,
+    "source_line_end": 120,
+    "verify_against": "is_introspection_query (table.this / exp.Anonymous name extraction) and _catalog_names in src/sqllens/safety/readonly.py; sqlglot's exp.Table representation of a table-valued function",
+    "verify_hint": "Trace inputs: a schema-qualified call 'SELECT name FROM main.pragma_table_info(\\'t\\')' under sqlite, a quoted mixed-case name '\"Pragma_Table_List\"', a table-valued function in a JOIN or after a comma, and the same call under dialect=None and an unlisted dialect such as 'duckdb' (does sqlglot still wrap it as exp.Table whose this is exp.Anonymous, so .name is the function name)",
+    "claim_signature": "absolute_claim:readonly.py:prefix-matches-any-casing-function:117",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "data_format_assumption",
+    "claim": "In a query_database turn, every DATAFRAME component the formatter sees is a run_sql result, so the last_sql_is_introspection flag (set only by run_sql STATUS_CARDs and never reset by other tools' cards) withholds only run_sql results; a DataFrame from any other tool that streams after an introspection run_sql card would also be withheld.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 386,
+    "source_line_end": 393,
+    "verify_against": "the agent tools that construct DataFrameComponent under src/sqllens/agent/tools/ and the tool registration in src/sqllens/agent/factory.py",
+    "verify_hint": "Find every producer of DataFrameComponent in src/sqllens/agent/ (RunSqlTool and any other registered tool) and check whether a non-run_sql tool can emit a DATAFRAME into the stream after a run_sql introspection card",
+    "claim_signature": "data_format_assumption:_format.py:dataframes-only-from-run-sql:386",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "dependency_interaction",
+    "claim": "The docstring states the agent already received the introspection result through its tool result, i.e. RunSqlTool returns the result to the LLM independently of the DATAFRAME UI component the formatter withholds.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The agent already received the result through its tool result.",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 274,
+    "verify_against": "RunSqlTool in src/sqllens/agent/tools/ (its ToolResult result_for_llm vs ui_component)",
+    "verify_hint": "Check RunSqlTool's execute method: the LLM-facing result (CSV preview / saved-file reference) is built separately from the DataFrameComponent UI component, so dropping the UI block does not affect what the agent receives",
+    "claim_signature": "dependency_interaction:_format.py:agent-receives-tool-result:274",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "api_contract",
+    "claim": "The comment states the factory always admits the 'Executing {tool}' status cards and query_database builds the agent trace only when the resolved show_details is on.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The factory\n# always admits these cards; ``query_database`` builds the trace only when the\n# resolved ``show_details`` is on.",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 591,
+    "source_line_end": 593,
+    "verify_against": "build_agent UiFeatures construction in src/sqllens/agent/factory.py; agent_trace gating in query_database_impl_with_widgets in src/sqllens/tools/query_database.py",
+    "verify_hint": "Check build_agent admits DEFAULT_USER_GROUP to UI_FEATURE_SHOW_TOOL_ARGUMENTS regardless of cfg.agent.show_details, and that build_agent_trace is called in query_database.py only under effective.show_details",
+    "claim_signature": "api_contract:_format.py:trace-gated-cards-always-admitted:591",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "api_contract",
+    "claim": "The docstring states a DataFrame from a schema-introspection query, classified under the configured database's sqlglot dialect, adds no block and only the agent sees it, which requires that no other channel query_database_impl_with_widgets returns (markdown, query_info, agent_trace) carries that DataFrame's rows.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A DataFrame from a schema-\n    introspection query, classified under the configured database's sqlglot\n    dialect, adds no block: only the agent sees it.",
+    "source_file": "src/sqllens/tools/query_database.py",
+    "source_line": 183,
+    "source_line_end": 185,
+    "verify_against": "build_agent_trace in src/sqllens/tools/_format.py and _query_info_from_sql in src/sqllens/tools/_format.py",
+    "verify_hint": "Check whether build_agent_trace copies any tool result content or DataFrame rows into the trace steps, and whether query_info carries anything beyond the SQL and row_count, when show_details is on",
+    "claim_signature": "api_contract:query_database.py:only-agent-sees-introspection:183",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "test_mock_alignment",
+    "claim": "The test helper comment states the real agent streams a run_sql running card then a success/error card with the same SQL, and the DataFrame (if any) follows the pair.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The agent streams a running card, then a success/error card, both with\n    # the same SQL; the DataFrame (if any) follows the pair.",
+    "source_file": "tests/unit/test_format.py",
+    "source_line": 1826,
+    "source_line_end": 1827,
+    "verify_against": "the tool-execution yield order in src/sqllens/agent/core/agent/agent.py",
+    "verify_hint": "Check in agent.py whether the tool result's ui_component (the DataFrame) is yielded after the completed status card (set_status) or between the running and completed cards",
+    "claim_signature": "test_mock_alignment:test_format.py:sql-call-stream-order:1826",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "absolute_claim",
+    "claim": "The comment asserts that the tests below it pass without a dialect and so hold on the code before #301.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Controls below pass without a dialect, so they hold on the code before #301.",
+    "source_file": "tests/unit/test_format.py",
+    "source_line": 1936,
+    "verify_against": "the tests following line 1936 in tests/unit/test_format.py and components_to_blocks's signature in the base view src/sqllens/tools/_format.py",
+    "verify_hint": "Trace test_unparseable_sql_result_still_shown_with_dialect and test_chart_after_introspection_card_is_kept (both call components_to_blocks with dialect=) against the base components_to_blocks, which takes no dialect keyword; and test_chart_after_introspection_card_is_kept's expected blocks on base, where the catalog DataFrame would still produce a table block",
+    "claim_signature": "absolute_claim:test_format.py:controls-pass-before-change:1936",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "test_mock_alignment",
+    "claim": "make_chart(make_chart_spec([...])) produces a CHART component that _build_chart_payload accepts, so the formatter emits a chart block for it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_format.py",
+    "source_line": 1971,
+    "verify_against": "make_chart and make_chart_spec in tests/unit/_agent_stubs.py; _build_chart_payload in src/sqllens/tools/_format.py; the real EmitChartTool component in src/sqllens/agent/tools/emit_chart.py",
+    "verify_hint": "Compare the component make_chart builds with what EmitChartTool emits and with what _build_chart_payload requires to return non-None",
+    "claim_signature": "test_mock_alignment:test_format.py:make-chart-real-shape:1971",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "test_mock_alignment",
+    "claim": "_one_row({...}) produces a one-row DataFrame that, absent the introspection withholding, would become a result_text block, so test_introspection_one_row_result_adds_no_text_block exercises the one-row text-block path of criterion 1.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_format.py",
+    "source_line": 1851,
+    "verify_against": "_one_row in tests/unit/test_format.py and _small_result_to_markdown in src/sqllens/tools/_format.py",
+    "verify_hint": "Check _one_row (tests/unit/test_format.py line 1529) builds a DataFrameComponent with exactly one row and at most _SMALL_RESULT_MAX_COLUMNS columns",
+    "claim_signature": "test_mock_alignment:test_format.py:one-row-hits-text-path:1851",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "In a `query_database` result, the DataFrame of a `run_sql` call whose SQL `is_introspection_query` (as `src/sqllens/safety/readonly.py` defines it) classifies as introspection adds no entry to `_meta[\"sqllens/blocks\"]`, neither a table block nor a one-row text block, and the Markdown text content contains no table or text rendered from that DataFrame.",
+    "claim_signature": "issue-acceptance-1",
+    "criteria_file": ".prflow/tmp/review/pr-307/local-20261030T191310Z-1/criteria.json",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 102,
+    "verify_hint": "Check the DATAFRAME branch of components_to_blocks in src/sqllens/tools/_format.py",
+    "id": "VC-33",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "That classification uses the sqlglot dialect SQL Lens derives from the configured database URL for its read-only guard (`mysql`, `postgres` or `sqlite`). On a MySQL database, a catalog query such as `SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE()` is classified as introspection and its result is not shown. On a database configured with a `postgresql+psycopg://` URL, the result of `SELECT tablename FROM pg_catalog.pg_tables` is not shown.",
+    "claim_signature": "issue-acceptance-2",
+    "criteria_file": ".prflow/tmp/review/pr-307/local-20261030T191310Z-1/criteria.json",
+    "source_file": "src/sqllens/tools/query_database.py",
+    "source_line": 290,
+    "verify_hint": "Check components_to_blocks is called with dialect=sqlglot_dialect_for_url(cfg.database.url) and that 'postgresql+psycopg' maps to 'postgres'",
+    "id": "VC-34",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With a dialect given, `is_introspection_query` counts the `pg_catalog` schema and the `pg_` name prefix only for `postgres`; the `mysql`, `sys` and `performance_schema` schemas only for `mysql`; and the `sqlite_` and `pragma_` name prefixes only for `sqlite`, where `pragma_` matches, in any casing, both a table-valued function called with an argument list and a table name without one, so a SQLite data table whose name starts with `pragma_` is also classified as introspection and its result is not shown. `information_schema` and `SHOW` count for every dialect. With no dialect, every engine's schemas, prefixes and `pragma_` functions count. On MySQL, `SELECT amount FROM pg_payments` (and on Postgres, `SELECT id FROM sys.accounts`) is therefore a data query: its result is shown, and its success clears an earlier `run_sql` error. On SQLite, `SELECT name FROM pragma_table_info('widgets')` and `SELECT name FROM pragma_table_list` are introspection.",
+    "claim_signature": "issue-acceptance-3",
+    "criteria_file": ".prflow/tmp/review/pr-307/local-20261030T191310Z-1/criteria.json",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 68,
+    "verify_hint": "Check the per-dialect tables and pragma_ handling in src/sqllens/safety/readonly.py",
+    "id": "VC-36",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "In a turn that runs an introspection query and then a data query and ends with answer text, the result holds the block, if any, that the data query's DataFrame produces and the answer text, in stream order, and nothing from the introspection result.",
+    "claim_signature": "issue-acceptance-4",
+    "criteria_file": ".prflow/tmp/review/pr-307/local-20261030T191310Z-1/criteria.json",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 427,
+    "verify_hint": "Check last_sql_is_introspection is recomputed on the data query's run_sql card so its DataFrame is kept, and candidates preserve stream order",
+    "id": "VC-37",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A turn whose only `run_sql` results are introspection results returns the same Markdown text, `is_error` value and `_meta[\"sqllens/blocks\"]` as the same turn with those results' DataFrame components removed: for example only its answer text, or `(no answer)` when nothing else would be shown.",
+    "claim_signature": "issue-acceptance-5",
+    "criteria_file": ".prflow/tmp/review/pr-307/local-20261030T191310Z-1/criteria.json",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 547,
+    "verify_hint": "Check that a withheld DataFrame changes nothing but last_sql_row_count, and whether render_interactive (which re-walks the full component list) could render something from a DATAFRAME component",
+    "id": "VC-38",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "An introspection success classified with the configured dialect does not clear an earlier `run_sql` error in the same turn, including on MySQL for a catalog query that uses `DATABASE()`.",
+    "claim_signature": "issue-acceptance-6",
+    "criteria_file": ".prflow/tmp/review/pr-307/local-20261030T191310Z-1/criteria.json",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 433,
+    "verify_hint": "Check the error-clearing elif uses last_sql_is_introspection computed with dialect, and that the flag is set before this check on the card that carries the success status",
+    "id": "VC-39",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The change leaves these as they are: the agent's own tool result for an introspection query, which keeps what `RunSqlTool` gives it today (for a non-empty result, a CSV preview and a saved-file reference); the user-visible blocks for `run_sql` results the classifier does not mark as introspection, which include value lookups against ordinary data tables whose names start with no catalog prefix of the configured engine, such as a status lookup table, and the blocks of a DataFrame that no `run_sql` card with a non-empty `metadata[\"sql\"]` string precedes in the turn; the success notification `RunSqlTool` returns instead of a DataFrame for a statement whose first word is not `SELECT` (for example `SHOW TABLES` or a `WITH … SELECT`), which holds only a row count and reaches the Markdown text only on a turn that produces no blocks; the classifier's fail-open rule, so SQL that does not parse under the configured dialect is still shown; the executed-SQL and agent-trace channels that `show_details` turns on; the text of the default system prompt in `src/sqllens/agent/core/system_prompt/default.py`; and the agent's answer text and the chart blocks it emits, including a chart emitted after an introspection query, which the change does not check for schema details.",
+    "claim_signature": "issue-acceptance-7",
+    "criteria_file": ".prflow/tmp/review/pr-307/local-20261030T191310Z-1/criteria.json",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 386,
+    "verify_hint": "Check only the DATAFRAME branch is gated, last_sql_is_introspection starts False, the parse-failure branch returns False, NotificationComponent handling and CHART handling are untouched, and default.py is not in the diff",
+    "id": "VC-40",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Regression tests exist for the first six criteria above. Each test of a changed outcome fails on the current code, and each control case (a data-only turn, and a no-dialect classifier case for a catalog that already counts today) passes on it. `tests/unit/test_format.py` holds tests built from synthetic `run_sql` status cards and DataFrame components for the hidden-block, ordering, introspection-only and error-supersede criteria. `tests/unit/test_safety.py` holds tests for the per-engine classifier criterion, with a no-dialect control. `tests/unit/test_query_database.py` holds a test that runs `query_database_impl_with_widgets` with a stub agent under a MySQL URL and under a `postgresql+psycopg://` URL.",
+    "claim_signature": "issue-acceptance-8",
+    "criteria_file": ".prflow/tmp/review/pr-307/local-20261030T191310Z-1/criteria.json",
+    "source_file": "tests/unit/test_query_database.py",
+    "source_line": 1149,
+    "verify_hint": "Check each criterion 1-6 has a test, that each changed-outcome test would fail against the base view's _format.py / readonly.py, and that the data-only and no-dialect controls would pass there",
+    "id": "VC-41",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "api_contract",
+    "claim": "The release-note fragment follows the repository's changelog convention: one changelog.d/<PR>.<category>.md fragment, named with this PR's number (307) and a valid category (fixed).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "changelog.d/307.fixed.md",
+    "verify_against": "CLAUDE.md 'Release notes' section and scripts/changelog.py (fragment filename parsing)",
+    "verify_hint": "Check the fragment-name pattern and allowed categories parsed in scripts/changelog.py, and that the PR number in the brief (pr-307) matches the filename",
+    "claim_signature": "api_contract:repo:changelog-fragment",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": true,
+    "verdict": "PASS",
+    "raw_verdict": "PASS",
+    "normalized": false,
+    "evidence": "scripts/changelog.py:17 CATEGORIES includes 'fixed'; :36 FRAGMENT regex (?:[1-9][0-9]*|\\+legacy-[0-9]{3})\\.([a-z]+)\\.md matches '307.fixed.md'. diff.patch has exactly one changelog fragment added (changelog.d/307.fixed.md, line 1 of the diff); PR number 307 matches the pr-307 review dir. Did not separately read CLAUDE.md release-notes section; the implementation parser is the source of truth.",
+    "file_checked": "scripts/changelog.py:17,36",
+    "normalization_ineligible": null,
+    "severity": "suggestion",
+    "carried": true,
+    "reused_from_iter": 1
+  },
+  {
+    "id": "VC-12",
+    "category": "api_contract",
+    "claim": "build_agent composes the runner stack using dialect = sqlglot_dialect_for_url(cfg.database.url) as shown in the row-level-security code snippet.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 184,
+    "verify_against": "src/sqllens/agent/factory.py build_agent",
+    "verify_hint": "Check the runner-composition block in build_agent in src/sqllens/agent/factory.py for the sqlglot_dialect_for_url call",
+    "claim_signature": "api_contract:row-level-security.md:factory-uses-dialect-mapper:184",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": true,
+    "verdict": "PASS",
+    "raw_verdict": "PASS",
+    "normalized": false,
+    "evidence": "factory.py:89 has `dialect = sqlglot_dialect_for_url(cfg.database.url)` after the RowCapRunner wrap (line 88). Line 91 passes it to ReadOnlyGuardRunner and line 98 to RlsGuardRunner, in the same order as the doc snippet at row-level-security.md:181-189. The function is imported at factory.py:42 and defined at safety/readonly.py:63.",
+    "file_checked": "src/sqllens/agent/factory.py:82-98",
+    "normalization_ineligible": null,
+    "severity": "suggestion",
+    "carried": true,
+    "reused_from_iter": 1
+  },
+  {
+    "id": "VC-13",
+    "category": "api_contract",
+    "claim": "Whatever show_details is, build_agent admits DEFAULT_USER_GROUP to UI_FEATURE_SHOW_TOOL_ARGUMENTS so the agent always emits the run_sql card and tools/_format.py always sees its SQL; query_database drops query_info and the agent trace when the resolved show_details is off.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Whatever `show_details` is, `build_agent` admits `DEFAULT_USER_GROUP` to `UI_FEATURE_SHOW_TOOL_ARGUMENTS`, so the agent always emits the `run_sql` card and `tools/_format.py` always sees its SQL — which it uses to withhold schema-introspection results from the user. `query_database` drops `query_info` and the agent trace when the resolved `show_details` is off;",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 134,
+    "verify_against": "src/sqllens/agent/factory.py build_agent UiFeatures construction; src/sqllens/tools/query_database.py show_details handling",
+    "verify_hint": "Check build_agent in factory.py appends DEFAULT_USER_GROUP unconditionally; check query_database.py sets query_info to None and skips/clears the agent trace when the per-request resolved show_details is False, on both success and AgentRunError paths",
+    "claim_signature": "api_contract:factory.md:tool-args-always-admitted:134",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": true,
+    "verdict": "PASS",
+    "raw_verdict": "PASS",
+    "normalized": false,
+    "evidence": "factory.py:165-175 builds fresh UiFeatures and appends DEFAULT_USER_GROUP to UI_FEATURE_SHOW_TOOL_ARGUMENTS unconditionally (no cfg.agent.show_details condition). query_database.py:302-303 sets query_info=None when not effective.show_details; agent_trace is built only under effective.show_details (309-318), else None. Both are computed before the is_error branch (319-325), so the AgentRunError path carries the already-filtered query_info and agent_trace. Success path returns the same filtered values (326-327).",
+    "file_checked": "src/sqllens/tools/query_database.py:293-327",
+    "normalization_ineligible": null,
+    "severity": "suggestion",
+    "carried": true,
+    "reused_from_iter": 1
+  },
+  {
+    "id": "VC-15",
+    "category": "api_contract",
+    "claim": "build_agent constructs a fresh UiFeatures() for each agent without mutating DEFAULT_UI_FEATURES and appends DEFAULT_USER_GROUP to only the UI_FEATURE_SHOW_TOOL_ARGUMENTS access list, threading it via AgentConfig(ui_features=...).",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`build_agent` constructs a *fresh* `UiFeatures()` for each agent (never mutating `DEFAULT_UI_FEATURES` in place — a single mutation would leak across all subsequently-built agents in the process) and appends `DEFAULT_USER_GROUP` to **only** the `UI_FEATURE_SHOW_TOOL_ARGUMENTS` access list.",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 136,
+    "verify_against": "src/sqllens/agent/factory.py build_agent; src/sqllens/agent/core/agent/config.py UiFeatures default_factory",
+    "verify_hint": "Check whether UiFeatures() in config.py builds a new feature_group_access dict (not a shared reference to DEFAULT_UI_FEATURES' lists), so the append in build_agent does not leak across agents",
+    "claim_signature": "api_contract:factory.md:fresh-uifeatures-per-agent:136",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": true,
+    "verdict": "PASS",
+    "raw_verdict": "PASS",
+    "normalized": false,
+    "evidence": "factory.py:165 builds a fresh UiFeatures(). config.py:45-46 uses default_factory=lambda: DEFAULT_UI_FEATURES.copy(), a shallow copy, so the dict is new but the inner lists are shared with DEFAULT_UI_FEATURES. build_agent does not append to the shared list. It copies it with list(...) (factory.py:166-170), appends DEFAULT_USER_GROUP to the copy (171-172), and reassigns only the UI_FEATURE_SHOW_TOOL_ARGUMENTS key on the instance's own dict via register_feature (173-175; config.py:83). DEFAULT_UI_FEATURES and other agents' lists are never mutated, and other features are untouched. The result is passed as AgentConfig(ui_features=ui_features) at factory.py:198. The doc wording 'appends' is loosely accurate: the append is to a copy, then re-registered. Absolute-claim input traced: building two agents in sequence. The second agent's list(...) copy again starts from the unmodified ['admin'], so nothing leaks.",
+    "file_checked": "src/sqllens/agent/factory.py:157-199",
+    "normalization_ineligible": null,
+    "severity": "suggestion",
+    "carried": true,
+    "reused_from_iter": 1
+  },
+  {
+    "id": "VC-16",
+    "category": "test_mock_alignment",
+    "claim": "tests/unit/test_factory_wiring.py contains test_show_details_on_unlocks_only_tool_arguments, test_show_details_off_still_admits_default_group_at_build_time and test_show_details_on_grants_static_user_access_to_tool_arguments, and the last two exercise can_user_access_feature.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Pinned end-to-end by `tests/unit/test_factory_wiring.py::test_show_details_on_unlocks_only_tool_arguments`, `::test_show_details_off_still_admits_default_group_at_build_time`, and `::test_show_details_on_grants_static_user_access_to_tool_arguments` — the last two exercise the actual `can_user_access_feature` gate function the agent calls, not just the access-list state.",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 138,
+    "verify_against": "tests/unit/test_factory_wiring.py",
+    "verify_hint": "Check test_show_details_off_still_admits_default_group_at_build_time in tests/unit/test_factory_wiring.py calls can_user_access_feature rather than only inspecting feature_group_access",
+    "claim_signature": "test_mock_alignment:factory.md:pinning-tests-exercise-gate:138",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": true,
+    "verdict": "PASS",
+    "raw_verdict": "PASS",
+    "normalized": false,
+    "evidence": "tests/unit/test_factory_wiring.py defines all three tests (lines 141, 169, 203). test_show_details_off_still_admits_default_group_at_build_time calls agent.config.ui_features.can_user_access_feature at lines 195-200, and test_show_details_on_grants_static_user_access_to_tool_arguments calls it at lines 223-235. Both go beyond inspecting feature_group_access.",
+    "file_checked": "tests/unit/test_factory_wiring.py:141-235",
+    "normalization_ineligible": null,
+    "severity": "suggestion",
+    "carried": true,
+    "reused_from_iter": 1
+  },
+  {
+    "id": "VC-17",
+    "category": "api_contract",
+    "claim": "query_database passes the same dialect that sqlglot_dialect_for_url derives for the read-only guard to the formatter's introspection classifier.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 154,
+    "verify_against": "src/sqllens/tools/query_database.py and src/sqllens/agent/factory.py",
+    "verify_hint": "Compare the URL source used in query_database.py (cfg.database.url of the same config the agent was built from) with the one build_agent uses, including when a per-request or reloaded config is involved",
+    "claim_signature": "api_contract:factory.md:same-dialect-guard-formatter:154",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": true,
+    "verdict": "PASS",
+    "raw_verdict": "PASS",
+    "normalized": false,
+    "evidence": "factory.py:89-98 build_agent derives dialect = sqlglot_dialect_for_url(cfg.database.url) and passes it to ReadOnlyGuardRunner/RlsGuardRunner. query_database.py:290-292 calls components_to_blocks(components, dialect=sqlglot_dialect_for_url(cfg.database.url)) using the same function and the same cfg.database.url field. The agent is built from the same cfg via get_agent(cfg) (query_database.py:252; tools/_agent.py:66 builds with the passed cfg; a later differing cfg only logs a mismatch warning at _agent.py:68), and the query_database docstring (lines 231-237) requires a caller-supplied agent be built from the same cfg. Residual: if an embedder passed a different cfg to a cached agent, the URLs could diverge, but that is a documented unsupported use and no shipped caller does it.",
+    "file_checked": "src/sqllens/tools/query_database.py:290-292",
+    "normalization_ineligible": null,
+    "severity": "suggestion",
+    "carried": true,
+    "reused_from_iter": 1
+  },
+  {
+    "id": "VC-35",
+    "category": "data_format_assumption",
+    "claim": "`cfg.database.url` is a plain `str` (not a SecretStr or pydantic URL object) at the point `query_database_impl_with_widgets` passes it to `sqlglot_dialect_for_url`, which calls `.split('://', 1)` on it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/tools/query_database.py",
+    "source_line": 291,
+    "verify_against": "the database config model in src/sqllens/config.py",
+    "verify_hint": "Check the `url` field type on the database settings class in src/sqllens/config.py",
+    "claim_signature": "data_format_assumption:query_database.py:database-url-plain-str:291",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": true,
+    "verdict": "PASS",
+    "raw_verdict": "PASS",
+    "normalized": false,
+    "evidence": "DatabaseConfig.url is declared `url: str = Field(...)` (config.py:52), a plain str, not SecretStr/URL. DatabaseConfig is a BaseModel (config.py:49) with no validator converting it. query_database.py:291 passes cfg.database.url to sqlglot_dialect_for_url(url: str), which does url.split('://',1) (safety/readonly.py:63-65). config.py:92 itself uses the same split on self.url.",
+    "file_checked": "src/sqllens/config.py:52",
+    "normalization_ineligible": null,
+    "severity": "suggestion",
+    "carried": true,
+    "reused_from_iter": 1
+  },
+  {
+    "id": "VC-43",
+    "category": "test_mock_alignment",
+    "claim": "`make_tool_cards('run_sql', {'sql': ...})` produces STATUS_CARDs whose `metadata['sql']` carries the SQL (as the real agent's run_sql cards do), and `make_dataframe` produces a DATAFRAME component the formatter renders as a table block.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_query_database.py",
+    "source_line": 1164,
+    "source_line_end": 1168,
+    "verify_against": "`make_tool_cards` and `make_dataframe` in tests/unit/_agent_stubs.py and the agent's status-card emission in src/sqllens/agent/core/agent/agent.py",
+    "verify_hint": "Read `make_tool_cards` (tests/unit/_agent_stubs.py line 96) for the metadata it sets and its running/completed statuses, and `make_dataframe` (line 174)",
+    "claim_signature": "test_mock_alignment:test_query_database.py:make-tool-cards-sql-metadata:1164",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": true,
+    "verdict": "PASS",
+    "raw_verdict": "PASS",
+    "normalized": false,
+    "evidence": "tests/unit/_agent_stubs.py:96-146 make_tool_cards builds running+success StatusCardComponents with metadata=args, so metadata['sql'] carries the SQL. The real agent does the same: agent.py:779-785 sets metadata=tool_call.arguments on the 'Executing {tool}' running card. _format.py:419-423 reads metadata.get('sql') from the card. make_dataframe (stubs:174-186) wraps a DataFrameComponent (ComponentType.DATAFRAME). _format.py:386-394 turns a DATAFRAME into a 'table' block unless it is a one-row small result (_small_result_to_markdown, 1297-1314, needs exactly 1 row). The test's 2-row and 3-row frames therefore render as table blocks, and the test asserts blocks types ['table','text']. The claim holds for the multi-row frames the test uses. A one-row frame would render as result_text, not a table.",
+    "file_checked": "tests/unit/_agent_stubs.py:96-186",
+    "normalization_ineligible": null,
+    "severity": "suggestion",
+    "carried": true,
+    "reused_from_iter": 1
+  },
+  {
+    "id": "VC-44",
+    "category": "test_mock_alignment",
+    "claim": "Patching `agent_module.build_agent` and passing a config whose `database.url` was replaced via `model_copy(update=...)` makes `query_database_impl_with_widgets` use the stub agent and read the replaced URL; the singleton agent state does not leak a previously built agent into this test.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_query_database.py",
+    "source_line": 1158,
+    "source_line_end": 1174,
+    "verify_against": "`get_agent` in src/sqllens/tools/_agent.py and the `agent_stub_factory` fixture in tests/unit/conftest.py",
+    "verify_hint": "Check that `get_agent` resolves `build_agent` through the module attribute that the test patches and how `_AGENT_STATE` is reset between tests (conftest.py fixtures)",
+    "claim_signature": "test_mock_alignment:test_query_database.py:stub-agent-patched-url:1158",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": true,
+    "verdict": "PASS",
+    "raw_verdict": "PASS",
+    "normalized": false,
+    "evidence": "tests/unit/test_query_database.py:23 imports sqllens.tools._agent as agent_module; line 1171 patches agent_module.build_agent. get_agent (src/sqllens/tools/_agent.py:66) calls build_agent by module-global name lookup at call time, so the patch takes effect. Autouse fixture _reset_query_database_singleton (tests/unit/conftest.py:26-39) sets agent_module._AGENT_STATE=None before and after each test, so no prior agent leaks. query_database.py:252 calls get_agent(cfg) and :291 reads cfg.database.url (sqlglot_dialect_for_url), which is the model_copy-replaced URL (test lines 1158-1160).",
+    "file_checked": "src/sqllens/tools/_agent.py:66",
+    "normalization_ineligible": null,
+    "severity": "suggestion",
+    "carried": true,
+    "reused_from_iter": 1
+  }
+]

@@ -1,0 +1,656 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "important",
+   "corroboration": 1,
+   "description": "src/sqllens/safety/readonly.py lines 177-184: an unexpected parser exception (anything but ParseError/TokenError, e.g. RecursionError or a sqlglot dialect-parser bug) now makes is_introspection_query return True, so _format.py (lines 386-395, 418-419) withholds a genuine data result while the turn returns isError false; only a server-side WARNING records it. The broad except also hides AttributeError/KeyError/TypeError programming errors. test_unexpected_parser_error_fails_closed pins the True return; no test covers what the client sees.",
+   "defect_signature": {
+    "file": "src/sqllens/safety/readonly.py",
+    "line_range": [
+     177,
+     184
+    ],
+    "kind": "unhandled_exception"
+   }
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "suggestion",
+   "corroboration": 1,
+   "description": "src/sqllens/tools/_format.py lines 386-395: the INFO 'withheld a schema-introspection run_sql result' log fires only when _build_table_payload returns a payload, so the payload-failure case is not logged as withheld (the payload-failure WARNING still fires).",
+   "defect_signature": {
+    "file": "src/sqllens/tools/_format.py",
+    "line_range": [
+     386,
+     395
+    ],
+    "kind": "other"
+   }
+  },
+  {
+   "finding_id": "F-3",
+   "agent": "prflow:comment-analyzer",
+   "severity": "suggestion",
+   "corroboration": 1,
+   "description": "docs/internal/mcp-server/tools.md line 102: 'each withheld result logs INFO server-side' is broader than the code; _format.py lines 386-420 log the withheld INFO only when _build_table_payload returns a payload. Capped at Suggestion by the behavior-inert prose cap.",
+   "defect_signature": {
+    "file": "docs/internal/mcp-server/tools.md",
+    "line_range": [
+     102,
+     102
+    ],
+    "kind": "documented_falsehood"
+   }
+  },
+  {
+   "finding_id": "F-4",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "corroboration": 1,
+   "description": "src/sqllens/safety/readonly.py lines 67-93: each _CATALOGS_BY_DIALECT key must be a URL-scheme prefix, a sqlglot dialect name and a catalog entry at once; an engine whose scheme differs from its sqlglot name (mssql/tsql) cannot be described, an engine added without a catalog entry silently gives the guards dialect=None, and prefix matching relies on dict order and non-overlapping keys in a mutable module-level dict. No production path affected today.",
+   "defect_signature": {
+    "file": "src/sqllens/safety/readonly.py",
+    "line_range": [
+     67,
+     93
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-5",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "corroboration": 1,
+   "description": "src/sqllens/tools/_format.py lines 389-434: last_sql_is_introspection stays set until the next run_sql card, so any later DataFrame is withheld whatever produced it; only RunSqlTool emits DataFrames today, so unreachable now.",
+   "defect_signature": {
+    "file": "src/sqllens/tools/_format.py",
+    "line_range": [
+     389,
+     434
+    ],
+    "kind": "type_design"
+   }
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [
+  {
+   "agent": "prflow:code-reviewer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 4 (>= 2)"
+  },
+  {
+   "agent": "prflow:pr-test-analyzer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 4 (>= 2)"
+  }
+ ],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (no Critical finding; one Important finding and two checklist FAILs below the critical threshold)\n\nThe PR can merge: no finding reaches the critical threshold, and every acceptance criterion has a passing checklist item. The notes below still deserve a look before merge.\n\nRule applied: rule 6 — findings and checklist FAILs below the threshold, plus two INCONCLUSIVE items → APPROVE with notes\n\n## Code Review Findings\n\n### 🟠 Important / Major\n\n1. `src/sqllens/safety/readonly.py` lines 177-184: when the parser raises an exception other than `ParseError` or `TokenError`, `is_introspection_query` now returns `True`, so a real data result is hidden from the user while the turn still returns `isError: false`. The only trace is a server-side WARNING. Triggers named are a `RecursionError` on a deeply nested query or a bug inside a sqlglot dialect parser. The base code returned `False` for every exception; iteration 3 changed this on purpose to stop a catalog result leaking, and no test covers what the client sees on this path. (raised by 1/4 agents)\n\n- VC-45: FAIL (important) — The test docstring asserts the configured database's sqlglot dialect reaches the formatter; the two parametrized catalog queries would therefore need to be classified differently with the URL's dialect than with dialect=None for the test to show that. [tests/unit/test_query_database.py:1156]\n\n  <details><summary>Evidence</summary>\n\n  The test (tests/unit/test_query_database.py:1137-1179) claims the configured dialect reaches the formatter. Its two catalog queries are 'SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE()' and 'SELECT tablename FROM pg_catalog.pg_tables'. In src/sqllens/safety/readonly.py, is_introspection_query with dialect=None uses _catalog_names(None), which returns _ALL_CATALOG_SCHEMAS (information_schema, pg_catalog, mysql, sys, performance_schema) and all prefixes (readonly.py:102-105). The first query's table schema is information_schema and the second's is pg_catalog, both in that union. Both parse without a dialect, because DATABASE() is just an anonymous function. So both classify True with dialect=None, exactly as they do under mysql and postgres respectively. The test therefore passes even if query_database.py stopped passing the dialect, and it does not show what its docstring asserts. The rejections lines cover other findings (unknown dialect, components_to_markdown) and not this missing-discrimination test gap, so they do not apply.\n\n  </details>\n\n### 🟡 Suggestion / Minor (5)\n\n<details><summary>5 items</summary>\n\n1. `docs/internal/mcp-server/tools.md` line 102: the `DATAFRAME` row says \"each withheld result logs `INFO` server-side\", but in `src/sqllens/tools/_format.py` lines 386-396 the \"withheld\" INFO line runs only when `_build_table_payload` returns a payload. An introspection DataFrame whose payload build fails logs only the existing WARNING from `_build_table_payload`, and an empty one logs nothing. The `silent-failure-hunter` raised the same gap against the code side (item 2). (raised by 1/4 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: the sentence describes the INFO log; that log covers introspection DataFrames with a built payload, and no output, branch or covered set depends on the doc line; git grep of the repository for \"each withheld result\" and \"mcp-server/tools.md\" found only doc-to-doc links in docs/internal and no script, workflow, lint, CLAUDE.md, AGENTS.md or prompt-extension reader; docs/internal is an internal page not published (docs/external is the published set) -->\n2. `src/sqllens/tools/_format.py` lines 386-395: the INFO line that records a withheld introspection result fires only when `_build_table_payload` returns a payload, so an operator searching for that message misses the payload-failure case. The payload-failure WARNING still fires, so nothing is lost silently. (raised by 1/4 agents)\n3. `src/sqllens/safety/readonly.py` lines 67-93: each `_CATALOGS_BY_DIALECT` key must now be a URL-scheme prefix, a sqlglot dialect name and a catalog entry at once. An engine whose URL scheme differs from its sqlglot name (for example SQL Server: `mssql://` against `tsql`) cannot be described, and an engine added to `build_sql_runner` without a catalog entry would silently give the read-only and RLS guards `dialect=None`. The match also depends on dict order and on no key being a prefix of another, which nothing enforces. No production path is affected today. (raised by 1/4 agents)\n4. `src/sqllens/tools/_format.py` lines 389-434: `last_sql_is_introspection` stays set until the next `run_sql` card, so any DataFrame later in the stream is withheld whatever produced it. Only `RunSqlTool` emits DataFrames today, so this is unreachable now, but a future DataFrame-emitting tool would have its output after an introspection query dropped silently. (raised by 1/4 agents)\n\n- VC-25: FAIL (suggestion) — The doc asserts that with show_details true and no SQL run (pure-text answer) the run_sql card is never emitted and the result is the same as the show_details-false branch above it (no SQL Markdown block, no _meta['sqllens/query']). [docs/internal/mcp-server/tools.md:245]\n\n  <details><summary>Evidence</summary>\n\n  The SQL parts hold: in src/sqllens/tools/_format.py last_sql starts None (l.333), and query_info is built only when last_sql is not None (l.494, 561); _append_sql_block (query_database.py:127-133) returns markdown unchanged for falsy query_info. So with no run_sql card there is no SQL block and no sqllens/query. But the doc line says 'same result as above', and the branch above (tools.md:244) says query_database drops the agent trace. In query_database.py:309-318, with effective.show_details true, build_agent_trace runs unconditionally of whether SQL ran and returns a dict (non-None); it is returned (l.327) and server.py:389-390 attaches it as _meta['sqllens/agent_trace'] whenever agent_trace is not None. So a pure-text answer with show_details on still carries the trace channel, which differs from the show_details-false branch. The doc's 'same result as above' is therefore inaccurate on the trace channel (also contradicted by tools.md:254). No rejections line covers this (they concern dialect and components_to_markdown).\n\n  </details>\n\n</details>\n\n### ℹ️ Informational — Deferred (2)\n\n<details><summary>2 items</summary>\n\n- VC-2: INCONCLUSIVE (suggestion) — The release note asserts catalog queries are classified with the configured database's dialect, so on MySQL a data table pg_payments is shown, and a MySQL catalog query using DATABASE() no longer clears an earlier query error. [changelog.d/307.fixed.md:4]\n\n  <details><summary>Evidence</summary>\n\n  First half verified: head src/sqllens/safety/readonly.py:89-107 (_CATALOGS_BY_DIALECT, _catalog_names) gives mysql prefixes () so `SELECT amount FROM pg_payments` under dialect='mysql' reaches line 206 with empty prefixes tuple (startswith(()) is False) and returns False, i.e. shown; base (view-base readonly.py:70-104) used a fixed ('pg_','sqlite_') prefix set, so it was hidden. Second half ('a MySQL catalog query using DATABASE() no longer clears an earlier error') not settled: base is_introspection_query (readonly.py:76-104) already returns True for information_schema.columns if sqlglot.parse_one succeeds with dialect=None, and the only head change relevant to that query is the dialect passed to parse_one. In the installed sqlglot, DATABASE tokenizes as TokenType.DATABASE (tokens.py:292), which is not in FUNC_TOKENS (parser.py:923-974), and sqlglot/dialects/mysql.py has no DATABASE-specific tokenizer/parser override (KEYWORDS at mysql.py:96-164 do not touch it), so I found no static reason the parse outcome differs between dialect=None and dialect='mysql'. If it parses in both, base already hid it and the 'no longer clears' wording is false; if it fails in both, head would return False too, contradicting tests/unit/test_format.py:1899-1907. I could not run sqlglot.parse_one('SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE()', dialect=None) vs dialect='mysql' (no execution tool), so the before/after behaviour is unconfirmed. Rejections lines cover other defects (unknown dialect, components_to_markdown) and not this claim.\n\n  </details>\n\n- VC-31: INCONCLUSIVE (important) — The docstring asserts introspection is a statement that references any catalog table, even alongside data tables, and that a name prefix matches, in any casing, a table name or a table-valued function called in FROM. [src/sqllens/safety/readonly.py:135]\n\n  <details><summary>Evidence</summary>\n\n  readonly.py:199-207 walks parsed.find_all(exp.Table), so a catalog table in a CTE, WHERE subquery or UNION branch is covered. It lowercases table.db and the name, so quoted mixed case is covered. It reads Anonymous table functions via table.this, so schema-qualified main.pragma_table_info('t') is covered when sqlglot parses it as a Table. The claim is absolute ('any catalog table', 'a table-valued function called in FROM'). I could not settle the LATERAL/JOIN-to-function input. sqlglot's _parse_lateral (sqlglot/parser.py:4735-4790) can set Lateral.this to a bare function (_parse_function) with no exp.Table node. A statement such as 'SELECT * FROM t, LATERAL pg_get_keywords() k' on postgres might then bypass the walk. Whether it does depends on whether _parse_select(table=True) consumes the name as a Table first, and I could not run sqlglot to check. No test in tests/ covers this (the only LATERAL hit is test_safety_rls.py:340). Missing evidence: the output of sqlglot.parse_one(..., dialect='postgres').find_all(exp.Table) for that statement. I did not run it.\n\n  </details>\n\n</details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: has_new_types + test_relevant (not small_diff, not config_only); 14 changed files; detect_all_audit not set.\n- Working tree: check skipped (PR head-override mode).\n- Review prompt extension: PROMPT-EXTENSION-STATUS: present-empty. Reviewer extension (requesting-code-review): PROMPT-EXTENSION-STATUS: present-empty.\n- CI evidence for the reviewed head 665616f: missing (no CI result was held for this head; no test suite was run).\n- Phase 3 roster: prflow:silent-failure-hunter, prflow:comment-analyzer, prflow:requesting-code-review, prflow:type-design-analyzer. Excluded by plan: prflow:code-reviewer and prflow:pr-test-analyzer (iterations=first-only, primary iteration 4). Dirty-tree check: ran clean.\n- Normalized (wording-only): 0\n- Re-verification: none requested.\n- prior-report: none\n- Finding rejected \"src/sqllens/tools/_format.py: dialect is an open str; an unknown sqlglot dialect makes the classifier fail open so catalog results would be shown\": settled none.\n- Finding rejected \"src/sqllens/tools/_format.py: components_to_markdown has no dialect parameter while the module docstring calls it the same walker\": settled none.\n- Behavior-inert cap: the `docs/internal/mcp-server/tools.md` line 102 finding was capped at Suggestion (all three conditions held), which keeps it out of the self-contradicting-diff carve-out. Checklist item VC-20 independently passed the same doc line.\n- Verdict-severity threshold: critical.\n\n- Checklist: 52 passed, 2 failed, 2 inconclusive\n- <details><summary>✅ Passed items (52 of 56)</summary>\n\n  - VC-1: The release note asserts query_database no longer shows schema-introspection results (catalog reads such as information_schema, pg_catalog, sqlite_master or SQLite pragma_* functions) as table or text blocks, while the agent still receives them. [changelog.d/307.fixed.md:1]\n  - VC-3: The release note asserts a data table whose name starts with the configured engine's own catalog prefix (pg_ on PostgreSQL, sqlite_ or pragma_ on SQLite) counts as a catalog read and its results are no longer shown. [changelog.d/307.fixed.md:8]\n  - VC-4: The run_sql tool-arguments STATUS_CARD the agent emits carries the executed SQL in its metadata (metadata['sql']). [docs/internal/agent/factory.md:132]\n  - VC-5: Whatever show_details is, build_agent admits DEFAULT_USER_GROUP to UI_FEATURE_SHOW_TOOL_ARGUMENTS, so the agent always emits the run_sql card and _format.py sees its SQL; query_database drops query_info and the agent trace when the resolved show_details is off. [docs/internal/agent/factory.md:134]\n  - VC-6: build_agent constructs a fresh UiFeatures() for each agent (never mutating DEFAULT_UI_FEATURES) and appends DEFAULT_USER_GROUP only to the UI_FEATURE_SHOW_TOOL_ARGUMENTS access list, leaving other admin-gated features admin-only, and passes it via AgentConfig(ui_features=...). [docs/internal/agent/factory.md:136]\n  - VC-7: The doc names three tests in tests/unit/test_factory_wiring.py as pinning the unlock, and says the last two (test_show_details_off_still_admits_default_group_at_build_time and test_show_details_on_grants_static_user_access_to_tool_arguments) exercise the actual can_user_access_feature gate function rather than only access-list state. [docs/internal/agent/factory.md:138]\n  - VC-8: The doc asserts the formatter withholds the DataFrame of every run_sql query the classifier marks as introspection, and that a SHOW statement returns a row-count notification instead of a DataFrame, which is not withheld. [docs/internal/database-connectors/read-only-safety.md:55]\n  - VC-9: The doc asserts the formatter withholds the DataFrame result of every run_sql query the classifier marks as introspection. [docs/internal/database-connectors/read-only-safety.md:55]\n  - VC-10: A DataFrame following a run_sql card whose SQL classifies as introspection adds no block and no Markdown; query_database calls the formatter with sqlglot_dialect_for_url(cfg.database.url), so both the hide use and the error-supersede use classify under that dialect. [docs/internal/database-connectors/read-only-safety.md:63]\n  - VC-11: is_introspection_query returns True for a statement whose leading keyword, after any leading comments, is SHOW. [docs/internal/database-connectors/read-only-safety.md:67]\n  - VC-13: A statement referencing any table whose schema is a catalog of the given dialect counts even alongside data tables: information_schema for every dialect, pg_catalog for postgres, and mysql, sys, performance_schema for mysql. [docs/internal/database-connectors/read-only-safety.md:68]\n  - VC-14: A table or a table-valued function called in FROM whose name begins, in any casing, with pg_ (postgres) or sqlite_ / pragma_ (sqlite) counts as introspection, including pragma_table_info('t') and pragma_table_list. [docs/internal/database-connectors/read-only-safety.md:69]\n  - VC-15: With dialect=None or a dialect not in the per-dialect table, every engine's schemas and prefixes count; a dialect name sqlglot does not know is logged at WARNING and parsed as no dialect; with a listed dialect another engine's names do not count. [docs/internal/database-connectors/read-only-safety.md:71]\n  - VC-16: The classifier returns False on sqlglot ParseError/TokenError or a None parse (logged at INFO), returns True for a SHOW-leading statement before any parse, and on any other parser exception returns True and logs a WARNING with the traceback. [docs/internal/database-connectors/read-only-safety.md:73]\n  - VC-17: The doc asserts a classifier misclassification never changes what was allowed to run, because the guard already vetted it. [docs/internal/database-connectors/read-only-safety.md:73]\n  - VC-18: build_agent composes the runner stack with dialect = sqlglot_dialect_for_url(cfg.database.url) passed to ReadOnlyGuardRunner and RlsGuardRunner, as the read-only-safety code snippet shows. [docs/internal/database-connectors/read-only-safety.md:164]\n  - VC-19: sqlglot_dialect_for_url is defined in src/sqllens/safety/readonly.py, exported from sqllens.safety, and maps sqlite://, postgres/postgresql(+driver)://, mysql:// to 'sqlite', 'postgres', 'mysql' and anything else to None, as the Dialect handling table lists. [docs/internal/database-connectors/read-only-safety.md:187]\n  - VC-20: A DataFrame following a run_sql card whose SQL classifies as introspection under the configured dialect adds no block and nothing to the Markdown, each withheld result logs at INFO server-side, and the agent still received it through its tool result. [docs/internal/mcp-server/tools.md:102]\n  - VC-21: The run_sql success card clears an earlier error only when its SQL is not introspection under the configured database's dialect. [docs/internal/mcp-server/tools.md:105]\n  - VC-22: The factory admits the run_sql card for the static user group whatever show_details is, so the agent emits it on every run_sql call; its SQL decides whether the following DataFrame is shown; query_database drops query_info when the resolved show_details is off. [docs/internal/mcp-server/tools.md:106]\n  - VC-23: render_interactive / '(no answer)' fallback runs when a turn produces no blocks, where introspection DataFrames produce none, so a turn with only introspection results and no other output falls to that path. [docs/internal/mcp-server/tools.md:156]\n  - VC-24: With show_details false (resolved per request) the factory still admits the run_sql card, components_to_blocks sees its SQL, and query_database drops query_info and the agent trace, so there is no SQL Markdown block and no _meta['sqllens/query']. [docs/internal/mcp-server/tools.md:244]\n  - VC-26: The per-call status cards the trace reads exist because the factory always admits UI_FEATURE_SHOW_TOOL_ARGUMENTS for the static user group, and query_database builds the agent trace only when the resolved show_details is on. [docs/internal/mcp-server/tools.md:276]\n  - VC-27: On a successful turn with no TEXT/DATAFRAME answer, where introspection DataFrames do not count, the tool returns render_interactive(components) or '(no answer)' with isError false. [docs/internal/mcp-server/tools.md:448]\n  - VC-28: Under the sqlite dialect (and with no dialect), sqlglot parses a table-valued function in FROM such as pragma_table_info('t') or PRAGMA_Index_List('t') as an exp.Table whose `this` is an exp.Anonymous carrying the written function name, and a bare pragma_table_list as an exp.Table whose `name` is the table name, so the prefix check sees both forms. [src/sqllens/safety/readonly.py:200]\n  - VC-29: For a SHOW statement that sqlglot does not parse into exp.Show (every non-MySQL dialect, and MySQL SHOW forms with no Show parser), sqlglot yields an exp.Command whose `name` is 'SHOW' (case-insensitively), including when an inline comment follows SHOW (SHOW/**/TABLES), so the parse-root check at lines 195-197 identifies it. [src/sqllens/safety/readonly.py:195]\n  - VC-30: A SQL string the read-only guard accepted and run_sql executed also parses under sqlglot.parse_one(sql, dialect=<same dialect>) in is_introspection_query, even though the guard first rewrites MySQL / no-dialect SQL with _mysql_parse_sql (carriage returns inside line comments become spaces) and the classifier parses the raw text; where the raw text fails to parse, the classifier returns False and the result is shown. [src/sqllens/safety/readonly.py:167]\n  - VC-32: is_introspection_query returns a bool for every SQL string the formatter passes it and for every dialect sqlglot_dialect_for_url returns, so components_to_blocks (called at query_database.py line 290 outside the inner except that sanitizes agent errors) does not raise from the classifier; the steps outside its parse handlers (Dialect.get_or_raise for a known dialect, _strip_leading_comments, the exp.Table walk) do not raise. [src/sqllens/tools/_format.py:432]\n  - VC-33: Only run_sql emits DATAFRAME components in the agent's stream, so the persisting last_sql_is_introspection flag (set at a run_sql card and not reset by other tools' cards) only ever withholds a DataFrame that run_sql produced for that introspection query. [src/sqllens/tools/_format.py:386]\n  - VC-34: The docstring asserts the agent already received a withheld introspection result through its tool result. [src/sqllens/tools/_format.py:274]\n  - VC-38: render_interactive, the no-blocks fallback for the Markdown text, renders nothing from a DATAFRAME component, so an introspection-only turn's Markdown contains no rows of the withheld result. [src/sqllens/tools/_format.py:553]\n  - VC-39: The comment asserts the factory always admits the 'Executing {tool}' status cards and query_database builds the trace only when the resolved show_details is on. [src/sqllens/tools/_format.py:597]\n  - VC-40: The docstring asserts a DataFrame from a schema-introspection query adds no block and only the agent sees it, which requires that no other channel returned to the caller (agent_trace, query_info, Markdown) carries its rows. [src/sqllens/tools/query_database.py:183]\n  - VC-46: 'SELECT FROM WHERE ;;;' fails to parse (ParseError/TokenError) under mysql, postgres, sqlite and no dialect, so the 'unparseable' tests exercise the classifier's fail-open path rather than a successful parse with no catalog table. [tests/unit/test_format.py:1936]\n  - VC-47: The test comment asserts '#' opens a line comment only in MySQL. [tests/unit/test_safety.py:929]\n  - VC-48: The control comment asserts these six catalogs already counted as introspection without a dialect before #301, so the control passes on the base code. [tests/unit/test_safety.py:892]\n  - VC-49: In a `query_database` result, the DataFrame of a `run_sql` call whose SQL `is_introspection_query` (as `src/sqllens/safety/readonly.py` defines it) classifies as introspection adds no entry to `_meta[\"sqllens/blocks\"]`, neither a table block nor a one-row text block, and the Markdown text content contains no table or text rendered from that DataFrame. [docs/internal/mcp-server/tools.md:102]\n  - VC-50: That classification uses the sqlglot dialect SQL Lens derives from the configured database URL for its read-only guard (`mysql`, `postgres` or `sqlite`). On a MySQL database, a catalog query such as `SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE()` is classified as introspection and its result is not shown. On a database configured with a `postgresql+psycopg://` URL, the result of `SELECT tablename FROM pg_catalog.pg_tables` is not shown. [src/sqllens/tools/query_database.py:290]\n  - VC-51: With a dialect given, `is_introspection_query` counts the `pg_catalog` schema and the `pg_` name prefix only for `postgres`; the `mysql`, `sys` and `performance_schema` schemas only for `mysql`; and the `sqlite_` and `pragma_` name prefixes only for `sqlite`, where `pragma_` matches, in any casing, both a table-valued function called with an argument list and a table name without one, so a SQLite data table whose name starts with `pragma_` is also classified as introspection and its result is not shown. `information_schema` and `SHOW` count for every dialect. With no dialect, every engine's schemas, prefixes and `pragma_` functions count. On MySQL, `SELECT amount FROM pg_payments` (and on Postgres, `SELECT id FROM sys.accounts`) is therefore a data query: its result is shown, and its success clears an earlier `run_sql` error. On SQLite, `SELECT name FROM pragma_table_info('widgets')` and `SELECT name FROM pragma_table_list` are introspection. [docs/internal/database-connectors/read-only-safety.md:68]\n  - VC-52: In a turn that runs an introspection query and then a data query and ends with answer text, the result holds the block, if any, that the data query's DataFrame produces and the answer text, in stream order, and nothing from the introspection result. [src/sqllens/tools/_format.py:432]\n  - VC-53: A turn whose only `run_sql` results are introspection results returns the same Markdown text, `is_error` value and `_meta[\"sqllens/blocks\"]` as the same turn with those results' DataFrame components removed: for example only its answer text, or `(no answer)` when nothing else would be shown. [docs/internal/mcp-server/tools.md:156]\n  - VC-54: An introspection success classified with the configured dialect does not clear an earlier `run_sql` error in the same turn, including on MySQL for a catalog query that uses `DATABASE()`. [src/sqllens/tools/_format.py:439]\n  - VC-55: The change leaves these as they are: the agent's own tool result for an introspection query, which keeps what `RunSqlTool` gives it today (for a non-empty result, a CSV preview and a saved-file reference); the user-visible blocks for `run_sql` results the classifier does not mark as introspection, which include value lookups against ordinary data tables whose names start with no catalog prefix of the configured engine, such as a status lookup table, and the blocks of a DataFrame that no `run_sql` card with a non-empty `metadata[\"sql\"]` string precedes in the turn; the success notification `RunSqlTool` returns instead of a DataFrame for a statement whose first word is not `SELECT` (for example `SHOW TABLES` or a `WITH … SELECT`), which holds only a row count and reaches the Markdown text only on a turn that produces no blocks; the classifier's fail-open rule, so SQL that does not parse under the configured dialect is still shown; the executed-SQL and agent-trace channels that `show_details` turns on; the text of the default system prompt in `src/sqllens/agent/core/system_prompt/default.py`; and the agent's answer text and the chart blocks it emits, including a chart emitted after an introspection query, which the change does not check for schema details. [src/sqllens/safety/readonly.py:167]\n  - VC-56: Regression tests exist for the first six criteria above. Each test of a changed outcome fails on the current code, and each control case (a data-only turn, and a no-dialect classifier case for a catalog that already counts today) passes on it. `tests/unit/test_format.py` holds tests built from synthetic `run_sql` status cards and DataFrame components for the hidden-block, ordering, introspection-only and error-supersede criteria. `tests/unit/test_safety.py` holds tests for the per-engine classifier criterion, with a no-dialect control. `tests/unit/test_query_database.py` holds a test that runs `query_database_impl_with_widgets` with a stub agent under a MySQL URL and under a `postgresql+psycopg://` URL. [tests/unit/test_format.py:1899]\n  - VC-36: The _sql_call helper models the real agent's run_sql emission: a running card then a success/error card with the same metadata['sql'], with the DataFrame after the pair; the real agent's DataFrame position relative to the completed card does not change the hide decision, since the flag is set at the running card. [tests/unit/test_format.py:1825]\n  - VC-37: The comment asserts the control tests below it pass without a dialect and therefore hold on the code before #301. [tests/unit/test_format.py:1955]\n  - VC-41: query_database derives the formatter's dialect from cfg.database.url with the same sqlglot_dialect_for_url mapping build_agent uses for the read-only guard, so the classifier and the guard agree on the dialect; a caller-supplied agent is documented as needing to be built from the same cfg. [src/sqllens/tools/query_database.py:290]\n  - VC-42: The config-loading doc asserts show_details is resolved per request and consumed by query_database and server.py, and that the agent factory admits UI_FEATURE_SHOW_TOOL_ARGUMENTS for the static default user group whatever its value, linking to factory.md#show_details--ui-feature-unlock. [docs/internal/setup/config-loading.md:33]\n  - VC-12: build_agent composes the runner stack using dialect = sqlglot_dialect_for_url(cfg.database.url) as shown in the row-level-security code snippet. [docs/internal/database-connectors/row-level-security.md:184]\n  - VC-35: `cfg.database.url` is a plain `str` (not a SecretStr or pydantic URL object) at the point `query_database_impl_with_widgets` passes it to `sqlglot_dialect_for_url`, which calls `.split('://', 1)` on it. [src/sqllens/tools/query_database.py:291]\n  - VC-43: `make_tool_cards('run_sql', {'sql': ...})` produces STATUS_CARDs whose `metadata['sql']` carries the SQL (as the real agent's run_sql cards do), and `make_dataframe` produces a DATAFRAME component the formatter renders as a table block. [tests/unit/test_query_database.py:1164]\n  - VC-44: Patching `agent_module.build_agent` and passing a config whose `database.url` was replaced via `model_copy(update=...)` makes `query_database_impl_with_widgets` use the stub agent and read the replaced URL; the singleton agent state does not leak a previously built agent into this test. [tests/unit/test_query_database.py:1158]\n\n  </details>\n- Reviewed against issue #301 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] In a `query_database` result, the DataFrame of a `run_sql` call whose SQL `is_introspection_query` (as `src/sqllens/safety/readonly.py` defines it) classifies as introspection adds no entry to `_meta[\"sqllens/blocks\"]`, neither a table block nor a one-row text block, and the Markdown text content contains no table or text rendered from that DataFrame.\n- [ ] That classification uses the sqlglot dialect SQL Lens derives from the configured database URL for its read-only guard (`mysql`, `postgres` or `sqlite`). On a MySQL database, a catalog query such as `SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE()` is classified as introspection and its result is not shown. On a database configured with a `postgresql+psycopg://` URL, the result of `SELECT tablename FROM pg_catalog.pg_tables` is not shown.\n- [ ] With a dialect given, `is_introspection_query` counts the `pg_catalog` schema and the `pg_` name prefix only for `postgres`; the `mysql`, `sys` and `performance_schema` schemas only for `mysql`; and the `sqlite_` and `pragma_` name prefixes only for `sqlite`, where `pragma_` matches, in any casing, both a table-valued function called with an argument list and a table name without one, so a SQLite data table whose name starts with `pragma_` is also classified as introspection and its result is not shown. `information_schema` and `SHOW` count for every dialect. With no dialect, every engine's schemas, prefixes and `pragma_` functions count. On MySQL, `SELECT amount FROM pg_payments` (and on Postgres, `SELECT id FROM sys.accounts`) is therefore a data query: its result is shown, and its success clears an earlier `run_sql` error. On SQLite, `SELECT name FROM pragma_table_info('widgets')` and `SELECT name FROM pragma_table_list` are introspection.\n- [ ] In a turn that runs an introspection query and then a data query and ends with answer text, the result holds the block, if any, that the data query's DataFrame produces and the answer text, in stream order, and nothing from the introspection result.\n- [ ] A turn whose only `run_sql` results are introspection results returns the same Markdown text, `is_error` value and `_meta[\"sqllens/blocks\"]` as the same turn with those results' DataFrame components removed: for example only its answer text, or `(no answer)` when nothing else would be shown.\n- [ ] An introspection success classified with the configured dialect does not clear an earlier `run_sql` error in the same turn, including on MySQL for a catalog query that uses `DATABASE()`.\n- [ ] The change leaves these as they are: the agent's own tool result for an introspection query, which keeps what `RunSqlTool` gives it today (for a non-empty result, a CSV preview and a saved-file reference); the user-visible blocks for `run_sql` results the classifier does not mark as introspection, which include value lookups against ordinary data tables whose names start with no catalog prefix of the configured engine, such as a status lookup table, and the blocks of a DataFrame that no `run_sql` card with a non-empty `metadata[\"sql\"]` string precedes in the turn; the success notification `RunSqlTool` returns instead of a DataFrame for a statement whose first word is not `SELECT` (for example `SHOW TABLES` or a `WITH … SELECT`), which holds only a row count and reaches the Markdown text only on a turn that produces no blocks; the classifier's fail-open rule, so SQL that does not parse under the configured dialect is still shown; the executed-SQL and agent-trace channels that `show_details` turns on; the text of the default system prompt in `src/sqllens/agent/core/system_prompt/default.py`; and the agent's answer text and the chart blocks it emits, including a chart emitted after an introspection query, which the change does not check for schema details.\n- [ ] Regression tests exist for the first six criteria above. Each test of a changed outcome fails on the current code, and each control case (a data-only turn, and a no-dialect classifier case for a catalog that already counts today) passes on it. `tests/unit/test_format.py` holds tests built from synthetic `run_sql` status cards and DataFrame components for the hidden-block, ordering, introspection-only and error-supersede criteria. `tests/unit/test_safety.py` holds tests for the per-engine classifier criterion, with a no-dialect control. `tests/unit/test_query_database.py` holds a test that runs `query_database_impl_with_widgets` with a stub agent under a MySQL URL and under a `postgresql+psycopg://` URL.",
+ "diff_produced_at_head": "665616f068f596cddd68e250e8b66d8985b0e635",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "api_contract:307.fixed.md:introspection-results-hidden:1",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "category": "api_contract",
+   "claim": "The release note asserts catalog queries are classified with the configured database's dialect, so on MySQL a data table pg_payments is shown, and a MySQL catalog query using DATABASE() no longer clears an earlier query error.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "Catalog queries are now classified with the\nconfigured database's SQL dialect, so a data table that only starts with\nanother engine's catalog prefix (for example `pg_payments` on MySQL) is shown,\nand a MySQL catalog query using `DATABASE()` no longer clears an earlier query\nerror.",
+   "source_file": "changelog.d/307.fixed.md",
+   "source_line": 4,
+   "source_line_end": 8,
+   "verify_against": "is_introspection_query and _CATALOGS_BY_DIALECT in src/sqllens/safety/readonly.py; base-view is_introspection_query for the 'no longer' comparison",
+   "verify_hint": "Trace `SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE()` through base is_introspection_query (no dialect) and head (dialect='mysql'), and `SELECT amount FROM pg_payments` under dialect='mysql'",
+   "claim_signature": "api_contract:307.fixed.md:dialect-aware-classification:4",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-2"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "First half verified: head src/sqllens/safety/readonly.py:89-107 (_CATALOGS_BY_DIALECT, _catalog_names) gives mysql prefixes () so `SELECT amount FROM pg_payments` under dialect='mysql' reaches line 206 with empty prefixes tuple (startswith(()) is False) and returns False, i.e. shown; base (view-base readonly.py:70-104) used a fixed ('pg_','sqlite_') prefix set, so it was hidden. Second half ('a MySQL catalog query using DATABASE() no longer clears an earlier error') not settled: base is_introspection_query (readonly.py:76-104) already returns True for information_schema.columns if sqlglot.parse_one succeeds with dialect=None, and the only head change relevant to that query is the dialect passed to parse_one. In the installed sqlglot, DATABASE tokenizes as TokenType.DATABASE (tokens.py:292), which is not in FUNC_TOKENS (parser.py:923-974), and sqlglot/dialects/mysql.py has no DATABASE-specific tokenizer/parser override (KEYWORDS at mysql.py:96-164 do not touch it), so I found no static reason the parse outcome differs between dialect=None and dialect='mysql'. If it parses in both, base already hid it and the 'no longer clears' wording is false; if it fails in both, head would return False too, contradicting tests/unit/test_format.py:1899-1907. I could not run sqlglot.parse_one('SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE()', dialect=None) vs dialect='mysql' (no execution tool), so the before/after behaviour is unconfirmed. Rejections lines cover other defects (unknown dialect, components_to_markdown) and not this claim.",
+   "file_checked": "src/sqllens/safety/readonly.py:67-208",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "api_contract:307.fixed.md:own-prefix-tables-hidden:8",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "dependency_interaction:factory.md:run-sql-card-sql-metadata:132",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "api_contract:factory.md:tool-arguments-always-admitted:134",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "api_contract:factory.md:fresh-uifeatures-per-agent:136",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "test_mock_alignment:factory.md:pinning-tests-call-gate:138",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "dependency_interaction:read-only-safety.md:show-returns-notification:55",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "absolute_claim:read-only-safety.md:every-introspection-withheld:55",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "api_contract:read-only-safety.md:both-uses-same-dialect:63",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "data_format_assumption:read-only-safety.md:show-after-comments:67",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "data_format_assumption:read-only-safety.md:per-dialect-catalog-schemas:68",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "data_format_assumption:read-only-safety.md:prefix-any-casing-functions:69",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "api_contract:read-only-safety.md:unknown-dialect-fallback:71",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "api_contract:read-only-safety.md:fail-open-fail-closed:73",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "absolute_claim:read-only-safety.md:never-changes-execution:73",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "api_contract:read-only-safety.md:factory-uses-dialect-mapper:164",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "api_contract:read-only-safety.md:dialect-mapping-table:187",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "api_contract:tools.md:dataframe-withheld-info-log:102",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "api_contract:tools.md:error-clear-uses-dialect:105",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "api_contract:tools.md:sql-card-always-emitted:106",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-23",
+   "claim_signature": "api_contract:tools.md:introspection-only-fallback:156",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-24",
+   "claim_signature": "api_contract:tools.md:show-details-off-drops-sql:244",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-25",
+   "category": "api_contract",
+   "claim": "The doc asserts that with show_details true and no SQL run (pure-text answer) the run_sql card is never emitted and the result is the same as the show_details-false branch above it (no SQL Markdown block, no _meta['sqllens/query']).",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "- `agent.show_details = True` but the agent never ran SQL (pure-text answer): the `run_sql` card is never emitted, same result as above.",
+   "source_file": "docs/internal/mcp-server/tools.md",
+   "source_line": 245,
+   "verify_against": "components_to_blocks last_sql handling in src/sqllens/tools/_format.py and query_database_impl_with_widgets in src/sqllens/tools/query_database.py",
+   "verify_hint": "Check that with no run_sql card last_sql stays None, query_info is None, and no SQL Markdown block is appended even when show_details is on; and that the agent trace is still built in that case (the branch above says the trace is dropped)",
+   "claim_signature": "api_contract:tools.md:no-sql-same-as-above:245",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-24"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "The SQL parts hold: in src/sqllens/tools/_format.py last_sql starts None (l.333), and query_info is built only when last_sql is not None (l.494, 561); _append_sql_block (query_database.py:127-133) returns markdown unchanged for falsy query_info. So with no run_sql card there is no SQL block and no sqllens/query. But the doc line says 'same result as above', and the branch above (tools.md:244) says query_database drops the agent trace. In query_database.py:309-318, with effective.show_details true, build_agent_trace runs unconditionally of whether SQL ran and returns a dict (non-None); it is returned (l.327) and server.py:389-390 attaches it as _meta['sqllens/agent_trace'] whenever agent_trace is not None. So a pure-text answer with show_details on still carries the trace channel, which differs from the show_details-false branch. The doc's 'same result as above' is therefore inaccurate on the trace channel (also contradicted by tools.md:254). No rejections line covers this (they concern dialect and components_to_markdown).",
+   "file_checked": "src/sqllens/tools/query_database.py:302-327",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-26",
+   "claim_signature": "api_contract:tools.md:trace-only-when-show-details:276",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-27",
+   "claim_signature": "api_contract:tools.md:no-answer-error-contract:448",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-28",
+   "claim_signature": "dependency_interaction:readonly.py:table-valued-function-node-shape:200",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-29",
+   "claim_signature": "dependency_interaction:readonly.py:show-command-root-name:195",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-30",
+   "claim_signature": "api_contract:readonly.py:guard-classifier-parse-parity:167",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-31",
+   "category": "absolute_claim",
+   "claim": "The docstring asserts introspection is a statement that references any catalog table, even alongside data tables, and that a name prefix matches, in any casing, a table name or a table-valued function called in FROM.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "or a statement that references any catalog table, even\n    alongside data tables.",
+   "source_file": "src/sqllens/safety/readonly.py",
+   "source_line": 135,
+   "source_line_end": 142,
+   "verify_against": "the exp.Table walk in is_introspection_query (lines 199-207) of src/sqllens/safety/readonly.py",
+   "verify_hint": "Trace inputs that could falsify it: a catalog table inside a CTE body, a WHERE subquery or a UNION branch; a schema-qualified table-valued function (main.pragma_table_info('t')); a quoted mixed-case catalog name (\"PG_CATALOG\".\"PG_CLASS\") on postgres; a catalog reached through a LATERAL or JOIN to a table-valued function",
+   "claim_signature": "absolute_claim:readonly.py:references-any-catalog-table:135",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-4"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "readonly.py:199-207 walks parsed.find_all(exp.Table), so a catalog table in a CTE, WHERE subquery or UNION branch is covered. It lowercases table.db and the name, so quoted mixed case is covered. It reads Anonymous table functions via table.this, so schema-qualified main.pragma_table_info('t') is covered when sqlglot parses it as a Table. The claim is absolute ('any catalog table', 'a table-valued function called in FROM'). I could not settle the LATERAL/JOIN-to-function input. sqlglot's _parse_lateral (sqlglot/parser.py:4735-4790) can set Lateral.this to a bare function (_parse_function) with no exp.Table node. A statement such as 'SELECT * FROM t, LATERAL pg_get_keywords() k' on postgres might then bypass the walk. Whether it does depends on whether _parse_select(table=True) consumes the name as a Table first, and I could not run sqlglot to check. No test in tests/ covers this (the only LATERAL hit is test_safety_rls.py:340). Missing evidence: the output of sqlglot.parse_one(..., dialect='postgres').find_all(exp.Table) for that statement. I did not run it.",
+   "file_checked": "src/sqllens/safety/readonly.py:199-207",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-32",
+   "claim_signature": "api_contract:_format.py:classifier-never-raises:432",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-33",
+   "claim_signature": "dependency_interaction:_format.py:dataframe-only-from-run-sql:386",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-34",
+   "claim_signature": "dependency_interaction:_format.py:agent-receives-tool-result:274",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-38",
+   "claim_signature": "api_contract:_format.py:fallback-renders-no-dataframe:553",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-39",
+   "claim_signature": "api_contract:_format.py:factory-admits-tool-cards:597",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-40",
+   "claim_signature": "api_contract:query_database.py:only-agent-sees-introspection:183",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-45",
+   "category": "test_mock_alignment",
+   "claim": "The test docstring asserts the configured database's sqlglot dialect reaches the formatter; the two parametrized catalog queries would therefore need to be classified differently with the URL's dialect than with dialect=None for the test to show that.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "Issue #301: the configured database's sqlglot dialect reaches the\n    formatter, so a catalog result is withheld while the data result shows.",
+   "source_file": "tests/unit/test_query_database.py",
+   "source_line": 1156,
+   "source_line_end": 1157,
+   "verify_against": "is_introspection_query in src/sqllens/safety/readonly.py with dialect None versus mysql/postgres",
+   "verify_hint": "Trace 'SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE()' and 'SELECT tablename FROM pg_catalog.pg_tables' through is_introspection_query with dialect=None: if both classify as introspection, the test passes whether or not query_database.py:291 passes the dialect",
+   "claim_signature": "test_mock_alignment:test_query_database.py:dialect-reaches-formatter:1156",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-11"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "The test (tests/unit/test_query_database.py:1137-1179) claims the configured dialect reaches the formatter. Its two catalog queries are 'SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE()' and 'SELECT tablename FROM pg_catalog.pg_tables'. In src/sqllens/safety/readonly.py, is_introspection_query with dialect=None uses _catalog_names(None), which returns _ALL_CATALOG_SCHEMAS (information_schema, pg_catalog, mysql, sys, performance_schema) and all prefixes (readonly.py:102-105). The first query's table schema is information_schema and the second's is pg_catalog, both in that union. Both parse without a dialect, because DATABASE() is just an anonymous function. So both classify True with dialect=None, exactly as they do under mysql and postgres respectively. The test therefore passes even if query_database.py stopped passing the dialect, and it does not show what its docstring asserts. The rejections lines cover other findings (unknown dialect, components_to_markdown) and not this missing-discrimination test gap, so they do not apply.",
+   "file_checked": "tests/unit/test_query_database.py:1137-1179",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-46",
+   "claim_signature": "test_mock_alignment:test_format.py:unparseable-sql-really-fails:1936",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-47",
+   "claim_signature": "absolute_claim:test_safety.py:hash-comment-mysql-only:929",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-48",
+   "claim_signature": "test_mock_alignment:test_safety.py:no-dialect-control-holds-base:892",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-49",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-50",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-51",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-52",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-53",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-54",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-55",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-56",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "id": "VC-36",
+   "claim_signature": "test_mock_alignment:test_format.py:sql-call-emission-order:1825",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 3
+  },
+  {
+   "id": "VC-37",
+   "claim_signature": "absolute_claim:test_format.py:controls-hold-on-base:1955",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 3
+  },
+  {
+   "id": "VC-41",
+   "claim_signature": "api_contract:query_database.py:formatter-guard-same-dialect:290",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 3
+  },
+  {
+   "id": "VC-42",
+   "claim_signature": "api_contract:config-loading.md:show-details-consumers:33",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 3
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "api_contract:row-level-security.md:factory-uses-dialect-mapper:184",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-35",
+   "claim_signature": "data_format_assumption:query_database.py:database-url-plain-str:291",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-43",
+   "claim_signature": "test_mock_alignment:test_query_database.py:make-tool-cards-sql-metadata:1164",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-44",
+   "claim_signature": "test_mock_alignment:test_query_database.py:stub-agent-patched-url:1158",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  }
+ ]
+}

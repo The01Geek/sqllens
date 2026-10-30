@@ -1,0 +1,158 @@
+[
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "src/sqllens/tools/_format.py lines 251-254: dialect is an open str; a name sqlglot does not know may make parse_one fail, and the classifier fails open to False so catalog results would be shown. Unreachable from the production caller today.",
+  "defect_signature": {
+   "file": "src/sqllens/tools/_format.py",
+   "line_range": [
+    251,
+    254
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "pushed_back",
+  "iter": 1
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "src/sqllens/tools/_format.py lines 565-576: components_to_markdown has no dialect parameter and always classifies under the all-engine union, while the module docstring calls it the same walker. No caller in src/.",
+  "defect_signature": {
+   "file": "src/sqllens/tools/_format.py",
+   "line_range": [
+    565,
+    576
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "pushed_back",
+  "iter": 1
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "critical",
+  "description": "src/sqllens/safety/readonly.py lines 149-158: is_introspection_query catches every Exception around sqlglot.parse_one and returns False (data query). This change makes that result decide whether a catalog DataFrame is withheld (_format.py lines 431, 436), so a non-parse error (RecursionError, an AttributeError/KeyError bug in sqlglot's dialect parser) shows a schema result and lets an introspection success clear an earlier run_sql error (isError false). The INFO log records only the exception type and calls it 'SQL did not parse'. assert_select_only in the same file catches only (ParseError, TokenError). The docstring (lines 143-145) and docs/internal/database-connectors/read-only-safety.md line 73 describe a narrower catch than the code has.",
+  "defect_signature": {
+   "file": "src/sqllens/safety/readonly.py",
+   "line_range": [
+    149,
+    158
+   ],
+   "kind": "unhandled_exception"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "suggestion",
+  "description": "src/sqllens/tools/_format.py lines 390-393: the INFO 'withheld' log line records no dialect, row count or run_sql call id, so a false positive (e.g. a pragma_ data table on SQLite) cannot be traced to its query.",
+  "defect_signature": {
+   "file": "src/sqllens/tools/_format.py",
+   "line_range": [
+    390,
+    393
+   ],
+   "kind": "other"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "suggestion",
+  "description": "src/sqllens/tools/_format.py lines 389-393: a turn whose only results are introspection results returns '(no answer)' with isError false and no client-visible sign that rows were withheld. Criterion 5 requires this output; only a server-side INFO log records it.",
+  "defect_signature": {
+   "file": "src/sqllens/tools/_format.py",
+   "line_range": [
+    389,
+    393
+   ],
+   "kind": "other"
+  },
+  "fix_decision": "pushed_back"
+ },
+ {
+  "agent": "prflow:comment-analyzer",
+  "severity": "suggestion",
+  "description": "docs/internal/mcp-server/tools.md line 106: 'The factory always emits this card' names the wrong component; build_agent only admits DEFAULT_USER_GROUP to UI_FEATURE_SHOW_TOOL_ARGUMENTS (factory.py lines 165-175), and the agent emits the card when run_sql runs.",
+  "defect_signature": {
+   "file": "docs/internal/mcp-server/tools.md",
+   "line_range": [
+    106,
+    106
+   ],
+   "kind": "comment_drift"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:comment-analyzer",
+  "severity": "suggestion",
+  "description": "src/sqllens/safety/readonly.py lines 109-110: the _strip_leading_comments docstring says '#' is dropped 'on MySQL', but line 110 also treats '#' as a comment when dialect is None. The final pass noted the same line in prose.",
+  "defect_signature": {
+   "file": "src/sqllens/safety/readonly.py",
+   "line_range": [
+    109,
+    110
+   ],
+   "kind": "comment_drift"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:requesting-code-review",
+  "severity": "suggestion",
+  "description": "src/sqllens/safety/readonly.py lines 136-137 (and comment line 84): 'With no dialect, or one not listed, every engine's catalogs count' is false for a dialect name sqlglot does not register (e.g. 'postgresql'): parse_one raises via Dialect.get_or_raise, the except returns False, and no catalog counts. No production caller reaches it.",
+  "defect_signature": {
+   "file": "src/sqllens/safety/readonly.py",
+   "line_range": [
+    136,
+    137
+   ],
+   "kind": "documented_falsehood"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:requesting-code-review",
+  "severity": "suggestion",
+  "description": "docs/internal/database-connectors/read-only-safety.md line 71: 'or a dialect not listed above, every engine's schemas and prefixes count' is false for a dialect name sqlglot does not register; the parse fails and the classifier returns False.",
+  "defect_signature": {
+   "file": "docs/internal/database-connectors/read-only-safety.md",
+   "line_range": [
+    71,
+    71
+   ],
+   "kind": "documented_falsehood"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:requesting-code-review",
+  "severity": "suggestion",
+  "description": "changelog.d/307.fixed.md lines 1-8: the release note omits that a data table whose name starts with the configured engine's own catalog prefix (SQLite pragma_..., Postgres pg_...) is now hidden, where before it was shown. Nothing in the note is false.",
+  "defect_signature": {
+   "file": "changelog.d/307.fixed.md",
+   "line_range": [
+    1,
+    8
+   ],
+   "kind": "other"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "src/sqllens/safety/readonly.py lines 79-91: the dialect names sqlglot_dialect_for_url returns and the _CATALOGS_BY_DIALECT keys are kept in sync only by a comment; no shared Literal/enum or test ties them. A new engine added to the mapper but not the table would fall back to the all-engine union and hide pg_payments-style data tables again. Unreachable today.",
+  "defect_signature": {
+   "file": "src/sqllens/safety/readonly.py",
+   "line_range": [
+    79,
+    91
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "applied"
+ }
+]

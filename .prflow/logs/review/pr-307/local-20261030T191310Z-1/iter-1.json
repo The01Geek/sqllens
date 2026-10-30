@@ -1,0 +1,743 @@
+{
+  "iter": 1,
+  "loop_role": "fix",
+  "dispatch_mode": "fanned-out",
+  "dispatch_disposition": null,
+  "fix_commit_sha": "366610d5c6fdd25148834c76e5a663fa394c74b3",
+  "fix_decisions": [
+    {
+      "finding_id": "VC-30",
+      "decision": "applied",
+      "commit": "366610d5c6fdd25148834c76e5a663fa394c74b3"
+    },
+    {
+      "finding_id": "F-1",
+      "decision": "applied",
+      "commit": "366610d5c6fdd25148834c76e5a663fa394c74b3"
+    },
+    {
+      "finding_id": "F-2",
+      "decision": "pushed_back",
+      "source_file": "src/sqllens/tools/_format.py",
+      "claim_text": "dialect is an open str; a name sqlglot does not know may make parse_one fail, and the classifier fails open to False so catalog results would be shown.",
+      "skip_category": "claim-quality",
+      "evidence": "No caller sends an unknown dialect: the only production caller (src/sqllens/tools/query_database.py) passes sqlglot_dialect_for_url(cfg.database.url), which returns only 'sqlite', 'postgres', 'mysql' or None (src/sqllens/safety/readonly.py sqlglot_dialect_for_url). A guard for an input no caller sends is ruled out by the fix discipline.",
+      "parking_evidence": {
+        "basis": "absent caller: no caller passes a dialect outside sqlglot_dialect_for_url's range",
+        "failing_input": "components_to_blocks(..., dialect='<unknown sqlglot dialect>')",
+        "source": "src/sqllens/safety/readonly.py sqlglot_dialect_for_url; src/sqllens/tools/query_database.py call site",
+        "finding_ref": {
+          "iter": 1,
+          "index": 2
+        }
+      }
+    },
+    {
+      "finding_id": "F-3",
+      "decision": "pushed_back",
+      "source_file": "src/sqllens/tools/_format.py",
+      "claim_text": "components_to_markdown has no dialect parameter and always classifies under the all-engine union, while the module docstring calls it the same walker. No caller in src/.",
+      "skip_category": "claim-quality",
+      "evidence": "src/sqllens/tools/_format.py components_to_markdown body calls components_to_blocks(components), so 'the same walker' holds; it has no src/ caller (grep: only tests and conftest use it), so adding a dialect parameter would serve an absent caller.",
+      "parking_evidence": {
+        "basis": "docstring is accurate and the parameter would serve no caller",
+        "failing_input": "components_to_markdown(stream) on a MySQL deployment",
+        "source": "src/sqllens/tools/_format.py:575 components_to_blocks(components)",
+        "finding_ref": {
+          "iter": 1,
+          "index": 3
+        }
+      }
+    },
+    {
+      "finding_id": "F-4",
+      "decision": "applied",
+      "commit": "366610d5c6fdd25148834c76e5a663fa394c74b3"
+    },
+    {
+      "finding_id": "F-5",
+      "decision": "applied",
+      "commit": "366610d5c6fdd25148834c76e5a663fa394c74b3"
+    },
+    {
+      "finding_id": "F-6",
+      "decision": "applied",
+      "commit": "366610d5c6fdd25148834c76e5a663fa394c74b3"
+    },
+    {
+      "finding_id": "F-7",
+      "decision": "applied",
+      "commit": "366610d5c6fdd25148834c76e5a663fa394c74b3"
+    },
+    {
+      "finding_id": "F-8",
+      "decision": "applied",
+      "commit": "366610d5c6fdd25148834c76e5a663fa394c74b3"
+    },
+    {
+      "finding_id": "F-9",
+      "decision": "applied",
+      "commit": "366610d5c6fdd25148834c76e5a663fa394c74b3"
+    },
+    {
+      "finding_id": "F-10",
+      "decision": "applied",
+      "commit": "366610d5c6fdd25148834c76e5a663fa394c74b3"
+    }
+  ],
+  "verification_evidence": {
+    "VC-29_probe": "sqlglot 30.26.0: parse_one(mysql DATABASE() catalog query, dialect='mysql') returns exp.Select and is_introspection_query is True",
+    "VC-30_probe": "pre-fix: '/* c */ SHOW TABLES' parsed as exp.Show (mysql) or Command SHOW (postgres/sqlite/None) and classified False",
+    "suite": "pytest -q: 2054 passed; ruff check: all checks passed"
+  },
+  "telemetry": {
+    "phase_1": {
+      "calls": 1,
+      "tokens": 214367,
+      "wall_clock_s": 553
+    }
+  },
+  "phase3_failed_agents": [],
+  "diff_produced_at_head": "35db446871d112ce4c70395d7a66b9992d2b8511",
+  "reference_reads": {
+    "fix_delta": {
+      "status": "verified",
+      "outcome": "clean",
+      "reason": null
+    }
+  },
+  "iteration_head": "366610d5c6fdd25148834c76e5a663fa394c74b3",
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "description": "src/sqllens/safety/readonly.py lines 75-106: _CATALOG_SCHEMAS_BY_DIALECT and _CATALOG_NAME_PREFIXES_BY_DIALECT must share keys (and match sqlglot_dialect_for_url's return values) but only a comment enforces it; _catalog_names checks the schemas dict then indexes the prefixes dict, so a one-sided key would raise KeyError outside the classifier's try. Key sets agree today.",
+      "defect_signature": {
+        "file": "src/sqllens/safety/readonly.py",
+        "line_range": [
+          75,
+          106
+        ],
+        "kind": "type_design"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-2",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "description": "src/sqllens/tools/_format.py lines 251-254: dialect is an open str; a name sqlglot does not know may make parse_one fail, and the classifier fails open to False so catalog results would be shown. Unreachable from the production caller today.",
+      "defect_signature": {
+        "file": "src/sqllens/tools/_format.py",
+        "line_range": [
+          251,
+          254
+        ],
+        "kind": "type_design"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "pushed_back"
+    },
+    {
+      "finding_id": "F-3",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "description": "src/sqllens/tools/_format.py lines 565-576: components_to_markdown has no dialect parameter and always classifies under the all-engine union, while the module docstring calls it the same walker. No caller in src/.",
+      "defect_signature": {
+        "file": "src/sqllens/tools/_format.py",
+        "line_range": [
+          565,
+          576
+        ],
+        "kind": "type_design"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "pushed_back"
+    },
+    {
+      "finding_id": "F-4",
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "suggestion",
+      "description": "src/sqllens/tools/_format.py lines 386-394: a withheld introspection DataFrame is dropped with no log line, so operators cannot tell an empty turn from a suppressed result.",
+      "defect_signature": {
+        "file": "src/sqllens/tools/_format.py",
+        "line_range": [
+          386,
+          394
+        ],
+        "kind": "other"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-5",
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "suggestion",
+      "description": "src/sqllens/safety/readonly.py lines 133-136: the fail-open except Exception now also decides whether a catalog result is shown, and leaves no server-side record when a parse failure lets one through.",
+      "defect_signature": {
+        "file": "src/sqllens/safety/readonly.py",
+        "line_range": [
+          133,
+          136
+        ],
+        "kind": "other"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-6",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "description": "docs/internal/database-connectors/read-only-safety.md line 55: 'withholds from the user the result of every run_sql query the classifier marks as introspection' is broader than the code; a SHOW yields a row-count NotificationComponent, not a DataFrame, which can still reach the Markdown on a turn with no blocks.",
+      "defect_signature": {
+        "file": "docs/internal/database-connectors/read-only-safety.md",
+        "line_range": [
+          55,
+          55
+        ],
+        "kind": "documented_falsehood"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-7",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "description": "docs/internal/database-connectors/read-only-safety.md line 68: wording can be read as pg_catalog applying to postgres and mysql; code scopes it to postgres only.",
+      "defect_signature": {
+        "file": "docs/internal/database-connectors/read-only-safety.md",
+        "line_range": [
+          68,
+          68
+        ],
+        "kind": "style"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-8",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "description": "src/sqllens/tools/_format.py lines 360-361: comment says 'row counting above still sees it' but the row-count update the DataFrame feeds is below, at lines 398-400.",
+      "defect_signature": {
+        "file": "src/sqllens/tools/_format.py",
+        "line_range": [
+          360,
+          361
+        ],
+        "kind": "style"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-9",
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "suggestion",
+      "description": "tests/unit/test_format.py lines 1954-1957: no test for a chart emitted after an introspection run_sql card, and fail-open is tested only with dialect=None, not under a configured dialect (criterion 7 leave-unchanged items).",
+      "defect_signature": {
+        "file": "tests/unit/test_format.py",
+        "line_range": [
+          1954,
+          1957
+        ],
+        "kind": "test_gap"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-10",
+      "agent": "prflow:requesting-code-review",
+      "severity": "suggestion",
+      "description": "docs/internal/mcp-server/tools.md lines 110-116 and 193: the sqllens/blocks wire-contract bullets and the query_database_impl_with_widgets paragraph were not updated to say an introspection DataFrame produces no block.",
+      "defect_signature": {
+        "file": "docs/internal/mcp-server/tools.md",
+        "line_range": [
+          110,
+          116
+        ],
+        "kind": "other"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    }
+  ],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": true,
+    "test_relevant": true,
+    "detect_all_audit": false,
+    "checklist_skipped": null
+  },
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "cap_drops": {
+    "count": 0,
+    "by_category": {}
+  },
+  "checklist": [
+    {
+      "id": "VC-1",
+      "claim_signature": "api_contract:307.fixed.md:introspection-results-hidden",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-2",
+      "claim_signature": "dependency_interaction:307.fixed.md:dialect-aware-classification",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-3",
+      "claim_signature": "api_contract:repo:changelog-fragment",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-4",
+      "claim_signature": "absolute_claim:read-only-safety.md:every-introspection-withheld:55",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-5",
+      "claim_signature": "api_contract:read-only-safety.md:formatter-receives-dialect:63",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-6",
+      "claim_signature": "dependency_interaction:read-only-safety.md:per-dialect-catalog-schemas:68",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-7",
+      "claim_signature": "dependency_interaction:read-only-safety.md:per-dialect-name-prefixes:69",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-8",
+      "claim_signature": "dependency_interaction:read-only-safety.md:no-dialect-union-fallback:71",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-9",
+      "claim_signature": "dependency_interaction:read-only-safety.md:show-before-parse-fail-open:73",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-10",
+      "claim_signature": "api_contract:read-only-safety.md:dialect-mapper-location:187",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-11",
+      "claim_signature": "api_contract:read-only-safety.md:factory-uses-dialect-mapper:164",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-12",
+      "claim_signature": "api_contract:row-level-security.md:factory-uses-dialect-mapper:184",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-13",
+      "claim_signature": "api_contract:factory.md:tool-args-always-admitted:134",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-14",
+      "claim_signature": "api_contract:factory.md:out-of-box-card-hidden:132",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-15",
+      "claim_signature": "api_contract:factory.md:fresh-uifeatures-per-agent:136",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-16",
+      "claim_signature": "test_mock_alignment:factory.md:pinning-tests-exercise-gate:138",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-17",
+      "claim_signature": "api_contract:factory.md:same-dialect-guard-formatter:154",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-18",
+      "claim_signature": "api_contract:tools.md:dataframe-hidden-after-introspection:102",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-19",
+      "claim_signature": "api_contract:tools.md:error-clear-uses-dialect:105",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-20",
+      "claim_signature": "api_contract:tools.md:card-always-emitted:106",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-21",
+      "claim_signature": "api_contract:tools.md:error-clear-uses-dialect:148",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-22",
+      "claim_signature": "api_contract:tools.md:introspection-only-no-blocks:156",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-23",
+      "claim_signature": "api_contract:tools.md:show-details-off-drops-query:244",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-24",
+      "claim_signature": "api_contract:tools.md:trace-gated-on-show-details:276",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-25",
+      "claim_signature": "api_contract:tools.md:no-answer-ignores-introspection:448",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-26",
+      "claim_signature": "data_format_assumption:tools.md:row-count-hidden-dataframe:240",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-27",
+      "claim_signature": "dependency_interaction:readonly.py:pragma-function-anonymous-name:144",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-28",
+      "claim_signature": "dependency_interaction:readonly.py:table-db-schema-qualifier:141",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "important"
+    },
+    {
+      "id": "VC-29",
+      "claim_signature": "dependency_interaction:readonly.py:mysql-database-function-parses:134",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "important"
+    },
+    {
+      "id": "VC-30",
+      "claim_signature": "absolute_claim:readonly.py:any-catalog-reference-introspection:112",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "FAIL",
+      "severity": "important"
+    },
+    {
+      "id": "VC-31",
+      "claim_signature": "absolute_claim:readonly.py:prefix-any-casing-tvf:118",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-32",
+      "claim_signature": "absolute_claim:readonly.py:fail-open-unparseable-shown:127",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-33",
+      "claim_signature": "api_contract:readonly.py:dialect-keys-sync-url-mapper:79",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-34",
+      "claim_signature": "api_contract:factory.py:dialect-mapper-unchanged:89",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-35",
+      "claim_signature": "data_format_assumption:query_database.py:database-url-plain-str:291",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-36",
+      "claim_signature": "dependency_interaction:_format.py:status-card-precedes-dataframe:422",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-37",
+      "claim_signature": "data_format_assumption:_format.py:classification-on-sql-change:422",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-38",
+      "claim_signature": "absolute_claim:_format.py:introspection-adds-no-block:270",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-39",
+      "claim_signature": "absolute_claim:_format.py:factory-always-admits-cards:587",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-40",
+      "claim_signature": "absolute_claim:query_database.py:only-agent-sees-introspection:183",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-41",
+      "claim_signature": "api_contract:_format.py:callers-pass-dialect:575",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-42",
+      "claim_signature": "test_mock_alignment:test_format.py:sql-call-stream-order:1826",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-43",
+      "claim_signature": "test_mock_alignment:test_query_database.py:make-tool-cards-sql-metadata:1164",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-44",
+      "claim_signature": "test_mock_alignment:test_query_database.py:stub-agent-patched-url:1158",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-45",
+      "claim_signature": "absolute_claim:test_format.py:controls-hold-before-301:1936",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-46",
+      "claim_signature": "absolute_claim:test_safety.py:no-dialect-control-before-301:879",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-1",
+      "id": "VC-47",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-2",
+      "id": "VC-48",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-3",
+      "id": "VC-49",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-4",
+      "id": "VC-50",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-5",
+      "id": "VC-51",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-6",
+      "id": "VC-52",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-7",
+      "id": "VC-53",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-8",
+      "id": "VC-54",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    }
+  ],
+  "fix_files": [
+    "docs/internal/database-connectors/read-only-safety.md",
+    "docs/internal/mcp-server/tools.md",
+    "src/sqllens/safety/readonly.py",
+    "src/sqllens/tools/_format.py",
+    "tests/unit/test_format.py",
+    "tests/unit/test_safety.py"
+  ],
+  "synthesized": false
+}
