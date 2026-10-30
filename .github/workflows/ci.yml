@@ -59,6 +59,16 @@ jobs:
           git fetch --no-tags origin "$CHANGELOG_BASE"
           python scripts/changelog.py policy --base "$CHANGELOG_BASE" --branch "$CHANGELOG_BRANCH"
       - run: ruff check .
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        if: matrix.python-version == '3.12'
+        with:
+          node-version: "24"
+      - name: Test security audit workflow expressions
+        if: matrix.python-version == '3.12'
+        working-directory: .github/tests/security-audit
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test
       # Skip the connectors marker — those need real DB service containers
       # and run in the dedicated job below.
       - run: pytest -q -m "not connectors"
