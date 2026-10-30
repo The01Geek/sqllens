@@ -6,6 +6,7 @@ import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
+from sqllens.agent.integrations.sql_threads import run_blocking_sql
 # See the sqlite runner for the rationale on this shared helper.
 from sqllens.safety.limits import effective_row_cap, rows_to_capped_df
 from sqllens.safety.readonly import is_read_shaped
@@ -89,6 +90,17 @@ class MySQLRunner(SqlRunner):
         Raises:
             pymysql.Error: If query execution fails (including MAX_EXECUTION_TIME firing).
         """
+        # The driver calls below block, so they run on the SQL worker pool and
+        # the event loop stays free for health checks and other requests. See
+        # ``sql_threads`` for its concurrency limit and cancellation behaviour.
+        return await run_blocking_sql(
+            self._run_sql_blocking, args, require_base_tables=require_base_tables
+        )
+
+    def _run_sql_blocking(
+        self, args: RunSqlToolArgs, *, require_base_tables: bool
+    ) -> pd.DataFrame:
+        """Execute ``args.sql`` synchronously; called on a worker thread by ``run_sql``."""
         conn = self.pymysql.connect(
             host=self.host,
             user=self.user,

@@ -8,9 +8,10 @@ bundled SQLite Chinook DB, with a configurable auth mode. We use a real
 ``mcp`` SDK client over Streamable HTTP — these tests prove the wire protocol
 works, not just our internal abstractions.
 
-LLM is never called: tests invoke discovery, metadata, and memory-import tools.
-``query_database`` integration tests live in a separate file gated behind a
-real Anthropic key.
+No test here calls the real Anthropic API. Most invoke discovery, metadata and
+memory tools, or replace the agent behind ``query_database``.
+``test_slow_agent_run_responsiveness.py`` runs ``query_database`` through the
+real SDK against a local stand-in for the Messages API.
 """
 
 from __future__ import annotations

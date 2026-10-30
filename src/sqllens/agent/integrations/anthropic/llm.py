@@ -33,7 +33,15 @@ class AnthropicLlmService(LlmService):
             Defaults to "claude-opus-5-5". Can also be set via ANTHROPIC_MODEL env var.
         api_key: API key; falls back to env `ANTHROPIC_API_KEY`.
         base_url: Optional custom base URL; env `ANTHROPIC_BASE_URL` if unset.
-        extra_client_kwargs: Extra kwargs forwarded to `anthropic.Anthropic()`.
+        extra_client_kwargs: Extra kwargs forwarded to `anthropic.AsyncAnthropic()`.
+
+    The client is the SDK's async client. Requests and streamed responses are
+    awaited, so a slow model call yields the event loop; a synchronous client
+    here would stall every other request the server handles until it returned.
+    The SDK rejects a synchronous ``http_client`` when the service is built. The
+    service never closes its client; the client opens connections only when a
+    request is sent and lives as long as the service. Those connections belong to
+    the event loop that opened them, so drive one service from one event loop.
     """
 
     def __init__(
@@ -61,13 +69,13 @@ class AnthropicLlmService(LlmService):
         if base_url:
             client_kwargs["base_url"] = base_url
 
-        self._client = anthropic.Anthropic(**client_kwargs)
+        self._client = anthropic.AsyncAnthropic(**client_kwargs)
 
     async def send_request(self, request: LlmRequest) -> LlmResponse:
         """Send a non-streaming request to Anthropic and return the response."""
         payload = self._build_payload(request)
 
-        resp = self._client.messages.create(**payload)
+        resp = await self._client.messages.create(**payload)
 
         logger.info(f"Anthropic response: {resp}")
 
@@ -104,12 +112,12 @@ class AnthropicLlmService(LlmService):
         logger.info(f"Anthropic streaming payload: {payload}")
 
         # SDK provides a streaming context manager with a text_stream iterator.
-        with self._client.messages.stream(**payload) as stream:
-            for text in stream.text_stream:
+        async with self._client.messages.stream(**payload) as stream:
+            async for text in stream.text_stream:
                 if text:
                     yield LlmStreamChunk(content=text)
 
-            final = stream.get_final_message()
+            final = await stream.get_final_message()
             logger.info(f"Anthropic stream response: {final}")
             _, tool_calls = self._parse_message_content(final)
             if tool_calls:

@@ -157,7 +157,7 @@ def probe_database(cfg: Config) -> None:
 def probe_llm(cfg: Config) -> None:
     """Construct the Anthropic client via ``AnthropicLlmService`` to validate config.
 
-    Goes through ``AnthropicLlmService`` rather than ``anthropic.Anthropic``
+    Goes through ``AnthropicLlmService`` rather than the SDK client
     directly so ``ANTHROPIC_BASE_URL`` / ``ANTHROPIC_API_KEY`` / ``ANTHROPIC_MODEL``
     env fallback and the model-default behavior match what ``build_agent`` will
     instantiate at serve time. No network round-trip — that would cost a
