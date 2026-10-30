@@ -175,6 +175,7 @@ async def test_health_and_list_data_sources_answer_during_slow_agent_run(
             raise
 
         slow_model.release.set()
-        await asyncio.wait_for(run, HOLD_LIMIT_S)
+        result = await asyncio.wait_for(run, HOLD_LIMIT_S)
+        assert not result.isError
 
     assert not slow_model.hold_expired, "the stand-in answered only after its hold limit"

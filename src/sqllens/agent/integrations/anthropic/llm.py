@@ -38,6 +38,9 @@ class AnthropicLlmService(LlmService):
     The client is the SDK's async client. Requests and streamed responses are
     awaited, so a slow model call yields the event loop; a synchronous client
     here would stall every other request the server handles until it returned.
+    The SDK rejects a synchronous ``http_client`` when the service is built. The
+    service never closes its client; the client opens connections only when a
+    request is sent and lives as long as the service.
     """
 
     def __init__(
