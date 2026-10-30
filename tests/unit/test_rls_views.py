@@ -162,19 +162,27 @@ class _KwargsRunner:
     lambda: _KwargsRunner(),
     lambda: ReadOnlyGuardRunner(RowCapRunner(_LegacyRunner(), max_rows=10), dialect="sqlite"),
     lambda: RowCapRunner(_KwargsRunner(), max_rows=10),
-    lambda: type("CustomCap", (RowCapRunner,), {
-        "run_sql": lambda self, args, context: self._inner.run_sql(args, context),
-    })(_KwargsRunner(), max_rows=10),
 ])
 def test_runner_without_declared_relation_check_is_rejected_at_construction(
     make_inner,
 ) -> None:
     # The shipped wrappers only forward the flag, so the check must reach the
     # runner beneath them; ``**kwargs`` alone does not show the check is done.
-    with pytest.raises(
-        TypeError, match=r"(_LegacyRunner|_KwargsRunner|CustomCap)\.run_sql must declare"
-    ):
+    with pytest.raises(TypeError, match=r"(_LegacyRunner|_KwargsRunner)\.run_sql must declare"):
         RlsGuardRunner(make_inner(), [_RULE], dialect="sqlite")
+
+
+def test_wrapper_subclass_is_checked_rather_than_looked_past(database) -> None:
+    # The subclass drops the keyword even though the runner beneath it declares
+    # it, so only checking the subclass itself catches the gap.
+    class CustomCap(RowCapRunner):
+        async def run_sql(self, args, context):
+            return await self._inner.run_sql(args, context)
+
+    with pytest.raises(TypeError, match=r"^CustomCap\.run_sql must declare"):
+        RlsGuardRunner(
+            CustomCap(SqliteRunner(str(database)), max_rows=10), [_RULE], dialect="sqlite"
+        )
 
 
 async def test_rules_appended_after_construction_are_not_applied() -> None:
