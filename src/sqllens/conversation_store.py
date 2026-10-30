@@ -21,9 +21,9 @@ mutations run without an intervening ``await``, so they are atomic under
 cooperative scheduling; the store is **not** thread-safe and would need a lock
 if ever driven from multiple OS threads. That holds for the synchronous
 ``truncate_messages`` too — it is synchronous so a cancelled task can call it
-without suspending, not so it can be called from a worker thread. Issue #255
-moved the Anthropic and database-driver calls onto worker threads but
-deliberately left every store call on the event loop.
+without suspending, not so it can be called from a worker thread. Database
+driver calls run on worker threads, but every store call stays on the event
+loop.
 """
 
 from __future__ import annotations

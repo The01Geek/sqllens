@@ -3,8 +3,8 @@
 
 """Per-conversation turn queue and cancel rollback in ``query_database``.
 
-Issue #255 moved the blocking leaf calls onto worker threads, which lets two
-``query_database`` calls run at once. The conversation store and the agent loop
+Model calls and database queries do not hold the event loop, so two
+``query_database`` calls can run at once. The conversation store and the agent loop
 stay on the event loop and are not built for concurrent turns on one
 conversation, so calls that share a ``conversation_id`` are serialized by a
 per-conversation ``asyncio.Lock``, and a cancelled call's messages are rolled

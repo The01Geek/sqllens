@@ -1,6 +1,5 @@
 """PostgreSQL implementation of SqlRunner interface."""
 
-import asyncio
 import logging
 import os
 import uuid
@@ -9,9 +8,11 @@ import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
+from sqllens.agent.integrations.sql_threads import run_blocking_sql
 # See the sqlite runner for the rationale on this shared helper.
 from sqllens.safety.limits import effective_row_cap, rows_to_capped_df
 from sqllens.safety.readonly import is_read_shaped
+from sqllens.safety.relations import verify_base_tables
 
 
 _DEFAULT_MAX_ROWS = 10_000
@@ -103,12 +104,16 @@ class PostgresRunner(SqlRunner):
         self._max_rows = max_rows
         self._read_only = read_only
 
-    async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
+    async def run_sql(
+        self, args: RunSqlToolArgs, context: ToolContext, *, require_base_tables: bool = False
+    ) -> pd.DataFrame:
         """Execute SQL query against PostgreSQL database and return results as DataFrame.
 
         Args:
             args: SQL query arguments
             context: Tool execution context
+            require_base_tables: Check relation types on this connection and
+                refuse views or failed catalog lookups before executing RLS SQL.
 
         Returns:
             DataFrame with query results. For SELECTs, ``df.attrs['truncated']`` is True
@@ -118,35 +123,36 @@ class PostgresRunner(SqlRunner):
         Raises:
             psycopg2.Error: If query execution fails (including statement_timeout firing).
         """
+        # The driver calls below block, so they run on the SQL worker pool and
+        # the event loop stays free for health checks and other requests. See
+        # ``sql_threads`` for its concurrency limit and cancellation behaviour.
+        return await run_blocking_sql(
+            self._run_sql_blocking, args, require_base_tables=require_base_tables
+        )
 
-        # The whole body — connect, session set-up, execute, fetch, close —
-        # runs in ONE worker thread, so a slow connect or query no longer holds
-        # the event loop. Do not switch to ``loop.run_in_executor``: it would
-        # cap rows at the base ``max_rows`` instead of the per-request
-        # profile's (see sqllens.runtime).
-        return await asyncio.to_thread(self._run_sql_blocking, args)
-
-    def _run_sql_blocking(self, args: RunSqlToolArgs) -> pd.DataFrame:
-        """Synchronous ``run_sql`` body, executed on a worker thread."""
+    def _run_sql_blocking(
+        self, args: RunSqlToolArgs, *, require_base_tables: bool
+    ) -> pd.DataFrame:
+        """Execute ``args.sql`` synchronously; called on a worker thread by ``run_sql``."""
         if self.connection_string:
             conn = self.psycopg2.connect(self.connection_string, **self._connection_options)
         else:
             conn = self.psycopg2.connect(**self.connection_params)
 
-        if self._read_only:
-            # Force read-only regardless of the DB role — a guard miss still
-            # cannot mutate. ``set_session(readonly=True)`` must run before any
-            # statement opens a transaction (it does here — right after
-            # connect), so the implicit transaction the SELECT below runs in
-            # is read-only. NOTE: an in-transaction
-            # ``SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`` would
-            # NOT work — under psycopg2's default autocommit=False the
-            # transaction is already open by the time any cursor executes, and
-            # SESSION CHARACTERISTICS only governs *subsequent* transactions,
-            # leaving the current (single, never-committed) one read-write.
-            conn.set_session(readonly=True)
-
         try:
+            if self._read_only:
+                # Force read-only regardless of the DB role — a guard miss still
+                # cannot mutate. ``set_session(readonly=True)`` must run before any
+                # statement opens a transaction (it does here — right after
+                # connect), so the implicit transaction the SELECT below runs in
+                # is read-only. NOTE: an in-transaction
+                # ``SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`` would
+                # NOT work — under psycopg2's default autocommit=False the
+                # transaction is already open by the time any cursor executes, and
+                # SESSION CHARACTERISTICS only governs *subsequent* transactions,
+                # leaving the current (single, never-committed) one read-write.
+                conn.set_session(readonly=True)
+
             if self._statement_timeout_ms > 0:
                 setup = conn.cursor()
                 try:
@@ -156,6 +162,9 @@ class PostgresRunner(SqlRunner):
                     )
                 finally:
                     setup.close()
+
+            if require_base_tables:
+                verify_base_tables(conn, args.sql, dialect="postgres")
 
             if is_read_shaped(args.sql):
                 # Named cursors are server-side and stream from a portal; they

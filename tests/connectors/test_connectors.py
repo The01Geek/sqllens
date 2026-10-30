@@ -3,9 +3,10 @@
 
 """Integration tests for the Postgres and MySQL SqlRunner adapters.
 
-These tests run against **real** Postgres and MySQL instances. They're gated
-behind the ``connectors`` pytest marker and are CI-only — locally, run them
-explicitly with ``pytest -m connectors``.
+These tests run against **real** Postgres and MySQL instances.
+``tests/conftest.py``'s ``collect_ignore`` excludes this directory, so the
+default ``pytest`` run does not collect them; they run in CI's connector job, and locally with
+``pytest tests/connectors``.
 
 Connection URLs come from env vars so the same tests work against
 docker-compose, GH Actions service containers, or a developer's local DBs.
@@ -29,12 +30,19 @@ from sqllens.config import (
     DatabaseConfig,
     LLMConfig,
     MemoryConfig,
+    RlsRule,
     ServerConfig,
 )
-from sqllens.safety import ReadOnlyGuardRunner, UnsafeSqlError
+from sqllens.safety import (
+    ReadOnlyGuardRunner,
+    RlsError,
+    RlsGuardRunner,
+    RowCapRunner,
+    UnsafeSqlError,
+)
 from sqllens.safety.limits import MAX_ROWS_ATTR, TRUNCATED_ATTR
 
-pytestmark = [pytest.mark.connectors, pytest.mark.asyncio]
+pytestmark = pytest.mark.asyncio
 
 
 def _need(env_var: str) -> str:
@@ -63,7 +71,101 @@ def _ctx() -> Any:
         conversation = None
         output_directory = "/tmp"
 
+        def __init__(self):
+            self.metadata = {}
+
     return _Ctx()
+
+
+async def _assert_rls_view_blocked(url: str, dialect: str, *, materialized: bool = False) -> None:
+    table = f"rls_{uuid.uuid4().hex}"
+    view = f"{table}_view"
+    view_kind = "MATERIALIZED VIEW" if materialized else "VIEW"
+    writer = build_sql_runner(url, read_only=False)
+
+    async def execute(sql: str) -> None:
+        await writer.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+
+    await execute(f"CREATE TABLE {table} (id INTEGER, tenant_id TEXT)")
+    try:
+        await execute(f"INSERT INTO {table} VALUES (1, 'alpha'), (2, 'beta')")
+        await execute(f"CREATE {view_kind} {view} AS SELECT * FROM {table}")
+        guard = RlsGuardRunner(
+            ReadOnlyGuardRunner(
+                RowCapRunner(build_sql_runner(url), max_rows=10), dialect=dialect
+            ),
+            [RlsRule(table=table, column="tenant_id", value="alpha")],
+            dialect=dialect,
+        )
+        result = await guard.run_sql(RunSqlToolArgs(sql=f"SELECT id FROM {table}"), _ctx())
+        assert result["id"].tolist() == [1]
+        with pytest.raises(RlsError, match="view"):
+            await guard.run_sql(RunSqlToolArgs(sql=f"SELECT id FROM {view}"), _ctx())
+        if dialect == "postgres":
+            # A quoted uppercase CTE must not shadow an unquoted database name.
+            result = await guard.run_sql(
+                RunSqlToolArgs(sql=(
+                    f'WITH "{table.upper()}" AS (SELECT 1) SELECT id FROM {table.upper()}'
+                )), _ctx()
+            )
+            assert result["id"].tolist() == [1]
+            with pytest.raises(RlsError, match="view"):
+                await guard.run_sql(
+                    RunSqlToolArgs(sql=(
+                        f'WITH "{view.upper()}" AS (SELECT 1) SELECT id FROM {view.upper()}'
+                    )), _ctx()
+                )
+    finally:
+        await execute(f"DROP {view_kind} IF EXISTS {view}")
+        await execute(f"DROP TABLE IF EXISTS {table}")
+
+
+@pytest.mark.parametrize("materialized", [False, True])
+async def test_postgres_rls_views(postgres_url, materialized) -> None:
+    await _assert_rls_view_blocked(postgres_url, "postgres", materialized=materialized)
+
+
+async def test_mysql_rls_views(mysql_url) -> None:
+    await _assert_rls_view_blocked(mysql_url, "mysql")
+
+
+def _rls_guard(url: str, dialect: str) -> RlsGuardRunner:
+    return RlsGuardRunner(
+        ReadOnlyGuardRunner(RowCapRunner(build_sql_runner(url), max_rows=10), dialect=dialect),
+        [RlsRule(table="rls_unused_table", column="tenant_id", value="alpha")],
+        dialect=dialect,
+    )
+
+
+@pytest.mark.parametrize(("dialect", "allowed", "blocked"), [
+    (
+        "postgres",
+        [
+            "SELECT column_name FROM information_schema.columns LIMIT 1",
+            "SELECT table_name FROM information_schema.tables LIMIT 1",
+            "SELECT tablename FROM pg_catalog.pg_tables LIMIT 1",
+        ],
+        ["SELECT * FROM pg_catalog.pg_stats LIMIT 1"],
+    ),
+    (
+        "mysql",
+        [
+            "SELECT column_name FROM information_schema.columns LIMIT 1",
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES LIMIT 1",
+        ],
+        ["SELECT * FROM information_schema.COLUMN_STATISTICS LIMIT 1"],
+    ),
+])
+async def test_rls_keeps_metadata_views_and_blocks_value_statistics(
+    request, dialect, allowed, blocked
+) -> None:
+    url = request.getfixturevalue(f"{dialect}_url")
+    guard = _rls_guard(url, dialect)
+    for sql in allowed:
+        await guard.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+    for sql in blocked:
+        with pytest.raises(RlsError, match="view"):
+            await guard.run_sql(RunSqlToolArgs(sql=sql), _ctx())
 
 
 # ─────────────────────────────── postgres ───────────────────────────────────

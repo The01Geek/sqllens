@@ -20,13 +20,16 @@ class SqlRunner(ABC):
 
     @abstractmethod
     async def run_sql(
-        self, args: RunSqlToolArgs, context: "ToolContext"
+        self, args: RunSqlToolArgs, context: "ToolContext", *, require_base_tables: bool = False
     ) -> pd.DataFrame:
         """Execute SQL query and return results as a DataFrame.
 
         Args:
             args: SQL query arguments
             context: Tool execution context
+            require_base_tables: Verify referenced relations on the execution connection
+                and refuse views or unverified relation kinds before running SQL.
+                Required by RLS; implementations must not ignore this flag.
 
         Returns:
             DataFrame with query results

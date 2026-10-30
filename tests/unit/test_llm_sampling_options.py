@@ -40,7 +40,7 @@ class _RecordingMessages:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    def create(self, **kwargs: Any) -> SimpleNamespace:
+    async def create(self, **kwargs: Any) -> SimpleNamespace:
         self.calls.append(("create", kwargs))
         return SimpleNamespace(content=[], stop_reason="end_turn", usage=None)
 
@@ -48,16 +48,21 @@ class _RecordingMessages:
         self.calls.append(("stream", kwargs))
         final = SimpleNamespace(content=[], stop_reason="end_turn", usage=None)
 
-        class _Stream:
-            text_stream: tuple[str, ...] = ()
+        async def no_text() -> Any:
+            return
+            yield
 
-            def __enter__(self) -> _Stream:
+        class _Stream:
+            def __init__(self) -> None:
+                self.text_stream = no_text()
+
+            async def __aenter__(self) -> _Stream:
                 return self
 
-            def __exit__(self, *exc: object) -> None:
+            async def __aexit__(self, *exc: object) -> None:
                 return None
 
-            def get_final_message(self) -> SimpleNamespace:
+            async def get_final_message(self) -> SimpleNamespace:
                 return final
 
         return _Stream()

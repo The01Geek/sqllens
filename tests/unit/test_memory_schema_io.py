@@ -80,6 +80,16 @@ def test_csv_well_formed() -> None:
     assert bundle.sql_pairs.pairs[0].sql == "SELECT count(*) FROM users"
 
 
+@pytest.mark.parametrize("separator", ["\r", "\n", "\r\n"])
+@pytest.mark.parametrize("defang", [False, True])
+def test_csv_record_separators_preserve_quoted_newlines(separator: str, defang: bool) -> None:
+    text = f'question,sql{separator}"first\r\nsecond","SELECT \'a\r\nb\'"{separator}'
+    bundle = parse_csv(text, defang=defang)
+    pair = bundle.sql_pairs.pairs[0]
+    assert pair.question == "first\r\nsecond"
+    assert pair.sql == "SELECT 'a\r\nb'"
+
+
 def test_csv_missing_column() -> None:
     with pytest.raises(BundleFormatError, match="header"):
         parse_csv("question\nonly one column\n")

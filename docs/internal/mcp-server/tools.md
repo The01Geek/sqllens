@@ -78,7 +78,7 @@ The docstrings are the user-facing tool descriptions that the calling AI client 
 
 [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py) owns the process-wide agent that `query_database` uses (and the transport-layer warmup primes). Extracting the singleton into its own module is structural, not cosmetic: a tool wrapper and the boot-time warmup must reach the *same* `Agent` object graph (memory state, tool registrations, cold-start cost) so neither can accidentally build a competing agent, and the cfg-mismatch warning has exactly one definition site.
 
-- **Lazy, race-safe singleton agent.** The agent and the `Config` that built it are stored together as one atomically-assigned tuple, `_AGENT_STATE: tuple[Agent, Config] | None`, and built on the first call via `build_agent(cfg)` (see [agent/factory.md](../agent/factory.md)). `get_agent` is `async` and guards the cold start with an `asyncio.Lock` (`_AGENT_LOCK`) using **double-checked locking**: the outer `_AGENT_STATE is None` test is a fast path that skips the lock once the agent exists; correctness comes from the inner re-check after awaiting the lock, so two concurrent first calls cannot both run `build_agent`. Note `build_agent` itself only *wires* objects — `ChromaAgentMemory.__init__` does no I/O, so the ChromaDB open and the ~80 MB embedding-model download are **not** triggered by `build_agent`; they fire lazily the first time a memory method touches the collection (or eagerly at boot via `_warm_memory`, below). A later call whose `cfg` is a *different object* (identity check, not `==` — see "Why all core tools take `cfg` from the closure") is still served by the original agent, but logs an explicit warning instead of silently honoring a config it is not using. Each request gets its own `RequestContext`; what makes concurrent in-flight requests safe is described in "Concurrency: worker threads and the per-conversation queue" below.
+- **Lazy, race-safe singleton agent.** The agent and the `Config` that built it are stored together as one atomically-assigned tuple, `_AGENT_STATE: tuple[Agent, Config] | None`, and built on the first call via `build_agent(cfg)` (see [agent/factory.md](../agent/factory.md)). `get_agent` is `async` and guards the cold start with an `asyncio.Lock` (`_AGENT_LOCK`) using **double-checked locking**: the outer `_AGENT_STATE is None` test is a fast path that skips the lock once the agent exists; correctness comes from the inner re-check after awaiting the lock, so two concurrent first calls cannot both run `build_agent`. Note `build_agent` itself only *wires* objects — `ChromaAgentMemory.__init__` does no I/O, so the ChromaDB open and the ~80 MB embedding-model download are **not** triggered by `build_agent`; they fire lazily the first time a memory method touches the collection (or eagerly at boot via `_warm_memory`, below). A later call whose `cfg` is a *different object* (identity check, not `==` — see "Why all core tools take `cfg` from the closure") is still served by the original agent, but logs an explicit warning instead of silently honoring a config it is not using. Each request gets its own `RequestContext`, and concurrent calls on one conversation are ordered as described in "Concurrency: the per-conversation turn queue" below.
 - **Error taxonomy lives in `query_database`, not here.** The sanitized-internal / SQL-execution-prefix / verbatim-`UnsafeSqlError` split is defined once in `tools/query_database.py` (`_INTERNAL_ERROR_MESSAGE`, `_SQL_EXECUTION_ERROR_PREFIX`). `_agent.py` only constructs and caches the agent.
 - **Stable re-exports.** `prime_agent` and `get_agent` are also re-exported from `tools/query_database.py` (in `__all__`) so existing call sites (`transport/http.py`, several tests) that import from there still work without churn.
 
@@ -86,7 +86,7 @@ The docstrings are the user-facing tool descriptions that the calling AI client 
 
 [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) does the actual work, calling the shared singleton above:
 
-1. **Fetch the shared singleton.** `query_database_impl_with_widgets` awaits `get_agent(cfg)` from [`tools/_agent.py`](../../../src/sqllens/tools/_agent.py); see "Shared agent singleton" above.
+1. **Fetch the shared singleton.** `query_database_impl_with_widgets` awaits `get_agent(cfg)` from [`tools/_agent.py`](../../../src/sqllens/tools/_agent.py); see "Shared agent singleton" above. The keyword-only `agent=` parameter overrides this; it is `None` on every MCP request path and is used only by `sqllens verify-memory`, which passes its own agent (see [agent/memory.md](../agent/memory.md#verifying-an-import-verify-memory)).
 2. **`RequestContext` with caller-supplied metadata.** SQL Lens does not forward HTTP headers/cookies into the agent (auth is enforced at the transport layer, and the agent is single-user — see [agent/factory.md](../agent/factory.md) "user resolver"), so the context is always `RequestContext(headers={}, cookies={}, metadata=<safe_metadata>)`. The `metadata` mapping is populated from MCP `_meta` extracted by `_request_metadata(ctx)` in [src/sqllens/server.py](../../../src/sqllens/server.py) and stripped of `_RESERVED_METADATA_KEYS` (`{"starter_ui_request", "ui_features_available"}`) by the shared `strip_reserved_metadata` helper so untrusted request metadata cannot steer agent-internal control flow — only supply values to the opt-in row-level-security guard. An absent / empty MCP `_meta` keeps the prior empty-context behaviour byte-for-byte. See [database-connectors/row-level-security.md](../database-connectors/row-level-security.md) for the full request → metadata → guard path.
 3. **Stream collapse, threading `conversation_id`.** The agent yields an async stream of `UiComponent` objects (text snippets, dataframes, chart components, status cards). MCP tools must return a single string, so we collect the stream into a list and pass it to `components_to_blocks` (the success path; `components_to_markdown` is a thin view over it that drops every structured payload — see "The `_format.components_to_blocks` collapse rule"). The `conversation_id` argument is forwarded into `agent.send_message(..., conversation_id=...)` so a follow-up turn loads the prior `Conversation`'s message history and the agent can answer its own clarifying question (see "Multi-turn conversations (`conversation_id`)" below).
 4. **Categorized, sanitized error surfacing.** Failures are re-raised as `RuntimeError`, which FastMCP (`mcp.server.fastmcp` — the official SDK, not the standalone `fastmcp` package) converts to a tool result with `isError: true`, formatting the client text as `Error executing tool query_database: <message>`. The *raised message* is therefore the contract, and it is split into three observable categories (see "The error/success contract" below) so the calling agent gets structured failure signal without leaking infrastructure detail. CLAUDE.md forbids letting the LLM apologize inside a successful tool result — the calling agent needs structured failure signal.
@@ -180,70 +180,50 @@ End-to-end flow:
 
 The conversation store is **in-process and ephemeral** — dropped on restart, never persisted to a server-side database (CLAUDE.md non-goal). Pinned by `tests/unit/test_server.py` (`_meta` + footer assembly), `tests/unit/test_query_database.py` (id threaded into `send_message`), and `tests/unit/test_format.py` (`append_conversation_footer`).
 
-## Concurrency: worker threads and the per-conversation queue
+## Concurrency: the per-conversation turn queue
 
-The server runs on one asyncio event loop, and the Anthropic SDK client and the
-database drivers are both synchronous. Issue #255 moved exactly those leaf
-calls onto worker threads, so the loop stays free while a question waits.
+Model calls and database queries do not hold the event loop, so several
+`query_database` calls can be in flight at once; see
+[transport.md](transport.md#keeping-the-event-loop-free-during-agent-runs-issue-299)
+for how. Calls on different conversation ids run at the same time. Calls that
+share a conversation id must not, because each one reads and appends to the
+same message history. Issue #255 adds two rules in
+[src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py):
 
-- **Anthropic calls and database queries run on worker threads.**
-  `AnthropicLlmService.send_request` and `stream_request`
-  ([src/sqllens/agent/integrations/anthropic/llm.py](../../../src/sqllens/agent/integrations/anthropic/llm.py))
-  each run their synchronous SDK call inside one `asyncio.to_thread` call; the
-  streaming variant drains the whole stream in that one thread and yields the
-  same chunk sequence afterwards (the agent's streaming handler accumulates
-  every chunk and yields nothing intermediate, so no output changes). Each of
-  the Postgres, MySQL and SQLite runners moved its entire `run_sql` body —
-  connect, session set-up, execute, fetch, close — into one `_run_sql_blocking`
-  call run through `asyncio.to_thread`. `asyncio.to_thread`, not
-  `loop.run_in_executor`: it copies the caller's `contextvars.Context`, which
-  is how the per-request profile's `max_rows` reaches `effective_row_cap`
-  inside the thread. The result: `GET /healthz` is answered, and a
-  `query_database` call on another conversation makes progress, while one call
-  waits.
-- **Calls sharing a `conversation_id` run one at a time.** The conversation
-  store and the agent cold-start lock are built for one event loop, so
-  `tools/query_database.py` holds a per-conversation `asyncio.Lock` around the
-  agent run. A call that arrives while another call on the same id is running
-  waits for it to finish, then runs; the lock is taken *before* the run timer,
-  so queue wait is not reported as the call's own duration. Each registry entry
+- **Calls sharing a `conversation_id` run one at a time.** The tool holds a
+  per-conversation `asyncio.Lock` around the agent run. A call that arrives
+  while another call on the same id is running waits for it to finish, fail or
+  be cancelled, then runs, so the history holds the first call's messages
+  followed by the second's. The lock is taken *before* the run timer, so time
+  spent waiting is not reported as the call's own duration. Each registry entry
   counts holders *and* waiters, and is deleted once that count reaches zero and
   the entry is still the one registered under its id (a superseded entry is
-  left alone, so a late release cannot collect its successor) — so no entry
-  accumulates per conversation ever seen. A `None` `conversation_id`
-  (reachable only by a direct `_impl` caller — the MCP tool body always mints
-  one) takes no lock: the agent mints a private id no other caller can name.
+  left alone, so a late release cannot collect its successor). No entry
+  accumulates per conversation ever seen, and a waiter cancelled while queued
+  leaves none behind. A `None` `conversation_id` (reachable only by a direct
+  `_impl` caller such as the eval runner; the MCP tool body always mints one)
+  takes no lock: the agent mints a private id no other caller can name.
 - **A cancelled call's messages are removed from its conversation.** After
   taking the turn lock and before the agent run, the tool records the
-  conversation's message count; on cancellation it truncates back to that count
-  through the synchronous `BoundedConversationStore.truncate_messages` and
-  re-raises, returning no result. The truncate is synchronous because the
-  handler runs inside an already-cancelled task, where a suspending `await`
-  would never resume. The next call on that id therefore sees the history as it
-  stood when the cancelled call's turn began, including any earlier call's
-  messages.
-- **What deliberately stays on the event loop.** `import_memory` and the
-  memory-administration MCP tools still make their synchronous memory-store
-  calls on the loop, so those tools still block it while they run. So do the
-  per-query scratch CSV write (`df.to_csv`) and the read-only and
-  row-level-security guards' SQL parsing. Nothing interrupts work already
-  running on a worker thread: a cancelled call's query runs until it finishes or
-  the engine's statement timeout stops it (see
-  [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md)),
-  and a cancelled call's Anthropic request runs, and is billed, until it
-  returns. No thread pool of SQL Lens' own is added — these calls share
-  asyncio's default executor, so beyond its thread count further calls wait for
-  a free thread; the ChromaDB memory store keeps its own two-thread pool. There
-  are no progress notifications and no acknowledge-now / fetch-later job API: a
-  call still holds its request open until the agent run ends, so a question
-  slower than a client's timeout still times out for that client.
+  conversation's message count. On cancellation it truncates the conversation
+  back to that count through the synchronous
+  `BoundedConversationStore.truncate_messages` and re-raises, returning no
+  result. The truncate is synchronous because the handler runs inside an
+  already-cancelled task, where a suspending `await` would never resume, and it
+  runs before the turn lock is released. The next call on that id therefore
+  sees the history as it stood when the cancelled call's turn began, including
+  any earlier call's messages. A store without `truncate_messages`, or one that
+  raises from it, is logged at ERROR naming the store class rather than
+  replacing the cancellation with another exception.
 
-Pinned by `tests/unit/test_event_loop_offload.py` (loop liveness per runner and
-per Anthropic mode, the streaming chunk-shape pin, and the profile row-cap
-`ContextVar` pin), `tests/unit/test_query_database_queue.py` (queue ordering,
-entry cleanup, cancel rollback), and
-`tests/integration/test_http_transport.py` (`/healthz` answered while a call is
-blocked inside the synchronous Anthropic client).
+Cancelling a call does not stop a database query that has already started on
+a worker thread; see the cancellation limit in
+[transport.md](transport.md#keeping-the-event-loop-free-during-agent-runs-issue-299).
+The rollback removes only conversation messages.
+
+Pinned by `tests/unit/test_query_database_queue.py` (concurrency across ids,
+ordering on a shared id, entry cleanup, cancel rollback, and the
+`truncate_messages` seam).
 
 ## The MCP App interactive result widget
 
@@ -308,7 +288,7 @@ The "no SQL channel" branches are deliberately distinguishable:
 
 - `agent.show_details = False`: the factory leaves `UI_FEATURE_SHOW_TOOL_ARGUMENTS` admin-gated, so the static user never receives the `run_sql` STATUS_CARD; `last_sql` in `components_to_blocks` stays `None` and `query_info` is `None`. Output is byte-for-byte the pre-feature behavior (no Markdown block, no `_meta["sqllens/query"]`).
 - `agent.show_details = True` but the agent never ran SQL (pure-text answer): the `run_sql` card is never emitted, same result as above.
-- `agent.show_details = True` and the agent ran SQL but execution failed: the completed `run_sql` card carries `status="error"` (the upstream agent maps `ToolResult(success=False)` → `set_status("error", …)`), which fires the `error_message` short-circuit in `components_to_blocks` *before* `query_info` is built. The tool surfaces the sanitized error message through the [error contract](#the-errorsuccess-contract) below — the `sqllens/query` channel is never populated on the error path. (The `sqllens/agent_trace` channel **is** attached on this error path when `show_details` is on — see [Agent trace channel](#agent-trace-channel--agentshow_details); it is the one *observability/widget* channel — blocks/query/memory — that survives a failure. The conversation channel also rides the error result, via `_trace_error_result`.)
+- `agent.show_details = True` and the agent ran SQL but execution failed: the completed `run_sql` card carries `status="error"` (the upstream agent maps `ToolResult(success=False)` → `set_status("error", …)`), which fires the `error_message` short-circuit in `components_to_blocks`. The raised `AgentRunError.query_info` retains captured SQL for the verification runner; it is cleared when the effective `show_details` is off. The tool surfaces the error message through the [error contract](#the-errorsuccess-contract) below — the `sqllens/query` channel is never populated on the error path. (The `sqllens/agent_trace` channel **is** attached on this error path when `show_details` is on — see [Agent trace channel](#agent-trace-channel--agentshow_details); it is the one *observability/widget* channel — blocks/query/memory — that survives a failure. The conversation channel also rides the error result, via `_trace_error_result`.)
 
 Pinned by `tests/unit/test_format.py` (component-stream cases), `tests/unit/test_query_database.py` (impl-level wiring + `_append_sql_block`), `tests/unit/test_server.py` (`_meta` assembly), `tests/unit/test_factory_wiring.py` (UI-feature unlock), and `tests/unit/test_ui_widget.py` (widget assertions).
 

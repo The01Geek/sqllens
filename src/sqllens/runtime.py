@@ -23,13 +23,6 @@ A ``ContextVar`` propagates across ``await`` and ``asyncio.Task`` boundaries
 under standard asyncio semantics, so per-request isolation holds even when the
 agent loop fans tool calls out into nested tasks: each request's ``set``
 returns a token that the tool boundary restores in ``finally``.
-
-It also propagates into a worker thread started by ``asyncio.to_thread``, which
-copies the calling context. That is load-bearing since issue #255: each SQL
-runner now executes its query on such a thread and reads its row cap from this
-``ContextVar`` there. ``loop.run_in_executor`` does *not* copy the context, so a
-runner moved onto a thread that way would silently cap rows at the base
-``max_rows`` instead of the per-request profile's.
 """
 
 from __future__ import annotations

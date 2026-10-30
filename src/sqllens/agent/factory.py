@@ -52,8 +52,16 @@ class _StaticUserResolver(UserResolver):
         )
 
 
-def build_agent(cfg: Config) -> Agent:
-    """Wire the agent from config. One call per process; the agent is reusable."""
+def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
+    """Wire the agent from config. One call per process; the agent is reusable.
+
+    ``allow_memory_writes=False`` omits every memory-*writing* tool
+    (``save_question_tool_args`` and ``save_text_memory``) regardless of
+    ``cfg.memory``, and disables retrieval counter and timestamp updates.
+    ``sqllens verify-memory`` builds its agent this way.
+    Save-tool registration composes with any per-tool config gate
+    as a logical AND.
+    """
     # Every CLI-launched transport already exits 2 in ``cli.serve`` before reaching
     # here. This guard catches the residual bypass paths — programmatic embedders
     # and tests that call ``build_agent`` directly — so a ``None`` key surfaces as
@@ -86,6 +94,7 @@ def build_agent(cfg: Config) -> Agent:
     memory = ChromaAgentMemory(
         persist_directory=str(cfg.memory.persist_dir),
         collection_name=cfg.memory.collection,
+        track_usage=allow_memory_writes,
     )
 
     # Wire the system-prompt context enhancer explicitly so both memory
@@ -119,11 +128,9 @@ def build_agent(cfg: Config) -> Agent:
     tools.register_local_tool(EmitTextTool(), access_groups=access)
     # save_question_tool_args lets the agent write question -> SQL pairs into
     # memory. Gated by memory.save_queries (OFF by default); the default system
-    # prompt gates its save bullet and the example workflow's save step on
-    # has_save, so dropping the registration drops those. The "Do NOT forget to
-    # save successful executions." sentence rides on has_search instead, and the
-    # search tool is registered unconditionally, so that sentence still prints.
-    if cfg.memory.save_queries:
+    # prompt switches its save instructions on the tool's presence, so dropping
+    # the registration cleanly drops the prompt guidance too.
+    if cfg.memory.save_queries and allow_memory_writes:
         tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
     tools.register_local_tool(
         SearchSavedCorrectToolUsesTool(
@@ -139,7 +146,7 @@ def build_agent(cfg: Config) -> Agent:
     # guidance too. Do not move this gate into SaveTextMemoryTool.execute or
     # ChromaAgentMemory.save_text_memory: curated imports (sqllens.memory.store)
     # call the same storage method, so a gate there would drop curated notes.
-    if cfg.memory.save_text_memories:
+    if cfg.memory.save_text_memories and allow_memory_writes:
         tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
 
     # The framework default gates the tool-arguments card to admin-only. We

@@ -34,18 +34,24 @@ ToolRegistry    →  RunSqlTool                          (executes generated SQL
                                                         a {"type":"text",...} block at this stream position —
                                                         non-emit_text assistant text is hidden reasoning)
                    SaveQuestionToolArgsTool            (memory write — tool-arg recordings;
-                                                        registered only when cfg.memory.save_queries)
+                                                        registered only when cfg.memory.save_queries
+                                                        and allow_memory_writes)
                    SearchSavedCorrectToolUsesTool      (memory read; default_similarity_threshold
                                                         bound to cfg.memory.similarity_threshold)
                    SaveTextMemoryTool                  (memory write — free-form text notes;
                                                         registered only when
-                                                        cfg.memory.save_text_memories)
+                                                        cfg.memory.save_text_memories
+                                                        and allow_memory_writes)
                                                           ↓
                                                         Agent(llm, tool_registry, user_resolver,
                                                               agent_memory, conversation_store,
                                                               AgentConfig(max_tool_iterations, max_tokens,
                                                                           temperature, effort))
 ```
+
+## `allow_memory_writes` — verification builds
+
+`build_agent(cfg, *, allow_memory_writes=True)`. Passing `False` omits both memory-writing tools (`save_question_tool_args`, `save_text_memory`) regardless of `cfg.memory`, and disables retrieval counter and timestamp updates with `ChromaAgentMemory(track_usage=False)`. Memory search and context injection remain available. Only `sqllens verify-memory` (`src/sqllens/eval/runner.py`) passes `False`. Any config gate on a save tool must be ANDed with it, never ORed. See [memory.md § Verifying an import](memory.md#verifying-an-import-verify-memory).
 
 ## Opus 5.5 defaults and conversation history
 

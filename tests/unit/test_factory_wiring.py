@@ -305,11 +305,7 @@ async def test_save_text_memory_tool_registered_when_enabled(
     assert "TEXT MEMORY" in await _prompt_from_agent_tools(agent)
 
 
-async def test_save_instruction_survives_with_no_save_tool(tmp_path: Path) -> None:
-    """The prompt's "Do NOT forget to save successful executions." sentence is
-    gated on the memory *search* tool, which is always registered, so gating
-    the two save tools off must not remove it (issue #267 leaves it as it is).
-    """
+async def test_save_instruction_omitted_with_no_save_tool(tmp_path: Path) -> None:
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     agent = build_agent(cfg)
 
@@ -317,7 +313,7 @@ async def test_save_instruction_survives_with_no_save_tool(tmp_path: Path) -> No
     assert "save_text_memory" not in agent.tool_registry._tools
     assert "search_saved_correct_tool_uses" in agent.tool_registry._tools
     prompt = await _prompt_from_agent_tools(agent)
-    assert "Do NOT forget to save successful executions." in prompt
+    assert "Do NOT forget to save successful executions." not in prompt
 
 
 def test_save_question_tool_omitted_by_default(tmp_path: Path) -> None:
@@ -493,3 +489,19 @@ def test_build_sql_runner_mysql_percent_decodes_credentials() -> None:
     assert isinstance(runner, MySQLRunner)
     assert runner.user == "user@corp"
     assert runner.password == "p/w:s"
+
+
+def test_allow_memory_writes_false_drops_every_save_tool(tmp_path: Path) -> None:
+    """``allow_memory_writes=False`` (the verify-memory build) must omit both
+    memory-writing tools even when the operator config enables query saving,
+    while keeping memory search and the SQL tool."""
+    cfg = build_test_config(
+        persist_dir=tmp_path / "chroma", save_queries=True, save_text_memories=True,
+    )
+    agent = build_agent(cfg, allow_memory_writes=False)
+
+    tools = agent.tool_registry._tools
+    assert "save_question_tool_args" not in tools
+    assert "save_text_memory" not in tools
+    assert "search_saved_correct_tool_uses" in tools
+    assert "run_sql" in tools

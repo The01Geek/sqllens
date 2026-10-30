@@ -11,10 +11,6 @@ for the auth and path-normalization edge cases.
 
 from __future__ import annotations
 
-import asyncio
-import threading
-from unittest.mock import MagicMock
-
 import httpx
 import pytest
 from mcp import ClientSession
@@ -462,93 +458,3 @@ class TestAgentFailure:
         assert "internal error" in body.lower()
         # Not an LLM apology masquerading as a result.
         assert "sorry" not in body.lower()
-
-
-# ───── #255: /healthz answers while a query waits on a blocking call ─────
-
-
-class TestHealthzDuringBlockingCall:
-    async def test_healthz_answers_while_anthropic_call_blocks(
-        self, make_server, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """``GET /healthz`` is served while a ``query_database`` call is blocked
-        inside the synchronous Anthropic client (first acceptance criterion, at
-        the transport level).
-
-        The blocking call is the *production* one: the tool stand-in awaits the
-        real ``AnthropicLlmService.send_request``, whose offload to a worker
-        thread is what is under test. Only the SDK client underneath it is a
-        fake, and it blocks on a ``threading.Event`` the test releases in a
-        ``finally`` — a thread left blocked would stop the interpreter from
-        exiting, since shutdown joins the default executor's threads.
-
-        Before #255 the loop sat inside ``messages.create`` and the Docker
-        ``HEALTHCHECK`` (a 2-second request timeout) could mark the container
-        unhealthy.
-        """
-        from sqllens import server as server_module
-        from sqllens.agent.core.llm.models import LlmMessage, LlmRequest
-        from sqllens.agent.core.user import User
-        from sqllens.agent.integrations.anthropic.llm import AnthropicLlmService
-
-        release = threading.Event()
-        blocked = threading.Event()
-
-        class _FakeMessage:
-            def __init__(self) -> None:
-                self.content = [{"type": "text", "text": "ok"}]
-                self.stop_reason = "end_turn"
-                self.usage = None
-
-        def _create(**_payload):
-            blocked.set()
-            assert release.wait(timeout=30), "release event was never set"
-            return _FakeMessage()
-
-        service = AnthropicLlmService(api_key="sk-ant-not-used")
-        service._client = MagicMock()
-        service._client.messages.create.side_effect = _create
-
-        async def fake_query(cfg, question, **kwargs):
-            await service.send_request(
-                LlmRequest(
-                    messages=[LlmMessage(role="user", content=question)],
-                    user=User(id="t", group_memberships=[]),
-                )
-            )
-            return "ok", [], None, None, None
-
-        monkeypatch.setattr(
-            server_module, "query_database_impl_with_widgets", fake_query
-        )
-        handle = make_server(AuthConfig(mode="none"))
-
-        try:
-            async with streamablehttp_client(handle.mcp_url) as (read, write, _):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    call = asyncio.create_task(
-                        session.call_tool(
-                            "query_database", {"question": "a slow question"}
-                        )
-                    )
-
-                    # Wait until the server thread is actually inside the
-                    # synchronous client call, so the probe below cannot pass
-                    # by racing ahead of it.
-                    assert await asyncio.to_thread(
-                        blocked.wait, 10
-                    ), "the query never reached the blocking client call"
-
-                    async with httpx.AsyncClient() as client:
-                        response = await client.get(
-                            handle.base_url + "/healthz", timeout=5.0
-                        )
-                    assert response.status_code == 200
-                    assert not call.done(), "the query returned before the probe"
-
-                    release.set()
-                    result = await call
-                    assert result.isError is False
-        finally:
-            release.set()

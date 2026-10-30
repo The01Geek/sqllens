@@ -70,6 +70,7 @@ class ChromaAgentMemory(AgentMemory):
                            Once a collection is created, subsequent application
                            restarts will retrieve the existing collection without
                            re-downloading the model.
+        track_usage: Whether retrieval updates stored hit counters and timestamps.
 
     Example:
         >>> from sqllens.agent.integrations.chromadb import ChromaAgentMemory
@@ -108,6 +109,8 @@ class ChromaAgentMemory(AgentMemory):
         persist_directory: str = "./chroma_memory",
         collection_name: str = "tool_memories",
         embedding_function=None,
+        *,
+        track_usage: bool = True,
     ):
         if not CHROMADB_AVAILABLE:
             raise ImportError(
@@ -121,6 +124,7 @@ class ChromaAgentMemory(AgentMemory):
         self._collection = None
         self._executor = ThreadPoolExecutor(max_workers=2)
         self._embedding_function = embedding_function
+        self._track_usage = track_usage
 
     @property
     def _collection_state(self):
@@ -286,11 +290,12 @@ class ChromaAgentMemory(AgentMemory):
                         # Pass the full existing metadata (copied) with the two
                         # tracking keys overwritten, so the update is correct
                         # whether Chroma merges or replaces per-id metadata.
-                        bumped = dict(metadata)
-                        bumped["hit_count"] = int(metadata.get("hit_count", 0)) + 1
-                        bumped["last_hit_date"] = now
-                        hit_ids.append(id_)
-                        hit_metadatas.append(bumped)
+                        if self._track_usage:
+                            bumped = dict(metadata)
+                            bumped["hit_count"] = int(metadata.get("hit_count", 0)) + 1
+                            bumped["last_hit_date"] = now
+                            hit_ids.append(id_)
+                            hit_metadatas.append(bumped)
 
             if hit_ids:
                 # Best-effort telemetry: a failure to persist the bumped counts

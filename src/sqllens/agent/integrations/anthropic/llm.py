@@ -9,7 +9,6 @@ non-streaming call as ToolCall entries.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from copy import deepcopy
@@ -34,7 +33,15 @@ class AnthropicLlmService(LlmService):
             Defaults to "claude-opus-5-5". Can also be set via ANTHROPIC_MODEL env var.
         api_key: API key; falls back to env `ANTHROPIC_API_KEY`.
         base_url: Optional custom base URL; env `ANTHROPIC_BASE_URL` if unset.
-        extra_client_kwargs: Extra kwargs forwarded to `anthropic.Anthropic()`.
+        extra_client_kwargs: Extra kwargs forwarded to `anthropic.AsyncAnthropic()`.
+
+    The client is the SDK's async client. Requests and streamed responses are
+    awaited, so a slow model call yields the event loop; a synchronous client
+    here would stall every other request the server handles until it returned.
+    The SDK rejects a synchronous ``http_client`` when the service is built. The
+    service never closes its client; the client opens connections only when a
+    request is sent and lives as long as the service. Those connections belong to
+    the event loop that opened them, so drive one service from one event loop.
     """
 
     def __init__(
@@ -62,18 +69,13 @@ class AnthropicLlmService(LlmService):
         if base_url:
             client_kwargs["base_url"] = base_url
 
-        self._client = anthropic.Anthropic(**client_kwargs)
+        self._client = anthropic.AsyncAnthropic(**client_kwargs)
 
     async def send_request(self, request: LlmRequest) -> LlmResponse:
         """Send a non-streaming request to Anthropic and return the response."""
         payload = self._build_payload(request)
 
-        # The SDK client is synchronous, so this request would otherwise hold
-        # the event loop for the whole round trip.
-        def _create() -> Any:
-            return self._client.messages.create(**payload)
-
-        resp = await asyncio.to_thread(_create)
+        resp = await self._client.messages.create(**payload)
 
         logger.info(f"Anthropic response: {resp}")
 
@@ -110,35 +112,25 @@ class AnthropicLlmService(LlmService):
         logger.info(f"Anthropic streaming payload: {payload}")
 
         # SDK provides a streaming context manager with a text_stream iterator.
-        # Both are synchronous, so the whole stream is drained in one worker
-        # thread and the chunks are yielded afterwards. Do not split the
-        # ``with`` block across threads: the stream object is tied to the
-        # thread that opened it. The caller (agent/core/agent/agent.py's
-        # streaming handler) accumulates every chunk and yields nothing
-        # intermediate, so buffering the text here changes no output.
-        def _drain() -> Tuple[List[str], Any]:
-            with self._client.messages.stream(**payload) as stream:
-                texts = [text for text in stream.text_stream if text]
-                return texts, stream.get_final_message()
+        async with self._client.messages.stream(**payload) as stream:
+            async for text in stream.text_stream:
+                if text:
+                    yield LlmStreamChunk(content=text)
 
-        texts, final = await asyncio.to_thread(_drain)
-
-        for text in texts:
-            yield LlmStreamChunk(content=text)
-
-        logger.info(f"Anthropic stream response: {final}")
-        _, tool_calls = self._parse_message_content(final)
-        if tool_calls:
-            yield LlmStreamChunk(
-                tool_calls=tool_calls,
-                finish_reason=getattr(final, "stop_reason", None),
-                provider_content=self._provider_content(final),
-            )
-        else:
-            yield LlmStreamChunk(
-                finish_reason=getattr(final, "stop_reason", None) or "stop",
-                provider_content=self._provider_content(final),
-            )
+            final = await stream.get_final_message()
+            logger.info(f"Anthropic stream response: {final}")
+            _, tool_calls = self._parse_message_content(final)
+            if tool_calls:
+                yield LlmStreamChunk(
+                    tool_calls=tool_calls,
+                    finish_reason=getattr(final, "stop_reason", None),
+                    provider_content=self._provider_content(final),
+                )
+            else:
+                yield LlmStreamChunk(
+                    finish_reason=getattr(final, "stop_reason", None) or "stop",
+                    provider_content=self._provider_content(final),
+                )
 
     async def validate_tools(self, tools: List[ToolSchema]) -> List[str]:
         """Basic validation of tool schemas for Anthropic."""

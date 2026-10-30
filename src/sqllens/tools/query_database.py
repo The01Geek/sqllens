@@ -24,7 +24,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqllens.agent import RequestContext
+from sqllens.agent import Agent, RequestContext
 from sqllens.config import RESERVED_METADATA_KEYS, Config
 from sqllens.profiles import ProfileStore, resolve_effective_settings
 from sqllens.runtime import (
@@ -59,11 +59,21 @@ class AgentRunError(RuntimeError):
     ``_meta`` when ``agent.show_details`` is on. It is ``None`` when details are
     off — in which case the server re-raises and FastMCP formats the failure
     exactly as before, with no trace leaked into a details-off deployment.
+
+    ``query_info`` retains captured SQL for the verification runner, under
+    the same resolved ``show_details`` gate as the trace.
     """
 
-    def __init__(self, message: str, *, agent_trace: dict | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        agent_trace: dict | None = None,
+        query_info: dict | None = None,
+    ) -> None:
         super().__init__(message)
         self.agent_trace = agent_trace
+        self.query_info = query_info
 
 # Client-facing error taxonomy. The MCP wrapper collapses every failure into
 # one ``isError: true`` result, so the *message* is the only category signal
@@ -132,9 +142,9 @@ class _ConversationQueueEntry:
 # separately LRU-bounded; this registry is bounded by concurrency instead).
 #
 # Safe as plain dict mutations: every read-modify-write below runs on the event
-# loop with no intervening ``await``, so no other task can interleave. Issue
-# #255 deliberately left the agent loop and the conversation store on the loop
-# for exactly this reason.
+# loop with no intervening ``await``, so no other task can interleave. The agent
+# loop and the conversation store stay on the event loop for exactly this
+# reason; only the database driver calls run on worker threads.
 _CONVERSATION_QUEUES: dict[str, _ConversationQueueEntry] = {}
 
 
@@ -333,6 +343,7 @@ async def query_database_impl_with_widgets(
     conversation_id: str | None = None,
     profile: str | None = None,
     profile_store: ProfileStore | None = None,
+    agent: Agent | None = None,
 ) -> tuple[str, list[dict], dict | None, dict | None, dict | None]:
     """Translate ``question`` to SQL, execute, return ordered ``blocks`` + ``memory_info``.
 
@@ -390,6 +401,14 @@ async def query_database_impl_with_widgets(
     loads the prior ``Conversation`` (its message history) and the agent can
     answer its own clarifying question. ``None`` lets the agent mint a fresh id
     internally; the MCP server layer mints and returns a stable id to the caller.
+
+    ``agent`` overrides the process-wide singleton from
+    :func:`~sqllens.tools._agent.get_agent`. ``None`` (every MCP request path)
+    uses the singleton. ``sqllens verify-memory`` passes its own agent, built
+    with ``build_agent(..., allow_memory_writes=False)``, so the verification
+    run goes through this exact pipeline without the cached agent's memory
+    write tools. Callers supplying an agent must build it from the same
+    ``cfg`` passed here so its guards and request settings agree.
     """
     # Resolve the named profile into an EffectiveSettings and publish it on
     # the ContextVar BEFORE the agent is invoked, so every downstream shaping
@@ -403,7 +422,8 @@ async def query_database_impl_with_widgets(
     _profile_token = set_effective_settings(effective)
     try:
         try:
-            agent = await get_agent(cfg)
+            if agent is None:
+                agent = await get_agent(cfg)
         except Exception as e:
             logger.exception("agent construction failed")
             raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
@@ -510,7 +530,9 @@ async def query_database_impl_with_widgets(
         if is_error:
             logger.warning("agent reported query failure: %s", answer)
             raise AgentRunError(
-                f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}", agent_trace=agent_trace
+                f"{_SQL_EXECUTION_ERROR_PREFIX}{answer}",
+                agent_trace=agent_trace,
+                query_info=query_info,
             )
         markdown = _append_sql_block(answer, query_info)
         return markdown, blocks, query_info, memory_info, agent_trace

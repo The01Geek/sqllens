@@ -102,25 +102,6 @@ PostgreSQL connection establishment separately uses a five-second `connect_timeo
 
 The timeout error surfaces as whatever the driver raises (`psycopg2.errors.QueryCanceled`, `pymysql.err.OperationalError` with `ER_QUERY_TIMEOUT`, `sqlite3.OperationalError('interrupted')`); `RunSqlTool.execute` catches that and returns a `ToolResult(success=False)` so the LLM can re-plan.
 
-**The runners run on worker threads, so the engine's timeout is what stops a
-query.** Since issue #255 each runner executes its whole `run_sql` body —
-connect, session set-up, execute, fetch, close — inside one `asyncio.to_thread`
-call, keeping the event loop free while the driver blocks (SQLite needs the
-whole body in one thread: `sqlite3` connections default to
-`check_same_thread=True`, and the progress-handler deadline is installed on that
-same connection). Nothing interrupts a thread already running, so **a query
-whose MCP request was cancelled keeps running until it finishes or the engine's
-statement timeout above stops it.** Two cases leave nothing but the query's own
-end to stop it: `statement_timeout_ms = 0`, which registers no timeout at all;
-and a MySQL statement other than a `SELECT`, which `MAX_EXECUTION_TIME` does not
-cover. Server shutdown waits for these threads rather than killing them (on
-Python 3.11 indefinitely, on 3.12+ up to five minutes — see
-[cleanup-error-handling.md](cleanup-error-handling.md)). See
-[cleanup-error-handling.md](cleanup-error-handling.md) for how cancellation
-unwinds, and
-[../mcp-server/tools.md](../mcp-server/tools.md#concurrency-worker-threads-and-the-per-conversation-queue)
-for the whole concurrency model.
-
 ## Row cap and truncation surface
 
 `DatabaseConfig.max_rows` (default `10_000`) is enforced in two places, deliberately:
@@ -250,7 +231,7 @@ Other regression classes in [tests/unit/test_safety.py](../../../tests/unit/test
 - `TestGuardFailsClosedOnUnexpectedError` — an unexpected internal error becomes a refused `UnsafeSqlError`, not a crash or a pass-through.
 - `TestSqliteReadOnlyUri` / `TestReadOnlyUriSpecialChars` / `TestSqliteConnectorReadOnlyEnforced` — the SQLite `_readonly_uri` builder, its `?`/`#` percent-encoding, and the connector-level `mode=ro` + `PRAGMA query_only` enforcement.
 
-Connector-level read-only against live Postgres/MySQL is exercised by [tests/integration/test_connectors.py](../../../tests/integration/test_connectors.py) under the `connectors` marker.
+Connector-level read-only against live Postgres/MySQL is exercised by [tests/connectors/test_connectors.py](../../../tests/connectors/test_connectors.py), which the default `pytest -q` run does not collect; run it with `pytest -q tests/connectors`.
 
 ### MySQL lexical boundaries
 
