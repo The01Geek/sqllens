@@ -184,14 +184,15 @@ Validation limits (enforced by the pydantic models, `extra="forbid"` on every mo
 
 ### Bundle-level DoS caps (parse-boundary, issue #186)
 
-The per-field limits above bound the size of any single item, but an authenticated client could still DoS the server by submitting millions of valid-but-cheap items inside one bundle (parsing the list, then writing each inside the held `import_lock`). Two outer-shape caps — defined in [src/sqllens/memory/schema.py](../../../src/sqllens/memory/schema.py) and enforced in [src/sqllens/memory/io.py](../../../src/sqllens/memory/io.py) at the parse boundary, **not** as model-level `Field` constraints — refuse such payloads on the way in:
+The per-field limits above bound the size of any single item, but an authenticated client could still DoS the server by submitting millions of valid-but-cheap items inside one bundle (parsing the list, then writing each inside the held `import_lock`). Three outer-shape caps — `MAX_BUNDLE_BYTES` and `MAX_BUNDLE_ITEMS` defined in [src/sqllens/memory/schema.py](../../../src/sqllens/memory/schema.py), `MAX_BUNDLE_DEPTH` in [src/sqllens/memory/io.py](../../../src/sqllens/memory/io.py), all enforced in `io.py` at the parse boundary, **not** as model-level `Field` constraints — refuse such payloads on the way in:
 
 | Cap | Value | Where enforced |
 |---|---|---|
 | `MAX_BUNDLE_BYTES` | `10 * 1024 * 1024` (10 MiB) | `_enforce_size_cap(text)` in `io.py` — runs **before** parse for both `parse_json` and `parse_csv`. Measured against the UTF-8 byte length of the input (not `len(text)` code points) so a multi-byte payload cannot bypass the cap by up to 4x. Short-circuits on the cheap code-point check first (`len(text) > MAX_BUNDLE_BYTES`) — that lower-bound is sufficient to reject without paying the `encode` of an attacker-shaped payload. |
 | `MAX_BUNDLE_ITEMS` | `10_000` | `_enforce_item_caps(bundle)` in `io.py` — runs **after** parse on the validated `MemoryBundle` and checks both `bundle.sql_pairs.pairs` and `bundle.schema_docs` independently. |
+| `MAX_BUNDLE_DEPTH` | `64` | `_enforce_depth_cap(raw)` in `io.py` — `parse_json` only, run **after** `json.loads` and **before** the "bundle root must be a JSON object" check. Walks the parsed value iteratively; nested arrays and objects count, the root container at depth 1. A payload too deep for `json.loads` itself raises `RecursionError`, which `parse_json` maps to the same message. |
 
-Both caps surface a `BundleFormatError` ("bundle exceeds the 10485760-byte cap; split the bundle into smaller files." / "bundle 'sql_pairs.pairs' exceeds the 10000-item cap (got N); split the bundle."). The `import_memory` MCP tool re-raises that as a sanitized `RuntimeError("Invalid memory bundle: ...")` (`isError: true`); the `sqllens import-memory` CLI exits 1 with the same message on stderr.
+All three caps surface a `BundleFormatError` ("bundle exceeds the 10485760-byte cap; split the bundle into smaller files." / "bundle 'sql_pairs.pairs' exceeds the 10000-item cap (got N); split the bundle." / "bundle JSON is too deeply nested to parse safely"). The `import_memory` MCP tool re-raises that as a sanitized `RuntimeError("Invalid memory bundle: ...")` (`isError: true`); the `sqllens import-memory` CLI exits 1 with the same message on stderr.
 
 Enforcing as a Pydantic `Field` constraint would propagate the cap to *every* construction — including `MemoryStore.iter_all` (which is the dedup baseline for `import_bundle` *and* the source for `export_bundle`) — so a healthy store legitimately holding more than `MAX_BUNDLE_ITEMS` rows would blow up at export and at the start of every import. Putting the cap at the parse boundary instead leaves in-process readers/writers unrestricted while still refusing oversized external payloads on the way in.
 
@@ -246,7 +247,7 @@ Implementation lives outside the vendored agent tree in [src/sqllens/eval/](../.
 
 | Module | Responsibility |
 |---|---|
-| `eval/golden.py` | Loads the golden file with the existing bundle parsers, retaining byte/item caps, JSON recursion protection, and schema validation. CSV uses `parse_csv(..., defang=False)` to preserve the question and expected SQL. |
+| `eval/golden.py` | Loads the golden file with the existing bundle parsers, retaining byte/item caps, the JSON nesting-depth limit, and schema validation. CSV uses `parse_csv(..., defang=False)` to preserve the question and expected SQL. |
 | `eval/compare.py` | Normalizes SQL using the configured dialect. `compare_sql` returns PASS/CHANGED or raises a side-specific parse diagnostic; `compare` returns ERROR for either parse failure. |
 | `eval/runner.py` | Resolves the persisted `default` profile into a cloned config, forces details on and query saving off, and builds a dedicated agent with `allow_memory_writes=False`. Missing SQL produces an ERROR diagnostic. Tests can inject `driver=`. An async `comparator=` accepts expected/actual SQL and can capture a database connection for row comparison without rewriting the runner. |
 

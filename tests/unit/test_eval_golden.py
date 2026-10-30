@@ -80,8 +80,9 @@ def test_load_golden_inherits_size_cap() -> None:
 
 
 def test_load_golden_inherits_recursion_guard() -> None:
-    """A deeply-nested JSON payload must surface as ``BundleFormatError``,
-    not propagate ``RecursionError`` past every guarded caller.
+    """A deeply-nested JSON payload gets the "deeply nested" ``BundleFormatError``
+    on every Python version, whether ``json.loads`` raises ``RecursionError``
+    or ``parse_json``'s depth limit rejects it.
     """
     depth = 10_000
     payload = "[" * depth + "1" + "]" * depth
