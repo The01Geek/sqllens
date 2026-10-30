@@ -439,7 +439,6 @@ class TestAgentFailure:
         (it swallows exceptions and logs), so the server still starts cleanly
         even though the same builder is on the warmup path.
         """
-        monkeypatch.setattr(agent_module, "_AGENT_STATE", None)
 
         def _boom(cfg):  # type: ignore[no-untyped-def]
             raise RuntimeError("forced agent build failure")
