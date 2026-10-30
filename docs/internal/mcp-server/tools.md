@@ -78,7 +78,7 @@ The docstrings are the user-facing tool descriptions that the calling AI client 
 
 [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py) owns the process-wide agent that `query_database` uses (and the transport-layer warmup primes). Extracting the singleton into its own module is structural, not cosmetic: a tool wrapper and the boot-time warmup must reach the *same* `Agent` object graph (memory state, tool registrations, cold-start cost) so neither can accidentally build a competing agent, and the cfg-mismatch warning has exactly one definition site.
 
-- **Lazy, race-safe singleton agent.** The agent and the `Config` that built it are stored together as one atomically-assigned tuple, `_AGENT_STATE: tuple[Agent, Config] | None`, and built on the first call via `build_agent(cfg)` (see [agent/factory.md](../agent/factory.md)). `get_agent` is `async` and guards the cold start with an `asyncio.Lock` (`_AGENT_LOCK`) using **double-checked locking**: the outer `_AGENT_STATE is None` test is a fast path that skips the lock once the agent exists; correctness comes from the inner re-check after awaiting the lock, so two concurrent first calls cannot both run `build_agent`. Note `build_agent` itself only *wires* objects — `ChromaAgentMemory.__init__` does no I/O, so the ChromaDB open and the ~80 MB embedding-model download are **not** triggered by `build_agent`; they fire lazily the first time a memory method touches the collection (or eagerly at boot via `_warm_memory`, below). A later call whose `cfg` is a *different object* (identity check, not `==` — see "Why all core tools take `cfg` from the closure") is still served by the original agent, but logs an explicit warning instead of silently honoring a config it is not using. The agent itself is safe for concurrent in-flight async requests because each request gets its own `RequestContext`.
+- **Lazy, race-safe singleton agent.** The agent and the `Config` that built it are stored together as one atomically-assigned tuple, `_AGENT_STATE: tuple[Agent, Config] | None`, and built on the first call via `build_agent(cfg)` (see [agent/factory.md](../agent/factory.md)). `get_agent` is `async` and guards the cold start with an `asyncio.Lock` (`_AGENT_LOCK`) using **double-checked locking**: the outer `_AGENT_STATE is None` test is a fast path that skips the lock once the agent exists; correctness comes from the inner re-check after awaiting the lock, so two concurrent first calls cannot both run `build_agent`. Note `build_agent` itself only *wires* objects — `ChromaAgentMemory.__init__` does no I/O, so the ChromaDB open and the ~80 MB embedding-model download are **not** triggered by `build_agent`; they fire lazily the first time a memory method touches the collection (or eagerly at boot via `_warm_memory`, below). A later call whose `cfg` is a *different object* (identity check, not `==` — see "Why all core tools take `cfg` from the closure") is still served by the original agent, but logs an explicit warning instead of silently honoring a config it is not using. Each request gets its own `RequestContext`, and concurrent calls on one conversation are ordered as described in "Concurrency: the per-conversation turn queue" below.
 - **Error taxonomy lives in `query_database`, not here.** The sanitized-internal / SQL-execution-prefix / verbatim-`UnsafeSqlError` split is defined once in `tools/query_database.py` (`_INTERNAL_ERROR_MESSAGE`, `_SQL_EXECUTION_ERROR_PREFIX`). `_agent.py` only constructs and caches the agent.
 - **Stable re-exports.** `prime_agent` and `get_agent` are also re-exported from `tools/query_database.py` (in `__all__`) so existing call sites (`transport/http.py`, several tests) that import from there still work without churn.
 
@@ -179,6 +179,65 @@ End-to-end flow:
 4. **The model passes it back** as the `conversation_id` tool argument on the next call, closing the loop.
 
 The conversation store is **in-process and ephemeral** — dropped on restart, never persisted to a server-side database (CLAUDE.md non-goal). Pinned by `tests/unit/test_server.py` (`_meta` + footer assembly), `tests/unit/test_query_database.py` (id threaded into `send_message`), and `tests/unit/test_format.py` (`append_conversation_footer`).
+
+## Concurrency: the per-conversation turn queue
+
+Model calls and database queries do not hold the event loop, so several
+`query_database` calls can be in flight at once; see
+[transport.md](transport.md#keeping-the-event-loop-free-during-agent-runs-issue-299)
+for how. Calls on different conversation ids run at the same time. Calls that
+share a conversation id must not, because each one reads and appends to the
+same message history. Issue #255 adds two rules in
+[src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py):
+
+- **Calls sharing a `conversation_id` run one at a time.** The tool holds a
+  per-conversation `asyncio.Lock` around the agent run. A call that arrives
+  while another call on the same id is running waits until that call's agent
+  run returns, fails or is cancelled, then runs, so the history holds the first
+  call's messages followed by the second's. The lock is released when the
+  agent run ends, before the first call formats its result, not when the whole
+  call returns. The lock is taken *before* the run timer, so time
+  spent waiting is not reported as the call's own duration. Each registry entry
+  counts holders *and* waiters, and is deleted once that count reaches zero and
+  the entry is still the one registered under its id (a superseded entry is
+  left alone, so a late release cannot collect its successor). No entry
+  accumulates per conversation ever seen, and a waiter cancelled while queued
+  leaves none behind. A `None` `conversation_id` (reachable only by a direct
+  `_impl` caller such as the eval runner; the MCP tool body always mints one)
+  takes no lock: the agent mints a private id no other caller can name.
+- **A cancelled call's messages are removed from its conversation.** After
+  taking the turn lock and before the agent run, the tool records the
+  conversation's message count. On cancellation it truncates the conversation
+  back to that count through the synchronous
+  `BoundedConversationStore.truncate_messages` and re-raises, returning no
+  result. The truncate is synchronous because the handler runs inside an
+  already-cancelled task, where a suspending `await` would never resume, and it
+  runs before the turn lock is released. The next call on that id therefore
+  sees the history as it stood when the cancelled call's turn began, including
+  any earlier call's messages. A store without `truncate_messages`, or one that
+  raises from it, is logged at ERROR naming the store class rather than
+  replacing the cancellation with another exception.
+
+Cancelling a call does not stop a database query that has already started on
+a worker thread; see the cancellation limit in
+[transport.md](transport.md#keeping-the-event-loop-free-during-agent-runs-issue-299).
+The rollback removes only conversation messages.
+
+The queue covers `query_database` only, and other tools can still hold the
+event loop. The memory-administration tools other than `add_memories` call the
+synchronous `MemoryStore` directly inside their `async` handlers, so each one
+blocks the loop for its whole call (tracked in #303; see "Not yet covered" in
+[transport.md](transport.md#keeping-the-event-loop-free-during-agent-runs-issue-299)).
+`import_memory` and `add_memories` both go through `import_bundle`
+([src/sqllens/memory/importer.py](../../../src/sqllens/memory/importer.py)):
+its per-entry writes use the `async` `MemoryStore` methods, which run on
+ChromaDB's own executor, but it first reads the existing entries for
+de-duplication with the synchronous `MemoryStore.iter_all`, which blocks the
+loop while it reads the collection.
+
+Pinned by `tests/unit/test_query_database_queue.py` (concurrency across ids,
+ordering on a shared id, entry cleanup, cancel rollback, and the
+`truncate_messages` seam).
 
 ## The MCP App interactive result widget
 

@@ -19,12 +19,17 @@ clarifying-question flow this store backs.
 Concurrency: assumes a single asyncio event loop. Each method's OrderedDict
 mutations run without an intervening ``await``, so they are atomic under
 cooperative scheduling; the store is **not** thread-safe and would need a lock
-if ever driven from multiple OS threads.
+if ever driven from multiple OS threads. That holds for the synchronous
+``truncate_messages`` too — it is synchronous so a cancelled task can call it
+without suspending, not so it can be called from a worker thread. Some work
+runs on worker threads (SQL driver calls, ChromaDB memory calls), but every
+store call stays on the event loop.
 """
 
 from __future__ import annotations
 
 from collections import OrderedDict
+from datetime import UTC, datetime
 
 from sqllens.agent.core.storage import Conversation, ConversationStore, Message
 from sqllens.agent.core.user import User
@@ -34,6 +39,10 @@ from sqllens.agent.core.user import User
 # exceed the number of distinct conversations in flight; 1000 is generous for a
 # single-database instance while bounding worst-case memory.
 DEFAULT_MAX_CONVERSATIONS = 1000
+
+
+class ConversationOwnerMismatchError(LookupError):
+    """``truncate_messages`` was asked to roll back another user's conversation."""
 
 
 class BoundedConversationStore(ConversationStore):
@@ -85,6 +94,51 @@ class BoundedConversationStore(ConversationStore):
         ]
         user_conversations.sort(key=lambda x: x.updated_at, reverse=True)
         return user_conversations[offset : offset + limit]
+
+    def truncate_messages(
+        self, conversation_id: str, user_id: str, length: int
+    ) -> bool:
+        """Drop messages past ``length``; the cancel-rollback seam.
+
+        Deliberately **synchronous**, unlike every other method here. Its only
+        production caller is ``tools/query_database.py``'s cancellation
+        handler, which runs inside an already-cancelled task: anyio re-delivers
+        the cancellation on every loop cycle there, so an ``await`` that
+        suspends would never resume and the rollback would be lost. Reads and mutates the same
+        ``Conversation`` object the agent appended to, so no store round trip
+        is needed.
+
+        Does not touch LRU recency: a rollback is cleanup for a turn that never
+        happened, not a use of the conversation. It does stamp ``updated_at``,
+        as ``Conversation.add_message`` does, so that field never reflects
+        messages that are no longer there.
+
+        Returns True when messages were actually dropped, False when there was
+        nothing to roll back: an unknown or evicted conversation id, or a
+        message list already at or below ``length``. Neither is an error,
+        because a cancelled call that was evicted mid-flight has nothing to
+        restore.
+
+        Raises:
+            ConversationOwnerMismatchError: the conversation belongs to a
+                different user. Nothing is dropped, so the rollback did not
+                happen, and the caller must be able to tell that apart.
+            ValueError: ``length`` is negative.
+        """
+        if length < 0:
+            raise ValueError(f"length must be >= 0 (got {length})")
+        conversation = self._conversations.get(conversation_id)
+        if conversation is None:
+            return False
+        if conversation.user.id != user_id:
+            raise ConversationOwnerMismatchError(conversation_id)
+        if length >= len(conversation.messages):
+            return False
+        del conversation.messages[length:]
+        # Naive UTC, the same kind of value ``Conversation.add_message`` stores,
+        # so ``list_conversations`` can still compare and sort them.
+        conversation.updated_at = datetime.now(UTC).replace(tzinfo=None)
+        return True
 
     def _remember(self, conversation: Conversation) -> None:
         self._conversations[conversation.id] = conversation

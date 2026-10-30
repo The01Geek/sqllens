@@ -20,7 +20,9 @@ from sqllens.agent.components.rich.data.dataframe import DataFrameComponent
 from sqllens.agent.components.rich.feedback.status_card import StatusCardComponent
 from sqllens.agent.components.rich.text import RichTextComponent
 from sqllens.agent.core.components import UiComponent
+from sqllens.agent.factory import _StaticUserResolver
 from sqllens.agent.markers import answer_marker_data
+from sqllens.conversation_store import BoundedConversationStore
 
 
 def wrap(rich) -> UiComponent:  # type: ignore[no-untyped-def]
@@ -266,6 +268,13 @@ class StubAgent:
     warm step in ``prime_agent``), so this stub mirrors both surfaces without
     depending on any agent internals.
 
+    ``conversation_store`` and ``user_resolver`` mirror the two attributes the
+    real ``Agent`` always sets in ``__init__`` (see
+    ``agent/core/agent/agent.py``). ``query_database``'s per-conversation queue
+    reads both before each agent run, so the stub carries real instances —
+    a ``BoundedConversationStore`` and the factory's single-user resolver —
+    rather than making the production path guess whether they exist.
+
     ``cleanup_ran`` flips True whenever the generator's frame unwinds — via
     natural exhaustion, an exception raised inside the body, or an explicit
     ``aclose()`` call from the consumer. This matches what the wrapper
@@ -283,12 +292,15 @@ class StubAgent:
         *,
         raise_exc: BaseException | None = None,
         memory_raise_exc: BaseException | None = None,
+        conversation_store: BoundedConversationStore | None = None,
     ) -> None:
         self._components = list(components or [])
         self._raise_exc = raise_exc
         self.send_message_calls: list[tuple[Any, str, str | None]] = []
         self.cleanup_ran: bool = False
         self.agent_memory = StubAgentMemory(raise_exc=memory_raise_exc)
+        self.conversation_store = conversation_store or BoundedConversationStore()
+        self.user_resolver = _StaticUserResolver()
 
     # NOTE: regular `def`, not `async def`. Mirrors the real
     # ``Agent.send_message`` shape — an async-generator function callable

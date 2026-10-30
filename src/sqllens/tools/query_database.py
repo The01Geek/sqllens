@@ -15,14 +15,18 @@ because the forms here remain mutually distinguishable under it.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from typing import Any
 
 from sqllens.agent import Agent, RequestContext
 from sqllens.config import RESERVED_METADATA_KEYS, Config
+from sqllens.conversation_store import ConversationOwnerMismatchError
 from sqllens.profiles import ProfileStore, resolve_effective_settings
 from sqllens.runtime import (
     EffectiveSettings,
@@ -115,6 +119,193 @@ def strip_reserved_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any
         for k, v in (metadata or {}).items()
         if k not in _RESERVED_METADATA_KEYS
     }
+
+
+@dataclass
+class _ConversationQueueEntry:
+    """One conversation id's turn lock plus its live user count.
+
+    ``users`` counts holders *and* waiters, not just the holder, so the entry
+    survives until the last interested call has let go. Counting only holders
+    would let the entry be deleted while a waiter was still parked inside
+    ``acquire`` on its lock, and the next call would mint a *second* lock for
+    the same conversation id — two calls would then run concurrently on one
+    conversation, which is the overlap the queue exists to prevent.
+    """
+
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    users: int = 0
+
+
+# Per-conversation turn locks, keyed by conversation id. Created on demand and
+# deleted as soon as no call holds or awaits them, so a long-running server
+# accumulates no entry per conversation ever seen (the conversation *store* is
+# separately LRU-bounded; this registry is bounded by concurrency instead).
+#
+# Safe as plain dict mutations: every read-modify-write below runs on the event
+# loop with no intervening ``await``, so no other task can interleave. The agent
+# loop and the conversation store stay on the event loop for exactly this
+# reason. Work that does run on worker threads (SQL driver calls, ChromaDB
+# memory calls) never touches this registry.
+_CONVERSATION_QUEUES: dict[str, _ConversationQueueEntry] = {}
+
+
+def _release_queue_entry(conversation_id: str, entry: _ConversationQueueEntry) -> None:
+    """Drop one user of ``entry``, deleting it once nobody is left.
+
+    The identity re-check (``is entry``) keeps a late release from deleting a
+    *successor* entry: if this entry was already removed and a new call minted
+    a fresh one for the same id, that new entry has its own users and must not
+    be collected by this one's bookkeeping.
+    """
+    entry.users -= 1
+    if entry.users <= 0 and _CONVERSATION_QUEUES.get(conversation_id) is entry:
+        del _CONVERSATION_QUEUES[conversation_id]
+
+
+@asynccontextmanager
+async def _conversation_turn(conversation_id: str | None) -> AsyncIterator[str | None]:
+    """Serialize agent runs that share ``conversation_id``.
+
+    Yields the queued conversation id when the turn lock was taken, or None
+    when the call runs unqueued — so the caller gets the id it should roll back
+    and the queued/unqueued decision in one value. Unqueued is the
+    ``conversation_id is None`` case only: the agent then mints a private id
+    that no other caller can name, so no second call can ever target the same
+    conversation and there is nothing to serialize or roll back. The MCP server
+    layer always passes a concrete id (``server.py`` mints one when the caller
+    sends none), so the unqueued path is reached by direct ``_impl`` callers
+    alone.
+
+    Cancellation while parked in ``acquire`` releases this call's claim on the
+    entry before propagating, so a cancelled waiter leaves no entry behind.
+    """
+    if conversation_id is None:
+        yield None
+        return
+
+    entry = _CONVERSATION_QUEUES.get(conversation_id)
+    if entry is None:
+        entry = _ConversationQueueEntry()
+        _CONVERSATION_QUEUES[conversation_id] = entry
+    entry.users += 1
+
+    try:
+        await entry.lock.acquire()
+    except BaseException:
+        # Includes the cancellation of a call still waiting for its turn.
+        _release_queue_entry(conversation_id, entry)
+        raise
+
+    try:
+        yield conversation_id
+    finally:
+        entry.lock.release()
+        _release_queue_entry(conversation_id, entry)
+
+
+async def _conversation_baseline(
+    agent: Any, request_context: RequestContext, conversation_id: str
+) -> tuple[str, int]:
+    """Resolve the request's user and the conversation's current message count.
+
+    Read after the turn lock is held and before the agent run, so the count is
+    the history as it stood when this call's turn began — including the
+    messages of any earlier call on the same id that has already finished. The
+    pair is what the cancellation handler rolls back to. A conversation the
+    agent has not created yet counts zero.
+    """
+    user = await agent.user_resolver.resolve_user(request_context)
+    conversation = await agent.conversation_store.get_conversation(
+        conversation_id, user
+    )
+    return user.id, 0 if conversation is None else len(conversation.messages)
+
+
+def _rollback_conversation(
+    agent: Any, conversation_id: str, user_id: str, length: int
+) -> None:
+    """Remove the cancelled call's messages, synchronously.
+
+    Must not suspend: the caller is already inside a cancelled task, where a
+    suspending ``await`` would never resume and the rollback would silently not
+    happen. ``BoundedConversationStore.truncate_messages`` is synchronous for
+    exactly this call site.
+
+    ``agent.conversation_store`` is read unguarded: ``Agent.__init__`` always
+    sets it, and ``_conversation_baseline`` already dereferenced it before the
+    run. The method lookup *and the call itself* are both guarded, because the
+    ``ConversationStore`` ABC does not declare ``truncate_messages`` — an
+    embedder that constructs ``Agent`` with a different store (the framework's
+    own ``MemoryConversationStore``, say) reaches a missing method, and one
+    whose own implementation raises reaches the second guard. Each logs at ERROR
+    naming the store class rather than raising, because the caller is
+    propagating a cancellation that must not be replaced by a different
+    exception — and a swallowed rollback would otherwise leave the next call on
+    this conversation reading a half-finished turn's messages with no signal at
+    all.
+    """
+    store = agent.conversation_store
+    truncate = getattr(store, "truncate_messages", None)
+    if truncate is None:
+        logger.error(
+            "cancelled query_database call on conversation %s was not rolled "
+            "back: conversation store %s has no synchronous truncate_messages; "
+            "the next call on this conversation will see the cancelled call's "
+            "messages",
+            conversation_id,
+            type(store).__name__,
+        )
+        return
+    try:
+        rolled_back = truncate(conversation_id, user_id, length)
+    except ConversationOwnerMismatchError:
+        # Unlike the "nothing to roll back" outcomes below, the messages are
+        # still there. Not reachable with the shipped _StaticUserResolver,
+        # which always resolves the same user.
+        logger.error(
+            "cancelled query_database call on conversation %s was not rolled "
+            "back: the conversation belongs to a different user than the one "
+            "the call resolved; the next call on this conversation will see "
+            "the cancelled call's messages",
+            conversation_id,
+        )
+        return
+    except Exception:
+        # Same rationale as the missing-method branch above: the caller is
+        # propagating a cancellation that must not be replaced by a different
+        # exception, so a store whose truncate_messages raises is logged at
+        # ERROR rather than allowed to escape and displace the CancelledError
+        # with nothing recording that the rollback did not happen. Apart from
+        # the owner mismatch handled above, the shipped BoundedConversationStore
+        # raises only ValueError for a negative length, which this caller's
+        # len()-derived baseline cannot produce, so this is unreachable with the
+        # default wiring.
+        logger.exception(
+            "cancelled query_database call on conversation %s was not rolled "
+            "back: conversation store %s raised from truncate_messages; the "
+            "next call on this conversation will see the cancelled call's "
+            "messages",
+            conversation_id,
+            type(store).__name__,
+        )
+        return
+    if rolled_back:
+        logger.info(
+            "cancelled query_database call: rolled conversation %s back to %d "
+            "message(s)",
+            conversation_id,
+            length,
+        )
+    else:
+        # Not an error: a conversation evicted mid-call, or one the cancelled
+        # call never got far enough to append to, has nothing to restore.
+        logger.info(
+            "cancelled query_database call on conversation %s: nothing to roll "
+            "back (unknown/evicted id, or already at %d message(s))",
+            conversation_id,
+            length,
+        )
 
 
 def _append_sql_block(markdown: str, query_info: dict | None) -> str:
@@ -261,32 +452,69 @@ async def query_database_impl_with_widgets(
         )
 
         components = []
-        started = time.monotonic()
-        try:
-            async for comp in agent.send_message(
-                request_context, question, conversation_id=conversation_id
-            ):
-                components.append(comp)
-        except UnsafeSqlError as e:
-            # Defensive path: the vendored agent catches the read-only guard
-            # violation inside RunSqlTool today, so this branch is not
-            # exercised by that pipeline. Kept so a future direct guard call
-            # or a code-path change surfaces UnsafeSqlError verbatim, distinct
-            # from the sanitized internal-error category below.
-            logger.warning("query rejected by read-only guard: %s", e)
-            raise RuntimeError(str(e)) from e
-        except RlsError as e:
-            # Same defensive rationale as the UnsafeSqlError branch above.
-            logger.warning("query rejected by row-level-security guard: %s", e)
-            raise RuntimeError(str(e)) from e
-        except Exception as e:
-            # Tool-internal / infrastructure failure. The driver exception
-            # string (host, port, db, role) is logged server-side only; the
-            # client gets a stable, sanitized message.
-            logger.exception("agent.send_message failed")
-            raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
+        # The turn lock is taken BEFORE ``started``, so a call that waited for
+        # an earlier call on the same conversation does not report that wait as
+        # part of its own duration.
+        async with _conversation_turn(conversation_id) as queued_id:
+            baseline_user_id = ""
+            baseline_messages = 0
+            if queued_id is not None:
+                # Inside the turn lock but above the agent-run ``try`` below, so
+                # this call needs its own handler to stay inside this function's
+                # error taxonomy: an embedder-supplied ``user_resolver`` or
+                # ``conversation_store`` can raise here, and without this clause
+                # the raw exception would travel past ``server.py`` (which only
+                # intercepts AgentRunError) to the MCP client instead of the
+                # sanitized message this function's docstring promises. The
+                # shipped _StaticUserResolver and BoundedConversationStore cannot
+                # raise, so this is unreachable with the default wiring.
+                # CancelledError is a BaseException and so is not caught here.
+                try:
+                    baseline_user_id, baseline_messages = await _conversation_baseline(
+                        agent, request_context, queued_id
+                    )
+                except Exception as e:
+                    logger.exception("conversation baseline read failed")
+                    raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
+            started = time.monotonic()
+            try:
+                async for comp in agent.send_message(
+                    request_context, question, conversation_id=conversation_id
+                ):
+                    components.append(comp)
+            except asyncio.CancelledError:
+                # Runs before the turn lock is released (still inside the
+                # context manager), so the next call on this conversation sees
+                # the history as it was when this turn began. CancelledError is
+                # a BaseException, so the ``except Exception`` handler below
+                # never catches it; this clause must come first and re-raise,
+                # returning no result.
+                if queued_id is not None:
+                    _rollback_conversation(
+                        agent, queued_id, baseline_user_id, baseline_messages
+                    )
+                raise
+            except UnsafeSqlError as e:
+                # Defensive path: the vendored agent catches the read-only guard
+                # violation inside RunSqlTool today, so this branch is not
+                # exercised by that pipeline. Kept so a future direct guard call
+                # or a code-path change surfaces UnsafeSqlError verbatim, distinct
+                # from the sanitized internal-error category below.
+                logger.warning("query rejected by read-only guard: %s", e)
+                raise RuntimeError(str(e)) from e
+            except RlsError as e:
+                # Same defensive rationale as the UnsafeSqlError branch above.
+                logger.warning("query rejected by row-level-security guard: %s", e)
+                raise RuntimeError(str(e)) from e
+            except Exception as e:
+                # Tool-internal / infrastructure failure. The driver exception
+                # string (host, port, db, role) is logged server-side only; the
+                # client gets a stable, sanitized message.
+                logger.exception("agent.send_message failed")
+                raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
 
-        total_duration_ms = int((time.monotonic() - started) * 1000)
+            total_duration_ms = int((time.monotonic() - started) * 1000)
+
         try:
             answer, is_error, blocks, query_info, memory_info = components_to_blocks(
                 components, dialect=sqlglot_dialect_for_url(cfg.database.url)
