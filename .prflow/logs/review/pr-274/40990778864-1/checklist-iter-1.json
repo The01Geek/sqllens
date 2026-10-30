@@ -1,0 +1,850 @@
+[
+  {
+    "id": "VC-1",
+    "category": "dependency_interaction",
+    "claim": "`verify_base_tables` in `sqllens.safety.relations` is importable and callable as `verify_base_tables(conn, sql, dialect=\"mysql\")`, accepting a live pymysql connection object as its first positional argument.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "source_line": 125,
+    "verify_against": "The `verify_base_tables` definition and its accepted `dialect` values",
+    "verify_hint": "Check `verify_base_tables` in `src/sqllens/safety/relations.py` — parameter order, keyword name `dialect`, the set of accepted dialect strings, and the connection API it calls (e.g. `.cursor()`) against pymysql.",
+    "claim_signature": "dependency_interaction:sql_runner.py:verify-base-tables-call:125",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "dependency_interaction",
+    "claim": "`verify_base_tables(conn, args.sql, dialect=\"postgres\")` works against a psycopg2 connection and tolerates being called inside the already-open implicit transaction psycopg2 starts under `autocommit=False`, before the named server-side cursor is created.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/postgres/sql_runner.py",
+    "source_line": 155,
+    "verify_against": "`verify_base_tables` implementation and psycopg2 named-cursor constraints",
+    "verify_hint": "Check `verify_base_tables` in `src/sqllens/safety/relations.py` for the psycopg2 cursor use and whether executing catalog queries before `conn.cursor(name=...)` affects the named-cursor portal in `PostgresSqlRunner.run_sql`.",
+    "claim_signature": "dependency_interaction:sql_runner.py:verify-base-tables-call:155",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "dependency_interaction",
+    "claim": "`verify_base_tables(conn, args.sql, dialect=\"sqlite\")` accepts a `sqlite3.Connection` and performs its catalog lookup with the `pragma_table_list` support the doc claims (SQLite 3.37+).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 126,
+    "verify_against": "`verify_base_tables` implementation for the sqlite dialect",
+    "verify_hint": "Check `verify_base_tables` in `src/sqllens/safety/relations.py` for the sqlite branch, its use of `pragma_table_list`, and its behaviour when the pragma function is unavailable.",
+    "claim_signature": "dependency_interaction:sql_runner.py:verify-base-tables-call:126",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "dependency_interaction",
+    "claim": "Issuing `conn.execute(\"BEGIN\")` before the catalog check is compatible with the sqlite3 driver's implicit transaction handling for every path that follows — the read path returning without commit/rollback, the write path calling `conn.commit()`, and the `finally` block closing the connection — and does not raise `sqlite3.OperationalError: cannot start a transaction within a transaction`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 125,
+    "source_line_end": 126,
+    "verify_against": "Python `sqlite3` transaction-control semantics and the rest of `SqliteSqlRunner.run_sql`",
+    "verify_hint": "Check `SqliteSqlRunner.run_sql` in `src/sqllens/agent/integrations/sqlite/sql_runner.py` (lines 93-143) together with the sqlite3 `isolation_level`/`autocommit` default for Python 3.11+.",
+    "claim_signature": "dependency_interaction:sql_runner.py:sqlite-explicit-begin:125",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "api_contract",
+    "claim": "Every concrete `SqlRunner` subclass in the repository implements the new abstract `run_sql` signature with the keyword-only `require_base_tables` parameter, so no implementation breaks when a caller passes it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/capabilities/sql_runner/base.py",
+    "source_line": 22,
+    "source_line_end": 24,
+    "verify_against": "All `SqlRunner` subclasses under `src/sqllens/`",
+    "verify_hint": "Grep for `SqlRunner)` subclasses and `async def run_sql` across `src/sqllens/` (including `agent/integrations/*`, `safety/`, and any stub/demo runner) and compare each signature with the abstract one.",
+    "claim_signature": "api_contract:base.py:require-base-tables-signature",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "test_mock_alignment",
+    "claim": "Test doubles and fakes that implement or patch `SqlRunner.run_sql` accept the keyword-only `require_base_tables` argument, so `RlsGuardRunner.__init__`'s construction check does not reject them and `run_sql(..., require_base_tables=True)` does not raise `TypeError` in tests.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/__init__.py",
+    "source_line": 135,
+    "source_line_end": 141,
+    "verify_against": "Fake/stub runners in the unit test suite",
+    "verify_hint": "Grep `tests/` for `def run_sql` and `SqlRunner` (e.g. `tests/unit/test_safety.py`, RLS and limits tests) and check each fake's signature against the new keyword.",
+    "claim_signature": "test_mock_alignment:__init__.py:fake-runner-kwarg",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "dependency_interaction",
+    "claim": "`inspect.signature(runner.run_sql)` returns the underlying function's parameters for the runner objects actually wired beneath `RlsGuardRunner` — including `MagicMock`/`AsyncMock` doubles and any functools-wrapped or `__call__`-based runner — so `_accepts_relation_check` does not falsely reject or falsely accept them.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/__init__.py",
+    "source_line": 185,
+    "source_line_end": 193,
+    "verify_against": "`inspect.signature` behaviour and the runners passed to `RlsGuardRunner` at the factory",
+    "verify_hint": "Check `build_sql_runner`/`build_agent` in `src/sqllens/agent/factory.py` for what is passed as `inner`, and the mock types used in the RLS tests.",
+    "claim_signature": "dependency_interaction:__init__.py:inspect-signature-run-sql:185",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "api_contract",
+    "claim": "The wrapper chain preserves the requirement: when `RlsGuardRunner` has rules it passes `require_base_tables=True`, and `ReadOnlyGuardRunner` and `RowCapRunner` forward it to the innermost connector runner in the order the factory composes them, so the connector actually performs the check on every RLS query.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/__init__.py",
+    "source_line": 179,
+    "source_line_end": 182,
+    "verify_against": "Runner composition order in the factory",
+    "verify_hint": "Check `build_sql_runner` in `src/sqllens/agent/factory.py` for the wrapping order (RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner) and that no unwrapping layer drops the keyword.",
+    "claim_signature": "api_contract:__init__.py:forward-require-base-tables:179",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "api_contract",
+    "claim": "`RlsGuardRunner.__init__` raising `TypeError` when rules are configured does not break existing construction sites that pass an empty rules list or a runner without the keyword.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/__init__.py",
+    "source_line": 135,
+    "verify_against": "All `RlsGuardRunner(` construction sites",
+    "verify_hint": "Grep for `RlsGuardRunner(` across `src/sqllens/` and `tests/` and check each call's `inner` and `rules` arguments.",
+    "claim_signature": "api_contract:__init__.py:rls-construction-typeerror:135",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts that implementations of `run_sql` must not ignore the `require_base_tables` flag — i.e. the contract is binding on every implementation, not advisory.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "require_base_tables: Verify referenced relations on the execution connection\n                and refuse views or unverified relation kinds before running SQL.\n                Required by RLS; implementations must not ignore this flag.",
+    "source_file": "src/sqllens/agent/capabilities/sql_runner/base.py",
+    "source_line": 30,
+    "source_line_end": 32,
+    "verify_against": "Every in-repo `SqlRunner.run_sql` implementation",
+    "verify_hint": "Check each `run_sql` implementation (`safety/__init__.py`, `safety/limits.py`, the three connectors, any demo/stub runner) for whether it honours or silently discards `require_base_tables`; a wrapper that accepts but drops it falsifies the claim.",
+    "claim_signature": "absolute_claim:base.py:implementations-must-not-ignore:30",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "absolute_claim",
+    "claim": "The internal doc asserts that `ReadOnlyGuardRunner` and `RowCapRunner` forward the requirement, that all three connectors call `verify_base_tables` on their execution connection before running the rewritten query, that SQLite opens a read transaction before checking its catalog, and that no catalog result is cached across queries.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`ReadOnlyGuardRunner` and `RowCapRunner` forward that requirement. The SQLite, PostgreSQL, and MySQL connectors call `verify_base_tables` in [relations.py](../../../src/sqllens/safety/relations.py) on their execution connection before running the rewritten query. SQLite opens a read transaction before checking its catalog. No catalog result is cached across queries.",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 39,
+    "verify_against": "`src/sqllens/safety/relations.py` and the three connector runners",
+    "verify_hint": "Check `verify_base_tables` in `src/sqllens/safety/relations.py` for any module-level or lru_cache memoization, and confirm the SQLite `BEGIN` yields a read transaction (deferred BEGIN takes no read lock until the first read).",
+    "claim_signature": "absolute_claim:row-level-security.md:no-catalog-caching:39",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "absolute_claim",
+    "claim": "The internal doc asserts that views (including PostgreSQL materialized views), unknown relation kinds, unsupported reference shapes, and catalog lookup failures all raise `RlsError`, while unprotected base-table queries still work.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Views (including PostgreSQL materialized views), unknown relation kinds, unsupported reference shapes, and catalog lookup failures raise `RlsError`.",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 41,
+    "verify_against": "`verify_base_tables` error paths in `src/sqllens/safety/relations.py`",
+    "verify_hint": "Check which exception types `verify_base_tables` raises for each case, and whether a driver error raised during the catalog lookup escapes as the driver's own exception rather than `RlsError` (note the connectors call it outside the guard wrappers' `try`).",
+    "claim_signature": "absolute_claim:row-level-security.md:all-cases-raise-rlserror:41",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "data_format_assumption",
+    "claim": "The `_METADATA_VIEWS` allowlist in `relations.py` contains exactly the views the doc enumerates — PostgreSQL `information_schema.schemata/tables/columns/views/table_constraints/key_column_usage/referential_constraints/constraint_column_usage/check_constraints` plus `pg_catalog.pg_tables`/`pg_views`/`pg_indexes`, and the MySQL `information_schema` structure views plus `statistics` — with `pg_stats` and `COLUMN_STATISTICS` absent.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 43,
+    "verify_against": "`_METADATA_VIEWS` in `src/sqllens/safety/relations.py`",
+    "verify_hint": "Compare the `_METADATA_VIEWS` entries (and their namespace/case-matching keys) in `src/sqllens/safety/relations.py` against the lists in this doc line and in `docs/external/row-level-security.md:161`.",
+    "claim_signature": "data_format_assumption:row-level-security.md:metadata-views-allowlist:43",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "absolute_claim",
+    "claim": "The internal doc asserts that PostgreSQL matches the allowlist on the namespace and name resolved by `to_regclass` on the connection, so a user view named `columns` elsewhere on the search path is still refused, and that MySQL matches the qualified `information_schema.<name>` reference case-insensitively without any catalog lookup.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "PostgreSQL matches the allowlist on the namespace and name `to_regclass` resolved on the connection, so a user view named `columns` elsewhere on the search path is still refused. MySQL matches the qualified `information_schema.<name>` reference case-insensitively without a catalog lookup; MySQL refuses to create objects in `information_schema`, even for root.",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 43,
+    "verify_against": "The allowlist-matching branches in `src/sqllens/safety/relations.py`",
+    "verify_hint": "Check the postgres `to_regclass` namespace resolution and the MySQL unqualified-vs-qualified reference handling in `verify_base_tables`; an unqualified `columns` reference resolved via MySQL's default database would falsify the MySQL half.",
+    "claim_signature": "absolute_claim:row-level-security.md:metadata-view-matching:43b",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "absolute_claim",
+    "claim": "The internal doc asserts that `RlsGuardRunner.__init__` raises `TypeError` when rules are configured and the inner `run_sql` accepts neither `require_base_tables` nor `**kwargs`, making the mismatch a construction-time wiring error rather than a per-query failure.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`RlsGuardRunner.__init__` inspects the inner `run_sql` signature and raises `TypeError` when rules are configured and it accepts neither `require_base_tables` nor `**kwargs`, so the mismatch is a wiring error at construction rather than a per-query failure.",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 47,
+    "verify_against": "`RlsGuardRunner.__init__` and `_accepts_relation_check`",
+    "verify_hint": "Check `_accepts_relation_check` in `src/sqllens/safety/__init__.py` (lines 185-193) — note it also returns False on `AttributeError`/`ValueError`, and whether a positional-only or `*args` runner is handled as the doc states.",
+    "claim_signature": "absolute_claim:row-level-security.md:construction-typeerror-check:47",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "absolute_claim",
+    "claim": "The external doc asserts that SQL Lens blocks every query referencing a database view (including a PostgreSQL materialized view) other than the listed metadata-only system views, or where a referenced relation's type cannot be verified on the connection.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- The query references a database view (including a PostgreSQL materialized view) other than the metadata-only system views listed under [Limitations](#limitations), or SQL Lens cannot verify a referenced relation's type on the database connection.",
+    "source_file": "docs/external/row-level-security.md",
+    "source_line": 132,
+    "verify_against": "`verify_base_tables` and the RLS wiring that reaches it",
+    "verify_hint": "Check `verify_base_tables` in `src/sqllens/safety/relations.py` plus `build_sql_runner` in `src/sqllens/agent/factory.py` — the claim fails if any query path (e.g. `visualize_data`, a schema-introspection path, or a runner built without the RLS wrapper) executes SQL without the relation check.",
+    "claim_signature": "absolute_claim:row-level-security.md:views-always-blocked:132",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "absolute_claim",
+    "claim": "The external limitation asserts that SQLite RLS requires SQLite 3.37 or newer, that virtual tables and their shadow tables are blocked, and that unavailable relation metadata blocks the query.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- **SQLite RLS requires SQLite 3.37 or newer.** Virtual tables and their shadow tables are blocked, and unavailable relation metadata blocks the query.",
+    "source_file": "docs/external/row-level-security.md",
+    "source_line": 163,
+    "verify_against": "The sqlite branch of `verify_base_tables`",
+    "verify_hint": "Check how `src/sqllens/safety/relations.py` reads `pragma_table_list` columns (`type`/`ncol`) to classify virtual and shadow tables, and what happens on an older SQLite where the pragma function is missing.",
+    "claim_signature": "absolute_claim:row-level-security.md:sqlite-337-requirement:163",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "absolute_claim",
+    "claim": "The external limitation asserts that SQL Lens rejects unquoted non-ASCII PostgreSQL identifiers under RLS.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- **Quote non-ASCII PostgreSQL identifiers when using RLS.** SQL Lens rejects their unquoted form because case folding depends on the server's encoding and locale.",
+    "source_file": "docs/external/row-level-security.md",
+    "source_line": 164,
+    "verify_against": "The PostgreSQL identifier normalization in `src/sqllens/safety/relations.py` / `rls.py`",
+    "verify_hint": "Check the postgres case-folding branch for the predicate that detects non-ASCII characters in an unquoted identifier, and confirm it raises rather than passing the identifier through.",
+    "claim_signature": "absolute_claim:row-level-security.md:non-ascii-identifier-reject:164",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "absolute_claim",
+    "claim": "The release note asserts that with RLS rules configured SQL Lens checks every referenced relation on the executing connection and blocks views (including views over unprotected tables and PostgreSQL materialized views), SQLite virtual tables, and any relation whose type it cannot verify.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "With RLS rules configured, SQL Lens checks every referenced relation on\nthe connection that runs the query and blocks views, including views over\nunprotected tables and PostgreSQL materialized views, as well as SQLite virtual\ntables and any relation whose type it cannot verify.",
+    "source_file": "changelog.d/274.security.md",
+    "source_line": 2,
+    "source_line_end": 5,
+    "verify_against": "`verify_base_tables` in `src/sqllens/safety/relations.py` and the connector call sites",
+    "verify_hint": "Check that every relation reference shape the scope analysis yields (schema-qualified, aliased, subquery, UNION branch, table-valued function) reaches the catalog check in `verify_base_tables`.",
+    "claim_signature": "absolute_claim:274.security.md:every-relation-checked:2",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "absolute_claim",
+    "claim": "The internal doc asserts that with the RLS decorator unwrapped (empty `rls` list) the no-RLS path adds no RLS rewrite or catalog checks.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "RLS is opt-in: an empty `rls` list disables the guard wholly (no decorator is wrapped, see [Wiring](#wiring) below) and the no-RLS path adds no RLS rewrite or catalog checks.",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 14,
+    "verify_against": "`build_sql_runner` in `src/sqllens/agent/factory.py` and the default `require_base_tables=False` defaults",
+    "verify_hint": "Check that no wrapper or connector sets `require_base_tables=True` independently of `RlsGuardRunner`, so the empty-rules path never calls `verify_base_tables`.",
+    "claim_signature": "absolute_claim:row-level-security.md:no-rls-no-catalog-checks:14",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "absolute_claim",
+    "claim": "The internal doc asserts that when `cfg.database.read_only = false` the engine runner still verifies the referenced relations before executing the rewritten SQL.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "When `cfg.database.read_only = false` (disabled — don't), the read-only guard is skipped *and* RLS still wraps if rules are configured; the engine runner still verifies the referenced relations before executing the rewritten SQL.",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 200,
+    "verify_against": "`build_sql_runner` composition when `read_only` is false",
+    "verify_hint": "Check `src/sqllens/agent/factory.py` for the wrapper chain when `cfg.database.read_only` is false — confirm `RlsGuardRunner`'s inner runner still forwards `require_base_tables` with `ReadOnlyGuardRunner` absent.",
+    "claim_signature": "absolute_claim:row-level-security.md:readonly-false-still-verifies:200",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "absolute_claim",
+    "claim": "The internal doc asserts that connection-level relation checks raise a sanitized `RlsError` that passes through the wrappers unchanged.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- Connection-level relation checks raise a sanitized `RlsError` when a view or unverified relation is encountered; this error passes through the wrappers.",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 207,
+    "verify_against": "Exception flow from the connector `verify_base_tables` call back out through `RowCapRunner`, `ReadOnlyGuardRunner` and `RlsGuardRunner`",
+    "verify_hint": "Check whether `ReadOnlyGuardRunner.run_sql` or `RlsGuardRunner.run_sql` in `src/sqllens/safety/__init__.py` wrap or re-label exceptions raised by `self._inner.run_sql` (both delegate outside their `try`), and whether the `RlsError` message can include unsanitized SQL or connection detail.",
+    "claim_signature": "absolute_claim:row-level-security.md:rlserror-passes-through:207",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "dependency_interaction",
+    "claim": "sqlglot's `traverse_scope` yields scope objects exposing both `.sources` (mapping of name to source, where a base-table source is an `exp.Table`) and `.tables`, and every `exp.Table` node belonging to an analyzable query appears in some scope's `.tables`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/relations.py",
+    "source_line": 43,
+    "source_line_end": 57,
+    "verify_against": "sqlglot's `sqlglot.optimizer.scope` module (installed version)",
+    "verify_hint": "Check `Scope.sources` and `Scope.tables` in `sqlglot/optimizer/scope.py` and the pinned sqlglot version in pyproject.toml/requirements.txt",
+    "claim_signature": "dependency_interaction:relations.py:traverse-scope-sources-tables",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "dependency_interaction",
+    "claim": "An `exp.Table` can be reconstructed from only the `this`, `db` and `catalog` args, and `relation.sql(dialect=...)` on that reconstruction renders a name usable both as a dict key and as a catalog lookup argument.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/relations.py",
+    "source_line": 48,
+    "source_line_end": 52,
+    "verify_against": "sqlglot `expressions.Table` arg_types",
+    "verify_hint": "Check `exp.Table.arg_types` in sqlglot `expressions.py` for other identity-bearing args (e.g. `pivots`, `when`, `only`, `version`) dropped by this copy",
+    "claim_signature": "dependency_interaction:relations.py:table-arg-reconstruction",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "dependency_interaction",
+    "claim": "The PostgreSQL execution cursor accepts `%s` placeholders (pyformat paramstyle) with a tuple of parameters, and `pg_catalog.to_regclass(text)` accepts the rendered relation SQL.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/relations.py",
+    "source_line": 91,
+    "source_line_end": 97,
+    "verify_against": "The PostgreSQL connector that supplies this connection in `src/sqllens/agent/integrations/`",
+    "verify_hint": "Check the Postgres runner's driver (psycopg vs psycopg2 vs asyncpg) and its paramstyle in the postgres sql_runner module, and the `connection` object passed to `verify_base_tables`",
+    "claim_signature": "dependency_interaction:relations.py:postgres-paramstyle-to-regclass",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "data_format_assumption",
+    "claim": "PostgreSQL `pg_class.relkind` values that must pass are `r` and `p`; `v` and `m` are views; any other value (including `f` foreign table and `t`/`i`/`S`) is unverifiable and blocked.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/relations.py",
+    "source_line": 124,
+    "source_line_end": 131,
+    "verify_against": "PostgreSQL catalog documentation for `pg_class.relkind`",
+    "verify_hint": "Compare the accepted set in `verify_base_tables` against the full relkind enumeration (r, i, S, t, v, m, c, f, p)",
+    "claim_signature": "data_format_assumption:relations.py:pg-relkind-values",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "data_format_assumption",
+    "claim": "MySQL `information_schema.TABLES.TABLE_TYPE` returns exactly `BASE TABLE`, `VIEW` or `SYSTEM VIEW` for relations this guard can see.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/relations.py",
+    "source_line": 114,
+    "source_line_end": 131,
+    "verify_against": "MySQL/MariaDB `information_schema.TABLES` documentation",
+    "verify_hint": "Check the documented TABLE_TYPE domain (including `TEMPORARY`/`SEQUENCE` on MariaDB) against the accepted and view sets in `verify_base_tables`",
+    "claim_signature": "data_format_assumption:relations.py:mysql-table-type-values",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "dependency_interaction",
+    "claim": "`SELECT @@lower_case_table_names` returns a single row whose first column is an integer 0, 1 or 2, and a non-zero value means the server folds schema and table names for comparison.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/relations.py",
+    "source_line": 76,
+    "source_line_end": 81,
+    "verify_against": "MySQL server system variable documentation and the MySQL driver's return typing",
+    "verify_hint": "Check whether the MySQL driver used by the mysql sql_runner returns this variable as int or str/bytes, and the documented semantics of lower_case_table_names 0/1/2",
+    "claim_signature": "dependency_interaction:relations.py:lower-case-table-names",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "dependency_interaction",
+    "claim": "Wrapping both sides of the MySQL comparison in `BINARY` plus conditional `LOWER()` yields the server's own identifier matching semantics for schema and table names under each lower_case_table_names mode.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/relations.py",
+    "source_line": 109,
+    "source_line_end": 119,
+    "verify_against": "MySQL identifier case-sensitivity rules and the `BINARY` operator's deprecation status",
+    "verify_hint": "Check MySQL 8.x docs for `BINARY` operator deprecation (8.0.27+) and lower_case_table_names=2 semantics (stored as given, compared lowercase)",
+    "claim_signature": "dependency_interaction:relations.py:mysql-binary-lower-matching",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "dependency_interaction",
+    "claim": "SQLite exposes the table-valued function `pragma_table_list(?)` whose result rows have a `schema` column and a `type` column returning values including `table` and `view`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/relations.py",
+    "source_line": 151,
+    "source_line_end": 157,
+    "verify_against": "SQLite `PRAGMA table_list` documentation (3.37+) and the SQLite runner's connection",
+    "verify_hint": "Check `pragma_table_list` column names/values and the minimum sqlite3 version, plus `src/sqllens/agent/integrations/sqlite/sql_runner.py` for the connection type passed in",
+    "claim_signature": "dependency_interaction:relations.py:pragma-table-list",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "data_format_assumption",
+    "claim": "`PRAGMA database_list` rows place the schema name in index 1, and the attached schemas plus `temp`/`main` are the resolution order SQLite uses for an unqualified name.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/relations.py",
+    "source_line": 144,
+    "source_line_end": 145,
+    "verify_against": "SQLite `PRAGMA database_list` documentation",
+    "verify_hint": "Check the column order (seq, name, file) of PRAGMA database_list and SQLite's documented unqualified-name resolution order",
+    "claim_signature": "data_format_assumption:relations.py:database-list-columns",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "api_contract",
+    "claim": "`verify_base_tables` is called with the live execution connection object by every connector/runner wrapper, and that object exposes a DB-API `cursor()` with `execute`/`fetchone`/`fetchall`/`close`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/relations.py",
+    "source_line": 61,
+    "source_line_end": 73,
+    "verify_against": "The call sites of `verify_base_tables` in the sqlite/postgres/mysql runners and `RlsGuardRunner`",
+    "verify_hint": "Grep for `verify_base_tables` and `require_base_tables` in `src/sqllens/agent/integrations/*/sql_runner.py` and `src/sqllens/safety/rls.py`",
+    "claim_signature": "api_contract:relations.py:verify-base-tables-connection",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts that no catalog result is cached across queries and that every view other than those in `_METADATA_VIEWS` is refused.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The caller supplies its live execution connection. No catalog result is\n    cached across queries; CTE names are resolved by SQL scope analysis.\n    Metadata-only system views in ``_METADATA_VIEWS`` remain readable so\n    schema introspection keeps working; every other view is refused.",
+    "source_file": "src/sqllens/safety/relations.py",
+    "source_line": 62,
+    "source_line_end": 67,
+    "verify_against": "The implementation of `verify_base_tables` and any caching in the connectors/runner wrappers",
+    "verify_hint": "Falsify by finding a view reference that reaches execution unblocked (e.g. a relation reachable only through a non-SELECT shape, a table-valued function, or a dialect other than sqlite/postgres/mysql) or any connection/cursor-level catalog caching in the runners",
+    "claim_signature": "absolute_claim:relations.py:every-other-view-refused",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "absolute_claim",
+    "claim": "The comment asserts that statistics views exposing sampled column values (`pg_stats`, `COLUMN_STATISTICS`) are absent from `_METADATA_VIEWS` and therefore stay blocked like any other view.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Metadata-only system views the agent's schema introspection relies on. They\n# describe structure, not stored rows. Statistics views that expose sampled\n# column values (PostgreSQL ``pg_stats``, MySQL ``COLUMN_STATISTICS``) are\n# deliberately absent and stay blocked like any other view.",
+    "source_file": "src/sqllens/safety/relations.py",
+    "source_line": 16,
+    "source_line_end": 19,
+    "verify_against": "The contents of the allowlists and the PostgreSQL/MySQL definitions of each listed view",
+    "verify_hint": "Check whether each allowlisted view is value-free — notably PostgreSQL `information_schema.check_constraints` / `views` (expose constraint and view definition SQL) and MySQL `information_schema.statistics` — against the claim that they describe structure, not stored rows",
+    "claim_signature": "absolute_claim:relations.py:metadata-views-no-values",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "absolute_claim",
+    "claim": "The comment asserts that MySQL's `information_schema` cannot hold user objects and that its names are case-insensitive, so a qualified name is sufficient to identify it without a catalog lookup.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# information_schema cannot hold user objects and its names\n                    # are case-insensitive, so a qualified name identifies it.",
+    "source_file": "src/sqllens/safety/relations.py",
+    "source_line": 103,
+    "source_line_end": 104,
+    "verify_against": "MySQL/MariaDB documentation on creating objects in `information_schema` and identifier case rules",
+    "verify_hint": "Falsify with a MySQL variant that permits a user object named `information_schema` (or a database alias/synonym), or an unqualified allowlisted name that `relation.db` leaves empty",
+    "claim_signature": "absolute_claim:relations.py:information-schema-no-user-objects",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "absolute_claim",
+    "claim": "The comment asserts that matching the PostgreSQL allowlist on the namespace the connection resolved prevents an unqualified name shadowed via search_path from borrowing a system view's exemption.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Match the allowlist on the namespace the connection\n                    # resolved, so an unqualified name shadowed via search_path\n                    # cannot borrow a system view's exemption.",
+    "source_file": "src/sqllens/safety/relations.py",
+    "source_line": 88,
+    "source_line_end": 90,
+    "verify_against": "PostgreSQL `to_regclass`/search_path resolution semantics and the query in `verify_base_tables`",
+    "verify_hint": "Falsify with a user-created schema literally named `pg_catalog`/`information_schema` or a session whose search_path resolves a user view into an allowlisted namespace; check that `to_regclass` resolves under the same session search_path as execution",
+    "claim_signature": "absolute_claim:relations.py:search-path-shadowing",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-37",
+    "category": "absolute_claim",
+    "claim": "The `normalize_rls_identifiers` docstring and comment assert that the function preserves PostgreSQL's quoted/unquoted distinction before scope analysis, and that non-ASCII folding depends on server encoding/locale so it cannot be verified at this parser-only stage.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"Preserve PostgreSQL's quoted/unquoted distinction before scope analysis.\"\"\"",
+    "source_file": "src/sqllens/safety/rls.py",
+    "source_line": 184,
+    "source_line_end": 195,
+    "verify_against": "PostgreSQL identifier folding rules and sqlglot's `exp.Identifier` `quoted` arg handling",
+    "verify_hint": "Falsify with an unquoted identifier whose ASCII `str.lower()` differs from PostgreSQL's fold (e.g. locale-sensitive cases), or check that lowering `this` without clearing/keeping `quoted` round-trips correctly through `relation.sql(dialect='postgres')`",
+    "claim_signature": "absolute_claim:rls.py:postgres-identifier-folding",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-38",
+    "category": "api_contract",
+    "claim": "`normalize_rls_identifiers` mutates the tree in place and is safe to run both inside `apply_rls` (before scope analysis) and again in `_relations` on the already-rewritten SQL, with no double-application effect.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rls.py",
+    "source_line": 227,
+    "verify_against": "`apply_rls` in `src/sqllens/safety/rls.py` and `_relations` in `src/sqllens/safety/relations.py`",
+    "verify_hint": "Check that predicates injected by `_predicate`/`exp.column` produce identifiers whose `quoted` arg survives the second normalization pass in `_relations`",
+    "claim_signature": "api_contract:rls.py:normalize-applied-twice",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-39",
+    "category": "test_mock_alignment",
+    "claim": "The mocked PostgreSQL cursor returning `(relkind, nspname, relname)` from a single `fetchone()` matches the real driver's row shape and ordering for the query in `verify_base_tables`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 97,
+    "source_line_end": 106,
+    "verify_against": "The SELECT column list in `verify_base_tables` and the Postgres driver's default row type",
+    "verify_hint": "Compare the mock tuple against the `c.relkind, n.nspname, c.relname` projection in `src/sqllens/safety/relations.py` and whether the real cursor returns tuples or dict/namedtuple rows",
+    "claim_signature": "test_mock_alignment:test_rls_views.py:postgres-cursor-row-shape",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-40",
+    "category": "test_mock_alignment",
+    "claim": "The MySQL mock's `fetchone.side_effect = [(mode,), (\"VIEW\",)]` matches the real call order: one identifier-case probe followed by one relation-type lookup per relation.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 109,
+    "source_line_end": 116,
+    "verify_against": "The MySQL branch of `verify_base_tables`",
+    "verify_hint": "Check the sequence and count of `cursor.execute`/`fetchone` calls in the mysql branch of `src/sqllens/safety/relations.py` for multi-relation queries",
+    "claim_signature": "test_mock_alignment:test_rls_views.py:mysql-fetchone-order",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-41",
+    "category": "test_mock_alignment",
+    "claim": "`ToolContext.model_construct()` with no arguments produces a context the SQLite runner chain (`SqliteRunner`, `RowCapRunner`, `ReadOnlyGuardRunner`, `RlsGuardRunner`) can use, including any `metadata` attribute RLS value resolution reads.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 54,
+    "verify_against": "`ToolContext` in `src/sqllens/agent/core/tool.py` and the metadata lookup in `src/sqllens/safety/rls.py`",
+    "verify_hint": "Check which `ToolContext` fields `RlsGuardRunner.run_sql` and `_resolve_value` dereference and whether `model_construct()` leaves them unset",
+    "claim_signature": "test_mock_alignment:test_rls_views.py:toolcontext-model-construct",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-42",
+    "category": "test_mock_alignment",
+    "claim": "The integration test's `_Ctx` class defines `__init__` setting `self.metadata = {}` alongside class-level attributes, and that shape satisfies what the RLS and runner code reads from a tool context.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_connectors.py",
+    "source_line": 73,
+    "source_line_end": 74,
+    "verify_against": "`ToolContext` usage inside `RlsGuardRunner` and the connector runners",
+    "verify_hint": "Check that `_Ctx` in `tests/integration/test_connectors.py` still satisfies every attribute read by `RlsGuardRunner.run_sql` in `src/sqllens/safety/rls.py`",
+    "claim_signature": "test_mock_alignment:test_connectors.py:ctx-metadata-attr",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-43",
+    "category": "api_contract",
+    "claim": "`sqllens.safety` re-exports `RlsError`, `RlsGuardRunner` and `RowCapRunner`, and `RlsGuardRunner(inner, rules, dialect=...)` is its constructor signature.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_connectors.py",
+    "source_line": 34,
+    "source_line_end": 40,
+    "verify_against": "`src/sqllens/safety/__init__.py` and `RlsGuardRunner.__init__`",
+    "verify_hint": "Check `__all__` in `src/sqllens/safety/__init__.py` and the `RlsGuardRunner` constructor parameters in `src/sqllens/safety/rls.py`",
+    "claim_signature": "api_contract:test_connectors.py:safety-exports-rlsguardrunner",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-44",
+    "category": "api_contract",
+    "claim": "Every runner placed beneath `RlsGuardRunner` accepts a keyword-only `require_base_tables` parameter on `run_sql`, and `RlsGuardRunner` always passes it as true.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rls.py",
+    "source_line": 550,
+    "source_line_end": 553,
+    "verify_against": "`RlsGuardRunner` construction check and `run_sql` in `src/sqllens/safety/rls.py`, plus every runner it wraps",
+    "verify_hint": "Check `run_sql` signatures of `ReadOnlyGuardRunner`, `RowCapRunner`, `SqliteRunner` and the postgres/mysql runners for `require_base_tables`, and the signature inspection in `RlsGuardRunner.__init__`",
+    "claim_signature": "api_contract:repo:require-base-tables-kwarg",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-45",
+    "category": "test_mock_alignment",
+    "claim": "`test_mysql_metadata_views_remain_readable` asserts that for an allowlisted metadata view only the identifier-case probe executes and no relation-type lookup is issued.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    # Only the identifier-case probe runs; no relation-type lookup is needed.\n    cursor.execute.assert_called_once_with(\"SELECT @@lower_case_table_names\")",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 259,
+    "source_line_end": 260,
+    "verify_against": "The mysql branch of `verify_base_tables`",
+    "verify_hint": "Falsify with an allowlisted metadata view referenced without a schema qualifier, or alongside a second non-allowlisted relation in the same query",
+    "claim_signature": "test_mock_alignment:test_rls_views.py:mysql-only-case-probe",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-46",
+    "category": "test_mock_alignment",
+    "claim": "`verify_base_tables` makes no connection call at all when a query references only CTE-resolved relations, so `connection.cursor.assert_not_called()` holds.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 205,
+    "verify_against": "The early `if not relations: return` path in `verify_base_tables`",
+    "verify_hint": "Check `_relations` in `src/sqllens/safety/relations.py` for whether CTE-only queries yield an empty source list under `traverse_scope`",
+    "claim_signature": "test_mock_alignment:test_rls_views.py:cte-only-no-cursor",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-47",
+    "category": "data_format_assumption",
+    "claim": "The integration test's expectation that a blocked view raises `RlsError` matching \"view\" holds for PostgreSQL materialized views, MySQL views, `pg_stats` and MySQL `COLUMN_STATISTICS` — i.e. these all reach the view branch rather than the generic base-table branch.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_connectors.py",
+    "source_line": 149,
+    "source_line_end": 152,
+    "verify_against": "The kind-to-message mapping in `verify_base_tables`",
+    "verify_hint": "Check that MySQL `COLUMN_STATISTICS` reports TABLE_TYPE `SYSTEM VIEW` and PostgreSQL `pg_stats` relkind `v` so the message says \"views\", not \"base table\"",
+    "claim_signature": "data_format_assumption:test_connectors.py:view-error-message-match",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-48",
+    "category": "dependency_interaction",
+    "claim": "`build_sql_runner(url, read_only=False)` yields a runner able to execute DDL (CREATE TABLE/VIEW, DROP) and `build_sql_runner(url)` defaults to a read-only runner whose `run_sql` accepts `require_base_tables`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_connectors.py",
+    "source_line": 76,
+    "source_line_end": 90,
+    "verify_against": "`build_sql_runner` in `src/sqllens/agent/factory.py`",
+    "verify_hint": "Check `build_sql_runner`'s `read_only` default and the runner classes it returns for postgres and mysql URLs",
+    "claim_signature": "dependency_interaction:test_connectors.py:build-sql-runner-readonly",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-49",
+    "category": "data_format_assumption",
+    "claim": "A SQLite FTS5 virtual table reports a `pragma_table_list` type outside the accepted base-table set, so it raises the \"base table\" message rather than the view message.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_rls_views.py",
+    "source_line": 175,
+    "source_line_end": 179,
+    "verify_against": "SQLite `PRAGMA table_list` type values for virtual and shadow tables",
+    "verify_hint": "Check what `pragma_table_list` reports for an FTS5 virtual table and its shadow tables against the accepted set in `_sqlite_kind`/`verify_base_tables`",
+    "claim_signature": "data_format_assumption:test_rls_views.py:fts5-virtual-table-kind",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-50",
+    "category": "api_contract",
+    "claim": "The new first-party files `src/sqllens/safety/relations.py` and `tests/unit/test_rls_views.py` carry the required SPDX header pair.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/relations.py",
+    "verify_against": "The SPDX header convention in CLAUDE.md (`# SPDX-FileCopyrightText: 2026 Daniel Radman` / `# SPDX-License-Identifier: Apache-2.0`)",
+    "verify_hint": "Check the first two lines of each new .py file against the repo-wide SPDX rule in CLAUDE.md",
+    "claim_signature": "api_contract:repo:spdx-header",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-28"
+    ],
+    "reused_from_iter_prev": false
+  }
+]
