@@ -1,0 +1,38 @@
+[
+  {
+    "criterion": 1,
+    "text": "On every Python version in CI's `unit` matrix, `parse_json` raises `BundleFormatError` whose message contains \"deeply nested\" for each of at minimum these well-formed payloads, at a total depth of 65 and of 10,000, where depth counts nested arrays and objects with the root container at depth 1: nested arrays with an array root; an object root whose single value is nested arrays; and nested objects, each object's single value being the next object."
+  },
+  {
+    "criterion": 2,
+    "text": "On every Python version in CI's `unit` matrix, `load_golden(payload, \"json\")` raises `BundleFormatError` whose message contains \"deeply nested\" for a 10,000-level nested-array payload."
+  },
+  {
+    "criterion": 3,
+    "text": "`parse_json` raises `BundleFormatError` whose message contains \"deeply nested\" when the parsed value's depth (nested arrays and objects, root container at depth 1) exceeds `MAX_BUNDLE_DEPTH = 64`, defined in `src/sqllens/memory/io.py`, checked by walking the parsed value iteratively, without recursion, after `json.loads` and before the \"bundle root must be a JSON object\" check; a well-formed payload of depth 64 is not rejected by this check."
+  },
+  {
+    "criterion": 4,
+    "text": "A valid JSON bundle carrying both a `sql_pairs` block with at least one pair and a `schema_docs` list still parses to the same `MemoryBundle` as before the change."
+  },
+  {
+    "criterion": 5,
+    "text": "`parse_json` still converts a `RecursionError` raised by `json.loads` into `BundleFormatError` whose message contains \"deeply nested\", shown by a test that makes `json.loads` raise `RecursionError`."
+  },
+  {
+    "criterion": 6,
+    "text": "The `unit` job in `.github/workflows/ci.yml` runs on Python 3.11, 3.12, 3.13 and 3.14, and passes on all four."
+  },
+  {
+    "criterion": 7,
+    "text": "`pyproject.toml` lists the `Programming Language :: Python :: 3.13` and `Programming Language :: Python :: 3.14` classifiers, and `requires-python` is still `>=3.11`."
+  },
+  {
+    "criterion": 8,
+    "text": "`CLAUDE.md`'s *Repo conventions* lists `Lint + unit + transport (py3.11)` and `Lint + unit + transport (py3.12)` as the required checks, and names the `py3.13` and `py3.14` unit jobs and `Connector tests (Postgres + MySQL)` as running on every PR without being required."
+  },
+  {
+    "criterion": 9,
+    "text": "The change leaves the Python matrix of `.github/workflows/dependency-audit.yml` unchanged (it keeps auditing 3.11 and 3.12 only); leaves `parse_json`'s `JSONDecodeError` handling unchanged (a deep payload that is also invalid JSON, and that 3.14's `json.loads` scans without `RecursionError`, keeps getting \"invalid JSON\" on Python 3.14); and leaves Python versions above 3.14 untested in CI and unlisted in the classifiers while `requires-python = \">=3.11\"` still admits them."
+  }
+]
