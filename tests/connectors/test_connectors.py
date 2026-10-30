@@ -3,9 +3,9 @@
 
 """Integration tests for the Postgres and MySQL SqlRunner adapters.
 
-These tests run against **real** Postgres and MySQL instances. Pyproject's
-``addopts`` ignores this directory, so the default ``pytest`` run does not
-collect them; they run in CI's connector job, and locally with
+These tests run against **real** Postgres and MySQL instances.
+``tests/conftest.py``'s ``collect_ignore`` excludes this directory, so the
+default ``pytest`` run does not collect them; they run in CI's connector job, and locally with
 ``pytest tests/connectors``.
 
 Connection URLs come from env vars so the same tests work against
@@ -35,7 +35,7 @@ from sqllens.config import (
 from sqllens.safety import ReadOnlyGuardRunner, UnsafeSqlError
 from sqllens.safety.limits import MAX_ROWS_ATTR, TRUNCATED_ATTR
 
-pytestmark = [pytest.mark.connectors, pytest.mark.asyncio]
+pytestmark = pytest.mark.asyncio
 
 
 def _need(env_var: str) -> str:
