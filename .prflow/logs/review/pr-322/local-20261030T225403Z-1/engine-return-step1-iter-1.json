@@ -1,0 +1,413 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "severity": "important",
+   "weighed_severity": "suggestion",
+   "capped": true,
+   "description": "docs/internal/mcp-server/transport.md line 115 (SQL execution bullet) does not state that the slot limit, wait limit and saturation warning assume all SQL calls run on one event loop at a time, nor that calls from a second concurrently running loop get their own slots and may wait in the shared executor's queue where neither the wait limit nor the warning applies; acceptance criterion 3 requires this in both the sql_threads.py module docstring and transport.md, and the diff adds it only to the docstring. The bullet also omits the new per-rejection WARNING, and the regression-coverage paragraph (line 125) does not list the new tests.",
+   "defect_signature": {
+    "file": "docs/internal/mcp-server/transport.md",
+    "line_range": [
+     115,
+     115
+    ],
+    "kind": "other"
+   },
+   "agents": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:pr-test-analyzer",
+    "prflow:requesting-code-review"
+   ],
+   "corroboration": 4
+  },
+  {
+   "finding_id": "F-2",
+   "severity": "important",
+   "weighed_severity": "suggestion",
+   "capped": true,
+   "description": "Same transport.md line 115 gap filed as comment drift: the page does not state the single-loop assumption or mention the per-rejection warning, while the sql_threads.py module docstring now does (acceptance criterion 3).",
+   "defect_signature": {
+    "file": "docs/internal/mcp-server/transport.md",
+    "line_range": [
+     115,
+     115
+    ],
+    "kind": "comment_drift"
+   },
+   "agents": [
+    "prflow:comment-analyzer"
+   ],
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-3",
+   "severity": "suggestion",
+   "weighed_severity": "suggestion",
+   "capped": false,
+   "description": "src/sqllens/agent/integrations/sql_threads.py lines 115-121: the open-loop ERROR record 'A SQL worker slot could not be returned: %s' reports the failure but not its effect (the slot is permanently lost for that loop; after SQL_WORKER_THREADS such failures every call waits 60 s and is rejected).",
+   "defect_signature": {
+    "file": "src/sqllens/agent/integrations/sql_threads.py",
+    "line_range": [
+     115,
+     121
+    ],
+    "kind": "other"
+   },
+   "agents": [
+    "prflow:silent-failure-hunter"
+   ],
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-4",
+   "severity": "suggestion",
+   "weighed_severity": "suggestion",
+   "capped": false,
+   "description": "tests/integration/test_slow_agent_run_responsiveness.py line 139: test docstring 'Issue #299 reported failures whenever several agent runs were active.' records provenance rather than what a maintainer must not break; the module docstring already states the assertion.",
+   "defect_signature": {
+    "file": "tests/integration/test_slow_agent_run_responsiveness.py",
+    "line_range": [
+     139,
+     139
+    ],
+    "kind": "style"
+   },
+   "agents": [
+    "prflow:comment-analyzer"
+   ],
+   "corroboration": 1
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "file_count": 9,
+  "changed_lines": 314,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (no finding or checklist FAIL at the critical threshold; one documentation criterion is not yet met)\n\nThe code and test changes are correct and ready to merge. The one open gap is that `docs/internal/mcp-server/transport.md` does not yet state the single-event-loop assumption that acceptance criterion 3 asks for, and the 4.1.5 rule grades that gap as a documentation-only Suggestion.\nRule applied: rule 6 — findings or checklist FAILs below the threshold remain → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (6)\n\n<details><summary>6 items</summary>\n\n1. `docs/internal/mcp-server/transport.md` line 115 (the \"SQL execution\" bullet) does not say that the slot limit, the wait limit and the saturation warning assume all SQL calls run on one event loop at a time. It also does not say that calls from a second loop running at the same time get their own slots and may wait in the shared executor's queue, where neither the wait limit nor the warning applies. Acceptance criterion 3 requires this statement in both the `sql_threads.py` module docstring and this page. The diff adds it only to the docstring (head `sql_threads.py` lines 22-27) and does not touch `transport.md`. The same bullet also does not mention the new warning logged for each rejected call, and the regression-coverage paragraph (line 125) does not list the new tests. (raised by 4/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: criterion 3 requires prose only; adding the sentence changes no output, branch or covered set of the SQL worker pool. git grep over the repository for 'transport.md' and 'docs/internal/mcp-server' finds only Markdown cross-links in other docs/internal pages and a docstring pointer at sql_threads.py:41, and no tool, lint, workflow or agent-instruction file reads the page. docs/internal is not published, and vendor-slice.sh:106 strips it. -->\n2. The same `docs/internal/mcp-server/transport.md` line 115 gap, filed as comment drift: the page does not state the single-loop assumption or mention the per-rejection warning, while the module docstring now does. This finding is labelled differently, so it does not formally corroborate item 1. (raised by 1/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: same searches as item 1; no tool or agent reads transport.md for behavior, and docs/internal is not published. -->\n3. `src/sqllens/agent/integrations/sql_threads.py` lines 115-121: the `ERROR` record written when a slot cannot be returned on a still-open loop (\"A SQL worker slot could not be returned: %s\") says the release failed but not what that means. The slot is never released, so the loop has one fewer slot for the rest of the process. After `SQL_WORKER_THREADS` such failures, every call waits 60 seconds and is rejected. Adding that consequence to the message would help an operator. (raised by 1/5 agents)\n4. `tests/integration/test_slow_agent_run_responsiveness.py` line 139: the new test docstring \"Issue #299 reported failures whenever several agent runs were active.\" records where the test came from rather than what a maintainer must not break. The module docstring (lines 14-16) already states what the test asserts. (raised by 1/5 agents)\n- VC-8: FAIL (suggestion) — The MySQL runner's `run_sql` docstring says `SqlWorkersBusyError` means the query never ran; this holds only if no earlier `run_blocking_sql` call in `run_sql` executed the query before a rejected one. [src/sqllens/agent/integrations/mysql/sql_runner.py:92]\n\n  <details><summary>Evidence</summary>\n\n  INVALID answer stored FAIL (claim_provenance source_authored): The claim's premise is false. MySQLRunner.run_sql (sql_runner.py:74-100) makes exactly one run_blocking_sql call (line 98; the only reference besides the import at line 9). Connect, ping, setup, execute, fetch and close all happen inside _run_sql_blocking (102-180) on a single worker. So SqlWorkersBusyError can only come from acquiring the slot for that single call, before any of it runs. No earlier call can execute the query before a rejected one, and the docstring 'the query never ran' holds. I did not read sql_threads, so I did not check whether the error could also be raised after the work starts.\n\n  </details>\n\n- VC-25: FAIL (critical) — The `sql_threads.py` module docstring and `docs/internal/mcp-server/transport.md` state that the slot limit, the wait limit and the saturation warning assume all SQL calls run on one event loop at a time, and that calls from a second concurrently running loop get their own slots and may wait in the shared executor's queue, where neither the wait limit nor the warning applies. [src/sqllens/agent/integrations/sql_threads.py:22] — fix the code, or have the issue author amend this criterion [behavior-inert prose cap] <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: criterion 3 requires prose only (a statement in docs/internal/mcp-server/transport.md), not program behavior; adding that sentence changes no output, branch taken or covered set of the SQL worker pool (first-conjunct=held). git grep —untracked over the repository for 'transport.md' and 'docs/internal/mcp-server' across .sh/.py/.jq/.yml/workflow files and agent-instruction files finds only Markdown cross-links in other docs/internal pages and a docstring pointer in sql_threads.py:41; no tool, lint, build step or instruction file (CLAUDE.md, AGENTS.md, .claude/, prompt extensions) reads it for behavior (limb-one=held). docs/internal/ is an unpublished internal page set; .github/actions/vendor-plugin/vendor-slice.sh:106 strips docs/internal and no workflow publishes it (limb-two=held). -->\n\n  <details><summary>Evidence</summary>\n\n  criteria.json counts (criterion 3 matches). The sql_threads.py module docstring lines 22-27 state the claim correctly. But docs/internal/mcp-server/transport.md (SQL execution bullet, line 115, and the rest of the section lines 110-125) says only 'one per event loop' for the semaphore; a grep for 'second loop', 'own slots', 'shared executor', 'second concurrently' finds nothing, and the doc has no statement that the limits assume one event loop at a time or that calls from a second loop may wait in the executor queue where neither the wait limit nor the warning applies. The diff does not touch transport.md (only tests/integration/test_http_transport.py matches). Criterion 3 requires both the docstring and the doc, so the doc half is missing.\n\n  </details>\n\n</details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: none of small_diff, config_only or has_new_types; test_relevant set; detect_all_audit not set; 9 changed files, 314 changed lines.\n- Phase 0 working-tree check: skipped (PR mode with head override).\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. Final-pass reviewer extension (requesting-code-review): PROMPT-EXTENSION-STATUS: content-present.\n- CI evidence for head dd47f3f151ecdd74655fe857f4eb24fb98963d17: missing; no CI result or in-environment suite result was held for this head.\n- Normalized (wording-only): 0\n- Re-verification: none requested.\n- Verdict severity threshold: critical (read from config).\n- Deferrals: skipped (the PR body has no deferred-findings marker).\n- Dirty-tree check: clean (no reviewer modified the working tree).\n- Phase 3 reviewers: 5 dispatched, 5 returned results.\n- 4.1.5 cap: VC-25 and the two transport.md findings capped at Suggestion (documentation-only, no tool or agent reader, internal unpublished page).\n- prior-report: none\n- Checklist: 30 passed, 2 failed, 0 inconclusive\n- <details><summary>✅ Passed items (30 of 32)</summary>\n\n  - VC-1: `async with asyncio.timeout(WORKER_WAIT_TIMEOUT_S): await slot.acquire()` raises the builtin `TimeoutError` (caught by `except TimeoutError`) when the wait expires, on Python 3.11 and 3.12, and on expiry leaves no slot acquired or leaked. [src/sqllens/agent/integrations/sql_threads.py:151]\n  - VC-2: The comment asserts that on 3.11 `asyncio.wait_for` returns a slot granted in the same tick as a cancellation (so a cancelled call would run), and implies `asyncio.timeout` plus `Semaphore.acquire` does not. [src/sqllens/agent/integrations/sql_threads.py:149]\n  - VC-3: The rejection warning record contains no SQL, call arguments or exception message: its only argument is `WORKER_WAIT_TIMEOUT_S`, and it is logged once per call that raises `SqlWorkersBusyError`, independently of the saturation-warning rate limit. [src/sqllens/agent/integrations/sql_threads.py:155]\n  - VC-4: In `_release_slot`, a `RuntimeError` from `loop.call_soon_threadsafe` is silent when `loop.is_closed()` is true and otherwise logs one ERROR naming only the exception type; no exception escapes the done-callback in either case. [src/sqllens/agent/integrations/sql_threads.py:115]\n  - VC-5: The module docstring asserts the slot limit, wait limit and saturation warning assume one event loop at a time, that a second concurrent loop's calls get their own slots and can together exceed the executor's threads, and that the extra calls wait in the shared executor queue where neither the wait limit nor the warning applies. [src/sqllens/agent/integrations/sql_threads.py:22]\n  - VC-6: The module docstring asserts each rejection logs its own warning which the saturation interval does not limit, and that a caller cancelled while waiting never runs. [src/sqllens/agent/integrations/sql_threads.py:18]\n  - VC-7: The SQLite runner's `run_sql` docstring says `SqlWorkersBusyError` means the query never ran; this holds only if every `run_blocking_sql` call in `run_sql` before the query executes cannot leave the query partly done when a later call is rejected. [src/sqllens/agent/integrations/sqlite/sql_runner.py:94]\n  - VC-9: The Postgres runner's `run_sql` docstring says `SqlWorkersBusyError` means the query never ran; this holds only if no earlier `run_blocking_sql` call in `run_sql` executed the query before a rejected one. [src/sqllens/agent/integrations/postgres/sql_runner.py:125]\n  - VC-10: The `_fresh_sql_executor` fixture gives each test in the file a new executor by setting `sql_threads._executor` to None (so `_get_executor` builds a fresh one) and shuts down the one created at teardown; monkeypatch restores the previous executor afterward. [tests/unit/test_sql_runner_event_loop.py:125]\n  - VC-11: `test_sql_pool_drops_a_call_cancelled_in_the_tick_its_slot_is_granted` reproduces the same-tick grant-and-cancel: after three `sleep(0)` the queued call is waiting in `Semaphore.acquire`, `slot.release()` wakes it, `queued.cancel()` lands in the same tick, and the test asserts the caller is cancelled, `ran == []` and the slot is not locked. [tests/unit/test_sql_runner_event_loop.py:296]\n  - VC-12: `test_sql_pool_release_after_its_loop_closed_is_silent` drives `_release_slot` against a really closed loop, so `call_soon_threadsafe` raises `RuntimeError` and `is_closed()` is true, and asserts no ERROR record on any logger. [tests/unit/test_sql_runner_event_loop.py:390]\n  - VC-13: The `SimpleNamespace` loop stand-in in `test_sql_pool_logs_a_slot_release_that_fails_on_an_open_loop` exposes the two methods `_release_slot` calls (`call_soon_threadsafe`, `is_closed`) with the real behavior of an open loop that refuses to schedule. [tests/unit/test_sql_runner_event_loop.py:428]\n  - VC-14: `test_sql_pool_returns_the_slot_when_submit_fails` patches `submit` on the same executor instance `run_blocking_sql` uses, and its later `_fill_pool` proves all SQL_WORKER_THREADS calls start without waiting by asserting no pool log record (no saturation warning). [tests/unit/test_sql_runner_event_loop.py:445]\n  - VC-15: `test_sql_pool_logs_every_rejected_call` asserts exactly three rejection WARNINGs and four pool records in total (three rejections plus one saturation warning), with no record containing the SQL argument or the exception message's word 'busy'. [tests/unit/test_sql_runner_event_loop.py:245]\n  - VC-16: Each `query_database` result's `meta` carries `\"sqllens/conversation\"` with a `conversation_id` key, and two calls without a conversation_id get distinct conversation ids. [tests/integration/test_slow_agent_run_responsiveness.py:192]\n  - VC-17: Two concurrent `query_database` runs each issue a `/v1/messages` request to the stand-in before either completes, so `wait_for_arrivals(runs, 15)` reaching `runs` means both runs are held at the model at the same time. [tests/integration/test_slow_agent_run_responsiveness.py:146]\n  - VC-18: With the per-fixture `_AGENT_STATE` reset removed, the agent `make_server` builds still reads `ANTHROPIC_BASE_URL` set by `slow_model`: the top-level autouse reset clears `_AGENT_STATE` before `slow_model` and `make_server` run, and the autouse env scrub of `ANTHROPIC_BASE_URL` runs before `slow_model` sets it. [tests/integration/test_slow_agent_run_responsiveness.py:123]\n  - VC-19: `test_agent_build_failure...` in test_http_transport.py still starts with `_AGENT_STATE` None after its explicit monkeypatch was removed, because the top-level autouse fixture resets it; the remaining body still uses `monkeypatch` and `agent_module` for its `_boom` patch. [tests/integration/test_http_transport.py:442]\n  - VC-20: The fixture docstring asserts that without the reset an integration server's startup fills an empty singleton so a later test would reuse an agent built for an earlier test's config, and that one reset clears both agent and config so they cannot drift apart. [tests/conftest.py:101]\n  - VC-21: Moving `_reset_query_database_singleton` to tests/conftest.py resets `_AGENT_STATE` on teardown while an integration server started by `make_server` may still be running in another thread; the reset happens after `make_server` teardown or does not race with the server's warmup writing the singleton. [tests/conftest.py:94]\n  - VC-22: The top-level conftest docstring now says it has four responsibilities and that the stub factory's companion `default_stub_rows` exposes the default scenario's rows. [tests/conftest.py:21]\n  - VC-23: Each call that fails with `SqlWorkersBusyError` produces exactly one rejection `WARNING` record (distinct from the saturation warning) on the `sqllens.agent.integrations.sql_threads` logger, including rejections that occur within `SATURATION_WARNING_INTERVAL_S` of a saturation warning; a unit test that times out several queued calls in one burst sees one rejection record per rejected call. No rejection record contains the call's SQL, arguments or exception message. [src/sqllens/agent/integrations/sql_threads.py:155]\n  - VC-24: On Python 3.11 and 3.12, a unit test that grants a waiting call its slot and cancels that call in the same loop tick sees the caller raise `CancelledError`, the call never run, and the slot still available to a later call. [src/sqllens/agent/integrations/sql_threads.py:152]\n  - VC-26: When the release of a slot fails because its event loop is closed, no `ERROR` record is written on the `sqllens.agent.integrations.sql_threads` logger and nothing propagates; when scheduling the release raises a `RuntimeError` while the loop is still open, one `ERROR` record naming the exception type is written on that logger and nothing propagates. Unit tests cover both cases. [src/sqllens/agent/integrations/sql_threads.py:115]\n  - VC-27: A unit test makes `submit` raise and then shows that `SQL_WORKER_THREADS` calls on that loop all start without waiting for a slot. [tests/unit/test_sql_runner_event_loop.py:445]\n  - VC-28: Every SQL worker pool test in `tests/unit/test_sql_runner_event_loop.py` runs on an executor no earlier test used. [tests/unit/test_sql_runner_event_loop.py:125]\n  - VC-29: Every test under `tests/integration/` starts with `sqllens.tools._agent._AGENT_STATE` set to `None`, as every unit test already does. [tests/conftest.py:94]\n  - VC-30: The `run_sql` docstrings of the SQLite, MySQL and Postgres runners list `SqlWorkersBusyError` under `Raises:`. [src/sqllens/agent/integrations/sqlite/sql_runner.py:94]\n  - VC-31: An integration test holds two `query_database` runs, from two different conversations, open at the local model stand-in at the same time; while both are held, `/healthz` and `list_data_sources` on another session each answer within 2 s, and once released both runs return a result that is not an error. [tests/integration/test_slow_agent_run_responsiveness.py:135]\n  - VC-32: The change leaves the slot semaphore keyed per event loop and the worker executor process-wide, adds no file under `changelog.d/`, and leaves `changelog.d/300.fixed.md` unchanged, including its sentence that a query waiting more than a minute for a free worker fails with \"All database workers are busy; try again shortly.\" [src/sqllens/agent/integrations/sql_threads.py:86]\n\n  </details>\n- Reviewed against issue #308 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] Each call that fails with `SqlWorkersBusyError` produces exactly one rejection `WARNING` record (distinct from the saturation warning) on the `sqllens.agent.integrations.sql_threads` logger, including rejections that occur within `SATURATION_WARNING_INTERVAL_S` of a saturation warning; a unit test that times out several queued calls in one burst sees one rejection record per rejected call. No rejection record contains the call's SQL, arguments or exception message.\n- [ ] On Python 3.11 and 3.12, a unit test that grants a waiting call its slot and cancels that call in the same loop tick sees the caller raise `CancelledError`, the call never run, and the slot still available to a later call.\n- [ ] The `sql_threads.py` module docstring and `docs/internal/mcp-server/transport.md` state that the slot limit, the wait limit and the saturation warning assume all SQL calls run on one event loop at a time, and that calls from a second concurrently running loop get their own slots and may wait in the shared executor's queue, where neither the wait limit nor the warning applies.\n- [ ] When the release of a slot fails because its event loop is closed, no `ERROR` record is written on the `sqllens.agent.integrations.sql_threads` logger and nothing propagates; when scheduling the release raises a `RuntimeError` while the loop is still open, one `ERROR` record naming the exception type is written on that logger and nothing propagates. Unit tests cover both cases.\n- [ ] A unit test makes `submit` raise and then shows that `SQL_WORKER_THREADS` calls on that loop all start without waiting for a slot.\n- [ ] Every SQL worker pool test in `tests/unit/test_sql_runner_event_loop.py` runs on an executor no earlier test used.\n- [ ] Every test under `tests/integration/` starts with `sqllens.tools._agent._AGENT_STATE` set to `None`, as every unit test already does.\n- [ ] The `run_sql` docstrings of the SQLite, MySQL and Postgres runners list `SqlWorkersBusyError` under `Raises:`.\n- [ ] An integration test holds two `query_database` runs, from two different conversations, open at the local model stand-in at the same time; while both are held, `/healthz` and `list_data_sources` on another session each answer within 2 s, and once released both runs return a result that is not an error.\n- [ ] The change leaves the slot semaphore keyed per event loop and the worker executor process-wide, adds no file under `changelog.d/`, and leaves `changelog.d/300.fixed.md` unchanged, including its sentence that a query waiting more than a minute for a free worker fails with \"All database workers are busy; try again shortly.\"",
+ "diff_produced_at_head": "dd47f3f151ecdd74655fe857f4eb24fb98963d17",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:sql_threads.py:timeout-raises-timeouterror:151",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "absolute_claim:sql_threads.py:wait-for-same-tick-race:149",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "data_format_assumption:sql_threads.py:rejection-log-content:155",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "dependency_interaction:sql_threads.py:release-slot-closed-loop:115",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "absolute_claim:sql_threads.py:one-loop-assumption:22",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "absolute_claim:sql_threads.py:rejection-and-cancel-doc:18",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "dependency_interaction:sql_runner.py:sqlite-busy-never-ran:94",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "category": "dependency_interaction",
+   "claim": "The MySQL runner's `run_sql` docstring says `SqlWorkersBusyError` means the query never ran; this holds only if no earlier `run_blocking_sql` call in `run_sql` executed the query before a rejected one.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "SqlWorkersBusyError: If no SQL worker slot freed in time; the query\n                never ran.",
+   "source_file": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+   "source_line": 92,
+   "source_line_end": 93,
+   "verify_against": "`MySQLRunner.run_sql` in src/sqllens/agent/integrations/mysql/sql_runner.py",
+   "verify_hint": "Check how many `run_blocking_sql` calls `MySQLRunner.run_sql` makes (connect, execute, fetch, close) and whether a rejection can occur after the statement executed.",
+   "claim_signature": "dependency_interaction:sql_runner.py:mysql-busy-never-ran:92",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "INVALID",
+   "normalized": false,
+   "evidence": "INVALID answer stored FAIL (claim_provenance source_authored): The claim's premise is false. MySQLRunner.run_sql (sql_runner.py:74-100) makes exactly one run_blocking_sql call (line 98; the only reference besides the import at line 9). Connect, ping, setup, execute, fetch and close all happen inside _run_sql_blocking (102-180) on a single worker. So SqlWorkersBusyError can only come from acquiring the slot for that single call, before any of it runs. No earlier call can execute the query before a rejected one, and the docstring 'the query never ran' holds. I did not read sql_threads, so I did not check whether the error could also be raised after the work starts.",
+   "file_checked": "src/sqllens/agent/integrations/mysql/sql_runner.py:92-100",
+   "normalization_ineligible": "claim_provenance source_authored",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "dependency_interaction:sql_runner.py:postgres-busy-never-ran:125",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:fresh-executor-fixture:125",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:same-tick-cancel-test:296",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:closed-loop-release-test:390",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:open-loop-release-stub:428",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:submit-fails-slot-returned:445",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:rejection-count-test:245",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "api_contract:test_slow_agent_run_responsiveness.py:conversation-meta-key:192",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "test_mock_alignment:test_slow_agent_run_responsiveness.py:two-runs-held-concurrently:146",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "test_mock_alignment:test_slow_agent_run_responsiveness.py:singleton-reset-order:123",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "test_mock_alignment:test_http_transport.py:removed-singleton-patch:442",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "absolute_claim:conftest.py:singleton-reuse-rationale:101",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "test_mock_alignment:conftest.py:reset-vs-server-teardown:94",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "absolute_claim:conftest.py:four-responsibilities:21",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-23",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-24",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "The `sql_threads.py` module docstring and `docs/internal/mcp-server/transport.md` state that the slot limit, the wait limit and the saturation warning assume all SQL calls run on one event loop at a time, and that calls from a second concurrently running loop get their own slots and may wait in the shared executor's queue, where neither the wait limit nor the warning applies.",
+   "claim_signature": "issue-acceptance-3",
+   "criteria_file": ".prflow/tmp/review/pr-322/local-20261030T225403Z-1/criteria.json",
+   "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+   "source_line": 22,
+   "verify_hint": "Check lines 22-27 of sql_threads.py and the SQL worker pool section of docs/internal/mcp-server/transport.md (not in this diff).",
+   "id": "VC-25",
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "criteria.json counts (criterion 3 matches). The sql_threads.py module docstring lines 22-27 state the claim correctly. But docs/internal/mcp-server/transport.md (SQL execution bullet, line 115, and the rest of the section lines 110-125) says only 'one per event loop' for the semaphore; a grep for 'second loop', 'own slots', 'shared executor', 'second concurrently' finds nothing, and the doc has no statement that the limits assume one event loop at a time or that calls from a second loop may wait in the executor queue where neither the wait limit nor the warning applies. The diff does not touch transport.md (only tests/integration/test_http_transport.py matches). Criterion 3 requires both the docstring and the doc, so the doc half is missing.",
+   "file_checked": "docs/internal/mcp-server/transport.md:115",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-26",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-27",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-28",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-29",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-30",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-31",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-10",
+   "id": "VC-32",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}

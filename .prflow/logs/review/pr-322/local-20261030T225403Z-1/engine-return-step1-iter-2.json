@@ -1,0 +1,329 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [],
+ "phase3_dispatched": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review"
+ ],
+ "expected_reviewers": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [
+  {
+   "agent": "prflow:code-reviewer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 2 (>= 2)"
+  },
+  {
+   "agent": "prflow:pr-test-analyzer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 2 (>= 2)"
+  }
+ ],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE",
+ "report": "## Verdict: APPROVE (no findings; all 33 checklist items passed)\n\nThe PR is ready to merge: three reviewers found no defects, every one of the 33 checklist items passed, and all 10 acceptance criteria were itemized and verified.\n\nRule applied: rule 7 — nothing remains → APPROVE\n\n## Code Review Findings\n\nNo findings. The silent-failure hunter, the comment analyzer and the final-pass reviewer each returned no Critical, Important or Suggestion findings. The code reviewer and the test analyzer were not dispatched on this iteration: both are configured to run on the first fix-loop iteration only.\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: test_relevant (not small_diff, not config_only, no new types); 10 changed files, 321 changed lines; detect_all_audit not set.\n- Working tree: skipped in pr mode (head-override review of the checked-out PR head 9adc737fbaa9788ef163b2ee046c5cae65ceed8d against origin/main 63e9848b11c75e727064e3dcd9b41bcd37c0ad4c).\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. Final-pass (requesting-code-review) extension: content-present.\n- Engine root: plugin engine `skills/review` (vendored `.prflow/vendor/prflow/skills/review/SKILL.md` and `.devflow/vendor/devflow/skills/review/SKILL.md` do not exist).\n- CI evidence: no CI results were supplied to this entry and no in-environment suite result for this head is held, so test evidence is missing.\n- Normalized (wording-only): 0\n- Re-verification: none (no checklist FAIL).\n- Severity threshold: critical.\n- Finding rejected \"The MySQL runner's run_sql docstring says SqlWorkersBusyError means the query never ran; this holds only if no earlier run_blocking_sql call in run_sql executed the query before a rejected one.\": settled none\n- Dirty-tree check: clean (no working-tree change by dispatched agents).\n- prior-report: none\n- Checklist: 33 passed, 0 failed, 0 inconclusive\n- <details><summary>✅ Passed items (33 of 33)</summary>\n\n  - VC-1: On Python 3.11 and 3.12, `async with asyncio.timeout(WORKER_WAIT_TIMEOUT_S): await slot.acquire()` raises the builtin `TimeoutError` (caught by `except TimeoutError`) when the deadline passes, and lets an outside cancellation propagate as `CancelledError` rather than converting it to `TimeoutError`, so a cancelled waiter is never reported as a rejection. [src/sqllens/agent/integrations/sql_threads.py:155]\n  - VC-2: The comment asserts that on 3.11 `asyncio.wait_for` returns a slot granted in the same tick as a cancellation, so a cancelled call would run anyway, and that `asyncio.timeout` does not have this behavior. [src/sqllens/agent/integrations/sql_threads.py:153]\n  - VC-3: The ERROR record asserts that when the slot release cannot be scheduled on an open loop, that event loop has one fewer slot for the rest of its life. [src/sqllens/agent/integrations/sql_threads.py:122]\n  - VC-4: `_release_slot` runs as a `concurrent.futures.Future` done-callback on a worker thread; it catches only `RuntimeError` from `loop.call_soon_threadsafe`, returns silently when `loop.is_closed()`, and otherwise logs one ERROR naming the exception type. Any other exception type from `call_soon_threadsafe` would escape to concurrent.futures, which logs it itself. [src/sqllens/agent/integrations/sql_threads.py:115]\n  - VC-5: The module docstring asserts the slot limit, wait limit and saturation warning assume every SQL call runs on one event loop at a time, as the server does. [src/sqllens/agent/integrations/sql_threads.py:22]\n  - VC-6: transport.md asserts each `SqlWorkersBusyError` rejection logs its own WARNING that the 60-second interval does not limit, and that the record carries no SQL, arguments or exception message. [docs/internal/mcp-server/transport.md:115]\n  - VC-8: transport.md's regression-coverage paragraph asserts the listed tests exist and check what it lists, including one-then-two held `query_database` runs from separate conversations, one warning per rejection, the same-tick cancel, silent closed-loop release, ERROR on open-loop release failure, and slot return on submit failure. [docs/internal/mcp-server/transport.md:125]\n  - VC-13: A successful `query_database` tool result carries `meta['sqllens/conversation']['conversation_id']`, and a call without `conversation_id` gets a newly generated id, so two concurrent runs yield two distinct ids. [tests/integration/test_slow_agent_run_responsiveness.py:191]\n  - VC-16: The test comment asserts that calling `query_database` without `conversation_id` makes each run start its own conversation. [tests/integration/test_slow_agent_run_responsiveness.py:144]\n  - VC-17: Two concurrent `query_database` calls on one `ClientSession` both reach the stand-in model concurrently (the shared agent singleton and the MCP server do not serialize them), so `wait_for_arrivals(2, 15)` can succeed. [tests/integration/test_slow_agent_run_responsiveness.py:145]\n  - VC-18: `test_sql_pool_logs_a_slot_release_that_fails_on_an_open_loop` uses a `SimpleNamespace` loop exposing only `is_closed` and `call_soon_threadsafe`, which are the only loop attributes `_release_slot` touches, and asserts one ERROR record whose args are `(\"RuntimeError\",)`. [tests/unit/test_sql_runner_event_loop.py:428]\n  - VC-23: The unit conftest docstring asserts env scrubbing and the agent-singleton reset live in the top-level tests/conftest.py and that this file adds only `agent_stub_factory`. [tests/unit/conftest.py]\n  - VC-24: Each call that fails with `SqlWorkersBusyError` produces exactly one rejection `WARNING` record (distinct from the saturation warning) on the `sqllens.agent.integrations.sql_threads` logger, including rejections that occur within `SATURATION_WARNING_INTERVAL_S` of a saturation warning; a unit test that times out several queued calls in one burst sees one rejection record per rejected call. No rejection record contains the call's SQL, arguments or exception message. [src/sqllens/agent/integrations/sql_threads.py:158]\n  - VC-25: On Python 3.11 and 3.12, a unit test that grants a waiting call its slot and cancels that call in the same loop tick sees the caller raise `CancelledError`, the call never run, and the slot still available to a later call. [src/sqllens/agent/integrations/sql_threads.py:153]\n  - VC-26: The `sql_threads.py` module docstring and `docs/internal/mcp-server/transport.md` state that the slot limit, the wait limit and the saturation warning assume all SQL calls run on one event loop at a time, and that calls from a second concurrently running loop get their own slots and may wait in the shared executor's queue, where neither the wait limit nor the warning applies. [src/sqllens/agent/integrations/sql_threads.py:22]\n  - VC-27: When the release of a slot fails because its event loop is closed, no `ERROR` record is written on the `sqllens.agent.integrations.sql_threads` logger and nothing propagates; when scheduling the release raises a `RuntimeError` while the loop is still open, one `ERROR` record naming the exception type is written on that logger and nothing propagates. Unit tests cover both cases. [src/sqllens/agent/integrations/sql_threads.py:115]\n  - VC-28: A unit test makes `submit` raise and then shows that `SQL_WORKER_THREADS` calls on that loop all start without waiting for a slot. [tests/unit/test_sql_runner_event_loop.py:445]\n  - VC-29: Every SQL worker pool test in `tests/unit/test_sql_runner_event_loop.py` runs on an executor no earlier test used. [tests/unit/test_sql_runner_event_loop.py:126]\n  - VC-30: Every test under `tests/integration/` starts with `sqllens.tools._agent._AGENT_STATE` set to `None`, as every unit test already does. [tests/conftest.py]\n  - VC-31: The `run_sql` docstrings of the SQLite, MySQL and Postgres runners list `SqlWorkersBusyError` under `Raises:`. [src/sqllens/agent/integrations/mysql/sql_runner.py:92]\n  - VC-32: An integration test holds two `query_database` runs, from two different conversations, open at the local model stand-in at the same time; while both are held, `/healthz` and `list_data_sources` on another session each answer within 2 s, and once released both runs return a result that is not an error. [tests/integration/test_slow_agent_run_responsiveness.py:135]\n  - VC-33: The change leaves the slot semaphore keyed per event loop and the worker executor process-wide, adds no file under `changelog.d/`, and leaves `changelog.d/300.fixed.md` unchanged, including its sentence that a query waiting more than a minute for a free worker fails with \"All database workers are busy; try again shortly.\" [src/sqllens/agent/integrations/sql_threads.py:147]\n  - VC-7: The SQLite runner's `run_sql` docstring says `SqlWorkersBusyError` means the query never ran; this holds only if every `run_blocking_sql` call in `run_sql` before the query executes cannot leave the query partly done when a later call is rejected. [src/sqllens/agent/integrations/sqlite/sql_runner.py:94]\n  - VC-9: The Postgres runner's `run_sql` docstring says `SqlWorkersBusyError` means the query never ran; this holds only if no earlier `run_blocking_sql` call in `run_sql` executed the query before a rejected one. [src/sqllens/agent/integrations/postgres/sql_runner.py:125]\n  - VC-10: The `_fresh_sql_executor` fixture gives each test in the file a new executor by setting `sql_threads._executor` to None (so `_get_executor` builds a fresh one) and shuts down the one created at teardown; monkeypatch restores the previous executor afterward. [tests/unit/test_sql_runner_event_loop.py:125]\n  - VC-11: `test_sql_pool_drops_a_call_cancelled_in_the_tick_its_slot_is_granted` reproduces the same-tick grant-and-cancel: after three `sleep(0)` the queued call is waiting in `Semaphore.acquire`, `slot.release()` wakes it, `queued.cancel()` lands in the same tick, and the test asserts the caller is cancelled, `ran == []` and the slot is not locked. [tests/unit/test_sql_runner_event_loop.py:296]\n  - VC-12: `test_sql_pool_release_after_its_loop_closed_is_silent` drives `_release_slot` against a really closed loop, so `call_soon_threadsafe` raises `RuntimeError` and `is_closed()` is true, and asserts no ERROR record on any logger. [tests/unit/test_sql_runner_event_loop.py:390]\n  - VC-14: `test_sql_pool_returns_the_slot_when_submit_fails` patches `submit` on the same executor instance `run_blocking_sql` uses, and its later `_fill_pool` proves all SQL_WORKER_THREADS calls start without waiting by asserting no pool log record (no saturation warning). [tests/unit/test_sql_runner_event_loop.py:445]\n  - VC-15: `test_sql_pool_logs_every_rejected_call` asserts exactly three rejection WARNINGs and four pool records in total (three rejections plus one saturation warning), with no record containing the SQL argument or the exception message's word 'busy'. [tests/unit/test_sql_runner_event_loop.py:245]\n  - VC-19: `test_agent_build_failure...` in test_http_transport.py still starts with `_AGENT_STATE` None after its explicit monkeypatch was removed, because the top-level autouse fixture resets it; the remaining body still uses `monkeypatch` and `agent_module` for its `_boom` patch. [tests/integration/test_http_transport.py:442]\n  - VC-20: The fixture docstring asserts that without the reset an integration server's startup fills an empty singleton so a later test would reuse an agent built for an earlier test's config, and that one reset clears both agent and config so they cannot drift apart. [tests/conftest.py:101]\n  - VC-21: Moving `_reset_query_database_singleton` to tests/conftest.py resets `_AGENT_STATE` on teardown while an integration server started by `make_server` may still be running in another thread; the reset happens after `make_server` teardown or does not race with the server's warmup writing the singleton. [tests/conftest.py:94]\n  - VC-22: The top-level conftest docstring now says it has four responsibilities and that the stub factory's companion `default_stub_rows` exposes the default scenario's rows. [tests/conftest.py:21]\n\n  </details>\n- Reviewed against issue #308 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] Each call that fails with `SqlWorkersBusyError` produces exactly one rejection `WARNING` record (distinct from the saturation warning) on the `sqllens.agent.integrations.sql_threads` logger, including rejections that occur within `SATURATION_WARNING_INTERVAL_S` of a saturation warning; a unit test that times out several queued calls in one burst sees one rejection record per rejected call. No rejection record contains the call's SQL, arguments or exception message.\n- [ ] On Python 3.11 and 3.12, a unit test that grants a waiting call its slot and cancels that call in the same loop tick sees the caller raise `CancelledError`, the call never run, and the slot still available to a later call.\n- [ ] The `sql_threads.py` module docstring and `docs/internal/mcp-server/transport.md` state that the slot limit, the wait limit and the saturation warning assume all SQL calls run on one event loop at a time, and that calls from a second concurrently running loop get their own slots and may wait in the shared executor's queue, where neither the wait limit nor the warning applies.\n- [ ] When the release of a slot fails because its event loop is closed, no `ERROR` record is written on the `sqllens.agent.integrations.sql_threads` logger and nothing propagates; when scheduling the release raises a `RuntimeError` while the loop is still open, one `ERROR` record naming the exception type is written on that logger and nothing propagates. Unit tests cover both cases.\n- [ ] A unit test makes `submit` raise and then shows that `SQL_WORKER_THREADS` calls on that loop all start without waiting for a slot.\n- [ ] Every SQL worker pool test in `tests/unit/test_sql_runner_event_loop.py` runs on an executor no earlier test used.\n- [ ] Every test under `tests/integration/` starts with `sqllens.tools._agent._AGENT_STATE` set to `None`, as every unit test already does.\n- [ ] The `run_sql` docstrings of the SQLite, MySQL and Postgres runners list `SqlWorkersBusyError` under `Raises:`.\n- [ ] An integration test holds two `query_database` runs, from two different conversations, open at the local model stand-in at the same time; while both are held, `/healthz` and `list_data_sources` on another session each answer within 2 s, and once released both runs return a result that is not an error.\n- [ ] The change leaves the slot semaphore keyed per event loop and the worker executor process-wide, adds no file under `changelog.d/`, and leaves `changelog.d/300.fixed.md` unchanged, including its sentence that a query waiting more than a minute for a free worker fails with \"All database workers are busy; try again shortly.\"",
+ "diff_produced_at_head": "9adc737fbaa9788ef163b2ee046c5cae65ceed8d",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:sql_threads.py:asyncio-timeout-semantics:155",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "absolute_claim:sql_threads.py:wait-for-same-tick-grant:153",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "absolute_claim:sql_threads.py:one-fewer-slot-forever:122",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "dependency_interaction:sql_threads.py:release-slot-exception-breadth:115",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "absolute_claim:sql_threads.py:server-single-loop:22",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "absolute_claim:transport.md:rejection-warning-unlimited:115",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "absolute_claim:transport.md:regression-coverage-list:125",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "api_contract:test_slow_agent_run_responsiveness.py:conversation-meta-key:191",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "absolute_claim:test_slow_agent_run_responsiveness.py:no-id-new-conversation:144",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "test_mock_alignment:test_slow_agent_run_responsiveness.py:concurrent-runs-reach-model:145",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:open-loop-release-mock:428",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-23",
+   "claim_signature": "absolute_claim:conftest.py:unit-conftest-only-stub-factory",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-24",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-25",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-26",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-27",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-28",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-29",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-30",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-31",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-32",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-10",
+   "id": "VC-33",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "dependency_interaction:sql_runner.py:sqlite-busy-never-ran:94",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "dependency_interaction:sql_runner.py:postgres-busy-never-ran:125",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:fresh-executor-fixture:125",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:same-tick-cancel-test:296",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:closed-loop-release-test:390",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:submit-fails-slot-returned:445",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:rejection-count-test:245",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "test_mock_alignment:test_http_transport.py:removed-singleton-patch:442",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "absolute_claim:conftest.py:singleton-reuse-rationale:101",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "test_mock_alignment:conftest.py:reset-vs-server-teardown:94",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "absolute_claim:conftest.py:four-responsibilities:21",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  }
+ ]
+}

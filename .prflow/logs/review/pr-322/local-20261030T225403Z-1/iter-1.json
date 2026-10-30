@@ -1,0 +1,428 @@
+{
+  "iter": 1,
+  "loop_role": "fix",
+  "dispatch_mode": "fanned-out",
+  "dispatch_disposition": null,
+  "fix_commit_sha": "9adc737fbaa9788ef163b2ee046c5cae65ceed8d",
+  "fix_decisions": [
+    {
+      "finding_id": "F-1",
+      "decision": "applied",
+      "commit": "9adc737fbaa9788ef163b2ee046c5cae65ceed8d"
+    },
+    {
+      "finding_id": "F-2",
+      "decision": "applied",
+      "commit": "9adc737fbaa9788ef163b2ee046c5cae65ceed8d"
+    },
+    {
+      "finding_id": "F-3",
+      "decision": "applied",
+      "commit": "9adc737fbaa9788ef163b2ee046c5cae65ceed8d"
+    },
+    {
+      "finding_id": "F-4",
+      "decision": "applied",
+      "commit": "9adc737fbaa9788ef163b2ee046c5cae65ceed8d"
+    },
+    {
+      "finding_id": "VC-25",
+      "decision": "applied",
+      "commit": "9adc737fbaa9788ef163b2ee046c5cae65ceed8d"
+    },
+    {
+      "finding_id": "VC-8",
+      "decision": "pushed_back",
+      "source_file": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+      "claim_text": "The MySQL runner's run_sql docstring says SqlWorkersBusyError means the query never ran; this holds only if no earlier run_blocking_sql call in run_sql executed the query before a rejected one.",
+      "skip_category": "claim-quality",
+      "evidence": "src/sqllens/agent/integrations/mysql/sql_runner.py:98 is the only run_blocking_sql call in MySQLRunner.run_sql; all driver work runs inside _run_sql_blocking on that one worker, so SqlWorkersBusyError can only come from the wait for that call's slot, before any driver work. The docstring holds.",
+      "parking_evidence": {
+        "basis": "The claim's premise (several run_blocking_sql calls in run_sql) is false; the docstring is correct.",
+        "failing_input": "A SqlWorkersBusyError raised from MySQLRunner.run_sql",
+        "source": "src/sqllens/agent/integrations/mysql/sql_runner.py:98",
+        "finding_ref": {
+          "iter": 1,
+          "index": null
+        }
+      }
+    }
+  ],
+  "telemetry": "unavailable",
+  "phase3_failed_agents": [],
+  "diff_produced_at_head": "dd47f3f151ecdd74655fe857f4eb24fb98963d17",
+  "reference_reads": {
+    "fix_delta": {
+      "status": "verified",
+      "outcome": "clean",
+      "reason": null
+    }
+  },
+  "iteration_head": "9adc737fbaa9788ef163b2ee046c5cae65ceed8d",
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "severity": "important",
+      "weighed_severity": "suggestion",
+      "capped": true,
+      "description": "docs/internal/mcp-server/transport.md line 115 (SQL execution bullet) does not state that the slot limit, wait limit and saturation warning assume all SQL calls run on one event loop at a time, nor that calls from a second concurrently running loop get their own slots and may wait in the shared executor's queue where neither the wait limit nor the warning applies; acceptance criterion 3 requires this in both the sql_threads.py module docstring and transport.md, and the diff adds it only to the docstring. The bullet also omits the new per-rejection WARNING, and the regression-coverage paragraph (line 125) does not list the new tests.",
+      "defect_signature": {
+        "file": "docs/internal/mcp-server/transport.md",
+        "line_range": [
+          115,
+          115
+        ],
+        "kind": "other"
+      },
+      "agent": "prflow:code-reviewer",
+      "corroboration_count": 4,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-2",
+      "severity": "important",
+      "weighed_severity": "suggestion",
+      "capped": true,
+      "description": "Same transport.md line 115 gap filed as comment drift: the page does not state the single-loop assumption or mention the per-rejection warning, while the sql_threads.py module docstring now does (acceptance criterion 3).",
+      "defect_signature": {
+        "file": "docs/internal/mcp-server/transport.md",
+        "line_range": [
+          115,
+          115
+        ],
+        "kind": "comment_drift"
+      },
+      "agent": "prflow:comment-analyzer",
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-3",
+      "severity": "suggestion",
+      "weighed_severity": "suggestion",
+      "capped": false,
+      "description": "src/sqllens/agent/integrations/sql_threads.py lines 115-121: the open-loop ERROR record 'A SQL worker slot could not be returned: %s' reports the failure but not its effect (the slot is permanently lost for that loop; after SQL_WORKER_THREADS such failures every call waits 60 s and is rejected).",
+      "defect_signature": {
+        "file": "src/sqllens/agent/integrations/sql_threads.py",
+        "line_range": [
+          115,
+          121
+        ],
+        "kind": "other"
+      },
+      "agent": "prflow:silent-failure-hunter",
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-4",
+      "severity": "suggestion",
+      "weighed_severity": "suggestion",
+      "capped": false,
+      "description": "tests/integration/test_slow_agent_run_responsiveness.py line 139: test docstring 'Issue #299 reported failures whenever several agent runs were active.' records provenance rather than what a maintainer must not break; the module docstring already states the assertion.",
+      "defect_signature": {
+        "file": "tests/integration/test_slow_agent_run_responsiveness.py",
+        "line_range": [
+          139,
+          139
+        ],
+        "kind": "style"
+      },
+      "agent": "prflow:comment-analyzer",
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    }
+  ],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": false,
+    "test_relevant": true,
+    "detect_all_audit": false,
+    "file_count": 9,
+    "changed_lines": 314,
+    "checklist_skipped": null
+  },
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:pr-test-analyzer"
+  ],
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:pr-test-analyzer"
+  ],
+  "cap_drops": {
+    "count": 0,
+    "by_category": {}
+  },
+  "checklist": [
+    {
+      "id": "VC-1",
+      "claim_signature": "dependency_interaction:sql_threads.py:timeout-raises-timeouterror:151",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-2",
+      "claim_signature": "absolute_claim:sql_threads.py:wait-for-same-tick-race:149",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-3",
+      "claim_signature": "data_format_assumption:sql_threads.py:rejection-log-content:155",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-4",
+      "claim_signature": "dependency_interaction:sql_threads.py:release-slot-closed-loop:115",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-5",
+      "claim_signature": "absolute_claim:sql_threads.py:one-loop-assumption:22",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-6",
+      "claim_signature": "absolute_claim:sql_threads.py:rejection-and-cancel-doc:18",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-7",
+      "claim_signature": "dependency_interaction:sql_runner.py:sqlite-busy-never-ran:94",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-8",
+      "claim_signature": "dependency_interaction:sql_runner.py:mysql-busy-never-ran:92",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "FAIL",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-9",
+      "claim_signature": "dependency_interaction:sql_runner.py:postgres-busy-never-ran:125",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-10",
+      "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:fresh-executor-fixture:125",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-11",
+      "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:same-tick-cancel-test:296",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-12",
+      "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:closed-loop-release-test:390",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-13",
+      "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:open-loop-release-stub:428",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-14",
+      "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:submit-fails-slot-returned:445",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-15",
+      "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:rejection-count-test:245",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-16",
+      "claim_signature": "api_contract:test_slow_agent_run_responsiveness.py:conversation-meta-key:192",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-17",
+      "claim_signature": "test_mock_alignment:test_slow_agent_run_responsiveness.py:two-runs-held-concurrently:146",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-18",
+      "claim_signature": "test_mock_alignment:test_slow_agent_run_responsiveness.py:singleton-reset-order:123",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-19",
+      "claim_signature": "test_mock_alignment:test_http_transport.py:removed-singleton-patch:442",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-20",
+      "claim_signature": "absolute_claim:conftest.py:singleton-reuse-rationale:101",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-21",
+      "claim_signature": "test_mock_alignment:conftest.py:reset-vs-server-teardown:94",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-22",
+      "claim_signature": "absolute_claim:conftest.py:four-responsibilities:21",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-1",
+      "id": "VC-23",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-2",
+      "id": "VC-24",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-3",
+      "id": "VC-25",
+      "reused_from_iter_prev": false,
+      "verdict": "FAIL",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-4",
+      "id": "VC-26",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-5",
+      "id": "VC-27",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-6",
+      "id": "VC-28",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-7",
+      "id": "VC-29",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-8",
+      "id": "VC-30",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-9",
+      "id": "VC-31",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-10",
+      "id": "VC-32",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    }
+  ],
+  "fix_files": [
+    "docs/internal/mcp-server/transport.md",
+    "src/sqllens/agent/integrations/sql_threads.py",
+    "tests/integration/test_slow_agent_run_responsiveness.py"
+  ],
+  "synthesized": false
+}
