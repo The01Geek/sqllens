@@ -95,7 +95,7 @@ ruff check .
 pytest -q
 ```
 
-The integration test suite spins up a real uvicorn server and exercises the full Streamable HTTP wire protocol end-to-end. No real LLM calls are made — `query_database` is gated behind a separate, opt-in test that requires a live Anthropic key.
+The integration test suite spins up a real uvicorn server and exercises the full Streamable HTTP wire protocol end-to-end. No real LLM calls are made: where a test runs `query_database` through the model path, it points the Anthropic SDK at a local stand-in for the Messages API.
 
 ## Project structure
 

@@ -225,6 +225,25 @@ async def test_postgres_runner_closes_conn_when_cursor_allocation_raises(
     conn.close.assert_called_once()
 
 
+
+async def test_postgres_runner_closes_conn_when_set_session_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the read-only session setup raises, conn.close() must still run (no leak)."""
+    conn = MagicMock()
+    conn.set_session.side_effect = _PrimaryError("set_session failed")
+
+    _install_fake_psycopg2(monkeypatch, lambda *_a, **_k: conn)
+
+    from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
+
+    runner = PostgresRunner(connection_string="postgresql://u:p@h/d")
+
+    with pytest.raises(_PrimaryError, match="set_session failed"):
+        await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
+
+    conn.close.assert_called_once()
+
 # ---------------------------------------------------------------------------
 # BaseException propagation
 #

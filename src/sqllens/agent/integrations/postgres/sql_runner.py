@@ -139,20 +139,20 @@ class PostgresRunner(SqlRunner):
         else:
             conn = self.psycopg2.connect(**self.connection_params)
 
-        if self._read_only:
-            # Force read-only regardless of the DB role — a guard miss still
-            # cannot mutate. ``set_session(readonly=True)`` must run before any
-            # statement opens a transaction (it does here — right after
-            # connect), so the implicit transaction the SELECT below runs in
-            # is read-only. NOTE: an in-transaction
-            # ``SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`` would
-            # NOT work — under psycopg2's default autocommit=False the
-            # transaction is already open by the time any cursor executes, and
-            # SESSION CHARACTERISTICS only governs *subsequent* transactions,
-            # leaving the current (single, never-committed) one read-write.
-            conn.set_session(readonly=True)
-
         try:
+            if self._read_only:
+                # Force read-only regardless of the DB role — a guard miss still
+                # cannot mutate. ``set_session(readonly=True)`` must run before any
+                # statement opens a transaction (it does here — right after
+                # connect), so the implicit transaction the SELECT below runs in
+                # is read-only. NOTE: an in-transaction
+                # ``SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`` would
+                # NOT work — under psycopg2's default autocommit=False the
+                # transaction is already open by the time any cursor executes, and
+                # SESSION CHARACTERISTICS only governs *subsequent* transactions,
+                # leaving the current (single, never-committed) one read-write.
+                conn.set_session(readonly=True)
+
             if self._statement_timeout_ms > 0:
                 setup = conn.cursor()
                 try:
