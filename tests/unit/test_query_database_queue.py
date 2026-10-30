@@ -428,8 +428,12 @@ async def test_rollback_whose_truncate_raises_is_logged_and_does_not_escape(
         # Must return normally rather than propagate the store's RuntimeError.
         query_database_module._rollback_conversation(_Agent(), "conv-a", "u", 0)
 
+    # Keys on the arm-specific breadcrumb, not just the "was not rolled back"
+    # prefix and store name it shares with the missing-method arm, so the test
+    # cannot pass if this case were reported through that other arm.
     assert any(
         "was not rolled back" in record.message
+        and "raised from truncate_messages" in record.message
         and "_RaisingStore" in record.getMessage()
         for record in caplog.records
     )
