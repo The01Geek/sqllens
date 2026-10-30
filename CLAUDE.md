@@ -62,12 +62,12 @@ The agent code originated as a fork of an MIT-licensed upstream project. The leg
 # Install (editable, with dev + all DB drivers)
 pip install -e ".[dev,all]"
 
-# Lint + tests (default skips connector tests that need real DBs)
+# Lint + tests (default run does not collect tests/connectors/, which needs real DBs)
 ruff check .
 pytest -q
 
 # Connector tests (need SQLLENS_TEST_POSTGRES_URL + SQLLENS_TEST_MYSQL_URL)
-pytest -q -m connectors
+pytest -q tests/connectors
 
 # Run the server (after `sqllens init` writes a sqllens.toml)
 sqllens serve

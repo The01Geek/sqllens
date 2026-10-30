@@ -231,7 +231,7 @@ Other regression classes in [tests/unit/test_safety.py](../../../tests/unit/test
 - `TestGuardFailsClosedOnUnexpectedError` — an unexpected internal error becomes a refused `UnsafeSqlError`, not a crash or a pass-through.
 - `TestSqliteReadOnlyUri` / `TestReadOnlyUriSpecialChars` / `TestSqliteConnectorReadOnlyEnforced` — the SQLite `_readonly_uri` builder, its `?`/`#` percent-encoding, and the connector-level `mode=ro` + `PRAGMA query_only` enforcement.
 
-Connector-level read-only against live Postgres/MySQL is exercised by [tests/integration/test_connectors.py](../../../tests/integration/test_connectors.py) under the `connectors` marker.
+Connector-level read-only against live Postgres/MySQL is exercised by [tests/connectors/test_connectors.py](../../../tests/connectors/test_connectors.py), which the default `pytest -q` run does not collect; run it with `pytest -q tests/connectors`.
 
 ### MySQL lexical boundaries
 

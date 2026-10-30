@@ -3,7 +3,7 @@
 
 """Shared fixtures for all SQL Lens tests (unit + integration).
 
-Two responsibilities:
+Three responsibilities:
 
 1. Autouse env scrub. Runners can export unprefixed names (``MODE=``, ``HOST=``,
    ``PORT=``, ...) — pydantic-settings sub-models in ``sqllens.config`` lack
@@ -19,6 +19,10 @@ Two responsibilities:
    (``query_database`` etc.) need to drive it without standing up a real LLM
    or DB. The factory builds an async-generator callable with the same shape
    as ``Agent.send_message`` for several canned scenarios.
+
+3. ``collect_ignore`` keeps ``tests/connectors/`` (live Postgres/MySQL tests)
+   out of a default run. Naming the directory on the command line still runs
+   it: ``pytest -q tests/connectors``.
 """
 
 from __future__ import annotations
@@ -32,6 +36,8 @@ from sqllens.agent.components.rich.data.dataframe import DataFrameComponent
 from sqllens.agent.components.rich.feedback.status_card import StatusCardComponent
 from sqllens.agent.components.rich.text import RichTextComponent
 from sqllens.agent.core.components import UiComponent
+
+collect_ignore = ["connectors"]
 
 _LEAKY_ENV_KEYS = (
     "MODE",
