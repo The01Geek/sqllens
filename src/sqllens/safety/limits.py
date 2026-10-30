@@ -81,9 +81,12 @@ class RowCapRunner(SqlRunner):
         self._inner = inner
         self._max_rows = max_rows
 
-    async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
+    async def run_sql(
+        self, args: RunSqlToolArgs, context: ToolContext, *, require_base_tables: bool = False
+    ) -> pd.DataFrame:
         cap = effective_row_cap(self._max_rows)
-        df = await self._inner.run_sql(args, context)
+        options = {"require_base_tables": True} if require_base_tables else {}
+        df = await self._inner.run_sql(args, context, **options)
         already_truncated = bool(df.attrs.get(TRUNCATED_ATTR, False))
         if len(df) > cap:
             df = df.iloc[:cap].copy()
