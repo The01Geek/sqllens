@@ -419,7 +419,7 @@ def components_to_blocks(
             metadata = getattr(rich, "metadata", None)
             sql = metadata.get("sql") if isinstance(metadata, dict) else None
             is_run_sql = isinstance(sql, str) and bool(sql.strip())
-            if is_run_sql:
+            if is_run_sql and sql != last_sql:
                 last_sql_is_introspection = is_introspection_query(sql, dialect=dialect)
             if status == "error":
                 error_message = (

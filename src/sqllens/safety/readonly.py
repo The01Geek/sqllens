@@ -109,8 +109,9 @@ def _catalog_names(dialect: str | None) -> tuple[frozenset[str], tuple[str, ...]
 def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     """Return True if ``sql`` is a schema-introspection read, not a data query.
 
-    Schema introspection = a structural ``SHOW`` (SHOW TABLES/COLUMNS/...), or a
-    SELECT that reads any catalog, even alongside data tables. The catalogs are
+    Schema introspection = a statement whose first keyword is ``SHOW``, or a
+    statement that references any catalog table, even alongside data tables.
+    The catalogs are
     ``information_schema`` for every dialect, plus the engine's own: the
     ``pg_catalog`` schema and ``pg_`` name prefix for ``postgres``; the
     ``mysql``, ``sys`` and ``performance_schema`` schemas for ``mysql``; the
@@ -123,8 +124,9 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     result from the user and to keep a catalog lookup's success from clearing
     an earlier query failure.
 
-    Best-effort, fail-open-to-``False``: a query that does not parse under
-    ``dialect`` is treated as a data query, so its result is shown.
+    Best-effort, fail-open-to-``False``: apart from a ``SHOW``, a query that
+    does not parse under ``dialect`` (a parse error or an empty parse) is
+    treated as a data query, so its result is shown.
     """
     if first_sql_keyword(sql) == "SHOW":
         return True
