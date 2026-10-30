@@ -259,3 +259,88 @@ async def test_one_row_results_are_stated_not_hidden() -> None:
     assert "single row, always state its key values in a plain sentence" in prompt
     assert "tables (from run_sql)" not in prompt
     assert "let the table/chart speak for itself" not in prompt
+
+
+_ALL_TOOLS = (
+    "run_sql",
+    "emit_chart",
+    "emit_text",
+    "search_saved_correct_tool_uses",
+    "save_question_tool_args",
+    "save_text_memory",
+)
+
+
+def _ambiguity_section(prompt: str) -> str:
+    """The "Ambiguous Questions:" header and the bullet lines that follow it."""
+    lines = prompt.split("\n")
+    start = lines.index("Ambiguous Questions:")
+    section = [lines[start]]
+    for line in lines[start + 1 :]:
+        if not line.startswith("- "):
+            break
+        section.append(line)
+    return "\n".join(section)
+
+
+@pytest.mark.parametrize("tool_names", [(), _ALL_TOOLS], ids=["no-tools", "all-tools"])
+async def test_ambiguous_questions_section_always_present(tool_names: tuple[str, ...]) -> None:
+    """Issue #298: the clarifying-question rule is always on and names no tool."""
+    tools = [_ToolSchemaStub(name) for name in tool_names]
+    prompt = await DefaultSystemPromptBuilder().build_system_prompt(User(id="t"), tools=tools)
+    section = _ambiguity_section(prompt)
+
+    for name in _ALL_TOOLS:
+        assert name not in section
+
+    # (1) when to ask, with the four examples, materiality and uncertainty.
+    assert "Ask a clarifying question instead of answering" in section
+    assert "count different records, a different period, or a different measure" in section
+    assert "partially paid orders" in section
+    assert "order date or the invoice date" in section
+    assert "which of several people a name refers to" in section
+    assert "shipping and tax" in section
+    assert "without first measuring the difference" in section
+    assert "Being unsure which reading is meant is a reason to ask" in section
+    # (2) what settles a choice, and a marking note.
+    assert "an earlier turn of this conversation" in section
+    assert "a memory note in your context naming the meaning to use" in section
+    assert "A saved pair settles it to the reading its SQL uses" in section
+    assert "has more than one meaning marks that choice as open" in section
+    # (3) a choice stays open until settled.
+    assert "asks to see several readings, settles it" in section
+    assert '"whatever you think", leaves it open' in section
+    assert "ask again on each turn, offering the readings as choices" in section
+    assert "does not depend on an open choice is handled on its own terms" in section
+    # (4) the no-ask classes.
+    assert "Otherwise answer directly" in section
+    assert "(sort order, chart type, labels, rounding), never needs a question" in section
+    # (5) the shape of the question, and its precedence over the one-row rule.
+    assert "whole written reply for that turn" in section
+    assert "business words without table or column names" in section
+    assert "stating no result for any reading" in section
+    assert "overrides the rule to state a one-row result's values" in section
+    # (6) lookups.
+    assert "Run a lookup query before asking only when it is needed" in section
+    assert "ask for a detail that narrows them" in section
+    # (7) one question per turn.
+    assert "at most one question per turn, covering every open choice" in section
+    # (8) never a result on an unsettled reading, as its own sentence.
+    assert (
+        "On every turn, never state a result computed on a reading of an unsettled "
+        "choice that changes the numbers." in section
+    )
+
+
+@pytest.mark.parametrize("has_search", [False, True])
+async def test_search_before_asking_requires_search_tool(has_search: bool) -> None:
+    tools = [_ToolSchemaStub("run_sql")]
+    if has_search:
+        tools.append(_ToolSchemaStub("search_saved_correct_tool_uses"))
+    prompt = await DefaultSystemPromptBuilder().build_system_prompt(User(id="t"), tools=tools)
+    instruction = (
+        "BEFORE executing any tool (run_sql or emit_chart), and BEFORE asking a "
+        "clarifying question, you MUST first call search_saved_correct_tool_uses"
+    )
+    assert (instruction in prompt) is has_search
+    assert ("BEFORE asking" in prompt) is has_search

@@ -1278,7 +1278,7 @@ def test_text_answer_wins_over_interactive_no_regression() -> None:
 
 def test_interactive_fallback_applies_when_no_blocks() -> None:
     # When no blocks are produced (no TEXT, DATAFRAME, or CHART), the markdown
-    # falls back to render_interactive (clarifying questions, button choices).
+    # falls back to render_interactive (chat-input prompts, button choices).
     stream = [_ui(ChatInputUpdateComponent(placeholder="Pick a metric"))]
     markdown, is_error, blocks, _qi, _mi = components_to_blocks(stream)
     assert is_error is False
