@@ -85,11 +85,11 @@ def _called_names(sql: str, dialect: str) -> list[str]:
     """Names written in call position (``name(`` or ``schema.name(``) in ``sql``.
 
     Read from tokens rather than typed function nodes: sqlglot renames many
-    built-ins (``strpos`` parses to ``StrPosition`` and is emitted as
-    ``POSITION``), and a keyword such as ``replace`` is a call name too. Keyword
-    and type names before ``(`` (``IN (``, ``DECIMAL(``) are collected as well;
-    they only cost a catalog match. Each name is returned as written, lower-cased
-    and ASCII-lower-cased, since PostgreSQL folds only ASCII in unquoted names.
+    built-ins (``strpos`` parses to ``StrPosition``), and a keyword such as
+    ``replace`` is a call name too. Keyword and type names before ``(``
+    (``IN (``, ``DECIMAL(``) are collected as well; they only cost a catalog
+    match. Each name is returned as written, lower-cased and ASCII-lower-cased,
+    since PostgreSQL folds only ASCII in unquoted names.
     """
     parser_dialect = sqlglot.Dialect.get_or_raise(dialect)
     keywords = type(parser_dialect).tokenizer_class.KEYWORDS
