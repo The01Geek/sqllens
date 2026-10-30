@@ -79,8 +79,8 @@ async def test_run_sql_classifies_with_database_dialect(
 ) -> None:
     """Issue #304: ``RunSqlTool`` must classify with the dialect the runner uses.
 
-    ``#`` opens a comment only on MySQL, so a ``#``-led read is a result table
-    there and a row count on SQLite.
+    ``#`` opens a comment on MySQL and not on SQLite, so a ``#``-led statement is read-shaped
+    there (a result table) and not on SQLite (a row count).
     """
     import pandas as pd
 
@@ -101,7 +101,9 @@ async def test_run_sql_classifies_with_database_dialect(
 
     class _Rows:
         async def run_sql(self, args: object, context: object) -> pd.DataFrame:
-            return pd.DataFrame({"n": [1]})
+            # The built-in runners' frame for a statement that is not
+            # read-shaped, so only the tool's own classification decides.
+            return pd.DataFrame({"rows_affected": [1]})
 
     class _Files:
         async def write_file(self, *args: object, **kwargs: object) -> None:

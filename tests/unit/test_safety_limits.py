@@ -266,10 +266,14 @@ class TestFirstSqlKeyword:
             "   ",
         ],
     )
-    def test_unknown_dialect_is_no_dialect(self, sql: str) -> None:
+    def test_unknown_dialect_is_no_dialect(
+        self, sql: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
         from sqllens.safety import first_sql_keyword
 
-        assert first_sql_keyword(sql, "no-such-dialect") == first_sql_keyword(sql)
+        with caplog.at_level("WARNING", logger="sqllens.safety.readonly"):
+            assert first_sql_keyword(sql, "no-such-dialect") == first_sql_keyword(sql)
+        assert "unknown sqlglot dialect 'no-such-dialect'" in caplog.text
 
     @pytest.mark.parametrize("dialect", [None, "sqlite", "postgres", "mysql"])
     @pytest.mark.parametrize("sql", ["-- c\nSELECT 'x", "/* unterminated SELECT 1"])
@@ -632,6 +636,23 @@ class TestRunSqlToolReadShapedResults:
         assert "row(s) affected" in out.result_for_llm
         assert isinstance(out.ui_component.rich_component, NotificationComponent)
         assert "results" not in out.metadata
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("dialect", [None, "postgres", "sqlite"])
+    async def test_rows_from_runner_with_other_dialect_are_kept(
+        self, dialect: str | None
+    ) -> None:
+        # Under these dialects ``#`` is no comment, so the tool does not
+        # classify the statement as read-shaped; a MySQL runner streamed its
+        # rows, which must not be reported as a row count.
+        from sqllens.agent.tools.run_sql import RunSqlTool
+
+        df = pd.DataFrame({"n": [1, 2]})
+        tool = RunSqlTool(
+            sql_runner=_StaticRunner(df), file_system=_NoopFileSystem(), dialect=dialect
+        )
+        out = await tool.execute(_ctx(), RunSqlToolArgs(sql="# c\nSELECT n FROM widgets"))
+        self._assert_table(out, "", [{"n": 1}, {"n": 2}])
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("read_only", [True, False])

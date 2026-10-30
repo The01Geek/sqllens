@@ -46,19 +46,25 @@ def first_sql_keyword(sql: str, dialect: str | None = None) -> str:
     """Return ``sql``'s leading keyword uppercased, or ``""`` if none.
 
     The SQL is tokenized with sqlglot's tokenizer for ``dialect``, so comments
-    and opening parentheses are skipped as that dialect's tokenizer skips them
-    (``#`` opens a comment only for ``mysql``; block comments nest only where
-    the tokenizer nests them). The first remaining token is returned,
+    and opening parentheses are skipped as that dialect's tokenizer skips them.
+    The first remaining token is returned,
     uppercased, when it is a keyword or an unquoted identifier; a string,
     number, quoted identifier or symbol gives ``""``, and so does SQL with no
     remaining token (empty, whitespace-only, or only comments and opening
-    parentheses). A dialect name sqlglot does not know is treated as no
-    dialect.
+    parentheses). A dialect name sqlglot does not know is logged at
+    ``WARNING`` and treated as no dialect.
 
     SQL the tokenizer rejects (``TokenError``, e.g. an unterminated string or
     comment) gives ``""``; any other exception from the tokenizer propagates.
     """
-    resolved = sqlglot.Dialect.get_or_raise(sqlglot.Dialect.get(dialect))
+    try:
+        resolved = sqlglot.Dialect.get_or_raise(dialect)
+    except ValueError:
+        logger.warning(
+            "first_sql_keyword: unknown sqlglot dialect %r; tokenizing with no dialect",
+            dialect,
+        )
+        resolved = sqlglot.Dialect.get_or_raise(None)
     try:
         tokens = resolved.tokenize(sql)
     except sqlglot.errors.TokenError:
@@ -136,21 +142,29 @@ def _catalog_names(dialect: str | None) -> tuple[frozenset[str], tuple[str, ...]
 def _cte_reference_ids(parsed: exp.Expression, dialect: str | None) -> set[int]:
     """Return the ids of ``exp.Table`` nodes scope analysis resolves to a CTE.
 
-    Identifiers are normalized first so a CTE reference resolves whatever its
-    letter case where the dialect folds unquoted names. Matching is by node
-    identity, never by name: when a CTE and a base table share a name, sqlglot
-    renames the base-table source key (as ``apply_rls`` in ``rls.py`` relies
-    on). Any exception from normalization or scope analysis excludes nothing.
+    Identifiers are normalized in place first, so a CTE reference resolves
+    whatever its letter case where the dialect folds unquoted names. A table
+    is a CTE reference when it has no schema or catalog qualifier and its own
+    name (not its alias) is a CTE visible in its scope, so an aliased or
+    schema-qualified catalog table beside a same-named CTE or derived table
+    still counts. Any exception from normalization or scope analysis
+    excludes nothing.
     """
     try:
         normalize_identifiers(parsed, dialect=dialect)
         references: set[int] = set()
         for scope in traverse_scope(parsed):
-            base_ids = {id(v) for v in scope.sources.values() if isinstance(v, exp.Table)}
-            references.update(id(t) for t in scope.tables if id(t) not in base_ids)
+            references.update(
+                id(table)
+                for table in scope.tables
+                if not table.args.get("db")
+                and not table.args.get("catalog")
+                and table.name in scope.cte_sources
+            )
     except Exception as exc:
         logger.info(
-            "is_introspection_query: scope analysis failed under dialect %r (%s); "
+            "is_introspection_query: identifier normalization or scope analysis "
+            "failed under dialect %r (%s); "
             "counting every table reference",
             dialect,
             type(exc).__name__,

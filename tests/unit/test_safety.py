@@ -517,21 +517,33 @@ class TestCorpusStaysRejected:
 
 
 class TestGuardDoesNotCrashOnPinnedSqlglot:
-    """A trivial SELECT must pass without an unhandled exception, and the
-    deny-walk's ``exp.Alter`` node still rejects ALTER on the pinned sqlglot.
+    """A trivial SELECT must pass without an unhandled exception, an ALTER is
+    rejected, and the pinned sqlglot parses ALTER to the ``exp.Alter`` node the
+    deny-walk lists.
     """
 
     @pytest.mark.parametrize("dialect", [None, "sqlite", "postgres", "mysql"])
     def test_trivial_select_passes(self, dialect: str | None) -> None:
         assert_select_only("SELECT 1", dialect=dialect)
 
-    def test_nested_alter_still_rejected(self) -> None:
-        # Exercises the DML/DDL deny-walk's ALTER branch via a set-operation
-        # operand (reachable from the Union root), not just the root-type gate.
+    def test_alter_rejected(self) -> None:
         with pytest.raises(UnsafeSqlError):
             assert_select_only(
                 "ALTER TABLE users ADD COLUMN x INT", dialect="postgres"
             )
+
+    @pytest.mark.parametrize("dialect", [None, "sqlite", "postgres", "mysql"])
+    def test_alter_parses_to_deny_walk_node(self, dialect: str | None) -> None:
+        # The root-type gate rejects a root-level ALTER before the deny-walk
+        # runs, so pin the AST shape the deny-walk's ``exp.Alter`` entry needs.
+        import sqlglot
+        from sqlglot import expressions as exp
+
+        from sqllens.safety.readonly import _DML_DDL_TYPES
+
+        parsed = sqlglot.parse_one("ALTER TABLE users ADD COLUMN x INT", dialect=dialect)
+        assert type(parsed) is exp.Alter
+        assert exp.Alter in _DML_DDL_TYPES
 
 
 class TestBenignTypedFunctionLiteralsPass:
@@ -919,12 +931,27 @@ class TestIsIntrospectionQueryPerDialect:
             ),
             # Scope analysis builds no scope for DESCRIBE; its table still counts.
             ("DESCRIBE information_schema.tables", "mysql"),
-            # The qualified base table shares the CTE's name; matching by node
-            # identity keeps it a catalog read.
+            # A qualified or aliased catalog table beside a same-named CTE or
+            # derived table is not a CTE reference, in either order.
             (
                 "WITH sqlite_master AS (SELECT 1) "
                 "SELECT * FROM sqlite_master, main.sqlite_master",
                 "sqlite",
+            ),
+            (
+                "WITH sqlite_master AS (SELECT 1) "
+                "SELECT * FROM main.sqlite_master, sqlite_master",
+                "sqlite",
+            ),
+            ("WITH c AS (SELECT 1 AS k) SELECT * FROM sqlite_master AS c, c", "sqlite"),
+            (
+                "SELECT count(*) FROM sqlite_master, (SELECT 1 AS k) AS sqlite_master",
+                "sqlite",
+            ),
+            # A CTE defined inside a derived table is not visible outside it.
+            (
+                "SELECT * FROM (WITH pg_a AS (SELECT 1) SELECT * FROM pg_a) AS s, pg_a",
+                "postgres",
             ),
         ],
     )
@@ -950,6 +977,22 @@ class TestIsIntrospectionQueryPerDialect:
             ("WITH pg_recent AS (SELECT 1 AS n) SELECT * FROM pg_recent", "postgres"),
             ("WITH PG_RECENT AS (SELECT 1 AS n) SELECT * FROM pg_recent", "postgres"),
             ("WITH sqlite_recent AS (SELECT 1) SELECT * FROM sqlite_recent", "sqlite"),
+            # References from a later CTE, a recursive CTE, a derived table and
+            # a subquery resolve to the enclosing query's CTE.
+            (
+                "WITH pg_a AS (SELECT 1), pg_b AS (SELECT * FROM pg_a) SELECT * FROM pg_b",
+                "postgres",
+            ),
+            (
+                "WITH RECURSIVE pg_r(n) AS (SELECT 1 UNION ALL "
+                "SELECT n + 1 FROM pg_r WHERE n < 3) SELECT * FROM pg_r",
+                "postgres",
+            ),
+            ("WITH pg_a AS (SELECT 1) SELECT * FROM (SELECT * FROM pg_a) AS s", "postgres"),
+            (
+                "WITH pg_a AS (SELECT 1) SELECT * FROM t WHERE EXISTS (SELECT 1 FROM pg_a)",
+                "postgres",
+            ),
         ],
     )
     def test_catalog_prefixed_cte_is_data(self, sql: str, dialect: str) -> None:

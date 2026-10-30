@@ -35,9 +35,11 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
             file_system: FileSystem implementation for saving results (defaults to LocalFileSystem)
             custom_tool_name: Optional custom name for the tool (overrides default "run_sql")
             custom_tool_description: Optional custom description for the tool (overrides default description)
-            dialect: sqlglot dialect of the configured database. Must match the
-                dialect the runner classifies with, or a read the runner
-                streamed could be reported as a row count.
+            dialect: sqlglot dialect of the configured database, used to
+                classify the statement. When the runner returns rows where
+                this classification expects its ``rows_affected`` frame (a
+                runner classifying under another dialect), the rows are
+                returned as a read result.
         """
         self.sql_runner = sql_runner
         self.file_system = file_system or LocalFileSystem()
@@ -71,7 +73,19 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
 
             query_type = first_sql_keyword(args.sql, self.dialect)
 
-            if is_read_shaped(args.sql, self.dialect):
+            read_shaped = is_read_shaped(args.sql, self.dialect)
+            if (
+                not read_shaped
+                and not df.empty
+                and list(df.columns) != ["rows_affected"]
+            ):
+                # The runner returned rows, not the ``rows_affected`` frame
+                # the built-in runners return for a statement that is not
+                # read-shaped: it classified the statement as a read, so
+                # report its rows rather than drop them as a row count.
+                read_shaped = True
+
+            if read_shaped:
                 # Read the truncation signal before branching so the empty
                 # branch also surfaces the "re-issue narrower" hint instead of
                 # silently reporting "no rows". The constants index the
