@@ -1,0 +1,337 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "suggestion",
+   "description": "The shared _TOO_DEEP_MESSAGE ('bundle JSON is too deeply nested to parse safely') names no limit and no remedy, unlike the sibling size and item caps; now that MAX_BUNDLE_DEPTH = 64 is documented, a CLI or MCP user does not learn the number they hit. The message is restated in docs/internal/agent/memory.md and docs/internal/mcp-server/tools.md.",
+   "defect_signature": {
+    "file": "src/sqllens/memory/io.py",
+    "line_range": [
+     35,
+     35
+    ],
+    "kind": "other"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "suggestion",
+   "description": "The sibling-walk test puts the deep branch in the last list item under the last key, so it catches a walk that follows only the first child but not one that follows only the last child (the natural mistake given the LIFO stack.pop() order in _enforce_depth_cap).",
+   "defect_signature": {
+    "file": "tests/unit/test_memory_schema_io.py",
+    "line_range": [
+     178,
+     186
+    ],
+    "kind": "test_gap"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-3",
+   "agent": "prflow:comment-analyzer",
+   "severity": "suggestion",
+   "description": "The MAX_BUNDLE_DEPTH cap is filed under 'Bundle-level DoS caps (parse-boundary, issue #186)'; the lead sentence says three caps 'refuse such payloads' (the many-cheap-items case the depth cap does not address) and the Field-constraint rationale fits only the item cap. Mirror instance: docs/internal/mcp-server/tools.md line 419. Capped at Suggestion by the behavior-inert prose cap.",
+   "defect_signature": {
+    "file": "docs/internal/agent/memory.md",
+    "line_range": [
+     181,
+     183
+    ],
+    "kind": "comment_drift"
+   },
+   "corroboration": 1
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null,
+  "file_count": 10,
+  "changed_lines": 139
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (three Suggestions and two inconclusive checklist items; nothing at or above the critical threshold)\n\nThe PR is ready to merge: the JSON depth limit is iterative, runs in the right place in `parse_json`, and is tested, and the only open points are minor Suggestions plus two checklist items that need CI results rather than source reading.\nRule applied: rule 6 — only findings below the threshold and INCONCLUSIVE items remain → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (3)\n\n<details><summary>3 items</summary>\n\n1. `src/sqllens/memory/io.py` line 35: the shared `_TOO_DEEP_MESSAGE` (\"bundle JSON is too deeply nested to parse safely\") names no limit and no remedy, unlike the sibling size and item caps, which state their number and say \"split the bundle\". Now that `MAX_BUNDLE_DEPTH = 64` is a documented limit, a CLI or MCP user does not learn the number they hit. The message is restated in `docs/internal/agent/memory.md` and `docs/internal/mcp-server/tools.md`. (raised by 1/5 agents)\n2. `tests/unit/test_memory_schema_io.py` lines 178-186: the sibling-walk test puts the deep branch in the last list item under the last key, so it catches a walk that follows only the first child but not one that follows only the last child, which is the natural mistake given the LIFO `stack.pop()` order in `_enforce_depth_cap`. (raised by 1/5 agents)\n3. `docs/internal/agent/memory.md` lines 181-183: the new `MAX_BUNDLE_DEPTH` cap is filed under the heading \"Bundle-level DoS caps (parse-boundary, issue #186)\", and the lead sentence says three caps \"refuse such payloads\", where \"such payloads\" means the many-cheap-items case the depth cap does not address; the later `Field`-constraint rationale fits only the item cap. The mirror bullet in `docs/internal/mcp-server/tools.md` line 419 points readers to that rationale for all three caps. (raised by 1/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: the finding disputes the wording and attribution of an internal doc section, not what any mechanism covers, and correcting it changes no output; git grep --no-index of the head view for \"agent/memory.md\", \"Bundle-level DoS\" and \"docs/internal\" outside .md files found no tool, workflow or agent-instruction reader of memory.md (only links to other docs/internal pages and a prose-asserting test for dependency-audit.md); docs/internal is an internal page set that nothing publishes -->\n\n</details>\n\n### ℹ️ Informational — Deferred (2)\n\n<details><summary>2 items</summary>\n\n- VC-12: INCONCLUSIVE (important) — Running the unit job on 3.13 and 3.14 assumes pinned dependencies (requirements.txt, docker/requirements-drivers.txt if installed, dev extras) have installable releases for those versions; steps gated on matrix.python-version == '3.12' still run exactly once. [.github/workflows/ci.yml:38]\n\n  <details><summary>Evidence</summary>\n\n  Second half holds: ci.yml:38 matrix is [3.11,3.12,3.13,3.14]; the setup-node and security-audit steps (ci.yml:62-71) are gated on matrix.python-version == '3.12', which matches exactly one entry, so they run once. First half is unsettled by reading: ci.yml:49 installs with -c requirements.txt -c docker/requirements-drivers.txt -e '.[dev,all]'. requirements.txt (compiled for --python-version 3.11, universal) has python_full_version markers only for numpy (<3.12 vs >=3.12) and httpx2-jsfetch; no pin is excluded on 3.13/3.14. Whether every pinned release (e.g. onnxruntime 1.31.1, chromadb 1.5.9, grpcio 1.85.0, pandas 3.1.0, and the driver pins) ships cp313/cp314 wheels or builds from sdist is external PyPI data that I could not read, and I did not run pip install on 3.13/3.14.\n\n  </details>\n\n- VC-24: INCONCLUSIVE (critical) — The `unit` job in `.github/workflows/ci.yml` runs on Python 3.11, 3.12, 3.13 and 3.14, and passes on all four. [.github/workflows/ci.yml:38]\n\n  <details><summary>Evidence</summary>\n\n  criteria.json is a valid list of {criterion,text} objects and carries criterion 6, so it counts. Verified: .github/workflows/ci.yml:38 sets the `unit` job matrix python-version to [\"3.11\",\"3.12\",\"3.13\",\"3.14\"] (job name 'Lint + unit + transport (py${{ matrix.python-version }})', fail-fast false), so the 'runs on' half holds. The 'passes on all four' half needs actual CI run results (or running pytest/ruff/pip install -c requirements.txt on 3.13 and 3.14), which are not in the supplied artifacts and which I did not run; reading source cannot settle dependency resolution under the pinned constraints or test results on 3.13/3.14. No counterexample found, so not FAIL.\n\n  </details>\n\n</details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: test_relevant (not small_diff, not config_only, no new types, detect_all_audit not set); 10 changed files, 139 changed lines.\n- Working tree: not checked in PR mode (Phase 0.1 skipped); the dirty-tree check after the reviewers reported no change.\n- Review prompt extension: `PROMPT-EXTENSION-STATUS: content-present`. Final-pass reviewer extension (`requesting-code-review`): `content-present`.\n- CI evidence for the reviewed head (e24f03fa3dc0d30d969fcd11cbb69fcb54fe0fed): missing; this run held no CI results and ran no test suite.\n- Verdict severity threshold: `critical` (read from config).\n- Normalized (wording-only): 0\n- Re-verification: none (no checklist FAIL to dispute).\n- Engine root: the running plugin's own engine at `<loop-skill-dir>/../review`; `.prflow/vendor/prflow/skills/review` and `.devflow/vendor/devflow/skills/review` were advanced past because neither exists.\n- Deferrals: none (the PR body has no deferred-findings block).\n- prior-report: none\n\n- Checklist: 25 passed, 0 failed, 2 inconclusive\n- <details><summary>✅ Passed items (25 of 27)</summary>\n\n  - VC-1: On Python 3.11, CPython's json.loads (C scanner) does not raise RecursionError for well-formed payloads nested up to MAX_BUNDLE_DEPTH + 1 (65) levels, so those payloads reach _enforce_depth_cap; payloads json.loads cannot parse raise RecursionError and get the same _TOO_DEEP_MESSAGE via the except RecursionError branch. [src/sqllens/memory/io.py:30]\n  - VC-2: The comment asserts json.loads on 3.11 raises RecursionError somewhere under 1,000 levels of nesting. [src/sqllens/memory/io.py:31]\n  - VC-3: The docstring asserts _enforce_depth_cap is iterative, never recursive, and pushes only containers (dict/list) onto its stack. [src/sqllens/memory/io.py:101]\n  - VC-4: _enforce_depth_cap counts depth with the root container at depth 1 and each nested dict/list adding 1, raising only when depth > MAX_BUNDLE_DEPTH, so a depth-64 payload passes and depth-65 fails, for array roots, object roots over arrays and nested objects; scalar roots push nothing and pass. [src/sqllens/memory/io.py:103]\n  - VC-5: The comment asserts input too deep for json.loads never reaches _enforce_depth_cap, and that RecursionError is not a JSONDecodeError so without the handler it escapes callers catching BundleFormatError. [src/sqllens/memory/io.py:141]\n  - VC-6: _enforce_depth_cap runs after json.loads and before the 'bundle root must be a JSON object' check, so a deep array root gets the 'deeply nested' message rather than the root-type message. [src/sqllens/memory/io.py:146]\n  - VC-7: Doc states all three caps (including the depth cap) surface through the import_memory MCP tool as RuntimeError('Invalid memory bundle: ...') with isError: true, i.e. the tool catches BundleFormatError from parse_json and re-raises it that way. [docs/internal/mcp-server/tools.md:419]\n  - VC-8: Doc states all three caps' BundleFormatError surfaces in the sqllens import-memory CLI as exit 1 with the same message on stderr, and through the MCP tool as a sanitized RuntimeError. [docs/internal/agent/memory.md:191]\n  - VC-9: Doc table states _enforce_depth_cap applies to parse_json only, runs after json.loads and before the root-type check, walks iteratively counting arrays and objects with the root at depth 1, and that a payload too deep for json.loads raises RecursionError mapped to the same message. [docs/internal/agent/memory.md:189]\n  - VC-10: Doc states MAX_BUNDLE_BYTES and MAX_BUNDLE_ITEMS are defined in memory/schema.py and MAX_BUNDLE_DEPTH in memory/io.py, all three enforced in io.py at the parse boundary. [docs/internal/agent/memory.md:183]\n  - VC-11: Doc states CI installs with requirements.txt as constraints for the Python 3.11-3.14 unit jobs and the connector job; this requires the ci.yml unit job install step to use requirements.txt on every matrix entry and requirements.txt's Python markers to resolve on 3.13 and 3.14. [docs/internal/operations/dependency-audit.md:3]\n  - VC-13: The test comment asserts that on Python 3.14 json.loads parses a 10,000-level nested array without RecursionError. [tests/unit/test_memory_schema_io.py:149]\n  - VC-14: monkeypatching memory_io.json.loads replaces the loads attribute on the global json module that parse_json calls via json.loads, and the stub raising RecursionError mirrors the real exception type json.loads raises on deep input. [tests/unit/test_memory_schema_io.py:189]\n  - VC-15: The admits-max-depth test assumes each depth-64 shape fails later with a non-depth BundleFormatError (root-type check for arrays, schema validation for unknown keys 'x'/'a'), rather than parsing successfully. [tests/unit/test_memory_schema_io.py:169]\n  - VC-16: The sibling-walk test's payload places a depth-64 nested array as the second schema_docs item, making its total depth exceed 64 (root 1, schema_docs list 2, array root 3), so the depth cap rather than schema validation rejects it. [tests/unit/test_memory_schema_io.py:178]\n  - VC-17: The docstring asserts load_golden gets the 'deeply nested' BundleFormatError on every Python version, whether json.loads raises RecursionError or the depth limit rejects it. [tests/unit/test_eval_golden.py:83]\n  - VC-18: The golden.py docstring states the bundle size and item caps and the JSON nesting-depth limit apply to golden files, i.e. load_golden calls parse_json/parse_csv. [src/sqllens/eval/golden.py:15]\n  - VC-19: On every Python version in CI's `unit` matrix, `parse_json` raises `BundleFormatError` whose message contains \"deeply nested\" for each of at minimum these well-formed payloads, at a total depth of 65 and of 10,000, where depth counts nested arrays and objects with the root container at depth 1: nested arrays with an array root; an object root whose single value is nested arrays; and nested objects, each object's single value being the next object. [tests/unit/test_memory_schema_io.py:162]\n  - VC-20: On every Python version in CI's `unit` matrix, `load_golden(payload, \"json\")` raises `BundleFormatError` whose message contains \"deeply nested\" for a 10,000-level nested-array payload. [tests/unit/test_eval_golden.py:82]\n  - VC-21: `parse_json` raises `BundleFormatError` whose message contains \"deeply nested\" when the parsed value's depth (nested arrays and objects, root container at depth 1) exceeds `MAX_BUNDLE_DEPTH = 64`, defined in `src/sqllens/memory/io.py`, checked by walking the parsed value iteratively, without recursion, after `json.loads` and before the \"bundle root must be a JSON object\" check; a well-formed payload of depth 64 is not rejected by this check. [src/sqllens/memory/io.py:98]\n  - VC-22: A valid JSON bundle carrying both a `sql_pairs` block with at least one pair and a `schema_docs` list still parses to the same `MemoryBundle` as before the change. [src/sqllens/memory/io.py:148]\n  - VC-23: `parse_json` still converts a `RecursionError` raised by `json.loads` into `BundleFormatError` whose message contains \"deeply nested\", shown by a test that makes `json.loads` raise `RecursionError`. [tests/unit/test_memory_schema_io.py:189]\n  - VC-25: `pyproject.toml` lists the `Programming Language :: Python :: 3.13` and `Programming Language :: Python :: 3.14` classifiers, and `requires-python` is still `>=3.11`. [pyproject.toml:22]\n  - VC-26: `CLAUDE.md`'s *Repo conventions* lists `Lint + unit + transport (py3.11)` and `Lint + unit + transport (py3.12)` as the required checks, and names the `py3.13` and `py3.14` unit jobs and `Connector tests (Postgres + MySQL)` as running on every PR without being required. [CLAUDE.md:157]\n  - VC-27: The change leaves the Python matrix of `.github/workflows/dependency-audit.yml` unchanged (it keeps auditing 3.11 and 3.12 only); leaves `parse_json`'s `JSONDecodeError` handling unchanged (a deep payload that is also invalid JSON, and that 3.14's `json.loads` scans without `RecursionError`, keeps getting \"invalid JSON\" on Python 3.14); and leaves Python versions above 3.14 untested in CI and unlisted in the classifiers while `requires-python = \">=3.11\"` still admits them. [src/sqllens/memory/io.py:138]\n\n  </details>\n- Reviewed against issue #309 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] On every Python version in CI's `unit` matrix, `parse_json` raises `BundleFormatError` whose message contains \"deeply nested\" for each of at minimum these well-formed payloads, at a total depth of 65 and of 10,000, where depth counts nested arrays and objects with the root container at depth 1: nested arrays with an array root; an object root whose single value is nested arrays; and nested objects, each object's single value being the next object.\n- [ ] On every Python version in CI's `unit` matrix, `load_golden(payload, \"json\")` raises `BundleFormatError` whose message contains \"deeply nested\" for a 10,000-level nested-array payload.\n- [ ] `parse_json` raises `BundleFormatError` whose message contains \"deeply nested\" when the parsed value's depth (nested arrays and objects, root container at depth 1) exceeds `MAX_BUNDLE_DEPTH = 64`, defined in `src/sqllens/memory/io.py`, checked by walking the parsed value iteratively, without recursion, after `json.loads` and before the \"bundle root must be a JSON object\" check; a well-formed payload of depth 64 is not rejected by this check.\n- [ ] A valid JSON bundle carrying both a `sql_pairs` block with at least one pair and a `schema_docs` list still parses to the same `MemoryBundle` as before the change.\n- [ ] `parse_json` still converts a `RecursionError` raised by `json.loads` into `BundleFormatError` whose message contains \"deeply nested\", shown by a test that makes `json.loads` raise `RecursionError`.\n- [ ] The `unit` job in `.github/workflows/ci.yml` runs on Python 3.11, 3.12, 3.13 and 3.14, and passes on all four.\n- [ ] `pyproject.toml` lists the `Programming Language :: Python :: 3.13` and `Programming Language :: Python :: 3.14` classifiers, and `requires-python` is still `>=3.11`.\n- [ ] `CLAUDE.md`'s *Repo conventions* lists `Lint + unit + transport (py3.11)` and `Lint + unit + transport (py3.12)` as the required checks, and names the `py3.13` and `py3.14` unit jobs and `Connector tests (Postgres + MySQL)` as running on every PR without being required.\n- [ ] The change leaves the Python matrix of `.github/workflows/dependency-audit.yml` unchanged (it keeps auditing 3.11 and 3.12 only); leaves `parse_json`'s `JSONDecodeError` handling unchanged (a deep payload that is also invalid JSON, and that 3.14's `json.loads` scans without `RecursionError`, keeps getting \"invalid JSON\" on Python 3.14); and leaves Python versions above 3.14 untested in CI and unlisted in the classifiers while `requires-python = \">=3.11\"` still admits them.",
+ "diff_produced_at_head": "e24f03fa3dc0d30d969fcd11cbb69fcb54fe0fed",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:io.py:json-loads-recursion-threshold",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "absolute_claim:io.py:py311-recursion-under-1000:31",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "absolute_claim:io.py:depth-walk-iterative:101",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "data_format_assumption:io.py:depth-counting-root-one",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "absolute_claim:io.py:too-deep-never-reaches-walk:141",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "api_contract:io.py:depth-before-root-check",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "api_contract:tools.md:depth-cap-surfaces-iserror:419",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "api_contract:memory.md:depth-cap-cli-mcp-surface:191",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "data_format_assumption:memory.md:depth-cap-table-row:189",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "data_format_assumption:memory.md:cap-definition-locations:183",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "dependency_interaction:dependency-audit.md:constraints-cover-313-314:3",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "category": "dependency_interaction",
+   "claim": "Running the unit job on 3.13 and 3.14 assumes pinned dependencies (requirements.txt, docker/requirements-drivers.txt if installed, dev extras) have installable releases for those versions; steps gated on matrix.python-version == '3.12' still run exactly once.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": ".github/workflows/ci.yml",
+   "source_line": 38,
+   "verify_against": ".github/workflows/ci.yml unit job steps, requirements.txt, pyproject.toml optional dependencies",
+   "verify_hint": "Check the unit job's install steps and which pins carry python_version markers that exclude 3.13/3.14",
+   "claim_signature": "dependency_interaction:ci.yml:matrix-313-314-installable:38",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Second half holds: ci.yml:38 matrix is [3.11,3.12,3.13,3.14]; the setup-node and security-audit steps (ci.yml:62-71) are gated on matrix.python-version == '3.12', which matches exactly one entry, so they run once. First half is unsettled by reading: ci.yml:49 installs with -c requirements.txt -c docker/requirements-drivers.txt -e '.[dev,all]'. requirements.txt (compiled for --python-version 3.11, universal) has python_full_version markers only for numpy (<3.12 vs >=3.12) and httpx2-jsfetch; no pin is excluded on 3.13/3.14. Whether every pinned release (e.g. onnxruntime 1.31.1, chromadb 1.5.9, grpcio 1.85.0, pandas 3.1.0, and the driver pins) ships cp313/cp314 wheels or builds from sdist is external PyPI data that I could not read, and I did not run pip install on 3.13/3.14.",
+   "file_checked": ".github/workflows/ci.yml:38-74",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "absolute_claim:test_memory_schema_io.py:py314-no-recursionerror:149",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "test_mock_alignment:test_memory_schema_io.py:loads-recursion-stub:189",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "data_format_assumption:test_memory_schema_io.py:max-depth-fails-later:169",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "data_format_assumption:test_memory_schema_io.py:sibling-walk-depth:178",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "absolute_claim:test_eval_golden.py:every-version-deeply-nested:83",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "api_contract:golden.py:caps-and-depth-apply:15",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-19",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-20",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-21",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-22",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-23",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "The `unit` job in `.github/workflows/ci.yml` runs on Python 3.11, 3.12, 3.13 and 3.14, and passes on all four.",
+   "claim_signature": "issue-acceptance-6",
+   "criteria_file": ".prflow/tmp/review/pr-321/local-20261030T225241Z-1/criteria.json",
+   "source_file": ".github/workflows/ci.yml",
+   "source_line": 38,
+   "verify_hint": "Check the python-version matrix of the 'Lint + unit + transport' job",
+   "id": "VC-24",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "criteria.json is a valid list of {criterion,text} objects and carries criterion 6, so it counts. Verified: .github/workflows/ci.yml:38 sets the `unit` job matrix python-version to [\"3.11\",\"3.12\",\"3.13\",\"3.14\"] (job name 'Lint + unit + transport (py${{ matrix.python-version }})', fail-fast false), so the 'runs on' half holds. The 'passes on all four' half needs actual CI run results (or running pytest/ruff/pip install -c requirements.txt on 3.13 and 3.14), which are not in the supplied artifacts and which I did not run; reading source cannot settle dependency resolution under the pinned constraints or test results on 3.13/3.14. No counterexample found, so not FAIL.",
+   "file_checked": ".github/workflows/ci.yml:38",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-25",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-26",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-27",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}

@@ -1,0 +1,67 @@
+{
+  "root_completeness": "established",
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "suggestion",
+      "description": "The shared _TOO_DEEP_MESSAGE ('bundle JSON is too deeply nested to parse safely') names no limit and no remedy, unlike the sibling size and item caps; now that MAX_BUNDLE_DEPTH = 64 is documented, a CLI or MCP user does not learn the number they hit. The message is restated in docs/internal/agent/memory.md and docs/internal/mcp-server/tools.md.",
+      "defect_signature": {"file": "src/sqllens/memory/io.py", "line_range": [35, 35], "kind": "other"},
+      "corroboration": 1
+    },
+    {
+      "finding_id": "F-2",
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "suggestion",
+      "description": "The sibling-walk test puts the deep branch in the last list item under the last key, so it catches a walk that follows only the first child but not one that follows only the last child (the natural mistake given the LIFO stack.pop() order in _enforce_depth_cap).",
+      "defect_signature": {"file": "tests/unit/test_memory_schema_io.py", "line_range": [178, 186], "kind": "test_gap"},
+      "corroboration": 1
+    },
+    {
+      "finding_id": "F-3",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "description": "The MAX_BUNDLE_DEPTH cap is filed under 'Bundle-level DoS caps (parse-boundary, issue #186)'; the lead sentence says three caps 'refuse such payloads' (the many-cheap-items case the depth cap does not address) and the Field-constraint rationale fits only the item cap. Mirror instance: docs/internal/mcp-server/tools.md line 419. Capped at Suggestion by the behavior-inert prose cap.",
+      "defect_signature": {"file": "docs/internal/agent/memory.md", "line_range": [181, 183], "kind": "comment_drift"},
+      "corroboration": 1
+    }
+  ],
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:pr-test-analyzer"
+  ],
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:pr-test-analyzer"
+  ],
+  "plan_eligible": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:pr-test-analyzer"
+  ],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": false,
+    "test_relevant": true,
+    "detect_all_audit": false,
+    "checklist_skipped": null,
+    "file_count": 10,
+    "changed_lines": 139
+  },
+  "cap_drops": {"count": 0, "by_category": {}},
+  "phase4_demoted": [],
+  "reject_drivers": [],
+  "criterion_exempt": [],
+  "verdict": "APPROVE with notes"
+}
