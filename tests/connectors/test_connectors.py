@@ -3,8 +3,8 @@
 
 """Integration tests for the Postgres and MySQL SqlRunner adapters.
 
-These tests run against **real** Postgres and MySQL instances. They live
-outside pyproject's ``testpaths``, so the default ``pytest`` run does not
+These tests run against **real** Postgres and MySQL instances. Pyproject's
+``addopts`` ignores this directory, so the default ``pytest`` run does not
 collect them; they run in CI's connector job, and locally with
 ``pytest tests/connectors``.
 
