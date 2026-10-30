@@ -388,8 +388,11 @@ def components_to_blocks(
             if payload is not None:
                 if last_sql_is_introspection:
                     logger.info(
-                        "withheld a schema-introspection run_sql result from the "
-                        "user-visible blocks; the agent still received it"
+                        "withheld a schema-introspection run_sql result (%d rows, "
+                        "dialect %r) from the user-visible blocks; the agent still "
+                        "received it",
+                        payload.get("row_count", 0) + payload.get("truncated", 0),
+                        dialect,
                     )
                 else:
                     small = _small_result_to_markdown(payload)

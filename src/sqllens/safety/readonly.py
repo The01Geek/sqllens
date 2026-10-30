@@ -106,7 +106,11 @@ def _catalog_names(dialect: str | None) -> tuple[frozenset[str], tuple[str, ...]
 
 
 def _strip_leading_comments(sql: str, dialect: str | None) -> str:
-    """Drop leading whitespace and ``--`` / ``/* */`` comments (and ``#`` on MySQL)."""
+    """Drop leading whitespace and ``--`` / ``/* */`` comments.
+
+    ``#`` also opens a line comment for ``mysql`` and for no dialect, which
+    counts every engine's syntax.
+    """
     line_markers = ("--", "#") if dialect in (None, "mysql") else ("--",)
     rest = sql.lstrip()
     while True:
@@ -134,21 +138,33 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     ``sqlite_`` and ``pragma_`` name prefixes for ``sqlite``. A name prefix
     matches, in any casing, a table name or a table-valued function called in
     ``FROM`` (``pragma_table_info('t')``). With no dialect, or one not listed,
-    every engine's catalogs count.
+    every engine's catalogs count; a dialect name sqlglot does not know is
+    parsed as no dialect.
 
     The MCP formatter (``tools/_format.py``) uses this to withhold a catalog
     result from the user and to keep a catalog lookup's success from clearing
     an earlier query failure.
 
     Best-effort, fail-open-to-``False``: apart from a ``SHOW``, a query that
-    does not parse under ``dialect`` (a parse error or an empty parse) is
-    treated as a data query, so its result is shown.
+    does not parse under ``dialect`` (a sqlglot parse or tokenize error, or an
+    empty parse) is treated as a data query, so its result is shown. Any other
+    exception from the parser fails closed to ``True`` and logs a warning.
     """
+    if dialect is not None:
+        try:
+            sqlglot.Dialect.get_or_raise(dialect)
+        except ValueError:
+            logger.warning(
+                "is_introspection_query: unknown sqlglot dialect %r; "
+                "classifying with no dialect",
+                dialect,
+            )
+            dialect = None
     if first_sql_keyword(_strip_leading_comments(sql, dialect)) == "SHOW":
         return True
     try:
         parsed = sqlglot.parse_one(sql, dialect=dialect)
-    except Exception as exc:
+    except (sqlglot.errors.ParseError, sqlglot.errors.TokenError) as exc:
         logger.info(
             "is_introspection_query: SQL did not parse under dialect %r (%s); "
             "classifying it as a data query",
@@ -156,6 +172,14 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
             type(exc).__name__,
         )
         return False
+    except Exception:
+        logger.warning(
+            "is_introspection_query: parser failed unexpectedly under dialect %r; "
+            "classifying it as introspection so its result stays withheld",
+            dialect,
+            exc_info=True,
+        )
+        return True
     if parsed is None:
         logger.info(
             "is_introspection_query: SQL parsed to nothing under dialect %r; "
@@ -164,8 +188,8 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
         )
         return False
     # The keyword check above misses a SHOW split by an inline comment
-    # (``SHOW/**/TABLES``) or behind a nested one; the parse root still
-    # identifies it (exp.Show, or a SHOW Command fallback).
+    # (``SHOW/**/TABLES``) or behind a nested one; when such a statement
+    # parses, its root identifies it (exp.Show, or a SHOW Command fallback).
     if isinstance(parsed, exp.Show) or (
         isinstance(parsed, exp.Command) and parsed.name.upper() == "SHOW"
     ):

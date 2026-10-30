@@ -892,6 +892,29 @@ class TestIsIntrospectionQueryPerDialect:
         # Control: these catalogs already count without a dialect before #301.
         assert is_introspection_query(sql) is True
 
+    def test_unexpected_parser_error_fails_closed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Only sqlglot parse/tokenize errors fail open; any other parser
+        # exception keeps the result withheld.
+        import sqllens.safety.readonly as readonly_mod
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RecursionError("too deep")
+
+        monkeypatch.setattr(readonly_mod.sqlglot, "parse_one", boom)
+        assert is_introspection_query("SELECT id FROM widgets", dialect="mysql") is True
+
+    def test_unknown_sqlglot_dialect_counts_every_engine(self) -> None:
+        assert is_introspection_query("SELECT * FROM pg_class", dialect="postgresql") is True
+        assert is_introspection_query("SELECT id FROM widgets", dialect="postgresql") is False
+
+    def test_mapped_dialects_have_catalog_entries(self) -> None:
+        from sqllens.safety.readonly import _CATALOGS_BY_DIALECT, sqlglot_dialect_for_url
+
+        for url in ("sqlite:///x.db", "postgresql+psycopg://h/db", "mysql+pymysql://h/db"):
+            assert sqlglot_dialect_for_url(url) in _CATALOGS_BY_DIALECT
+
     def test_hash_is_not_a_comment_outside_mysql(self) -> None:
         # "#" opens a line comment only in MySQL; on Postgres this is not a SHOW.
         assert is_introspection_query("#x\nSHOW 'abc", dialect="postgres") is False
