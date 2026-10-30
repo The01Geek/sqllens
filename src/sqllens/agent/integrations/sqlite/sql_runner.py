@@ -8,6 +8,7 @@ import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
+from sqllens.agent.integrations.sql_threads import run_blocking_sql
 # Minimal documented dependency on sqllens.safety so a per-request profile
 # can narrow the streaming row cap without rebuilding the agent. The
 # integration runners (mysql/postgres/sqlite) each call this shared helper
@@ -91,6 +92,17 @@ class SqliteRunner(SqlRunner):
             sqlite3.Error: If query execution fails (the progress-handler deadline
                 raises ``sqlite3.OperationalError('interrupted')``).
         """
+        # The driver calls below block, so they run on the SQL worker pool and
+        # the event loop stays free for health checks and other requests. See
+        # ``sql_threads`` for its concurrency limit and cancellation behaviour.
+        return await run_blocking_sql(
+            self._run_sql_blocking, args, require_base_tables=require_base_tables
+        )
+
+    def _run_sql_blocking(
+        self, args: RunSqlToolArgs, *, require_base_tables: bool
+    ) -> pd.DataFrame:
+        """Execute ``args.sql`` synchronously; called on a worker thread by ``run_sql``."""
         if self._read_only and self.database_path != ":memory:":
             conn = sqlite3.connect(_readonly_uri(self.database_path), uri=True)
         else:

@@ -59,9 +59,9 @@ The 5-second connect timeout (`_DB_CONNECT_TIMEOUT_SECONDS`) bounds how long a w
 
 ### `probe_llm`
 
-Constructs `AnthropicLlmService(model=cfg.llm.model, api_key=cfg.llm.api_key.get_secret_value())`. Goes through the service class rather than `anthropic.Anthropic` directly so the `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` env-var fallback and the model-default behavior match what [`build_agent`](../agent/factory.md) will instantiate at serve time.
+Constructs `AnthropicLlmService(model=cfg.llm.model, api_key=cfg.llm.api_key.get_secret_value())`. Goes through the service class rather than the SDK client directly so the `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` env-var fallback and the model-default behavior match what [`build_agent`](../agent/factory.md) will instantiate at serve time.
 
-**No network round-trip.** A real `messages.create` would cost a billed token and slow restarts. Construction alone validates the constructor signature and surfaces obviously-broken keys (the SDK rejects empty strings at construction).
+**No network round-trip.** A real `messages.create` would cost a billed token and slow restarts. Construction alone checks only that the service and its SDK client can be built. It does not check the key: an empty key is not forwarded to the SDK, and neither an empty nor a wrong key fails until the first model request.
 
 If `cfg.llm.api_key is None`, the probe raises `PreflightError("llm", API_KEY_MISSING_MESSAGE)` — same message the CLI's earlier `cfg.llm.api_key is None` gate uses. The earlier gate stays in place because it runs whether or not preflight is enabled.
 

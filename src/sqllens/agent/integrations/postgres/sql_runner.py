@@ -8,6 +8,7 @@ import pandas as pd
 
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.core.tool import ToolContext
+from sqllens.agent.integrations.sql_threads import run_blocking_sql
 # See the sqlite runner for the rationale on this shared helper.
 from sqllens.safety.limits import effective_row_cap, rows_to_capped_df
 from sqllens.safety.readonly import is_read_shaped
@@ -122,25 +123,36 @@ class PostgresRunner(SqlRunner):
         Raises:
             psycopg2.Error: If query execution fails (including statement_timeout firing).
         """
+        # The driver calls below block, so they run on the SQL worker pool and
+        # the event loop stays free for health checks and other requests. See
+        # ``sql_threads`` for its concurrency limit and cancellation behaviour.
+        return await run_blocking_sql(
+            self._run_sql_blocking, args, require_base_tables=require_base_tables
+        )
+
+    def _run_sql_blocking(
+        self, args: RunSqlToolArgs, *, require_base_tables: bool
+    ) -> pd.DataFrame:
+        """Execute ``args.sql`` synchronously; called on a worker thread by ``run_sql``."""
         if self.connection_string:
             conn = self.psycopg2.connect(self.connection_string, **self._connection_options)
         else:
             conn = self.psycopg2.connect(**self.connection_params)
 
-        if self._read_only:
-            # Force read-only regardless of the DB role — a guard miss still
-            # cannot mutate. ``set_session(readonly=True)`` must run before any
-            # statement opens a transaction (it does here — right after
-            # connect), so the implicit transaction the SELECT below runs in
-            # is read-only. NOTE: an in-transaction
-            # ``SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`` would
-            # NOT work — under psycopg2's default autocommit=False the
-            # transaction is already open by the time any cursor executes, and
-            # SESSION CHARACTERISTICS only governs *subsequent* transactions,
-            # leaving the current (single, never-committed) one read-write.
-            conn.set_session(readonly=True)
-
         try:
+            if self._read_only:
+                # Force read-only regardless of the DB role — a guard miss still
+                # cannot mutate. ``set_session(readonly=True)`` must run before any
+                # statement opens a transaction (it does here — right after
+                # connect), so the implicit transaction the SELECT below runs in
+                # is read-only. NOTE: an in-transaction
+                # ``SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`` would
+                # NOT work — under psycopg2's default autocommit=False the
+                # transaction is already open by the time any cursor executes, and
+                # SESSION CHARACTERISTICS only governs *subsequent* transactions,
+                # leaving the current (single, never-committed) one read-write.
+                conn.set_session(readonly=True)
+
             if self._statement_timeout_ms > 0:
                 setup = conn.cursor()
                 try:
