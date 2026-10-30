@@ -127,10 +127,17 @@ def _pool_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
     return [r for r in caplog.records if r.name == POOL_LOGGER]
 
 
+class _Abort(BaseException):
+    """A BaseException that is not an Exception, which a worker must also survive."""
+
+
 async def _fill_pool(
-    release: threading.Event,
+    release: threading.Event, *, fail: bool = False
 ) -> tuple[list[asyncio.Future[None]], dict[str, int]]:
-    """Occupy every SQL worker thread until ``release`` is set, then queue three more."""
+    """Occupy every SQL worker thread until ``release`` is set, then queue three more.
+
+    With ``fail``, each call raises ``_Abort`` once released.
+    """
     from sqllens.agent.integrations.sql_threads import SQL_WORKER_THREADS, run_blocking_sql
 
     lock = threading.Lock()
@@ -142,6 +149,8 @@ async def _fill_pool(
             counts["peak"] = max(counts["peak"], counts["running"])
         try:
             assert release.wait(5), "the test never released the SQL workers"
+            if fail:
+                raise _Abort
         finally:
             with lock:
                 counts["running"] -= 1
@@ -175,12 +184,35 @@ async def test_sql_pool_runs_at_most_its_worker_count_at_once(
     finally:
         release.set()
         await asyncio.gather(*holders)
-    # Three calls arrived while every worker was busy; the warning is rate-limited.
+    # Three calls arrived while every worker was busy; the warning is rate-limited
+    # and reports the pending count it decided on: eight running plus one queued.
     [warning] = _pool_records(caplog)
     assert warning.levelno == logging.WARNING
-    assert warning.getMessage() == (
-        f"All {sql_threads.SQL_WORKER_THREADS} SQL worker threads are busy; queued calls: 1."
-    )
+    workers = sql_threads.SQL_WORKER_THREADS
+    assert warning.args == (workers + 1, workers)
+
+
+async def test_sql_pool_warns_on_a_burst_before_any_worker_starts(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqllens.agent.integrations import sql_threads
+
+    monkeypatch.setattr(sql_threads._POOL, "_last_saturation_warning", None)
+    caplog.set_level(logging.INFO, logger=POOL_LOGGER)
+    release = threading.Event()
+    workers = sql_threads.SQL_WORKER_THREADS
+    burst = [
+        asyncio.ensure_future(sql_threads.run_blocking_sql(release.wait, 5))
+        for _ in range(workers + 1)
+    ]
+    try:
+        # Let every task submit its call, without waiting for any worker.
+        await asyncio.sleep(0)
+        [warning] = _pool_records(caplog)
+        assert warning.args == (workers + 1, workers)
+    finally:
+        release.set()
+        await asyncio.gather(*burst)
 
 
 def test_sql_pool_rejects_a_size_below_one() -> None:
@@ -190,33 +222,66 @@ def test_sql_pool_rejects_a_size_below_one() -> None:
         _DaemonThreadPool(0, "test")
 
 
-class _Abort(BaseException):
-    """A BaseException that is not an Exception, which a worker must also survive."""
-
-
 async def test_sql_pool_workers_survive_failing_calls() -> None:
-    from sqllens.agent.integrations.sql_threads import SQL_WORKER_THREADS, run_blocking_sql
-
-    # The barrier makes every worker run one failing call at the same time.
-    barrier = threading.Barrier(SQL_WORKER_THREADS, timeout=5)
-
-    def fail() -> None:
-        barrier.wait()
-        raise _Abort
-
-    results = await asyncio.wait_for(
-        asyncio.gather(
-            *(run_blocking_sql(fail) for _ in range(SQL_WORKER_THREADS)),
-            return_exceptions=True,
-        ),
-        5,
-    )
+    release = threading.Event()
+    holders, _ = await _fill_pool(release, fail=True)
+    release.set()
+    results = await asyncio.wait_for(asyncio.gather(*holders, return_exceptions=True), 5)
     assert all(isinstance(r, _Abort) for r in results)
-    # The pool still runs a full set of calls at once.
+    # Every worker ran a failing call; the pool still runs a full set at once.
     release = threading.Event()
     holders, _ = await _fill_pool(release)
     release.set()
     await asyncio.gather(*holders)
+
+
+async def test_sql_pool_fails_the_call_when_the_hand_back_fails(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from concurrent.futures import Future
+
+    from sqllens.agent.integrations import sql_threads
+
+    class BrokenHandBack(Future):
+        def set_result(self, result: object) -> None:
+            raise RuntimeError("hand-back failed")
+
+    monkeypatch.setattr(sql_threads, "Future", BrokenHandBack)
+    with pytest.raises(RuntimeError, match="hand-back failed"):
+        await asyncio.wait_for(sql_threads.run_blocking_sql(lambda: 1), 5)
+    assert any(r.levelno == logging.ERROR for r in _pool_records(caplog))
+
+    monkeypatch.undo()
+    assert await asyncio.wait_for(sql_threads.run_blocking_sql(lambda: 2), 5) == 2
+
+
+async def test_sql_pool_fails_a_call_that_waits_too_long_for_a_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sqllens.agent.integrations import sql_threads
+
+    monkeypatch.setattr(sql_threads, "WORKER_WAIT_TIMEOUT_S", 0.3)
+    # The limit covers only the wait: a call that starts at once may run longer.
+    assert await sql_threads.run_blocking_sql(lambda: time.sleep(0.6) or "done") == "done"
+
+    release = threading.Event()
+    holders, _ = await _fill_pool(release)
+    ran: list[bool] = []
+    # Let the three extra calls submit first, so they time out before this one.
+    await asyncio.sleep(0)
+    try:
+        with pytest.raises(sql_threads.SqlWorkersBusyError) as busy:
+            await sql_threads.run_blocking_sql(ran.append, True)
+        assert str(busy.value) == "All database workers are busy; try again shortly."
+    finally:
+        release.set()
+        results = await asyncio.gather(*holders, return_exceptions=True)
+    # The three calls queued behind the full pool timed out too.
+    assert [type(r) for r in results[-3:]] == [sql_threads.SqlWorkersBusyError] * 3
+    # Once workers are free, the timed-out call is skipped, not run late.
+    assert await sql_threads.run_blocking_sql(lambda: "after") == "after"
+    await asyncio.sleep(0.1)
+    assert ran == []
 
 
 async def test_sql_pool_drops_a_queued_call_when_its_caller_is_cancelled() -> None:
@@ -238,18 +303,11 @@ async def test_sql_pool_drops_a_queued_call_when_its_caller_is_cancelled() -> No
 
 
 @pytest.mark.parametrize(
-    ("fails", "level", "message"),
-    [
-        (False, logging.INFO, "A SQL query finished after its caller was cancelled."),
-        (
-            True,
-            logging.WARNING,
-            "A SQL query failed after its caller was cancelled: RuntimeError",
-        ),
-    ],
+    ("fails", "level", "args"),
+    [(False, logging.INFO, ()), (True, logging.WARNING, ("RuntimeError",))],
 )
 async def test_sql_pool_lets_a_started_call_finish_and_logs_it(
-    caplog: pytest.LogCaptureFixture, fails: bool, level: int, message: str
+    caplog: pytest.LogCaptureFixture, fails: bool, level: int, args: tuple[str, ...]
 ) -> None:
     """A started call outlives its cancelled caller and leaves a log line without its SQL."""
     from sqllens.agent.integrations.sql_threads import run_blocking_sql
@@ -283,7 +341,8 @@ async def test_sql_pool_lets_a_started_call_finish_and_logs_it(
         assert time.monotonic() < deadline, "the abandoned call was never logged"
         await asyncio.sleep(TICK_S)
     [record] = _pool_records(caplog)
-    assert (record.levelno, record.getMessage()) == (level, message)
+    assert (record.levelno, record.args) == (level, args)
+    assert "secret" not in record.getMessage()
 
 
 def test_a_query_still_running_does_not_hold_up_process_exit() -> None:
