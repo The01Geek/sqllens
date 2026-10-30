@@ -1132,3 +1132,48 @@ async def test_with_widgets_injected_agent_bypasses_singleton(
     assert "from injected" in markdown
     assert len(injected.send_message_calls) == 1
     assert agent_module._AGENT_STATE is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("url", "catalog_sql"),
+    [
+        (
+            "mysql+pymysql://u:p@db.example/shop",
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = DATABASE()",
+        ),
+        ("postgresql+psycopg://u:p@db.example/shop", "SELECT tablename FROM pg_catalog.pg_tables"),
+    ],
+)
+async def test_with_widgets_hides_introspection_result_under_configured_dialect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+    url: str,
+    catalog_sql: str,
+) -> None:
+    """Issue #301: the configured database's sqlglot dialect reaches the
+    formatter, so a catalog result is withheld while the data result shows."""
+    base = build_test_config(persist_dir=tmp_path / "chroma")
+    cfg = base.model_copy(
+        update={"database": base.database.model_copy(update={"url": url})}
+    )
+    stub = agent_stub_factory(
+        [
+            *make_tool_cards("run_sql", {"sql": catalog_sql}),
+            make_dataframe([{"name": f"catalog_{i}"} for i in range(3)]),
+            *make_tool_cards("run_sql", {"sql": "SELECT id FROM widgets"}),
+            make_dataframe([{"id": 1}, {"id": 2}]),
+            make_text_component("Two widgets."),
+        ]
+    )
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    markdown, blocks, _query_info, _memory, _trace = (
+        await query_database_impl_with_widgets(cfg, "how many widgets")
+    )
+
+    assert [b["type"] for b in blocks] == ["table", "text"]
+    assert blocks[0]["columns"] == ["id"]
+    assert "catalog_" not in markdown

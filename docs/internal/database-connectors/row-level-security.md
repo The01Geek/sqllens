@@ -181,7 +181,7 @@ Three properties of this path are deliberate and pinned by tests in [tests/unit/
 ```python
 sql_runner = build_sql_runner(...)
 sql_runner = RowCapRunner(sql_runner, max_rows=cfg.database.max_rows)
-dialect = _sqlglot_dialect(cfg.database.url)
+dialect = sqlglot_dialect_for_url(cfg.database.url)
 if cfg.database.read_only:
     sql_runner = ReadOnlyGuardRunner(sql_runner, dialect=dialect)
 if cfg.rls:

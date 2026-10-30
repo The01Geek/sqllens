@@ -60,15 +60,17 @@ The guard relies on sqlglot's parse-tree shape and the `walk()` contract: which 
 
 It exists for the agent self-correction case: the system prompt lets the agent run a catalog `SELECT` or a structural `SHOW` internally to confirm a column/table name after a failed query, then re-issue a corrected query. When the MCP formatter collapses the component stream it must distinguish "the agent looked up the schema" (a step toward an answer) from "the agent re-ran the actual query and got data" (the recovered answer that supersedes an earlier error). Counting an introspection success as the recovered answer would let *data query failed → introspect → give up* report a silent success — exactly the failure CLAUDE.md forbids. See [mcp-server/tools.md](../mcp-server/tools.md#agent-self-correction-supersedes-an-earlier-error) for the consuming logic.
 
+The formatter also uses it to keep catalog results internal: a DataFrame that follows a `run_sql` card whose SQL classifies as introspection adds no block and no Markdown, while the agent still receives the result through its own tool result. `query_database` calls the formatter with the configured database's dialect (`sqlglot_dialect_for_url(cfg.database.url)`, see [Dialect handling](#dialect-handling)), so both uses classify under that dialect.
+
 Classification rules (returns `True` for introspection):
 
 - A statement whose leading keyword is `SHOW` (the structural schema-discovery `SHOW` variants the guard allowlists — `SHOW TABLES`/`COLUMNS`/...).
-- A `SELECT` referencing any table whose schema is a catalog: `information_schema`, `pg_catalog`, `mysql`, `sys`, or `performance_schema` (`_CATALOG_SCHEMAS`).
-- A `SELECT` referencing any table whose **name** begins with a catalog object prefix: `pg_` (Postgres system tables like `pg_class`) or `sqlite_` (`sqlite_master`, `sqlite_schema`) (`_CATALOG_NAME_PREFIXES`).
+- A `SELECT` referencing any table whose schema is a catalog of the given dialect, even alongside data tables: `information_schema` for every dialect, plus `pg_catalog` for `postgres` and `mysql`, `sys`, `performance_schema` for `mysql`.
+- A `SELECT` referencing any table, or table-valued function called in `FROM`, whose **name** begins (in any casing) with a catalog object prefix of the given dialect: `pg_` for `postgres` (`pg_class`), `sqlite_` and `pragma_` for `sqlite` (`sqlite_master`, `pragma_table_info('t')`, `pragma_table_list`). A data table whose name starts with the configured engine's prefix (a SQLite table named `pragma_…`) therefore counts too.
 
-Everything else — including a normal `SELECT` over user tables — classifies as a data query (`False`).
+With `dialect=None`, or a dialect not listed above, every engine's schemas and prefixes count. With a listed dialect, another engine's catalog names do not: on MySQL, `SELECT amount FROM pg_payments` is a data query. Everything else — including a normal `SELECT` over user tables — classifies as a data query (`False`).
 
-**Fail-open to `False`.** Unlike the guard (which fails *closed* to `UnsafeSqlError`), this classifier returns `False` on a parse failure or `None` parse result. The bias is deliberate and opposite the guard's: a string reaching this function has *already executed* through `run_sql`, so a misparse here is rare; treating an unparseable string as a data query biases toward **surfacing a recovered answer** rather than swallowing a real one as "just introspection". Misclassification is a UX concern (a recovered answer shown or hidden), not a safety one — the guard already vetted what was allowed to run.
+**Fail-open to `False`.** Unlike the guard (which fails *closed* to `UnsafeSqlError`), this classifier returns `False` on a parse failure or `None` parse result. The bias is deliberate and opposite the guard's: a string reaching this function has *already executed* through `run_sql`, so a misparse here is rare; treating an unparseable string as a data query biases toward **surfacing a recovered answer** rather than swallowing a real one as "just introspection". A misclassification decides whether a recovered answer is shown and whether a catalog result reaches the user; it never changes what was allowed to run — the guard already vetted that.
 
 Pinned by `tests/unit/test_safety.py`.
 
@@ -159,7 +161,7 @@ sql_runner = build_sql_runner(
     read_only=cfg.database.read_only,
 )
 sql_runner = RowCapRunner(sql_runner, max_rows=cfg.database.max_rows)
-dialect = _sqlglot_dialect(cfg.database.url)
+dialect = sqlglot_dialect_for_url(cfg.database.url)
 if cfg.database.read_only:
     sql_runner = ReadOnlyGuardRunner(sql_runner, dialect=dialect)
 if cfg.rls:
@@ -182,7 +184,7 @@ Full reference in [row-level-security.md](row-level-security.md).
 
 ## Dialect handling
 
-`_sqlglot_dialect(url)` in [src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py) maps URL schemes to sqlglot dialect names:
+`sqlglot_dialect_for_url(url)` in [src/sqllens/safety/readonly.py](../../../src/sqllens/safety/readonly.py) (exported from `sqllens.safety`) maps URL schemes to sqlglot dialect names:
 
 | URL prefix | Dialect |
 |---|---|

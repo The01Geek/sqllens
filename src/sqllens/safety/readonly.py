@@ -60,31 +60,71 @@ def is_read_shaped(sql: str) -> bool:
     return first_sql_keyword(sql) in _READ_SHAPED_KEYWORDS
 
 
+def sqlglot_dialect_for_url(url: str) -> str | None:
+    """Map a database URL to the sqlglot dialect name used by the safety guards."""
+    scheme = url.split("://", 1)[0].lower()
+    if scheme.startswith("sqlite"):
+        return "sqlite"
+    if scheme.startswith("postgres"):
+        return "postgres"
+    if scheme.startswith("mysql"):
+        return "mysql"
+    return None
+
+
 # Catalog schemas and object-name prefixes that mark a read as schema
-# introspection rather than a data-answering query. The system prompt
-# (agent/core/system_prompt/default.py) tells the agent to run these internally
-# — a SELECT against information_schema / pg_catalog / sqlite_master, or a
-# structural SHOW — to confirm a column/table name before retrying a failed
-# query. Their success is NOT a recovered answer, so the MCP formatter must not
-# treat such a card as one (see tools/_format.py).
-_CATALOG_SCHEMAS: frozenset[str] = frozenset(
-    {"information_schema", "pg_catalog", "mysql", "sys", "performance_schema"}
+# introspection rather than a data-answering query. Keyed by sqlglot dialect:
+# an engine-specific catalog counts only on its own engine, so a data table
+# that merely starts with another engine's prefix (``pg_payments`` on MySQL)
+# is not misread as a catalog. Keep these keys in sync with
+# ``sqlglot_dialect_for_url`` — an unmapped dialect falls back to the union.
+_SHARED_CATALOG_SCHEMAS: frozenset[str] = frozenset({"information_schema"})
+_CATALOG_SCHEMAS_BY_DIALECT: dict[str, frozenset[str]] = {
+    "postgres": frozenset({"pg_catalog"}),
+    "mysql": frozenset({"mysql", "sys", "performance_schema"}),
+    "sqlite": frozenset(),
+}
+_CATALOG_NAME_PREFIXES_BY_DIALECT: dict[str, tuple[str, ...]] = {
+    "postgres": ("pg_",),
+    "mysql": (),
+    "sqlite": ("sqlite_", "pragma_"),
+}
+_ALL_CATALOG_SCHEMAS: frozenset[str] = _SHARED_CATALOG_SCHEMAS.union(
+    *_CATALOG_SCHEMAS_BY_DIALECT.values()
 )
-_CATALOG_NAME_PREFIXES: tuple[str, ...] = ("pg_", "sqlite_")
+_ALL_CATALOG_NAME_PREFIXES: tuple[str, ...] = tuple(
+    prefix for prefixes in _CATALOG_NAME_PREFIXES_BY_DIALECT.values() for prefix in prefixes
+)
+
+
+def _catalog_names(dialect: str | None) -> tuple[frozenset[str], tuple[str, ...]]:
+    if dialect not in _CATALOG_SCHEMAS_BY_DIALECT:
+        return _ALL_CATALOG_SCHEMAS, _ALL_CATALOG_NAME_PREFIXES
+    return (
+        _SHARED_CATALOG_SCHEMAS | _CATALOG_SCHEMAS_BY_DIALECT[dialect],
+        _CATALOG_NAME_PREFIXES_BY_DIALECT[dialect],
+    )
 
 
 def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     """Return True if ``sql`` is a schema-introspection read, not a data query.
 
     Schema introspection = a structural ``SHOW`` (SHOW TABLES/COLUMNS/...), or a
-    SELECT whose tables target a catalog (``information_schema``, ``pg_catalog``,
-    ``sqlite_master``, ``pg_*`` system tables, ...). The agent runs these
-    internally to confirm a column name before retrying a failed query, so their
-    success is not a recovered answer for the user's question.
+    SELECT that reads any catalog, even alongside data tables. The catalogs are
+    ``information_schema`` for every dialect, plus the engine's own: the
+    ``pg_catalog`` schema and ``pg_`` name prefix for ``postgres``; the
+    ``mysql``, ``sys`` and ``performance_schema`` schemas for ``mysql``; the
+    ``sqlite_`` and ``pragma_`` name prefixes for ``sqlite``. A name prefix
+    matches, in any casing, a table name or a table-valued function called in
+    ``FROM`` (``pragma_table_info('t')``). With no dialect, or one not listed,
+    every engine's catalogs count.
 
-    Best-effort, fail-open-to-``False``: a query that does not parse (rare for
-    one ``run_sql`` already executed) is treated as a data query, biasing toward
-    surfacing a recovered answer rather than misclassifying a real one.
+    The MCP formatter (``tools/_format.py``) uses this to withhold a catalog
+    result from the user and to keep a catalog lookup's success from clearing
+    an earlier query failure.
+
+    Best-effort, fail-open-to-``False``: a query that does not parse under
+    ``dialect`` is treated as a data query, so its result is shown.
     """
     if first_sql_keyword(sql) == "SHOW":
         return True
@@ -94,12 +134,14 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
         return False
     if parsed is None:
         return False
+    schemas, prefixes = _catalog_names(dialect)
     for table in parsed.find_all(exp.Table):
         schema = (table.db or "").lower()
-        name = (table.name or "").lower()
-        if schema in _CATALOG_SCHEMAS:
+        if schema in schemas:
             return True
-        if any(name.startswith(prefix) for prefix in _CATALOG_NAME_PREFIXES):
+        source = table.this
+        name = source.name if isinstance(source, exp.Anonymous) else table.name
+        if (name or "").lower().startswith(prefixes):
             return True
     return False
 

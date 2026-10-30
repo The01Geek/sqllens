@@ -35,7 +35,12 @@ from sqllens.agent.tools import (
 )
 from sqllens.config import API_KEY_MISSING_MESSAGE, Config
 from sqllens.conversation_store import BoundedConversationStore
-from sqllens.safety import ReadOnlyGuardRunner, RlsGuardRunner, RowCapRunner
+from sqllens.safety import (
+    ReadOnlyGuardRunner,
+    RlsGuardRunner,
+    RowCapRunner,
+    sqlglot_dialect_for_url,
+)
 
 DEFAULT_USER_ID = "sqllens-user"
 DEFAULT_USER_GROUP = "default"
@@ -81,7 +86,7 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
         read_only=cfg.database.read_only,
     )
     sql_runner = RowCapRunner(sql_runner, max_rows=cfg.database.max_rows)
-    dialect = _sqlglot_dialect(cfg.database.url)
+    dialect = sqlglot_dialect_for_url(cfg.database.url)
     if cfg.database.read_only:
         sql_runner = ReadOnlyGuardRunner(sql_runner, dialect=dialect)
     # RLS is composed *outermost* (ahead of the read-only guard) so it rewrites
@@ -251,15 +256,3 @@ def build_sql_runner(
             read_only=read_only,
         )
     raise ValueError(f"unsupported database scheme: {scheme!r} (expected sqlite/postgres/mysql)")
-
-
-def _sqlglot_dialect(url: str) -> str | None:
-    """Map a database URL to the sqlglot dialect name used by the safety guard."""
-    scheme = url.split("://", 1)[0].lower()
-    if scheme.startswith("sqlite"):
-        return "sqlite"
-    if scheme.startswith("postgres"):
-        return "postgres"
-    if scheme.startswith("mysql"):
-        return "mysql"
-    return None
