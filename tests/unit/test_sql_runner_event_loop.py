@@ -343,3 +343,38 @@ async def test_profile_row_cap_reaches_the_sql_worker_thread(tmp_path: Any) -> N
 
     assert len(df) == 5
     assert df.attrs["truncated"] is True
+
+
+@pytest.mark.parametrize("require", [True, False])
+async def test_relation_check_runs_on_the_sql_worker_thread(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, require: bool
+) -> None:
+    """``require_base_tables`` reaches the worker and is checked on its connection."""
+    from sqllens.agent.integrations.sqlite import sql_runner as module
+    from sqllens.safety.rls import RlsError
+
+    db = tmp_path / "t.db"
+    with sqlite3.connect(db) as conn:
+        conn.executescript("CREATE TABLE t (x INTEGER); CREATE VIEW v AS SELECT x FROM t;")
+    conn.close()
+
+    real_check = module.verify_base_tables
+    seen: list[str] = []
+
+    def check(connection: Any, sql: str, *, dialect: str) -> None:
+        seen.append(threading.current_thread().name)
+        real_check(connection, sql, dialect=dialect)
+
+    monkeypatch.setattr(module, "verify_base_tables", check)
+    run = module.SqliteRunner(str(db)).run_sql(
+        RunSqlToolArgs(sql="SELECT x FROM v"), MagicMock(), require_base_tables=require
+    )
+    if require:
+        with pytest.raises(RlsError, match="view"):
+            await run
+        [thread] = seen
+        assert thread.startswith("sqllens-sql")
+    else:
+        df = await run
+        assert df.empty
+        assert seen == []
