@@ -227,13 +227,6 @@ The queue covers `query_database` only. The memory tools keep the event loop
 free by a different route: their synchronous `MemoryStore` calls run on the
 single memory worker thread (see "Memory store calls" in
 [transport.md](transport.md#keeping-the-event-loop-free-during-agent-runs-issue-299)).
-The six memory-administration tools other than `add_memories` run their whole
-`memory.admin` function there. `import_memory` and `add_memories` both go
-through `import_bundle`
-([src/sqllens/memory/importer.py](../../../src/sqllens/memory/importer.py)),
-which runs its optional clear and its de-duplication read
-(`MemoryStore.iter_all`) there as one call; its per-entry writes use the
-`async` `MemoryStore` methods, which run on `ChromaAgentMemory`'s own executor.
 
 Pinned by `tests/unit/test_query_database_queue.py` (concurrency across ids,
 ordering on a shared id, entry cleanup, cancel rollback, and the

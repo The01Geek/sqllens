@@ -36,8 +36,8 @@ def _norm(text: str) -> str:
 def _baseline(store: MemoryStore, clear: bool) -> tuple[set[tuple[str, str]], set[str]]:
     """Optionally clear, then return the normalized keys already in the store.
 
-    Runs on the memory worker as one call, so no other store call can run
-    between the clear and the read.
+    Runs on the memory worker as one call, so no other call routed through
+    ``run_memory_call`` runs between the clear and the read.
     """
     if clear:
         store.clear()

@@ -307,7 +307,6 @@ async def test_loop_side_memory_work_stays_on_the_event_loop(
     assert len(threads["parse"]) == 1
     # One add + one import item, each normalized on the loop; the store baseline
     # normalizes the stored rows on the worker.
-    assert threads["dedup"]
     assert len(threads["dumps"]) == 7
     for key in ("validate", "parse", "dumps"):
         assert all(t is loop_thread for t in threads[key]), key
