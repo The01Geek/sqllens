@@ -319,6 +319,10 @@ def build_server(cfg: Config) -> FastMCP:
         back in as the ``conversation_id`` argument so the agent retains
         context. Omit it to start a fresh conversation; the response always
         reports the conversation id (as ``_meta`` and a plain-text footer).
+        When a result is a clarifying question rather than an answer, ask the
+        user that question, or use the answer the user's earlier messages
+        already give; then call ``query_database`` again with that answer as
+        ``question`` and the ``conversation_id`` the result returned.
 
         ``profile`` selects a named config profile for this single request —
         the request-local overlay of result-shaping knobs (``show_details``,
