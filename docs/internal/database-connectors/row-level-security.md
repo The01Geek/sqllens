@@ -11,7 +11,7 @@ Two predicate sources are supported:
 - **Static** — a fixed value spelled in `sqllens.toml` / `SQLLENS_*` env. Same filter for every request. Works on every transport, including stdio.
 - **Dynamic** — value resolved per request from caller-supplied MCP `_meta`. The embedding application is the source of truth for identity. SQL Lens itself does not authenticate the caller for the purpose of identifying the principal.
 
-RLS is opt-in: an empty `rls` list disables the guard wholly (no decorator is wrapped, see [Wiring](#wiring) below) and the no-RLS path stays a zero-overhead passthrough.
+RLS is opt-in: an empty `rls` list disables the guard wholly (no decorator is wrapped, see [Wiring](#wiring) below) and the no-RLS path adds no RLS rewrite or catalog checks.
 
 ## What RLS is **not**
 
@@ -33,6 +33,20 @@ The rewrite is **proven-clean**: rather than filtering only the SQL shapes it re
 - Any unexpected exception from the rewrite — `RlsGuardRunner` catches `Exception`, logs with a traceback, and re-raises as `RlsError`. Same invariant as the read-only guard's fail-closed branch.
 
 `RlsError` is the only error class the guard raises out; the `RlsGuardRunner` wrapper re-raises with a `"refusing to execute query: row-level security could not be applied: …"` prefix so the calling agent gets actionable safety feedback rather than an unstructured crash. See [How errors surface](#how-errors-surface).
+
+## Database relation checks
+
+The AST rewrite cannot see stored view definitions. When rules are active, `RlsGuardRunner` also requires `run_sql(..., require_base_tables=True)` from the inner runner. `ReadOnlyGuardRunner` and `RowCapRunner` forward that requirement. The SQLite, PostgreSQL, and MySQL connectors call `verify_base_tables` in [relations.py](../../../src/sqllens/safety/relations.py) on their execution connection before running the rewritten query. SQLite opens a read transaction before checking its catalog. No catalog result is cached across queries.
+
+Scope analysis distinguishes real database relations from CTE/derived aliases. Catalog lookups resolve PostgreSQL search paths with `to_regclass`, use SQLite schema lookup order, and respect MySQL's identifier case policy. Views (including PostgreSQL materialized views), unknown relation kinds, unsupported reference shapes, and catalog lookup failures raise `RlsError`. This deliberately rejects user views while RLS is active, including views over unprotected tables; it does not attempt to expand their definitions. Unprotected base-table queries still work.
+
+The one exception is `_METADATA_VIEWS`: a fixed allowlist of metadata-only system views (PostgreSQL `information_schema` structure views plus `pg_catalog.pg_tables`/`pg_views`/`pg_indexes`; MySQL `information_schema` structure views plus `statistics`), kept readable because the system prompt directs the agent to introspect the schema through them. PostgreSQL matches the allowlist on the namespace and name `to_regclass` resolved on the connection, so a user view named `columns` elsewhere on the search path is still refused. MySQL matches the qualified `information_schema.<name>` reference case-insensitively without a catalog lookup; MySQL refuses to create objects in `information_schema`, even for root. Value-bearing statistics views (`pg_stats`, `COLUMN_STATISTICS`) are deliberately absent.
+
+Known gaps with the same root cause — rules key on relation names, not the rows behind them: PostgreSQL partition and inheritance children are base tables and pass unscoped unless they have their own rule, and stored functions that read protected tables are not inspected. Both are documented as user-facing limitations.
+
+Custom `SqlRunner` implementations used beneath `RlsGuardRunner` must declare the `require_base_tables` keyword and enforce the same check on their execution connection. When rules are configured, `RlsGuardRunner.__init__` looks past the `RlsGuardRunner`, `ReadOnlyGuardRunner` and `RowCapRunner` wrappers to the first runner beneath them and raises `TypeError` unless its `run_sql` names a `require_base_tables` parameter; a bare `**kwargs` does not qualify. A custom wrapper is checked as that runner, not looked past. A runner that declares the keyword but ignores it cannot be detected. Calling the standalone `apply_rls` function only rewrites SQL; it cannot verify stored relations without a database connection.
+
+SQLite uses `pragma_table_list` (SQLite 3.37+), which distinguishes ordinary tables from virtual tables and their shadow tables. Virtual and shadow tables are refused while RLS is active; an unavailable catalog function also blocks the query. PostgreSQL unquoted ASCII identifiers are lowercased before both scope analysis and relation lookup so quoted CTE names do not hide distinct database relations. Unquoted non-ASCII PostgreSQL identifiers are rejected because their folding depends on server encoding and locale; quote these identifiers explicitly.
 
 ## No string interpolation — CWE-89 / CWE-284
 
@@ -179,9 +193,9 @@ Resulting call order on every query: **RlsGuardRunner → ReadOnlyGuardRunner �
 The order is deliberate:
 
 - **RLS is outermost** so the rewrite happens *before* the read-only guard runs. The read-only guard's full-tree walk then validates the *rewritten* SQL — meaning the same DML/DDL deny-walk and denied-function check applies to the injected predicates too. A rule whose composition somehow produced a denied function would be caught.
-- **The decorator is only wrapped when `cfg.rls` is non-empty.** The no-RLS path stays a zero-overhead passthrough.
+- **The decorator is only wrapped when `cfg.rls` is non-empty.** The no-RLS path adds no RLS rewrite or catalog checks.
 
-When `cfg.database.read_only = false` (disabled — don't), the read-only guard is skipped *and* RLS still wraps if rules are configured; the rewritten SQL just goes straight to the engine runner.
+When `cfg.database.read_only = false` (disabled — don't), the read-only guard is skipped *and* RLS still wraps if rules are configured; the engine runner still verifies the referenced relations before executing the rewritten SQL.
 
 ## How errors surface
 
@@ -190,6 +204,7 @@ The error contract mirrors [database-connectors/read-only-safety.md](read-only-s
 - `RlsError` is the only error type the rewrite raises out.
 - `RlsGuardRunner.run_sql` catches `RlsError` and re-raises with a clear prefix: `"refusing to execute query: row-level security could not be applied: <inner message>"`.
 - Any other unexpected exception from the rewrite is logged with a traceback (`logger.warning`, `exc_info=True`) and converted to `RlsError` — fail-secure.
+- Connection-level relation checks raise a sanitized `RlsError` when a view or unverified relation is encountered; this error passes through the wrappers.
 - The vendored `RunSqlTool` swallows `RlsError` into a tool result the same way it does `UnsafeSqlError` today, so in practice the calling agent receives the rejection as a tool error and can re-plan (or surface a clean message).
 - [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) also has an explicit `except RlsError` branch in `query_database_impl_with_widgets` that re-raises the message verbatim as `RuntimeError(str(e))` — same defensive rationale as the `UnsafeSqlError` branch, for any future path that lets `RlsError` propagate out of `send_message`. Like the unsafe-SQL branch, RLS blocks are actionable safety feedback and must reach the client unsanitized, not collapsed into the `_INTERNAL_ERROR_MESSAGE` category.
 

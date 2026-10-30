@@ -9,9 +9,12 @@ Four orthogonal protections, composed at the factory:
   anything that isn't a single ``SELECT``/``WITH``.
 * ``apply_rls`` / ``RlsGuardRunner`` — per-request row-level-security
   predicate injection via sqlglot AST rewrite; the rewritten SQL is what
-  flows on to the read-only guard. Fail-secure: any rewrite failure
-  (parse error, scope-analysis error, missing/suspicious dynamic value,
-  unprovable protected-table reference) blocks the query.
+  flows on to the read-only guard, and the engine runner then verifies on
+  its execution connection that every referenced relation is a base table
+  or an allowlisted metadata-only system view. Fail-secure: any rewrite
+  failure (parse error, scope-analysis error, missing/suspicious dynamic
+  value, unprovable protected-table reference) and any other view or
+  unverifiable relation blocks the query.
 * Per-runner statement timeouts (``SET statement_timeout`` on Postgres,
   ``SET SESSION MAX_EXECUTION_TIME`` on MySQL, ``set_progress_handler``
   deadline on SQLite) — server- or driver-side time bound.
@@ -22,6 +25,7 @@ Four orthogonal protections, composed at the factory:
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import TYPE_CHECKING
 
@@ -77,7 +81,9 @@ class ReadOnlyGuardRunner(SqlRunner):
         self._inner = inner
         self._dialect = dialect
 
-    async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
+    async def run_sql(
+        self, args: RunSqlToolArgs, context: ToolContext, *, require_base_tables: bool = False
+    ) -> pd.DataFrame:
         try:
             assert_select_only(args.sql, dialect=self._dialect)
         except UnsafeSqlError as e:
@@ -101,7 +107,8 @@ class ReadOnlyGuardRunner(SqlRunner):
                 f"refusing to execute SQL: read-only guard errored "
                 f"({type(e).__name__}: {e})"
             ) from e
-        return await self._inner.run_sql(args, context)
+        options = {"require_base_tables": True} if require_base_tables else {}
+        return await self._inner.run_sql(args, context, **options)
 
 
 class RlsGuardRunner(SqlRunner):
@@ -116,6 +123,9 @@ class RlsGuardRunner(SqlRunner):
     Dynamic predicate values are read from ``context.metadata`` (populated per
     request from caller-supplied MCP metadata). Static rules need no metadata
     and so are enforced on every transport, including stdio.
+
+    With active rules, the inner runner must also verify base-table relations
+    on its execution connection; stored views are refused rather than expanded.
     """
 
     def __init__(
@@ -125,11 +135,23 @@ class RlsGuardRunner(SqlRunner):
         *,
         dialect: str | None = None,
     ) -> None:
+        executor = _relation_check_executor(inner)
+        if rules and not _declares_relation_check(executor):
+            # Checked once at construction so a runner that cannot verify
+            # relations is a wiring error at startup, not a per-query failure.
+            raise TypeError(
+                f"{type(executor).__name__}.run_sql must declare the require_base_tables "
+                "keyword to run beneath RlsGuardRunner"
+            )
         self._inner = inner
-        self._rules = rules
+        # Copied so a caller mutating its list cannot add rules the
+        # construction check above never saw.
+        self._rules = list(rules)
         self._dialect = dialect
 
-    async def run_sql(self, args: RunSqlToolArgs, context: ToolContext) -> pd.DataFrame:
+    async def run_sql(
+        self, args: RunSqlToolArgs, context: ToolContext, *, require_base_tables: bool = False
+    ) -> pd.DataFrame:
         try:
             rewritten = apply_rls(
                 args.sql,
@@ -160,6 +182,36 @@ class RlsGuardRunner(SqlRunner):
                 f"refusing to execute query: row-level-security guard errored "
                 f"({type(e).__name__}: {e})"
             ) from e
+        options = {"require_base_tables": True} if self._rules or require_base_tables else {}
         return await self._inner.run_sql(
-            args.model_copy(update={"sql": rewritten}), context
+            args.model_copy(update={"sql": rewritten}), context, **options
         )
+
+
+def _relation_check_executor(runner: object) -> object:
+    """Return the runner that receives ``require_base_tables`` beneath the guards.
+
+    The SQL Lens wrappers only forward the requirement, so the runner that must
+    honor it is the first one beneath them. Exact types only: a subclass may
+    override ``run_sql`` without forwarding, so it is checked itself.
+    """
+    while type(runner) in (RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner):
+        runner = runner._inner  # type: ignore[attr-defined]
+    return runner
+
+
+def _declares_relation_check(runner: object) -> bool:
+    """True if ``runner.run_sql`` names a ``require_base_tables`` parameter.
+
+    A bare ``**kwargs`` does not count: it accepts the keyword without
+    showing that the runner acts on it.
+    """
+    try:
+        params = inspect.signature(runner.run_sql).parameters  # type: ignore[attr-defined]
+    except (AttributeError, TypeError, ValueError):
+        return False
+    param = params.get("require_base_tables")
+    return param is not None and param.kind in (
+        inspect.Parameter.KEYWORD_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+    )
