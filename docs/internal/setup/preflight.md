@@ -59,7 +59,7 @@ The 5-second connect timeout (`_DB_CONNECT_TIMEOUT_SECONDS`) bounds how long a w
 
 ### `probe_llm`
 
-Constructs `AnthropicLlmService(model=cfg.llm.model, api_key=cfg.llm.api_key.get_secret_value())`. Goes through the service class rather than `anthropic.Anthropic` directly so the `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` env-var fallback and the model-default behavior match what [`build_agent`](../agent/factory.md) will instantiate at serve time.
+Constructs `AnthropicLlmService(model=cfg.llm.model, api_key=cfg.llm.api_key.get_secret_value())`. Goes through the service class rather than the SDK client directly so the `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` env-var fallback and the model-default behavior match what [`build_agent`](../agent/factory.md) will instantiate at serve time.
 
 **No network round-trip.** A real `messages.create` would cost a billed token and slow restarts. Construction alone validates the constructor signature and surfaces obviously-broken keys (the SDK rejects empty strings at construction).
 
