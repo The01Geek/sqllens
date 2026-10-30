@@ -1,0 +1,2147 @@
+[
+  {
+    "id": "VC-1",
+    "category": "api_contract",
+    "claim": "The CLI exposes `sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]` with exactly these option names and spellings.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 225,
+    "verify_against": "The `verify_memory` Typer command definition in src/sqllens/cli.py",
+    "verify_hint": "Check the `verify-memory` command and its option declarations (`--format`, `--fail-under`, `-c/--config`) in `src/sqllens/cli.py`",
+    "criterion": 1,
+    "claim_signature": "api_contract:memory.md:verify-memory-cli-signature:225",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "dependency_interaction",
+    "claim": "`eval/golden.py` loads the golden file via the existing bundle parsers `parse_json`/`parse_csv`, retaining byte/item caps, JSON recursion protection and schema validation, and calls `parse_csv(..., defang=False)`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Loads the golden file with the existing bundle parsers, retaining byte/item caps, JSON recursion protection, and schema validation. CSV uses `parse_csv(..., defang=False)` to preserve the question and expected SQL.",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 245,
+    "verify_against": "src/sqllens/eval/golden.py and the `parse_json`/`parse_csv` signatures in src/sqllens/memory/io.py",
+    "verify_hint": "Check that `parse_csv` in `src/sqllens/memory/io.py` accepts a `defang` keyword and that `src/sqllens/eval/golden.py` passes `defang=False`",
+    "criterion": 2,
+    "claim_signature": "dependency_interaction:memory.md:golden-uses-bundle-parsers:245",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "dependency_interaction",
+    "claim": "`parse_csv` defangs each cell by default and golden verification opts out of defanging to preserve reference values.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`parse_csv` defaults to defanging each cell *before* constructing the `SqlPair`; golden verification opts out to preserve reference values",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 196,
+    "verify_against": "The `parse_csv` and `_defang_csv_cell` implementations in src/sqllens/memory/io.py",
+    "verify_hint": "Check the `defang` parameter default in `parse_csv` in `src/sqllens/memory/io.py`",
+    "claim_signature": "dependency_interaction:memory.md:parse-csv-defang-default:196",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "api_contract",
+    "claim": "`build_agent` has the signature `build_agent(cfg, *, allow_memory_writes=True)`, and `allow_memory_writes=False` omits both `save_question_tool_args` and `save_text_memory` regardless of `cfg.memory` and constructs `ChromaAgentMemory(track_usage=False)` while leaving memory search and context injection available.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`build_agent(cfg, *, allow_memory_writes=True)`. Passing `False` omits both memory-writing tools (`save_question_tool_args`, `save_text_memory`) regardless of `cfg.memory`, and disables retrieval counter and timestamp updates with `ChromaAgentMemory(track_usage=False)`. Memory search and context injection remain available.",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 54,
+    "verify_against": "The `build_agent` definition in src/sqllens/agent/factory.py",
+    "verify_hint": "Check the `build_agent` signature and the save-tool registration branches plus the `ChromaAgentMemory(...)` construction in `src/sqllens/agent/factory.py`",
+    "claim_signature": "api_contract:factory.md:allow-memory-writes-signature:54",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "absolute_claim",
+    "claim": "Only `sqllens verify-memory` (`src/sqllens/eval/runner.py`) passes `allow_memory_writes=False`; no other caller in the repository does.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Only `sqllens verify-memory` (`src/sqllens/eval/runner.py`) passes `False`.",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 54,
+    "verify_against": "All `build_agent(` call sites in src/ and tests/",
+    "verify_hint": "Search every `build_agent(` call site under `src/sqllens/` for `allow_memory_writes=False` and confirm only `src/sqllens/eval/runner.py` passes it",
+    "claim_signature": "absolute_claim:factory.md:only-verify-memory-passes-false:54",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "dependency_interaction",
+    "claim": "`ChromaAgentMemory` accepts a `track_usage` keyword that defaults to `True`, and `track_usage=False` suppresses hit-counter and `last_hit_date` updates in `search_similar_usage` for both search tools and context injection.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "With `track_usage=True` (the default), when `ChromaAgentMemory.search_similar_usage`",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 22,
+    "verify_against": "The `ChromaAgentMemory.__init__` and `search_similar_usage` implementation in src/sqllens/agent/integrations/chromadb/agent_memory.py",
+    "verify_hint": "Check `__init__` for a `track_usage` parameter and its default, and the update branch in `search_similar_usage`, in `src/sqllens/agent/integrations/chromadb/agent_memory.py`",
+    "claim_signature": "dependency_interaction:memory.md:track-usage-default-true:22",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "api_contract",
+    "claim": "Each save tool registration in `build_agent` is gated on its own config flag ANDed with `allow_memory_writes`, exactly as the documented snippet `if cfg.memory.save_queries and allow_memory_writes:` / `if cfg.memory.save_text_memories and allow_memory_writes:` shows, and the search tool is registered unconditionally.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "if cfg.memory.save_queries and allow_memory_writes:\n    tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 87,
+    "source_line_end": 96,
+    "verify_against": "The tool-registration block in src/sqllens/agent/factory.py",
+    "verify_hint": "Compare the documented snippet with the actual registration conditions in `build_agent` in `src/sqllens/agent/factory.py`",
+    "claim_signature": "api_contract:memory.md:save-tool-gates-anded:87",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "absolute_claim",
+    "claim": "Leaving `cfg.memory.save_queries` off drops the `save_question_tool_args` tool and all of the default system prompt's save guidance together, with no save instruction surviving.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "so leaving the flag off drops the tool and its save guidance together. Reading saved memory is unaffected.",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 102,
+    "verify_against": "The `has_save` / `has_search` branches in src/sqllens/agent/core/system_prompt/default.py",
+    "verify_hint": "Check every save-related sentence in `src/sqllens/agent/core/system_prompt/default.py` for whether any rides `has_search` rather than `has_save` (e.g. the previously documented 'Do NOT forget to save successful executions.' sentence)",
+    "claim_signature": "absolute_claim:memory.md:save-guidance-fully-dropped:102",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "absolute_claim",
+    "claim": "With `save_queries` off the system prompt drops its save guidance (no residual save sentence) — the config-loading table's wording.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "when off, `SaveQuestionToolArgsTool` is not registered, so the agent cannot write tool-use memory and the system prompt drops its save guidance; reading saved memory is unaffected.",
+    "source_file": "docs/internal/setup/config-loading.md",
+    "source_line": 30,
+    "verify_against": "The `has_save` / `has_search` prompt branches in src/sqllens/agent/core/system_prompt/default.py",
+    "verify_hint": "Check whether any save sentence in `src/sqllens/agent/core/system_prompt/default.py` is emitted under `has_search` with both save flags off",
+    "claim_signature": "absolute_claim:config-loading.md:save-guidance-fully-dropped:30",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "api_contract",
+    "claim": "`query_database_impl_with_widgets` has a keyword-only `agent=` parameter that overrides the singleton, is `None` on every MCP request path, and is passed only by `sqllens verify-memory`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The keyword-only `agent=` parameter overrides this; it is `None` on every MCP request path and is used only by `sqllens verify-memory`, which passes its own agent",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 89,
+    "verify_against": "The `query_database_impl_with_widgets` signature in src/sqllens/tools/query_database.py and its call sites in src/sqllens/server.py and src/sqllens/eval/runner.py",
+    "verify_hint": "Check the `agent=` parameter in `query_database_impl_with_widgets` in `src/sqllens/tools/query_database.py` and every caller",
+    "claim_signature": "api_contract:tools.md:query-database-agent-override:89",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "data_format_assumption",
+    "claim": "`AgentRunError.query_info` retains the captured SQL for the verification runner on the SQL-execution-failure path, and is cleared when the effective `show_details` is off.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The raised `AgentRunError.query_info` retains captured SQL for the verification runner; it is cleared when the effective `show_details` is off.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 246,
+    "verify_against": "The `AgentRunError` definition and the error short-circuit in src/sqllens/tools/query_database.py / src/sqllens/tools/_format.py",
+    "verify_hint": "Check where `AgentRunError` is raised with `query_info` and where it is cleared based on `show_details` in `src/sqllens/tools/query_database.py`",
+    "claim_signature": "data_format_assumption:tools.md:agentrunerror-query-info:246",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "dependency_interaction",
+    "claim": "The verify runner resolves the persisted `default` profile's similarity threshold and limits into a cloned config capped by the configured row and iteration limits, never mutating the caller's config or the stored profile, and never selects named profiles.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The verifier uses the persisted `default` profile's similarity threshold and limits, capped by the configured row and iteration limits. It overrides `show_details` to retain executed SQL without changing the caller's config or the stored profile. It does not select named profiles.",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 256,
+    "verify_against": "The profile-resolution and config-clone code in src/sqllens/eval/runner.py and the profile store it reads",
+    "verify_hint": "Check how `src/sqllens/eval/runner.py` loads the persisted `default` profile and builds the cloned `Config`",
+    "claim_signature": "dependency_interaction:memory.md:default-profile-cloned-config:256",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "absolute_claim",
+    "claim": "The verify agent is never the process-wide cached agent from `tools/_agent.py`: the runner neither reads nor populates that singleton.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The verify agent is never the process-wide cached agent from `tools/_agent.py`. That singleton is keyed on whichever `Config` built it first and may carry both save tools. The runner neither reads nor populates it.",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 254,
+    "verify_against": "src/sqllens/eval/runner.py imports/calls versus `get_agent`/`prime_agent` in src/sqllens/tools/_agent.py",
+    "verify_hint": "Check `src/sqllens/eval/runner.py` for any use of `get_agent`/`prime_agent` from `src/sqllens/tools/_agent.py`, including indirectly via `query_database_impl_with_widgets` when `agent=` is passed",
+    "claim_signature": "absolute_claim:memory.md:verify-agent-not-singleton:254",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "api_contract",
+    "claim": "`eval/compare.py` provides `compare_sql`, which returns PASS/CHANGED or raises a side-specific parse diagnostic, and `compare`, which returns ERROR for either parse failure.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Normalizes SQL using the configured dialect. `compare_sql` returns PASS/CHANGED or raises a side-specific parse diagnostic; `compare` returns ERROR for either parse failure.",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 246,
+    "verify_against": "src/sqllens/eval/compare.py",
+    "verify_hint": "Check the `compare_sql` and `compare` function signatures and return/raise behaviour in `src/sqllens/eval/compare.py`",
+    "criterion": 8,
+    "claim_signature": "api_contract:memory.md:compare-module-api:246",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "dependency_interaction",
+    "claim": "`compare_sql` catches `sqlglot.errors.SqlglotError` (covering grammar and tokenization errors) and raises `SqlComparisonError` naming the failing side, while unknown-dialect errors propagate unchanged.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`compare_sql` catches `sqlglot.errors.SqlglotError`, including grammar and tokenization errors, and raises `SqlComparisonError` identifying the failing side. Unknown-dialect errors propagate unchanged.",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 275,
+    "verify_against": "The except clauses in src/sqllens/eval/compare.py and sqlglot's error class hierarchy",
+    "verify_hint": "Check the `except` breadth in `compare_sql` in `src/sqllens/eval/compare.py` against `sqlglot.errors` (ParseError, TokenError, UnsupportedError) and whether unknown-dialect errors are a SqlglotError subclass",
+    "claim_signature": "dependency_interaction:memory.md:sqlglot-error-breadth:275",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "api_contract",
+    "claim": "`eval/runner.py` accepts a test-injectable `driver=` and an async `comparator=` that receives expected and actual SQL and can capture a database connection.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Tests can inject `driver=`. An async `comparator=` accepts expected/actual SQL and can capture a database connection for row comparison without rewriting the runner.",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 247,
+    "verify_against": "The runner entry-point signature in src/sqllens/eval/runner.py",
+    "verify_hint": "Check the `driver=` and `comparator=` parameters and the awaited comparator call in `src/sqllens/eval/runner.py`",
+    "criterion": 8,
+    "claim_signature": "api_contract:memory.md:runner-driver-comparator-params:247",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "absolute_claim",
+    "claim": "Every `CaseResult` with status ERROR carries a diagnostic, and driver and comparator exceptions are reported as `<ExceptionType>: <message>`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Every `CaseResult` with this status requires a diagnostic. SQL parse failures identify the expected or actual side; missing SQL has its own message. Driver and comparator exceptions are reported as `<ExceptionType>: <message>`.",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 264,
+    "verify_against": "The `CaseResult` model and ERROR construction paths in src/sqllens/eval/runner.py",
+    "verify_hint": "Check whether `CaseResult` validates a non-empty detail for ERROR and how exceptions are formatted in `src/sqllens/eval/runner.py`",
+    "claim_signature": "absolute_claim:memory.md:error-always-has-diagnostic:264",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "api_contract",
+    "claim": "The CLI's `_exit_for_report` re-asserts a `report.total == 0` guard and exits 1 with the message `golden file is empty (no sql_pairs). There is nothing to verify.` for `{}` or an empty `sql_pairs.pairs` list.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "**Empty golden file** — `{}` or an empty `sql_pairs.pairs` list exits 1 with `golden file is empty (no sql_pairs). There is nothing to verify.` `_exit_for_report` re-asserts the same `report.total == 0` guard",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 268,
+    "verify_against": "`_exit_for_report` and the verify-memory command in src/sqllens/cli.py",
+    "verify_hint": "Check the exact error string and the `report.total == 0` branch in `_exit_for_report` in `src/sqllens/cli.py`",
+    "criterion": 7,
+    "claim_signature": "api_contract:memory.md:empty-golden-exit-message:268",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "api_contract",
+    "claim": "`_exit_for_report` exits 1 when `report.passed == 0` before any percentage comparison, so `--fail-under 0` cannot green an all-non-PASS run, and exits 1 when `passed / total * 100 < PCT` otherwise.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "when `report.passed == 0`, the run exits 1 **even with `--fail-under 0`**, which would otherwise score `0% >= 0%` as a green result on a fully-broken agent. This guard sits *before* the percentage compare",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 270,
+    "source_line_end": 271,
+    "verify_against": "`_exit_for_report` in src/sqllens/cli.py",
+    "verify_hint": "Check the ordering of the `report.passed == 0` guard versus the threshold comparison in `_exit_for_report` in `src/sqllens/cli.py`",
+    "criterion": 6,
+    "claim_signature": "api_contract:memory.md:zero-pass-guard-ordering:270",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "absolute_claim",
+    "claim": "The `_exit_for_report` exit policy refuses to exit 0 in exactly four vacuous-success cases, and the four listed bullets are those cases.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The CLI's `_exit_for_report` explicitly refuses to exit 0 in four vacuous-success traps:",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 266,
+    "verify_against": "`_exit_for_report` in src/sqllens/cli.py",
+    "verify_hint": "Count the non-zero-exit branches in `_exit_for_report` in `src/sqllens/cli.py` and compare against the four documented bullets (CLAUDE.md counting-claims rule)",
+    "claim_signature": "absolute_claim:memory.md:four-vacuous-success-traps:266",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "absolute_claim",
+    "claim": "With `--fail-under PCT` and at least one PASS, the command exits zero when the PASS percentage is at or above PCT (inclusive) and non-zero otherwise, without floating-point boundary errors.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "With **`--fail-under PCT`** and at least one PASS, the command exits zero when the PASS percentage is at or above PCT and non-zero otherwise.",
+    "source_file": "docs/external/managing-memory.md",
+    "source_line": 166,
+    "verify_against": "The threshold comparison in `_exit_for_report` in src/sqllens/cli.py",
+    "verify_hint": "Check the comparison arithmetic in `_exit_for_report` in `src/sqllens/cli.py` at exact-boundary rates such as 1/3 with `--fail-under 33.3` and 7/10 with `--fail-under 70`",
+    "criterion": 6,
+    "claim_signature": "absolute_claim:managing-memory.md:inclusive-threshold-boundary:166",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "api_contract",
+    "claim": "`--fail-under` accepts a percentage from 0 to 100 and rejects values outside that range.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Pass-rate percentage tolerance from 0 to 100. See the exit-code rules below; at least one case must PASS.",
+    "source_file": "docs/external/managing-memory.md",
+    "source_line": 133,
+    "verify_against": "The `--fail-under` option declaration and validation in src/sqllens/cli.py",
+    "verify_hint": "Check the `--fail-under` option's type, min/max bounds and out-of-range handling in the `verify-memory` command in `src/sqllens/cli.py`",
+    "claim_signature": "api_contract:managing-memory.md:fail-under-range:133",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "absolute_claim",
+    "claim": "A verification run saves no memories and updates no retrieval counters, with both save tools turned off even when the configuration enables saving queries, while memory reads continue.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`verify-memory` does not save memories or update retrieval counters. For the duration of the run, the assistant's tools for saving question-and-answer pairs and notes are turned off, even if your configuration enables saving queries. The assistant still reads memory as usual, which is what you are testing.",
+    "source_file": "docs/external/managing-memory.md",
+    "source_line": 124,
+    "verify_against": "src/sqllens/eval/runner.py and the save/track_usage gates in src/sqllens/agent/factory.py",
+    "verify_hint": "Check every memory-write path reachable during a verify run — `build_agent(allow_memory_writes=False)` in `src/sqllens/agent/factory.py` plus any direct `save_*` calls in `src/sqllens/eval/runner.py` — and whether `track_usage=False` covers context injection as well as the search tool",
+    "claim_signature": "absolute_claim:managing-memory.md:no-saves-no-counters:124",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "absolute_claim",
+    "claim": "Per-case details are printed after the summary for every non-PASS result, showing the expected SQL, the captured actual SQL or `(not available)`, and an error message when the run failed.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Per-case details follow the summary for any non-PASS result, showing the expected SQL, the captured actual SQL (or `(not available)`), and an error message (when the run failed).",
+    "source_file": "docs/external/managing-memory.md",
+    "source_line": 157,
+    "verify_against": "The report-rendering code for verify-memory in src/sqllens/cli.py",
+    "verify_hint": "Check the per-case detail rendering loop (including the `(not available)` literal) for `verify-memory` in `src/sqllens/cli.py`",
+    "criterion": 5,
+    "claim_signature": "absolute_claim:managing-memory.md:per-case-details-every-non-pass:157",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-29"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "absolute_claim",
+    "claim": "CSV golden values are preserved without spreadsheet formula-protection prefixes, and memory import/export still adds them.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "CSV golden values are preserved without spreadsheet formula-protection prefixes.",
+    "source_file": "changelog.d/210.added.md",
+    "source_line": 6,
+    "source_line_end": 7,
+    "verify_against": "`_defang_csv_cell` call sites in src/sqllens/memory/io.py and the `defang` argument in src/sqllens/eval/golden.py",
+    "verify_hint": "Check that golden CSV parsing passes `defang=False` in `src/sqllens/eval/golden.py` while `import-memory`/`export-memory` paths still defang in `src/sqllens/memory/io.py`",
+    "claim_signature": "absolute_claim:210.added.md:csv-golden-no-defang:6",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-31"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "api_contract",
+    "claim": "The changelog fragment's relative link `docs/external/managing-memory.md#verifying-memory-after-an-import` resolves to the documented anchor from the rendered release-notes location.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "[Managing memory](docs/external/managing-memory.md#verifying-memory-after-an-import).",
+    "source_file": "changelog.d/210.added.md",
+    "source_line": 18,
+    "verify_against": "The heading `## Verifying Memory After an Import` in docs/external/managing-memory.md and the link conventions used by other changelog.d fragments",
+    "verify_hint": "Compare the link path style against existing fragments in `changelog.d/` and the rendering done by `scripts/changelog.py`",
+    "claim_signature": "api_contract:210.added.md:changelog-doc-link:18",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-32"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "api_contract",
+    "claim": "The internal doc's anchor link `memory.md#verifying-an-import-verify-memory` matches the heading `### Verifying an import (\\`verify-memory\\`)` in docs/internal/agent/memory.md.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "See [memory.md § Verifying an import](memory.md#verifying-an-import-verify-memory).",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 54,
+    "verify_against": "The heading at docs/internal/agent/memory.md:230",
+    "verify_hint": "Check the slug generated for `### Verifying an import (`verify-memory`)` in `docs/internal/agent/memory.md` against the anchor used in `factory.md` and `mcp-server/tools.md:89`",
+    "claim_signature": "api_contract:factory.md:verify-memory-anchor:54",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-33"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "absolute_claim",
+    "claim": "`src/sqllens/eval/` is outside the vendored exclusion set, so every new `.py` file there is fully linted, SPDX-headed, and type-hinted on public signatures.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Implementation lives outside the vendored agent tree in [src/sqllens/eval/](../../../src/sqllens/eval/):",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 241,
+    "verify_against": "The ruff exclude list in pyproject.toml and the headers of src/sqllens/eval/*.py",
+    "verify_hint": "Check the `[tool.ruff]` exclude entries in `pyproject.toml` and the SPDX header plus public type hints in each file under `src/sqllens/eval/`",
+    "criterion": 9,
+    "claim_signature": "absolute_claim:memory.md:eval-not-vendored-linted:241",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-34"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "absolute_claim",
+    "claim": "`src/sqllens/cli.py` contains exactly three memory-related Typer commands (`import-memory`, `export-memory`, `verify-memory`), and the external doc's \"three command-line commands\" count matches.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Three Typer commands in [src/sqllens/cli.py](../../../src/sqllens/cli.py):",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 220,
+    "verify_against": "The Typer command registrations in src/sqllens/cli.py",
+    "verify_hint": "Count memory-related `@app.command` registrations in `src/sqllens/cli.py` (CLAUDE.md counting-claims rule) and cross-check `docs/external/managing-memory.md:3`",
+    "claim_signature": "absolute_claim:memory.md:three-memory-cli-commands:220",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-35"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "absolute_claim",
+    "claim": "The overview table's CLI command list `version | init | validate | serve | claude-desktop install | import-memory | export-memory | verify-memory` matches the commands src/sqllens/cli.py registers.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`sqllens version \\| init \\| validate \\| serve \\| claude-desktop install \\| import-memory \\| export-memory \\| verify-memory`.",
+    "source_file": "docs/internal/architecture/overview.md",
+    "source_line": 42,
+    "verify_against": "All Typer command and sub-app registrations in src/sqllens/cli.py",
+    "verify_hint": "Enumerate every `@app.command`/sub-app in `src/sqllens/cli.py` and compare with the documented list",
+    "claim_signature": "absolute_claim:overview.md:cli-command-list:42",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-36"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "absolute_claim",
+    "claim": "The ERROR status covers the agent answering without SQL, and a missing SQL statement produces its own distinct diagnostic message.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A missing SQL statement has its own diagnostic.",
+    "source_file": "docs/external/managing-memory.md",
+    "source_line": 157,
+    "verify_against": "The missing-SQL branch in src/sqllens/eval/runner.py",
+    "verify_hint": "Check the branch in `src/sqllens/eval/runner.py` that handles `query_info` being `None` or lacking an `sql` key and the message it emits",
+    "claim_signature": "absolute_claim:managing-memory.md:missing-sql-diagnostic:157",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-37"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "absolute_claim",
+    "claim": "Question-and-answer pairs added by the context tier count as retrieved in memory statistics only during normal serving (not during verification).",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "During normal serving, question-and-answer pairs added this way count as retrieved in the memory statistics.",
+    "source_file": "docs/external/managing-memory.md",
+    "source_line": 28,
+    "verify_against": "The context-injection hit-bump path in src/sqllens/agent/integrations/chromadb/agent_memory.py gated by `track_usage`",
+    "verify_hint": "Check whether the context-enhancer retrieval path in `src/sqllens/agent/integrations/chromadb/agent_memory.py` honours `track_usage=False`, not just the search tool path",
+    "claim_signature": "absolute_claim:managing-memory.md:context-tier-counts-only-serving:28",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-40"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "absolute_claim",
+    "claim": "The hit-counting paragraph's claim that `search_similar_usage` bumps `hit_count`/`last_hit_date` for every row it returns still holds alongside the new `track_usage` gate.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`search_similar_usage` bumps `hit_count` / `last_hit_date` for every row it returns (see *Per-memory hit tracking*).",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 33,
+    "verify_against": "The `track_usage` branch in `search_similar_usage` in src/sqllens/agent/integrations/chromadb/agent_memory.py",
+    "verify_hint": "Check whether this unqualified 'every row' wording contradicts the `track_usage=True` qualifier added at memory.md:22 given the implementation in `src/sqllens/agent/integrations/chromadb/agent_memory.py`",
+    "claim_signature": "absolute_claim:memory.md:hit-counting-every-row:33",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-41"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "absolute_claim",
+    "claim": "The memory prompt-framing paragraph no longer asserts anything about the text-memory save default or issue #267, and the surrounding doc's statements about `save_text_memories` remain accurate after that removal.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "This framing reduces ambiguity and bounds prompt growth; it cannot guarantee that a model will resist prompt injection. Give memory write access only to trusted curators, and review imported knowledge.",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 71,
+    "verify_against": "The `save_text_memories` default in src/sqllens/config.py and its registration gate in src/sqllens/agent/factory.py",
+    "verify_hint": "Check `MemoryConfig.save_text_memories`'s default in `src/sqllens/config.py` against the remaining claims at `docs/internal/agent/memory.md:103` and `:121`",
+    "claim_signature": "absolute_claim:memory.md:267-sentence-removal:71",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-42"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "dependency_interaction",
+    "claim": "The verify runner executes generated SQL through the same guarded read-only runner stack `build_agent` gives `serve`, with no additional execution path.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "plus the SQL the agent executes against the configured database through the same guarded runner stack `build_agent` gives `serve`",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 258,
+    "verify_against": "`build_sql_runner` / `ReadOnlyGuardRunner` wiring in src/sqllens/agent/factory.py and src/sqllens/safety/",
+    "verify_hint": "Check that the runner built for verification in `src/sqllens/eval/runner.py` goes through the same `build_agent`/`build_sql_runner` guard stack in `src/sqllens/agent/factory.py`",
+    "claim_signature": "dependency_interaction:memory.md:verify-uses-guarded-runner:258",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-43"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "dependency_interaction",
+    "claim": "sqlglot.parse(sql, read=resolved) returns a list of expressions that may contain None entries, and each expression supports .sql(dialect=..., normalize=True, pretty=False) with those keyword names.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/compare.py",
+    "source_line": 49,
+    "source_line_end": 56,
+    "verify_against": "sqlglot public API for the pinned version",
+    "verify_hint": "Check sqlglot.parse and Expression.sql signatures in the installed sqlglot (pinned 30.25.0 per the PR body) for the `read`, `dialect`, `normalize` and `pretty` keywords and the possibility of None elements",
+    "claim_signature": "dependency_interaction:compare.py:sqlglot-parse-render:49",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-37",
+    "category": "dependency_interaction",
+    "claim": "sqlglot.errors.SqlglotError is the common base class of the parse and tokenization errors raised by sqlglot.parse, so catching it in compare_sql intercepts those failures.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/compare.py",
+    "source_line": 65,
+    "source_line_end": 72,
+    "verify_against": "sqlglot.errors module class hierarchy",
+    "verify_hint": "Check sqlglot/errors.py for SqlglotError, ParseError, TokenError and the error type raised for an unknown dialect name",
+    "claim_signature": "dependency_interaction:compare.py:sqlgloterror-base-class:65",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-38",
+    "category": "absolute_claim",
+    "claim": "The authored docstring asserts that a dialect configuration error propagates unchanged out of compare_sql, while a parse or tokenization failure is converted to SqlComparisonError.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A dialect configuration error propagates unchanged. A parse or tokenization\n    failure becomes ``SqlComparisonError`` so the runner can show its cause.",
+    "source_file": "src/sqllens/eval/compare.py",
+    "source_line": 62,
+    "source_line_end": 63,
+    "verify_against": "the exception type sqlglot raises for an unknown/unsupported dialect name",
+    "verify_hint": "Call normalize_sql with dialect='not_a_dialect' and check whether the raised error is a subclass of sqlglot.errors.SqlglotError (which the except clauses in compare_sql would then catch and convert, contradicting the docstring)",
+    "claim_signature": "absolute_claim:compare.py:dialect-error-propagates:62",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-39",
+    "category": "absolute_claim",
+    "claim": "The authored docstring asserts that normalize=True normalizes unquoted identifier case and that keyword casing comes from sqlglot's renderer, so structurally identical SQL differing only in unquoted identifier case compares equal.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Keyword casing comes from sqlglot's renderer; ``normalize=True`` normalizes\n    unquoted identifier case. Quoting remains significant to string comparison.",
+    "source_file": "src/sqllens/eval/compare.py",
+    "source_line": 43,
+    "source_line_end": 44,
+    "verify_against": "sqlglot generator `normalize` option semantics",
+    "verify_hint": "Check what `normalize` does in sqlglot's Generator (sqlglot/generator.py) and confirm with mixed-case unquoted identifiers plus a quoted identifier of differing case",
+    "claim_signature": "absolute_claim:compare.py:normalize-identifier-case:43",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-40",
+    "category": "dependency_interaction",
+    "claim": "resolve_effective_settings(cfg, None, store=ProfileStore(cfg)) accepts a None profile name and returns an object exposing max_tool_iterations, max_rows and similarity_threshold.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/runner.py",
+    "source_line": 85,
+    "source_line_end": 103,
+    "verify_against": "src/sqllens/profiles.py",
+    "verify_hint": "Check `resolve_effective_settings` and `ProfileStore` in src/sqllens/profiles.py and the EffectiveSettings field names used here",
+    "claim_signature": "dependency_interaction:runner.py:resolve-effective-settings:85",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-41",
+    "category": "api_contract",
+    "claim": "query_database_impl_with_widgets(cfg, question, agent=...) returns a 5-tuple whose third element is the query_info dict, matching the AgentDriver alias the runner unpacks.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/runner.py",
+    "source_line": 135,
+    "source_line_end": 138,
+    "verify_against": "src/sqllens/tools/query_database.py return signature",
+    "verify_hint": "Check the return annotation and every return statement of `query_database_impl_with_widgets` in src/sqllens/tools/query_database.py, and that `agent` is keyword-only compatible",
+    "claim_signature": "api_contract:runner.py:driver-tuple-shape:135",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-42",
+    "category": "api_contract",
+    "claim": "AgentRunError instances raised anywhere on the query path carry a `query_info` attribute, so the runner's isinstance(exc, AgentRunError) branch can read exc.query_info.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/runner.py",
+    "source_line": 170,
+    "verify_against": "AgentRunError construction sites in src/sqllens/tools/query_database.py and server.py",
+    "verify_hint": "Grep every `AgentRunError(` construction (src/sqllens/tools/query_database.py, src/sqllens/server.py) and confirm each either passes query_info or relies on the new default",
+    "claim_signature": "api_contract:runner.py:agentrunerror-query-info:170",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-43",
+    "category": "api_contract",
+    "claim": "A CaseResult built from a comparator-returned status satisfies CaseResult.__post_init__: a Status.ERROR status gets the non-blank \"comparator reported an error\" diagnostic and PASS/CHANGED paths always have non-blank actual_sql and error None.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/runner.py",
+    "source_line": 196,
+    "source_line_end": 202,
+    "verify_against": "CaseResult.__post_init__ in the same file and the Status values a custom comparator may return",
+    "verify_hint": "Check CaseResult.__post_init__ (src/sqllens/eval/runner.py lines 32-37) against every CaseResult construction in _run_one_case, including a comparator that returns a non-Status value",
+    "claim_signature": "api_contract:runner.py:caseresult-invariant:196",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-44",
+    "category": "absolute_claim",
+    "claim": "The authored docstring asserts the production driver builds one dedicated agent with no memory-writing tools and never uses the cached singleton, and that a setup failure propagates before any case runs.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "``driver`` replaces the live agent for tests. The production driver builds\n    one dedicated agent with no memory-writing tools and never uses the cached\n    singleton. A setup failure propagates before any case runs.",
+    "source_file": "src/sqllens/eval/runner.py",
+    "source_line": 119,
+    "source_line_end": 121,
+    "verify_against": "build_agent in src/sqllens/agent/factory.py and get_agent in src/sqllens/tools/_agent.py",
+    "verify_hint": "Trace build_agent(forced_cfg, allow_memory_writes=False) in src/sqllens/agent/factory.py for any residual memory-write tool registration, and confirm query_database_impl_with_widgets never calls get_agent when `agent` is supplied",
+    "claim_signature": "absolute_claim:runner.py:dedicated-agent-no-writes:119",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-45",
+    "category": "absolute_claim",
+    "claim": "The authored docstring asserts that verification_config resolves the persisted default profile without changing the caller's config or the stored profile.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Details are enabled and query saving is disabled without changing the caller\n    or the stored profile. The dedicated agent also omits both memory save tools.",
+    "source_file": "src/sqllens/eval/runner.py",
+    "source_line": 82,
+    "source_line_end": 83,
+    "verify_against": "ProfileStore and resolve_effective_settings side effects in src/sqllens/profiles.py",
+    "verify_hint": "Check whether ProfileStore(cfg) construction or resolve_effective_settings(cfg, None, store=...) writes to disk or mutates cfg (src/sqllens/profiles.py), and whether pydantic model_copy is a deep enough copy for the nested models mutated here",
+    "claim_signature": "absolute_claim:runner.py:no-caller-or-profile-mutation:82",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-46",
+    "category": "api_contract",
+    "claim": "The CLI passes the caller's raw cfg to run_verification, which internally derives forced_cfg, so the forced show_details/no-save settings reach both the built agent and every driver invocation.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 592,
+    "verify_against": "run_verification in src/sqllens/eval/runner.py and the settings query_database_impl_with_widgets re-resolves per call",
+    "verify_hint": "Check whether query_database_impl_with_widgets re-resolves profile settings from the passed cfg (resolve_effective_settings / set_effective_settings in src/sqllens/tools/query_database.py) in a way that could override the forced show_details",
+    "claim_signature": "api_contract:cli.py:forced-cfg-propagation:592",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-47",
+    "category": "dependency_interaction",
+    "claim": "The Decimal threshold comparison report.passed * 100 >= threshold * report.total works with int operands and a Decimal built from str(fail_under), for every float typer can supply in [0.0, 100.0].",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 682,
+    "source_line_end": 688,
+    "verify_against": "Python decimal semantics for int/Decimal mixed arithmetic and Decimal(str(float))",
+    "verify_hint": "Check Decimal(str(x)) for the float values typer yields (including 0.0 and values like 33.33) and whether `threshold.is_finite()` can ever be False given typer's min/max bounds, and what the code does when it is False",
+    "claim_signature": "dependency_interaction:cli.py:decimal-threshold-compare:682",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-48",
+    "category": "dependency_interaction",
+    "claim": "typer.Option with min=0.0 / max=100.0 on a `float | None` parameter rejects out-of-range values and still permits the None default (no value supplied).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 524,
+    "source_line_end": 535,
+    "verify_against": "typer's handling of min/max on Optional float options",
+    "verify_hint": "Check typer/click FloatRange handling for an Optional parameter with min/max and a None default (typer.main / click.types.FloatRange)",
+    "claim_signature": "dependency_interaction:cli.py:typer-option-min-max:524",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-49",
+    "category": "dependency_interaction",
+    "claim": "path.open(encoding=\"utf-8\", newline=\"\") raises only OSError or UnicodeError subclasses on an unreadable or non-UTF-8 file, so the except clause structures every read failure.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 571,
+    "source_line_end": 576,
+    "verify_against": "Python io text-read exception types (UnicodeDecodeError, LookupError, OSError)",
+    "verify_hint": "Confirm UnicodeDecodeError is a UnicodeError subclass and check whether reading a directory path or a file with a BOM/invalid bytes raises anything outside (OSError, UnicodeError)",
+    "claim_signature": "dependency_interaction:cli.py:read-exception-breadth:571",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-50",
+    "category": "api_contract",
+    "claim": "load_golden raises only BundleFormatError (and not the ValueError it raises for an unknown fmt) on the CLI path, because the CLI validates fmt against VALID_FORMATS before calling it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 577,
+    "source_line_end": 581,
+    "verify_against": "load_golden in src/sqllens/eval/golden.py and parse_json/parse_csv error paths in src/sqllens/memory/io.py",
+    "verify_hint": "Check every raise in parse_json and parse_csv in src/sqllens/memory/io.py (including pydantic ValidationError and _enforce_item_caps) for anything that is not a BundleFormatError",
+    "claim_signature": "api_contract:cli.py:load-golden-error-types:577",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-51",
+    "category": "dependency_interaction",
+    "claim": "io.StringIO(text, newline=\"\") disables newline translation so csv.reader preserves quoted embedded newlines and the supported record separators in golden CSV cells.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/io.py",
+    "source_line": 146,
+    "verify_against": "Python io.StringIO newline parameter semantics and the csv module's newline='' requirement",
+    "verify_hint": "Check io.StringIO's `newline` argument in the Python docs (values None/''/'\\n') and the csv module's note on newline handling; test a cell containing \\r\\n",
+    "claim_signature": "dependency_interaction:io.py:stringio-newline-arg:146",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-52",
+    "category": "dependency_interaction",
+    "claim": "csv.reader raises csv.Error (and nothing broader) for the malformed input this try/except wraps, e.g. a field exceeding the csv field size limit.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/io.py",
+    "source_line": 147,
+    "source_line_end": 150,
+    "verify_against": "csv module error behaviour",
+    "verify_hint": "Check which exceptions csv.reader iteration can raise (csv.Error, _csv.Error, ValueError for NUL bytes) in the Python csv docs",
+    "claim_signature": "dependency_interaction:io.py:csv-error-breadth:147",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-53",
+    "category": "api_contract",
+    "claim": "Adding the keyword-only `defang` parameter to parse_csv leaves every existing caller on the defanging default.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/memory/io.py",
+    "source_line": 139,
+    "verify_against": "all parse_csv call sites in the repository",
+    "verify_hint": "Grep for `parse_csv(` across src/ and tests/ (notably src/sqllens/cli.py import_memory and src/sqllens/server.py) and confirm none passes defang=False except the golden loader",
+    "claim_signature": "api_contract:io.py:parse-csv-defang-callers:139",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-54",
+    "category": "absolute_claim",
+    "claim": "The edited comment asserts formula-trigger cells are prefixed with an apostrophe at the default parse and serialize boundaries so a planted bundle cannot survive a round-trip and detonate in a spreadsheet later.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# prefix such cells with a single apostrophe at the default parse and serialize",
+    "source_file": "src/sqllens/memory/io.py",
+    "source_line": 32,
+    "verify_against": "_defang_csv_cell use sites and serialize_csv in the same file now that defang is optional",
+    "verify_hint": "Check whether any path reachable with defang=False can write cells back out through serialize_csv or into memory, in src/sqllens/memory/io.py and src/sqllens/eval/golden.py",
+    "claim_signature": "absolute_claim:io.py:defang-roundtrip-claim:32",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-55",
+    "category": "absolute_claim",
+    "claim": "The authored module docstring asserts that the bundle size and item caps and the JSON recursion guard apply to golden files, and that CSV cells are preserved verbatim.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The bundle size and item caps and JSON recursion guard apply. CSV cells are\npreserved verbatim because both the question and SQL are ground truth.",
+    "source_file": "src/sqllens/eval/golden.py",
+    "source_line": 15,
+    "source_line_end": 16,
+    "verify_against": "_enforce_size_cap, _enforce_item_caps and the recursion guard in src/sqllens/memory/io.py",
+    "verify_hint": "Confirm parse_csv(defang=False) and parse_json both call _enforce_size_cap and _enforce_item_caps, and that SqlPair validation does not strip or transform cells (src/sqllens/memory/io.py)",
+    "claim_signature": "absolute_claim:golden.py:caps-and-verbatim-cells:15",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-56",
+    "category": "api_contract",
+    "claim": "The names re-exported by sqllens.eval (Status, compare, normalize_sql, GoldenCase, load_golden, CaseResult, RunReport, run_verification) all exist in their source modules, and the CLI's TYPE_CHECKING-only `from sqllens.eval import RunReport` annotation resolves without a runtime import.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/__init__.py",
+    "source_line": 12,
+    "source_line_end": 27,
+    "verify_against": "src/sqllens/eval/compare.py, golden.py, runner.py and the TYPE_CHECKING block in src/sqllens/cli.py",
+    "verify_hint": "Cross-check each __all__ entry against its defining module, and confirm cli.py uses `from __future__ import annotations` so the RunReport annotations on _print_report/_exit_for_report are not evaluated at runtime",
+    "claim_signature": "api_contract:__init__.py:eval-exports:12",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-57",
+    "category": "absolute_claim",
+    "claim": "The authored docstring asserts that the sqllens.eval runner accepts an async comparator for alternative comparison strategies.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The runner accepts an async comparator for alternative comparison strategies.",
+    "source_file": "src/sqllens/eval/__init__.py",
+    "source_line": 18,
+    "verify_against": "the Comparator alias and its use in run_verification / _run_one_case",
+    "verify_hint": "Check that `comparator` is awaited in _run_one_case (src/sqllens/eval/runner.py) and that the default _sql_comparator wraps the synchronous compare_sql in an async def",
+    "claim_signature": "absolute_claim:__init__.py:async-comparator-seam:18",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-58",
+    "category": "absolute_claim",
+    "claim": "The authored CLI help asserts that with --fail-under the command exits 0 only if at least one case PASSes and the PASS rate is >= the threshold, and that without it any non-PASS case exits non-zero.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"PASS-rate percentage tolerance (0-100). When set, the command exits \"\n            \"0 only if at least one case PASSes and PASS rate >= this threshold. Without it, \"\n            \"any non-PASS case exits non-zero. Use this when occasional CHANGED \"\n            \"noise from LLM non-determinism is expected.\"",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 529,
+    "source_line_end": 534,
+    "verify_against": "_exit_for_report in src/sqllens/cli.py",
+    "verify_hint": "Trace _exit_for_report (src/sqllens/cli.py lines 642-689) for each branch, including fail_under=0 with some PASSes and a threshold where int/Decimal rounding lands exactly on the boundary",
+    "claim_signature": "absolute_claim:cli.py:fail-under-help-text:529",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-59",
+    "category": "absolute_claim",
+    "claim": "The authored command docstring asserts that empty and all-non-PASS runs always exit non-zero, including with --fail-under 0, and that the run disables memory saving and retrieval-counter updates.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Exits non-zero on any non-PASS case (or, with ``--fail-under``, when the\n    PASS rate is below the threshold). Empty and all-non-PASS runs always\n    exit non-zero, including with ``--fail-under 0``.",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 550,
+    "source_line_end": 552,
+    "verify_against": "_exit_for_report in cli.py plus verification_config and build_agent(allow_memory_writes=False)",
+    "verify_hint": "Check the zero-total and passed==0 guards in _exit_for_report, and trace track_usage=False through ChromaAgentMemory in src/sqllens/agent/integrations/chromadb/agent_memory.py to confirm retrieval counters are not updated",
+    "claim_signature": "absolute_claim:cli.py:verify-memory-docstring-guarantees:550",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-28"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-60",
+    "category": "dependency_interaction",
+    "claim": "Status is a StrEnum usable as a dict key with Status members and as `case.status.value` for display, and rich's Table.add_row accepts the resulting markup strings.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 609,
+    "source_line_end": 621,
+    "verify_against": "rich.table.Table API and enum.StrEnum behaviour",
+    "verify_hint": "Check rich.table.Table (title, add_column overflow/justify/no_wrap, add_row) in the installed rich version and that StrEnum members hash distinctly from the plain strings used as dict keys",
+    "claim_signature": "dependency_interaction:cli.py:rich-table-status-enum:609",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-29"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-61",
+    "category": "absolute_claim",
+    "claim": "The authored build_agent docstring asserts that allow_memory_writes=False omits every memory-writing tool (save_question_tool_args and save_text_memory) regardless of cfg.memory, and disables retrieval counter and timestamp updates.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "``allow_memory_writes=False`` omits every memory-*writing* tool\n    (``save_question_tool_args`` and ``save_text_memory``) regardless of\n    ``cfg.memory``, and disables retrieval counter and timestamp updates.",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 32,
+    "source_line_end": 34,
+    "verify_against": "the full tool registration list in build_agent and ChromaAgentMemory write paths",
+    "verify_hint": "Enumerate every register_local_tool call in src/sqllens/agent/factory.py and every write method on ChromaAgentMemory (src/sqllens/agent/integrations/chromadb/agent_memory.py) to confirm no other memory-writing tool or counter update escapes the flag",
+    "claim_signature": "absolute_claim:factory.py:allow-memory-writes-scope:32",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-30"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-62",
+    "category": "dependency_interaction",
+    "claim": "ChromaAgentMemory accepts the keyword-only track_usage argument, and when it is False the search path skips the hit-count/last_hit_date bump without otherwise changing which results are returned.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/chromadb/agent_memory.py",
+    "source_line": 290,
+    "source_line_end": 301,
+    "verify_against": "the surrounding _search body in the same file, including every later use of hit_ids and hit_metadatas",
+    "verify_hint": "Read the whole _search function in src/sqllens/agent/integrations/chromadb/agent_memory.py and check whether hit_ids/hit_metadatas, now populated only when track_usage is true, feed anything besides the metadata update (e.g. result assembly or filtering)",
+    "claim_signature": "dependency_interaction:agent_memory.py:track-usage-skips-bump:290",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-31"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-63",
+    "category": "absolute_claim",
+    "claim": "The authored parameter doc asserts track_usage controls whether retrieval updates stored hit counters and timestamps.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "track_usage: Whether retrieval updates stored hit counters and timestamps.",
+    "source_file": "src/sqllens/agent/integrations/chromadb/agent_memory.py",
+    "source_line": 73,
+    "verify_against": "every stored-metadata write in ChromaAgentMemory",
+    "verify_hint": "Grep ChromaAgentMemory for hit_count / last_hit_date / collection.update writes and confirm all of them are gated by self._track_usage",
+    "claim_signature": "absolute_claim:agent_memory.py:track-usage-doc:73",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-32"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-64",
+    "category": "absolute_claim",
+    "claim": "The edited factory comment asserts the default system prompt switches its save instructions on the tool's presence, so dropping the registration cleanly drops the prompt guidance too.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# prompt switches its save instructions on the tool's presence, so dropping\n    # the registration cleanly drops the prompt guidance too.",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 131,
+    "source_line_end": 132,
+    "verify_against": "build_system_prompt in src/sqllens/agent/core/system_prompt/default.py",
+    "verify_hint": "Grep build_system_prompt in src/sqllens/agent/core/system_prompt/default.py for every has_save / save-related sentence and confirm none remains gated on has_search or printed unconditionally",
+    "claim_signature": "absolute_claim:factory.py:prompt-save-guidance-gate:131",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-33"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-65",
+    "category": "absolute_claim",
+    "claim": "The edited save_queries config description asserts that when disabled the tool is not registered and the system prompt drops its save guidance, while reading saved memory is unaffected.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"prompt drops its save guidance. Reading saved \"\n            \"memory (search_saved_correct_tool_uses) is unaffected.\"",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 175,
+    "source_line_end": 176,
+    "verify_against": "build_system_prompt's has_save branches and the search-tool registration in factory.py",
+    "verify_hint": "Check the has_save-gated strings in src/sqllens/agent/core/system_prompt/default.py (around lines 170-195) and the unconditional SearchSavedCorrectToolUsesTool registration in src/sqllens/agent/factory.py",
+    "claim_signature": "absolute_claim:config.py:save-queries-description:175",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-34"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-66",
+    "category": "absolute_claim",
+    "claim": "The authored AgentRunError docstring addition asserts that query_info retains captured SQL for the verification runner under the same resolved show_details gate as the trace.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "``query_info`` retains captured SQL for the verification runner, under\n    the same resolved ``show_details`` gate as the trace.",
+    "source_file": "src/sqllens/tools/query_database.py",
+    "source_line": 27,
+    "source_line_end": 28,
+    "verify_against": "the AgentRunError raise site and the show_details gating of query_info / agent_trace in query_database.py and _format.py",
+    "verify_hint": "Trace where query_info and agent_trace are populated or nulled by the resolved show_details setting in src/sqllens/tools/query_database.py and components_to_blocks in src/sqllens/tools/_format.py",
+    "claim_signature": "absolute_claim:query_database.py:query-info-show-details-gate:27",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-35"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-67",
+    "category": "api_contract",
+    "claim": "components_to_blocks now returns a non-None query_info on the error path whenever SQL was observed, and every existing caller tolerates that previously-always-None fourth element.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 470,
+    "source_line_end": 474,
+    "verify_against": "all callers of components_to_blocks",
+    "verify_hint": "Grep for `components_to_blocks(` across src/ (query_database.py, visualize_data.py, server.py) and check what each does with the fourth tuple element when is_error is True",
+    "claim_signature": "api_contract:_format.py:error-path-query-info:470",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-36"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-68",
+    "category": "absolute_claim",
+    "claim": "The authored docstring addition asserts that passing `agent` overrides the process-wide singleton, that None (every MCP request path) uses the singleton, and that callers supplying an agent must build it from the same cfg so guards and request settings agree.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "``agent`` overrides the process-wide singleton from\n    :func:`~sqllens.tools._agent.get_agent`. ``None`` (every MCP request path)\n    uses the singleton.",
+    "source_file": "src/sqllens/tools/query_database.py",
+    "source_line": 229,
+    "source_line_end": 231,
+    "verify_against": "get_agent in src/sqllens/tools/_agent.py and every call site of query_database_impl_with_widgets",
+    "verify_hint": "Grep every caller of query_database_impl_with_widgets (src/sqllens/server.py, tools/, eval/runner.py) and confirm only the verification runner passes `agent`",
+    "claim_signature": "absolute_claim:query_database.py:agent-override-docstring:229",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-37"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-69",
+    "category": "dependency_interaction",
+    "claim": "Importing Agent from sqllens.agent at module import time for the `agent: Agent | None` annotation does not introduce a circular import or a new eager dependency into src/sqllens/tools/query_database.py.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/tools/query_database.py",
+    "source_line": 24,
+    "verify_against": "src/sqllens/agent/__init__.py exports and the module's existing import graph",
+    "verify_hint": "Check that `Agent` is exported from src/sqllens/agent/__init__.py and whether that package's __init__ pulls in heavy or cyclic modules relative to sqllens.tools.query_database",
+    "claim_signature": "dependency_interaction:query_database.py:agent-import:24",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-38"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-70",
+    "category": "test_mock_alignment",
+    "claim": "The scripted test driver returns a 5-tuple (markdown, blocks, query_info, memory_info, agent_trace), matching what the real `query_database_impl_with_widgets` returns and what the runner's driver seam expects.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_runner.py",
+    "source_line": 44,
+    "source_line_end": 63,
+    "verify_against": "the real driver return signature",
+    "verify_hint": "Check `query_database_impl_with_widgets` in `src/sqllens/tools/query_database.py` for its return tuple arity/order, and the `driver` parameter type in `run_verification` in `src/sqllens/eval/runner.py`",
+    "claim_signature": "test_mock_alignment:test_eval_runner.py:driver-return-tuple-shape:44",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-71",
+    "category": "dependency_interaction",
+    "claim": "`run_verification(cfg, cases, *, driver=..., comparator=...)` accepts both keyword-only injection points, and `GoldenCase(question, expected_sql)` is positionally constructible.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_runner.py",
+    "source_line": 404,
+    "source_line_end": 424,
+    "verify_against": "the runner and golden module signatures",
+    "verify_hint": "Check the signature of `run_verification` in `src/sqllens/eval/runner.py` and the `GoldenCase` dataclass field order in `src/sqllens/eval/golden.py`",
+    "claim_signature": "dependency_interaction:test_eval_runner.py:run-verification-signature:404",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-72",
+    "category": "dependency_interaction",
+    "claim": "`build_agent` accepts a keyword-only `allow_memory_writes` argument and is called by the production driver with `allow_memory_writes=False`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_runner.py",
+    "source_line": 386,
+    "source_line_end": 392,
+    "verify_against": "the agent factory signature and runner call site",
+    "verify_hint": "Check `build_agent` in `src/sqllens/agent/factory.py` for the `allow_memory_writes` keyword and the call site in `src/sqllens/eval/runner.py`",
+    "claim_signature": "dependency_interaction:test_eval_runner.py:build-agent-allow-memory-writes:386",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-73",
+    "category": "dependency_interaction",
+    "claim": "The runner reads the effective settings via `sqllens.runtime.get_effective_settings()`, whose result exposes `show_details`, `similarity_threshold`, `max_rows` and `max_tool_iterations`, and clamps profile values to the config ceilings with `min`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_runner.py",
+    "source_line": 395,
+    "source_line_end": 401,
+    "verify_against": "runtime settings and profile clamping logic",
+    "verify_hint": "Check `get_effective_settings` in `src/sqllens/runtime.py`, the `Profile` model in `src/sqllens/profiles.py`, and the clamping in `src/sqllens/eval/runner.py`",
+    "claim_signature": "dependency_interaction:test_eval_runner.py:effective-settings-clamping:395",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-74",
+    "category": "dependency_interaction",
+    "claim": "`ProfileStore(cfg)` exposes `path` and an awaitable `upsert(name, Profile)`, and `Profile` accepts `show_details`, `similarity_threshold`, `max_rows` and `max_tool_iterations`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_runner.py",
+    "source_line": 371,
+    "source_line_end": 376,
+    "verify_against": "the profiles module",
+    "verify_hint": "Check `ProfileStore` and `Profile` in `src/sqllens/profiles.py`",
+    "claim_signature": "dependency_interaction:test_eval_runner.py:profilestore-upsert-api:371",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-75",
+    "category": "test_mock_alignment",
+    "claim": "The `AgentSpy.send_message(self, context, question, *, conversation_id=None)` async-generator signature matches how the runner/driver invokes the real agent.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_runner.py",
+    "source_line": 379,
+    "source_line_end": 384,
+    "verify_against": "the real agent's send_message signature and its callers",
+    "verify_hint": "Check the agent's `send_message` definition under `src/sqllens/agent/core/agent/` and its invocation in `src/sqllens/tools/query_database.py`",
+    "claim_signature": "test_mock_alignment:test_eval_runner.py:agentspy-send-message-signature:379",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-76",
+    "category": "test_mock_alignment",
+    "claim": "The private internals the test touches exist with these names: `agent.tool_registry._tools` mapping tool names, `agent.agent_memory`, `agent_memory._get_collection()`, and `agent_memory._executor`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_runner.py",
+    "source_line": 480,
+    "source_line_end": 499,
+    "verify_against": "the agent and ChromaDB memory implementations",
+    "verify_hint": "Check `tool_registry._tools` in the agent tool registry module and `_get_collection`/`_executor` on `ChromaAgentMemory` in `src/sqllens/agent/integrations/chromadb/`",
+    "claim_signature": "test_mock_alignment:test_eval_runner.py:agent-memory-private-internals:480",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-77",
+    "category": "dependency_interaction",
+    "claim": "`search_similar_usage(question, context=..., similarity_threshold=...)` does not update retrieval counters on a memory built with `allow_memory_writes=False`, while the serving instance's retrieval sets `hit_count` to 1 and `last_hit_date`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_runner.py",
+    "source_line": 486,
+    "source_line_end": 496,
+    "verify_against": "the Chroma memory search implementation",
+    "verify_hint": "Check `search_similar_usage` and its hit-counter update path in `ChromaAgentMemory` (`src/sqllens/agent/integrations/chromadb/`), including the `hit_count`/`last_hit_date` metadata keys",
+    "claim_signature": "dependency_interaction:test_eval_runner.py:search-similar-usage-hit-counter:486",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-78",
+    "category": "dependency_interaction",
+    "claim": "`CaseResult(question, expected_sql, actual_sql, status, error)` is positionally constructible in that order and raises `ValueError` for a missing or contradictory diagnostic; `RunReport(results=...)` snapshots its input into a tuple.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_runner.py",
+    "source_line": 434,
+    "source_line_end": 453,
+    "verify_against": "the runner's report dataclasses",
+    "verify_hint": "Check `CaseResult` and `RunReport` definitions and their validation in `src/sqllens/eval/runner.py`",
+    "claim_signature": "dependency_interaction:test_eval_runner.py:caseresult-field-order-validation:434",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-79",
+    "category": "test_mock_alignment",
+    "claim": "The shared test helpers `_agent_stubs.make_status_card`, `_agent_stubs.make_tool_cards(name, metadata, ok=..., error=...)`, the `agent_stub_factory` fixture and `_memory_helpers.patch_fake_embeddings` exist with these signatures.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_runner.py",
+    "source_line": 456,
+    "source_line_end": 478,
+    "verify_against": "the unit-test helper modules",
+    "verify_hint": "Check `tests/unit/_agent_stubs.py` for `make_status_card`/`make_tool_cards`, `tests/unit/_memory_helpers.py` for `patch_fake_embeddings`, and the `agent_stub_factory` fixture in `tests/unit/conftest.py`",
+    "claim_signature": "test_mock_alignment:test_eval_runner.py:shared-stub-helper-signatures:456",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-80",
+    "category": "dependency_interaction",
+    "claim": "`sqllens.eval.runner` binds the comparator as the module attribute `compare_sql`, so monkeypatching `sqllens.eval.runner.compare_sql` intercepts the comparison, and it is called with keyword-only `dialect`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_runner.py",
+    "source_line": 190,
+    "source_line_end": 198,
+    "verify_against": "the runner's import of the comparator",
+    "verify_hint": "Check the import and call of `compare_sql` in `src/sqllens/eval/runner.py` against `compare` in `src/sqllens/eval/compare.py`",
+    "claim_signature": "dependency_interaction:test_eval_runner.py:compare-sql-module-binding:190",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-81",
+    "category": "dependency_interaction",
+    "claim": "A URL scheme of `cockroachdb_no_such://` loads as a valid Config and produces an unknown dialect whose per-case error text contains \"Unknown dialect\".",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_runner.py",
+    "source_line": 201,
+    "source_line_end": 228,
+    "verify_against": "config URL validation and sqlglot's unknown-dialect error",
+    "verify_hint": "Check `DatabaseConfig` URL validation in `src/sqllens/config.py` and the `ValueError(\"Unknown dialect\")` raised by `sqlglot.Dialect.get_or_raise`",
+    "claim_signature": "dependency_interaction:test_eval_runner.py:unknown-dialect-error-text:201",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-82",
+    "category": "dependency_interaction",
+    "claim": "`sqllens.eval.compare` exports `Status`, `compare` and `normalize_sql`, with `compare(expected, actual, *, dialect)` and `normalize_sql(sql, *, dialect)`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_compare.py",
+    "source_line": 10,
+    "verify_against": "the comparator module's public API",
+    "verify_hint": "Check `src/sqllens/eval/compare.py` for `Status`, `compare` and `normalize_sql` signatures",
+    "claim_signature": "dependency_interaction:test_eval_compare.py:compare-module-public-api:10",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-83",
+    "category": "dependency_interaction",
+    "claim": "The SQLAlchemy-to-sqlglot dialect map translates `postgresql`→postgres, `mssql`→tsql and `mariadb`→mysql case-insensitively, and the test's comment that these are all three explicit entries of `_SQLGLOT_DIALECT_MAP` holds.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "has no mariadb dialect, so the map translates to 'mysql'. Pins all three\n    explicit entries of ``_SQLGLOT_DIALECT_MAP``.",
+    "source_file": "tests/unit/test_eval_compare.py",
+    "source_line": 93,
+    "source_line_end": 98,
+    "verify_against": "_SQLGLOT_DIALECT_MAP in compare.py",
+    "verify_hint": "Check `_SQLGLOT_DIALECT_MAP` and its lookup normalization in `src/sqllens/eval/compare.py`, and the dialect names `DatabaseConfig.dialect` can return",
+    "claim_signature": "dependency_interaction:test_eval_compare.py:sqlglot-dialect-map-entries:93",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-84",
+    "category": "absolute_claim",
+    "claim": "The comparator compares every statement in a multi-statement SQL string, so the listed expected/actual pairs classify exactly as parametrized.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "def test_comparison_covers_every_statement(expected: str, actual: str, status: Status) -> None:",
+    "source_file": "tests/unit/test_eval_compare.py",
+    "source_line": 135,
+    "source_line_end": 146,
+    "verify_against": "the multi-statement handling in compare.py",
+    "verify_hint": "Check whether `compare`/`normalize_sql` in `src/sqllens/eval/compare.py` uses `sqlglot.parse` over all statements (not `parse_one`); falsify with a trailing-semicolon or differing-statement-count input such as `\"SELECT 1;\"` vs `\"SELECT 1; SELECT 1\"`",
+    "claim_signature": "absolute_claim:test_eval_compare.py:every-statement-compared:135",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-85",
+    "category": "dependency_interaction",
+    "claim": "An unknown dialect name raises `ValueError` matching \"Unknown dialect\" out of `compare` rather than being swallowed into `Status.ERROR`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_compare.py",
+    "source_line": 129,
+    "source_line_end": 132,
+    "verify_against": "exception handling in compare.py",
+    "verify_hint": "Check which exceptions `compare` in `src/sqllens/eval/compare.py` catches (ParseError/TokenError) versus lets escape, against sqlglot's unknown-dialect `ValueError`",
+    "claim_signature": "dependency_interaction:test_eval_compare.py:unknown-dialect-not-swallowed:129",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-86",
+    "category": "dependency_interaction",
+    "claim": "`load_golden(text, fmt)` reuses the memory-bundle parsers so it inherits `MAX_BUNDLE_BYTES`, `MAX_BUNDLE_ITEMS`, the deep-nesting guard and header validation, raising `BundleFormatError` with messages matching \"cap\", \"deeply nested\", \"header\" and \"invalid CSV...field larger\".",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_golden.py",
+    "source_line": 71,
+    "source_line_end": 124,
+    "verify_against": "the bundle parsers and their limit constants",
+    "verify_hint": "Check `parse_json`/`parse_csv` and `BundleFormatError` messages in `src/sqllens/memory/io.py`, `MAX_BUNDLE_BYTES`/`MAX_BUNDLE_ITEMS` in `src/sqllens/memory/schema.py`, and `load_golden` in `src/sqllens/eval/golden.py`",
+    "claim_signature": "dependency_interaction:test_eval_golden.py:bundle-parser-limits-inherited:71",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-87",
+    "category": "dependency_interaction",
+    "claim": "`load_golden` leaves CSV cells byte-identical (no formula-injection defanging) for every leading-character prefix including `=`, `+`, `-`, `@`, tab, CR and LF, while memory imports keep their defanging.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_golden.py",
+    "source_line": 103,
+    "source_line_end": 112,
+    "verify_against": "the defang flag on parse_csv",
+    "verify_hint": "Check the `defang` parameter and its default in `parse_csv` in `src/sqllens/memory/io.py` and what `load_golden` in `src/sqllens/eval/golden.py` passes",
+    "claim_signature": "dependency_interaction:test_eval_golden.py:csv-defang-off-for-golden:103",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-88",
+    "category": "dependency_interaction",
+    "claim": "`load_golden(text, \"xml\")` raises `ValueError` matching \"unknown golden-file format\" rather than a BundleFormatError.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_golden.py",
+    "source_line": 61,
+    "source_line_end": 63,
+    "verify_against": "format dispatch in golden.py",
+    "verify_hint": "Check the format dispatch and error message in `load_golden` in `src/sqllens/eval/golden.py`",
+    "claim_signature": "dependency_interaction:test_eval_golden.py:unknown-format-value-error:61",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-89",
+    "category": "api_contract",
+    "claim": "The CLI's lazy call site is `sqllens.eval.run_verification` (no module-level binding in `cli.py`), and it is invoked as `run_verification(cfg, cases)` with no extra required arguments, so a two-parameter stub suffices.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli_verify_memory.py",
+    "source_line": 72,
+    "source_line_end": 79,
+    "verify_against": "the verify-memory command body",
+    "verify_hint": "Check how `verify_memory` in `src/sqllens/cli.py` imports and calls `run_verification`, and the re-export in `src/sqllens/eval/__init__.py`",
+    "claim_signature": "api_contract:test_cli_verify_memory.py:cli-lazy-run-verification-seam:72",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-90",
+    "category": "api_contract",
+    "claim": "`sqllens.eval` re-exports `CaseResult`, `RunReport` and `Status`, and `RunReport` accepts a positional tuple of results.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli_verify_memory.py",
+    "source_line": 384,
+    "source_line_end": 388,
+    "verify_against": "the eval package exports",
+    "verify_hint": "Check `__all__` / imports in `src/sqllens/eval/__init__.py` and the `RunReport` constructor in `src/sqllens/eval/runner.py`",
+    "claim_signature": "api_contract:test_cli_verify_memory.py:eval-package-reexports:384",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-91",
+    "category": "api_contract",
+    "claim": "`sqllens.cli._exit_for_report(report, threshold)` takes a report and a float threshold and raises `typer.Exit(1)` when the pass rate is below it, applying the threshold inclusively.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli_verify_memory.py",
+    "source_line": 378,
+    "source_line_end": 392,
+    "verify_against": "the exit-policy helper in cli.py",
+    "verify_hint": "Check `_exit_for_report` in `src/sqllens/cli.py` for its signature and its inclusive comparison arithmetic",
+    "claim_signature": "api_contract:test_cli_verify_memory.py:exit-for-report-signature:378",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-92",
+    "category": "api_contract",
+    "claim": "The CLI emits the literal output strings the tests assert: `PASS 1`, `CHANGED 1`, `ERROR 1`, `Expected SQL:`, `Actual SQL: (not available)`, `pass-rate 50.0%`, `below threshold`, `no case PASSed`, `Verification failed` (stderr), `Verification run failed (RuntimeError)` (stderr), `Invalid golden file` (stderr) and `cannot read` (stderr).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli_verify_memory.py",
+    "source_line": 90,
+    "source_line_end": 356,
+    "verify_against": "the verify-memory output and error strings",
+    "verify_hint": "Check the table/summary rendering and error messages in the `verify-memory` command and `_exit_for_report` in `src/sqllens/cli.py`",
+    "claim_signature": "api_contract:test_cli_verify_memory.py:cli-output-literals:90",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-93",
+    "category": "api_contract",
+    "claim": "The `verify-memory` command accepts `PATH`, `--format`, `--fail-under` and `-c`, exits 2 for a missing LLM API key and for out-of-range/non-numeric `--fail-under` (-1, 101, abc), exits 1 for an unknown `--format` value whose message names both `json` and `csv`, and exits 1 for a missing golden file.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli_verify_memory.py",
+    "source_line": 250,
+    "source_line_end": 302,
+    "verify_against": "the Typer option declarations and validation in cli.py",
+    "verify_hint": "Check the `verify-memory` option declarations (including any `min`/`max` on `--fail-under`), the API-key guard (`API_KEY_MISSING_MESSAGE` pattern) and the exit codes in `src/sqllens/cli.py`",
+    "claim_signature": "api_contract:test_cli_verify_memory.py:verify-memory-option-exit-codes:250",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-94",
+    "category": "dependency_interaction",
+    "claim": "Both `verify-memory` and `import-memory` decode their input file so invalid UTF-8 (`b\"\\xff\"`) exits 1 with a \"cannot read\" stderr diagnostic rather than raising `UnicodeError`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_cli_verify_memory.py",
+    "source_line": 395,
+    "source_line_end": 403,
+    "verify_against": "the file-reading paths of both commands",
+    "verify_hint": "Check the file read/decode and its exception handling in both the `verify-memory` and `import-memory` commands in `src/sqllens/cli.py`",
+    "claim_signature": "dependency_interaction:test_cli_verify_memory.py:utf8-decode-guard-both-commands:395",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-28"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-95",
+    "category": "api_contract",
+    "claim": "On the error path the formatter now returns `query_info == {\"sql\": \"DELETE FROM users\", \"query_type\": \"DELETE\"}` instead of `None`, while the markdown still omits the SQL.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_format.py",
+    "source_line": 1038,
+    "source_line_end": 1056,
+    "verify_against": "the error-path query_info construction",
+    "verify_hint": "Check the error/failure branch that builds `query_info` (keys `sql`, `query_type`) in `src/sqllens/tools/_format.py`",
+    "claim_signature": "api_contract:test_format.py:error-path-query-info-retained:1038",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-31"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-96",
+    "category": "api_contract",
+    "claim": "`AgentRunError` carries a `query_info` attribute: populated with the failed SQL when `show_details` is on, and `None` when it is off.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_query_database.py",
+    "source_line": 1086,
+    "source_line_end": 1109,
+    "verify_against": "the AgentRunError definition and raise sites",
+    "verify_hint": "Check the `AgentRunError` class attributes and where it is raised in `src/sqllens/tools/query_database.py`",
+    "claim_signature": "api_contract:test_query_database.py:agentrunerror-query-info-attr:1086",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-32"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-97",
+    "category": "api_contract",
+    "claim": "`query_database_impl_with_widgets(cfg, question, agent=...)` accepts an injected agent and then neither builds nor consults the process-wide singleton (`sqllens.tools._agent.build_agent` is not called and `_AGENT_STATE` stays None).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_query_database.py",
+    "source_line": 1112,
+    "source_line_end": 1134,
+    "verify_against": "the agent parameter and singleton path",
+    "verify_hint": "Check the `agent` keyword in `query_database_impl_with_widgets` in `src/sqllens/tools/query_database.py` and the `_AGENT_STATE`/`build_agent` caching in `src/sqllens/tools/_agent.py`",
+    "claim_signature": "api_contract:test_query_database.py:injected-agent-bypasses-singleton:1112",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-33"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-98",
+    "category": "test_mock_alignment",
+    "claim": "The prompt builder omits the \"save successful executions\" guidance and the `save_question_tool_args` / `save_text_memory` names exactly when no save tool is in the supplied tool list, while always keeping \"Do NOT skip the search step\"; `_ToolSchemaStub` is a sufficient stand-in for a real tool schema in `build_system_prompt(user, tools=...)`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_system_prompt.py",
+    "source_line": 93,
+    "source_line_end": 104,
+    "verify_against": "the system prompt builder's gating",
+    "verify_hint": "Check `DefaultSystemPromptBuilder.build_system_prompt` and the save-guidance gating in `src/sqllens/agent/core/system_prompt/default.py`, plus the tool-schema attributes it reads",
+    "claim_signature": "test_mock_alignment:test_system_prompt.py:save-guidance-gated-on-save-tool:93",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-34"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-99",
+    "category": "api_contract",
+    "claim": "The prompt no longer contains \"Do NOT forget to save successful executions.\" when both save tools are unregistered — reversing the prior test's assertion that it survives.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 308,
+    "source_line_end": 316,
+    "verify_against": "the prompt assembly after the save-tool gating change",
+    "verify_hint": "Check the save-instruction string and its gating condition in `src/sqllens/agent/core/system_prompt/default.py`, and whether issue #267's recorded intent was to leave it in place",
+    "claim_signature": "api_contract:test_factory_wiring.py:save-instruction-now-omitted:308",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-35"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-100",
+    "category": "dependency_interaction",
+    "claim": "`build_test_config` accepts `save_queries` and `save_text_memories` keywords, and `build_agent(cfg, allow_memory_writes=False)` omits both save tools while keeping `search_saved_correct_tool_uses` and `run_sql`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 494,
+    "source_line_end": 507,
+    "verify_against": "the test config helper and the agent factory",
+    "verify_hint": "Check `build_test_config`'s accepted keywords in the tests' helper module and the tool-registration branches in `build_agent` in `src/sqllens/agent/factory.py`",
+    "claim_signature": "dependency_interaction:test_factory_wiring.py:allow-memory-writes-drops-save-tools:494",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-36"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A new `sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]` CLI command exists, matching the existing command conventions in `cli.py`.",
+    "claim_signature": "issue-acceptance-1",
+    "criteria_file": ".prflow/tmp/review/pr-210/40987077486-1/criteria.json",
+    "source_file": "docs/internal/architecture/overview.md",
+    "source_line": 42,
+    "verify_hint": "Check that `src/sqllens/cli.py` registers `verify-memory` alongside `import-memory`/`export-memory` with the same config-loading and exit-code conventions",
+    "id": "VC-101",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The golden file is parsed with the existing memory-bundle parser (`question,sql` JSON/CSV via `parse_json` / `parse_csv`); no new file format is introduced.",
+    "claim_signature": "issue-acceptance-2",
+    "criteria_file": ".prflow/tmp/review/pr-210/40987077486-1/criteria.json",
+    "source_file": "src/sqllens/eval/golden.py",
+    "source_line": 45,
+    "verify_hint": "Confirm load_golden only delegates to parse_json / parse_csv in src/sqllens/memory/io.py and defines no format of its own",
+    "id": "VC-102",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Each case is classified PASS / CHANGED / ERROR using `sqlglot`-normalized SQL comparison against the configured database dialect.",
+    "claim_signature": "issue-acceptance-3",
+    "criteria_file": ".prflow/tmp/review/pr-210/40987077486-1/criteria.json",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 262,
+    "verify_hint": "Check the PASS/CHANGED/ERROR status enum and classification in `src/sqllens/eval/compare.py` and `src/sqllens/eval/runner.py`",
+    "id": "VC-103",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The runner forces `show_details` on so `query_info[\"sql\"]` is populated for each case, and extracts the agent's generated SQL from it.",
+    "claim_signature": "issue-acceptance-4",
+    "criteria_file": ".prflow/tmp/review/pr-210/40987077486-1/criteria.json",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 256,
+    "verify_hint": "Check where `src/sqllens/eval/runner.py` sets `show_details` on a cloned config and reads `query_info[\"sql\"]`",
+    "id": "VC-104",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Output is a per-case table plus a summary line; every non-PASS case shows the expected-vs-actual SQL.",
+    "claim_signature": "issue-acceptance-5",
+    "criteria_file": ".prflow/tmp/review/pr-210/40987077486-1/criteria.json",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 603,
+    "verify_hint": "Check _print_report in src/sqllens/cli.py renders the table, the summary line, and expected plus actual SQL for every non-PASS status including ERROR with actual_sql None",
+    "id": "VC-105",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Exit code is non-zero when any case is not PASS (or, when `--fail-under` is given, when the PASS rate is below the threshold).",
+    "claim_signature": "issue-acceptance-6",
+    "criteria_file": ".prflow/tmp/review/pr-210/40987077486-1/criteria.json",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 668,
+    "verify_hint": "Walk _exit_for_report in src/sqllens/cli.py for the no-threshold and threshold branches, including boundary pass rates",
+    "id": "VC-106",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Per CLAUDE.md, an **empty golden set**, an **all-ERROR run**, or a **partial failure** surfaces as a loud non-success — never a green/empty success. (An empty golden file is itself an error: there is nothing to verify, so the command must not exit 0.)",
+    "claim_signature": "issue-acceptance-7",
+    "criteria_file": ".prflow/tmp/review/pr-210/40987077486-1/criteria.json",
+    "source_file": "docs/external/managing-memory.md",
+    "source_line": 163,
+    "verify_hint": "Check `_exit_for_report` in `src/sqllens/cli.py` for the all-non-PASS and partial-failure branches and that neither can print unqualified success",
+    "id": "VC-107",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The SQL-normalization comparator is isolated (`compare.py`) so a future \"execute and compare rows\" comparator can be added without rewriting the runner.",
+    "claim_signature": "issue-acceptance-8",
+    "criteria_file": ".prflow/tmp/review/pr-210/40987077486-1/criteria.json",
+    "source_file": "src/sqllens/eval/compare.py",
+    "source_line": 59,
+    "verify_hint": "Check that runner.py contains no normalization logic of its own and that the Comparator alias plus run_verification's comparator parameter fully isolate the strategy",
+    "id": "VC-108",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "New `.py` files under `src/sqllens/eval/` carry the SPDX header and pass `ruff check .` (this package is **not** in the vendored-exclusion set) and have type hints on every public signature.",
+    "claim_signature": "issue-acceptance-9",
+    "criteria_file": ".prflow/tmp/review/pr-210/40987077486-1/criteria.json",
+    "source_file": "src/sqllens/eval/__init__.py",
+    "source_line": 1,
+    "verify_hint": "Check pyproject.toml's [tool.ruff] exclude list for src/sqllens/eval, and confirm SPDX headers plus full annotations on the public functions in eval/__init__.py, compare.py, golden.py and runner.py (including the untyped nested helpers)",
+    "id": "VC-109",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-110",
+    "category": "dependency_interaction",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 1. An ERROR result caused by expected SQL that cannot be parsed reaches the operator with no explanation. `compare()` in `src/sqllens/eval/compare.py` returns the ERROR status when the *expected* side fails to parse, but `_run_one_case` in `src/sqllens/eval/runner.py` builds the result with `error` left at its `None` default, and `_print_report` in `src/sqllens/cli.py` prints an error line only when `error` is not `None`. The row therefore shows the expected and actual SQL and nothing saying that the golden file, not the agent, is at fault — the opposite of what the module's own prose promises. (raised by 3/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/runner.py",
+    "verify_against": "compare() in src/sqllens/eval/compare.py, _run_one_case in src/sqllens/eval/runner.py, _print_report in src/sqllens/cli.py",
+    "verify_hint": "Check whether _run_one_case sets `error` when compare() returns Status.ERROR, and whether _print_report prints a reason for such rows",
+    "prior_ref": "finding 1 (important)",
+    "prior_evidence": "1. An ERROR result caused by expected SQL that cannot be parsed reaches the operator with no explanation. `compare()` in `src/sqllens/eval/compare.py` returns the ERROR status when the *expected* side fails to parse, but `_run_one_case` in `src/sqllens/eval/runner.py` builds the result with `error` left at its `None` default, and `_print_report` in `src/sqllens/cli.py` prints an error line only when `error` is not `None`. The row therefore shows the expected and actual SQL and nothing saying that the golden file, not the agent, is at fault — the opposite of what the module's own prose promises. (raised by 3/6 agents)",
+    "claim_signature": "dependency_interaction:runner.py:error-reason-on-expected-parse-failure",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-111",
+    "category": "absolute_claim",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 2. The help text and the published option table state the `fail-under` rule without the override that fires when nothing passed. `src/sqllens/cli.py` tells the operator that the command exits zero whenever the pass rate is at or above the threshold, and `docs/external/managing-memory.md` line 133 repeats it, but `_exit_for_report` exits 1 whenever no case passed, so a threshold of zero on a fully failed run still exits non-zero. The correct rule appears further down the same page. (raised by 3/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "verify_against": "_exit_for_report in src/sqllens/cli.py and the --fail-under row of docs/external/managing-memory.md",
+    "verify_hint": "Compare the --fail-under help string and docs/external/managing-memory.md option table row against _exit_for_report's branches in src/sqllens/cli.py",
+    "prior_ref": "finding 2 (important)",
+    "prior_evidence": "2. The help text and the published option table state the `fail-under` rule without the override that fires when nothing passed. `src/sqllens/cli.py` tells the operator that the command exits zero whenever the pass rate is at or above the threshold, and `docs/external/managing-memory.md` line 133 repeats it, but `_exit_for_report` exits 1 whenever no case passed, so a threshold of zero on a fully failed run still exits non-zero. The correct rule appears further down the same page. (raised by 3/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=not-held; evidence: enumerated the exit decision in _exit_for_report — correcting the sentence changes no branch and no exit code; the text is printed as command help and published on an external documentation page, so a reader outside the repository sees it -->",
+    "claim_signature": "absolute_claim:cli.py:fail-under-exit-rule",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-112",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 3. Two documentation pages promise an equivalence the comparator does not provide. `docs/external/managing-memory.md` line 159 says that quoted and unquoted identifiers compare equal where the dialect's case rules allow, and `docs/internal/agent/memory.md` line 271 repeats it. `normalize_sql` renders with sqlglot's `normalize=True`, which lowercases unquoted identifiers but keeps quoting as written, so `SELECT \"id\" FROM \"t\"` and `SELECT id FROM t` render differently and classify as CHANGED. This PR's own test `test_quoted_identifiers_under_postgres_dialect` asserts that CHANGED verdict. An operator who writes a golden file from a quoted-identifier dump gets unexpected CHANGED rows and a non-zero exit. (raised by 2/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/external/managing-memory.md",
+    "verify_against": "normalize_sql in src/sqllens/eval/compare.py and test_quoted_identifiers_under_postgres_dialect in tests/unit/test_eval_compare.py",
+    "verify_hint": "Check the identifier-equivalence sentence in docs/external/managing-memory.md and its restatement in docs/internal/agent/memory.md against normalize_sql's `normalize=True` rendering",
+    "prior_ref": "finding 3 (important)",
+    "prior_evidence": "3. Two documentation pages promise an equivalence the comparator does not provide. `docs/external/managing-memory.md` line 159 says that quoted and unquoted identifiers compare equal where the dialect's case rules allow, and `docs/internal/agent/memory.md` line 271 repeats it. `normalize_sql` renders with sqlglot's `normalize=True`, which lowercases unquoted identifiers but keeps quoting as written, so `SELECT \"id\" FROM \"t\"` and `SELECT id FROM t` render differently and classify as CHANGED. This PR's own test `test_quoted_identifiers_under_postgres_dialect` asserts that CHANGED verdict. An operator who writes a golden file from a quoted-identifier dump gets unexpected CHANGED rows and a non-zero exit. (raised by 2/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=not-held; evidence: enumerated the equality set normalize_sql produces — correcting the sentence changes no classification and no output; docs/external/managing-memory.md is published to readers outside the repository -->",
+    "claim_signature": "data_format_assumption:managing-memory.md:quoted-identifier-equivalence",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-113",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 4. A verification run resolves its settings without the persisted profile, so it does not reproduce the retrieval path it certifies. `run_verification` in `src/sqllens/eval/runner.py` calls `query_database_impl_with_widgets` with no profile store, and `resolve_effective_settings` overlays a persisted profile only when a store is passed, while every MCP request path passes the server's store. On a deployment whose `default` profile sets its own `similarity_threshold`, the verifier retrieves memory at a different threshold than production does, which is the behaviour under test. Two sentences added by this change describe the run as identical to a real `query_database` call. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/runner.py",
+    "verify_against": "resolve_effective_settings in src/sqllens/config/profiles.py and the profile_store arguments passed in src/sqllens/server.py",
+    "verify_hint": "Check whether run_verification passes a profile_store to query_database_impl_with_widgets, and what resolve_effective_settings does when store is None",
+    "prior_ref": "finding 4 (important)",
+    "prior_evidence": "4. A verification run resolves its settings without the persisted profile, so it does not reproduce the retrieval path it certifies. `run_verification` in `src/sqllens/eval/runner.py` calls `query_database_impl_with_widgets` with no profile store, and `resolve_effective_settings` overlays a persisted profile only when a store is passed, while every MCP request path passes the server's store. On a deployment whose `default` profile sets its own `similarity_threshold`, the verifier retrieves memory at a different threshold than production does, which is the behaviour under test. Two sentences added by this change describe the run as identical to a real `query_database` call. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:runner.py:verification-profile-store",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-114",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 5. A CSV golden file has its expected SQL rewritten before comparison. `load_golden` in `src/sqllens/eval/golden.py` routes CSV text through `parse_csv`, which prefixes an apostrophe to any cell starting with one of `= + - @` or a whitespace character, to neutralise spreadsheet formulas on the import path. Here the cell is the ground truth: an expected statement that opens with a SQL comment becomes unparseable, so the case always classifies ERROR, and with finding 1 it reports no reason. A question cell is likewise sent to the agent in altered form. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/golden.py",
+    "verify_against": "parse_csv and _defang_csv_cell in src/sqllens/memory/io.py, load_golden in src/sqllens/eval/golden.py",
+    "verify_hint": "Check how load_golden routes CSV text through parse_csv in src/sqllens/memory/io.py and whether _defang_csv_cell is applied to the question and sql cells",
+    "prior_ref": "finding 5 (important)",
+    "prior_evidence": "5. A CSV golden file has its expected SQL rewritten before comparison. `load_golden` in `src/sqllens/eval/golden.py` routes CSV text through `parse_csv`, which prefixes an apostrophe to any cell starting with one of `= + - @` or a whitespace character, to neutralise spreadsheet formulas on the import path. Here the cell is the ground truth: an expected statement that opens with a SQL comment becomes unparseable, so the case always classifies ERROR, and with finding 1 it reports no reason. A question cell is likewise sent to the agent in altered form. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:golden.py:csv-defang-on-golden-cells",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-115",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 6. Agent output that cannot be parsed is classified CHANGED rather than ERROR, which differs from the taxonomy the issue decided. `src/sqllens/eval/compare.py` reserves ERROR for an unparseable expected side, so a run in which the agent emits SQL the comparator cannot parse lands in the same bucket as a harmless rewrite and is tolerated identically by the threshold option. The departure is deliberate and documented in the module and in both documentation pages; it should be recorded against the issue rather than only in module prose. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/compare.py",
+    "verify_against": "Design Decision 4 in issue #208 and the ERROR branch of compare() in src/sqllens/eval/compare.py",
+    "verify_hint": "Check compare()'s ERROR branch in src/sqllens/eval/compare.py against the status taxonomy in the issue #208 context file",
+    "prior_ref": "finding 6 (important)",
+    "prior_evidence": "6. Agent output that cannot be parsed is classified CHANGED rather than ERROR, which differs from the taxonomy the issue decided. `src/sqllens/eval/compare.py` reserves ERROR for an unparseable expected side, so a run in which the agent emits SQL the comparator cannot parse lands in the same bucket as a harmless rewrite and is tolerated identically by the threshold option. The departure is deliberate and documented in the module and in both documentation pages; it should be recorded against the issue rather than only in module prose. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:compare.py:unparseable-actual-status",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-116",
+    "category": "dependency_interaction",
+    "claim": "verify_memory catches every malformed-golden-file exception load_golden can raise, including csv.Error from parse_csv, and reports it as a structured 'Invalid golden file' exit rather than a traceback.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "verify_against": "parse_csv in src/sqllens/memory/io.py, BundleFormatError and VALID_FORMATS definitions, csv.field_size_limit usage",
+    "verify_hint": "Check parse_csv's list(csv.reader(...)) call in src/sqllens/memory/io.py for csv.Error handling and the except clause of verify_memory in src/sqllens/cli.py",
+    "prior_ref": "VC-9",
+    "prior_evidence": "Exports hold: memory/io.py:28 VALID_FORMATS, :38 BundleFormatError; eval/__init__.py __all__ exports load_golden, run_verification, Status. But 'BundleFormatError is the only malformed-bundle exception load_golden raises' is false: parse_csv (io.py:141-142) calls list(csv.reader(...)) with no csv.Error handling, and no csv.field_size_limit is set anywhere in src (grep) while MAX_BUNDLE_BYTES is 10MB (schema.py:33). A CSV golden file with a single field >131072 chars (or other csv.Error conditions) raises csv.Error, which is not BundleFormatError (a ValueError), so cli.py:571-575 does not catch it and verify-memory crashes with a traceback instead of the structured 'Invalid golden file' exit. Also load_golden raises plain ValueError for bad fmt, though the CLI pre-checks that.",
+    "claim_signature": "dependency_interaction:cli.py:golden-file-csv-error-handling",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-117",
+    "category": "absolute_claim",
+    "claim": "The verify-memory CLI docstring's statement about ERROR rows holds for every ERROR path, including the no-SQL-produced and compare-raised paths, or is scoped to the paths where it holds.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "verify_against": "the ERROR construction sites in src/sqllens/eval/runner.py and the error wrapping/logging in src/sqllens/tools/query_database.py",
+    "verify_hint": "Check the verify_memory docstring in src/sqllens/cli.py against the ERROR branches of _run_one_case in src/sqllens/eval/runner.py and _INTERNAL_ERROR_MESSAGE handling in src/sqllens/tools/query_database.py",
+    "prior_ref": "VC-12",
+    "prior_evidence": "The docstring (cli.py:541-543) says an ERROR row shows the same sanitized message an MCP client would get, and that the underlying cause is logged to stderr. That holds only for agent-raised exceptions. query_database.py:240-274 wraps tool-internal failures in RuntimeError(_INTERNAL_ERROR_MESSAGE) and calls logger.exception first. Nothing in src configures logging (no basicConfig/addHandler), so those records reach stderr only through Python's last-resort handler at WARNING and above. Two other ERROR paths in eval/runner.py break the claim. (1) Lines 195-205: when the agent produced no SQL, the row carries a runner-authored message ('agent did not produce a SQL statement...'). It is not an MCP client message and nothing is logged. (2) Lines 213-222: when compare() raises (for example ValueError for an unknown dialect), the row carries f'{type(exc).__name__}: {exc}' and nothing is logged. Also, runner.py:192 prefixes the exception type name ('RuntimeError: ...'), so the row text is not identical to what an MCP client gets. The query_database.py:306-310 path puts the unsanitized agent answer into AgentRunError, and that answer is the text shown. The 'An ERROR row' wording is absolute, and ERROR rows from the no-SQL and compare-failure paths contradict it.",
+    "claim_signature": "absolute_claim:cli.py:error-row-sanitized-message-claim",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-118",
+    "category": "absolute_claim",
+    "claim": "The internal doc's statement about the dialect translation matches how compare() handles an unknown-dialect ValueError (which is not a SqlglotError and therefore is not classified ERROR).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/agent/memory.md",
+    "verify_against": "the except clause of compare() in src/sqllens/eval/compare.py and its docstring",
+    "verify_hint": "Check the dialect-translation sentence in docs/internal/agent/memory.md against compare()'s SqlglotError-only except in src/sqllens/eval/compare.py",
+    "prior_ref": "VC-15",
+    "prior_evidence": "docs/internal/agent/memory.md:271 says that without the translation every Postgres comparison would silently classify as ERROR. compare() in src/sqllens/eval/compare.py:130-137 catches only sqlglot.errors.SqlglotError. ValueError (the Unknown dialect error) is not a SqlglotError, so it propagates out of compare() and is not classified ERROR. The compare docstring (compare.py:109-121) says this itself: the ValueError must propagate to the runner's per-case except so the operator sees the real cause, not a misleading ERROR row. The same file's header comment (compare.py:35-38) and normalize_sql docstring (compare.py:88-89) repeat the 'silently ERROR' wording, which also contradicts compare's docstring. The doc claim is therefore inaccurate. I did not check the pinned sqlglot version's get_or_raise; the claim fails on how compare() handles the exception either way.",
+    "claim_signature": "absolute_claim:memory.md:unknown-dialect-silent-error",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-119",
+    "category": "absolute_claim",
+    "claim": "The runner module docstring's statement about forcing show_details matches what the code guarantees about query_info[\"sql\"] being populated, including the no-tool-call answer case.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/runner.py",
+    "verify_against": "the query_info construction in src/sqllens/tools/_format.py and src/sqllens/tools/query_database.py",
+    "verify_hint": "Check the runner.py module docstring's show_details sentence against where query_info is left None in src/sqllens/tools/_format.py and src/sqllens/tools/query_database.py",
+    "prior_ref": "VC-30",
+    "prior_evidence": "runner.py:6-8 says show_details is forced on so query_info[\"sql\"] is populated for every case. Forcing is real (verification_config, runner.py:104-108), but populating is not guaranteed: _format.py:535-547 leaves query_info None unless a run_sql SQL was seen (a no-tool-call answer), and query_database.py:289-290 nulls it when effective.show_details is off (a profile could shadow). The runner's own ERROR branch (runner.py:195-205) and run_verification docstring (128-132) handle the missing-SQL case, which contradicts 'every case'. Counterexample: agent answers without calling run_sql, so query_info is None.",
+    "claim_signature": "absolute_claim:runner.py:show-details-populates-sql",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-120",
+    "category": "absolute_claim",
+    "claim": "The runner docstring's claim about a future row-execution comparator dropping in with no runner changes matches the runner's actual comparator seam (module-scope import, direct synchronous call, or an injection parameter).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/runner.py",
+    "verify_against": "the compare import and call site in src/sqllens/eval/runner.py and run_verification's parameter list",
+    "verify_hint": "Check how runner.py imports and calls compare and whether run_verification exposes a comparator parameter",
+    "prior_ref": "VC-31",
+    "prior_evidence": "runner.py:31 imports compare by name at module scope and runner.py:214 calls compare(case.expected_sql, actual_sql, dialect=dialect) directly. run_verification (112-117) has only a driver injection parameter (the agent driver), with no comparator parameter. Swapping in a row-execution comparator therefore requires editing the runner. The call is also synchronous and receives only SQL strings plus a dialect, with no config or DB handle, so a row-executing comparator could not fit the same call. The docstring's 'no runner changes required' (lines 20-22) is false.",
+    "claim_signature": "absolute_claim:runner.py:comparator-drop-in-claim",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-121",
+    "category": "absolute_claim",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 1. The explanation of sqlglot's flags in `src/sqllens/eval/compare.py` is the wrong way round. The `normalize_sql` docstring and the module docstring attribute keyword casing to `normalize=True`, but that argument normalises unquoted identifier case; keyword uppercasing happens with or without it. A maintainer who trusts the comment could drop the argument and silently make the comparator case-sensitive on identifiers. (raised by 2/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/compare.py",
+    "verify_against": "sqlglot's generator semantics for `normalize` and `normalize_functions`",
+    "verify_hint": "Check the normalize_sql docstring and module docstring in src/sqllens/eval/compare.py against what sqlglot's `normalize=True` generator flag actually does",
+    "prior_ref": "suggestion 1",
+    "prior_evidence": "1. The explanation of sqlglot's flags in `src/sqllens/eval/compare.py` is the wrong way round. The `normalize_sql` docstring and the module docstring attribute keyword casing to `normalize=True`, but that argument normalises unquoted identifier case; keyword uppercasing happens with or without it. A maintainer who trusts the comment could drop the argument and silently make the comparator case-sensitive on identifiers. (raised by 2/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: enumerated what normalize_sql renders — correcting the docstring changes no rendered string; the docstring is never printed and the file is internal, so no reader outside the repository sees it -->",
+    "claim_signature": "absolute_claim:compare.py:normalize-flag-explanation",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-122",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 2. `CaseResult` in `src/sqllens/eval/runner.py` can represent states the code treats as impossible. The dataclass is frozen but has no construction-time check, so an ERROR result with neither an error message nor actual SQL is constructible, and that value renders as a failing row with no diagnostic at all. The relationship between status, error and SQL is held only by the discipline of the four existing construction sites. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/runner.py",
+    "verify_against": "the CaseResult dataclass definition and its construction sites in src/sqllens/eval/runner.py",
+    "verify_hint": "Check CaseResult in src/sqllens/eval/runner.py for a __post_init__ or equivalent validation",
+    "prior_ref": "suggestion 2",
+    "prior_evidence": "2. `CaseResult` in `src/sqllens/eval/runner.py` can represent states the code treats as impossible. The dataclass is frozen but has no construction-time check, so an ERROR result with neither an error message nor actual SQL is constructible, and that value renders as a failing row with no diagnostic at all. The relationship between status, error and SQL is held only by the discipline of the four existing construction sites. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:runner.py:caseresult-illegal-states",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-123",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 3. `RunReport` in `src/sqllens/eval/runner.py` defaults to an empty result list, so the zero-case report the project documents as a failure mode is the type's cheapest value. The guard against it lives in `src/sqllens/cli.py` at two separate places, and `pass_rate` returns a meaningless zero for it. The frozen marker is also shallow: the list stays mutable after construction. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/runner.py",
+    "verify_against": "the RunReport dataclass and pass_rate in src/sqllens/eval/runner.py, and the zero-case guards in src/sqllens/cli.py",
+    "verify_hint": "Check RunReport's `results` field default and mutability in src/sqllens/eval/runner.py",
+    "prior_ref": "suggestion 3",
+    "prior_evidence": "3. `RunReport` in `src/sqllens/eval/runner.py` defaults to an empty result list, so the zero-case report the project documents as a failure mode is the type's cheapest value. The guard against it lives in `src/sqllens/cli.py` at two separate places, and `pass_rate` returns a meaningless zero for it. The frozen marker is also shallow: the list stays mutable after construction. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:runner.py:runreport-empty-default",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-124",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 4. `src/sqllens/cli.py` keeps a second copy of the status taxonomy as plain strings. `_STATUS_COLOUR` is keyed on string literals and looked up without a fallback, so a future fourth status satisfies every type annotation and then fails at render time on the first row carrying it. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "verify_against": "the Status enum in src/sqllens/eval/compare.py",
+    "verify_hint": "Check _STATUS_COLOUR and its lookup in src/sqllens/cli.py against the Status members defined in src/sqllens/eval/compare.py",
+    "prior_ref": "suggestion 4",
+    "prior_evidence": "4. `src/sqllens/cli.py` keeps a second copy of the status taxonomy as plain strings. `_STATUS_COLOUR` is keyed on string literals and looked up without a fallback, so a future fourth status satisfies every type annotation and then fails at render time on the first row carrying it. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:cli.py:status-colour-taxonomy-copy",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-125",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 5. The new `agent` parameter on `query_database_impl_with_widgets` in `src/sqllens/tools/query_database.py` accepts an agent and a config built from different sources, with nothing in the signature saying they must match. The injected agent carries its guarded SQL runner, row limits and memory thresholds from whichever config built it, while the config argument drives profile resolution separately. Only the runner happening to pass the same object keeps them consistent. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/tools/query_database.py",
+    "verify_against": "the signature of query_database_impl_with_widgets and the call site in src/sqllens/eval/runner.py",
+    "verify_hint": "Check the `agent=` parameter of query_database_impl_with_widgets in src/sqllens/tools/query_database.py and how profile resolution uses the separate cfg argument",
+    "prior_ref": "suggestion 5",
+    "prior_evidence": "5. The new `agent` parameter on `query_database_impl_with_widgets` in `src/sqllens/tools/query_database.py` accepts an agent and a config built from different sources, with nothing in the signature saying they must match. The injected agent carries its guarded SQL runner, row limits and memory thresholds from whichever config built it, while the config argument drives profile resolution separately. Only the runner happening to pass the same object keeps them consistent. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:query_database.py:agent-cfg-pair-consistency",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-126",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 6. The declared driver return type in `src/sqllens/eval/runner.py` and the defensive widening in `_extract_sql` contradict each other. The type alias declares the third element a dictionary or `None`, while `_extract_sql` accepts any object and justifies it by shapes the alias says cannot occur. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/runner.py",
+    "verify_against": "the AgentDriver type alias and _extract_sql in src/sqllens/eval/runner.py",
+    "verify_hint": "Compare the AgentDriver alias's third element type with _extract_sql's annotation and isinstance guards in src/sqllens/eval/runner.py",
+    "prior_ref": "suggestion 6",
+    "prior_evidence": "6. The declared driver return type in `src/sqllens/eval/runner.py` and the defensive widening in `_extract_sql` contradict each other. The type alias declares the third element a dictionary or `None`, while `_extract_sql` accepts any object and justifies it by shapes the alias says cannot occur. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:runner.py:agentdriver-alias-vs-extract-sql",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-127",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 7. The default failure path in `src/sqllens/cli.py` exits with code 1 and prints nothing to standard error, while all three sibling exit paths print a reason. A script that reads only standard error sees a bare non-zero exit. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "verify_against": "the exit arms of _exit_for_report in src/sqllens/cli.py",
+    "verify_hint": "Check the default arm of _exit_for_report in src/sqllens/cli.py for a stderr message before typer.Exit(code=1)",
+    "prior_ref": "suggestion 7",
+    "prior_evidence": "7. The default failure path in `src/sqllens/cli.py` exits with code 1 and prints nothing to standard error, while all three sibling exit paths print a reason. A script that reads only standard error sees a bare non-zero exit. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:cli.py:silent-default-failure-exit",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-128",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 8. No test pins the inclusive boundary of the threshold option in `src/sqllens/cli.py`. The existing tests cover a rate above and a rate below the threshold, so a regression from \"at or above\" to \"above\" would start failing runs that exactly meet an operator's threshold. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "verify_against": "tests/unit/test_cli_verify_memory.py threshold tests",
+    "verify_hint": "Search tests/unit/test_cli_verify_memory.py for a case where the pass rate equals the --fail-under value",
+    "prior_ref": "suggestion 8",
+    "prior_evidence": "8. No test pins the inclusive boundary of the threshold option in `src/sqllens/cli.py`. The existing tests cover a rate above and a rate below the threshold, so a regression from \"at or above\" to \"above\" would start failing runs that exactly meet an operator's threshold. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:cli.py:fail-under-inclusive-boundary-test",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-129",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 9. The scripted test driver in `tests/unit/test_eval_runner.py` calls `next` on an iterator inside an async function without a guard. When the script runs out of responses the resulting error is caught by the per-case handler and scored as a legitimate ERROR classification instead of failing as a test-harness bug; the CLI test file guards exactly this case. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_runner.py",
+    "verify_against": "_patch_driver in tests/unit/test_cli_verify_memory.py and _run_one_case's per-case except in src/sqllens/eval/runner.py",
+    "verify_hint": "Check _scripted_driver's next() call in tests/unit/test_eval_runner.py against the guarded equivalent in tests/unit/test_cli_verify_memory.py",
+    "prior_ref": "suggestion 9",
+    "prior_evidence": "9. The scripted test driver in `tests/unit/test_eval_runner.py` calls `next` on an iterator inside an async function without a guard. When the script runs out of responses the resulting error is caught by the per-case handler and scored as a legitimate ERROR classification instead of failing as a test-harness bug; the CLI test file guards exactly this case. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:test_eval_runner.py:scripted-driver-stopiteration-guard",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-130",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 10. No test covers the branch in `src/sqllens/cli.py` that turns a failure before any case runs into a structured message and exit 1. Every CLI test replaces the verification run with a successful stub, so neither the message nor the exit code is pinned. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/cli.py",
+    "verify_against": "tests/unit/test_cli_verify_memory.py and the 'Verification run failed' branch in src/sqllens/cli.py",
+    "verify_hint": "Search tests/unit/test_cli_verify_memory.py for a test where run_verification raises rather than returning a successful stub report",
+    "prior_ref": "suggestion 10",
+    "prior_evidence": "10. No test covers the branch in `src/sqllens/cli.py` that turns a failure before any case runs into a structured message and exit 1. Every CLI test replaces the verification run with a successful stub, so neither the message nor the exit code is pinned. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:cli.py:pre-case-failure-branch-test",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-131",
+    "category": "absolute_claim",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 11. Two docstrings carry rationale rather than guidance. The second paragraph of `pass_rate` in `src/sqllens/eval/runner.py` explains a design choice the one-line summary already states, and the module docstring of `src/sqllens/eval/compare.py` records which pull request accepted a trade-off, which will read as stale once that history is closed. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/eval/runner.py",
+    "verify_against": "the pass_rate docstring in src/sqllens/eval/runner.py and the module docstring of src/sqllens/eval/compare.py",
+    "verify_hint": "Read pass_rate's docstring in src/sqllens/eval/runner.py and the PR-provenance sentence in compare.py's module docstring",
+    "prior_ref": "suggestion 11",
+    "prior_evidence": "11. Two docstrings carry rationale rather than guidance. The second paragraph of `pass_rate` in `src/sqllens/eval/runner.py` explains a design choice the one-line summary already states, and the module docstring of `src/sqllens/eval/compare.py` records which pull request accepted a trade-off, which will read as stale once that history is closed. (raised by 1/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: no mechanism is under discussion, so rewriting either docstring changes no branch and no output; neither docstring is printed and both files are internal -->",
+    "claim_signature": "absolute_claim:runner.py:docstring-rationale-provenance",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  }
+]
