@@ -32,7 +32,7 @@ The widget reports its own size so the assistant can fit it to the result. On ho
 - **[Getting started](getting-started.md)** — Install SQL Lens, point it at the bundled demo database, and run your first question.
 - **[Configuration](configuration.md)** — All configurable fields in `sqllens.toml`, environment variables, and database URL formats.
 - **[Row-Level Security](row-level-security.md)** — Narrow every answer to the rows a particular request is allowed to see using static or per-request dynamic rules.
-- **[Managing memory](managing-memory.md)** — Bulk-load curated question-and-answer pairs and notes, or export what SQL Lens has learned.
+- **[Managing memory](managing-memory.md)** — Bulk-load curated question-and-answer pairs and notes, export what SQL Lens has learned, or verify the assistant still produces expected SQL for a curated golden set.
 - **[Install on Claude Desktop (Windows)](install-claude-desktop-windows.md)** — One-command installer and full manual fallback for connecting SQL Lens to Claude Desktop on a fresh Windows machine.
 - **[Release notes](release-notes.md)** — User-visible changes in each released version.
 
