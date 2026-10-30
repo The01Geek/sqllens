@@ -74,8 +74,9 @@ A complete bundle is also limited in size as a defense against a malformed or ho
 
 - **10 MiB** (10,485,760 bytes, measured against the raw UTF-8 contents) per bundle file. Files larger than this are rejected with `Invalid memory bundle: bundle exceeds the 10485760-byte cap; split the bundle into smaller files.` before SQL Lens parses them.
 - **10,000 items** in each top-level block. A bundle whose `sql_pairs.pairs` list or `schema_docs` list exceeds 10,000 entries is rejected with `Invalid memory bundle: bundle '<block>' exceeds the 10000-item cap (got N); split the bundle.`
+- **64 levels** of nested arrays and objects in a JSON bundle, counting the outermost object as level 1. A valid bundle nests only a few levels deep, so this limit only affects malformed files; a deeper file is rejected with `Invalid memory bundle: bundle JSON is too deeply nested to parse safely` on every supported Python version.
 
-Realistic curated bundles fit comfortably under both limits. If you have more curated knowledge than fits in one bundle, split it into multiple files and import them sequentially. The limits apply to both the command-line `sqllens import-memory` and the optional `import_memory` MCP tool.
+Realistic curated bundles fit comfortably under these limits. If you have more curated knowledge than fits in one bundle, split it into multiple files and import them sequentially. The limits apply to both the command-line `sqllens import-memory` and the optional `import_memory` MCP tool.
 
 ### CSV files and spreadsheet formulas
 
@@ -143,7 +144,7 @@ sqllens verify-memory PATH [--format json|csv] [--fail-under PCT] [-c CONFIG]
 | `--fail-under PCT` | Pass-rate percentage tolerance from 0 to 100. See the exit-code rules below; at least one case must PASS. |
 | `-c CONFIG` | Path to `sqllens.toml`. Falls back to the environment or `./sqllens.toml`. |
 
-A golden file is structurally a memory bundle's question-and-answer block — the same 10 MiB and 10,000-item limits apply, and the same blank-value and length rules are enforced. CSV golden values are preserved exactly; unlike memory import/export, verification does not add spreadsheet formula-protection prefixes. The free-form notes block, if present, is ignored: only question-and-answer pairs are reference cases.
+A golden file is structurally a memory bundle's question-and-answer block — the same 10 MiB, 10,000-item and JSON nesting limits apply, and the same blank-value and length rules are enforced. CSV golden values are preserved exactly; unlike memory import/export, verification does not add spreadsheet formula-protection prefixes. The free-form notes block, if present, is ignored: only question-and-answer pairs are reference cases.
 
 A typical workflow is to import an updated bundle, then immediately verify it:
 
@@ -187,7 +188,7 @@ Calls also require `auth.mode = "bearer"`, or an explicit `auth.insecure = true`
 
 If any entry in the bundle fails to save, the tool reports the import as an error to the assistant rather than a success, even when some entries saved and only others failed. A partial import is treated as a failure so the assistant is never told an import succeeded when part of it did not. The reported message gives only the counts of saved, skipped and errored entries; the detailed reason for each failure is written to the server log, not returned to the client.
 
-The same 10 MiB / 10,000-item bundle size limits described under [Bundle size limits](#bundle-size-limits) apply to the tool. A bundle that exceeds either cap is refused with `Invalid memory bundle: ...` before any item is written, so a single oversized request cannot block the server.
+The same 10 MiB, 10,000-item and 64-level limits described under [Bundle size limits](#bundle-size-limits) apply to the tool. A bundle that exceeds any of them is refused with `Invalid memory bundle: ...` before any item is written, so a single oversized request cannot block the server.
 
 **Warning:** Leave `allow_import` off unless you trust every client that can reach the server. A client able to write memory can influence the SQL that SQL Lens generates for future questions. The command-line `import-memory` and `export-memory` commands are unaffected by this setting and remain the recommended way to manage memory.
 
