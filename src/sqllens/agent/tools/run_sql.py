@@ -13,7 +13,7 @@ from sqllens.agent.components import (
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.capabilities.file_system import FileSystem
 from sqllens.agent.integrations.local import LocalFileSystem
-from sqllens.safety.limits import MAX_ROWS_ATTR, TRUNCATED_ATTR
+from sqllens.safety.limits import MAX_ROWS_ATTR, READ_RESULT_ATTR, TRUNCATED_ATTR
 from sqllens.safety.readonly import first_sql_keyword, is_read_shaped
 
 
@@ -36,10 +36,9 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
             custom_tool_name: Optional custom name for the tool (overrides default "run_sql")
             custom_tool_description: Optional custom description for the tool (overrides default description)
             dialect: sqlglot dialect of the configured database, used to
-                classify the statement. When the runner returns rows where
-                this classification expects its ``rows_affected`` frame (a
-                runner classifying under another dialect), the rows are
-                returned as a read result.
+                classify the statement. A frame the runner built with
+                ``rows_to_capped_df`` (as the built-in runners do for a read)
+                is returned as a read result whatever this classification.
         """
         self.sql_runner = sql_runner
         self.file_system = file_system or LocalFileSystem()
@@ -73,19 +72,10 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
 
             query_type = first_sql_keyword(args.sql, self.dialect)
 
-            read_shaped = is_read_shaped(args.sql, self.dialect)
-            if (
-                not read_shaped
-                and not df.empty
-                and list(df.columns) != ["rows_affected"]
-            ):
-                # The runner returned rows, not the ``rows_affected`` frame
-                # the built-in runners return for a statement that is not
-                # read-shaped: it classified the statement as a read, so
-                # report its rows rather than drop them as a row count.
-                read_shaped = True
-
-            if read_shaped:
+            # A frame the runner marked as a read result is reported as one
+            # even when this tool's dialect classifies the statement otherwise,
+            # so the runner's rows are never dropped as a row count.
+            if is_read_shaped(args.sql, self.dialect) or df.attrs.get(READ_RESULT_ATTR):
                 # Read the truncation signal before branching so the empty
                 # branch also surfaces the "re-issue narrower" hint instead of
                 # silently reporting "no rows". The constants index the

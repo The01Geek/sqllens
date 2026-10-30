@@ -639,20 +639,37 @@ class TestRunSqlToolReadShapedResults:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("dialect", [None, "postgres", "sqlite"])
+    @pytest.mark.parametrize("column", ["n", "rows_affected"])
     async def test_rows_from_runner_with_other_dialect_are_kept(
-        self, dialect: str | None
+        self, dialect: str | None, column: str
     ) -> None:
         # Under these dialects ``#`` is no comment, so the tool does not
         # classify the statement as read-shaped; a MySQL runner streamed its
-        # rows, which must not be reported as a row count.
+        # rows, which must not be reported as a row count, whatever the
+        # column is called.
         from sqllens.agent.tools.run_sql import RunSqlTool
+        from sqllens.safety.limits import rows_to_capped_df
 
-        df = pd.DataFrame({"n": [1, 2]})
+        df = rows_to_capped_df([{column: 1}, {column: 2}], 10)
         tool = RunSqlTool(
             sql_runner=_StaticRunner(df), file_system=_NoopFileSystem(), dialect=dialect
         )
         out = await tool.execute(_ctx(), RunSqlToolArgs(sql="# c\nSELECT n FROM widgets"))
-        self._assert_table(out, "", [{"n": 1}, {"n": 2}])
+        self._assert_table(out, "", [{column: 1}, {column: 2}])
+
+    @pytest.mark.asyncio
+    async def test_empty_read_from_runner_with_other_dialect_reports_no_rows(self) -> None:
+        from sqllens.agent.tools.run_sql import RunSqlTool
+        from sqllens.safety.limits import rows_to_capped_df
+
+        tool = RunSqlTool(
+            sql_runner=_StaticRunner(rows_to_capped_df([], 10)),
+            file_system=_NoopFileSystem(),
+            dialect="sqlite",
+        )
+        out = await tool.execute(_ctx(), RunSqlToolArgs(sql="# c\nSELECT n FROM widgets"))
+        assert "No rows returned" in out.result_for_llm
+        assert "row(s) affected" not in out.result_for_llm
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("read_only", [True, False])

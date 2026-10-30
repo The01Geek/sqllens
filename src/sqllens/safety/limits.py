@@ -25,6 +25,10 @@ if TYPE_CHECKING:
 
 TRUNCATED_ATTR = "truncated"
 MAX_ROWS_ATTR = "max_rows"
+# Set by ``rows_to_capped_df``: the frame holds a read's result rows, so
+# ``RunSqlTool`` reports them even when its own classification of the
+# statement differs from the runner's.
+READ_RESULT_ATTR = "read_result"
 
 
 def mark_truncation(df: pd.DataFrame, *, truncated: bool, max_rows: int) -> None:
@@ -69,6 +73,7 @@ def rows_to_capped_df(rows: Iterable[Mapping], max_rows: int) -> pd.DataFrame:
     else:
         df = pd.DataFrame([dict(row) for row in rows])
     mark_truncation(df, truncated=truncated, max_rows=max_rows)
+    df.attrs[READ_RESULT_ATTR] = True
     return df
 
 
