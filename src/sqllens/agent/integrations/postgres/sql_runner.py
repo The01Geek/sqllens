@@ -1,5 +1,6 @@
 """PostgreSQL implementation of SqlRunner interface."""
 
+import asyncio
 import logging
 import os
 import uuid
@@ -117,6 +118,17 @@ class PostgresRunner(SqlRunner):
         Raises:
             psycopg2.Error: If query execution fails (including statement_timeout firing).
         """
+        # The driver calls below block. Run them on a worker thread so a slow
+        # query does not stall the event loop, which also serves health checks
+        # and every other request. The row cap is read here, on the caller's
+        # context, and handed to the thread. If the caller is cancelled, the
+        # thread still runs until the driver returns, which a configured
+        # statement timeout bounds.
+        cap = effective_row_cap(self._max_rows)
+        return await asyncio.to_thread(self._run_sql_blocking, args.sql, cap)
+
+    def _run_sql_blocking(self, sql: str, cap: int) -> pd.DataFrame:
+        """Execute ``sql`` synchronously; called on a worker thread by ``run_sql``."""
         if self.connection_string:
             conn = self.psycopg2.connect(self.connection_string, **self._connection_options)
         else:
@@ -146,7 +158,7 @@ class PostgresRunner(SqlRunner):
                 finally:
                     setup.close()
 
-            if is_read_shaped(args.sql):
+            if is_read_shaped(sql):
                 # Named cursors are server-side and stream from a portal; they
                 # require an open transaction (psycopg2's default autocommit=False).
                 cursor_name = f"sqllens_{uuid.uuid4().hex}"
@@ -155,8 +167,7 @@ class PostgresRunner(SqlRunner):
                     cursor_factory=self.psycopg2.extras.RealDictCursor,
                 )
                 try:
-                    cursor.execute(args.sql)
-                    cap = effective_row_cap(self._max_rows)
+                    cursor.execute(sql)
                     rows = cursor.fetchmany(cap + 1)
                 finally:
                     # Log-and-swallow secondary exceptions on the SELECT cleanup
@@ -174,7 +185,7 @@ class PostgresRunner(SqlRunner):
 
             cursor = conn.cursor()
             try:
-                cursor.execute(args.sql)
+                cursor.execute(sql)
                 conn.commit()
                 rows_affected = cursor.rowcount
             finally:

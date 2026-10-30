@@ -1,5 +1,6 @@
 """SQLite implementation of SqlRunner interface."""
 
+import asyncio
 import sqlite3
 import time
 from urllib.parse import quote
@@ -85,6 +86,17 @@ class SqliteRunner(SqlRunner):
             sqlite3.Error: If query execution fails (the progress-handler deadline
                 raises ``sqlite3.OperationalError('interrupted')``).
         """
+        # The driver calls below block. Run them on a worker thread so a slow
+        # query does not stall the event loop, which also serves health checks
+        # and every other request. The row cap is read here, on the caller's
+        # context, and handed to the thread. If the caller is cancelled, the
+        # thread still runs until the driver returns, which a configured
+        # statement timeout bounds.
+        cap = effective_row_cap(self._max_rows)
+        return await asyncio.to_thread(self._run_sql_blocking, args.sql, cap)
+
+    def _run_sql_blocking(self, sql: str, cap: int) -> pd.DataFrame:
+        """Execute ``sql`` synchronously; called on a worker thread by ``run_sql``."""
         if self._read_only and self.database_path != ":memory:":
             conn = sqlite3.connect(_readonly_uri(self.database_path), uri=True)
         else:
@@ -116,10 +128,9 @@ class SqliteRunner(SqlRunner):
                     _make_deadline_handler(deadline), _PROGRESS_HANDLER_INSTRUCTIONS
                 )
 
-            cursor.execute(args.sql)
+            cursor.execute(sql)
 
-            if is_read_shaped(args.sql):
-                cap = effective_row_cap(self._max_rows)
+            if is_read_shaped(sql):
                 rows = cursor.fetchmany(cap + 1)
                 return rows_to_capped_df(rows, cap)
 

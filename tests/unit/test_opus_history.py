@@ -29,7 +29,10 @@ class _Messages:
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
 
-    def create(self, **kwargs: Any) -> Message:
+    async def create(self, **kwargs: Any) -> Message:
+        return self._message(**kwargs)
+
+    def _message(self, **kwargs: Any) -> Message:
         self.requests.append(deepcopy(kwargs))
         first = len(self.requests) % 2 == 1
         blocks = deepcopy(_BLOCKS)
@@ -46,18 +49,24 @@ class _Messages:
         })
 
     def stream(self, **kwargs: Any) -> Any:
-        final = self.create(**kwargs)
+        final = self._message(**kwargs)
+
+        async def text_stream() -> Any:
+            for block in final.content:
+                if block.type == "text":
+                    yield block.text
 
         class Stream:
-            text_stream = tuple(block.text for block in final.content if block.type == "text")
+            def __init__(self) -> None:
+                self.text_stream = text_stream()
 
-            def __enter__(self) -> "Stream":
+            async def __aenter__(self) -> "Stream":
                 return self
 
-            def __exit__(self, *args: object) -> None:
+            async def __aexit__(self, *args: object) -> None:
                 pass
 
-            def get_final_message(self) -> Message:
+            async def get_final_message(self) -> Message:
                 return final
 
         return Stream()
@@ -113,7 +122,7 @@ async def test_real_sdk_stream_retains_signature_and_tool_input() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, headers={"content-type": "text/event-stream"}, text=sse)
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         service = AnthropicLlmService(api_key="test-key", http_client=client)
         chunks = [chunk async for chunk in service.stream_request(
             LlmRequest(messages=[], user=User(id="test")),

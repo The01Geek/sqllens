@@ -107,6 +107,18 @@ Two properties are deliberate and pinned by tests:
 
 `_send_health` shares the response writer with `_send_401` via the `_send_json(send, status, body, *, extra_headers=())` helper; only `_send_401` passes the `WWW-Authenticate` header through `extra_headers`.
 
+### Keeping the event loop free during agent runs (issue #299)
+
+`run(cfg)` starts one uvicorn process with one event loop, and `/healthz`, `/readyz`, every MCP session and every tool call share it. `/healthz` does no work of its own, so a slow or failing `/healthz` means something is holding that loop. Code on the `query_database` request path must therefore never make a blocking call directly inside a coroutine:
+
+- **Model calls.** `AnthropicLlmService` ([src/sqllens/agent/integrations/anthropic/llm.py](../../../src/sqllens/agent/integrations/anthropic/llm.py)) builds `anthropic.AsyncAnthropic` and awaits `messages.create` and the streamed `messages.stream` response. It previously used the synchronous `anthropic.Anthropic` client inside its `async` methods, so each model call, which can stream for several seconds, stalled every other request; health checks and `list_data_sources` calls from other clients timed out whenever an agent run was in flight.
+- **SQL execution.** The SQLite, MySQL and Postgres runners' `run_sql` coroutines hand their synchronous driver work (`connect`, `execute`, `fetchmany`, `close`) to `asyncio.to_thread`. The per-request row cap is read before the hand-off, on the caller's context. A cancelled caller does not stop the worker thread; the query runs until the driver returns, which a configured statement timeout bounds.
+- **Vector memory.** `ChromaAgentMemory` already runs its ChromaDB calls on its own two-thread executor (see [agent/memory.md](../agent/memory.md)).
+
+Not yet covered: the memory-administration tools in `server.py` (`list_memories`, `add_memories`, `export_memories` and the rest) still call the synchronous ChromaDB store directly inside their `async` handlers. Each call is usually short, but it holds the loop for its duration.
+
+Regression coverage: `tests/integration/test_slow_agent_run_responsiveness.py` holds a `query_database` model call open against a local stand-in for the Messages API and requires `/healthz` and `list_data_sources` on a second session to answer within 2 s; `tests/unit/test_sql_runner_event_loop.py` checks that a slow driver call in each runner leaves the loop free.
+
 ## Readiness probe: `GET /readyz`
 
 `READYZ_PATH = "/readyz"` (module constant in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py)) is an **unauthenticated** readiness endpoint, added in issue #107 (O-5) and refined by issue #116. Where `/healthz` answers "is the process up", `/readyz` answers "has the startup sequence — session manager up plus the best-effort eager-warmup *attempt* — finished, so the server can serve". `_PathNormalizer.__call__` checks `path == READYZ_PATH` (immediately after the `/healthz` branch) and calls `_send_readiness(send, self._readiness.ready)`:
