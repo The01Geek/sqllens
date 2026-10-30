@@ -133,16 +133,6 @@ def test_parse_csv_rejects_oversize_bundle() -> None:
         parse_csv(payload)
 
 
-def test_parse_json_rejects_deeply_nested_under_size_cap() -> None:
-    # Regression: on Python 3.14 json.loads parses this without RecursionError,
-    # so only the explicit depth limit makes the message "deeply nested".
-    depth = 10_000
-    payload = "[" * depth + "1" + "]" * depth
-    assert len(payload.encode("utf-8")) < MAX_BUNDLE_BYTES
-    with pytest.raises(BundleFormatError, match="deeply nested"):
-        parse_json(payload)
-
-
 def _nested_arrays(depth: int) -> str:
     return "[" * depth + "1" + "]" * depth
 
@@ -153,6 +143,15 @@ def _object_over_arrays(depth: int) -> str:
 
 def _nested_objects(depth: int) -> str:
     return '{"a": ' * depth + "1" + "}" * depth
+
+
+def test_parse_json_rejects_deeply_nested_under_size_cap() -> None:
+    # Regression: on Python 3.14 json.loads parses this without RecursionError,
+    # so only the explicit depth limit makes the message "deeply nested".
+    payload = _nested_arrays(10_000)
+    assert len(payload.encode("utf-8")) < MAX_BUNDLE_BYTES
+    with pytest.raises(BundleFormatError, match="deeply nested"):
+        parse_json(payload)
 
 
 _NESTED_SHAPES = pytest.mark.parametrize(
