@@ -11,7 +11,8 @@ gets collapsed into the agent's blanket exception handler — operators see only
 The probes are side-effect-light by design — except ``probe_memory``, which
 necessarily writes to disk: it creates the persist dir (and any missing
 parents) and touches then removes a sentinel file to confirm writability,
-since ``os.access`` alone gives wrong answers under EUID/ACL setups. Even
+since ``os.access`` alone gives wrong answers under EUID/ACL setups; an
+existing ``chroma.sqlite3`` is opened for writing but left unchanged. Even
 ``probe_memory`` avoids opening a Chroma collection so the ~80 MB embedding
 download stays lazy. The remaining probes are non-mutating: open and
 immediately close a connection (no query), construct the LLM client (no
@@ -22,6 +23,7 @@ missing a token).
 from __future__ import annotations
 
 import contextlib
+import errno
 from pathlib import Path
 from typing import Literal
 from urllib.parse import unquote, urlparse
@@ -180,13 +182,21 @@ def probe_llm(cfg: Config) -> None:
 
 
 def probe_memory(cfg: Config) -> None:
-    """Ensure the ChromaDB persist directory exists and is writable.
+    """Ensure the ChromaDB persist directory and any existing store file are writable.
 
     Creates the directory (and any missing parents) and confirms writability
     with a sentinel file — ``os.access`` alone gives wrong answers under
-    EUID/ACL setups and races with the actual write. Does **not** open a
-    Chroma collection (that would trigger the ~80 MB embedding model
-    download, which stays lazy by design).
+    EUID/ACL setups and races with the actual write. When the directory
+    already holds ``chroma.sqlite3``, also opens it for writing (``r+b``,
+    nothing written), because Chroma (observed on 1.5.9) cannot open a store
+    whose database file this process cannot write, even to read it. Segment
+    directories are not checked. Does **not** open a Chroma collection (that
+    would trigger the ~80 MB embedding model download, which stays lazy by
+    design).
+
+    Must run before this process opens the store: on unix, closing any
+    descriptor on ``chroma.sqlite3`` drops every SQLite lock the process
+    holds on it.
     """
     persist_dir = Path(cfg.memory.persist_dir)
 
@@ -210,6 +220,23 @@ def probe_memory(cfg: Config) -> None:
         # unlink. Don't let cleanup-noise shadow the real probe result.
         with contextlib.suppress(OSError):
             sentinel.unlink(missing_ok=True)
+
+    # Not a SQLite ``mode=rw`` connection: SQLite silently falls back to
+    # read-only on a 0444 file, so that check passes on the very store this
+    # one exists to catch.
+    store_file = persist_dir / "chroma.sqlite3"
+    try:
+        with open(store_file, "r+b"):
+            pass
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        reason = exc.strerror or type(exc).__name__
+        if isinstance(exc, PermissionError) or exc.errno == errno.EROFS:
+            detail = f"memory store file {store_file} is not writable by this process: {reason}"
+        else:
+            detail = f"cannot open memory store file {store_file} for writing: {reason}"
+        raise PreflightError("memory", detail) from exc
 
 
 def probe_auth(cfg: Config) -> None:

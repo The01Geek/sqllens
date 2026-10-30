@@ -89,6 +89,8 @@ class MySQLRunner(SqlRunner):
 
         Raises:
             pymysql.Error: If query execution fails (including MAX_EXECUTION_TIME firing).
+            SqlWorkersBusyError: If no SQL worker slot freed in time; the query
+                never ran.
         """
         # The driver calls below block, so they run on the SQL worker pool and
         # the event loop stays free for health checks and other requests. See
