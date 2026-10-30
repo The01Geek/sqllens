@@ -144,6 +144,11 @@ jobs:
             exit 1
           fi
 
+      # MySQL 8.0 enables binary logging, so a user without SUPER cannot create
+      # the stored function the RLS connector test needs (errors 1418/1419).
+      - name: Allow the test user to create MySQL stored functions
+        run: python -c "import pymysql; c = pymysql.connect(host='127.0.0.1', user='root', password='sqllens'); c.cursor().execute('SET GLOBAL log_bin_trust_function_creators = 1'); c.close()"
+
       - run: pytest -q tests/connectors -v
 
   # Auto-request a PRFlow review once both CI jobs above are green, by posting a

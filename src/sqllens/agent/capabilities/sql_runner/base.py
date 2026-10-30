@@ -27,8 +27,9 @@ class SqlRunner(ABC):
         Args:
             args: SQL query arguments
             context: Tool execution context
-            require_base_tables: Verify referenced relations on the execution connection
-                and refuse views or unverified relation kinds before running SQL.
+            require_base_tables: Verify referenced relations and called routines on
+                the execution connection and refuse views, unverified relation kinds,
+                child tables and database-defined routines before running SQL.
                 Required by RLS; implementations must not ignore this flag.
 
         Returns:

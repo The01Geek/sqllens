@@ -512,12 +512,8 @@ def _mysql_parse_sql(sql: str, *, mysql_line_comments: bool) -> str:
     return "".join(chars)
 
 
-def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
-    """Raise ``UnsafeSqlError`` if ``sql`` contains anything other than reads.
-
-    Multiple statements are not allowed. Parse failures are treated as unsafe —
-    we'd rather block a query we can't understand than execute it.
-    """
+def _parse_statements(sql: str, dialect: str | None) -> list[exp.Expression | None]:
+    """Parse ``sql`` as the guards see it, raising ``UnsafeSqlError`` if it cannot."""
     if not sql or not sql.strip():
         raise UnsafeSqlError("empty SQL")
 
@@ -529,9 +525,45 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
     try:
         if type(parser_dialect) in (MySQL, sqlglot.Dialect):
             sql = _mysql_parse_sql(sql, mysql_line_comments=type(parser_dialect) is MySQL)
-        statements = sqlglot.parse(sql, dialect=parser_dialect)
+        return sqlglot.parse(sql, dialect=parser_dialect)
     except (sqlglot.errors.ParseError, sqlglot.errors.TokenError) as e:
         raise UnsafeSqlError(f"could not parse SQL: {e}") from e
+
+
+def _refuse_denied_function(node: exp.Expression, denied_funcs: frozenset[str]) -> None:
+    if isinstance(node, exp.Func):
+        offending = _func_name_candidates(node) & denied_funcs
+        if offending:
+            name = sorted(offending)[0]
+            raise UnsafeSqlError(
+                f"function {name!r} is not allowed: side-effecting / DoS / RCE "
+                "function refused by the read-only guard"
+            )
+
+
+def assert_no_denied_functions(sql: str, *, dialect: str | None = None) -> None:
+    """Raise ``UnsafeSqlError`` if ``sql`` calls a function on the denylist.
+
+    This is the function-denylist part of :func:`assert_select_only` without
+    its statement-type checks. It fails closed the same way: empty SQL, an
+    unresolvable dialect, a parse or tokenize error, or an empty statement in
+    the parse raises.
+    """
+    denied_funcs = _denied_funcs(dialect)
+    for stmt in _parse_statements(sql, dialect):
+        if stmt is None:
+            raise UnsafeSqlError("empty parse tree")
+        for sub in stmt.walk():
+            _refuse_denied_function(sub, denied_funcs)
+
+
+def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
+    """Raise ``UnsafeSqlError`` if ``sql`` contains anything other than reads.
+
+    Multiple statements are not allowed. Parse failures are treated as unsafe —
+    we'd rather block a query we can't understand than execute it.
+    """
+    statements = _parse_statements(sql, dialect)
 
     if len(statements) != 1:
         raise UnsafeSqlError(
@@ -578,11 +610,4 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
         # Side-effecting / DoS / RCE function calls. A valid SELECT can still
         # call e.g. ``load_extension`` (SQLite RCE) or ``pg_read_file`` (data
         # exfiltration); the root-type/DML walk above does not see these.
-        if isinstance(sub, exp.Func):
-            offending = _func_name_candidates(sub) & denied_funcs
-            if offending:
-                name = sorted(offending)[0]
-                raise UnsafeSqlError(
-                    f"function {name!r} is not allowed: side-effecting / DoS / RCE "
-                    "function refused by the read-only guard"
-                )
+        _refuse_denied_function(sub, denied_funcs)
