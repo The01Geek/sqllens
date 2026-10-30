@@ -78,7 +78,7 @@ The docstrings are the user-facing tool descriptions that the calling AI client 
 
 [src/sqllens/tools/_agent.py](../../../src/sqllens/tools/_agent.py) owns the process-wide agent that `query_database` uses (and the transport-layer warmup primes). Extracting the singleton into its own module is structural, not cosmetic: a tool wrapper and the boot-time warmup must reach the *same* `Agent` object graph (memory state, tool registrations, cold-start cost) so neither can accidentally build a competing agent, and the cfg-mismatch warning has exactly one definition site.
 
-- **Lazy, race-safe singleton agent.** The agent and the `Config` that built it are stored together as one atomically-assigned tuple, `_AGENT_STATE: tuple[Agent, Config] | None`, and built on the first call via `build_agent(cfg)` (see [agent/factory.md](../agent/factory.md)). `get_agent` is `async` and guards the cold start with an `asyncio.Lock` (`_AGENT_LOCK`) using **double-checked locking**: the outer `_AGENT_STATE is None` test is a fast path that skips the lock once the agent exists; correctness comes from the inner re-check after awaiting the lock, so two concurrent first calls cannot both run `build_agent`. Note `build_agent` itself only *wires* objects — `ChromaAgentMemory.__init__` does no I/O, so the ChromaDB open and the ~80 MB embedding-model download are **not** triggered by `build_agent`; they fire lazily the first time a memory method touches the collection (or eagerly at boot via `_warm_memory`, below). A later call whose `cfg` is a *different object* (identity check, not `==` — see "Why all core tools take `cfg` from the closure") is still served by the original agent, but logs an explicit warning instead of silently honoring a config it is not using. The agent itself is safe for concurrent in-flight async requests because each request gets its own `RequestContext`.
+- **Lazy, race-safe singleton agent.** The agent and the `Config` that built it are stored together as one atomically-assigned tuple, `_AGENT_STATE: tuple[Agent, Config] | None`, and built on the first call via `build_agent(cfg)` (see [agent/factory.md](../agent/factory.md)). `get_agent` is `async` and guards the cold start with an `asyncio.Lock` (`_AGENT_LOCK`) using **double-checked locking**: the outer `_AGENT_STATE is None` test is a fast path that skips the lock once the agent exists; correctness comes from the inner re-check after awaiting the lock, so two concurrent first calls cannot both run `build_agent`. Note `build_agent` itself only *wires* objects — `ChromaAgentMemory.__init__` does no I/O, so the ChromaDB open and the ~80 MB embedding-model download are **not** triggered by `build_agent`; they fire lazily the first time a memory method touches the collection (or eagerly at boot via `_warm_memory`, below). A later call whose `cfg` is a *different object* (identity check, not `==` — see "Why all core tools take `cfg` from the closure") is still served by the original agent, but logs an explicit warning instead of silently honoring a config it is not using. Each request gets its own `RequestContext`; what makes concurrent in-flight requests safe is described in "Concurrency: worker threads and the per-conversation queue" below.
 - **Error taxonomy lives in `query_database`, not here.** The sanitized-internal / SQL-execution-prefix / verbatim-`UnsafeSqlError` split is defined once in `tools/query_database.py` (`_INTERNAL_ERROR_MESSAGE`, `_SQL_EXECUTION_ERROR_PREFIX`). `_agent.py` only constructs and caches the agent.
 - **Stable re-exports.** `prime_agent` and `get_agent` are also re-exported from `tools/query_database.py` (in `__all__`) so existing call sites (`transport/http.py`, several tests) that import from there still work without churn.
 
@@ -179,6 +179,69 @@ End-to-end flow:
 4. **The model passes it back** as the `conversation_id` tool argument on the next call, closing the loop.
 
 The conversation store is **in-process and ephemeral** — dropped on restart, never persisted to a server-side database (CLAUDE.md non-goal). Pinned by `tests/unit/test_server.py` (`_meta` + footer assembly), `tests/unit/test_query_database.py` (id threaded into `send_message`), and `tests/unit/test_format.py` (`append_conversation_footer`).
+
+## Concurrency: worker threads and the per-conversation queue
+
+The server runs on one asyncio event loop, and the Anthropic SDK client and the
+database drivers are both synchronous. Issue #255 moved exactly those leaf
+calls onto worker threads, so the loop stays free while a question waits.
+
+- **Anthropic calls and database queries run on worker threads.**
+  `AnthropicLlmService.send_request` and `stream_request`
+  ([src/sqllens/agent/integrations/anthropic/llm.py](../../../src/sqllens/agent/integrations/anthropic/llm.py))
+  each run their synchronous SDK call inside one `asyncio.to_thread` call; the
+  streaming variant drains the whole stream in that one thread and yields the
+  same chunk sequence afterwards (the agent's streaming handler accumulates
+  every chunk and yields nothing intermediate, so no output changes). Each of
+  the Postgres, MySQL and SQLite runners moved its entire `run_sql` body —
+  connect, session set-up, execute, fetch, close — into one `_run_sql_blocking`
+  call run through `asyncio.to_thread`. `asyncio.to_thread`, not
+  `loop.run_in_executor`: it copies the caller's `contextvars.Context`, which
+  is how the per-request profile's `max_rows` reaches `effective_row_cap`
+  inside the thread. The result: `GET /healthz` is answered, and a
+  `query_database` call on another conversation makes progress, while one call
+  waits.
+- **Calls sharing a `conversation_id` run one at a time.** The conversation
+  store and the agent cold-start lock are built for one event loop, so
+  `tools/query_database.py` holds a per-conversation `asyncio.Lock` around the
+  agent run. A call that arrives while another call on the same id is running
+  waits for it to finish, then runs; the lock is taken *before* the run timer,
+  so queue wait is not reported as the call's own duration. Each registry entry
+  counts holders and waiters and is deleted when that count reaches zero, so no
+  entry accumulates per conversation ever seen. A `None` `conversation_id`
+  (reachable only by a direct `_impl` caller — the MCP tool body always mints
+  one) takes no lock: the agent mints a private id no other caller can name.
+- **A cancelled call's messages are removed from its conversation.** After
+  taking the turn lock and before the agent run, the tool records the
+  conversation's message count; on cancellation it truncates back to that count
+  through the synchronous `BoundedConversationStore.truncate_messages` and
+  re-raises, returning no result. The truncate is synchronous because the
+  handler runs inside an already-cancelled task, where a suspending `await`
+  would never resume. The next call on that id therefore sees the history as it
+  stood when the cancelled call's turn began, including any earlier call's
+  messages.
+- **What deliberately stays on the event loop.** `import_memory` and the
+  memory-administration MCP tools still make their synchronous memory-store
+  calls on the loop, so those tools still block it while they run. So do the
+  per-query scratch CSV write (`df.to_csv`) and the read-only and
+  row-level-security guards' SQL parsing. Nothing interrupts work already
+  running on a worker thread: a cancelled call's query runs until it finishes or
+  the engine's statement timeout stops it (see
+  [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md)),
+  and a cancelled call's Anthropic request runs, and is billed, until it
+  returns. No thread pool of SQL Lens' own is added — these calls share
+  asyncio's default executor, so beyond its thread count further calls wait for
+  a free thread; the ChromaDB memory store keeps its own two-thread pool. There
+  are no progress notifications and no acknowledge-now / fetch-later job API: a
+  call still holds its request open until the agent run ends, so a question
+  slower than a client's timeout still times out for that client.
+
+Pinned by `tests/unit/test_event_loop_offload.py` (loop liveness per runner and
+per Anthropic mode, the streaming chunk-shape pin, and the profile row-cap
+`ContextVar` pin), `tests/unit/test_query_database_queue.py` (queue ordering,
+entry cleanup, cancel rollback), and
+`tests/integration/test_http_transport.py` (`/healthz` answered while a call is
+blocked inside the synchronous Anthropic client).
 
 ## The MCP App interactive result widget
 

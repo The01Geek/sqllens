@@ -495,9 +495,10 @@ class TestHealthzDuringBlockingCall:
         blocked = threading.Event()
 
         class _FakeMessage:
-            content = [{"type": "text", "text": "ok"}]
-            stop_reason = "end_turn"
-            usage = None
+            def __init__(self) -> None:
+                self.content = [{"type": "text", "text": "ok"}]
+                self.stop_reason = "end_turn"
+                self.usage = None
 
         def _create(**_payload):
             blocked.set()
