@@ -10,7 +10,9 @@ import json
 import pytest
 from pydantic import ValidationError
 
+from sqllens.memory import io as memory_io
 from sqllens.memory.io import (
+    MAX_BUNDLE_DEPTH,
     BundleFormatError,
     parse_csv,
     parse_json,
@@ -132,18 +134,67 @@ def test_parse_csv_rejects_oversize_bundle() -> None:
 
 
 def test_parse_json_rejects_deeply_nested_under_size_cap() -> None:
-    # CPython's _json C scanner recurses on the native stack and raises
-    # RecursionError beyond ~5-9k depth. RecursionError is an Exception but
-    # NOT a JSONDecodeError, so without the dedicated handler the unstructured
-    # error escapes past every BundleFormatError caller in server.import_memory
-    # and cli.import_memory — violating the CLAUDE.md structured-signal rule
-    # AND the _enforce_size_cap docstring's "refused before allocation"
-    # promise (a 20KB nested-array bomb is well below MAX_BUNDLE_BYTES).
+    # Regression: on Python 3.14 json.loads parses this without RecursionError,
+    # so only the explicit depth limit makes the message "deeply nested".
     depth = 10_000
     payload = "[" * depth + "1" + "]" * depth
     assert len(payload.encode("utf-8")) < MAX_BUNDLE_BYTES
     with pytest.raises(BundleFormatError, match="deeply nested"):
         parse_json(payload)
+
+
+def _nested_arrays(depth: int) -> str:
+    return "[" * depth + "1" + "]" * depth
+
+
+def _object_over_arrays(depth: int) -> str:
+    return '{"x": ' + _nested_arrays(depth - 1) + "}"
+
+
+def _nested_objects(depth: int) -> str:
+    return '{"a": ' * depth + "1" + "}" * depth
+
+
+_NESTED_SHAPES = pytest.mark.parametrize(
+    "build", [_nested_arrays, _object_over_arrays, _nested_objects]
+)
+
+
+@_NESTED_SHAPES
+@pytest.mark.parametrize("depth", [MAX_BUNDLE_DEPTH + 1, 10_000])
+def test_parse_json_rejects_nesting_beyond_depth_limit(build, depth: int) -> None:
+    with pytest.raises(BundleFormatError, match="deeply nested"):
+        parse_json(build(depth))
+
+
+@_NESTED_SHAPES
+def test_parse_json_depth_limit_admits_max_depth(build) -> None:
+    # Depth 64 passes the depth check and fails later on the schema or root
+    # type, so the message must not be the depth one.
+    with pytest.raises(BundleFormatError) as excinfo:
+        parse_json(build(MAX_BUNDLE_DEPTH))
+    assert "deeply nested" not in str(excinfo.value)
+
+
+def test_parse_json_depth_walk_reaches_later_siblings() -> None:
+    # The deep branch sits in the second list item and the second key, so a
+    # walk that follows only the first child would miss it.
+    payload = (
+        '{"sql_pairs": {"pairs": [{"question": "q", "sql": "SELECT 1"}]}, '
+        '"schema_docs": [{"content": "c"}, ' + _nested_arrays(MAX_BUNDLE_DEPTH) + "]}"
+    )
+    with pytest.raises(BundleFormatError, match="deeply nested"):
+        parse_json(payload)
+
+
+def test_parse_json_maps_loads_recursion_error_to_deeply_nested(monkeypatch) -> None:
+    def _raise(*_args, **_kwargs):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(memory_io.json, "loads", _raise)
+    with pytest.raises(BundleFormatError, match="deeply nested") as excinfo:
+        parse_json('{"schema_docs": []}')
+    assert isinstance(excinfo.value.__cause__, RecursionError)
 
 
 def test_parse_json_rejects_multibyte_oversize_below_codepoint_cap() -> None:

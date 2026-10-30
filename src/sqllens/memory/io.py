@@ -27,6 +27,12 @@ from sqllens.memory.schema import (
 CSV_HEADER = ["question", "sql"]
 VALID_FORMATS = ("json", "csv")
 
+# Maximum container nesting of a JSON bundle, the root container counting as
+# depth 1. Keep it far below where ``json.loads`` on 3.11 raises
+# ``RecursionError`` (under 1,000 levels), or the walk stops being what
+# rejects a deep bundle there and the message differs by Python version.
+MAX_BUNDLE_DEPTH = 64
+
 # CSV-injection (CWE-1236) defang set. Any cell starting with one of these
 # characters becomes a formula trigger when opened in Excel/LibreOffice; we
 # prefix such cells with a single apostrophe at the default parse and serialize
@@ -88,6 +94,24 @@ def _enforce_item_caps(bundle: MemoryBundle) -> None:
         )
 
 
+def _enforce_depth_cap(raw: object) -> None:
+    """Reject parsed JSON whose container nesting exceeds ``MAX_BUNDLE_DEPTH``.
+
+    Iterative, never recursive, and only containers go on the stack.
+    """
+    stack: list[tuple[dict | list, int]] = []
+    if isinstance(raw, (dict, list)):
+        stack.append((raw, 1))
+    while stack:
+        container, depth = stack.pop()
+        if depth > MAX_BUNDLE_DEPTH:
+            raise BundleFormatError("bundle JSON is too deeply nested to parse safely")
+        children = container.values() if isinstance(container, dict) else container
+        for child in children:
+            if isinstance(child, (dict, list)):
+                stack.append((child, depth + 1))
+
+
 def _defang_csv_cell(value: str) -> str:
     """Neutralise a CSV-injection formula trigger by leading-apostrophe escape.
 
@@ -113,19 +137,16 @@ def parse_json(text: str) -> MemoryBundle:
     except json.JSONDecodeError as exc:
         raise BundleFormatError(f"invalid JSON: {exc}") from exc
     except RecursionError as exc:
-        # CPython's _json C scanner recurses on the native stack and bypasses
-        # ``sys.getrecursionlimit()`` for several thousand levels before
-        # raising ``RecursionError("maximum recursion depth exceeded while
-        # decoding a JSON array...")``. A 20 KB ``[[[…]]]`` bomb sails past
-        # the ``MAX_BUNDLE_BYTES`` size cap and blows the scanner stack
-        # mid-parse. ``RecursionError`` is an ``Exception`` subclass but
-        # NOT a ``JSONDecodeError``, so without this handler the unstructured
-        # error propagates past the ``except BundleFormatError`` callers in
-        # ``server.import_memory`` / ``cli.import_memory``, violating the
-        # CLAUDE.md "structured signal, never an unguarded crash" contract.
+        # Input too deep for ``json.loads`` itself never reaches
+        # ``_enforce_depth_cap``. ``RecursionError`` is not a
+        # ``JSONDecodeError``; without this handler it escapes the
+        # ``except BundleFormatError`` callers as an unstructured crash.
         raise BundleFormatError(
             "bundle JSON is too deeply nested to parse safely"
         ) from exc
+    # Must run before the root-type check, or a deep array root gets
+    # "bundle root must be a JSON object" instead of "deeply nested".
+    _enforce_depth_cap(raw)
     if not isinstance(raw, dict):
         raise BundleFormatError("bundle root must be a JSON object")
     try:
