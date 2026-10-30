@@ -30,7 +30,10 @@ jobs:
           ref: ${{ github.event_name == 'schedule' && github.ref_name || github.event.repository.default_branch }}
           persist-credentials: false
       - name: Select the public default-branch commit
-        run: echo "SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+        run: |
+          set -euo pipefail
+          source_sha=$(git rev-parse HEAD)
+          printf 'SOURCE_SHA=%s\n' "$source_sha" >> "$GITHUB_ENV"
       - name: Dispatch to the private audit host
         env:
           SECURITY_AUDIT_REPOSITORY: ${{ secrets.SECURITY_AUDIT_REPOSITORY }}

@@ -118,6 +118,19 @@ private context files, stale revisions and safe failure diagnostics with mocked
 GitHub responses. Run it with `pytest -q tests/unit/test_private_security_audit.py`.
 Validate both workflow files with `actionlint` as well.
 
+The Python tests also execute the public commit-selection shell step with passing
+and failing git controls, exercise the dispatch guards before network access, and
+drive the real HTTP client with synthetic pagination and response-size boundaries.
+CI's Python 3.12 job evaluates the public workflow's schedule and manual-dispatch
+expressions with GitHub's pinned `@actions/expressions` library. To run those tests
+locally, use Node 24 with the Python development environment active (including
+PyYAML):
+
+```bash
+npm ci --prefix .github/tests/security-audit --ignore-scripts --no-audit --no-fund
+npm test --prefix .github/tests/security-audit
+```
+
 These checks do not establish live Claude output quality, cross-repository token
 permissions, or successful advisory creation. Verify those privately during
 activation after the host and credentials are chosen; do not describe the audit as

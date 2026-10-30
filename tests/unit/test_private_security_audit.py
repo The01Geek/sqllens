@@ -4,8 +4,11 @@
 """Privacy boundaries for scheduled security reporting."""
 
 import importlib.util
+import io
 import json
+import os
 import stat
+import subprocess
 from pathlib import Path
 from urllib.error import HTTPError
 
@@ -545,3 +548,123 @@ def test_prepare_rejects_invalid_effort_before_draft_reads_or_files(prepare_envi
     assert client.calls == []
     assert not (prepare_environment / "context.json").exists()
     assert not (prepare_environment / "output").exists()
+
+
+@pytest.mark.parametrize("git_exit", [0, 23])
+def test_public_commit_selection_propagates_git_failure(tmp_path, git_exit):
+    workflow = yaml.safe_load((ROOT / ".github/workflows/security-audit.yml").read_text())
+    step = next(
+        step
+        for step in workflow["jobs"]["dispatch"]["steps"]
+        if step.get("name") == "Select the public default-branch commit"
+    )
+    git = tmp_path / "git"
+    git.write_text(f"#!/bin/sh\nprintf '%s\\n' {SHA}\nexit {git_exit}\n")
+    git.chmod(0o755)
+    github_env = tmp_path / "github-env"
+    github_env.write_text("EXISTING=preserved\n")
+    result = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-e", "-c", step["run"]],
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "GITHUB_ENV": str(github_env),
+        },
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    assert result.returncode == git_exit, result.stderr
+    expected = "EXISTING=preserved\n" + (f"SOURCE_SHA={SHA}\n" if git_exit == 0 else "")
+    assert github_env.read_text() == expected
+
+
+@pytest.mark.parametrize(
+    ("enabled", "repository", "expected_exit", "expected_stdout"),
+    [
+        (True, audit.REPOSITORY, 0, "Private audit dispatched.\n"),
+        (False, audit.REPOSITORY, 0, "Security audit disabled by repository configuration.\n"),
+        ("false", audit.REPOSITORY, 1, ""),
+        (0, audit.REPOSITORY, 1, ""),
+        (None, audit.REPOSITORY, 1, ""),
+        (True, "example/unexpected-source", 1, ""),
+    ],
+)
+def test_dispatch_cli_gates_before_network(
+    monkeypatch, tmp_path, capsys, enabled, repository, expected_exit, expected_stdout
+):
+    (tmp_path / ".prflow").mkdir()
+    (tmp_path / ".prflow/config.json").write_text(
+        json.dumps({"workflows": {"security_audit": enabled}})
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(audit.sys, "argv", ["audit", "dispatch"])
+    monkeypatch.setenv("GITHUB_REPOSITORY", repository)
+    monkeypatch.setenv("SOURCE_SHA", SHA)
+    monkeypatch.setenv("LOOKBACK_DAYS", "7")
+    monkeypatch.setenv("SECURITY_AUDIT_REPOSITORY", "example/private-audit")
+    client = FakeGitHub(({"private": True, "default_branch": "main"}, None), (None, None))
+    monkeypatch.setattr(audit, "GitHub", lambda token: client)
+
+    assert audit.main() == expected_exit
+    output = capsys.readouterr()
+    assert output.out == expected_stdout
+    expected_error = (
+        "Security audit failed. Check private audit configuration and access.\n"
+        if expected_exit
+        else ""
+    )
+    assert output.err == expected_error
+    if enabled is True and repository == audit.REPOSITORY:
+        assert [call[0] for call in client.calls] == ["GET", "POST"]
+    else:
+        assert client.calls == []
+
+
+@pytest.fixture
+def http_responses(monkeypatch):
+    responses, requests = [], []
+
+    class Response(io.BytesIO):
+        def __init__(self, raw, headers):
+            super().__init__(raw)
+            self.headers = headers
+
+    class Opener:
+        def open(self, request, timeout):
+            requests.append((request.get_method(), request.full_url))
+            return Response(*responses.pop(0))
+
+    monkeypatch.setattr(audit, "build_opener", lambda handler: Opener())
+    return responses, requests
+
+
+def test_real_http_client_reads_all_draft_pages_from_link_header(http_responses):
+    responses, requests = http_responses
+    next_url = f"https://api.github.com{audit.ADVISORIES}?state=draft&page=2"
+    other = draft("example.other-check", "GHSA-jmpq-rvwx-2345")
+    responses.extend(
+        [
+            (json.dumps([draft()]).encode(), {"Link": f'<{next_url}>; rel="next"'}),
+            (json.dumps([other]).encode(), {}),
+        ]
+    )
+    assert audit.list_drafts(audit.GitHub("synthetic-token")) == [draft(), other]
+    assert requests == [
+        ("GET", f"https://api.github.com{audit.ADVISORIES}?state=draft&per_page=100"),
+        ("GET", next_url),
+    ]
+
+
+@pytest.mark.parametrize("excess_bytes", [0, 1])
+def test_real_http_client_response_budget_boundary(http_responses, excess_bytes):
+    responses, requests = http_responses
+    raw = b"[]" + b" " * (audit.MAX_RESPONSE_BYTES - 2 + excess_bytes)
+    responses.append((raw, {}))
+    client = audit.GitHub("synthetic-token")
+    if excess_bytes:
+        with pytest.raises(audit.AuditError, match="API response too large"):
+            client.request("GET", audit.ADVISORIES)
+    else:
+        assert client.request("GET", audit.ADVISORIES) == ([], None)
+    assert requests == [("GET", f"https://api.github.com{audit.ADVISORIES}")]
