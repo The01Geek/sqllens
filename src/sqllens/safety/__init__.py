@@ -10,10 +10,11 @@ Four orthogonal protections, composed at the factory:
 * ``apply_rls`` / ``RlsGuardRunner`` — per-request row-level-security
   predicate injection via sqlglot AST rewrite; the rewritten SQL is what
   flows on to the read-only guard, and the engine runner then verifies on
-  its execution connection that every referenced relation is a base table.
-  Fail-secure: any rewrite failure (parse error, scope-analysis error,
-  missing/suspicious dynamic value, unprovable protected-table reference)
-  and any view or unverifiable relation blocks the query.
+  its execution connection that every referenced relation is a base table
+  or an allowlisted metadata-only system view. Fail-secure: any rewrite
+  failure (parse error, scope-analysis error, missing/suspicious dynamic
+  value, unprovable protected-table reference) and any other view or
+  unverifiable relation blocks the query.
 * Per-runner statement timeouts (``SET statement_timeout`` on Postgres,
   ``SET SESSION MAX_EXECUTION_TIME`` on MySQL, ``set_progress_handler``
   deadline on SQLite) — server- or driver-side time bound.
@@ -191,10 +192,11 @@ def _relation_check_executor(runner: object) -> object:
     """Return the runner that receives ``require_base_tables`` beneath the guards.
 
     The SQL Lens wrappers only forward the requirement, so the runner that must
-    honor it is the first one beneath them.
+    honor it is the first one beneath them. Exact types only: a subclass may
+    override ``run_sql`` without forwarding, so it is checked itself.
     """
-    while isinstance(runner, (RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner)):
-        runner = runner._inner
+    while type(runner) in (RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner):
+        runner = runner._inner  # type: ignore[attr-defined]
     return runner
 
 

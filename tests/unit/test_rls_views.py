@@ -162,13 +162,18 @@ class _KwargsRunner:
     lambda: _KwargsRunner(),
     lambda: ReadOnlyGuardRunner(RowCapRunner(_LegacyRunner(), max_rows=10), dialect="sqlite"),
     lambda: RowCapRunner(_KwargsRunner(), max_rows=10),
+    lambda: type("CustomCap", (RowCapRunner,), {
+        "run_sql": lambda self, args, context: self._inner.run_sql(args, context),
+    })(_KwargsRunner(), max_rows=10),
 ])
 def test_runner_without_declared_relation_check_is_rejected_at_construction(
     make_inner,
 ) -> None:
     # The shipped wrappers only forward the flag, so the check must reach the
     # runner beneath them; ``**kwargs`` alone does not show the check is done.
-    with pytest.raises(TypeError, match=r"(_LegacyRunner|_KwargsRunner)\.run_sql must declare"):
+    with pytest.raises(
+        TypeError, match=r"(_LegacyRunner|_KwargsRunner|CustomCap)\.run_sql must declare"
+    ):
         RlsGuardRunner(make_inner(), [_RULE], dialect="sqlite")
 
 
@@ -290,6 +295,20 @@ async def test_sqlite_transaction_failure_is_sanitized(monkeypatch) -> None:
     connection.cursor.return_value.execute.assert_not_called()
 
 
+def _fresh_connections():
+    # A new connection per connect() call, so a check run on a second
+    # connection would not match the one the query executes on.
+    conns: list[MagicMock] = []
+
+    def connect(*_a, **_k):
+        conn = MagicMock()
+        conn.cursor.return_value.fetchmany.return_value = []
+        conns.append(conn)
+        return conn
+
+    return conns, connect
+
+
 def _refusing_check(calls):
     def check(connection, sql, *, dialect):
         calls.append((connection, sql, dialect))
@@ -300,9 +319,8 @@ def _refusing_check(calls):
 
 @pytest.mark.parametrize("require", [True, False])
 async def test_postgres_runner_checks_relations_on_its_connection(monkeypatch, require) -> None:
-    conn = MagicMock()
-    conn.cursor.return_value.fetchmany.return_value = []
-    _install_fake_psycopg2(monkeypatch, lambda *_a, **_k: conn)
+    conns, connect = _fresh_connections()
+    _install_fake_psycopg2(monkeypatch, connect)
     from sqllens.agent.integrations.postgres import sql_runner
 
     calls: list = []
@@ -314,6 +332,7 @@ async def test_postgres_runner_checks_relations_on_its_connection(monkeypatch, r
     if require:
         with pytest.raises(RlsError, match="synthetic relation refusal"):
             await run
+        [conn] = conns
         assert calls == [(conn, "SELECT id FROM orders", "postgres")]
         assert not any(
             call.args == ("SELECT id FROM orders",)
@@ -326,9 +345,8 @@ async def test_postgres_runner_checks_relations_on_its_connection(monkeypatch, r
 
 @pytest.mark.parametrize("require", [True, False])
 async def test_mysql_runner_checks_relations_on_its_connection(monkeypatch, require) -> None:
-    conn = MagicMock()
-    conn.cursor.return_value.fetchmany.return_value = []
-    _install_fake_pymysql(monkeypatch, lambda **_k: conn)
+    conns, connect = _fresh_connections()
+    _install_fake_pymysql(monkeypatch, connect)
     from sqllens.agent.integrations.mysql import sql_runner
 
     calls: list = []
@@ -340,6 +358,7 @@ async def test_mysql_runner_checks_relations_on_its_connection(monkeypatch, requ
     if require:
         with pytest.raises(RlsError, match="synthetic relation refusal"):
             await run
+        [conn] = conns
         assert calls == [(conn, "SELECT id FROM orders", "mysql")]
         assert not any(
             call.args == ("SELECT id FROM orders",)
