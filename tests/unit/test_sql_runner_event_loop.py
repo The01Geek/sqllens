@@ -18,6 +18,7 @@ import logging
 import sqlite3
 import threading
 import time
+from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -121,14 +122,25 @@ async def test_postgres_runner_does_not_block_event_loop(
 POOL_LOGGER = "sqllens.agent.integrations.sql_threads"
 
 
+@pytest.fixture(autouse=True)
+def _fresh_sql_executor(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Run each test on its own executor, so no earlier test's call holds a worker."""
+    from sqllens.agent.integrations import sql_threads
+
+    monkeypatch.setattr(sql_threads, "_executor", None)
+    yield
+    if sql_threads._executor is not None:
+        sql_threads._executor.shutdown(wait=False)
+
+
 def _pool_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
     return [r for r in caplog.records if r.name == POOL_LOGGER]
 
 
 async def _fill_pool(
-    release: threading.Event,
+    release: threading.Event, extra: int = 3
 ) -> tuple[list[asyncio.Future[None]], dict[str, int]]:
-    """Occupy every SQL worker slot until ``release`` is set, then queue three more."""
+    """Occupy every SQL worker slot until ``release`` is set, then queue ``extra`` more."""
     from sqllens.agent.integrations.sql_threads import SQL_WORKER_THREADS, run_blocking_sql
 
     lock = threading.Lock()
@@ -153,7 +165,7 @@ async def _fill_pool(
             f"only {counts['running']} of {SQL_WORKER_THREADS} SQL calls ever ran at once"
         )
         await asyncio.sleep(TICK_S)
-    holders += [asyncio.ensure_future(run_blocking_sql(hold)) for _ in range(3)]
+    holders += [asyncio.ensure_future(run_blocking_sql(hold)) for _ in range(extra)]
     return holders, counts
 
 
@@ -230,6 +242,39 @@ async def test_sql_pool_fails_a_call_that_waits_too_long_for_a_worker(
     assert ran == []
 
 
+async def test_sql_pool_logs_every_rejected_call(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqllens.agent.integrations import sql_threads
+
+    monkeypatch.setattr(sql_threads, "WORKER_WAIT_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(sql_threads, "_last_saturation_warning", None)
+    caplog.set_level(logging.INFO, logger=POOL_LOGGER)
+    release = threading.Event()
+    holders, _ = await _fill_pool(release, extra=0)
+    secret_sql = "SELECT secret FROM t"
+    try:
+        # Rejected well within SATURATION_WARNING_INTERVAL_S of the saturation warning.
+        results = await asyncio.gather(
+            *(sql_threads.run_blocking_sql(print, secret_sql) for _ in range(3)),
+            return_exceptions=True,
+        )
+    finally:
+        release.set()
+        await asyncio.gather(*holders)
+    assert [type(r) for r in results] == [sql_threads.SqlWorkersBusyError] * 3
+
+    records = _pool_records(caplog)
+    rejections = [r for r in records if "rejected" in r.getMessage()]
+    assert len(rejections) == 3
+    assert len(records) == 4  # The three rejections and one saturation warning.
+    for record in rejections:
+        assert record.levelno == logging.WARNING
+        message = record.getMessage()
+        assert "secret" not in message
+        assert "busy" not in message
+
+
 async def test_sql_pool_drops_a_queued_call_when_its_caller_is_cancelled() -> None:
     from sqllens.agent.integrations.sql_threads import run_blocking_sql
 
@@ -245,6 +290,31 @@ async def test_sql_pool_drops_a_queued_call_when_its_caller_is_cancelled() -> No
     finally:
         release.set()
         await asyncio.gather(*holders)
+    assert ran == []
+
+
+async def test_sql_pool_drops_a_call_cancelled_in_the_tick_its_slot_is_granted() -> None:
+    from sqllens.agent.integrations import sql_threads
+
+    release = threading.Event()
+    # No extra queued calls: one would take the slot this test frees and hide the race.
+    holders, _ = await _fill_pool(release, extra=0)
+    slot = sql_threads._slots[asyncio.get_running_loop()]
+    ran: list[bool] = []
+    try:
+        queued = asyncio.ensure_future(sql_threads.run_blocking_sql(ran.append, True))
+        for _ in range(3):
+            await asyncio.sleep(0)
+        # Grant the queued call a slot and cancel it before it can run again.
+        slot.release()
+        queued.cancel()
+        await asyncio.wait({queued}, timeout=1)
+        assert queued.cancelled()
+        assert not slot.locked()
+    finally:
+        release.set()
+        await asyncio.gather(*holders)
+    await asyncio.sleep(0.1)
     assert ran == []
 
 
@@ -315,6 +385,87 @@ async def test_sql_pool_lets_a_started_call_finish_and_logs_it(
     [record] = _pool_records(caplog)
     assert (record.levelno, record.args) == (level, args)
     assert "secret" not in record.getMessage()
+
+
+def test_sql_pool_release_after_its_loop_closed_is_silent(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from sqllens.agent.integrations.sql_threads import run_blocking_sql
+
+    caplog.set_level(logging.INFO)
+    started = threading.Event()
+    release = threading.Event()
+
+    def hold() -> None:
+        started.set()
+        assert release.wait(5), "the test never released the query"
+
+    async def until_started() -> None:
+        while not started.is_set():
+            await asyncio.sleep(TICK_S)
+
+    loop = asyncio.new_event_loop()
+    try:
+        call = loop.create_task(run_blocking_sql(hold))
+        loop.run_until_complete(asyncio.wait_for(until_started(), 5))
+        call.cancel()
+        loop.run_until_complete(asyncio.gather(call, return_exceptions=True))
+    finally:
+        loop.close()
+    release.set()
+
+    # The abandoned-call line comes from a callback that runs after the release's.
+    deadline = time.monotonic() + 5
+    while not _pool_records(caplog):
+        assert time.monotonic() < deadline, "the call never finished"
+        time.sleep(TICK_S)
+    [record] = _pool_records(caplog)
+    assert record.levelno == logging.INFO
+    # A callback that raised would be logged at ERROR by concurrent.futures.
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+def test_sql_pool_logs_a_slot_release_that_fails_on_an_open_loop(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from sqllens.agent.integrations import sql_threads
+
+    caplog.set_level(logging.INFO, logger=POOL_LOGGER)
+
+    def refuse(*_args: Any) -> None:
+        raise RuntimeError("cannot schedule")
+
+    loop = SimpleNamespace(is_closed=lambda: False, call_soon_threadsafe=refuse)
+    sql_threads._release_slot(loop, asyncio.Semaphore())  # type: ignore[arg-type]
+
+    [record] = _pool_records(caplog)
+    assert (record.levelno, record.args) == (logging.ERROR, ("RuntimeError",))
+
+
+async def test_sql_pool_returns_the_slot_when_submit_fails(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqllens.agent.integrations import sql_threads
+
+    monkeypatch.setattr(sql_threads, "_last_saturation_warning", None)
+    caplog.set_level(logging.INFO, logger=POOL_LOGGER)
+    executor = sql_threads._get_executor()
+
+    def refuse(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("cannot schedule new futures after shutdown")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(executor, "submit", refuse)
+        with pytest.raises(RuntimeError, match="cannot schedule"):
+            await sql_threads.run_blocking_sql(lambda: None)
+
+    release = threading.Event()
+    # Waits until every one of SQL_WORKER_THREADS calls is running at once.
+    holders, _ = await _fill_pool(release, extra=0)
+    release.set()
+    await asyncio.gather(*holders)
+    # No call found every slot taken, so none waited.
+    assert _pool_records(caplog) == []
 
 
 async def test_sql_pool_is_not_the_default_executor() -> None:
