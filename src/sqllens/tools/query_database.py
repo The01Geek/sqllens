@@ -401,9 +401,23 @@ async def query_database_impl_with_widgets(
             baseline_user_id = ""
             baseline_messages = 0
             if queued_id is not None:
-                baseline_user_id, baseline_messages = await _conversation_baseline(
-                    agent, request_context, queued_id
-                )
+                # Inside the turn lock but above the agent-run ``try`` below, so
+                # this call needs its own handler to stay inside this function's
+                # error taxonomy: an embedder-supplied ``user_resolver`` or
+                # ``conversation_store`` can raise here, and without this clause
+                # the raw exception would travel past ``server.py`` (which only
+                # intercepts AgentRunError) to the MCP client instead of the
+                # sanitized message this function's docstring promises. The
+                # shipped _StaticUserResolver and BoundedConversationStore cannot
+                # raise, so this is unreachable with the default wiring.
+                # CancelledError is a BaseException and so is not caught here.
+                try:
+                    baseline_user_id, baseline_messages = await _conversation_baseline(
+                        agent, request_context, queued_id
+                    )
+                except Exception as e:
+                    logger.exception("conversation baseline read failed")
+                    raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
             started = time.monotonic()
             try:
                 async for comp in agent.send_message(
