@@ -1,5 +1,7 @@
 # Eager preflight on `sqllens serve`
 
+<!-- verified-against: 8d44a95 2026-10-30 -->
+
 Source-of-truth reference for [src/sqllens/preflight.py](../../../src/sqllens/preflight.py) and its integration into the [CLI](../../../src/sqllens/cli.py). Tracks production-readiness item **S-4** in [production-readiness-v0.1.0.md](../production-readiness-v0.1.0.md).
 
 ## Why preflight exists
@@ -73,6 +75,18 @@ Creates `cfg.memory.persist_dir` (with parents) and confirms writability by touc
 
 The sentinel-removal is wrapped in `contextlib.suppress(OSError)` so a permission flip between `touch` and `unlink` can't shadow the real probe result. If the touch succeeded, the directory is writable; cleanup noise is irrelevant.
 
+**Existing store file check.** After the sentinel check, the probe opens `persist_dir / "chroma.sqlite3"` with `open(path, "r+b")` and closes it without writing, so the file's bytes are unchanged. A writable directory can still hold a store file this process cannot write (for example a root-owned file left in a bind mount by a root container), and Chroma (observed on 1.5.9) then cannot open the store at all, even to read it. Outcomes:
+
+- `FileNotFoundError` (no store yet): the probe passes.
+- `PermissionError` or `errno.EROFS`: `PreflightError("memory", "memory store file <path> is not writable by this process: <strerror>")`.
+- Any other `OSError` (for example the path is a directory): `PreflightError("memory", "cannot open memory store file <path> for writing: <strerror>")`.
+
+The open is a real `r+b` open, not `os.access`, for the same EUID/ACL reason as the sentinel. It is not a SQLite `mode=rw` connection either: SQLite silently falls back to read-only on a mode 0444 file, so that check passes on the exact store this one exists to catch. Only `chroma.sqlite3` is checked; nothing inside the store's segment directories is opened.
+
+**Ordering constraint.** `probe_memory` must run before this process opens the store. On unix, closing any descriptor on `chroma.sqlite3` drops every SQLite (POSIX advisory) lock the same process holds on that file, so opening and closing it while a Chroma connection is live in-process could corrupt the store. Both callers satisfy this: `sqllens serve` calls `run_preflight(cfg)` before `run(cfg)`, and `sqllens validate` opens no store.
+
+The check tests the access of the process that runs it, so `sqllens validate --check-memory` reflects the server's access only when run as the server's user. A process running as root normally bypasses file permission bits and passes. Windows behavior of the `r+b` check is not established.
+
 ### `probe_auth`
 
 Calls `build_authenticator(cfg.auth)`. The function raises `ValueError` with an actionable message (e.g. `auth.mode='bearer' requires auth.bearer_token to be set`) when its preconditions aren't met. The probe catches `ValueError` specifically and passes the message through unmodified — prefixing it with `ValueError:` would make a config oversight read like an internal bug.
@@ -126,7 +140,7 @@ Where `<subsystem>` is one of `database | llm | memory | auth` and `<detail>` is
 
 - A driver exception class and fixed connection-failure guidance (database probe); URL-format errors also omit supplied values.
 - The constructor exception rendered the same way (llm probe).
-- A short cause string for filesystem failures (memory probe).
+- A short cause string for filesystem failures, naming the directory or store file (memory probe).
 - The raw `ValueError.args[0]` from `build_authenticator` (auth probe).
 
 Database driver messages are withheld from the printed diagnostic because they may include connection details. The original exception remains available through `__cause__` to in-process callers. This sanitization is scoped to database URL/driver failures.
