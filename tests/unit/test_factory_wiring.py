@@ -101,8 +101,8 @@ async def test_run_sql_classifies_with_database_dialect(
 
     class _Rows:
         async def run_sql(self, args: object, context: object) -> pd.DataFrame:
-            # The built-in runners' frame for a statement that is not
-            # read-shaped, so only the tool's own classification decides.
+            # A frame without the ``read_result`` mark, so only the tool's
+            # own classification decides how it is reported.
             return pd.DataFrame({"rows_affected": [1]})
 
     class _Files:
