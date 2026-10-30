@@ -1,0 +1,159 @@
+{
+  "root_completeness": "established",
+  "verdict": "APPROVE with notes",
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "plan_eligible": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": true,
+    "test_relevant": true,
+    "detect_all_audit": false,
+    "file_count": 15,
+    "changed_lines": 1371,
+    "checklist_skipped": null
+  },
+  "cap_drops": {
+    "count": 0,
+    "by_category": {}
+  },
+  "phase4_demoted": [],
+  "reject_drivers": [],
+  "criterion_exempt": [],
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "file": "src/sqllens/tools/query_database.py",
+      "line_range": [183, 194],
+      "kind": "test_gap",
+      "severity": "important",
+      "agent": "prflow:pr-test-analyzer",
+      "corroboration": 1,
+      "description": "No test covers handing the conversation turn to a queued waiter after the holding call is cancelled. Every cancellation test in tests/unit/test_query_database_queue.py either cancels a call with no waiter parked behind it or cancels the waiter instead of the holder, so the entry.lock.release() in _conversation_turn's finally block is never exercised with someone waiting on it. A regression that dropped or moved that release would leave the next call on the same conversation id blocked until its client times out while the suite still passes, because the entry's user count still reaches zero and the registry-empty assertions still hold."
+    },
+    {
+      "finding_id": "F-2",
+      "file": "src/sqllens/tools/query_database.py",
+      "line_range": [213, 269],
+      "kind": "type_design",
+      "severity": "suggestion",
+      "agent": "prflow:requesting-code-review, prflow:type-design-analyzer",
+      "corroboration": 2,
+      "description": "The cancel-rollback seam is reached by getattr(store, \"truncate_messages\", None) instead of being declared on a type. The ConversationStore abstract base class in src/sqllens/agent/core/storage/base.py does not declare the method, so the caller carries two defensive log-only arms for a method the shipped BoundedConversationStore always provides, and swapping in another store would lose the rollback with only a log line. Both _conversation_baseline and _rollback_conversation also take agent: Any, so nothing checks the attributes they read."
+    },
+    {
+      "finding_id": "F-3",
+      "file": "src/sqllens/agent/integrations/anthropic/llm.py",
+      "line_range": [103, 107],
+      "kind": "comment_drift",
+      "severity": "suggestion",
+      "agent": "prflow:requesting-code-review",
+      "corroboration": 1,
+      "description": "The docstring of stream_request still says \"Yields text chunks as they arrive\", but after this change the whole stream is drained on a worker thread and every chunk is yielded only after get_final_message() returns. The inline comment a few lines below states the new behaviour correctly, so the two contradict each other. The 4.1.5 behavior-inert prose cap covers this finding at Suggestion, which keeps it out of the self-contradicting-diff carve-out."
+    },
+    {
+      "finding_id": "F-4",
+      "file": "src/sqllens/conversation_store.py",
+      "line_range": [109, 122],
+      "kind": "other",
+      "severity": "suggestion",
+      "agent": "prflow:silent-failure-hunter",
+      "corroboration": 1,
+      "description": "BoundedConversationStore.truncate_messages returns the same False for an unknown or evicted conversation id, a user-id mismatch, and a conversation already at or below the requested length. The caller logs all three with one INFO line saying there was nothing to roll back, at src/sqllens/tools/query_database.py lines 277 to 285. In the mismatch case the conversation still carries the cancelled call's messages, so the state is not fine and the log says it is. With the shipped static user resolver the user id is constant, so this case cannot be reached under the default wiring."
+    },
+    {
+      "finding_id": "F-5",
+      "file": "src/sqllens/conversation_store.py",
+      "line_range": [93, 120],
+      "kind": "comment_drift",
+      "severity": "suggestion",
+      "agent": "prflow:comment-analyzer",
+      "corroboration": 1,
+      "description": "The docstring of truncate_messages describes the True and False outcomes in detail but never mentions that the method raises ValueError for a negative length. The new test test_truncate_messages_rejects_a_negative_length pins behaviour the docstring does not describe."
+    },
+    {
+      "finding_id": "F-6",
+      "file": "src/sqllens/tools/query_database.py",
+      "line_range": [113, 126],
+      "kind": "type_design",
+      "severity": "suggestion",
+      "agent": "prflow:type-design-analyzer",
+      "corroboration": 1,
+      "description": "_ConversationQueueEntry is a record with no behaviour whose invariant is maintained by two free functions. The increment lives in _conversation_turn and the matching decrement in _release_queue_entry, and the \"registered exactly while users is above zero\" half is only reachable through a module-level global the entry knows nothing about. A future call site that takes entry.lock directly, or that misses one of the release calls on an error path, would break the no-overlap guarantee with no signal, and users: int = 0 admits a negative count that the <= 0 test then tolerates silently."
+    },
+    {
+      "finding_id": "F-7",
+      "file": "src/sqllens/conversation_store.py",
+      "line_range": [93, 95],
+      "kind": "type_design",
+      "severity": "suggestion",
+      "agent": "prflow:type-design-analyzer",
+      "corroboration": 1,
+      "description": "truncate_messages takes a bare user_id: str while every sibling method takes a User and compares conversation.user.id. The result is a signature whose first two arguments are both unconstrained strings with different meanings, so swapping them still type-checks and returns the same False that the legitimate evicted-conversation case returns."
+    },
+    {
+      "finding_id": "F-8",
+      "file": "src/sqllens/tools/query_database.py",
+      "line_range": [215, 260],
+      "kind": "style",
+      "severity": "suggestion",
+      "agent": "prflow:comment-analyzer",
+      "corroboration": 1,
+      "description": "The comment bodies spend most of their length on how the design was derived and on why a branch is unreachable under the default wiring, and the same reasoning is restated a third time inside the except Exception body. The load-bearing instructions are already stated in the first sentences."
+    },
+    {
+      "finding_id": "F-9",
+      "file": "tests/unit/test_event_loop_offload.py",
+      "line_range": [301, 333],
+      "kind": "test_gap",
+      "severity": "suggestion",
+      "agent": "prflow:pr-test-analyzer",
+      "corroboration": 1,
+      "description": "Propagation of the profile row cap through the ContextVar is pinned for the Postgres runner only, by test_profile_row_cap_reaches_offloaded_runner. Criterion nine is runner-agnostic and the MySQL and SQLite runners each received their own offload hop in this change, so switching either of them to loop.run_in_executor would silently widen that runner's fetch back to the base max_rows with no test failing."
+    },
+    {
+      "finding_id": "F-10",
+      "file": "tests/unit/test_query_database_queue.py",
+      "line_range": [184, 197],
+      "kind": "test_gap",
+      "severity": "suggestion",
+      "agent": "prflow:pr-test-analyzer",
+      "corroboration": 1,
+      "description": "test_second_call_starts_after_first_fails never starts a second call. Its docstring says a failed first call releases the turn like a returning one, but the body runs one failing call and asserts only that the queue registry is empty, so the named behaviour is not executed."
+    },
+    {
+      "finding_id": "F-11",
+      "file": "docs/internal/database-connectors/cleanup-error-handling.md",
+      "line_range": [41, 41],
+      "kind": "documented_falsehood",
+      "severity": "suggestion",
+      "agent": "prflow:pr-test-analyzer",
+      "corroboration": 1,
+      "description": "The shutdown explanation attributes uvicorn's use of asyncio.run and asyncio.Runner to uvicorn/_compat.py, and one agent could not confirm that file path because uvicorn was not readable from its view. Three other agents reported confirming the same path against the installed uvicorn 0.54.0, and the surrounding behavioural claim about shutdown waiting for executor threads matches CPython, so this is recorded as unverified rather than false. Checklist item VC-23 is INCONCLUSIVE for the same reason."
+    }
+  ]
+}

@@ -1,0 +1,746 @@
+{
+  "iter": 1,
+  "loop_role": "fix",
+  "dispatch_mode": "fanned-out",
+  "dispatch_disposition": null,
+  "fix_commit_sha": "5cfc54e9687684cf8eeec53194dfabff9caef58d",
+  "fix_decisions": [
+    {
+      "finding_id": "F-1",
+      "decision": "applied",
+      "commit": "5cfc54e9687684cf8eeec53194dfabff9caef58d",
+      "source_file": "src/sqllens/tools/query_database.py",
+      "claim_text": "The new `await _conversation_baseline(...)` runs inside the per-conversation turn context manager but outside the `try` block that owns the function's error taxonomy, so exceptions from an embedder-supplied user_resolver or conversation_store reach the MCP client as a raw exception string instead of the sanitized _INTERNAL_ERROR_MESSAGE the docstring promises.",
+      "evidence": "Confirmed at source: the baseline await sits inside `async with _conversation_turn(...)` but above the `try` that owns the taxonomy, and src/sqllens/server.py:368 wraps the tool call with only `except AgentRunError`. Fixed by wrapping the baseline call in `except Exception` -> logger.exception + raise RuntimeError(_INTERNAL_ERROR_MESSAGE), the same idiom the sibling paths at lines 388 and 442 use. CancelledError is a BaseException and so is unaffected."
+    }
+  ],
+  "telemetry": {
+    "phase_1": {
+      "calls": 1,
+      "tokens": 149830,
+      "wall_clock_s": 807.7
+    }
+  },
+  "phase3_failed_agents": [],
+  "diff_produced_at_head": "b444a2a6adc46fe36587b6516d3ef04834f02b7c",
+  "iteration_head": "5cfc54e9687684cf8eeec53194dfabff9caef58d",
+  "reference_reads": {
+    "fix_delta": {
+      "status": "verified",
+      "outcome": "clean",
+      "reason": null
+    }
+  },
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "file": "src/sqllens/tools/query_database.py",
+      "line_range": [
+        400,
+        406
+      ],
+      "kind": "unhandled_exception",
+      "severity": "important",
+      "agent": "prflow:silent-failure-hunter, prflow:requesting-code-review",
+      "description": "The new `await _conversation_baseline(...)` runs inside the per-conversation turn context manager but outside the `try` block at line 408 that owns the function's error taxonomy. Its two awaits, `agent.user_resolver.resolve_user` and `agent.conversation_store.get_conversation`, have no handler, so anything they raise passes `server.py` (which only intercepts `AgentRunError`) and reaches the MCP client as a raw exception string instead of the sanitized `_INTERNAL_ERROR_MESSAGE` the docstring at lines 332-334 promises. Unreachable with the shipped `_StaticUserResolver` and `BoundedConversationStore`, both of which are trivial and cannot raise; an embedder-supplied resolver or store reaches it. The sibling rollback path guards this same seam.",
+      "corroboration_count": 2,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-2",
+      "file": "docs/internal/database-connectors/cleanup-error-handling.md",
+      "line_range": [
+        41,
+        41
+      ],
+      "kind": "comment_drift",
+      "severity": "suggestion",
+      "agent": "prflow:comment-analyzer, prflow:requesting-code-review",
+      "description": "The sentence \"the cleanup in the `finally:` above still runs on that same thread, before the exception surfaces at the `await`\" holds for an exception raised inside the threaded body but is false for the cancellation case the same paragraph describes. Because `asyncio.to_thread` cannot interrupt a running worker, a `CancelledError` surfaces at the `await` immediately while the thread's `finally` cleanup runs later. Capped behavior-inert by Phase 4.1.5 (first-conjunct held, limb-one held, limb-two held).",
+      "corroboration_count": 2
+    },
+    {
+      "finding_id": "F-3",
+      "file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+      "line_range": [
+        143,
+        146
+      ],
+      "kind": "comment_drift",
+      "severity": "suggestion",
+      "agent": "prflow:comment-analyzer",
+      "description": "The inline comment repeats the same imprecision: \"teardown runs on the thread that owns the connection, before any exception surfaces at the await\". The thread-affinity half is correct; the \"before any exception surfaces at the await\" half is false under cancellation. The MySQL and Postgres runners carry no equivalent sentence. Capped behavior-inert by Phase 4.1.5.",
+      "corroboration_count": 1
+    },
+    {
+      "finding_id": "F-4",
+      "file": "docs/internal/database-connectors/cleanup-error-handling.md",
+      "line_range": [
+        41,
+        41
+      ],
+      "kind": "documented_falsehood",
+      "severity": "suggestion",
+      "agent": "prflow:silent-failure-hunter",
+      "description": "The rewritten item attributes `loop.shutdown_default_executor()` to `uvicorn/_compat.py` while the issue's verified premise records that call in `uvicorn/server.py`. One agent could not check it (uvicorn is outside the workspace); prflow:comment-analyzer read the installed `uvicorn/_compat.py` 0.54.0 and reported the claim correct, so this stands only as an unresolved cross-check. Capped behavior-inert by Phase 4.1.5.",
+      "corroboration_count": 1
+    },
+    {
+      "finding_id": "F-5",
+      "file": "docs/external/getting-started.md",
+      "line_range": [
+        58,
+        58
+      ],
+      "kind": "documented_falsehood",
+      "severity": "suggestion",
+      "agent": "prflow:silent-failure-hunter",
+      "description": "The added sentence asserts \"so its health check keeps answering\". `/healthz` is served only by the HTTP transport's path normalizer, while the preceding paragraph walks the reader through stdio mode, where no health endpoint exists. True for HTTP, vacuous for the adjacent stdio reader; the criterion asks only for the \"does not stop the server from accepting other requests\" part. Capped by Phase 4.1.5 at important (limb-two not held, docs/external is published), weighed at the lower of that and its original suggestion.",
+      "corroboration_count": 1
+    },
+    {
+      "finding_id": "F-6",
+      "file": "src/sqllens/tools/query_database.py",
+      "line_range": [
+        557,
+        565
+      ],
+      "kind": "logic_error",
+      "severity": "suggestion",
+      "agent": "prflow:silent-failure-hunter",
+      "description": "Every `False` return from the rollback logs one INFO line, but `BoundedConversationStore.truncate_messages` returns `False` for three distinct reasons. One of them, a user-id mismatch, means the conversation still exists and still holds the cancelled call's messages, a genuinely failed rollback that the sibling branch treats as ERROR-worthy. The log cannot distinguish the three. Unreachable today because the shipped resolver yields one user id.",
+      "corroboration_count": 1
+    },
+    {
+      "finding_id": "F-7",
+      "file": "src/sqllens/tools/query_database.py",
+      "line_range": [
+        114,
+        151
+      ],
+      "kind": "type_design",
+      "severity": "suggestion",
+      "agent": "prflow:type-design-analyzer",
+      "description": "`_ConversationQueueEntry` bundles a lock and a public mutable `users` counter but owns no behavior. Its refcount invariant is maintained by two module-level functions, hand-written arithmetic at two call sites, and a separate dict-registration site. `_release_queue_entry` tests `users <= 0`, folding a double release into the same branch as the correct zero case, so a future double-release would delete the entry silently. Behavior on the diff's paths is correct.",
+      "corroboration_count": 1
+    },
+    {
+      "finding_id": "F-8",
+      "file": "src/sqllens/tools/query_database.py",
+      "line_range": [
+        538,
+        549
+      ],
+      "kind": "type_design",
+      "severity": "suggestion",
+      "agent": "prflow:type-design-analyzer",
+      "description": "`truncate_messages` is declared only on `BoundedConversationStore`, not on the `ConversationStore` base class, so the production caller probes for it at run time and degrades to an ERROR log. Support for synchronous cancel rollback is therefore a runtime requirement rather than a typed one, and a type checker cannot warn an embedder that the framework default store loses the rollback.",
+      "corroboration_count": 1
+    },
+    {
+      "finding_id": "F-9",
+      "file": "src/sqllens/conversation_store.py",
+      "line_range": [
+        123,
+        123
+      ],
+      "kind": "type_design",
+      "severity": "suggestion",
+      "agent": "prflow:type-design-analyzer",
+      "description": "`truncate_messages` deletes the tail of `conversation.messages` from outside the model, while `add_message` couples that list to `updated_at` by stamping both together. After a rollback `updated_at` still reflects the cancelled turn whose messages are gone, and that timestamp is the key `list_conversations` sorts on.",
+      "corroboration_count": 1
+    },
+    {
+      "finding_id": "F-10",
+      "file": "src/sqllens/tools/query_database.py",
+      "line_range": [
+        401,
+        406
+      ],
+      "kind": "type_design",
+      "severity": "suggestion",
+      "agent": "prflow:type-design-analyzer",
+      "description": "`_conversation_turn`'s yielded `str | None` carries two decisions at once (which id to roll back, and whether a lock was taken), and the caller keeps the baseline as two independently initialized locals with an empty string standing for \"no baseline\". An empty user id is a representable but illegal state kept from `truncate_messages` only by the `queued_id is not None` guard, where it would match no conversation and return `False` as a silently skipped rollback.",
+      "corroboration_count": 1
+    },
+    {
+      "finding_id": "F-11",
+      "file": "tests/unit/test_event_loop_offload.py",
+      "line_range": [
+        36,
+        46
+      ],
+      "kind": "comment_drift",
+      "severity": "suggestion",
+      "agent": "prflow:pr-test-analyzer",
+      "description": "The comment above `_LIVENESS_TIMEOUT_SECONDS` and `_assert_loop_live_while`'s docstring both claim a pre-fix run fails by the `asyncio.wait_for` probe timing out, which cannot happen: `wait_for`'s timer runs on the same loop the blocking call would hold. On a pre-change tree the test instead fails on `assert not blocked.done()` after the fake driver's own thirty-second wait. The tests work; the stated reason is wrong and will mislead anyone tuning that timeout. Capped behavior-inert by Phase 4.1.5.",
+      "corroboration_count": 1
+    },
+    {
+      "finding_id": "F-12",
+      "file": "tests/unit/test_event_loop_offload.py",
+      "line_range": [
+        1111,
+        1143
+      ],
+      "kind": "test_gap",
+      "severity": "suggestion",
+      "agent": "prflow:pr-test-analyzer",
+      "description": "`test_profile_row_cap_reaches_offloaded_runner` pins the per-request profile row cap for `PostgresRunner` only. MySQL and SQLite gained the same `asyncio.to_thread` hop and each read `effective_row_cap` inside the thread, so switching either to `loop.run_in_executor` (the mistake all three in-code comments warn against) would silently fetch the base `max_rows` with no failing test. The liveness tests for those runners pass regardless of the cap.",
+      "corroboration_count": 1
+    },
+    {
+      "finding_id": "F-13",
+      "file": "src/sqllens/agent/integrations/anthropic/llm.py",
+      "line_range": [
+        105,
+        105
+      ],
+      "kind": "comment_drift",
+      "severity": "suggestion",
+      "agent": "prflow:code-reviewer",
+      "description": "The `stream_request` docstring still says it \"Yields text chunks as they arrive\", while the new implementation drains the whole stream on a worker thread and yields the collected text afterwards. The inline comment below it describes the new behavior correctly. Raised by the code-reviewer as a sub-threshold note. Capped behavior-inert by Phase 4.1.5.",
+      "corroboration_count": 1
+    }
+  ],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": true,
+    "test_relevant": true,
+    "detect_all_audit": false,
+    "file_count": 15,
+    "changed_lines": 1303,
+    "checklist_skipped": null
+  },
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "cap_drops": {
+    "count": 0,
+    "by_category": {}
+  },
+  "checklist": [
+    {
+      "id": "VC-1",
+      "claim_signature": "dependency_interaction:runtime.py:to-thread-context-copy",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-2",
+      "claim_signature": "dependency_interaction:llm.py:messages-create-in-thread:76",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-3",
+      "claim_signature": "dependency_interaction:llm.py:stream-drain-in-thread:124",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-4",
+      "claim_signature": "api_contract:llm.py:streaming-chunk-accumulation",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-5",
+      "claim_signature": "dependency_interaction:sql_runner.py:sqlite-same-thread:101",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-6",
+      "claim_signature": "dependency_interaction:sql_runner.py:mysql-body-move:96",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-7",
+      "claim_signature": "dependency_interaction:sql_runner.py:postgres-body-move:130",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-8",
+      "claim_signature": "api_contract:repo:runner-wrapper-delegation",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-9",
+      "claim_signature": "api_contract:conversation_store.py:truncate-messages-signature",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-10",
+      "claim_signature": "dependency_interaction:query_database.py:baseline-agent-attrs:210",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-11",
+      "claim_signature": "dependency_interaction:conversation_store.py:rollback-same-object",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-12",
+      "claim_signature": "api_contract:query_database.py:cancel-baseline-history:424",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-13",
+      "claim_signature": "dependency_interaction:query_database.py:cancellederror-type:413",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-14",
+      "claim_signature": "api_contract:query_database.py:lock-loop-binding:125",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-15",
+      "claim_signature": "api_contract:query_database.py:server-mints-conversation-id",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-16",
+      "claim_signature": "absolute_claim:query_database.py:no-queue-entry-leak",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-17",
+      "claim_signature": "absolute_claim:query_database.py:no-await-between-rmw",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-18",
+      "claim_signature": "absolute_claim:query_database.py:rollback-never-suspends",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-19",
+      "claim_signature": "absolute_claim:query_database.py:lock-before-timer:397",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-20",
+      "claim_signature": "absolute_claim:read-only-safety.md:timeout-only-stopper",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-21",
+      "claim_signature": "absolute_claim:cleanup-error-handling.md:shutdown-executor-wait",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-22",
+      "claim_signature": "absolute_claim:tools.md:stays-on-loop-list",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-23",
+      "claim_signature": "absolute_claim:tools.md:chromadb-two-thread-pool",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-24",
+      "claim_signature": "test_mock_alignment:tools.md:pinning-tests-exist",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-25",
+      "claim_signature": "test_mock_alignment:test_event_loop_offload.py:fake-pymysql-module-surface:82",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-26",
+      "claim_signature": "test_mock_alignment:test_event_loop_offload.py:fake-psycopg2-module-surface:94",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-27",
+      "claim_signature": "dependency_interaction:test_event_loop_offload.py:mysql-runner-signature:119",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-28",
+      "claim_signature": "test_mock_alignment:test_event_loop_offload.py:sqlite-pragma-readback:157",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-29",
+      "claim_signature": "dependency_interaction:test_event_loop_offload.py:sqlite-connect-patch-target:162",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-30",
+      "claim_signature": "test_mock_alignment:test_event_loop_offload.py:fake-anthropic-message-shape:182",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-31",
+      "claim_signature": "test_mock_alignment:test_event_loop_offload.py:fake-stream-shape:191",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-32",
+      "claim_signature": "dependency_interaction:test_event_loop_offload.py:anthropic-client-attribute:214",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-33",
+      "claim_signature": "data_format_assumption:test_event_loop_offload.py:llm-request-fields:223",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-34",
+      "claim_signature": "api_contract:test_event_loop_offload.py:stream-chunk-sequence:288",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-35",
+      "claim_signature": "data_format_assumption:test_event_loop_offload.py:effective-settings-fields:320",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-36",
+      "claim_signature": "dependency_interaction:test_event_loop_offload.py:fetchmany-row-cap-plus-one:333",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-37",
+      "claim_signature": "absolute_claim:test_event_loop_offload.py:to-thread-carries-contextvar:304",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-38",
+      "claim_signature": "absolute_claim:test_event_loop_offload.py:every-blocking-call-offloaded:8",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-39",
+      "claim_signature": "absolute_claim:test_event_loop_offload.py:shutdown-joins-executor-threads:12",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-40",
+      "claim_signature": "test_mock_alignment:test_query_database_queue.py:gated-agent-surface:63",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-41",
+      "claim_signature": "dependency_interaction:test_query_database_queue.py:conversation-store-api:89",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-42",
+      "claim_signature": "dependency_interaction:test_query_database_queue.py:build-agent-patch-target:109",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-43",
+      "claim_signature": "dependency_interaction:test_query_database_queue.py:conversation-queue-registry:38",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-44",
+      "claim_signature": "api_contract:test_query_database_queue.py:rollback-missing-seam-log:398",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-45",
+      "claim_signature": "api_contract:test_query_database_queue.py:truncate-messages-contract:354",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-46",
+      "claim_signature": "test_mock_alignment:test_query_database_queue.py:settle-loop-sufficiency:120",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-47",
+      "claim_signature": "api_contract:test_query_database_queue.py:none-conversation-id-unqueued:332",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-48",
+      "claim_signature": "test_mock_alignment:_agent_stubs.py:stub-agent-store-and-resolver:271",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-49",
+      "claim_signature": "dependency_interaction:_agent_stubs.py:static-user-resolver:303",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-50",
+      "claim_signature": "test_mock_alignment:test_http_transport.py:fake-query-return-tuple:512",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-51",
+      "claim_signature": "api_contract:test_http_transport.py:healthz-route-unauthenticated:543",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-52",
+      "claim_signature": "absolute_claim:test_http_transport.py:docker-healthcheck-two-second-timeout:485",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-1",
+      "id": "VC-53",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-2",
+      "id": "VC-54",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-3",
+      "id": "VC-55",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-4",
+      "id": "VC-56",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-5",
+      "id": "VC-57",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-6",
+      "id": "VC-58",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-7",
+      "id": "VC-59",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-8",
+      "id": "VC-60",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-9",
+      "id": "VC-61",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-10",
+      "id": "VC-62",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-11",
+      "id": "VC-63",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    }
+  ],
+  "fix_files": [
+    "src/sqllens/tools/query_database.py"
+  ],
+  "synthesized": false
+}

@@ -1,0 +1,744 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "verdict": "APPROVE with notes",
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "file_count": 15,
+  "changed_lines": 1303,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "file": "src/sqllens/tools/query_database.py",
+   "line_range": [
+    400,
+    406
+   ],
+   "kind": "unhandled_exception",
+   "severity": "important",
+   "agent": "prflow:silent-failure-hunter, prflow:requesting-code-review",
+   "corroboration": 2,
+   "description": "The new `await _conversation_baseline(...)` runs inside the per-conversation turn context manager but outside the `try` block at line 408 that owns the function's error taxonomy. Its two awaits, `agent.user_resolver.resolve_user` and `agent.conversation_store.get_conversation`, have no handler, so anything they raise passes `server.py` (which only intercepts `AgentRunError`) and reaches the MCP client as a raw exception string instead of the sanitized `_INTERNAL_ERROR_MESSAGE` the docstring at lines 332-334 promises. Unreachable with the shipped `_StaticUserResolver` and `BoundedConversationStore`, both of which are trivial and cannot raise; an embedder-supplied resolver or store reaches it. The sibling rollback path guards this same seam."
+  },
+  {
+   "finding_id": "F-2",
+   "file": "docs/internal/database-connectors/cleanup-error-handling.md",
+   "line_range": [
+    41,
+    41
+   ],
+   "kind": "comment_drift",
+   "severity": "suggestion",
+   "agent": "prflow:comment-analyzer, prflow:requesting-code-review",
+   "corroboration": 2,
+   "description": "The sentence \"the cleanup in the `finally:` above still runs on that same thread, before the exception surfaces at the `await`\" holds for an exception raised inside the threaded body but is false for the cancellation case the same paragraph describes. Because `asyncio.to_thread` cannot interrupt a running worker, a `CancelledError` surfaces at the `await` immediately while the thread's `finally` cleanup runs later. Capped behavior-inert by Phase 4.1.5 (first-conjunct held, limb-one held, limb-two held)."
+  },
+  {
+   "finding_id": "F-3",
+   "file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+   "line_range": [
+    143,
+    146
+   ],
+   "kind": "comment_drift",
+   "severity": "suggestion",
+   "agent": "prflow:comment-analyzer",
+   "corroboration": 1,
+   "description": "The inline comment repeats the same imprecision: \"teardown runs on the thread that owns the connection, before any exception surfaces at the await\". The thread-affinity half is correct; the \"before any exception surfaces at the await\" half is false under cancellation. The MySQL and Postgres runners carry no equivalent sentence. Capped behavior-inert by Phase 4.1.5."
+  },
+  {
+   "finding_id": "F-4",
+   "file": "docs/internal/database-connectors/cleanup-error-handling.md",
+   "line_range": [
+    41,
+    41
+   ],
+   "kind": "documented_falsehood",
+   "severity": "suggestion",
+   "agent": "prflow:silent-failure-hunter",
+   "corroboration": 1,
+   "description": "The rewritten item attributes `loop.shutdown_default_executor()` to `uvicorn/_compat.py` while the issue's verified premise records that call in `uvicorn/server.py`. One agent could not check it (uvicorn is outside the workspace); prflow:comment-analyzer read the installed `uvicorn/_compat.py` 0.54.0 and reported the claim correct, so this stands only as an unresolved cross-check. Capped behavior-inert by Phase 4.1.5."
+  },
+  {
+   "finding_id": "F-5",
+   "file": "docs/external/getting-started.md",
+   "line_range": [
+    58,
+    58
+   ],
+   "kind": "documented_falsehood",
+   "severity": "suggestion",
+   "agent": "prflow:silent-failure-hunter",
+   "corroboration": 1,
+   "description": "The added sentence asserts \"so its health check keeps answering\". `/healthz` is served only by the HTTP transport's path normalizer, while the preceding paragraph walks the reader through stdio mode, where no health endpoint exists. True for HTTP, vacuous for the adjacent stdio reader; the criterion asks only for the \"does not stop the server from accepting other requests\" part. Capped by Phase 4.1.5 at important (limb-two not held, docs/external is published), weighed at the lower of that and its original suggestion."
+  },
+  {
+   "finding_id": "F-6",
+   "file": "src/sqllens/tools/query_database.py",
+   "line_range": [
+    557,
+    565
+   ],
+   "kind": "logic_error",
+   "severity": "suggestion",
+   "agent": "prflow:silent-failure-hunter",
+   "corroboration": 1,
+   "description": "Every `False` return from the rollback logs one INFO line, but `BoundedConversationStore.truncate_messages` returns `False` for three distinct reasons. One of them, a user-id mismatch, means the conversation still exists and still holds the cancelled call's messages, a genuinely failed rollback that the sibling branch treats as ERROR-worthy. The log cannot distinguish the three. Unreachable today because the shipped resolver yields one user id."
+  },
+  {
+   "finding_id": "F-7",
+   "file": "src/sqllens/tools/query_database.py",
+   "line_range": [
+    114,
+    151
+   ],
+   "kind": "type_design",
+   "severity": "suggestion",
+   "agent": "prflow:type-design-analyzer",
+   "corroboration": 1,
+   "description": "`_ConversationQueueEntry` bundles a lock and a public mutable `users` counter but owns no behavior. Its refcount invariant is maintained by two module-level functions, hand-written arithmetic at two call sites, and a separate dict-registration site. `_release_queue_entry` tests `users <= 0`, folding a double release into the same branch as the correct zero case, so a future double-release would delete the entry silently. Behavior on the diff's paths is correct."
+  },
+  {
+   "finding_id": "F-8",
+   "file": "src/sqllens/tools/query_database.py",
+   "line_range": [
+    538,
+    549
+   ],
+   "kind": "type_design",
+   "severity": "suggestion",
+   "agent": "prflow:type-design-analyzer",
+   "corroboration": 1,
+   "description": "`truncate_messages` is declared only on `BoundedConversationStore`, not on the `ConversationStore` base class, so the production caller probes for it at run time and degrades to an ERROR log. Support for synchronous cancel rollback is therefore a runtime requirement rather than a typed one, and a type checker cannot warn an embedder that the framework default store loses the rollback."
+  },
+  {
+   "finding_id": "F-9",
+   "file": "src/sqllens/conversation_store.py",
+   "line_range": [
+    123,
+    123
+   ],
+   "kind": "type_design",
+   "severity": "suggestion",
+   "agent": "prflow:type-design-analyzer",
+   "corroboration": 1,
+   "description": "`truncate_messages` deletes the tail of `conversation.messages` from outside the model, while `add_message` couples that list to `updated_at` by stamping both together. After a rollback `updated_at` still reflects the cancelled turn whose messages are gone, and that timestamp is the key `list_conversations` sorts on."
+  },
+  {
+   "finding_id": "F-10",
+   "file": "src/sqllens/tools/query_database.py",
+   "line_range": [
+    401,
+    406
+   ],
+   "kind": "type_design",
+   "severity": "suggestion",
+   "agent": "prflow:type-design-analyzer",
+   "corroboration": 1,
+   "description": "`_conversation_turn`'s yielded `str | None` carries two decisions at once (which id to roll back, and whether a lock was taken), and the caller keeps the baseline as two independently initialized locals with an empty string standing for \"no baseline\". An empty user id is a representable but illegal state kept from `truncate_messages` only by the `queued_id is not None` guard, where it would match no conversation and return `False` as a silently skipped rollback."
+  },
+  {
+   "finding_id": "F-11",
+   "file": "tests/unit/test_event_loop_offload.py",
+   "line_range": [
+    36,
+    46
+   ],
+   "kind": "comment_drift",
+   "severity": "suggestion",
+   "agent": "prflow:pr-test-analyzer",
+   "corroboration": 1,
+   "description": "The comment above `_LIVENESS_TIMEOUT_SECONDS` and `_assert_loop_live_while`'s docstring both claim a pre-fix run fails by the `asyncio.wait_for` probe timing out, which cannot happen: `wait_for`'s timer runs on the same loop the blocking call would hold. On a pre-change tree the test instead fails on `assert not blocked.done()` after the fake driver's own thirty-second wait. The tests work; the stated reason is wrong and will mislead anyone tuning that timeout. Capped behavior-inert by Phase 4.1.5."
+  },
+  {
+   "finding_id": "F-12",
+   "file": "tests/unit/test_event_loop_offload.py",
+   "line_range": [
+    1111,
+    1143
+   ],
+   "kind": "test_gap",
+   "severity": "suggestion",
+   "agent": "prflow:pr-test-analyzer",
+   "corroboration": 1,
+   "description": "`test_profile_row_cap_reaches_offloaded_runner` pins the per-request profile row cap for `PostgresRunner` only. MySQL and SQLite gained the same `asyncio.to_thread` hop and each read `effective_row_cap` inside the thread, so switching either to `loop.run_in_executor` (the mistake all three in-code comments warn against) would silently fetch the base `max_rows` with no failing test. The liveness tests for those runners pass regardless of the cap."
+  },
+  {
+   "finding_id": "F-13",
+   "file": "src/sqllens/agent/integrations/anthropic/llm.py",
+   "line_range": [
+    105,
+    105
+   ],
+   "kind": "comment_drift",
+   "severity": "suggestion",
+   "agent": "prflow:code-reviewer",
+   "corroboration": 1,
+   "description": "The `stream_request` docstring still says it \"Yields text chunks as they arrive\", while the new implementation drains the whole stream on a worker thread and yields the collected text afterwards. The inline comment below it describes the new behavior correctly. Raised by the code-reviewer as a sub-threshold note. Capped behavior-inert by Phase 4.1.5."
+  }
+ ],
+ "report": "## Verdict: APPROVE with notes (one Important note and twelve suggestions, all below the configured threshold)\n\nThis PR is ready to merge: every one of the eleven acceptance criteria verified as met, no checklist item failed, and the only substantive note is an error-handling narrowing that the shipped components cannot reach today.\n\nRule applied: rule 6 — a finding or checklist FAIL below the threshold, an exempt finding, or an INCONCLUSIVE item → APPROVE with notes\n\n## Code Review Findings\n\n### 🟠 Important / Major\n\n1. In `src/sqllens/tools/query_database.py`, the new `await _conversation_baseline(...)` at lines 400-406 runs inside the per-conversation turn context manager but outside the `try` block at line 408 that owns this function's error taxonomy. The two awaits it performs, `agent.user_resolver.resolve_user` and `agent.conversation_store.get_conversation`, therefore have no handler: anything they raise travels past `server.py`, which only intercepts `AgentRunError`, and reaches the MCP client as a raw exception string instead of the sanitized `_INTERNAL_ERROR_MESSAGE` the same function's docstring promises. With the shipped `_StaticUserResolver` and `BoundedConversationStore` both calls are trivial and cannot raise, so behavior is correct today; an embedder supplying its own resolver or store would reach it, and the sibling rollback path guards exactly this seam while the baseline path does not. (raised by 2/6 agents)\n\n### 🟡 Suggestion / Minor (12)\n\n<details>\n<summary>12 items</summary>\n\n1. In `docs/internal/database-connectors/cleanup-error-handling.md` line 41, the closing sentence \"the cleanup in the `finally:` above still runs on that same thread, before the exception surfaces at the `await`\" is true for an exception raised inside the threaded body but false for the cancellation case the same paragraph is about. Because `asyncio.to_thread` cannot interrupt a running worker, a `CancelledError` surfaces at the `await` immediately while the thread's `finally` cleanup runs later, possibly minutes later. A reader asking whether the connection is closed by the time a cancelled request returns is led to the wrong answer. (raised by 2/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: enumerated no mechanism coverage under discussion — making the sentence true edits prose only; searched the head view's .sh/.py/.jq/.yml/.yaml/.toml/.cfg/.ini files for \"cleanup-error-handling\" and found no reader, and the file is under docs/internal, which the vendor slice removes rather than publishes -->\n2. In `src/sqllens/agent/integrations/sqlite/sql_runner.py` lines 143-146, the inline comment carries the same imprecision: \"teardown runs on the thread that owns the connection, before any exception surfaces at the await\". The thread-affinity half is correct and load-bearing; the \"before any exception surfaces at the await\" half is false when the awaiting task is cancelled, which is the scenario the new documentation pairs this comment with. The MySQL and Postgres runners carry no equivalent sentence. (raised by 1/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: no mechanism coverage under discussion — the comment describes ordering, not what the teardown covers; no tool or agent reads this comment, and it is a source comment in an installed file the program never prints -->\n3. In `docs/internal/database-connectors/cleanup-error-handling.md` line 41, the rewritten item attributes `loop.shutdown_default_executor()` to `uvicorn/_compat.py`, while the issue's own verified premise records that call as read in `uvicorn/server.py`. One agent could not check this because uvicorn lives outside the workspace; a second agent did read the installed `uvicorn/_compat.py` at version 0.54.0 and reported the claim as correct, so the file path is probably right and this is recorded only as an unresolved cross-check. (raised by 1/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: no mechanism coverage under discussion — the disputed text is a file-path attribution in prose; same searches as item 1 found no tool or agent reader, and docs/internal is not published -->\n4. In `docs/external/getting-started.md` line 58, the added sentence asserts \"so its health check keeps answering\". A `/healthz` endpoint exists only under the HTTP transport's path normalizer, and the paragraph immediately before it walks the reader through stdio mode, where there is no health endpoint at all. The claim is true for HTTP readers and empty for the stdio reader sitting next to it; the acceptance criterion asks only for the \"does not stop the server from accepting other requests\" part. (raised by 1/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=not-held; evidence: no mechanism coverage under discussion — making the sentence true narrows its subject; searched the head view's .sh/.py/.jq/.yml/.yaml/.toml/.cfg/.ini files for \"getting-started\" and found no reader; limb two fails because docs/external is user-facing published documentation, so the cap is Important and the finding is weighed at the lower of that and its original Suggestion -->\n5. In `src/sqllens/tools/query_database.py` lines 557-565, every `False` return from the rollback logs one INFO line reading \"nothing to roll back (unknown/evicted id, or already at N message(s))\". `BoundedConversationStore.truncate_messages` returns `False` for three different reasons, and one of them, a user-id mismatch, means the conversation still exists and still holds the cancelled call's messages — a rollback that genuinely failed, which the sibling branch treats as worth an ERROR. The log gives no way to tell the three apart. This is unreachable today because the shipped resolver yields a single user id. (raised by 1/6 agents)\n6. In `src/sqllens/tools/query_database.py` lines 114-151, `_ConversationQueueEntry` bundles a lock and a public mutable `users` counter but owns no behavior. Its real invariant — that `users` is incremented and decremented exactly once per interested call, and that the entry is registered in the queue map only while the count is above zero — is maintained by two module-level functions plus hand-written arithmetic at two call sites and a third, separate registration site. The release path tests `users <= 0`, which folds a double release into the same branch as the correct zero case, so a future double-release would delete the entry silently rather than surface. Behavior on the paths this diff exercises is correct. (raised by 1/6 agents)\n7. In `src/sqllens/tools/query_database.py` lines 538-549, the rollback calls `truncate_messages`, which is declared only on `BoundedConversationStore` and not on the `ConversationStore` base class. The caller therefore probes for the method at run time and degrades to an ERROR log when it is absent, which makes \"a store wired into the agent supports synchronous cancel rollback\" a runtime requirement rather than a typed one; a type checker cannot warn an embedder that the framework's default store loses the rollback. A narrow protocol, or a base-class method with a default, would state the requirement at the type level. (raised by 1/6 agents)\n8. In `src/sqllens/conversation_store.py` line 123, `truncate_messages` deletes the tail of `conversation.messages` directly, while the model couples that list to `updated_at` by stamping both together in `add_message`. After a rollback the conversation's `updated_at` still reflects the cancelled turn whose messages are gone, and that timestamp is the key `list_conversations` sorts on, so a rolled-back conversation ranks as more recently updated than it is. (raised by 1/6 agents)\n9. In `src/sqllens/tools/query_database.py` lines 155-193 and 401-406, the turn context manager's yielded value carries two decisions in one `str | None` — which id to roll back, and whether a lock was taken — and the caller stores the baseline as two independently initialized locals with an empty string standing for \"no baseline\". An empty user id is a representable but illegal state that only the `queued_id is not None` guard keeps away from `truncate_messages`, where it would match no conversation and return `False`, a silently skipped rollback rather than a signal. A single optional baseline value holding id, user and count together would make the two states mutually exclusive by construction. (raised by 1/6 agents)\n10. In `tests/unit/test_event_loop_offload.py` lines 36-46, the comment above the liveness timeout and the helper's docstring both say a pre-fix run fails by the `asyncio.wait_for` probe timing out. That cannot happen, because `wait_for`'s timer is driven by the same loop the blocking call would be holding, so it cannot fire while the loop is blocked. On a pre-change tree the helper is not reached until the fake driver's own thirty-second wait expires on the loop thread, and the test then fails on a different assertion. The tests are effective; only the explanation of why is wrong, which will mislead the next person tuning that timeout or diagnosing a thirty-second-per-test hang. (raised by 1/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: no mechanism coverage under discussion — the disputed text explains why a test fails, and the assertions themselves are unchallenged; searched the head view's .sh/.py/.jq/.yml/.yaml/.toml/.cfg/.ini files for \"test_event_loop_offload\" and found no tool or agent that reads these comments, and the file is an internal test the program never prints -->\n11. In `tests/unit/test_event_loop_offload.py` lines 1111-1143, the test that pins a per-request profile row cap reaching the offloaded runner covers Postgres only. MySQL and SQLite each gained the same worker-thread hop and each read the effective row cap inside the thread, so switching either of those two to a plain executor call — the exact mistake all three in-code comments warn against — would silently fetch the base row limit with no failing test. The liveness tests for those two runners pass regardless of the cap, so they do not substitute. The consequence is low because one shared mechanism is involved. (raised by 1/6 agents)\n12. In `src/sqllens/agent/integrations/anthropic/llm.py` line 105, the `stream_request` docstring still says it \"Yields text chunks as they arrive\", while the new implementation drains the whole stream on a worker thread and yields the collected text afterwards. The inline comment directly below it describes the new behavior correctly. (raised by 1/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: no mechanism coverage under discussion — the sentence describes yield timing, and the only consumer accumulates every chunk, so correcting it changes no output or branch; no tool or agent reads this docstring, and it is a source docstring in an installed file the program never prints as help -->\n\n</details>\n\n### ℹ️ Informational — Deferred (1)\n\n<details>\n<summary>1 item</summary>\n\n- VC-21: INCONCLUSIVE (suggestion) — Server shutdown waits for in-flight worker threads via `loop.shutdown_default_executor()`, waiting indefinitely on Python 3.11 and up to five minutes on 3.12+, because uvicorn runs the server through `asyncio.run` / `asyncio.Runner` (`uvicorn/_compat.py`). [docs/internal/database-connectors/cleanup-error-handling.md:41]\n\n  <details><summary>Evidence</summary>\n\n  src/sqllens/transport/http.py:249 calls uvicorn.run(app,...), but uvicorn/_compat.py is not in the head view (Glob found none) and no CPython asyncio/runners.py source was supplied. So I could not read the installed uvicorn runner or the Runner.close code per Python version. From memory, 3.11 calls shutdown_default_executor() with no timeout and 3.12+ passes a 300s timeout, but that is not evidence. Missing: the installed uvicorn _compat.py and CPython 3.11/3.12 asyncio/runners.py.\n\n  </details>\n\n</details>\n\n\n## Run details\n\n<details>\n<summary>Run details</summary>\n\n- Diff profile: has_new_types + test_relevant (neither small_diff nor config_only), 15 changed files, 1303 changed lines. Phase 1 and Phase 2 both ran.\n- Working tree at Phase 0: clean, no uncommitted changes.\n- Review prompt extension: `PROMPT-EXTENSION-STATUS: present-empty`. Final-pass `requesting-code-review` extension: `PROMPT-EXTENSION-STATUS: present-empty`.\n- CI evidence for the reviewed head: missing. No engine-ground-truth block listing CI results reached this run, and no in-environment suite result for `b444a2a6adc46fe36587b6516d3ef04834f02b7c` is held. Test claims in this review were settled by reading source, not by running a suite.\n- Normalized (wording-only): 0\n- Re-verification: none. No checklist item failed, so no disputed FAIL was registered.\n- `detect_all_audit`: not set. The new tests pin per-site behavior rather than enumerating a population and asserting completeness over it, so the Phase 3.1.5 completeness critic did not run.\n- Dirty-tree check: clean, no agent modified the working tree.\n- Phase 3 reviewers: all six returned results, none failed.\n- prior-report: none\n- Finding corroboration note: two pairs of findings describe one defect each while their agents filed different `kind` values — the baseline-await note (`unhandled_exception` and `api_misuse`) and suggestion item 1 (`comment_drift` and `documented_falsehood`). Each pair is reported as a single finding corroborated by two agents, matched on the same file, overlapping lines and the same defect in prose.\n- Verdict-severity threshold: `critical` (read exited 0 and printed `critical`).\n\n- Checklist: 62 passed, 0 failed, 1 inconclusive\n- <details><summary>✅ Passed items (62 of 63)</summary>\n\n  - VC-1: `asyncio.to_thread` copies the caller's contextvars.Context into the worker thread, so the per-request profile's `max_rows` ContextVar set by sqllens.runtime is readable inside `_run_sql_blocking` and `effective_row_cap` returns the profile value rather than the base config value. [src/sqllens/runtime.py:26]\n  - VC-2: `self._client.messages.create(**payload)` run inside `asyncio.to_thread` returns the same object the direct synchronous call returned, so the downstream `_parse_message_content`, `resp.usage.input_tokens/output_tokens` and `stop_reason` reads still hold. [src/sqllens/agent/integrations/anthropic/llm.py:73]\n  - VC-3: Draining `stream.text_stream` to a list and calling `stream.get_final_message()` inside the same `with` block on a worker thread yields the same text pieces and the same final message object as the previous incremental iteration, and `get_final_message()` is valid while the context manager is still open. [src/sqllens/agent/integrations/anthropic/llm.py:119]\n  - VC-4: The streaming consumer accumulates every chunk and yields nothing intermediate, so buffering all text before yielding changes no agent output or `_meta` for streaming requests. [src/sqllens/agent/integrations/anthropic/llm.py:116]\n  - VC-5: The SQLite runner's entire connect/execute/fetch/close body, including the progress-handler deadline installed on the connection, runs on one worker thread so `sqlite3`'s default `check_same_thread=True` is not violated. [src/sqllens/agent/integrations/sqlite/sql_runner.py:95]\n  - VC-6: Moving the MySQL runner's `run_sql` body into `_run_sql_blocking` keeps every statement of the original body (connect, ping, session set-up, execute, fetch, close) and the same returned DataFrame and raised `pymysql.Error`. [src/sqllens/agent/integrations/mysql/sql_runner.py:88]\n  - VC-7: Moving the Postgres runner's `run_sql` body into `_run_sql_blocking` preserves the cursor/connection cleanup in its `finally:` and the exceptions it raises, and callers of `run_sql` still await a `pd.DataFrame`. [src/sqllens/agent/integrations/postgres/sql_runner.py:121]\n  - VC-8: Runner subclasses and decorators that wrap or override `run_sql` (e.g. `ReadOnlyGuardRunner`, `RlsGuardRunner`, `RowCapRunner`) still interoperate with the runners now that the body lives in `_run_sql_blocking`, and no other caller invokes the moved body directly. [src/sqllens/agent/integrations/postgres/sql_runner.py:125]\n  - VC-9: `BoundedConversationStore.truncate_messages(conversation_id, user_id, length)` matches the call the cancellation handler makes, which passes the user *id* string (not a `User`) resolved by `_conversation_baseline`, and the stored `Conversation.messages` is a mutable list supporting `del messages[length:]`. [src/sqllens/conversation_store.py:93]\n  - VC-10: The agent object exposes `user_resolver.resolve_user(request_context)` returning a user with `.id`, and `conversation_store.get_conversation(conversation_id, user)` taking a `User` object and returning a `Conversation | None`, as `_conversation_baseline` assumes. [src/sqllens/tools/query_database.py:206]\n  - VC-11: The agent appends the turn's messages to the very same in-store `Conversation` object `truncate_messages` mutates (no copy-then-`update_conversation` replacement), so truncating that object actually removes the cancelled call's messages from the store. [src/sqllens/conversation_store.py:102]\n  - VC-12: The cancelled-call rollback baseline counts the messages the agent has already persisted at turn start, so the surviving history equals exactly the messages present when the turn began — including a user message the agent may persist before the LLM call for a brand-new conversation. [src/sqllens/tools/query_database.py:413]\n  - VC-13: A cancellation delivered while the tool awaits `agent.send_message` surfaces as `asyncio.CancelledError` at that await (not as an anyio-specific exception type), so the new `except asyncio.CancelledError` clause runs the rollback and re-raises. [src/sqllens/tools/query_database.py:413]\n  - VC-14: `asyncio.Lock` instances created at first use inside `_ConversationQueueEntry` bind to the running event loop at acquire time, so entries created by one call are usable by later calls on the same server loop (and the module-level `_CONVERSATION_QUEUES` dict is not shared across loops in tests). [src/sqllens/tools/query_database.py:125]\n  - VC-15: The MCP server layer always passes a concrete `conversation_id` into the tool impl (minting one when the caller sends none), so the unqueued `None` path is reachable only by direct `_impl` callers. [src/sqllens/tools/query_database.py:163]\n  - VC-16: No entry accumulates in `_CONVERSATION_QUEUES` for any conversation ever seen: every created entry is deleted once no call holds or awaits it. [src/sqllens/tools/query_database.py:130]\n  - VC-17: The read-modify-write sequences on `_CONVERSATION_QUEUES` and `entry.users` all run on the event loop with no intervening `await`, so no other task can interleave and plain dict mutations are safe. [src/sqllens/tools/query_database.py:134]\n  - VC-18: A cancelled `query_database` call's rollback is never silently skipped: `truncate_messages` is synchronous for exactly that call site, and the only non-rollback outcome is logged. [src/sqllens/tools/query_database.py:218]\n  - VC-19: Taking the turn lock before `started` means a queued call's wait never appears in its reported duration, and the returned `_meta` is otherwise identical to before the change. [src/sqllens/tools/query_database.py:397]\n  - VC-20: The runner move leaves the engine's statement timeout as the only thing that stops a cancelled request's query, and `statement_timeout_ms = 0` or a non-`SELECT` MySQL statement leaves nothing but the query's own end — i.e. `MAX_EXECUTION_TIME` covers only `SELECT`. [docs/internal/database-connectors/read-only-safety.md:42]\n  - VC-22: Only `import_memory`, the memory-administration tools, the scratch `df.to_csv` write and the read-only / RLS SQL parsing remain on the event loop; no other synchronous blocking leaf of a `query_database` call does. [docs/internal/mcp-server/tools.md:116]\n  - VC-23: The ChromaDB memory store keeps its own two-thread pool, and SQL Lens adds no thread pool of its own beyond asyncio's default executor. [docs/internal/mcp-server/tools.md:124]\n  - VC-24: The tests named as pinning this change exist and exercise loop liveness per runner and per Anthropic mode, the streaming chunk-shape pin, the profile row-cap ContextVar pin, queue ordering, entry cleanup, cancel rollback, and `/healthz` answered during a blocked Anthropic call. [docs/internal/mcp-server/tools.md:132]\n  - VC-25: The fake `pymysql` module stub supplies every attribute MySQLRunner imports or uses (`cursors.DictCursor`, `cursors.SSDictCursor`, `connect`, `Error`), and the runner's execute path calls `cursor.execute(sql)` with a single positional argument and `cursor.fetchmany(n)`. [tests/unit/test_event_loop_offload.py:82]\n  - VC-26: The fake `psycopg2` module stub supplies every attribute PostgresRunner uses (`extras.RealDictCursor`, `extensions.parse_dsn`, `connect`, `Error`), and `parse_dsn` returning an empty dict is enough for the runner to build a connection. [tests/unit/test_event_loop_offload.py:94]\n  - VC-27: `MySQLRunner(host=..., database=..., user=..., password=...)` and `runner.run_sql(RunSqlToolArgs(sql=...), context=...)` match the runner's real constructor and method signatures, and `run_sql` returns a pandas DataFrame supporting `.to_dict(orient=\"records\")`. [tests/unit/test_event_loop_offload.py:119]\n  - VC-28: The SQLite runner's read-only check reads `PRAGMA query_only` via `connection.execute(...).fetchone()` returning an indexable row whose element 0 is truthy, and the query itself goes through `conn.cursor()`. [tests/unit/test_event_loop_offload.py:157]\n  - VC-29: `sqllens.agent.integrations.sqlite.sql_runner` imports `sqlite3` as a module attribute so `monkeypatch.setattr(sqlite_module.sqlite3, \"connect\", ...)` intercepts the runner's connection, and `SqliteRunner(database_path=...)` is the real keyword name. [tests/unit/test_event_loop_offload.py:162]\n  - VC-30: `_FakeMessage` with `content` as a list of plain dicts, `stop_reason` and `usage = None` is a sufficient stand-in for the Anthropic SDK `Message` that `AnthropicLlmService.send_request` parses; the service does not require SDK model objects or attribute access on content blocks. [tests/unit/test_event_loop_offload.py:182]\n  - VC-31: `_FakeStream` matches the SDK streaming surface the service uses: a synchronous context manager with `text_stream` (an iterator of str) and `get_final_message()`, and `client.messages.stream(**payload)` is the call the service makes. [tests/unit/test_event_loop_offload.py:191]\n  - VC-32: `AnthropicLlmService(api_key=...)` accepts that keyword without validating the key, and `_client` is the private attribute holding the synchronous SDK client that both `send_request` and `stream_request` use. [tests/unit/test_event_loop_offload.py:214]\n  - VC-33: `LlmRequest` accepts `messages` and `user` only (no model/max-tokens required), `LlmMessage(role=..., content=...)` are its real field names, and `User(id=..., group_memberships=[])` satisfies `User`'s required fields. [tests/unit/test_event_loop_offload.py:223]\n  - VC-34: `stream_request` yields one chunk per non-empty text piece with `content` set, then a final chunk with `content is None`, `finish_reason == \"end_turn\"`, `provider_content` equal to the concatenated content blocks, and `tool_calls is None` on every chunk. [tests/unit/test_event_loop_offload.py:288]\n  - VC-35: `EffectiveSettings` takes exactly the fields `show_details`, `max_tool_iterations`, `max_rows`, `similarity_threshold`, and `set_effective_settings`/`reset_effective_settings` use the ContextVar token protocol shown. [tests/unit/test_event_loop_offload.py:320]\n  - VC-36: The Postgres runner resolves its row cap as min(profile max_rows, constructor max_rows) and fetches `max_rows + 1` rows, so with a profile cap of 7 it calls `fetchmany(8)` exactly once. [tests/unit/test_event_loop_offload.py:333]\n  - VC-37: The offload uses `asyncio.to_thread` (which propagates contextvars) rather than `loop.run_in_executor`, so the request-local effective-settings ContextVar reaches the worker thread for every offloaded runner call. [tests/unit/test_event_loop_offload.py:304]\n  - VC-38: Before issue #255 the event loop was stuck for the whole duration of every such blocking driver or Anthropic call, and after it the blocking body runs on a worker thread. [tests/unit/test_event_loop_offload.py:8]\n  - VC-39: Interpreter shutdown joins the default executor's threads, so a worker thread left blocked would keep the process from exiting — hence every test must release its `threading.Event` in a `finally`. [tests/unit/test_event_loop_offload.py:12]\n  - VC-40: `_GatedAgent` mirrors the attributes `query_database_impl_with_widgets` reads off the agent — `conversation_store`, `user_resolver`, `agent_memory` (here `None`) — and its `send_message(request_context, message, *, conversation_id=None)` signature matches the real `Agent.send_message`. [tests/unit/test_query_database_queue.py:63]\n  - VC-41: `BoundedConversationStore` exposes async `get_conversation(conversation_id, user)` and `create_conversation(conversation_id, user, message)`, with conversations offering `add_message(Message(role=..., content=...))` and a `messages` list — matching how the real agent mutates history. [tests/unit/test_query_database_queue.py:89]\n  - VC-42: Patching `build_agent` on `sqllens.tools._agent` replaces the agent the `query_database` tool uses, and `build_agent` is called with the config as its only positional argument. [tests/unit/test_query_database_queue.py:109]\n  - VC-43: `_CONVERSATION_QUEUES` is a module-level dict in `sqllens.tools.query_database` keyed by conversation id, safe to `.clear()` between tests, and entries remove themselves once no call holds or awaits them. [tests/unit/test_query_database_queue.py:38]\n  - VC-44: `_rollback_conversation(agent, conversation_id, user_id, length)` is the real private helper signature, and when the store lacks a `truncate_messages` seam it logs at ERROR on logger `sqllens.tools.query_database` with a message containing \"was not rolled back\" and the store class name. [tests/unit/test_query_database_queue.py:398]\n  - VC-45: `BoundedConversationStore.truncate_messages(conversation_id, user_id, length)` is synchronous, returns True only when it dropped messages, returns False for an already-short conversation, an unknown id or another user's conversation, and raises `ValueError(\"length must be >= 0\")` for a negative length. [tests/unit/test_query_database_queue.py:354]\n  - VC-46: A fixed 10-iteration `asyncio.sleep(0)` loop is enough for `query_database_impl_with_widgets` to reach its gate or queue-wait point, so the turn-ordering assertions are deterministic rather than timing-dependent. [tests/unit/test_query_database_queue.py:120]\n  - VC-47: A `None` conversation id takes no queue entry and no rollback, and the agent mints a private id per call so two such calls overlap. [tests/unit/test_query_database_queue.py:332]\n  - VC-48: `StubAgent` now always carries `conversation_store` and `user_resolver`, mirroring the two attributes the real `Agent` sets in `__init__`, because `query_database`'s per-conversation queue reads both before each agent run. [tests/unit/_agent_stubs.py:271]\n  - VC-49: `_StaticUserResolver` is importable from `sqllens.agent.factory` and its `resolve_user(None)` is an awaitable returning a `User` with a stable `id`, usable as the stub's resolver. [tests/unit/_agent_stubs.py:303]\n  - VC-50: The transport test's `fake_query` returns a 5-tuple `(\"ok\", [], None, None, None)` matching the arity and element meanings the server expects from `query_database_impl_with_widgets`, and `server_module` is where the server resolves that symbol. [tests/integration/test_http_transport.py:512]\n  - VC-51: The HTTP transport serves `GET /healthz` at `handle.base_url + \"/healthz\"` returning status 200 without auth when `AuthConfig(mode=\"none\")`. [tests/integration/test_http_transport.py:543]\n  - VC-52: Before #255 the event loop sat inside `messages.create`, and the Docker `HEALTHCHECK` uses a 2-second request timeout that could therefore mark the container unhealthy. [tests/integration/test_http_transport.py:485]\n  - VC-53: While a `query_database` call is blocked inside a synchronous Anthropic client call or inside a synchronous database driver call (connect, execute or fetch), the event loop keeps running other tasks, and the HTTP transport answers `GET /healthz`. This holds for non-streaming and streaming Anthropic requests and for each of the Postgres, MySQL and SQLite runners. [src/sqllens/agent/integrations/anthropic/llm.py:76]\n  - VC-54: Two `query_database` calls with different conversation ids, each blocked inside a synchronous Anthropic or database call, are blocked at the same time: neither waits for the other call to finish before entering its own blocking call. [tests/unit/test_query_database_queue.py:131]\n  - VC-55: Two `query_database` calls with the same conversation id do not overlap: the second call's agent run starts only after the first call has returned, failed or been cancelled. When both calls return or fail, the conversation's history afterwards holds the first call's messages followed by the second call's messages. [src/sqllens/tools/query_database.py:400]\n  - VC-56: After every call on a conversation has returned, failed or been cancelled — including a call cancelled while it was waiting for its turn — the server holds no per-conversation queue entry for that conversation id. [src/sqllens/tools/query_database.py:181]\n  - VC-57: When a `query_database` call is cancelled while it is running, the conversation holds none of the messages that call added and keeps every message that was in it when the cancelled call's turn began (after any earlier call on that conversation id finished). The next call on that conversation id runs with that history. [src/sqllens/tools/query_database.py:420]\n  - VC-58: When a `query_database` call is cancelled, the tool function raises the cancellation and returns no result. [tests/unit/test_query_database_queue.py:312]\n  - VC-59: For the same conversation id, the same sequence of Anthropic responses and the same query results, a `query_database` call returns the same text content and the same `_meta` as before this change, apart from the duration values in the agent trace. This holds for both streaming and non-streaming Anthropic requests. [tests/unit/test_event_loop_offload.py:275]\n  - VC-60: An Anthropic API error raised during a call still produces an `isError: true` result, and a database error or statement timeout raised by a runner still produces a failed `run_sql` step that the agent can re-plan from, as before this change. [src/sqllens/agent/integrations/anthropic/llm.py]\n  - VC-61: A database query run under a profile whose `max_rows` is lower than the base config's fetches at most that profile's `max_rows` plus one rows from the driver. [src/sqllens/runtime.py:26]\n  - VC-62: The change leaves these as they are: - It adds no interruption of work already running on a worker thread. A cancelled call's database query keeps running until it finishes or the engine's statement timeout stops it. Nothing but the query's own end stops it when `statement_timeout_ms = 0`, or when it is a MySQL statement other than `SELECT`, which MySQL's `MAX_EXECUTION_TIME` does not cover. A cancelled call's Anthropic request keeps running, and is billed, until it returns. Server shutdown waits for such threads. - It adds no thread pool of its own. Anthropic calls and database queries share asyncio's default executor, so beyond its thread count further calls wait for a free thread. The ChromaDB memory store keeps its own two-thread pool. - It leaves the synchronous memory-store calls of `import_memory` and the memory-administration MCP tools on the event loop, so those tools still block it while they run. - It leaves the scratch CSV write after each query, `df.to_csv`, and the read-only and row-level-security guards' SQL parsing on the event loop. - It adds no progress notifications and no acknowledge-now / fetch-later job API. A `query_database` call still holds its request open until the agent run ends, so a question that takes longer than a client's timeout still times out for that client. [src/sqllens/agent/integrations/anthropic/llm.py:76]\n  - VC-63: After the change: - `docs/internal/mcp-server/tools.md` states that `query_database`'s Anthropic calls and database queries run on worker threads, that calls sharing a conversation id run one at a time, that a cancelled call's messages are removed from its conversation, and that `import_memory` and the memory-administration tools still block the event loop. - `docs/internal/database-connectors/cleanup-error-handling.md` and `docs/internal/database-connectors/read-only-safety.md` state that a cancelled request's database query keeps running on its worker thread until it finishes or the engine's statement timeout stops it. - `docs/external/getting-started.md` states that a question waiting on the AI service or the database does not stop the server from accepting other requests, and that `import_memory` and the memory-administration tools can still briefly block them. [docs/external/getting-started.md:57]\n\n  </details>\n- Reviewed against issue #255 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] While a `query_database` call is blocked inside a synchronous Anthropic client call or inside a synchronous database driver call (connect, execute or fetch), the event loop keeps running other tasks, and the HTTP transport answers `GET /healthz`. This holds for non-streaming and streaming Anthropic requests and for each of the Postgres, MySQL and SQLite runners.\n- [ ] Two `query_database` calls with different conversation ids, each blocked inside a synchronous Anthropic or database call, are blocked at the same time: neither waits for the other call to finish before entering its own blocking call.\n- [ ] Two `query_database` calls with the same conversation id do not overlap: the second call's agent run starts only after the first call has returned, failed or been cancelled. When both calls return or fail, the conversation's history afterwards holds the first call's messages followed by the second call's messages.\n- [ ] After every call on a conversation has returned, failed or been cancelled — including a call cancelled while it was waiting for its turn — the server holds no per-conversation queue entry for that conversation id.\n- [ ] When a `query_database` call is cancelled while it is running, the conversation holds none of the messages that call added and keeps every message that was in it when the cancelled call's turn began (after any earlier call on that conversation id finished). The next call on that conversation id runs with that history.\n- [ ] When a `query_database` call is cancelled, the tool function raises the cancellation and returns no result.\n- [ ] For the same conversation id, the same sequence of Anthropic responses and the same query results, a `query_database` call returns the same text content and the same `_meta` as before this change, apart from the duration values in the agent trace. This holds for both streaming and non-streaming Anthropic requests.\n- [ ] An Anthropic API error raised during a call still produces an `isError: true` result, and a database error or statement timeout raised by a runner still produces a failed `run_sql` step that the agent can re-plan from, as before this change.\n- [ ] A database query run under a profile whose `max_rows` is lower than the base config's fetches at most that profile's `max_rows` plus one rows from the driver.\n- [ ] The change leaves these as they are: - It adds no interruption of work already running on a worker thread. A cancelled call's database query keeps running until it finishes or the engine's statement timeout stops it. Nothing but the query's own end stops it when `statement_timeout_ms = 0`, or when it is a MySQL statement other than `SELECT`, which MySQL's `MAX_EXECUTION_TIME` does not cover. A cancelled call's Anthropic request keeps running, and is billed, until it returns. Server shutdown waits for such threads. - It adds no thread pool of its own. Anthropic calls and database queries share asyncio's default executor, so beyond its thread count further calls wait for a free thread. The ChromaDB memory store keeps its own two-thread pool. - It leaves the synchronous memory-store calls of `import_memory` and the memory-administration MCP tools on the event loop, so those tools still block it while they run. - It leaves the scratch CSV write after each query, `df.to_csv`, and the read-only and row-level-security guards' SQL parsing on the event loop. - It adds no progress notifications and no acknowledge-now / fetch-later job API. A `query_database` call still holds its request open until the agent run ends, so a question that takes longer than a client's timeout still times out for that client.\n- [ ] After the change: - `docs/internal/mcp-server/tools.md` states that `query_database`'s Anthropic calls and database queries run on worker threads, that calls sharing a conversation id run one at a time, that a cancelled call's messages are removed from its conversation, and that `import_memory` and the memory-administration tools still block the event loop. - `docs/internal/database-connectors/cleanup-error-handling.md` and `docs/internal/database-connectors/read-only-safety.md` state that a cancelled request's database query keeps running on its worker thread until it finishes or the engine's statement timeout stops it. - `docs/external/getting-started.md` states that a question waiting on the AI service or the database does not stop the server from accepting other requests, and that `import_memory` and the memory-administration tools can still briefly block them.",
+ "diff_produced_at_head": "b444a2a6adc46fe36587b6516d3ef04834f02b7c",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:runtime.py:to-thread-context-copy",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "dependency_interaction:llm.py:messages-create-in-thread:76",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "dependency_interaction:llm.py:stream-drain-in-thread:124",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "api_contract:llm.py:streaming-chunk-accumulation",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "dependency_interaction:sql_runner.py:sqlite-same-thread:101",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "dependency_interaction:sql_runner.py:mysql-body-move:96",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "dependency_interaction:sql_runner.py:postgres-body-move:130",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "api_contract:repo:runner-wrapper-delegation",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "api_contract:conversation_store.py:truncate-messages-signature",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "dependency_interaction:query_database.py:baseline-agent-attrs:210",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "dependency_interaction:conversation_store.py:rollback-same-object",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "api_contract:query_database.py:cancel-baseline-history:424",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "dependency_interaction:query_database.py:cancellederror-type:413",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "api_contract:query_database.py:lock-loop-binding:125",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "api_contract:query_database.py:server-mints-conversation-id",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "absolute_claim:query_database.py:no-queue-entry-leak",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "absolute_claim:query_database.py:no-await-between-rmw",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "absolute_claim:query_database.py:rollback-never-suspends",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "absolute_claim:query_database.py:lock-before-timer:397",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "absolute_claim:read-only-safety.md:timeout-only-stopper",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-21",
+   "category": "absolute_claim",
+   "claim": "Server shutdown waits for in-flight worker threads via `loop.shutdown_default_executor()`, waiting indefinitely on Python 3.11 and up to five minutes on 3.12+, because uvicorn runs the server through `asyncio.run` / `asyncio.Runner` (`uvicorn/_compat.py`).",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "uvicorn runs the server through `asyncio.run` / `asyncio.Runner` (`uvicorn/_compat.py`), which calls `loop.shutdown_default_executor()` on the way out. How long it waits depends on the interpreter — on Python 3.11 that call takes no timeout and waits indefinitely; on 3.12+ `asyncio.run` passes it a five-minute cap.",
+   "source_file": "docs/internal/database-connectors/cleanup-error-handling.md",
+   "source_line": 41,
+   "verify_against": "the installed uvicorn's runner code and CPython's `asyncio.Runner.close` / `shutdown_default_executor` signatures per version",
+   "verify_hint": "Check `uvicorn/_compat.py` in the installed uvicorn and `asyncio.runners.Runner.close` in CPython 3.11 vs 3.12, plus how `sqllens serve` starts uvicorn in `src/sqllens/transport/http.py`",
+   "claim_signature": "absolute_claim:cleanup-error-handling.md:shutdown-executor-wait",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-21"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "src/sqllens/transport/http.py:249 calls uvicorn.run(app,...), but uvicorn/_compat.py is not in the head view (Glob found none) and no CPython asyncio/runners.py source was supplied. So I could not read the installed uvicorn runner or the Runner.close code per Python version. From memory, 3.11 calls shutdown_default_executor() with no timeout and 3.12+ passes a 300s timeout, but that is not evidence. Missing: the installed uvicorn _compat.py and CPython 3.11/3.12 asyncio/runners.py.",
+   "file_checked": "src/sqllens/transport/http.py:249",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "absolute_claim:tools.md:stays-on-loop-list",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-23",
+   "claim_signature": "absolute_claim:tools.md:chromadb-two-thread-pool",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-24",
+   "claim_signature": "test_mock_alignment:tools.md:pinning-tests-exist",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-25",
+   "claim_signature": "test_mock_alignment:test_event_loop_offload.py:fake-pymysql-module-surface:82",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-26",
+   "claim_signature": "test_mock_alignment:test_event_loop_offload.py:fake-psycopg2-module-surface:94",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-27",
+   "claim_signature": "dependency_interaction:test_event_loop_offload.py:mysql-runner-signature:119",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-28",
+   "claim_signature": "test_mock_alignment:test_event_loop_offload.py:sqlite-pragma-readback:157",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-29",
+   "claim_signature": "dependency_interaction:test_event_loop_offload.py:sqlite-connect-patch-target:162",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-30",
+   "claim_signature": "test_mock_alignment:test_event_loop_offload.py:fake-anthropic-message-shape:182",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-31",
+   "claim_signature": "test_mock_alignment:test_event_loop_offload.py:fake-stream-shape:191",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-32",
+   "claim_signature": "dependency_interaction:test_event_loop_offload.py:anthropic-client-attribute:214",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-33",
+   "claim_signature": "data_format_assumption:test_event_loop_offload.py:llm-request-fields:223",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-34",
+   "claim_signature": "api_contract:test_event_loop_offload.py:stream-chunk-sequence:288",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-35",
+   "claim_signature": "data_format_assumption:test_event_loop_offload.py:effective-settings-fields:320",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-36",
+   "claim_signature": "dependency_interaction:test_event_loop_offload.py:fetchmany-row-cap-plus-one:333",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-37",
+   "claim_signature": "absolute_claim:test_event_loop_offload.py:to-thread-carries-contextvar:304",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-38",
+   "claim_signature": "absolute_claim:test_event_loop_offload.py:every-blocking-call-offloaded:8",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-39",
+   "claim_signature": "absolute_claim:test_event_loop_offload.py:shutdown-joins-executor-threads:12",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-40",
+   "claim_signature": "test_mock_alignment:test_query_database_queue.py:gated-agent-surface:63",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-41",
+   "claim_signature": "dependency_interaction:test_query_database_queue.py:conversation-store-api:89",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-42",
+   "claim_signature": "dependency_interaction:test_query_database_queue.py:build-agent-patch-target:109",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-43",
+   "claim_signature": "dependency_interaction:test_query_database_queue.py:conversation-queue-registry:38",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-44",
+   "claim_signature": "api_contract:test_query_database_queue.py:rollback-missing-seam-log:398",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-45",
+   "claim_signature": "api_contract:test_query_database_queue.py:truncate-messages-contract:354",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-46",
+   "claim_signature": "test_mock_alignment:test_query_database_queue.py:settle-loop-sufficiency:120",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-47",
+   "claim_signature": "api_contract:test_query_database_queue.py:none-conversation-id-unqueued:332",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-48",
+   "claim_signature": "test_mock_alignment:_agent_stubs.py:stub-agent-store-and-resolver:271",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-49",
+   "claim_signature": "dependency_interaction:_agent_stubs.py:static-user-resolver:303",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-50",
+   "claim_signature": "test_mock_alignment:test_http_transport.py:fake-query-return-tuple:512",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-51",
+   "claim_signature": "api_contract:test_http_transport.py:healthz-route-unauthenticated:543",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-52",
+   "claim_signature": "absolute_claim:test_http_transport.py:docker-healthcheck-two-second-timeout:485",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-53",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-54",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-55",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-56",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-57",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-58",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-59",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-60",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-61",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-10",
+   "id": "VC-62",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-11",
+   "id": "VC-63",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}

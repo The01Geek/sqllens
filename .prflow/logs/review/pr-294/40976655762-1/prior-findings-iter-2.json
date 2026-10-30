@@ -1,0 +1,68 @@
+[
+ {
+  "agent": "prflow:silent-failure-hunter, prflow:requesting-code-review",
+  "severity": "important",
+  "description": "The new `await _conversation_baseline(...)` runs inside the per-conversation turn context manager but outside the `try` block at line 408 that owns the function's error taxonomy. Its two awaits, `agent.user_resolver.resolve_user` and `agent.conversation_store.get_conversation`, have no handler, so anything they raise passes `server.py` (which only intercepts `AgentRunError`) and reaches the MCP client as a raw exception string instead of the sanitized `_INTERNAL_ERROR_MESSAGE` the docstring at lines 332-334 promises. Unreachable with the shipped `_StaticUserResolver` and `BoundedConversationStore`, both of which are trivial and cannot raise; an embedder-supplied resolver or store reaches it. The sibling rollback path guards this same seam.",
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:comment-analyzer, prflow:requesting-code-review",
+  "severity": "suggestion",
+  "description": "The sentence \"the cleanup in the `finally:` above still runs on that same thread, before the exception surfaces at the `await`\" holds for an exception raised inside the threaded body but is false for the cancellation case the same paragraph describes. Because `asyncio.to_thread` cannot interrupt a running worker, a `CancelledError` surfaces at the `await` immediately while the thread's `finally` cleanup runs later. Capped behavior-inert by Phase 4.1.5 (first-conjunct held, limb-one held, limb-two held)."
+ },
+ {
+  "agent": "prflow:comment-analyzer",
+  "severity": "suggestion",
+  "description": "The inline comment repeats the same imprecision: \"teardown runs on the thread that owns the connection, before any exception surfaces at the await\". The thread-affinity half is correct; the \"before any exception surfaces at the await\" half is false under cancellation. The MySQL and Postgres runners carry no equivalent sentence. Capped behavior-inert by Phase 4.1.5."
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "suggestion",
+  "description": "The rewritten item attributes `loop.shutdown_default_executor()` to `uvicorn/_compat.py` while the issue's verified premise records that call in `uvicorn/server.py`. One agent could not check it (uvicorn is outside the workspace); prflow:comment-analyzer read the installed `uvicorn/_compat.py` 0.54.0 and reported the claim correct, so this stands only as an unresolved cross-check. Capped behavior-inert by Phase 4.1.5."
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "suggestion",
+  "description": "The added sentence asserts \"so its health check keeps answering\". `/healthz` is served only by the HTTP transport's path normalizer, while the preceding paragraph walks the reader through stdio mode, where no health endpoint exists. True for HTTP, vacuous for the adjacent stdio reader; the criterion asks only for the \"does not stop the server from accepting other requests\" part. Capped by Phase 4.1.5 at important (limb-two not held, docs/external is published), weighed at the lower of that and its original suggestion."
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "suggestion",
+  "description": "Every `False` return from the rollback logs one INFO line, but `BoundedConversationStore.truncate_messages` returns `False` for three distinct reasons. One of them, a user-id mismatch, means the conversation still exists and still holds the cancelled call's messages, a genuinely failed rollback that the sibling branch treats as ERROR-worthy. The log cannot distinguish the three. Unreachable today because the shipped resolver yields one user id."
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "`_ConversationQueueEntry` bundles a lock and a public mutable `users` counter but owns no behavior. Its refcount invariant is maintained by two module-level functions, hand-written arithmetic at two call sites, and a separate dict-registration site. `_release_queue_entry` tests `users <= 0`, folding a double release into the same branch as the correct zero case, so a future double-release would delete the entry silently. Behavior on the diff's paths is correct."
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "`truncate_messages` is declared only on `BoundedConversationStore`, not on the `ConversationStore` base class, so the production caller probes for it at run time and degrades to an ERROR log. Support for synchronous cancel rollback is therefore a runtime requirement rather than a typed one, and a type checker cannot warn an embedder that the framework default store loses the rollback."
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "`truncate_messages` deletes the tail of `conversation.messages` from outside the model, while `add_message` couples that list to `updated_at` by stamping both together. After a rollback `updated_at` still reflects the cancelled turn whose messages are gone, and that timestamp is the key `list_conversations` sorts on."
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "`_conversation_turn`'s yielded `str | None` carries two decisions at once (which id to roll back, and whether a lock was taken), and the caller keeps the baseline as two independently initialized locals with an empty string standing for \"no baseline\". An empty user id is a representable but illegal state kept from `truncate_messages` only by the `queued_id is not None` guard, where it would match no conversation and return `False` as a silently skipped rollback."
+ },
+ {
+  "agent": "prflow:pr-test-analyzer",
+  "severity": "suggestion",
+  "description": "The comment above `_LIVENESS_TIMEOUT_SECONDS` and `_assert_loop_live_while`'s docstring both claim a pre-fix run fails by the `asyncio.wait_for` probe timing out, which cannot happen: `wait_for`'s timer runs on the same loop the blocking call would hold. On a pre-change tree the test instead fails on `assert not blocked.done()` after the fake driver's own thirty-second wait. The tests work; the stated reason is wrong and will mislead anyone tuning that timeout. Capped behavior-inert by Phase 4.1.5."
+ },
+ {
+  "agent": "prflow:pr-test-analyzer",
+  "severity": "suggestion",
+  "description": "`test_profile_row_cap_reaches_offloaded_runner` pins the per-request profile row cap for `PostgresRunner` only. MySQL and SQLite gained the same `asyncio.to_thread` hop and each read `effective_row_cap` inside the thread, so switching either to `loop.run_in_executor` (the mistake all three in-code comments warn against) would silently fetch the base `max_rows` with no failing test. The liveness tests for those runners pass regardless of the cap."
+ },
+ {
+  "agent": "prflow:code-reviewer",
+  "severity": "suggestion",
+  "description": "The `stream_request` docstring still says it \"Yields text chunks as they arrive\", while the new implementation drains the whole stream on a worker thread and yields the collected text afterwards. The inline comment below it describes the new behavior correctly. Raised by the code-reviewer as a sub-threshold note. Capped behavior-inert by Phase 4.1.5."
+ }
+]
