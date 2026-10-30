@@ -40,7 +40,8 @@ class AnthropicLlmService(LlmService):
     here would stall every other request the server handles until it returned.
     The SDK rejects a synchronous ``http_client`` when the service is built. The
     service never closes its client; the client opens connections only when a
-    request is sent and lives as long as the service.
+    request is sent and lives as long as the service. Those connections belong to
+    the event loop that opened them, so drive one service from one event loop.
     """
 
     def __init__(
