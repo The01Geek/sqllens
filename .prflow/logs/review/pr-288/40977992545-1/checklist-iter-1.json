@@ -1,0 +1,1856 @@
+[
+  {
+    "id": "VC-1",
+    "category": "dependency_interaction",
+    "claim": "A GET of /repos/<owner>/<repo>/security-advisories?state=draft&per_page=100 returns a JSON array whose items are objects carrying a 'state' field equal to 'draft' and a 'ghsa_id' field; any other shape is treated as an invalid response.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 118,
+    "source_line_end": 132,
+    "verify_against": "GitHub REST API reference for repository security advisories (list repository security advisories)",
+    "verify_hint": "Check the documented response schema and query parameters of GET /repos/{owner}/{repo}/security-advisories against `list_drafts` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "dependency_interaction:security_advisories.py:list-draft-advisories-response:118",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "api_contract",
+    "claim": "The 'next' URL GitHub returns in the Link header for advisory pagination is an https://api.github.com URL whose path is exactly /repos/The01Geek/sqllens/security-advisories; any other scheme, host or path aborts pagination.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 136,
+    "source_line_end": 143,
+    "verify_against": "GitHub REST API pagination documentation (Link header format) and the advisories endpoint's own next-page URL shape",
+    "verify_hint": "Check the Link-header next URL path GitHub emits for the advisories endpoint against the `parsed.path != ADVISORIES` guard in `list_drafts` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "api_contract:security_advisories.py:advisory-pagination-path-guard:136",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "data_format_assumption",
+    "claim": "The create-advisory request body accepts the keys summary, description, severity, cve_id, vulnerabilities (with package.ecosystem/package.name, vulnerable_version_range, patched_versions) and start_private_fork, with null permitted for cve_id, vulnerable_version_range and patched_versions.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 288,
+    "source_line_end": 305,
+    "verify_against": "GitHub REST API reference for POST /repos/{owner}/{repo}/security-advisories request body",
+    "verify_hint": "Check the documented required/optional body parameters and nullability for POST /repos/{owner}/{repo}/security-advisories against the payload built in `publish` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "data_format_assumption:security_advisories.py:create-advisory-request-body:288",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "data_format_assumption",
+    "claim": "The create-advisory response is a JSON object whose 'state' is 'draft' and whose 'ghsa_id' matches GHSA-xxxx-xxxx-xxxx in lowercase alphanumerics.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 306,
+    "source_line_end": 310,
+    "verify_against": "GitHub REST API reference for the created repository security advisory response (state values and ghsa_id format)",
+    "verify_hint": "Check the documented 'state' enum and ghsa_id casing for created advisories against the `GHSA` regex at line 25 and the response checks in `publish` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "data_format_assumption:security_advisories.py:created-draft-response-shape:306",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "dependency_interaction",
+    "claim": "GET /repos/{owner}/{repo} returns an object with a boolean 'private' field and a string 'default_branch' field, and the token used can read that metadata for the private audit host.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 93,
+    "source_line_end": 106,
+    "verify_against": "GitHub REST API reference for GET /repos/{owner}/{repo} (full repository response)",
+    "verify_hint": "Check the 'private' and 'default_branch' fields of the repository response against `require_private` and `dispatch` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "dependency_interaction:security_advisories.py:repo-metadata-private-default-branch:93",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "api_contract",
+    "claim": "The private audit host exposes a workflow file named sqllens-security-audit.yml on its default branch that accepts a workflow_dispatch with string inputs source_sha and lookback_days.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 107,
+    "source_line_end": 114,
+    "verify_against": "The private host workflow template documented in docs/internal/security-audits.md and the reusable worker's workflow_call inputs in .github/workflows/security-audit-private.yml",
+    "verify_hint": "Check the host template's file name and its workflow_dispatch input names in `docs/internal/security-audits.md` against the dispatch route and inputs in `dispatch` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "api_contract:security_advisories.py:private-host-workflow-filename:107",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "data_format_assumption",
+    "claim": "The repository's .prflow/config.json supplies 'claude_model' as a string and optionally 'security_audit'.'effort', with 'medium' used when the setting is omitted.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 329,
+    "source_line_end": 335,
+    "verify_against": "The tracked .prflow/config.json and its .prflow/config.schema.json",
+    "verify_hint": "Check whether `claude_model` and a `security_audit.effort` key exist and with what types in `.prflow/config.json` and `.prflow/config.schema.json` against `prepare` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "data_format_assumption:security_advisories.py:prflow-config-model-effort:329",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "data_format_assumption",
+    "claim": "The dispatch kill switch is read from .prflow/config.json as workflows.security_audit, a boolean defaulting to true when absent.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 380,
+    "source_line_end": 386,
+    "verify_against": "The tracked .prflow/config.json 'workflows' object and .prflow/config.schema.json",
+    "verify_hint": "Check the `workflows` keys present in `.prflow/config.json` (and whether `security_audit` is permitted by `.prflow/config.schema.json`) against the `enabled` lookup in `main` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "data_format_assumption:security_advisories.py:workflows-security-audit-switch:380",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "dependency_interaction",
+    "claim": "The Claude CLI --effort flag accepts each of low, medium, high, xhigh and max as the script passes them straight through to claude_args.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 334,
+    "verify_against": "Anthropic Claude CLI reference for the --effort flag's accepted values",
+    "verify_hint": "Check the documented --effort value set in the Claude CLI reference against the allow-list in `prepare` in `.github/scripts/security_advisories.py` and the `--effort` argument in `.github/workflows/security-audit-private.yml`",
+    "claim_signature": "dependency_interaction:security_advisories.py:effort-value-allowlist:334",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "api_contract",
+    "claim": "The pinned anthropics/claude-code-action/base-action exposes step outputs named 'conclusion' (equal to 'success' on success) and 'structured_output' holding the schema-conforming JSON report.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/security-audit-private.yml",
+    "source_line": 118,
+    "source_line_end": 119,
+    "verify_against": "The pinned base-action's action.yml outputs at anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6",
+    "verify_hint": "Check the `outputs` block of `base-action/action.yml` at the pinned SHA against the AUDIT_CONCLUSION/AUDIT_REPORT_JSON env mapping in the 'Deliver validated findings' step of `.github/workflows/security-audit-private.yml`",
+    "claim_signature": "api_contract:security-audit-private.yml:base-action-outputs:118",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "dependency_interaction",
+    "claim": "The pinned base-action accepts the inputs claude_code_oauth_token, show_full_output, settings, prompt and claude_args as used here.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/security-audit-private.yml",
+    "source_line": 68,
+    "source_line_end": 71,
+    "verify_against": "The pinned base-action's action.yml inputs at anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6",
+    "verify_hint": "Check the `inputs` block of `base-action/action.yml` at the pinned SHA against the `with:` keys of the 'Analyze privately without publishing tools' step in `.github/workflows/security-audit-private.yml`",
+    "claim_signature": "dependency_interaction:security-audit-private.yml:base-action-inputs:68",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "api_contract",
+    "claim": "The JSON Schema emitted by report_schema (integer const, string const, enum, additionalProperties false, maxItems) is accepted by the CLI --json-schema flag and constrains the model's structured_output to the envelope validate_report then re-checks.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 160,
+    "source_line_end": 190,
+    "verify_against": "Anthropic Claude CLI --json-schema documentation on supported JSON Schema keywords and structured output guarantees",
+    "verify_hint": "Check the supported schema keywords for --json-schema against `report_schema` in `.github/scripts/security_advisories.py` and the `--json-schema` argument in `.github/workflows/security-audit-private.yml`",
+    "claim_signature": "api_contract:security_advisories.py:json-schema-keyword-support:160",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "api_contract",
+    "claim": "The schema's per-finding constraints and validate_report's re-validation agree on every field: identical id pattern, severity set, length limits for title/location/description/recommendation, the 19-character existing_advisory bound and the 20-item findings cap.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 213,
+    "source_line_end": 244,
+    "verify_against": "report_schema in the same file as the declared contract given to the model",
+    "verify_hint": "Compare the `fields` dict and per-finding checks in `validate_report` with the `fields`/`properties` dicts in `report_schema` in `.github/scripts/security_advisories.py`, including the 'severity': 8 length bound and the location file:line pattern the schema does not express",
+    "claim_signature": "api_contract:security_advisories.py:schema-validator-field-alignment:213",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "api_contract",
+    "claim": "The analyzer prompt's instructions match what delivery accepts: a report with complete=false (instructed when analysis is incomplete or more than 20 findings exist) reaches validate_report, which refuses it outright.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Set complete=false if analysis is incomplete or more than 20 distinct findings\n            need reporting; never truncate findings or claim a clean result on failure.",
+    "source_file": ".github/workflows/security-audit-private.yml",
+    "source_line": 95,
+    "source_line_end": 96,
+    "verify_against": "validate_report's complete handling in .github/scripts/security_advisories.py",
+    "verify_hint": "Check the `report[\"complete\"] is not True` branch in `validate_report` in `.github/scripts/security_advisories.py` against the complete=false instruction in the prompt block of `.github/workflows/security-audit-private.yml`",
+    "claim_signature": "api_contract:security-audit-private.yml:prompt-complete-false-contract:95",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "api_contract",
+    "claim": "AUDIT_CONTEXT_PATH, set into GITHUB_ENV by the first step, is resolvable as ${{ env.AUDIT_CONTEXT_PATH }} in the later analyze step's prompt and lies under runner.temp, which --add-dir grants the analyzer.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/security-audit-private.yml",
+    "source_line": 48,
+    "source_line_end": 49,
+    "verify_against": "GitHub Actions documentation on GITHUB_ENV visibility in subsequent steps and env-context expression availability, plus the --add-dir path",
+    "verify_hint": "Check that `$RUNNER_TEMP` matches `${{ runner.temp }}` and that `env.AUDIT_CONTEXT_PATH` is available in step expressions, against lines 48-49, 79-80 and 109 of `.github/workflows/security-audit-private.yml`",
+    "claim_signature": "api_contract:security-audit-private.yml:audit-context-path-env:48",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "data_format_assumption",
+    "claim": "The schema JSON and the model/effort values are written to GITHUB_OUTPUT as single-line key=value pairs, so none of them contains a newline that would break the file format.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 370,
+    "source_line_end": 372,
+    "verify_against": "GitHub Actions documentation on the GITHUB_OUTPUT file format and multiline values",
+    "verify_hint": "Check the documented GITHUB_OUTPUT single-line vs heredoc-delimiter rules against the writes at the end of `prepare` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "data_format_assumption:security_advisories.py:github-output-single-line:370",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "dependency_interaction",
+    "claim": "The scheduled and manual gating expression relies on github.event.repository.default_branch being present for workflow_dispatch and on github.ref_name being the default branch for schedule events.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/security-audit.yml",
+    "source_line": 24,
+    "source_line_end": 30,
+    "verify_against": "GitHub Actions webhook event payload documentation for the schedule and workflow_dispatch events",
+    "verify_hint": "Check whether the schedule event payload includes a `repository` object and what `github.ref`/`github.ref_name` hold for each event, against the `if:` at line 24 and the checkout `ref:` at line 30 of `.github/workflows/security-audit.yml`",
+    "claim_signature": "dependency_interaction:security-audit.yml:schedule-dispatch-ref-context:24",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "dependency_interaction",
+    "claim": "github.event.repository.private is populated for a reusable workflow invoked via workflow_call and reflects the calling repository's visibility, and compares as the string 'true' in the shell test and as a boolean in the job `if`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/security-audit-private.yml",
+    "source_line": 32,
+    "source_line_end": 38,
+    "verify_against": "GitHub Actions documentation on the github context inside reusable workflows and the repository payload for workflow_call",
+    "verify_hint": "Check what `github.event.repository.private` resolves to in a `workflow_call` worker against the privacy step and the `audit` job `if` in `.github/workflows/security-audit-private.yml`",
+    "claim_signature": "dependency_interaction:security-audit-private.yml:caller-private-check:32",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "test_mock_alignment",
+    "claim": "The expression test reads .github/workflows/security-audit.yml and depends on a job keyed 'dispatch' with an `if` expression and a step whose `uses` starts with actions/checkout@ and that carries with.ref.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/tests/security-audit/security-audit.test.mjs",
+    "source_line": 10,
+    "source_line_end": 11,
+    "verify_against": "The job and step structure of .github/workflows/security-audit.yml at head",
+    "verify_hint": "Check the `jobs.dispatch` key and the checkout step's `with.ref` in `.github/workflows/security-audit.yml` against `workflow.jobs.dispatch` and the `checkout` lookup in `.github/tests/security-audit/security-audit.test.mjs`",
+    "claim_signature": "test_mock_alignment:security-audit.test.mjs:workflow-job-step-shape:10",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "dependency_interaction",
+    "claim": "@actions/expressions 0.3.61 exports Parser, Lexer, Evaluator and data with the used API surface: new Lexer(src).lex().tokens, new Parser(tokens, names, []).parse(), data.reviver as a JSON.parse reviver, and Evaluator#evaluate().coerceString().",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/tests/security-audit/security-audit.test.mjs",
+    "source_line": 6,
+    "source_line_end": 18,
+    "verify_against": "The @actions/expressions 0.3.61 package API (types/README in node_modules after npm ci)",
+    "verify_hint": "Check the exported `Lexer`, `Parser`, `Evaluator` and `data` API of `@actions/expressions@0.3.61` against the `evaluate` helper in `.github/tests/security-audit/security-audit.test.mjs`",
+    "claim_signature": "dependency_interaction:security-audit.test.mjs:actions-expressions-api:6",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "test_mock_alignment",
+    "claim": "The test shells out to process.env.PYTHON or 'python' and requires that interpreter to import yaml, in the CI job where the step runs.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/tests/security-audit/security-audit.test.mjs",
+    "source_line": 5,
+    "source_line_end": 9,
+    "verify_against": "The CI job that runs this suite in .github/workflows/ci.yml (interpreter name and installed dependencies)",
+    "verify_hint": "Check whether `python` resolves and `pyyaml` is installed in the 'Lint + unit + transport' job of `.github/workflows/ci.yml` before the 'Test security audit workflow expressions' step, against the execFileSync call in `.github/tests/security-audit/security-audit.test.mjs`",
+    "claim_signature": "test_mock_alignment:security-audit.test.mjs:python-yaml-availability:5",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "dependency_interaction",
+    "claim": "The CI step pins actions/setup-node to SHA 949feb2413d6458794dcd2491c4babbbce0c15c1 as v7 and runs npm ci in .github/tests/security-audit, where package.json and package-lock.json are in sync for @actions/expressions 0.3.61.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/ci.yml",
+    "source_line": 62,
+    "source_line_end": 72,
+    "verify_against": "The actions/setup-node release tags for that commit SHA, and the package.json / package-lock.json pair in .github/tests/security-audit",
+    "verify_hint": "Check that the pinned SHA corresponds to actions/setup-node v7 and that `npm ci` succeeds against `.github/tests/security-audit/package-lock.json`, per the added step in `.github/workflows/ci.yml`",
+    "claim_signature": "dependency_interaction:ci.yml:setup-node-pin-and-npm-ci:62",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "absolute_claim",
+    "claim": "The publish path creates missing drafts and does not edit, publish, close, or comment on any advisory.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"Create missing drafts; never edit, publish, close, or comment on an advisory.\"\"\"",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 248,
+    "verify_against": "Every client.request call reachable from publish in .github/scripts/security_advisories.py",
+    "verify_hint": "Trace every HTTP method/route reachable from `publish` (including `list_drafts`) in `.github/scripts/security_advisories.py` and look for any report shape that would drive a PATCH, a state change, or a second write to an existing ghsa_id",
+    "claim_signature": "absolute_claim:security_advisories.py:never-edit-publish-advisory:248",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "absolute_claim",
+    "claim": "Every draft reference in the report is validated before any write occurs, including references belonging to findings later in the list.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Validate every reference before making any write, including later items.",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 255,
+    "verify_against": "The ordering of validation loops and the first POST in publish in .github/scripts/security_advisories.py",
+    "verify_hint": "Name a findings list whose later item would raise in the resolution loop and check whether any create POST in `publish` in `.github/scripts/security_advisories.py` can execute before that raise",
+    "claim_signature": "absolute_claim:security_advisories.py:validate-before-any-write:255",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "absolute_claim",
+    "claim": "The private prepare step's checkout is the fixed public default branch and no dispatched ref is ever executed.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Checkout is the fixed public default branch; never execute a dispatched ref.",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 324,
+    "verify_against": "The checkout step's repository/ref inputs in .github/workflows/security-audit-private.yml and any ref derived from inputs.source_sha",
+    "verify_hint": "Check the 'Checkout the trusted public default branch' step (repository/ref/path) in `.github/workflows/security-audit-private.yml` against the comment and the rev-parse comparison in `prepare` in `.github/scripts/security_advisories.py`, including what a source_sha not on the default branch produces",
+    "claim_signature": "absolute_claim:security_advisories.py:never-execute-dispatched-ref:324",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "absolute_claim",
+    "claim": "No HTTP response body, model output, credential or private host name appears in the script's diagnostics, and it never falls back to a public issue.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Neither HTTP response bodies nor model output, credentials, or private host names\n        # belong in diagnostics. In particular, never fall back to a public issue.",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 420,
+    "source_line_end": 421,
+    "verify_against": "Every print/stderr/stdout and step-summary write reachable in .github/scripts/security_advisories.py, plus unhandled-exception paths outside main",
+    "verify_hint": "Enumerate every output write in `.github/scripts/security_advisories.py` (including the GITHUB_STEP_SUMMARY writes in `main` and anything an exception raised while writing those files could print) and name an input that would surface response or host detail",
+    "claim_signature": "absolute_claim:security_advisories.py:no-sensitive-detail-in-diagnostics:420",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "absolute_claim",
+    "claim": "The public workflow transmits only a public commit SHA and a lookback window to the private host.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# This public workflow sends only a public commit SHA and lookback window.",
+    "source_file": ".github/workflows/security-audit.yml",
+    "source_line": 3,
+    "verify_against": "The dispatch payload built by dispatch() in .github/scripts/security_advisories.py and everything the public job writes to logs",
+    "verify_hint": "Check the POST body in `dispatch` in `.github/scripts/security_advisories.py` and the public job's printed output against the 'only' wording at the top of `.github/workflows/security-audit.yml`, including whether the private host name can appear in the public run",
+    "claim_signature": "absolute_claim:security-audit.yml:public-sends-only-sha-and-window:3",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "absolute_claim",
+    "claim": "Analysis never starts in a public repository even when the reusable worker is called from one.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Even if called from a public repository, analysis must never start there.",
+    "source_file": ".github/workflows/security-audit-private.yml",
+    "source_line": 4,
+    "verify_against": "The privacy job, the audit job `if`, and private_context() in .github/scripts/security_advisories.py",
+    "verify_hint": "Check the string-vs-boolean comparisons in the privacy step and `audit.if` in `.github/workflows/security-audit-private.yml` plus `private_context` in `.github/scripts/security_advisories.py` for a caller visibility value that would pass the guards",
+    "claim_signature": "absolute_claim:security-audit-private.yml:never-analyze-in-public:4",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-28"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "absolute_claim",
+    "claim": "The details of an AuditError must not reach a public log.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"A failure whose details must not reach a public log.\"\"\"",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 29,
+    "verify_against": "The exception handling in main() and any code path where an AuditError can propagate uncaught in the public dispatch job",
+    "verify_hint": "Check whether every AuditError raised on the `dispatch` mode path is caught by the `except Exception` in `main` in `.github/scripts/security_advisories.py`, including one raised before `try` is entered or during interpreter startup",
+    "claim_signature": "absolute_claim:security_advisories.py:auditerror-details-not-public:29",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-29"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "absolute_claim",
+    "claim": "Findings are read and drafts created only inside a private Actions run.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"Dispatch metadata publicly; read findings and create drafts only in a private Actions run.\"\"\"",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 4,
+    "verify_against": "private_context() and the mode routing in main() in .github/scripts/security_advisories.py",
+    "verify_hint": "Check that both the `prepare` and `publish` modes pass through `private_context` before any report or draft read in `main` in `.github/scripts/security_advisories.py`, and what happens when GITHUB_REPOSITORY names a public repo the token can still read",
+    "claim_signature": "absolute_claim:security_advisories.py:private-only-findings-read:4",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-30"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "api_contract",
+    "claim": "This change ships a changelog.d/<PR>.<category>.md release-note fragment, or is a developer-only change needing none.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/security-audit.yml",
+    "verify_against": "The release-note fragment convention in CLAUDE.md and the enforcement in scripts/changelog.py policy",
+    "verify_hint": "Check `changelog.d/` at head for a fragment for PR 288 and the rules enforced by `scripts/changelog.py policy`",
+    "claim_signature": "api_contract:repo:changelog-fragment",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-31"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "data_format_assumption",
+    "claim": "The GHSA identifier format assumed everywhere is exactly GHSA- plus three lowercase alphanumeric quads (19 characters), matching what GitHub returns and what existing_advisory may carry.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "source_line": 25,
+    "verify_against": "GitHub's documented GHSA ID format (character set, casing and segment count)",
+    "verify_hint": "Check GitHub's GHSA ID format documentation against the `GHSA` regex at line 25 and the 19-character `existing_advisory` bounds in `report_schema` and `validate_report` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "data_format_assumption:security_advisories.py:ghsa-id-format:25",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-32"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "test_mock_alignment",
+    "claim": "FakeGitHub.request(method, route, body=None) matches the real client's request signature and returns a (payload, next_link) two-tuple, which is what callers like dispatch/list_drafts/publish/prepare consume.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 95,
+    "source_line_end": 105,
+    "verify_against": "the real GitHub client in .github/scripts/security_advisories.py",
+    "verify_hint": "Compare `GitHub.request` signature and return value in `.github/scripts/security_advisories.py` with `FakeGitHub.request`",
+    "claim_signature": "test_mock_alignment:test_private_security_audit.py:fakegithub-request-contract:95",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "dependency_interaction",
+    "claim": "The security_advisories module exposes AuditError, GitHub, NoRedirect, build_opener, dispatch, list_drafts, prepare, publish, validate_report, report_schema, main, ADVISORIES, REPOSITORY, MAX_REPORT_BYTES and MAX_RESPONSE_BYTES as module-level names loadable via importlib from the file path.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 52,
+    "source_line_end": 58,
+    "verify_against": "module-level definitions in .github/scripts/security_advisories.py",
+    "verify_hint": "Grep `.github/scripts/security_advisories.py` for each of these top-level names",
+    "claim_signature": "dependency_interaction:test_private_security_audit.py:module-public-names:52",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "data_format_assumption",
+    "claim": "A finding object has exactly the keys id, title, severity, location, description, recommendation and existing_advisory, with 'high' a valid severity and 'src/example.py:12' a valid location.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 61,
+    "source_line_end": 71,
+    "verify_against": "the finding validation / report schema in .github/scripts/security_advisories.py",
+    "verify_hint": "Check `report_schema` and the per-finding validator in `.github/scripts/security_advisories.py`",
+    "claim_signature": "data_format_assumption:test_private_security_audit.py:finding-object-keys:61",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "data_format_assumption",
+    "claim": "The report envelope has exactly the keys version (1), complete (true), analyzed_sha and findings.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 74,
+    "source_line_end": 83,
+    "verify_against": "the envelope validation in .github/scripts/security_advisories.py",
+    "verify_hint": "Check `validate_report` and `report_schema` envelope properties in `.github/scripts/security_advisories.py`",
+    "claim_signature": "data_format_assumption:test_private_security_audit.py:report-envelope-keys:74",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-37",
+    "category": "data_format_assumption",
+    "claim": "A draft advisory as returned by the GitHub repository-advisories API carries ghsa_id, state, summary and description, and the audit marker embedded in description has the form `<!-- sqllens-audit:v1:<identity> -->`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 86,
+    "source_line_end": 92,
+    "verify_against": "the marker constant and draft parsing in .github/scripts/security_advisories.py, and GitHub's repository-advisories response shape",
+    "verify_hint": "Check the marker template and draft field reads in `.github/scripts/security_advisories.py`",
+    "claim_signature": "data_format_assumption:test_private_security_audit.py:draft-marker-shape:86",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-38",
+    "category": "api_contract",
+    "claim": "The dispatch route is `/repos/<owner>/<repo>/actions/workflows/sqllens-security-audit.yml/dispatches` with body {ref: default_branch, inputs: {source_sha, lookback_days}}, and the private-host metadata GET route is `/repos/<owner>/<repo>`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 108,
+    "source_line_end": 121,
+    "verify_against": "the dispatch function in .github/scripts/security_advisories.py and GitHub's workflow-dispatch REST API",
+    "verify_hint": "Check `dispatch` in `.github/scripts/security_advisories.py` for the workflow filename and request body keys",
+    "claim_signature": "api_contract:test_private_security_audit.py:dispatch-route-body:108",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-39",
+    "category": "api_contract",
+    "claim": "The private workflow template's job inputs source_sha and lookback_days and secrets AUDIT_CLAUDE_OAUTH_TOKEN and SECURITY_ADVISORY_TOKEN match the reusable worker's declared workflow_call inputs and secrets, and the dispatched workflow filename sqllens-security-audit.yml matches the dispatcher's route.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/security-audits.md",
+    "source_line": 47,
+    "source_line_end": 53,
+    "verify_against": ".github/workflows/security-audit-private.yml workflow_call block",
+    "verify_hint": "Check the `on.workflow_call.inputs` and `secrets` sections of `.github/workflows/security-audit-private.yml`",
+    "claim_signature": "api_contract:security-audits.md:host-template-inputs:47",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-40",
+    "category": "test_mock_alignment",
+    "claim": "list_drafts issues its first request to `ADVISORIES + \"?state=draft&per_page=100\"` and follows a returned next link verbatim as the next route.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 150,
+    "source_line_end": 155,
+    "verify_against": "list_drafts in .github/scripts/security_advisories.py",
+    "verify_hint": "Check the initial query string and pagination loop in `list_drafts` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "test_mock_alignment:test_private_security_audit.py:list-drafts-first-route:150",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-41",
+    "category": "dependency_interaction",
+    "claim": "The error messages the tests match on — 'private audit host', 'pagination', 'Repeated', 'Invalid draft', 'Referenced draft', 'Duplicate advisory marker', 'too large', 'advanced', 'model', 'Invalid audit effort', 'destination', 'redirect', 'API response too large' — are the wordings the helper actually raises.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 127,
+    "verify_against": "AuditError raise sites in .github/scripts/security_advisories.py",
+    "verify_hint": "Grep `AuditError(` in `.github/scripts/security_advisories.py` and compare message text with the test `match=` patterns",
+    "claim_signature": "dependency_interaction:test_private_security_audit.py:auditerror-message-wording:127",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-42",
+    "category": "data_format_assumption",
+    "claim": "The advisory create payload posted to ADVISORIES contains start_private_fork=False, cve_id=None, a vulnerabilities list of one entry with package {ecosystem: 'pip', name: 'sqllens'}, vulnerable_version_range=None and patched_versions=None, and no 'state' key.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 188,
+    "source_line_end": 201,
+    "verify_against": "the create-advisory payload builder in .github/scripts/security_advisories.py and GitHub's create-repository-advisory request schema",
+    "verify_hint": "Check the POST payload construction in `publish` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "data_format_assumption:test_private_security_audit.py:create-advisory-payload:188",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-43",
+    "category": "data_format_assumption",
+    "claim": "publish returns a list of receipt dicts with exactly the keys id, analyzed_sha and already_tracked.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 474,
+    "source_line_end": 477,
+    "verify_against": "the receipt construction in publish in .github/scripts/security_advisories.py",
+    "verify_hint": "Check what `publish` appends to its receipt list in `.github/scripts/security_advisories.py`",
+    "claim_signature": "data_format_assumption:test_private_security_audit.py:publish-receipt-keys:474",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-44",
+    "category": "test_mock_alignment",
+    "claim": "The public workflow .github/workflows/security-audit.yml contains the literal substrings 'security_advisories.py dispatch', 'SECURITY_AUDIT_DISPATCH_TOKEN' and 'SECURITY_AUDIT_REPOSITORY' and none of 'claude-code-action', 'gh issue create', 'issues: write' or 'CLAUDE_CODE_OAUTH_TOKEN'.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 21,
+    "source_line_end": 33,
+    "verify_against": ".github/workflows/security-audit.yml",
+    "verify_hint": "Read `.github/workflows/security-audit.yml` and check each asserted substring",
+    "claim_signature": "test_mock_alignment:test_private_security_audit.py:public-workflow-substrings:21",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-45",
+    "category": "test_mock_alignment",
+    "claim": "The private worker workflow has a job named 'audit' whose `if` contains 'github.event.repository.private == true', top-level permissions exactly {contents: read}, and the literals 'show_full_output: false', 'claude-code-action/base-action@', '--tools \"Read,Glob,Grep\"' and 'disableAllHooks', with no 'upload-artifact' or 'actions/cache'.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 36,
+    "source_line_end": 49,
+    "verify_against": ".github/workflows/security-audit-private.yml",
+    "verify_hint": "Read `.github/workflows/security-audit-private.yml`: job key `audit`, its `if`, top-level `permissions`, and the analyzer step literals",
+    "claim_signature": "test_mock_alignment:test_private_security_audit.py:private-workflow-shape:36",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-46",
+    "category": "test_mock_alignment",
+    "claim": "The private worker has a step with id 'audit' carrying claude_args containing '--tools \"Read,Glob,Grep\"', '--strict-mcp-config' and '--setting-sources user' and no `env` block, and a later step whose run contains 'publish' with env AUDIT_CONCLUSION = steps.audit.outputs.conclusion and AUDIT_REPORT_JSON = steps.audit.outputs.structured_output.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 419,
+    "source_line_end": 430,
+    "verify_against": ".github/workflows/security-audit-private.yml steps, and the pinned claude-code-action output names",
+    "verify_hint": "Check the `audit` step and delivery step in `.github/workflows/security-audit-private.yml`, and that the pinned action declares `conclusion` and `structured_output` outputs",
+    "claim_signature": "test_mock_alignment:test_private_security_audit.py:analysis-step-outputs:419",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-47",
+    "category": "test_mock_alignment",
+    "claim": "The public workflow has a `dispatch` job containing a step named exactly 'Select the public default-branch commit' whose `run` body is runnable under `bash -e -c` and writes only SOURCE_SHA=<sha> to GITHUB_ENV on success.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 553,
+    "source_line_end": 579,
+    "verify_against": "the dispatch job steps in .github/workflows/security-audit.yml",
+    "verify_hint": "Check the step name and `run` script of the commit-selection step in `.github/workflows/security-audit.yml`",
+    "claim_signature": "test_mock_alignment:test_private_security_audit.py:commit-selection-step:553",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-48",
+    "category": "test_mock_alignment",
+    "claim": "The stub `git` script the test installs on PATH satisfies every git invocation the workflow step makes, so the step's exit status equals the stub's exit status on any supported shell.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 561,
+    "source_line_end": 577,
+    "verify_against": "the commands invoked by the commit-selection run block in .github/workflows/security-audit.yml",
+    "verify_hint": "Enumerate every external command in the commit-selection `run` block of `.github/workflows/security-audit.yml`",
+    "claim_signature": "test_mock_alignment:test_private_security_audit.py:git-stub-sufficiency:561",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-49",
+    "category": "dependency_interaction",
+    "claim": "The helper reads configuration from `./.prflow/config.json`, using keys workflows.security_audit, claude_model and security_audit.effort.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 356,
+    "source_line_end": 364,
+    "verify_against": "the config loading in .github/scripts/security_advisories.py and the real .prflow/config.json",
+    "verify_hint": "Check the config-reading function in `.github/scripts/security_advisories.py` and the key names present in `.prflow/config.json`",
+    "claim_signature": "dependency_interaction:test_private_security_audit.py:prflow-config-keys:356",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-50",
+    "category": "data_format_assumption",
+    "claim": "prepare writes GITHUB_OUTPUT as exactly three single-line entries in the order model=, effort=, schema=, with the schema value equal to json of report_schema(sha).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 513,
+    "source_line_end": 526,
+    "verify_against": "the GITHUB_OUTPUT writes in prepare in .github/scripts/security_advisories.py",
+    "verify_hint": "Check every line `prepare` appends to `GITHUB_OUTPUT` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "data_format_assumption:test_private_security_audit.py:github-output-three-lines:513",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-51",
+    "category": "data_format_assumption",
+    "claim": "The prepare context file is JSON with a `drafts` list whose entries carry an `id` key and a `recent_changes` string, written at mode 0600 to AUDIT_CONTEXT_PATH without following an existing symlink.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 376,
+    "source_line_end": 389,
+    "verify_against": "the context-file writer in prepare in .github/scripts/security_advisories.py and the analyzer prompt that reads it",
+    "verify_hint": "Check the context dict keys and the open flags/mode used in `prepare` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "data_format_assumption:test_private_security_audit.py:context-file-shape:376",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-52",
+    "category": "test_mock_alignment",
+    "claim": "prepare invokes subprocess.check_output with a command whose index 1 is 'rev-parse' for the HEAD lookup and a different command for commit history, and consumes string (text-mode) output.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 368,
+    "source_line_end": 372,
+    "verify_against": "the subprocess.check_output calls in prepare in .github/scripts/security_advisories.py",
+    "verify_hint": "Check each `subprocess.check_output` argument list and `text=`/decode handling in `prepare` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "test_mock_alignment:test_private_security_audit.py:check-output-argv-shape:368",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-53",
+    "category": "test_mock_alignment",
+    "claim": "The fake opener contract — build_opener(handler) returning an object whose open(request, timeout) is called with timeout 30 and an Authorization 'Bearer <token>' header, and whose response exposes .read() and .headers with a 'Link' key — matches how the real GitHub client calls urllib.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 624,
+    "source_line_end": 639,
+    "verify_against": "the GitHub.request implementation and build_opener usage in .github/scripts/security_advisories.py",
+    "verify_hint": "Check `GitHub.request` in `.github/scripts/security_advisories.py`: opener construction, open() arguments, timeout, headers and response reads",
+    "claim_signature": "test_mock_alignment:test_private_security_audit.py:opener-open-contract:624",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-54",
+    "category": "dependency_interaction",
+    "claim": "A Link header of the form `<url>; rel=\"next\"` is parsed by the real client into the next-page route, and an absent Link header yields None.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 642,
+    "source_line_end": 656,
+    "verify_against": "the Link-header parser in .github/scripts/security_advisories.py and GitHub's pagination Link format",
+    "verify_hint": "Check the Link-header parsing branch of `GitHub.request` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "dependency_interaction:test_private_security_audit.py:link-header-rel-next:642",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-55",
+    "category": "data_format_assumption",
+    "claim": "A response body of exactly MAX_RESPONSE_BYTES bytes is accepted and one byte more is rejected, i.e. the limit is inclusive in the real client.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 659,
+    "source_line_end": 670,
+    "verify_against": "the response-size check in GitHub.request in .github/scripts/security_advisories.py",
+    "verify_hint": "Check the read limit and comparison operator against `MAX_RESPONSE_BYTES` in `.github/scripts/security_advisories.py`",
+    "claim_signature": "data_format_assumption:test_private_security_audit.py:response-budget-inclusive:659",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-56",
+    "category": "dependency_interaction",
+    "claim": "main() reads mode from sys.argv[1] ('dispatch', 'prepare', 'publish') and the environment variables GITHUB_ACTIONS, GITHUB_REPOSITORY, SOURCE_SHA, LOOKBACK_DAYS, AUDIT_CONCLUSION, AUDIT_REPORT_JSON, AUDIT_CONTEXT_PATH, GITHUB_OUTPUT, GITHUB_STEP_SUMMARY, SECURITY_AUDIT_REPOSITORY and SECURITY_AUDIT_DISPATCH_TOKEN, returning 0 or 1.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 296,
+    "source_line_end": 308,
+    "verify_against": "main() and the environment reads in .github/scripts/security_advisories.py, plus the env blocks of both workflows",
+    "verify_hint": "Check `main` in `.github/scripts/security_advisories.py` and the `env:` keys in both security-audit workflow files",
+    "claim_signature": "dependency_interaction:test_private_security_audit.py:cli-env-var-names:296",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-57",
+    "category": "api_contract",
+    "claim": "The fixed public diagnostic emitted on failure is exactly 'Security audit failed. Check private audit configuration and access.' on stderr with empty stdout, and the success strings are exactly 'Private audit dispatched.', 'Security audit disabled by repository configuration.' and 'Private advisory delivery completed.'",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 582,
+    "source_line_end": 617,
+    "verify_against": "the print/stderr statements in main() in .github/scripts/security_advisories.py",
+    "verify_hint": "Grep for these message literals in `.github/scripts/security_advisories.py`",
+    "claim_signature": "api_contract:test_private_security_audit.py:cli-message-literals:582",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-58",
+    "category": "data_format_assumption",
+    "claim": "The step summary written to GITHUB_STEP_SUMMARY contains the GHSA id and the literal text 'already tracked: True' on successful delivery, and no summary file is created on failure.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 503,
+    "source_line_end": 510,
+    "verify_against": "the summary writer in .github/scripts/security_advisories.py",
+    "verify_hint": "Check where `GITHUB_STEP_SUMMARY` is written in `.github/scripts/security_advisories.py` and its exact phrasing",
+    "claim_signature": "data_format_assumption:test_private_security_audit.py:step-summary-text:503",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-59",
+    "category": "dependency_interaction",
+    "claim": "'low', 'medium', 'high', 'xhigh' and 'max' are all accepted audit effort values and are passed through to the analyzer as supported settings.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 513,
+    "verify_against": "the effort allow-list in .github/scripts/security_advisories.py and the pinned Claude action's accepted effort values",
+    "verify_hint": "Check the effort validation set in `.github/scripts/security_advisories.py` and how the private workflow forwards `effort`",
+    "claim_signature": "dependency_interaction:test_private_security_audit.py:effort-allowlist-values:513",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-60",
+    "category": "absolute_claim",
+    "claim": "The automation never publishes advisories and never opens public issues.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "This automation never publishes advisories or opens public issues.",
+    "source_file": "docs/internal/security-audits.md",
+    "source_line": 7,
+    "verify_against": "all write paths in .github/scripts/security_advisories.py and both workflow files",
+    "verify_hint": "Enumerate every POST/PATCH/PUT route and any `gh issue`/issues API use in `.github/scripts/security_advisories.py` and both security-audit workflows",
+    "claim_signature": "absolute_claim:security-audits.md:never-publishes-or-issues:7",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-28"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-61",
+    "category": "absolute_claim",
+    "claim": "Existing drafts are never edited, closed or published by the delivery step.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Only missing drafts are created. Existing drafts are never edited, closed or\npublished, so maintainer edits survive reruns.",
+    "source_file": "docs/internal/security-audits.md",
+    "source_line": 105,
+    "source_line_end": 106,
+    "verify_against": "the publish function in .github/scripts/security_advisories.py",
+    "verify_hint": "Check `publish` in `.github/scripts/security_advisories.py` for any request method other than GET and POST-create",
+    "claim_signature": "absolute_claim:security-audits.md:existing-drafts-never-edited:105",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-29"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-62",
+    "category": "absolute_claim",
+    "claim": "Every finding and every existing-draft reference is validated before the first write, and distinct findings cannot claim the same draft in one report.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Every finding and existing-draft reference is\nvalidated before the first write.",
+    "source_file": "docs/internal/security-audits.md",
+    "source_line": 96,
+    "source_line_end": 97,
+    "verify_against": "the validation ordering in publish in .github/scripts/security_advisories.py",
+    "verify_hint": "Trace in `publish` whether all findings/references are validated before the first POST, including the duplicate-reference check",
+    "claim_signature": "absolute_claim:security-audits.md:validate-before-first-write:96",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-30"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-63",
+    "category": "absolute_claim",
+    "claim": "No repository code or tests are executed by the analyzer, and the advisory token is absent from the analysis step's environment.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "No repository code or tests are executed by the analyzer. The workflows configure\nno report artifact uploads or caches.",
+    "source_file": "docs/internal/security-audits.md",
+    "source_line": 91,
+    "source_line_end": 92,
+    "verify_against": ".github/workflows/security-audit-private.yml analysis step tools, env and claude_args",
+    "verify_hint": "Check the analyzer step's allowed tools, `env`, hook settings and any artifact/cache actions in `.github/workflows/security-audit-private.yml`",
+    "claim_signature": "absolute_claim:security-audits.md:analyzer-executes-nothing:91",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-31"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-64",
+    "category": "absolute_claim",
+    "claim": "Setting workflows.security_audit to a non-Boolean value fails validation, and until the private host is configured the public dispatcher fails with a generic configuration error with no public-report fallback.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "To pause the\nschedule explicitly, set `workflows.security_audit` to `false` in\n`.prflow/config.json`; a non-Boolean value fails validation.",
+    "source_file": "docs/internal/security-audits.md",
+    "source_line": 13,
+    "source_line_end": 15,
+    "verify_against": "the switch validation and missing-configuration path in .github/scripts/security_advisories.py",
+    "verify_hint": "Check the `workflows.security_audit` type check and the missing-`SECURITY_AUDIT_REPOSITORY` branch in `.github/scripts/security_advisories.py`",
+    "claim_signature": "absolute_claim:security-audits.md:non-boolean-switch-fails:13",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-32"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-65",
+    "category": "data_format_assumption",
+    "claim": "The documented limits hold in code: 20 findings and 120 KB per report, at most 100 recent commits, a 1-90 day lookback, and a 256 KB context ceiling checked before analysis.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The limit is 20 findings\nand 120 KB per report.",
+    "source_file": "docs/internal/security-audits.md",
+    "source_line": 98,
+    "source_line_end": 99,
+    "verify_against": "MAX_REPORT_BYTES, the findings maxItems, the commit-count and lookback bounds and the context-size check in .github/scripts/security_advisories.py",
+    "verify_hint": "Check the numeric constants and bound checks in `.github/scripts/security_advisories.py`",
+    "claim_signature": "data_format_assumption:security-audits.md:documented-numeric-limits:98",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-33"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-66",
+    "category": "absolute_claim",
+    "claim": "The worker refuses public callers, checks out current public main with credentials not persisted, verifies HEAD equals the dispatched SHA before analysis, and never executes a user-supplied branch or ref.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The worker refuses public callers. It checks out the current public `main`, with\ncredentials not persisted, and checks that its HEAD equals the dispatched SHA.",
+    "source_file": "docs/internal/security-audits.md",
+    "source_line": 73,
+    "source_line_end": 74,
+    "verify_against": ".github/workflows/security-audit-private.yml checkout step and the stale-revision check in prepare",
+    "verify_hint": "Check the `actions/checkout` ref and `persist-credentials` in `.github/workflows/security-audit-private.yml` and the HEAD comparison in `prepare`",
+    "claim_signature": "absolute_claim:security-audits.md:worker-checkout-and-sha-guard:73",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-34"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-67",
+    "category": "data_format_assumption",
+    "claim": "The documented verification commands work as written: the npm project exists at .github/tests/security-audit with a `test` script, and the Python 3.12 CI job runs those expression tests.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "npm ci --prefix .github/tests/security-audit --ignore-scripts --no-audit --no-fund\nnpm test --prefix .github/tests/security-audit",
+    "source_file": "docs/internal/security-audits.md",
+    "source_line": 130,
+    "source_line_end": 131,
+    "verify_against": ".github/tests/security-audit/package.json and the Python 3.12 job in .github/workflows/ci.yml",
+    "verify_hint": "Check `.github/tests/security-audit/package.json` scripts and the step that runs them in the CI workflow's py3.12 job",
+    "claim_signature": "data_format_assumption:security-audits.md:npm-verification-commands:130",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-35"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-68",
+    "category": "absolute_claim",
+    "claim": "The changelog fragment asserts that existing drafts are never edited or published and that analysis is read-only.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Existing drafts are never\nedited or published.",
+    "source_file": "changelog.d/288.security.md",
+    "source_line": 2,
+    "source_line_end": 3,
+    "verify_against": "the write paths in .github/scripts/security_advisories.py and the analyzer tool allow-list",
+    "verify_hint": "Check `publish` request methods and the analyzer `--tools` list in `.github/workflows/security-audit-private.yml`",
+    "claim_signature": "absolute_claim:288.security.md:drafts-never-edited-published:2",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-36"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-69",
+    "category": "api_contract",
+    "claim": "The new test file carries the required SPDX header pair for first-party .py files.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 1,
+    "source_line_end": 2,
+    "verify_against": "the SPDX header convention in CLAUDE.md",
+    "verify_hint": "Compare against the SPDX header block documented in `CLAUDE.md` and used by other files under `tests/unit/`",
+    "claim_signature": "api_contract:repo:spdx-header",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-37"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-70",
+    "category": "test_mock_alignment",
+    "claim": "The tests resolve repository files from `Path(__file__).resolve().parents[2]`, so ROOT is the repository root for a file at tests/unit/.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 18,
+    "verify_against": "the repository layout and pytest rootdir configuration in pyproject.toml",
+    "verify_hint": "Confirm `tests/unit/` depth relative to the repo root and that `.github/scripts/security_advisories.py` exists at that root",
+    "claim_signature": "test_mock_alignment:test_private_security_audit.py:root-parents-depth:18",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-38"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-71",
+    "category": "dependency_interaction",
+    "claim": "The test module's imports of pytest and yaml (PyYAML) are satisfied by the declared dev dependencies used by the default `pytest -q` run.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "source_line": 15,
+    "source_line_end": 16,
+    "verify_against": "the dev extra in pyproject.toml",
+    "verify_hint": "Check that `pyyaml` is listed in the `dev` optional-dependency group in `pyproject.toml`",
+    "claim_signature": "dependency_interaction:test_private_security_audit.py:pyyaml-dev-dependency:15",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-39"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-72",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 1. The weekly schedule can never run the audit, and the run still finishes green, while the documentation this change adds says the weekly workflow does dispatch. `.github/workflows/security-audit.yml:24` gates the only job on `github.ref == format('refs/heads/{0}', github.event.repository.default_branch)`, and line 30 checks out the same expression. This repository already records, from issue 93, that this value is empty in a scheduled run: `.github/workflows/devflow-retrospective.yml:64-69` carries the instruction not to collapse the checkout ref to `github.event.repository.default_branch` because it is unset in a `schedule` payload, and that workflow branches on `github.ref_name` for scheduled runs to avoid it. With an empty value the condition compares `github.ref` against `refs/heads/`, the job is skipped, and the workflow reports success. Two documentation lines this diff adds then describe behavior the gate prevents: `docs/internal/security-audits.md:3` says the weekly public workflow sends a commit and a lookback window to the private repository, and lines 13-14 present `workflows.security_audit: false` as the way to pause the schedule. The added tests check only text inside the workflow file (`tests/unit/test_private_security_audit.py:985-997`) and assert nothing about the trigger condition, so nothing fails on this. (raised by 2/6 agents) [self-contradicting-diff carve-out]",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/security-audit.yml",
+    "verify_against": "the job-level `if` condition in .github/workflows/security-audit.yml and the schedule-ref handling recorded in .github/workflows/devflow-retrospective.yml:64-69, plus docs/internal/security-audits.md:3 and 13-14",
+    "verify_hint": "Check the `dispatch` job's `if:` and checkout `ref:` in .github/workflows/security-audit.yml against `github.event.repository.default_branch` availability on the `schedule` payload, as noted in .github/workflows/devflow-retrospective.yml",
+    "prior_ref": "finding 1 (important)",
+    "prior_evidence": "1. The weekly schedule can never run the audit, and the run still finishes green, while the documentation this change adds says the weekly workflow does dispatch. `.github/workflows/security-audit.yml:24` gates the only job on `github.ref == format('refs/heads/{0}', github.event.repository.default_branch)`, and line 30 checks out the same expression. This repository already records, from issue 93, that this value is empty in a scheduled run: `.github/workflows/devflow-retrospective.yml:64-69` carries the instruction not to collapse the checkout ref to `github.event.repository.default_branch` because it is unset in a `schedule` payload, and that workflow branches on `github.ref_name` for scheduled runs to avoid it. With an empty value the condition compares `github.ref` against `refs/heads/`, the job is skipped, and the workflow reports success. Two documentation lines this diff adds then describe behavior the gate prevents: `docs/internal/security-audits.md:3` says the weekly public workflow sends a commit and a lookback window to the private repository, and lines 13-14 present `workflows.security_audit: false` as the way to pause the schedule. The added tests check only text inside the workflow file (`tests/unit/test_private_security_audit.py:985-997`) and assert nothing about the trigger condition, so nothing fails on this. (raised by 2/6 agents) [self-contradicting-diff carve-out] <!-- inertness: first-conjunct=not-held limb-one=not-evaluated limb-two=not-evaluated; evidence: the finding's subject is the job gate at security-audit.yml:24, a branch condition, not the sentence describing it — a functional gap, so the cap does not apply -->",
+    "claim_signature": "api_contract:security-audit.yml:schedule-default-branch-gate",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-73",
+    "category": "dependency_interaction",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 2. The analyzer's tool restriction is written in two flag spellings that appear nowhere else in this repository, and nothing checks that either one takes effect. `.github/workflows/security-audit-private.yml:110` passes `--tools \"Read,Glob,Grep\"` and line 112 passes `--allowedTools \"Read,Glob,Grep\"`, while every other Claude invocation here uses `--allowed-tools` (`devflow.yml:1536`, `devflow-implement.yml:1130`, `devflow-retrospective.yml:639`, and the version of `security-audit.yml` this diff deletes). The restriction is load-bearing: the delivery step at lines 118-128 runs `security_advisories.py publish` from the same checkout the analyzer reads, with `SECURITY_ADVISORY_TOKEN` in its environment. If an unrecognized flag is ignored rather than rejected, the tool grant silently stays at its default with no signal. The only check is a test asserting the literal string appears in `claude_args`, which says nothing about enforcement, and `docs/internal/security-audits.md:87` states the Read/Glob/Grep-only restriction as settled fact. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/security-audit-private.yml",
+    "verify_against": "the pinned anthropics/claude-code-action base-action argument parser and the Claude Code CLI flag reference, plus docs/internal/security-audits.md:87",
+    "verify_hint": "Check the `claude_args` block of the `audit` job in .github/workflows/security-audit-private.yml against the pinned base-action's parse-sdk-options and the other repo invocations in devflow.yml / devflow-implement.yml / devflow-retrospective.yml",
+    "prior_ref": "finding 2 (important)",
+    "prior_evidence": "2. The analyzer's tool restriction is written in two flag spellings that appear nowhere else in this repository, and nothing checks that either one takes effect. `.github/workflows/security-audit-private.yml:110` passes `--tools \"Read,Glob,Grep\"` and line 112 passes `--allowedTools \"Read,Glob,Grep\"`, while every other Claude invocation here uses `--allowed-tools` (`devflow.yml:1536`, `devflow-implement.yml:1130`, `devflow-retrospective.yml:639`, and the version of `security-audit.yml` this diff deletes). The restriction is load-bearing: the delivery step at lines 118-128 runs `security_advisories.py publish` from the same checkout the analyzer reads, with `SECURITY_ADVISORY_TOKEN` in its environment. If an unrecognized flag is ignored rather than rejected, the tool grant silently stays at its default with no signal. The only check is a test asserting the literal string appears in `claude_args`, which says nothing about enforcement, and `docs/internal/security-audits.md:87` states the Read/Glob/Grep-only restriction as settled fact. (raised by 1/6 agents)",
+    "claim_signature": "dependency_interaction:security-audit-private.yml:analyzer-tool-flag-spellings",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-74",
+    "category": "dependency_interaction",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 1. `git rev-parse HEAD` runs without a timeout while its sibling call sets one. `.github/scripts/security_advisories.py:325` calls `subprocess.check_output([\"git\", \"rev-parse\", \"HEAD\"], text=True)` with no `timeout`, and the `git log` call about twenty lines later passes `timeout=30`. A stuck git here would hold the private job open until the 45-minute job timeout instead of failing quickly. The tests replace `subprocess.check_output` entirely, so neither call's arguments are exercised. (raised by 3/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the subprocess calls inside `prepare()` in .github/scripts/security_advisories.py and the `lookback()` helper",
+    "verify_hint": "Check the two `subprocess.check_output` calls in `prepare()` in .github/scripts/security_advisories.py and whether the return value of `lookback(days)` is used",
+    "prior_ref": "suggestion 1",
+    "prior_evidence": "1. `git rev-parse HEAD` runs without a timeout while its sibling call sets one. `.github/scripts/security_advisories.py:325` calls `subprocess.check_output([\"git\", \"rev-parse\", \"HEAD\"], text=True)` with no `timeout`, and the `git log` call about twenty lines later passes `timeout=30`. A stuck git here would hold the private job open until the 45-minute job timeout instead of failing quickly. The tests replace `subprocess.check_output` entirely, so neither call's arguments are exercised. (raised by 3/6 agents)",
+    "claim_signature": "dependency_interaction:security_advisories.py:rev-parse-timeout",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-75",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 2. A configuration section that is not an object raises an untyped error that reaches only the fixed generic message. Line 331 calls `.get` on `config.get(\"security_audit\", {})` and line 381 on `config.get(\"workflows\", {})`, so a string, list or null at either position raises `AttributeError`. The blanket handler near line 419 reports it as \"Check private audit configuration and access\", which a maintainer cannot tell apart from a missing credential or an unreachable host. The leaf values are type-checked; their containers are not. (raised by 2/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the config reads in `prepare()` and `main()` in .github/scripts/security_advisories.py and the `.prflow/config.json` shape",
+    "verify_hint": "Check the `config.get(\"security_audit\", {}).get(...)` and `config.get(\"workflows\", {}).get(...)` reads in .github/scripts/security_advisories.py for isinstance guards",
+    "prior_ref": "suggestion 2",
+    "prior_evidence": "2. A configuration section that is not an object raises an untyped error that reaches only the fixed generic message. Line 331 calls `.get` on `config.get(\"security_audit\", {})` and line 381 on `config.get(\"workflows\", {})`, so a string, list or null at either position raises `AttributeError`. The blanket handler near line 419 reports it as \"Check private audit configuration and access\", which a maintainer cannot tell apart from a missing credential or an unreachable host. The leaf values are type-checked; their containers are not. (raised by 2/6 agents)",
+    "claim_signature": "data_format_assumption:security_advisories.py:config-container-type",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-76",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 3. The public dispatcher's commit-selection step cannot fail. `.github/workflows/security-audit.yml:33` runs `echo \"SOURCE_SHA=$(git rev-parse HEAD)\" >> \"$GITHUB_ENV\"` with no `set -euo pipefail`, and the step's exit status is `echo`'s, so a failing `git rev-parse` writes an empty value and the step passes. The problem then surfaces one step later as the generic configuration message, pointing at the private host rather than at the local checkout. Every `run` block in the code this file replaces used `set -euo pipefail`. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/security-audit.yml",
+    "verify_against": "the commit-selection `run:` block in .github/workflows/security-audit.yml and the `SOURCE_SHA` read in .github/scripts/security_advisories.py",
+    "verify_hint": "Check the 'Select the public default-branch commit' step in .github/workflows/security-audit.yml for `set -euo pipefail` and a separate assignment before the GITHUB_ENV write",
+    "prior_ref": "suggestion 3",
+    "prior_evidence": "3. The public dispatcher's commit-selection step cannot fail. `.github/workflows/security-audit.yml:33` runs `echo \"SOURCE_SHA=$(git rev-parse HEAD)\" >> \"$GITHUB_ENV\"` with no `set -euo pipefail`, and the step's exit status is `echo`'s, so a failing `git rev-parse` writes an empty value and the step passes. The problem then surfaces one step later as the generic configuration message, pointing at the private host rather than at the local checkout. Every `run` block in the code this file replaces used `set -euo pipefail`. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:security-audit.yml:source-sha-failure-propagation",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-77",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 4. A created-draft receipt is lost when the step-summary write fails. `.github/scripts/security_advisories.py:405` reads `os.environ[\"GITHUB_STEP_SUMMARY\"]` after `publish()` has already created advisories, so a missing variable or an unwritable path exits 1 with real drafts created and their advisory ids never reported, under a message about configuration rather than partial delivery. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the GITHUB_STEP_SUMMARY write in `main()` relative to `publish()` in .github/scripts/security_advisories.py",
+    "verify_hint": "Check where `os.environ[\"GITHUB_STEP_SUMMARY\"]` is read in `main()` in .github/scripts/security_advisories.py relative to the create loop in `publish()`",
+    "prior_ref": "suggestion 4",
+    "prior_evidence": "4. A created-draft receipt is lost when the step-summary write fails. `.github/scripts/security_advisories.py:405` reads `os.environ[\"GITHUB_STEP_SUMMARY\"]` after `publish()` has already created advisories, so a missing variable or an unwritable path exits 1 with real drafts created and their advisory ids never reported, under a message about configuration rather than partial delivery. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:security_advisories.py:step-summary-receipt-loss",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-78",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 5. The documentation names a configuration file that does not hold these settings today. `docs/internal/security-audits.md:13-15` and lines 81-82 tell maintainers to set `workflows.security_audit` and the audit effort in `.prflow/config.json`, which matches the code, but this repository's live values are in `.github/project-config.yml`, and `.prflow/config.json` holds neither key. A maintainer who follows the page succeeds, while the existing entries in the other file stay inert and the page does not say so. This is pre-existing behavior, so it is a clarity point only. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/security-audits.md",
+    "verify_against": "the config path read by .github/scripts/security_advisories.py, `.prflow/config.json` and `.github/project-config.yml`",
+    "verify_hint": "Check the configuration-location paragraphs in docs/internal/security-audits.md against the config file path loaded in .github/scripts/security_advisories.py and the keys present in .prflow/config.json",
+    "prior_ref": "suggestion 5",
+    "prior_evidence": "5. The documentation names a configuration file that does not hold these settings today. `docs/internal/security-audits.md:13-15` and lines 81-82 tell maintainers to set `workflows.security_audit` and the audit effort in `.prflow/config.json`, which matches the code, but this repository's live values are in `.github/project-config.yml`, and `.prflow/config.json` holds neither key. A maintainer who follows the page succeeds, while the existing entries in the other file stay inert and the page does not say so. This is pre-existing behavior, so it is a clarity point only. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:security-audits.md:config-location",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-79",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 6. The report contract is written twice, as a JSON Schema and as a hand-written validator, with no single source of truth. `.github/scripts/security_advisories.py` lines 160-190 and lines 193-244 restate the same identifier pattern, field lengths, severity list, item limit and envelope keys, and they already differ: only the validator requires a `path:line` location with no absolute or parent-directory path, non-blank values, an advisory-id shape and unique identifiers. A report the schema accepts can still be rejected whole, and editing one copy leaves the other behind. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "`report_schema` and `validate_report` in .github/scripts/security_advisories.py",
+    "verify_hint": "Compare `report_schema` with `validate_report` in .github/scripts/security_advisories.py for shared constants covering id pattern, lengths, severity enum and item cap",
+    "prior_ref": "suggestion 6",
+    "prior_evidence": "6. The report contract is written twice, as a JSON Schema and as a hand-written validator, with no single source of truth. `.github/scripts/security_advisories.py` lines 160-190 and lines 193-244 restate the same identifier pattern, field lengths, severity list, item limit and envelope keys, and they already differ: only the validator requires a `path:line` location with no absolute or parent-directory path, non-blank values, an advisory-id shape and unique identifiers. A report the schema accepts can still be rejected whole, and editing one copy leaves the other behind. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:security_advisories.py:schema-validator-single-source",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-80",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 7. The dispatch-mode guards have no failing-input test. `.github/scripts/security_advisories.py:381-388` holds the pause switch, the non-Boolean rejection and the repository check that stops a fork run from spending the dispatch token, and the single dispatch-mode test uses an empty configuration and the expected repository, so all three are exercised only on their passing path. The `GITHUB_ACTIONS` check at line 316 is likewise never exercised with a failing value. These are the switches the documentation tells maintainers to rely on. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the dispatch guards in `main()` in .github/scripts/security_advisories.py and the dispatch-mode tests in tests/unit/test_private_security_audit.py",
+    "verify_hint": "Check tests/unit/test_private_security_audit.py for tests setting `workflows.security_audit` false, a non-Boolean value, a mismatched GITHUB_REPOSITORY, and an unset GITHUB_ACTIONS",
+    "prior_ref": "suggestion 7",
+    "prior_evidence": "7. The dispatch-mode guards have no failing-input test. `.github/scripts/security_advisories.py:381-388` holds the pause switch, the non-Boolean rejection and the repository check that stops a fork run from spending the dispatch token, and the single dispatch-mode test uses an empty configuration and the expected repository, so all three are exercised only on their passing path. The `GITHUB_ACTIONS` check at line 316 is likewise never exercised with a failing value. These are the switches the documentation tells maintainers to rely on. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:security_advisories.py:dispatch-guard-negative-tests",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-81",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 8. The report-size limit is tested only on the rejecting side. Line 200 rejects a report larger than `MAX_REPORT_BYTES`, and the test covers only one byte over the limit. The pull request text says a control case of exactly 120,000 bytes was accepted, but the added test file has no such case, so tightening the comparison to `>=` would silently discard a conforming maximum-size report. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "verify_against": "the MAX_REPORT_BYTES comparison in `validate_report` in .github/scripts/security_advisories.py and the size tests in tests/unit/test_private_security_audit.py",
+    "verify_hint": "Check tests/unit/test_private_security_audit.py for a case asserting a report of exactly MAX_REPORT_BYTES is accepted",
+    "prior_ref": "suggestion 8",
+    "prior_evidence": "8. The report-size limit is tested only on the rejecting side. Line 200 rejects a report larger than `MAX_REPORT_BYTES`, and the test covers only one byte over the limit. The pull request text says a control case of exactly 120,000 bytes was accepted, but the added test file has no such case, so tightening the comparison to `>=` would silently discard a conforming maximum-size report. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:test_private_security_audit.py:report-size-boundary",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-82",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 9. The documentation rounds a byte budget. The page describes `MAX_REPORT_BYTES = 120_000` as \"120 KB\", which a reader using binary units will read as 122,880 bytes. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/security-audits.md",
+    "verify_against": "`MAX_REPORT_BYTES` in .github/scripts/security_advisories.py",
+    "verify_hint": "Check the report-limit sentence in docs/internal/security-audits.md against the `MAX_REPORT_BYTES` constant in .github/scripts/security_advisories.py",
+    "prior_ref": "suggestion 9",
+    "prior_evidence": "9. The documentation rounds a byte budget. The page describes `MAX_REPORT_BYTES = 120_000` as \"120 KB\", which a reader using binary units will read as 122,880 bytes. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:security-audits.md:report-byte-budget-units",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-83",
+    "category": "api_contract",
+    "claim": "A manual workflow_dispatch of the public audit workflow from a non-default branch surfaces structured signal that no audit ran, rather than finishing as a run indistinguishable from a successful audit.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/security-audit.yml",
+    "verify_against": "the `dispatch` job gate in .github/workflows/security-audit.yml and the silent-success rule in CLAUDE.md",
+    "verify_hint": "Check the `dispatch` job's `if:` in .github/workflows/security-audit.yml and whether any job or step reports the skip",
+    "prior_ref": "VC-35",
+    "prior_evidence": "Head .github/workflows/security-audit.yml:24 still gates the only job `dispatch` with `if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)`; workflow_dispatch (line 8) is allowed from any branch, and there is no other job or step that reports the skip. Searched head view for readers/docs (CLAUDE.md.src, SECURITY.md, docs) and found nothing that documents or explains the skip. CLAUDE.md.src:90 requires failures not surface as silent success. Neither rejection covers this (they concern helper diagnostics and NODE_VERSION); no criteria_file provided, so 'No defect' cannot apply. Nuance: GitHub marks the skipped job as skipped rather than literally green, but no message explains why the audit did not run.",
+    "claim_signature": "api_contract:security-audit.yml:non-default-branch-skip-signal",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-84",
+    "category": "data_format_assumption",
+    "claim": "The report schema handed to the analyzer cannot describe a report larger than the byte cap that `validate_report` then enforces.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "`MAX_REPORT_BYTES`, `report_schema` and `validate_report` in .github/scripts/security_advisories.py",
+    "verify_hint": "Compare the per-finding maxLength values and maxItems in `report_schema` with `MAX_REPORT_BYTES` enforced in `validate_report` in .github/scripts/security_advisories.py",
+    "prior_ref": "VC-36",
+    "prior_evidence": "Defect still present at head. security_advisories.py:21 MAX_REPORT_BYTES=120_000; report_schema (160-190) allows maxItems 20 (line 176) with per-finding maxLength 140+256+4000+2000+19 plus id (up to 96 chars), severity and JSON keys/quotes, about 6.6 KB each, about 130 KB for 20. validate_report (193-195) rejects >120000 bytes with AuditError before parsing. Schema is emitted to the analyzer at line 372. Readers of validate_report/report_schema: line 249 (the audit path) and tests only; nothing reconciles the bounds, no retry. A schema-valid report of about 19-20 maximal findings is rejected wholesale. No fix, rejection, or criterion covers this.",
+    "claim_signature": "data_format_assumption:security_advisories.py:schema-exceeds-byte-cap",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-85",
+    "category": "data_format_assumption",
+    "claim": "The schema the analyzer sees constrains `location`, `existing_advisory` and `complete` as tightly as the delivery validator does, so a schema-conformant report is not rejected after a full private run.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "`report_schema` field definitions versus the `path:line`, GHSA and `complete is True` checks in `validate_report` in .github/scripts/security_advisories.py",
+    "verify_hint": "Compare the `location`, `existing_advisory` and `complete` entries in `report_schema` with their checks in `validate_report` in .github/scripts/security_advisories.py",
+    "prior_ref": "VC-37",
+    "prior_evidence": "Head still shows the divergence: report_schema (.github/scripts/security_advisories.py:165,168,172) has location as bounded string, existing_advisory as maxLength 19, complete as plain boolean; validate_report requires path:line regex (239-240), GHSA.fullmatch (242, GHSA regex line 25), and complete is True (208). A schema-conformant report such as location 'foo' or complete=false is rejected after the private run. Searched .github (excluding this file) for other readers/prompt text stating the grammar and found none. Neither rejection line addresses this; no criteria_file given, so No defect cannot apply.",
+    "claim_signature": "data_format_assumption:security_advisories.py:schema-validator-field-divergence",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-86",
+    "category": "test_mock_alignment",
+    "claim": "Each of the three fail-closed gates on the public dispatch path — the non-Boolean rejection, the `workflows.security_audit` kill switch and the GITHUB_REPOSITORY mismatch check — is exercised by an executable test that would fail if the gate were inverted or deleted.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the dispatch gates in `main()` in .github/scripts/security_advisories.py and the tests in tests/unit/test_private_security_audit.py",
+    "verify_hint": "Check tests/unit/test_private_security_audit.py for dispatch-mode `main()` tests covering each of the three gates in .github/scripts/security_advisories.py",
+    "prior_ref": "VC-38",
+    "prior_evidence": "The finding still holds at head. security_advisories.py:381-388 holds the three gates (non-bool rejection, enabled=false early return, GITHUB_REPOSITORY mismatch). In tests/unit/test_private_security_audit.py the only dispatch-mode main() test is test_http_error_diagnostics_do_not_echo_private_data (lines 320-340). It uses config '{}' and the matching REPOSITORY. Grep of tests/ for 'workflows\"', 'disabled', 'Unexpected source' and 'Invalid audit' found nothing relevant to these gates (the only 'Invalid audit' match is the effort check at line 543). No test sets workflows.security_audit to false or a non-bool, and none sets a mismatched GITHUB_REPOSITORY. Deleting or inverting any gate would leave the existing test passing. No rejection line covers this (they concern helper diagnostics and NODE_VERSION), and no criteria_file was supplied.",
+    "claim_signature": "test_mock_alignment:security_advisories.py:dispatch-gates-executable-test",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-87",
+    "category": "test_mock_alignment",
+    "claim": "The workflows.security_audit pause switch, its non-Boolean rejection and the expected-source-repository check on the dispatch path are each covered by a test.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the dispatch guards in `main()` in .github/scripts/security_advisories.py and tests/unit/test_private_security_audit.py",
+    "verify_hint": "Grep tests/unit/test_private_security_audit.py for `workflows`, `security_audit` and `GITHUB_REPOSITORY` in dispatch-mode tests",
+    "prior_ref": "VC-51",
+    "prior_evidence": "Head main() dispatch guards at .github/scripts/security_advisories.py:381-388 (pause switch, non-bool rejection, GITHUB_REPOSITORY check). Grep of tests/unit/test_private_security_audit.py for workflows/GITHUB_REPOSITORY/security_audit: the only dispatch-mode test (320-327) uses config '{}' and matching audit.REPOSITORY. Other hits (299,313,486) are prepare/publish; 358,513,540 are effort config. No test sets workflows.security_audit false or non-bool, or a mismatched source repo. Rejections cover helper exception details and NODE_VERSION, not this gap. No criteria_file given. Gap persists.",
+    "claim_signature": "test_mock_alignment:security_advisories.py:pause-switch-coverage",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-88",
+    "category": "test_mock_alignment",
+    "claim": "The HTTP client's success path — the response size cap and the Link header parse — is driven by a test using the real client rather than a fake.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "`GitHub.request` in .github/scripts/security_advisories.py and the HTTP tests in tests/unit/test_private_security_audit.py",
+    "verify_hint": "Check tests/unit/test_private_security_audit.py for tests exercising the real `audit.GitHub.request` success branch (MAX_RESPONSE_BYTES cap and `Link` rel=\"next\" parse)",
+    "prior_ref": "VC-52",
+    "prior_evidence": "Head still shows the gap. In tests/unit/test_private_security_audit.py, the only tests using the real audit.GitHub.request are line 320-340 (patched opener raising HTTPError) and 343-348 (destination/redirect rejection). Pagination tests (150-172) use FakeGitHub. Grep for Link, MAX_RESPONSE and rel= finds no test hit. The success path at .github/scripts/security_advisories.py:63-68 (response.read cap at MAX_RESPONSE_BYTES, 'API response too large', Link rel=\"next\" regex) is never executed by any test. Neither rejection line covers this (they concern helper exception diagnostics and NODE_VERSION). The Link regex and size cap drive pagination and are security-relevant, so the gap is consequential.",
+    "claim_signature": "test_mock_alignment:security_advisories.py:http-success-path-real-client",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-89",
+    "category": "test_mock_alignment",
+    "claim": "The success path of `GitHub.request` — the response-size cap, the Link rel=\"next\" extraction and the JSON decode — is exercised with the real client, so a Link-pattern regression cannot silently truncate draft listing to the first page.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "`GitHub.request` in .github/scripts/security_advisories.py and tests/unit/test_private_security_audit.py",
+    "verify_hint": "Grep tests/unit/test_private_security_audit.py for `build_opener`, `rel=`, `MAX_RESPONSE` and `Link` to see whether the real request success branch is driven",
+    "prior_ref": "VC-53",
+    "prior_evidence": "Head security_advisories.py:63-68 holds the size cap, Link rel=next regex and json.loads. Grep of tests/unit/test_private_security_audit.py for build_opener|rel=|MAX_RESPONSE|.request(|Link finds only line 336 (build_opener stub for the error path) and line 346 (destination rejection). No test drives the success branch with the real client; pagination tests use FakeGitHub. A Link regex regression would silently truncate draft listing to page one. The rejections cover helper exception details and NODE_VERSION, which are different subjects. No criteria_file was supplied.",
+    "claim_signature": "test_mock_alignment:security_advisories.py:link-pagination-regression-test",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-90",
+    "category": "test_mock_alignment",
+    "claim": "Each dispatch guard in `main()` — the enabled kill switch returning 0, the non-Boolean config rejection and the repository mismatch check — is exercised by a test, so a regression making `enabled` falsy could not turn the weekly audit into a green no-op.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the dispatch guards in `main()` in .github/scripts/security_advisories.py and tests/unit/test_private_security_audit.py",
+    "verify_hint": "Grep tests/unit/test_private_security_audit.py for 'Unexpected source', 'Invalid audit configuration' and `security_audit` outside effort configuration",
+    "prior_ref": "VC-54",
+    "prior_evidence": "Guards at .github/scripts/security_advisories.py:381-388. In tests/unit/test_private_security_audit.py, the only dispatch main() test (320-340) uses config '{}' and matching GITHUB_REPOSITORY. Grep finds no 'Unexpected source', no 'Invalid audit configuration', and 'security_audit' appears only with effort configs (358, 513, 540). No test covers the kill switch, non-bool rejection or repository mismatch. Rejections concern helper docs and NODE_VERSION, not this.",
+    "claim_signature": "test_mock_alignment:security_advisories.py:kill-switch-green-noop-test",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-91",
+    "category": "data_format_assumption",
+    "claim": "The report contract given to the analyzer in `report_schema` is equivalent to what `validate_report` enforces for `location` and `existing_advisory`, so schema-satisfying output cannot fail delivery after the analysis has run.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "`report_schema` and `validate_report` in .github/scripts/security_advisories.py",
+    "verify_hint": "Compare the `location` and `existing_advisory` schema entries with their `fullmatch` checks in `validate_report` in .github/scripts/security_advisories.py",
+    "prior_ref": "VC-55",
+    "prior_evidence": "Head security_advisories.py:165 location schema is only string/minLength 1/maxLength 256; :168 existing_advisory only maxLength 19; no patterns. validate_report requires location fullmatch ([A-Za-z0-9_./-]+):([1-9][0-9]{0,6}) with no leading / or .. (239-241), existing_advisory GHSA fullmatch (242-243), unique ids (234-235), raising AuditError. Schema-valid output like location 'foo.py' or existing_advisory 'abc' fails delivery after analysis, so the claimed equivalence is false. Searched the schema/validator in the head file; no other enforcement found. The recorded rejections concern helper exception documentation and NODE_VERSION, not this divergence.",
+    "claim_signature": "data_format_assumption:security_advisories.py:location-advisory-schema-equivalence",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-92",
+    "category": "api_contract",
+    "claim": "The single diagnostic message printed by the blanket handler is accurate for every failure it can report, including failures originating in the model's own report output rather than configuration or access.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the `except Exception` handler in `main()` and every `AuditError` raise in .github/scripts/security_advisories.py",
+    "verify_hint": "Check the fixed diagnostic string in `main()`'s blanket handler against the AuditError raises inside `validate_report` in .github/scripts/security_advisories.py",
+    "prior_ref": "VC-56",
+    "prior_evidence": "security_advisories.py:419-423 catches every Exception and prints only 'Security audit failed. Check private audit configuration and access.' AuditError raises at 195 'Report too large', 203 'Invalid report envelope', 205, 207, 209 'Audit coverage is incomplete', 212, 225-238 (finding field/identity/severity validation) stem from the model's own report output, not configuration or access, so the fixed message misdirects for them. Searched all AuditError raises via grep. Rejection 1 concerns docs promising helper exception details, a different defect, so coverage is unclear and the item is graded without it; no criteria_file, so the No defect route is unavailable.",
+    "claim_signature": "api_contract:security_advisories.py:fixed-diagnostic-accuracy",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-93",
+    "category": "test_mock_alignment",
+    "claim": "The effort whitelist, the 256 KB context budget and the documented workflows.security_audit pause switch are each covered by a test, as the sibling model whitelist is.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the effort check, the context-budget check in `prepare()` and the pause switch in `main()` in .github/scripts/security_advisories.py, versus tests/unit/test_private_security_audit.py",
+    "verify_hint": "Grep tests/unit/test_private_security_audit.py for 'Draft context exceeds audit budget' and the `workflows.security_audit` switch",
+    "prior_ref": "VC-57",
+    "prior_evidence": "Effort whitelist is tested (tests/unit/test_private_security_audit.py:513-543, 'Invalid audit effort'). But security_advisories.py:365 'Draft context exceeds audit budget' and the workflows.security_audit switch (line 381) have no test: grep of head tests for 'audit budget', 'exceeds', '\"workflows\"', 'enabled', '256', 'paus' (security-named test files and all .py grep for 'audit budget'/'Draft context exceeds'/'security_audit') found nothing beyond effort config. Rejections cover unrelated topics (helper exception docs, NODE_VERSION). Claim that all three are covered is false; no criteria_file supplied.",
+    "claim_signature": "test_mock_alignment:security_advisories.py:context-budget-coverage",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-94",
+    "category": "api_contract",
+    "claim": "A run that created drafts and then failed records the identifiers it created, rather than writing the step summary only after every create succeeds with any failure swallowed by the blanket handler.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "`publish()` and the step-summary write in `main()` in .github/scripts/security_advisories.py",
+    "verify_hint": "Check the create loop in `publish()` in .github/scripts/security_advisories.py for a per-create receipt write before returning",
+    "prior_ref": "VC-63",
+    "prior_evidence": "At head, publish() (.github/scripts/security_advisories.py:277-311) creates drafts in a loop and only appends to a local receipt (311), with no per-create summary or log write. main() writes GITHUB_STEP_SUMMARY only at 405-414, after publish returns. Any later create failure (307/310 AuditError, HTTP error) or a summary-write error goes to the blanket `except Exception` (419), which prints a fixed message and returns 1, so GHSA ids of already-created drafts are not recorded in the failed run. The search of main() and publish() found no other reader or writer of the ids. The rejections lines cover helper exception-detail docs and NODE_VERSION, not this. No criteria_file was supplied, so No defect cannot apply. Mitigation: re-runs dedupe via the marker, but that is not a record in the failed run.",
+    "claim_signature": "api_contract:security_advisories.py:partial-delivery-receipt",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-95",
+    "category": "api_contract",
+    "claim": "LOOKBACK_DAYS in the private worker falls back to the documented seven-day default when a caller forwards an empty value, as the public dispatcher's `inputs.lookback_days || '7'` does.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/security-audit-private.yml",
+    "verify_against": "the `LOOKBACK_DAYS` env assignment in .github/workflows/security-audit-private.yml, the dispatcher in .github/workflows/security-audit.yml, the host template in docs/internal/security-audits.md and `lookback()` in .github/scripts/security_advisories.py",
+    "verify_hint": "Compare the `LOOKBACK_DAYS` expression in .github/workflows/security-audit-private.yml with the `|| '7'` default in .github/workflows/security-audit.yml and the `lookback()` validation",
+    "prior_ref": "VC-67",
+    "prior_evidence": "Head security-audit-private.yml:46 is `LOOKBACK_DAYS: ${{ inputs.lookback_days }}` with no `|| '7'`, while security-audit.yml:38 uses `${{ inputs.lookback_days || '7' }}`. The documented host template (docs/internal/security-audits.md:50) forwards `${{ inputs.lookback_days }}`, so a blank dispatch passes ''. Readers searched: security_advisories.py:378 (os.environ.get default does not apply to a set-but-empty var) and private.yml:75 (prompt text only). lookback() at security_advisories.py:87-89 rejects '' with AuditError('Invalid lookback'), so the run fails closed instead of using 7 days. No criteria_file supplied, so the 'No defect' route is unavailable. The rejections concern helper exception docs and NODE_VERSION, so neither covers this item.",
+    "claim_signature": "api_contract:security-audit-private.yml:lookback-empty-default",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-96",
+    "category": "data_format_assumption",
+    "claim": "The documented remediation for a context budget overrun names every significant contributor to the context, including the commit history the lookback window controls, not only the draft list.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/security-audits.md",
+    "verify_against": "the context assembly in `prepare()` in .github/scripts/security_advisories.py",
+    "verify_hint": "Compare the context-overrun remediation sentence in docs/internal/security-audits.md with what `prepare()` in .github/scripts/security_advisories.py puts into the context (drafts plus git log output)",
+    "prior_ref": "VC-69",
+    "prior_evidence": "docs/internal/security-audits.md:83-85 says 'Context larger than 256 KB fails before analysis; reduce or consolidate old drafts before retrying.' prepare() in .github/scripts/security_advisories.py:338-364 builds the context from drafts plus recent_changes (git log, up to 100 commits within the lookback, with --name-only file lists), then fails at 256_000 bytes. Commit subjects and file lists can be large, so the commits are a real contributor, and lowering lookback_days is a lever. The doc names only drafts. Searched for other readers of this text in the doc and script. None soften it. No criteria_file was given. The rejections cover helper exception details and NODE_VERSION, not this. No defect does not apply because an operator following the advice could not fix an overrun caused by commits.",
+    "claim_signature": "data_format_assumption:security-audits.md:context-overrun-remediation",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-97",
+    "category": "dependency_interaction",
+    "claim": "The `git rev-parse HEAD` call passes the same `timeout=30` its sibling `git log` call does, and the normalized value returned by `lookback(days)` is what is interpolated into the git log argument.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the `subprocess.check_output` calls and `lookback()` in .github/scripts/security_advisories.py",
+    "verify_hint": "Check `prepare()` in .github/scripts/security_advisories.py for the timeout keyword on the rev-parse call and for use of `lookback(days)`'s return value",
+    "prior_ref": "VC-39",
+    "prior_evidence": "The prior finding still holds at head. security_advisories.py:325 calls subprocess.check_output(['git','rev-parse','HEAD'], text=True) with no timeout, while the git log call at 338-349 passes timeout=30. Line 328 calls lookback(days) and discards the result, and line 343 interpolates raw `days`. lookback() (87-90) validates 1-90 and returns the normalized int string, so raw input such as '07' is validated but not normalized. I searched the file for readers of this behavior and for other timeout uses. The only effect is that a hung git is bounded by the job timeout. No criteria_file is supplied, so the 'No defect' route is unavailable. Neither rejection line covers this finding.",
+    "claim_signature": "dependency_interaction:security_advisories.py:lookback-normalization-discarded",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-98",
+    "category": "api_contract",
+    "claim": "The new internal page is registered in the internal documentation routing map that claims to name the page owning each topic.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/security-audits.md",
+    "verify_against": "docs/internal/index.md, which describes itself as the routing map",
+    "verify_hint": "Grep docs/internal/index.md for a row referencing security-audits.md",
+    "prior_ref": "VC-40",
+    "prior_evidence": "Prior finding still holds at head. Grep for 'security-audits' in view-head/docs/internal finds no matches; docs/internal/index.md (lines 1-66) has no row for security-audits.md, though the page exists in docs/internal and the index calls itself the routing map for finding the page that owns a topic (line 3). The only reference is from .github/workflows/security-audit-private.yml. No rejections line covers this, and no fix was made.",
+    "claim_signature": "api_contract:security-audits.md:internal-index-registration",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-99",
+    "category": "api_contract",
+    "claim": "A partial delivery, which the documentation accepts as possible, leaves a record of the GHSA ids the run created rather than writing the step summary only after every create succeeded.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "`publish()` and the step-summary write in `main()` in .github/scripts/security_advisories.py, plus the partial-delivery statement in docs/internal/security-audits.md",
+    "verify_hint": "Check the ordering of the GITHUB_STEP_SUMMARY write in `main()` relative to `publish()`'s create loop in .github/scripts/security_advisories.py",
+    "prior_ref": "VC-41",
+    "prior_evidence": "The behavior still holds at head. publish() (security_advisories.py:277-311) POSTs each advisory in a loop and only returns the receipt list at line 312. If a later POST or validation raises (lines 307, 310, or an HTTP error), the exception propagates to main()'s generic handler (419+). The GITHUB_STEP_SUMMARY write at 405-414 runs only after publish() returns, so GHSA ids created earlier in the same run are never recorded. Recovery relies on marker-based dedup (by_key, lines 253/262) at the next run. No criteria_file was supplied, so the 'No defect' reason cannot apply. No rejections line covers this. The impact is small because the drafts are private and dedup recovers them, hence suggestion.",
+    "claim_signature": "api_contract:security_advisories.py:partial-delivery-ghsa-record",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-100",
+    "category": "api_contract",
+    "claim": "The failure diagnostic distinguishes an input-validation refusal, such as a bad `lookback_days` dispatch input, from a configuration or access fault.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "`lookback()` and the blanket handler in `main()` in .github/scripts/security_advisories.py",
+    "verify_hint": "Check whether `main()`'s handler in .github/scripts/security_advisories.py distinguishes AuditError validation refusals from the fixed configuration/access message",
+    "prior_ref": "VC-42",
+    "prior_evidence": "Head still shows the behavior. security_advisories.py:87-90 lookback() raises AuditError('Invalid lookback') for a bad lookback_days, but main()'s except Exception (419-425) prints only the fixed 'Security audit failed. Check private audit configuration and access.' So a user typo is reported as a configuration/access problem. The rejections cover a different finding (docs promising helper details; NODE_VERSION), so they do not cover this one. No criteria_file, so 'No defect' is unavailable. Narrow misleading diagnostic; a validation-only category would not leak anything since AuditError messages are fixed strings.",
+    "claim_signature": "api_contract:security_advisories.py:input-validation-diagnostic-category",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-101",
+    "category": "data_format_assumption",
+    "claim": "The `.prflow/config.json` data is validated as a mapping at each level it is read, so a non-mapping yields a validated rejection rather than a bare AttributeError.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the config reads in `prepare()` and `main()` in .github/scripts/security_advisories.py",
+    "verify_hint": "Check the chained `config.get(...).get(...)` reads in .github/scripts/security_advisories.py for isinstance validation",
+    "prior_ref": "VC-43",
+    "prior_evidence": "The head still shows the recorded behavior. .github/scripts/security_advisories.py:329-331 and 380-381 call config.get(...).get(...) on untyped json.loads data with no isinstance check. A non-mapping at either level raises AttributeError, not a validated AuditError. I searched the readers of that config in the file. The main() handler at 419-425 catches it with `except Exception`, prints a fixed message and returns 1. So the behavior is fail-closed, but the diagnosis is the generic one. The item has no criteria_file, so the grading rules' 'No defect' pass is unavailable. No disclosed entry, rejection line or criterion covers this. The two rejections concern private-audit documentation and NODE_VERSION, which are different subjects. The prior finding therefore still holds, at suggestion level.",
+    "claim_signature": "data_format_assumption:security_advisories.py:untyped-config-read",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-102",
+    "category": "data_format_assumption",
+    "claim": "The validator's return type distinguishes validated findings from the raw parsed output, so `publish` does not re-index raw string keys or rely on `\"\"` meaning \"no reference\".",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the signature of `validate_report` and the field reads in `publish()` in .github/scripts/security_advisories.py",
+    "verify_hint": "Check `validate_report`'s return annotation and `publish()`'s `f[\"existing_advisory\"]` reads in .github/scripts/security_advisories.py for a Finding/Report type",
+    "prior_ref": "VC-44",
+    "prior_evidence": "The head still shows the behavior. security_advisories.py:193 has `def validate_report(raw, sha) -> list[dict]`. publish (247) indexes raw keys, e.g. `f[\"existing_advisory\"]` at 256 and 263, and treats an empty string as 'no reference'. I searched the file for TypedDict, dataclass and class definitions and found only AuditError, NoRedirect and GitHub, so no Finding or Report type was added. The prior finding therefore still holds. 'No defect' cannot be shown because no criteria_file was supplied. No rejection covers this. The finding is a typing and design suggestion with no runtime failure.",
+    "claim_signature": "data_format_assumption:security_advisories.py:validated-finding-type",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-103",
+    "category": "dependency_interaction",
+    "claim": "Building the report schema is a pure projection that cannot raise, or its precondition on `sha` is stated and guaranteed by its caller.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "`report_schema`, `revision()` and the schema's production caller in .github/scripts/security_advisories.py",
+    "verify_hint": "Check the `analyzed_sha` entry of `report_schema` in .github/scripts/security_advisories.py and whether `revision(sha)` can raise there",
+    "prior_ref": "VC-45",
+    "prior_evidence": "The finding still holds at head. security_advisories.py:173 has `\"analyzed_sha\": {\"type\": \"string\", \"const\": revision(sha)}` inside report_schema (line 160). revision (lines 81-84) raises AuditError(\"Invalid revision\") when the value does not match SHA. Readers: line 372 (the only production caller, which writes the schema to GITHUB_OUTPUT) and tests/unit/test_private_security_audit.py:521. I did not trace whether sha is validated earlier on the line-372 path. No criteria_file was supplied, so the grading rules do not allow a 'No defect' PASS. No rejections line covers this behavior. Both rejections are about helper diagnostics docs and NODE_VERSION. Impact is limited to an undocumented precondition and a fail-closed raise, so severity is suggestion.",
+    "claim_signature": "dependency_interaction:security_advisories.py:report-schema-raises",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-104",
+    "category": "data_format_assumption",
+    "claim": "The `claude_model` allowlist in the audit helper accepts the same model-id characters as the pattern the other workflows apply to the same configuration key.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the model allowlist in `prepare()` in .github/scripts/security_advisories.py versus the model patterns in .github/workflows/devflow.yml, devflow-implement.yml and devflow-retrospective.yml",
+    "verify_hint": "Compare the `re.fullmatch` model pattern in `prepare()` in .github/scripts/security_advisories.py with the model allowlists in the devflow workflows",
+    "prior_ref": "VC-46",
+    "prior_evidence": "The behavior still holds at head. .github/scripts/security_advisories.py:332 uses re.fullmatch(r\"[A-Za-z0-9_.-]{1,100}\", model) and raises AuditError(\"Invalid audit model\") at :333. The workflows devflow.yml:1172, devflow-implement.yml:701 and devflow-retrospective.yml:430 document the wider allowlist (A-Za-z0-9 . _ / : @ [ ] -). A provider-qualified id such as one containing '/' or ':' is accepted there but rejected by prepare(). The only reader is the audit prepare step, and it fails on such a value. No criteria_file was supplied, so the 'No defect' reason cannot apply. No rejections line covers this finding. The current configured value (.prflow/config.json: claude-opus-5) passes, so the defect is latent.",
+    "claim_signature": "data_format_assumption:security_advisories.py:claude-model-allowlist",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-105",
+    "category": "dependency_interaction",
+    "claim": "The private worker's analyzer invocation uses one tool-restriction flag in the spelling used elsewhere in this repository, and gates `--effort` as the removed job and the other workflows do.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/security-audit-private.yml",
+    "verify_against": "the `claude_args` block in .github/workflows/security-audit-private.yml versus devflow.yml, devflow-implement.yml and devflow-retrospective.yml",
+    "verify_hint": "Compare the tool and effort flags in the `claude_args` block of .github/workflows/security-audit-private.yml with the invocations in the devflow workflows",
+    "prior_ref": "VC-48",
+    "prior_evidence": "The head still shows the recorded behavior: security-audit-private.yml:110 `--tools \"Read,Glob,Grep\"`, :112 `--allowedTools \"Read,Glob,Grep\"`, :103 `--effort` unconditional. Other workflows use kebab `--allowed-tools` (devflow.yml:1536, devflow-implement.yml:1130, devflow-retrospective.yml:639) and gate --effort in shell (devflow.yml:1187). Readers searched: security_advisories.py:331-371 always emits a validated non-empty effort (default medium), so --effort never gets a valueless argument, and the CLI treats --tools (available set) and allowed tools (auto-approval) as distinct, so the 'two flags for one restriction' point is partly overstated. But the camelCase spelling divergence is real. No criteria_file was supplied and no rejection line covers this, so the 'No defect' pass is unavailable. No fix is present. It is a style inconsistency only, with no functional harm shown.",
+    "claim_signature": "dependency_interaction:security-audit-private.yml:tool-flag-spelling-consistency",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-106",
+    "category": "data_format_assumption",
+    "claim": "The documented limits cover the API response-size cap the helper enforces, with a remediation for it, alongside the context and report limits.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/security-audits.md",
+    "verify_against": "`MAX_RESPONSE_BYTES` and the 'API response too large' raise in .github/scripts/security_advisories.py",
+    "verify_hint": "Grep docs/internal/security-audits.md for the response-size limit defined as MAX_RESPONSE_BYTES in .github/scripts/security_advisories.py",
+    "prior_ref": "VC-49",
+    "prior_evidence": "The prior finding still holds at head. docs/internal/security-audits.md:84-85 documents only the 256 KB context limit and line 98-99 the 20-finding/120 KB report limit. A Grep of the doc for 2_000_000, 2 MB and response found nothing relevant. .github/scripts/security_advisories.py:22 defines MAX_RESPONSE_BYTES = 2_000_000, and lines 64-66 raise AuditError('API response too large') when a GitHub API response exceeds it. That limit is undocumented. One correction to the prior evidence: the message is specific, not generic, and the limit applies per response, not to accumulated drafts. The doc omission remains. No criteria_file was supplied, so the 'No defect' route is unavailable. No rejections line covers this item.",
+    "claim_signature": "data_format_assumption:security-audits.md:response-size-limit-documented",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-107",
+    "category": "dependency_interaction",
+    "claim": "The documented deduplication guarantee accounts for every repository-advisory state that drops an advisory out of the `?state=draft` listing the helper queries, including triage.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/security-advisories-dedup",
+    "verify_against": "the `?state=draft` listing route in `list_drafts` in .github/scripts/security_advisories.py and GitHub's documented repository-advisory states",
+    "verify_hint": "Compare the deduplication sentence in docs/internal/security-audits.md with the advisory states covered by `list_drafts` in .github/scripts/security_advisories.py",
+    "prior_ref": "VC-50",
+    "prior_evidence": "Head still shows the prior behavior. docs/internal/security-audits.md:106-107 says 'Deduplication covers current drafts; maintainers must assess recurrence after an advisory has been published or closed.' It does not mention triage. .github/scripts/security_advisories.py:118 lists only route ADVISORIES + '?state=draft&per_page=100'. A grep of both files for 'triage' found nothing, so nothing handles that state. GitHub repository advisories also have a triage state (not in the head files, so taken from GitHub's documented states). An advisory moved to triage would leave the draft listing and could be recreated as a duplicate. No rejection line covers this, no criteria file was supplied, and 'No defect' cannot be shown because the doc is incomplete and a duplicate draft is possible. Docs-level gap, so low severity.",
+    "claim_signature": "dependency_interaction:security-audits.md:dedup-triage-state",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-108",
+    "category": "test_mock_alignment",
+    "claim": "The monkeypatched `subprocess.check_output` stub matches both how `prepare()` calls it and what the real git call returns, including the trailing newline the `.strip()` handles.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "verify_against": "the `subprocess.check_output` calls in `prepare()` in .github/scripts/security_advisories.py",
+    "verify_hint": "Compare the check_output stub in the `prepare_environment` fixture in tests/unit/test_private_security_audit.py with the real rev-parse output shape",
+    "prior_ref": "VC-58",
+    "prior_evidence": "prepare() at .github/scripts/security_advisories.py:325 does check_output([\"git\",\"rev-parse\",\"HEAD\"], text=True).strip(). Test stub at tests/unit/test_private_security_audit.py:368 is `lambda cmd, **kw: SHA if cmd[1] == \"rev-parse\" ...` with SHA = \"a\" * 40 (line 54), no trailing newline. Call shape matches, but the stub does not mimic real git output, so .strip() is not exercised; the claim's trailing-newline part is false. No criteria_file is supplied, so the 'No defect' pass cannot be earned. No rejections line covers this (they concern helper diagnostics and NODE_VERSION). Functionally harmless; minor fidelity gap.",
+    "claim_signature": "test_mock_alignment:test_private_security_audit.py:check-output-stub-fidelity",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-109",
+    "category": "dependency_interaction",
+    "claim": "The `git rev-parse HEAD` subprocess call in the audit helper passes a timeout, as its sibling `git log` call does.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the subprocess calls in `prepare()` in .github/scripts/security_advisories.py",
+    "verify_hint": "Grep .github/scripts/security_advisories.py for `check_output` and compare the timeout keywords",
+    "prior_ref": "VC-59",
+    "prior_evidence": "At head, .github/scripts/security_advisories.py:325 calls subprocess.check_output([\"git\",\"rev-parse\",\"HEAD\"], text=True) with no timeout, while the git log call at lines 338-349 passes timeout=30. The only other timeout is the HTTP call at line 63. The Grep for check_output/timeout/subprocess found no other readers or fixes. No criteria_file is supplied, so 'No defect' cannot apply. The rejections lines (private-audit docs, NODE_VERSION) do not cover this defect. The claim is false at head. Impact is small: a hung local git command would stall the CI job.",
+    "claim_signature": "dependency_interaction:security_advisories.py:rev-parse-timeout-sibling",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-110",
+    "category": "data_format_assumption",
+    "claim": "Reading `security_audit` and `workflows` from the configuration validates that each is an object, raising the helper's own error type rather than AttributeError for a string, list or null.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the config reads in .github/scripts/security_advisories.py",
+    "verify_hint": "Check the `security_audit` and `workflows` config reads in .github/scripts/security_advisories.py for container type checks",
+    "prior_ref": "VC-60",
+    "prior_evidence": "Head security_advisories.py:331 `config.get(\"security_audit\", {}).get(\"effort\", \"medium\")` and :381 `config.get(\"workflows\", {}).get(\"security_audit\", True)` do no container type check; a string, list or null raises AttributeError, not the helper's AuditError. Grep of the file for config reads found only :330, :331 and :381 (no other readers). The `except Exception` at :419 catches it, so the practical impact is only the exception type. No criteria_file was supplied, so the No defect route is unavailable. The rejections cover helper exception details in the docs and NODE_VERSION, not this issue.",
+    "claim_signature": "data_format_assumption:security_advisories.py:config-object-validation",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-111",
+    "category": "data_format_assumption",
+    "claim": "The JSON schema handed to the model and the imperative validator derive their shared field bounds, id pattern, severity set and item cap from one source, and the schema has counterparts for the marker-injection ban, id uniqueness, the path:line grammar and the GHSA shape.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "`report_schema` and `validate_report` in .github/scripts/security_advisories.py",
+    "verify_hint": "Check whether `report_schema` and `validate_report` in .github/scripts/security_advisories.py share constants and whether the schema expresses the marker ban, uniqueness, path:line and GHSA rules",
+    "prior_ref": "VC-61",
+    "prior_evidence": "Head still hard-codes bounds separately: report_schema (security_advisories.py:160-190) uses id pattern line 162, severity enum 164, maxItems 20 at 176, lengths 163-168; validate_report (193-244) repeats them at 211, 213-221, 232, 237. No shared constants. Schema has no counterpart for marker ban (228), uniqueness (234), path:line grammar (239) or GHSA shape (242; only maxLength 19). Rejections concern helper exception details and NODE_VERSION, not this. No criteria file given. Drift risk only, so suggestion.",
+    "claim_signature": "data_format_assumption:security_advisories.py:shared-contract-constants",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-112",
+    "category": "data_format_assumption",
+    "claim": "Validated findings, drafts and receipts carry the validator's invariants in their types rather than as bare dictionaries whose guarantees depend on call ordering.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the signatures of `validate_report`, `draft_index` and `publish` in .github/scripts/security_advisories.py",
+    "verify_hint": "Grep .github/scripts/security_advisories.py for TypedDict or dataclass definitions backing the finding, draft and receipt shapes",
+    "prior_ref": "VC-62",
+    "prior_evidence": "Head security_advisories.py signatures: validate_report(raw, sha) -> list[dict] (:193), draft_index(drafts: list[dict]) -> dict[str, dict] (:147), publish(...) -> list[dict] (:247). Grep for TypedDict|dataclass found none in the file. Readers: only publish consumes the validated findings. Rejections lines concern helper exception docs and NODE_VERSION, so they do not cover this. No criteria_file, so 'No defect' is unavailable. The claim that invariants are carried in types is false.",
+    "claim_signature": "data_format_assumption:security_advisories.py:typed-invariants",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-113",
+    "category": "dependency_interaction",
+    "claim": "The `git rev-parse HEAD` call in the audit helper passes a timeout so a hung call cannot block until the job timeout.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the subprocess calls in .github/scripts/security_advisories.py",
+    "verify_hint": "Grep .github/scripts/security_advisories.py for `rev-parse` and check for a `timeout=` keyword",
+    "prior_ref": "VC-64",
+    "prior_evidence": "Head .github/scripts/security_advisories.py:325 calls subprocess.check_output([\"git\",\"rev-parse\",\"HEAD\"], text=True) with no timeout. Grep for check_output/timeout/rev-parse finds timeout only at line 63 (HTTP) and 348 (git log call). No fix, no covering rejection (they concern private-audit docs and NODE_VERSION), no criteria_file, so No defect is unavailable. Claim is false.",
+    "claim_signature": "dependency_interaction:security_advisories.py:rev-parse-hung-call-timeout",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-114",
+    "category": "data_format_assumption",
+    "claim": "A `.prflow/config.json` where `security_audit` or `workflows` is a string, list or null is rejected with the helper's AuditError, the error type every other input rejection uses.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/scripts/security_advisories.py",
+    "verify_against": "the config reads in `prepare()` and `main()` in .github/scripts/security_advisories.py",
+    "verify_hint": "Check `prepare()` and `main()` in .github/scripts/security_advisories.py for isinstance checks before the chained `.get` calls",
+    "prior_ref": "VC-65",
+    "prior_evidence": "Head still has unguarded config.get(\"security_audit\", {}).get(\"effort\", \"medium\") at security_advisories.py:331 and config.get(\"workflows\", {}).get(\"security_audit\", True) at :381. A string/list/null value raises AttributeError, not AuditError (also a non-dict top-level config). Readers searched: prepare() (:329-335) and main() (:380-383); no isinstance checks. main() catches generic Exception at :419 and prints a fixed message, so exit behavior is the same, but the claim of AuditError is false. Rejections cover only diagnostics documentation and NODE_VERSION, not this. No criteria_file supplied, so 'No defect' is unavailable.",
+    "claim_signature": "data_format_assumption:security_advisories.py:config-audit-error-type",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-115",
+    "category": "api_contract",
+    "claim": "The privacy gate in the private worker prints the reason it refuses rather than exiting 1 with no message.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/security-audit-private.yml",
+    "verify_against": "the 'Require a private caller' step in .github/workflows/security-audit-private.yml and CLAUDE.md's structured-signal rule",
+    "verify_hint": "Check the `CALLER_PRIVATE` test step in .github/workflows/security-audit-private.yml for a diagnostic message",
+    "prior_ref": "VC-66",
+    "prior_evidence": "Head security-audit-private.yml:32-35: step 'Require a private caller' runs `test \"$CALLER_PRIVATE\" = true` with no diagnostic message, so it exits 1 silently. CALLER_PRIVATE is used only at line 34 (searched the file). The rejections lines concern helper exception docs and NODE_VERSION, not this gate. No criteria_file. No-defect reason not claimed: an operator gets no explanation of the refusal beyond the step name.",
+    "claim_signature": "api_contract:security-audit-private.yml:privacy-gate-diagnostic",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-116",
+    "category": "test_mock_alignment",
+    "claim": "The privacy-boundary assertions parse the workflow YAML as their sibling test does, so reformatting or quoting changes cannot defeat them.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_private_security_audit.py",
+    "verify_against": "the workflow files .github/workflows/security-audit.yml and .github/workflows/security-audit-private.yml",
+    "verify_hint": "Check the public-workflow and never-uploads-reports tests in tests/unit/test_private_security_audit.py for `yaml.safe_load` versus raw `read_text()` substring checks",
+    "prior_ref": "VC-68",
+    "prior_evidence": "At head, tests/unit/test_private_security_audit.py lines 18-30 (public workflow tests) and 39-46 (test_private_worker_never_uploads_reports) still use raw read_text() substring checks, while lines 33-36 and 416-427 use yaml.safe_load. Substring checks match comments and are defeated by reformatting or quoting, so the claim is false. Neither rejection line covers this (one is about helper exception documentation, the other about NODE_VERSION). No criteria_file was supplied, so 'No defect' cannot apply. The impact is limited to test brittleness.",
+    "claim_signature": "test_mock_alignment:test_private_security_audit.py:yaml-parsed-privacy-assertions",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-117",
+    "category": "api_contract",
+    "claim": "The activation section of the internal document describes repository state rather than this pull request's state, so it stays accurate after the change merges and after the private host is provisioned.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/security-audits.md",
+    "verify_against": "the activation section wording in docs/internal/security-audits.md and the repository documentation conventions in CLAUDE.md",
+    "verify_hint": "Check the activation paragraphs near the top of docs/internal/security-audits.md for PR-scoped phrasing such as 'this change'",
+    "prior_ref": "VC-70",
+    "prior_evidence": "Head docs/internal/security-audits.md:11 says 'have not been selected or provisioned by this change' and line 20 says 'After reviewing and merging this change'. Both are PR-scoped phrasing and become stale after merge/provisioning (line 11 untrue once host provisioned; line 20 stale after merge). Neither rejection line concerns this subject (helper exception details; NODE_VERSION). No criteria_file supplied, so No defect cannot be shown. Readers searched: the doc itself is the only reader of this section.",
+    "claim_signature": "api_contract:security-audits.md:pr-scoped-activation-wording",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  }
+]
