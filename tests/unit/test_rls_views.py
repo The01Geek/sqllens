@@ -637,7 +637,10 @@ def test_postgres_typed_builtin_with_renamed_canonical_form_is_allowed() -> None
 def test_raising_child_or_routine_lookup_fails_closed(dialect, fail_on, caplog) -> None:
     cursor = _FakeCatalog({"orders": ("r", False)}, fail_on=fail_on)
     with caplog.at_level(logging.WARNING, logger="sqllens.safety.relations"):
-        with pytest.raises(RlsError, match="could not verify relation types") as error:
+        # The message names both checks, since either lookup may be the one that failed.
+        with pytest.raises(
+            RlsError, match="could not verify relation types or function calls"
+        ) as error:
             verify_base_tables(
                 _catalog_connection(cursor), "SELECT upper(tenant_id) FROM orders",
                 dialect=dialect,

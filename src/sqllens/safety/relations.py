@@ -138,18 +138,23 @@ def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
         # The client sees only the sanitized message; log the cause so a guard
         # bug, a revoked catalog grant and a lost connection stay distinguishable.
         logger.warning(
-            "row-level-security relation check raised an unexpected %s; failing closed",
+            "row-level-security relation or function check raised an unexpected %s; "
+            "failing closed",
             type(exc).__name__,
             exc_info=True,
         )
-        raise RlsError("row-level security could not verify relation types; query blocked") from exc
+        raise RlsError(
+            "row-level security could not verify relation types or function calls; "
+            "query blocked"
+        ) from exc
 
 
 def _verify_relations(cursor: Any, relations: list[exp.Table], dialect: str) -> None:
     """Raise ``RlsError`` for a relation that is not a verified base table.
 
-    A failed lookup or a non-boolean child flag raises another exception, which
-    the caller, ``verify_base_tables``, logs before refusing the query.
+    A lookup that raises, or a non-boolean child flag, propagates as another
+    exception, which the caller, ``verify_base_tables``, logs before refusing the
+    query.
     """
     mysql_fold = False
     if dialect == "mysql":
