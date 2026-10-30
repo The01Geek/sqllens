@@ -198,6 +198,126 @@ class TestFirstSqlKeyword:
 
         assert first_sql_keyword(sql) == expected
 
+    @pytest.mark.parametrize("dialect", [None, "sqlite", "postgres", "mysql"])
+    @pytest.mark.parametrize("keyword", ["SELECT", "WITH"])
+    @pytest.mark.parametrize(
+        "prefix",
+        ["", "  \n\t", "-- note\n", "/* note */ ", "/* a */ (", "( -- a\n", "(-- a\n/* b */ ("],
+    )
+    def test_skips_comments_and_parens(
+        self, prefix: str, keyword: str, dialect: str | None
+    ) -> None:
+        from sqllens.safety import first_sql_keyword
+
+        body = "SELECT 1" if keyword == "SELECT" else "WITH x AS (SELECT 1) SELECT * FROM x"
+        assert first_sql_keyword(prefix + body, dialect) == keyword
+
+    @pytest.mark.parametrize("dialect", [None, "sqlite", "postgres", "mysql"])
+    @pytest.mark.parametrize("sql", ["SELECT*FROM t", "SELECT/* c */1", "select*from t"])
+    def test_keyword_touching_symbol(self, sql: str, dialect: str | None) -> None:
+        from sqllens.safety import first_sql_keyword
+
+        assert first_sql_keyword(sql, dialect) == "SELECT"
+
+    @pytest.mark.parametrize(
+        ("dialect", "expected"),
+        [("postgres", "SELECT"), ("mysql", "C"), ("sqlite", "C")],
+    )
+    def test_nested_block_comment_follows_engine(self, dialect: str, expected: str) -> None:
+        from sqllens.safety import first_sql_keyword
+
+        assert first_sql_keyword("/* a /* b */ c */ SELECT 1", dialect) == expected
+
+    @pytest.mark.parametrize(
+        ("dialect", "expected"),
+        [("mysql", "SELECT"), ("postgres", ""), ("sqlite", ""), (None, "")],
+    )
+    def test_hash_comment_only_on_mysql(self, dialect: str | None, expected: str) -> None:
+        from sqllens.safety import first_sql_keyword
+
+        assert first_sql_keyword("# c\nSELECT 1", dialect) == expected
+
+    @pytest.mark.parametrize("sql", ["'x' AS a", "1 AS a", '"t"', "|| 'a'", "* FROM t"])
+    def test_non_keyword_first_token_is_empty(self, sql: str) -> None:
+        from sqllens.safety import first_sql_keyword
+
+        assert first_sql_keyword(sql, "postgres") == ""
+
+    def test_unquoted_identifier_is_returned(self) -> None:
+        from sqllens.safety import first_sql_keyword
+
+        assert first_sql_keyword("foo bar", "postgres") == "FOO"
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "-- note\nSELECT 1",
+            "/* note */ SELECT 1",
+            "/* a */ (SELECT 1)",
+            "( -- a\nSELECT 1)",
+            "SELECT*FROM t",
+            "SELECT/* c */1",
+            "/* a /* b */ c */ SELECT 1",
+            "# c\nSELECT 1",
+            "'x' AS a",
+            "1 AS a",
+            '"t"',
+            "",
+            "   ",
+        ],
+    )
+    def test_unknown_dialect_is_no_dialect(self, sql: str) -> None:
+        from sqllens.safety import first_sql_keyword
+
+        assert first_sql_keyword(sql, "no-such-dialect") == first_sql_keyword(sql)
+
+    @pytest.mark.parametrize("dialect", [None, "sqlite", "postgres", "mysql"])
+    @pytest.mark.parametrize("sql", ["-- c\nSELECT 'x", "/* unterminated SELECT 1"])
+    def test_untokenizable_sql_is_empty(self, sql: str, dialect: str | None) -> None:
+        from sqllens.safety import first_sql_keyword
+
+        assert first_sql_keyword(sql, dialect) == ""
+
+    def test_other_tokenizer_errors_propagate(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import sqllens.safety.readonly as readonly_mod
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RecursionError("too deep")
+
+        monkeypatch.setattr(readonly_mod.sqlglot, "tokenize", boom)
+        with pytest.raises(RecursionError):
+            readonly_mod.first_sql_keyword("SELECT 1", "postgres")
+
+    def test_mysql_carriage_return_in_line_comment(self) -> None:
+        # Needs sqlglot>=30.22: older MySQL tokenizers end the comment at the
+        # carriage return and reject the quote after it.
+        from sqllens.safety import assert_select_only, is_read_shaped
+
+        sql = "SELECT n FROM widgets # x\r'\n"
+        assert is_read_shaped(sql, "mysql") is True
+        assert_select_only(sql, dialect="mysql")
+
+    @pytest.mark.parametrize(
+        ("sql", "dialect", "expected"),
+        [
+            ("-- c\nSELECT n FROM t", "sqlite", True),
+            ("/* c */ WITH x AS (SELECT 1) SELECT * FROM x", "postgres", True),
+            ("/* c */ SHOW TABLES", "mysql", True),
+            ("SELECT*FROM t", "sqlite", True),
+            ("# c\nSELECT 1", "mysql", True),
+            ("/* a /* b */ c */ SELECT 1", "postgres", True),
+            ("SELECT n FROM widgets /* note", "sqlite", False),
+            ("SHOW 'abc", "mysql", False),
+            ("/* c */ SHOW 'abc", "mysql", False),
+            ("EXPLAIN SELECT 1", "postgres", False),
+            ("VALUES (1)", "sqlite", False),
+        ],
+    )
+    def test_is_read_shaped_by_dialect(self, sql: str, dialect: str, expected: bool) -> None:
+        from sqllens.safety import is_read_shaped
+
+        assert is_read_shaped(sql, dialect) is expected
+
 
 class TestSqliteRunnerCteRowCap:
     """Regression: CTE queries (`WITH ... SELECT`) must honor max_rows.
@@ -363,6 +483,171 @@ class TestRunSqlToolTruncationSurface:
         assert out.metadata["truncated"] is True
         assert out.metadata["max_rows"] == 50
         assert out.metadata["row_count"] == 0
+
+
+def _widgets_db(tmp_path: Path, rows: int) -> str:
+    db_path = tmp_path / "widgets.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE widgets (n INTEGER, label TEXT)")
+    conn.executemany(
+        "INSERT INTO widgets (n, label) VALUES (?, ?)", [(i, f"w{i}") for i in range(rows)]
+    )
+    conn.commit()
+    conn.close()
+    return str(db_path)
+
+
+class TestSqliteRunnerCommentLedRowCap:
+    """Issue #304: a comment-led or touching-symbol read used to take the write
+    branch and return a one-row ``rows_affected`` frame."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "sql", ["-- note\nSELECT n, label FROM widgets", "SELECT*FROM widgets"]
+    )
+    async def test_read_is_streamed_and_capped(self, tmp_path: Path, sql: str) -> None:
+        runner = SqliteRunner(database_path=_widgets_db(tmp_path, 50), max_rows=10)
+        df = await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+        assert list(df.columns) == ["n", "label"]
+        assert list(df["n"]) == list(range(10))
+        assert df.attrs[TRUNCATED_ATTR] is True
+        assert df.attrs[MAX_ROWS_ATTR] == 10
+
+
+class TestRunSqlToolReadShapedResults:
+    """Issue #304: ``RunSqlTool`` builds its result table for every statement
+    ``is_read_shaped`` classifies as read-shaped, with the runner's dialect."""
+
+    def _assert_table(self, out: Any, query_type: str, rows: list[dict[str, Any]]) -> None:
+        from sqllens.agent.components import DataFrameComponent
+
+        assert out.success is True
+        assert "Results saved to file: query_results_" in out.result_for_llm
+        assert "row(s) affected" not in out.result_for_llm
+        assert isinstance(out.ui_component.rich_component, DataFrameComponent)
+        assert out.metadata["query_type"] == query_type
+        assert out.metadata["row_count"] == len(rows)
+        assert out.metadata["columns"] == list(rows[0])
+        assert out.metadata["results"] == rows
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("sql", "query_type"),
+        [
+            ("WITH w AS (SELECT n FROM widgets) SELECT n FROM w", "WITH"),
+            ("-- note\nSELECT n FROM widgets", "SELECT"),
+            ("/* note */ SELECT n FROM widgets", "SELECT"),
+            ("SELECT n FROM widgets", "SELECT"),
+        ],
+    )
+    async def test_sqlite_reads_return_rows(
+        self, tmp_path: Path, sql: str, query_type: str
+    ) -> None:
+        from sqllens.agent.tools.run_sql import RunSqlTool
+
+        runner = SqliteRunner(database_path=_widgets_db(tmp_path, 3), max_rows=100)
+        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
+        out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
+        self._assert_table(out, query_type, [{"n": 0}, {"n": 1}, {"n": 2}])
+        assert out.result_for_llm.startswith("n\n0\n1\n2\n")
+
+    @pytest.mark.asyncio
+    async def test_sqlite_touching_symbol_read_returns_rows(self, tmp_path: Path) -> None:
+        from sqllens.agent.tools.run_sql import RunSqlTool
+
+        runner = SqliteRunner(database_path=_widgets_db(tmp_path, 2), max_rows=100)
+        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
+        out = await tool.execute(_ctx(), RunSqlToolArgs(sql="SELECT*FROM widgets"))
+        self._assert_table(out, "SELECT", [{"n": 0, "label": "w0"}, {"n": 1, "label": "w1"}])
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("sql", "dialect", "query_type"),
+        [
+            ("(SELECT n FROM a) UNION (SELECT n FROM b)", "postgres", "SELECT"),
+            ("(SELECT n FROM a) UNION (SELECT n FROM b)", "mysql", "SELECT"),
+            ("SHOW TABLES", "mysql", "SHOW"),
+            ("# note\nSELECT n FROM widgets", "mysql", "SELECT"),
+        ],
+    )
+    async def test_static_runner_reads_return_rows(
+        self, sql: str, dialect: str, query_type: str
+    ) -> None:
+        from sqllens.agent.tools.run_sql import RunSqlTool
+
+        df = pd.DataFrame({"n": [1, 2]})
+        tool = RunSqlTool(
+            sql_runner=_StaticRunner(df), file_system=_NoopFileSystem(), dialect=dialect
+        )
+        out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
+        self._assert_table(out, query_type, [{"n": 1}, {"n": 2}])
+
+    @pytest.mark.asyncio
+    async def test_empty_read_reports_no_rows(self, tmp_path: Path) -> None:
+        from sqllens.agent.tools.run_sql import RunSqlTool
+
+        runner = SqliteRunner(database_path=_widgets_db(tmp_path, 3), max_rows=100)
+        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
+        sql = "WITH w AS (SELECT n FROM widgets WHERE n > 99) SELECT n FROM w"
+        out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
+        assert out.success is True
+        assert "No rows returned" in out.result_for_llm
+        assert "row(s) affected" not in out.result_for_llm
+        assert out.metadata["row_count"] == 0
+        assert out.metadata["query_type"] == "WITH"
+
+    @pytest.mark.asyncio
+    async def test_empty_capped_read_keeps_truncation_note(self) -> None:
+        from sqllens.agent.tools.run_sql import RunSqlTool
+        from sqllens.safety.limits import mark_truncation
+
+        df = pd.DataFrame()
+        mark_truncation(df, truncated=True, max_rows=5)
+        tool = RunSqlTool(
+            sql_runner=_StaticRunner(df), file_system=_NoopFileSystem(), dialect="sqlite"
+        )
+        sql = "-- c\nWITH w AS (SELECT 1) SELECT * FROM w"
+        out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
+        assert "No rows returned" in out.result_for_llm
+        assert "Result truncated at 5 rows" in out.result_for_llm
+        assert "row(s) affected" not in out.result_for_llm
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "sql",
+        ["UPDATE widgets SET n = n + 1", "SELECT n FROM widgets /* note"],
+    )
+    async def test_not_read_shaped_gets_rows_affected(self, tmp_path: Path, sql: str) -> None:
+        # read_only off: these reach the runner's write branch. The unterminated
+        # comment does not tokenize, so it is not read-shaped though SQLite runs it.
+        from sqllens.agent.components import NotificationComponent
+        from sqllens.agent.tools.run_sql import RunSqlTool
+
+        runner = SqliteRunner(
+            database_path=_widgets_db(tmp_path, 3), max_rows=100, read_only=False
+        )
+        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
+        out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
+        assert out.success is True
+        assert "row(s) affected" in out.result_for_llm
+        assert isinstance(out.ui_component.rich_component, NotificationComponent)
+        assert "results" not in out.metadata
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("read_only", [True, False])
+    @pytest.mark.parametrize("sql", ["", "   \n\t"])
+    async def test_empty_sql_fails(self, tmp_path: Path, sql: str, read_only: bool) -> None:
+        from sqllens.agent.tools.run_sql import RunSqlTool
+        from sqllens.safety import ReadOnlyGuardRunner
+
+        runner: SqlRunner = SqliteRunner(
+            database_path=_widgets_db(tmp_path, 1), max_rows=10, read_only=read_only
+        )
+        if read_only:
+            runner = ReadOnlyGuardRunner(runner, dialect="sqlite")
+        tool = RunSqlTool(sql_runner=runner, file_system=_NoopFileSystem(), dialect="sqlite")
+        out = await tool.execute(_ctx(), RunSqlToolArgs(sql=sql))
+        assert out.success is False
 
 
 class TestRunnerNegativeTimeoutRejection:

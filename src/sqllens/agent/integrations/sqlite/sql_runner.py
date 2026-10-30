@@ -147,7 +147,7 @@ class SqliteRunner(SqlRunner):
 
             cursor.execute(args.sql)
 
-            if is_read_shaped(args.sql):
+            if is_read_shaped(args.sql, "sqlite"):
                 cap = effective_row_cap(self._max_rows)
                 rows = cursor.fetchmany(cap + 1)
                 return rows_to_capped_df(rows, cap)

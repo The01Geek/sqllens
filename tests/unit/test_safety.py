@@ -503,7 +503,7 @@ class TestCorpusStaysRejected:
     """Corpus-regression assertion.
 
     Re-asserts the full bypass corpus stays rejected. This is the explicit
-    guard against a future sqlglot bump (the ``>=25.0,<31`` pin can be widened
+    guard against a future sqlglot bump (the ``>=30.22,<31`` pin can be widened
     later) silently re-opening a parser-level bypass after the ``walk()``
     version shim was removed.
     """
@@ -517,12 +517,8 @@ class TestCorpusStaysRejected:
 
 
 class TestGuardDoesNotCrashOnPinnedSqlglot:
-    """A trivial SELECT must pass without an unhandled exception.
-
-    Pins the ALTER-node version-tolerance fix: a bare ``exp.Alter`` reference
-    AttributeErrors on sqlglot 25.0.x (it ships only ``exp.AlterTable``),
-    which would crash the guard on *every* query — including ``SELECT 1`` —
-    on the low end of the pinned ``>=25.0,<31`` range.
+    """A trivial SELECT must pass without an unhandled exception, and the
+    deny-walk's ``exp.Alter`` node still rejects ALTER on the pinned sqlglot.
     """
 
     @pytest.mark.parametrize("dialect", [None, "sqlite", "postgres", "mysql"])
@@ -911,19 +907,70 @@ class TestIsIntrospectionQueryPerDialect:
             ("-- columns\nSHOW COLUMNS FROM widgets", "mysql"),
             ("/* look up tables */ SHOW TABLES", "postgres"),
             ("/* look up tables */ SHOW TABLES", "sqlite"),
-            # A comment-led SHOW that sqlglot cannot tokenize is still caught
-            # before the parse rather than failing open.
-            ("# tables\n/* again */ SHOW 'abc", "mysql"),
-            ("/* c */ SHOW 'abc", "mysql"),
-            ("-- c\nSHOW 'abc", "postgres"),
-            # An inline comment right after SHOW is caught by the parse root.
+            # The tokenizer drops an inline comment right after SHOW.
             ("SHOW/**/TABLES", "mysql"),
             ("SHOW/* c */ COLUMNS FROM widgets", "mysql"),
             ("/* a /* b */ c */ SHOW TABLES", "postgres"),
+            # A real catalog table inside or beside a CTE still counts.
+            ("WITH x AS (SELECT * FROM pg_class) SELECT * FROM x", "postgres"),
+            (
+                "WITH pg_recent AS (SELECT 1) SELECT * FROM pg_recent JOIN pg_class ON true",
+                "postgres",
+            ),
+            # Scope analysis builds no scope for DESCRIBE; its table still counts.
+            ("DESCRIBE information_schema.tables", "mysql"),
+            # The qualified base table shares the CTE's name; matching by node
+            # identity keeps it a catalog read.
+            (
+                "WITH sqlite_master AS (SELECT 1) "
+                "SELECT * FROM sqlite_master, main.sqlite_master",
+                "sqlite",
+            ),
         ],
     )
     def test_own_engine_catalogs_detected(self, sql: str, dialect: str) -> None:
         assert is_introspection_query(sql, dialect=dialect) is True
+
+    @pytest.mark.parametrize(
+        ("sql", "dialect"),
+        [
+            ("# tables\n/* again */ SHOW 'abc", "mysql"),
+            ("/* c */ SHOW 'abc", "mysql"),
+            ("-- c\nSHOW 'abc", "postgres"),
+        ],
+    )
+    def test_untokenizable_show_is_data(self, sql: str, dialect: str) -> None:
+        # The read-only guard fails closed on the same input and the database
+        # rejects it, so it never returns rows to withhold.
+        assert is_introspection_query(sql, dialect=dialect) is False
+
+    @pytest.mark.parametrize(
+        ("sql", "dialect"),
+        [
+            ("WITH pg_recent AS (SELECT 1 AS n) SELECT * FROM pg_recent", "postgres"),
+            ("WITH PG_RECENT AS (SELECT 1 AS n) SELECT * FROM pg_recent", "postgres"),
+            ("WITH sqlite_recent AS (SELECT 1) SELECT * FROM sqlite_recent", "sqlite"),
+        ],
+    )
+    def test_catalog_prefixed_cte_is_data(self, sql: str, dialect: str) -> None:
+        assert is_introspection_query(sql, dialect=dialect) is False
+
+    def test_scope_failure_excludes_no_cte(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import sqllens.safety.readonly as readonly_mod
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("scope failed")
+
+        monkeypatch.setattr(readonly_mod, "traverse_scope", boom)
+        sql = "WITH pg_recent AS (SELECT 1) SELECT * FROM pg_recent"
+        with caplog.at_level("INFO", logger="sqllens.safety.readonly"):
+            assert is_introspection_query(sql, dialect="postgres") is True
+        assert "RuntimeError" in caplog.text
+
+    def test_hash_is_not_a_comment_without_dialect(self) -> None:
+        assert is_introspection_query("# c\nSHOW TABLES") is False
 
     @pytest.mark.parametrize(
         ("sql", "dialect"),

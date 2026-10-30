@@ -4,14 +4,14 @@ How `RunSqlTool` persists per-query CSVs to disk, how the `LocalFileSystem` capa
 
 ## What gets written, and when
 
-`RunSqlTool.execute()` ([src/sqllens/agent/tools/run_sql.py](../../../src/sqllens/agent/tools/run_sql.py)) does the following on every successful `SELECT`:
+`RunSqlTool.execute()` ([src/sqllens/agent/tools/run_sql.py](../../../src/sqllens/agent/tools/run_sql.py)) does the following on every successful read-shaped statement that returns rows — any statement `is_read_shaped` (in [src/sqllens/safety/readonly.py](../../../src/sqllens/safety/readonly.py)) classifies as read-shaped under the configured database's dialect, the same classifier and dialect the runner routes with: a `SELECT`, a `WITH` query, a parenthesized set operation, a comment-led read, or a MySQL `SHOW`:
 
 1. Runs the SQL via the injected `SqlRunner` and gets a `pd.DataFrame`.
 2. Generates a short random file id (`uuid4().hex[:8]`).
 3. Serializes the DataFrame as CSV and writes it to `query_results_<file_id>.csv` via `self.file_system.write_file(...)`.
 4. Returns a `result_for_llm` string that **includes the absolute filename** so the model can refer to it from a downstream tool (the upstream `visualize_data` tool consumed it; that tool was pruned, and SQL Lens's first-party `EmitChartTool` takes already-aggregated rows directly instead of reading the CSV — so nothing reads it today).
 
-Non-`SELECT` queries don't write anything; they return a row-count summary only.
+A read-shaped statement that returns no rows writes nothing and reports `No rows returned`. Only statements that are not read-shaped get the row-count summary, and they write nothing either. Empty or whitespace-only SQL is a failed call before the runner is reached.
 
 ## The `FileSystem` capability
 
@@ -57,10 +57,12 @@ Because `user.id` is the same string for every request, `sha256(user.id)[:16]` a
 ```python
 scratch_fs = LocalFileSystem(str(Path(tempfile.gettempdir()) / "sqllens"))
 tools.register_local_tool(
-    RunSqlTool(sql_runner=sql_runner, file_system=scratch_fs),
+    RunSqlTool(sql_runner=sql_runner, file_system=scratch_fs, dialect=dialect),
     access_groups=access,
 )
 ```
+
+`dialect` is `sqlglot_dialect_for_url(cfg.database.url)`, the dialect the runners classify with.
 
 The `file_system=` kwarg is mandatory — without it, `RunSqlTool.__init__` would fall through to `LocalFileSystem()` (the dot-CWD default) and reintroduce the launcher-CWD bug fixed by issue #10. A regression test in [tests/unit/test_factory_wiring.py](../../../tests/unit/test_factory_wiring.py) asserts the wiring shape so a future re-lift or refactor that drops the kwarg fails on Linux CI before it ships.
 

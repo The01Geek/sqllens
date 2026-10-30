@@ -1974,3 +1974,43 @@ def test_unparseable_sql_result_still_shown() -> None:
     stream = [*_sql_call("SELECT FROM WHERE ;;;"), _catalog_df()]
     _md, _err, blocks, _qi, _mi = components_to_blocks(stream)
     assert [b["type"] for b in blocks] == ["table"]
+
+
+# ---------------------------------------------------------------------------
+# Classification with the configured dialect (issue #304)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("sql", "dialect"),
+    [("-- note\nSELECT id FROM widgets", None), ("# note\nSELECT id FROM widgets", "mysql")],
+)
+def test_query_info_query_type_skips_comments(sql: str, dialect: str | None) -> None:
+    stream = [*_sql_call(sql)]
+    _md, _err, _blocks, query_info, _mi = components_to_blocks(stream, dialect=dialect)
+    assert query_info is not None
+    assert query_info["query_type"] == "SELECT"
+
+
+def _widgets_df() -> UiComponent:
+    return _ui(DataFrameComponent(rows=[{"n": 1}, {"n": 2}], columns=["n"]))
+
+
+@pytest.mark.parametrize(
+    ("sql", "dialect"),
+    [
+        ("WITH w AS (SELECT n FROM widgets) SELECT n FROM w", "sqlite"),
+        ("WITH pg_recent AS (SELECT n FROM widgets) SELECT n FROM pg_recent", "postgres"),
+        ("WITH sqlite_recent AS (SELECT n FROM widgets) SELECT n FROM sqlite_recent", "sqlite"),
+    ],
+)
+def test_cte_data_query_result_is_shown(sql: str, dialect: str) -> None:
+    stream = [*_sql_call(sql), _widgets_df()]
+    _md, _err, blocks, _qi, _mi = components_to_blocks(stream, dialect=dialect)
+    assert [b["type"] for b in blocks] == ["table"]
+
+
+def test_mysql_show_tables_result_is_withheld() -> None:
+    stream = [*_sql_call("SHOW TABLES"), _widgets_df()]
+    _md, _err, blocks, _qi, _mi = components_to_blocks(stream, dialect="mysql")
+    assert blocks == []

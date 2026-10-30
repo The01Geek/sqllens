@@ -153,7 +153,7 @@ Unsupported schemes raise `ValueError` — the calling CLI layer turns that into
 
 `statement_timeout_ms`, `max_rows`, and `read_only` are threaded as keyword arguments into every runner. `read_only` (default `True`) causes each connector to enforce read-only at the driver/session layer before any user SQL runs — SQLite via the `mode=ro` URI plus `PRAGMA query_only=ON`, Postgres via psycopg2's `conn.set_session(readonly=True)`, MySQL via `SET SESSION TRANSACTION READ ONLY`. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full story. Callers outside `build_agent` (programmatic embedders, tests) can pass any of these keywords; defaults match `DatabaseConfig` (`30_000` ms timeout, `10_000` rows, `read_only=True`).
 
-`sqlglot_dialect_for_url(url)` (in `sqllens.safety`) maps the same scheme to a sqlglot dialect name (`"sqlite"`, `"postgres"`, `"mysql"`) that `build_agent` hands to the read-only guard and the RLS guard; `query_database` passes the same dialect to the formatter's introspection classifier. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md).
+`sqlglot_dialect_for_url(url)` (in `sqllens.safety`) maps the same scheme to a sqlglot dialect name (`"sqlite"`, `"postgres"`, `"mysql"`) that `build_agent` hands to the read-only guard, the RLS guard and `RunSqlTool` (which classifies each statement as read-shaped or not with it); `query_database` passes the same dialect to the formatter, which uses it for the introspection classifier and for `query_info["query_type"]`. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md).
 
 ## The user resolver is intentionally static
 

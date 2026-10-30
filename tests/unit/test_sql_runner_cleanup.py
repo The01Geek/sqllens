@@ -294,3 +294,51 @@ async def test_postgres_runner_propagates_keyboard_interrupt(
         await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
 
     conn.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Comment-led reads take the streaming branch (issue #304)
+# ---------------------------------------------------------------------------
+
+
+async def test_mysql_runner_streams_hash_comment_led_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sql = "# c\nSELECT 1"
+    cursor = MagicMock()
+    cursor.fetchmany.return_value = [{"x": 1}]
+    conn = MagicMock()
+    conn.cursor.return_value = cursor
+    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
+
+    from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
+
+    runner = MySQLRunner(host="h", database="d", user="u", password="p", read_only=False)
+    df = await runner.run_sql(RunSqlToolArgs(sql=sql), context=MagicMock())
+
+    assert df.to_dict(orient="records") == [{"x": 1}]
+    conn.cursor.assert_called_once_with(sys.modules["pymysql.cursors"].SSDictCursor)
+    cursor.execute.assert_called_once_with(sql)
+    conn.commit.assert_not_called()
+
+
+async def test_postgres_runner_streams_comment_led_read_on_named_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sql = "-- c\nSELECT 1"
+    cursor = MagicMock()
+    cursor.fetchmany.return_value = [{"x": 1}]
+    conn = MagicMock()
+    conn.cursor.return_value = cursor
+    _install_fake_psycopg2(monkeypatch, lambda *_a, **_k: conn)
+
+    from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
+
+    runner = PostgresRunner(connection_string="postgresql://u:p@h/d", read_only=False)
+    df = await runner.run_sql(RunSqlToolArgs(sql=sql), context=MagicMock())
+
+    assert df.to_dict(orient="records") == [{"x": 1}]
+    conn.cursor.assert_called_once()
+    assert conn.cursor.call_args.kwargs["name"].startswith("sqllens_")
+    cursor.execute.assert_called_once_with(sql)
+    conn.commit.assert_not_called()

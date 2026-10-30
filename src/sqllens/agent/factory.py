@@ -120,7 +120,7 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     tools = ToolRegistry()
     access = [DEFAULT_USER_GROUP]
     tools.register_local_tool(
-        RunSqlTool(sql_runner=sql_runner, file_system=scratch_fs),
+        RunSqlTool(sql_runner=sql_runner, file_system=scratch_fs, dialect=dialect),
         access_groups=access,
     )
     # EmitChartTool needs no SQL/FS — the agent runs run_sql first, then hands

@@ -67,6 +67,53 @@ def test_run_sql_scratch_anchored_to_absolute_tempdir(tmp_path: Path) -> None:
     assert working_dir != Path("."), "must not fall through to LocalFileSystem default"
 
 
+@pytest.mark.parametrize(
+    ("url", "dialect", "query_type"),
+    [
+        ("mysql+pymysql://u:p@db.internal:3306/shop", "mysql", "SELECT"),
+        ("sqlite:///:memory:", "sqlite", ""),
+    ],
+)
+async def test_run_sql_classifies_with_database_dialect(
+    tmp_path: Path, url: str, dialect: str, query_type: str
+) -> None:
+    """Issue #304: ``RunSqlTool`` must classify with the dialect the runner uses.
+
+    ``#`` opens a comment only on MySQL, so a ``#``-led read is a result table
+    there and a row count on SQLite.
+    """
+    import pandas as pd
+
+    from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs
+
+    if dialect == "mysql":
+        pytest.importorskip("pymysql")
+    cfg = Config(
+        database=DatabaseConfig(url=url, read_only=False),
+        llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
+        memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
+        auth=AuthConfig(mode="none"),
+        agent=AgentRuntimeConfig(),
+    )
+    run_sql_tool = _unwrap(build_agent(cfg).tool_registry._tools["run_sql"])
+    assert isinstance(run_sql_tool, RunSqlTool)
+    assert run_sql_tool.dialect == dialect
+
+    class _Rows:
+        async def run_sql(self, args: object, context: object) -> pd.DataFrame:
+            return pd.DataFrame({"n": [1]})
+
+    class _Files:
+        async def write_file(self, *args: object, **kwargs: object) -> None:
+            return None
+
+    run_sql_tool.sql_runner = _Rows()
+    run_sql_tool.file_system = _Files()
+    out = await run_sql_tool.execute(None, RunSqlToolArgs(sql="# c\nSELECT n FROM t"))
+    assert out.metadata["query_type"] == query_type
+    assert ("results" in out.metadata) is (dialect == "mysql")
+
+
 def test_default_max_tool_iterations_is_twenty(tmp_path: Path) -> None:
     """The default surfaces our raised baseline, not the framework's 10.
 
