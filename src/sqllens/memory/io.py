@@ -32,7 +32,7 @@ VALID_FORMATS = ("json", "csv")
 # prefix such cells with a single apostrophe at both the parse and serialize
 # boundaries so a planted bundle cannot survive a round-trip and detonate in a
 # spreadsheet later.
-_CSV_FORMULA_TRIGGERS = frozenset({"=", "+", "-", "@", "\t", "\r"})
+_CSV_FORMULA_TRIGGERS = frozenset({"=", "+", "-", "@", "\t", "\r", "\n"})
 
 
 class BundleFormatError(ValueError):
@@ -177,15 +177,23 @@ def serialize_json(bundle: MemoryBundle) -> str:
     )
 
 
-def serialize_csv(bundle: MemoryBundle) -> str:
+def serialize_csv(bundle: MemoryBundle, *, warnings: list[str] | None = None) -> str:
+    """Serialize safe CSV, reporting actual formula-prefix additions to callers."""
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(CSV_HEADER)
+    defanged = False
     if bundle.sql_pairs:
         for pair in bundle.sql_pairs.pairs:
-            writer.writerow(
-                [_defang_csv_cell(pair.question), _defang_csv_cell(pair.sql)]
-            )
+            cells = [pair.question, pair.sql]
+            safe_cells = [_defang_csv_cell(cell) for cell in cells]
+            defanged |= safe_cells != cells
+            writer.writerow(safe_cells)
+    if defanged and warnings is not None:
+        warnings.append(
+            "CSV formula protection prefixed one or more cells with an "
+            "apostrophe, changing their text. Use JSON to preserve exact values."
+        )
     return buf.getvalue()
 
 

@@ -1,6 +1,7 @@
 """PostgreSQL implementation of SqlRunner interface."""
 
 import logging
+import os
 import uuid
 from typing import Optional
 import pandas as pd
@@ -14,6 +15,7 @@ from sqllens.safety.relations import verify_base_tables
 
 
 _DEFAULT_MAX_ROWS = 10_000
+_DEFAULT_CONNECT_TIMEOUT_SECONDS = 5
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +52,14 @@ class PostgresRunner(SqlRunner):
             max_rows: Hard ceiling on rows returned per SELECT
             read_only: Force the session read-only regardless of the DB role
                 (defence-in-depth backstop for the parser guard).
-            **kwargs: Additional psycopg2 connection parameters (sslmode, connect_timeout, etc.)
+            connect_timeout: Via kwargs, defaults to 5 seconds unless the DSN
+                or PGCONNECT_TIMEOUT already supplies a value. An explicit
+                DSN value takes precedence over the constructor option.
         """
         try:
             import psycopg2
             import psycopg2.extras
+            import psycopg2.extensions
 
             self.psycopg2 = psycopg2
         except Exception as e:
@@ -65,6 +70,13 @@ class PostgresRunner(SqlRunner):
         if connection_string:
             self.connection_string = connection_string
             self.connection_params = None
+            dsn_params = self.psycopg2.extensions.parse_dsn(connection_string)
+            self._connection_options = {}
+            if "connect_timeout" not in dsn_params:
+                if kwargs.get("connect_timeout") is not None:
+                    self._connection_options["connect_timeout"] = kwargs["connect_timeout"]
+                elif not os.environ.get("PGCONNECT_TIMEOUT"):
+                    self._connection_options["connect_timeout"] = _DEFAULT_CONNECT_TIMEOUT_SECONDS
         elif host and database and user:
             self.connection_string = None
             self.connection_params = {
@@ -75,6 +87,8 @@ class PostgresRunner(SqlRunner):
                 "password": password,
                 **kwargs,
             }
+            if kwargs.get("connect_timeout") is None and not os.environ.get("PGCONNECT_TIMEOUT"):
+                self.connection_params["connect_timeout"] = _DEFAULT_CONNECT_TIMEOUT_SECONDS
         else:
             raise ValueError(
                 "Either provide connection_string OR (host, database, and user) parameters"
@@ -109,7 +123,7 @@ class PostgresRunner(SqlRunner):
             psycopg2.Error: If query execution fails (including statement_timeout firing).
         """
         if self.connection_string:
-            conn = self.psycopg2.connect(self.connection_string)
+            conn = self.psycopg2.connect(self.connection_string, **self._connection_options)
         else:
             conn = self.psycopg2.connect(**self.connection_params)
 

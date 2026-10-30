@@ -215,7 +215,7 @@ def apply_rls(
 
     try:
         statements = sqlglot.parse(sql, dialect=dialect)
-    except sqlglot.errors.ParseError as e:
+    except (sqlglot.errors.ParseError, sqlglot.errors.TokenError) as e:
         raise RlsError(f"could not parse SQL for row-level security: {e}") from e
 
     if len(statements) != 1 or statements[0] is None:

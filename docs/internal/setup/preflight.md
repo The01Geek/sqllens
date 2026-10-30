@@ -21,19 +21,19 @@ from sqllens.preflight import (
 )
 ```
 
-`PreflightError(subsystem, detail)` exposes `.subsystem` (`Literal["database", "llm", "memory", "auth"]`) and `.detail` (the underlying message). Its `__str__` is `f"{subsystem}: {detail}"`, which the CLI prefixes with `Preflight failed:` for the user-facing line.
+`PreflightError(subsystem, detail)` exposes `.subsystem` (`Literal["database", "llm", "memory", "auth"]`) and `.detail` (the client-facing diagnostic). Its `__str__` is `f"{subsystem}: {detail}"`, which the CLI prefixes with `Preflight failed:` for the user-facing line.
 
 Each `probe_*` accepts a fully-loaded `Config` and returns `None` on success, raising `PreflightError` otherwise. The originating driver exception is chained via `__cause__` so callers that re-raise (or `pytest -s` runs) still see the full traceback.
 
 ### Exception-narrowing contract
 
-Probes catch **only the driver / SDK exception base** for the subsystem they validate and re-label it as a `PreflightError`. Anything else — `TypeError`, `AttributeError`, an `ImportError` from a missing transitive dep, or any other programmer error — propagates as itself. The point is to avoid masking bugs by re-labelling them as "database failure" or "llm failure"; a `TypeError` from preflight should surface as a `TypeError`, not as `database: TypeError: ...`.
+Connection probes catch the driver / SDK exception base for the subsystem they validate and re-label it as a `PreflightError`. MySQL URL parsing separately catches `ValueError` before calling the driver. Anything else — `TypeError`, `AttributeError`, an `ImportError` from a missing transitive dep, or any other programmer error — propagates as itself. The point is to avoid masking bugs by re-labelling them as "database failure" or "llm failure"; a `TypeError` from preflight should surface as a `TypeError`, not as `database: TypeError: ...`.
 
 | Probe | Caught (re-labelled as `PreflightError`) | Propagated as-is |
 |---|---|---|
 | `probe_database` (sqlite) | `sqlite3.Error` | everything else |
 | `probe_database` (postgres) | `psycopg2.Error` | everything else (the explicit `ImportError` branch above this catch handles the "driver not installed" case) |
-| `probe_database` (mysql) | `pymysql.MySQLError` | everything else (same: the explicit `ImportError` branch handles a missing driver) |
+| `probe_database` (mysql) | `pymysql.MySQLError`; URL-parser `ValueError` before connecting | everything else (same: the explicit `ImportError` branch handles a missing driver) |
 | `probe_llm` | `anthropic.AnthropicError` | everything else, including `ImportError` from `import anthropic` or `from sqllens.agent.integrations import AnthropicLlmService` — these imports are deliberately kept **outside** the `try` block so a packaging breakage doesn't masquerade as an "llm" subsystem failure |
 | `probe_auth` | `ValueError` (and a residual `Exception` catch for parity with `build_authenticator`'s historic surface) | n/a |
 
@@ -124,12 +124,12 @@ Preflight failed: <subsystem>: <detail>
 
 Where `<subsystem>` is one of `database | llm | memory | auth` and `<detail>` is either:
 
-- A driver exception rendered as `f"{type(exc).__name__}: {exc}"` (database probe).
+- A driver exception class and fixed connection-failure guidance (database probe); URL-format errors also omit supplied values.
 - The constructor exception rendered the same way (llm probe).
 - A short cause string for filesystem failures (memory probe).
 - The raw `ValueError.args[0]` from `build_authenticator` (auth probe).
 
-Driver exception strings can leak DSN-derived hints (host, port, database name) — S-10 in [production-readiness-v0.1.0.md](../production-readiness-v0.1.0.md) tracks the broader question of what error detail to expose. For preflight the trade-off is intentional: the operator running `serve` is the one who set the DSN, so the leaked hint goes to a principal who already has the secret.
+Database driver messages are withheld from the printed diagnostic because they may include connection details. The original exception remains available through `__cause__` to in-process callers. This sanitization is scoped to database URL/driver failures.
 
 ## What preflight is *not*
 

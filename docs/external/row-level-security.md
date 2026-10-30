@@ -23,7 +23,7 @@ If SQL Lens cannot prove that every reference to a protected table has been corr
 Two kinds of values are supported:
 
 - **Static**: a fixed value spelled in your configuration file. The same value is used for every request. Works on every transport.
-- **Dynamic**: a value resolved per request from metadata supplied by the calling assistant. Available only when SQL Lens runs over the HTTP transport (stdio has no per-request metadata channel).
+- **Dynamic**: a value resolved per request from metadata supplied by the calling assistant.
 
 ## Static rules
 
@@ -79,7 +79,7 @@ value_from_metadata = "tenant_id"
 
 For each request, SQL Lens reads the `tenant_id` key out of the request's MCP `_meta` object and uses that value in the predicate. If the key is missing, the value is empty or suspicious-looking, or has the wrong type, SQL Lens blocks the query and tells the assistant the rule could not be applied.
 
-**Note:** Dynamic rules only work over the HTTP transport. On stdio, no per-request metadata is available, so SQL Lens treats every dynamic rule as if the value were missing and blocks the query.
+**Note:** Dynamic rules require the calling application to supply the configured metadata keys. Missing or rejected metadata blocks the query on either transport.
 
 ### Supplying request metadata from your application
 
@@ -101,6 +101,8 @@ When your application calls the MCP `tools/call` method for `query_database`, in
 Most MCP client libraries provide a way to attach `_meta` to a tool call. Consult your client library's documentation for the exact pattern.
 
 A few reserved keys are stripped at the boundary and cannot be used as RLS metadata keys: `starter_ui_request` and `ui_features_available` are reserved for SQL Lens's own internal use. Pick any other key name.
+
+Request metadata extras must fit within 64 top-level keys, 16 KiB of compact ASCII-escaped JSON, 1,024 nodes including object keys, and eight nesting levels below the root. Invalid or oversized metadata is discarded completely, so dynamic RLS queries fail on missing values. These limits apply after the MCP request has been parsed.
 
 ## What gets rewritten
 
@@ -160,7 +162,7 @@ If any `[[rls]]` block is malformed, validation fails with a clear message namin
 - **Quote non-ASCII PostgreSQL identifiers when using RLS.** SQL Lens rejects their unquoted form because case folding depends on the server's encoding and locale.
 - **One process, one database, one configuration.** The rules in `sqllens.toml` apply to every request handled by that SQL Lens process. If you need per-database rules, run one SQL Lens process per database.
 - **No schema-qualified table names.** `table = "orders"` is supported; `table = "public.orders"` is not.
-- **Dynamic rules require HTTP.** The stdio transport has no per-request metadata channel.
+- **Dynamic rules require caller-supplied metadata.** Both HTTP and stdio carry MCP metadata, but the calling application must supply the required keys.
 - **Identity comes from your application, not from SQL Lens authentication.** SQL Lens does not currently derive the predicate value from an authenticated principal's claims. Wire your embedding application to assert the identity you want to enforce.
 - **Read-only scope.** Row-Level Security narrows what the assistant can read. Combined with the default `database.read_only = true` setting, the assistant cannot write at all; Row-Level Security narrows the reads further.
 

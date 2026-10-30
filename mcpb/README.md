@@ -16,6 +16,9 @@
 
 The script auto-detects the host OS/arch and produces `dist/sqllens-<version>-<platform>.mcpb`. Override the platform tag with `./mcpb/build.sh linux-x86_64` if cross-tagging.
 
+Packing uses `@anthropic-ai/mcpb@2.1.2`. Update that exact version in `build.sh`
+when adopting a new CLI release; its transitive npm dependencies are not locked.
+
 Native wheels (notably ChromaDB's onnxruntime) are platform-specific, so each `.mcpb` only works on the OS/arch it was built for. CI builds a matrix and attaches all of them to the GitHub release.
 
 ## Installing
@@ -27,8 +30,9 @@ Drag the `.mcpb` matching your platform onto Claude Desktop. It'll prompt for th
 | Database URL | yes | SQLAlchemy DSN. Examples: `sqlite:///path/to/db.sqlite`, `postgresql://user:pw@host/db`, `mysql+pymysql://user:pw@host/db` |
 | Database display name | no | Defaults to `primary` |
 | Enforce read-only | no | Defaults to on. Strongly recommended |
+| Let the assistant save free-form notes | no | Defaults to off. Turn it on to let the assistant write its own schema notes into memory |
 | Anthropic API key | yes | Stored in your OS keychain |
-| Anthropic model | no | Defaults to the current Sonnet |
+| Anthropic model | no | Defaults to Claude Opus 5.5 |
 | Memory directory | yes | Where ChromaDB persists. Defaults to `~/.sqllens/chroma` |
 
 ## Caveats

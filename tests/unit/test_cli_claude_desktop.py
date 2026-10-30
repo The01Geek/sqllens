@@ -51,7 +51,7 @@ class TestTomlGeneration:
             db_url="sqlite:///./demo.db",
             db_name="demo",
             read_only=True,
-            model="claude-sonnet-4-5-20250929",
+            model="claude-opus-5-5",
             memory_dir=str(tmp_path / "chroma"),
         )
         path = tmp_path / "sqllens.toml"
@@ -66,7 +66,7 @@ class TestTomlGeneration:
             db_url="sqlite:///./demo.db",
             db_name="demo",
             read_only=True,
-            model="claude-sonnet-4-5-20250929",
+            model="claude-opus-5-5",
             memory_dir=str(tmp_path / "chroma"),
         )
         path = tmp_path / "sqllens.toml"
@@ -78,7 +78,7 @@ class TestTomlGeneration:
         assert cfg.database.url == "sqlite:///./demo.db"
         assert cfg.database.name == "demo"
         assert cfg.database.read_only is True
-        assert cfg.llm.model == "claude-sonnet-4-5-20250929"
+        assert cfg.llm.model == "claude-opus-5-5"
 
     def test_windows_path_with_backslashes_round_trips(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -89,7 +89,7 @@ class TestTomlGeneration:
             db_url="sqlite:///./demo.db",
             db_name="demo",
             read_only=True,
-            model="claude-sonnet-4-5-20250929",
+            model="claude-opus-5-5",
             memory_dir=windows_path,
         )
         # Single-quoted literal string preserves backslashes verbatim.
@@ -108,7 +108,7 @@ class TestTomlGeneration:
             db_url="sqlite:///./demo.db",
             db_name="demo",
             read_only=True,
-            model="claude-sonnet-4-5-20250929",
+            model="claude-opus-5-5",
             memory_dir=str(tmp_path / "chroma"),
         )
         # Any line that mentions api_key as a key (start-of-line, optionally
@@ -308,7 +308,7 @@ def base_options(tmp_path: Path, fake_config_json: Path) -> InstallOptions:
         db_url="sqlite:///./demo.db",
         api_key=FAKE_KEY,
         name="demo",
-        model="claude-sonnet-4-5-20250929",
+        model="claude-opus-5-5",
         read_only=True,
         memory_dir=str(tmp_path / "chroma"),
         working_dir=tmp_path / "workdir",
@@ -841,7 +841,7 @@ class TestResolveOptions:
             db_url="sqlite:///./demo.db",
             api_key=None,
             name=None,
-            model="claude-sonnet-4-5-20250929",
+            model="claude-opus-5-5",
             read_only=True,
             memory_dir=None,
             working_dir=tmp_path / "workdir",
@@ -860,7 +860,7 @@ class TestResolveOptions:
                 db_url="sqlite:///./demo.db",
                 api_key=None,
                 name=None,
-                model="claude-sonnet-4-5-20250929",
+                model="claude-opus-5-5",
                 read_only=True,
                 memory_dir=None,
                 working_dir=tmp_path / "workdir",
@@ -875,7 +875,7 @@ class TestResolveOptions:
                 db_url="sqlite:///./demo.db",
                 api_key=FAKE_KEY,
                 name=None,
-                model="claude-sonnet-4-5-20250929",
+                model="claude-opus-5-5",
                 read_only=True,
                 memory_dir=None,
                 working_dir=tmp_path / "workdir",
@@ -896,7 +896,7 @@ class TestResolveOptions:
                 db_url="this is not a dsn",
                 api_key=FAKE_KEY,
                 name=None,
-                model="claude-sonnet-4-5-20250929",
+                model="claude-opus-5-5",
                 read_only=True,
                 memory_dir=None,
                 working_dir=tmp_path / "workdir",
@@ -1188,14 +1188,16 @@ class TestAtomicJsonWrite:
         self, base_options: InstallOptions, fake_config_json: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("SQLLENS_LLM__API_KEY", FAKE_KEY)
-        from sqllens.installers import claude_desktop as installer_mod
+        from sqllens import _atomic as atomic_mod
 
-        original_replace = installer_mod.os.replace
+        original_replace = atomic_mod.os.replace
 
-        def boom_replace(*args: object, **kwargs: object) -> None:
-            raise OSError("simulated rename failure")
+        def boom_replace(source, destination) -> None:
+            if Path(destination) == fake_config_json:
+                raise OSError("simulated rename failure")
+            original_replace(source, destination)
 
-        monkeypatch.setattr(installer_mod.os, "replace", boom_replace)
+        monkeypatch.setattr(atomic_mod.os, "replace", boom_replace)
         with pytest.raises(InstallError, match="If it is missing or corrupt, restore it with"):
             run_install(
                 base_options,
@@ -1227,7 +1229,7 @@ class TestTomlStringDoubleQuotedFallback:
             db_url=url_with_apostrophe,
             db_name="demo",
             read_only=True,
-            model="claude-sonnet-4-5-20250929",
+            model="claude-opus-5-5",
             memory_dir=str(tmp_path / "chroma"),
         )
         # Must have picked the double-quoted form for this field.
@@ -1276,7 +1278,7 @@ class TestRevertVisibility:
         assert "inconsistent state" in captured.err
 
     def test_revert_cmd_bytes_warns_on_secondary_oserror(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from sqllens.installers.claude_desktop import _revert_cmd_bytes
 
@@ -1286,12 +1288,8 @@ class TestRevertVisibility:
         def boom(*_args: object, **_kwargs: object) -> None:
             raise PermissionError("simulated antivirus lock")
 
-        original_write_bytes = Path.write_bytes
-        try:
-            Path.write_bytes = boom  # type: ignore[method-assign]
-            _revert_cmd_bytes(cmd_path, original=b"@echo old\r\n")
-        finally:
-            Path.write_bytes = original_write_bytes  # type: ignore[method-assign]
+        monkeypatch.setattr("sqllens.installers.claude_desktop._atomic_write_bytes", boom)
+        _revert_cmd_bytes(cmd_path, original=b"@echo old\r\n")
 
         captured = capsys.readouterr()
         assert "WARNING" in captured.err

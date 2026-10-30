@@ -25,6 +25,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from decimal import Decimal
 
+from sqllens._bounded_json import JsonBoundsError, copy_bounded_json
 from sqllens.agent.core.components import UiComponent
 from sqllens.agent.core.rich_component import ComponentType
 from sqllens.agent.markers import IS_ANSWER_MARKER_KEY
@@ -655,6 +656,7 @@ def build_agent_trace(
        silently reported as a clean finish;
     5. else ``None`` — a clean run.
 
+    For per-step argument bounds, see ``docs/internal/mcp-server/tools.md``.
     Over-budget traces are size-capped by :func:`_cap_trace_size`, which may add
     ``arguments_truncated``/``steps_truncated`` flags and drop per-step
     ``arguments`` or trailing steps to fit the ``_meta`` iframe ceiling.
@@ -666,6 +668,7 @@ def build_agent_trace(
     by_id: dict[str, dict] = {}
     agent_error: str | None = None
     hit_iteration_limit = False
+    arguments_truncated = False
 
     for comp in components:
         rich = comp.rich_component
@@ -701,10 +704,16 @@ def build_agent_trace(
         tool = title[len(_TOOL_CARD_PREFIX):]
         timestamp = getattr(rich, "timestamp", None)
         metadata = getattr(rich, "metadata", None)
-        arguments = metadata if isinstance(metadata, dict) else {}
 
         step = by_id.get(card_id) if isinstance(card_id, str) else None
         if step is None:
+            arguments = {}
+            if isinstance(metadata, dict):
+                try:
+                    arguments, truncated = copy_bounded_json(metadata, max_string_chars=1024)
+                    arguments_truncated |= truncated
+                except JsonBoundsError:
+                    arguments_truncated = True
             # First card for this tool call — the ``running`` open.
             step = {
                 "index": len(steps),
@@ -780,6 +789,7 @@ def build_agent_trace(
             "total_duration_ms": total_duration_ms,
             "steps": public_steps,
             "terminal_error": terminal_error,
+            **({"arguments_truncated": True} if arguments_truncated else {}),
         }
     )
 
@@ -789,9 +799,8 @@ def _cap_trace_size(trace: dict) -> dict:
 
     The trace rides the same ``CallToolResult._meta`` blob as the table/chart
     payloads, which the host pushes into a sandboxed iframe — a multi-MB blob is
-    what actually breaks rendering (see ``_MAX_TABLE_PAYLOAD_BYTES``). Per-step
-    ``arguments`` (raw SQL, memory-search text) are the unbounded part, so when
-    the trace is over budget we drop them first (flagging ``arguments_truncated``
+    what actually breaks rendering (see ``_MAX_TABLE_PAYLOAD_BYTES``). When
+    the trace is over budget we drop per-step ``arguments`` first (flagging ``arguments_truncated``
     and stripping ``arguments`` from each step), then, only if still over, keep
     the largest contiguous step prefix that fits (recording ``steps_truncated``).
     A loud flag beats a silently-broken widget on the debugging path.
@@ -1328,11 +1337,11 @@ def _table_block_to_markdown(block: dict) -> str:
         return ""
 
     labels = _display_labels(block, columns)
-    header = "| " + " | ".join(str(c) for c in labels) + " |"
+    header = "| " + " | ".join(_escape_small_result_text(str(c)) for c in labels) + " |"
     separator = "|" + "|".join(["---"] * len(columns)) + "|"
     body_rows = []
     for row in rows[:_MAX_ROWS_RENDERED]:
-        cells = [str(c) for c in row]
+        cells = [_escape_small_result_text(str(c)) for c in row]
         body_rows.append("| " + " | ".join(cells) + " |")
     note = ""
     # row_count is the kept prefix after the per-block size cap; truncated is

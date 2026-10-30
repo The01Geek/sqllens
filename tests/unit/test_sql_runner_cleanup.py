@@ -128,10 +128,15 @@ def _install_fake_psycopg2(
     extras_mod = types.ModuleType("psycopg2.extras")
     extras_mod.RealDictCursor = type("RealDictCursor", (), {})
     psycopg2.extras = extras_mod
+    extensions_mod = types.ModuleType("psycopg2.extensions")
+    # Existing fixtures use DSNs without explicit connection options.
+    extensions_mod.parse_dsn = lambda _dsn: {}
+    psycopg2.extensions = extensions_mod
     psycopg2.connect = connect_factory
     psycopg2.Error = Exception
     monkeypatch.setitem(sys.modules, "psycopg2", psycopg2)
     monkeypatch.setitem(sys.modules, "psycopg2.extras", extras_mod)
+    monkeypatch.setitem(sys.modules, "psycopg2.extensions", extensions_mod)
 
 
 async def test_postgres_runner_preserves_primary_when_close_raises(

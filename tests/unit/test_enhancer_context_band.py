@@ -7,13 +7,13 @@ Issue #251 gives the context enhancer a second, opt-in threshold
 (``context_similarity_threshold``). These tests pin:
 
 - the off-by-default tier: unset floor → no SQL-pair search, text searched at the
-  strict bar, output byte-identical to the text-only rendering — also when the
+  strict bar, only text records in the bounded context — also when the
   strict bar is raised above 0.7 (no silent opt-in);
 - the text-injection floor tracking ``similarity_threshold`` (not a frozen 0.7);
 - the enabled tier injecting text memories and question->SQL pairs scoring at or
   above the floor — including strong pairs at or above the strict bar;
 - the pair search being limited to ``run_sql`` and skipping pairs with no SQL;
-- the SQL rendering (fenced, length-capped);
+- the SQL rendering (quoted, length-capped);
 - per-request profile overrides of the strict bar;
 - the degrade paths (text-search failure → original prompt; pair-search failure →
   text hits still injected).
@@ -21,6 +21,7 @@ Issue #251 gives the context enhancer a second, opt-in threshold
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -156,24 +157,22 @@ def _pair(question: str, sql: str | None, score: float) -> ToolMemorySearchResul
     )
 
 
-def _render_text_only(prompt: str, memories: list[TextMemorySearchResult]) -> str:
-    """The exact pre-change (issue #251) text-only rendering, reproduced here so
-    the no-op regression asserts against a fixed expected string, not against
-    the code under test."""
-    section = "\n\n## Relevant Context from Memory\n\n"
-    section += (
-        "The following domain knowledge and context from prior "
-        "interactions may be relevant:\n\n"
-    )
-    for result in memories:
-        section += f"• {result.memory.content}\n"
-    return prompt + section
+def _context_records(prompt: str) -> list[dict[str, str]]:
+    return json.loads(prompt.split("<sqllens_memory_data>", 1)[1]
+                      .split("</sqllens_memory_data>", 1)[0])
+
+
+def _assert_text_only(prompt: str, memories: list[TextMemorySearchResult]) -> None:
+    assert prompt.startswith(_BASE_PROMPT)
+    assert _context_records(prompt) == [
+        {"kind": "text", "content": result.memory.content} for result in memories
+    ]
 
 
 @pytest.mark.asyncio
 async def test_unset_floor_is_noop() -> None:
     """Default: floor unset → tier off, no SQL-pair search, text at the strict bar,
-    output byte-identical to the text-only rendering."""
+    only text records in the bounded context."""
     text = [_text("orders live in the sales schema", 0.85)]
     mem = _StubAgentMemory(text_results=text)
     enhancer = DefaultLlmContextEnhancer(mem)
@@ -182,7 +181,7 @@ async def test_unset_floor_is_noop() -> None:
 
     assert mem.tool_search_calls == []
     assert mem.text_search_calls == [0.7]
-    assert out == _render_text_only(_BASE_PROMPT, text)
+    _assert_text_only(out, text)
 
 
 @pytest.mark.asyncio
@@ -228,7 +227,7 @@ async def test_floor_not_below_strict_keeps_tier_off(floor: float) -> None:
 
     assert mem.tool_search_calls == []
     assert mem.text_search_calls == [0.7]
-    assert out == _render_text_only(_BASE_PROMPT, text)
+    _assert_text_only(out, text)
 
 
 @pytest.mark.asyncio
@@ -247,8 +246,9 @@ async def test_tier_injects_both_memory_kinds() -> None:
 
     assert "## Relevant Context from Memory" in out
     assert "cancelled orders are excluded by convention" in out
-    assert 'Related prior question: "how many orders last 10 days"' in out
-    assert "```sql\nSELECT count(*) FROM orders\n```" in out
+    assert _context_records(out)[1] == {"kind": "sql_example",
+                                        "question": "how many orders last 10 days",
+                                        "sql": "SELECT count(*) FROM orders"}
     assert mem.text_search_calls == [0.3]
     assert mem.tool_search_calls == [0.3]
     assert mem.tool_name_filters == ["run_sql"]
@@ -365,7 +365,7 @@ async def test_profile_strict_bar_can_enable_tier() -> None:
         reset_effective_settings(token)
 
     assert mem.tool_search_calls == [0.3]
-    assert 'Related prior question: "pair"' in out
+    assert _context_records(out)[0]["question"] == "pair"
 
 
 @pytest.mark.asyncio
@@ -399,5 +399,5 @@ async def test_pair_search_failure_keeps_text_hits(
     with caplog.at_level(logging.WARNING):
         out = await enhancer.enhance_system_prompt(_BASE_PROMPT, "q", _USER)
 
-    assert out == _render_text_only(_BASE_PROMPT, text)
+    _assert_text_only(out, text)
     assert any("Context pair search failed" in r.getMessage() for r in caplog.records)

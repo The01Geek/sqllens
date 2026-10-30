@@ -5,8 +5,12 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from sqllens.cli import app
@@ -144,3 +148,26 @@ def test_clear_requires_confirmation(tmp_path, monkeypatch) -> None:
     )
     assert confirmed.exit_code == 0, confirmed.output
     assert "skipped_duplicate=0" in confirmed.output
+
+
+@pytest.mark.parametrize("value,changed", [("=synthetic-private-value", True), ("ordinary", False)])
+def test_csv_export_reports_formula_protection_without_failing(
+    tmp_path, monkeypatch, value, changed,
+) -> None:
+    patch_fake_embeddings(monkeypatch)
+    cfg = _config(tmp_path)
+    source = tmp_path / "in.json"
+    source.write_text(json.dumps({"sql_pairs": {"pairs": [{"question": value, "sql": value}]}}))
+    imported = runner.invoke(app, ["import-memory", str(source), "-c", str(cfg)])
+    assert imported.exit_code == 0, imported.output
+    output = tmp_path / "out.csv"
+    result = runner.invoke(app, ["export-memory", str(output), "--format", "csv", "-c", str(cfg)])
+    assert result.exit_code == 0, result.output
+    expected = "'" + value if changed else value
+    assert list(csv.reader(io.StringIO(output.read_text()))) == [
+        ["question", "sql"], [expected, expected],
+    ]
+    assert ("Warning:" in result.output) is changed
+    if changed:
+        assert "CSV formula protection" in result.output and "JSON" in result.output
+        assert value not in result.output

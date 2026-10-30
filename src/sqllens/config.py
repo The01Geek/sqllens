@@ -24,7 +24,14 @@ import shlex
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -102,7 +109,7 @@ class LLMConfig(BaseModel):
     # embedders and tests that bypass the CLI entirely; it raises ``ValueError``
     # with the same message.
     api_key: SecretStr | None = Field(default=None, description="Anthropic API key")
-    model: str = Field(default="claude-sonnet-4-5-20250929", description="Anthropic model id")
+    model: str = Field(default="claude-opus-5-5", description="Anthropic model id")
     # Output-token cap for every agent LLM call. The framework fallback was 512,
     # which cuts off a tool call carrying a long SQL statement mid-arguments
     # (#247). Env override: SQLLENS_LLM__MAX_TOKENS.
@@ -165,8 +172,25 @@ class MemoryConfig(BaseModel):
             "Expose the save_question_tool_args agent tool, which lets the agent "
             "persist successful question -> SQL pairs into vector memory. OFF by "
             "default: when disabled the tool is not registered and the system "
-            "prompt drops its save instructions automatically. Reading saved "
+            "prompt drops its save bullet and the example workflow's save "
+            "step; the 'Do NOT forget to save successful executions.' sentence "
+            "rides on the always-registered search tool and still prints. "
+            "Reading saved "
             "memory (search_saved_correct_tool_uses) is unaffected."
+        ),
+    )
+    save_text_memories: bool = Field(
+        default=False,
+        description=(
+            "Expose the save_text_memory agent tool, which lets the agent "
+            "persist free-form notes (schema vocabulary, semantic hints) into "
+            "vector memory. OFF by default. When "
+            "disabled the tool is not registered and the default system prompt "
+            "drops its TEXT MEMORY section automatically. Notes already stored "
+            "— including curated imports — are untouched, and the context "
+            "enhancer still injects the ones matching a question. A blank "
+            "value (an empty or whitespace-only environment variable or TOML "
+            "string) reads as OFF."
         ),
     )
     allow_import: bool = Field(
@@ -174,7 +198,9 @@ class MemoryConfig(BaseModel):
         description=(
             "Expose the import_memory MCP tool. OFF by default: a remote client "
             "that can write memory can poison future SQL generation. Enable only "
-            "for trusted operators. The CLI import/export commands are unaffected."
+            "for trusted operators. Calls require auth.mode='bearer' or an "
+            "explicit auth.insecure=true acknowledgement on a closed network. "
+            "The CLI import/export commands are unaffected."
         ),
     )
     allow_admin_tools: bool = Field(
@@ -190,6 +216,17 @@ class MemoryConfig(BaseModel):
             "network."
         ),
     )
+
+    @field_validator("save_text_memories", mode="before")
+    @classmethod
+    def _blank_save_text_memories_is_off(cls, value: object) -> object:
+        # Keep the blank test narrow — widening it to any unparseable string
+        # would accept a typo like "ture" as OFF instead of failing config
+        # validation, silently leaving note saving disabled for an operator
+        # who asked for it.
+        if isinstance(value, str) and not value.strip():
+            return False
+        return value
 
 
 class ProfilesConfig(BaseModel):
@@ -606,11 +643,14 @@ class Config(BaseSettings):
         return tuple(sources)
 
     @classmethod
-    def load(cls, path: str | Path | None = None) -> Config:
+    def load(cls, path: str | Path | None = None, *, llm_api_key: str | None = None) -> Config:
         """Resolve config from env + TOML.
 
         If ``path`` is given it takes precedence over ``SQLLENS_CONFIG`` and the
         default ``./sqllens.toml`` location.
+
+        ``llm_api_key`` supplies an explicit key override without exporting it
+        into the process environment. Other values keep their usual precedence.
 
         Raises ``ConfigBomError`` — a ``ValueError`` subclass, so ``except
         ValueError:`` still catches it — when the resolved TOML begins with a
@@ -634,7 +674,7 @@ class Config(BaseSettings):
             resolved = _resolved_toml_path()
             token = _LOAD_TOML_PATH.set(resolved)
             try:
-                return cls()
+                return cls(llm={"api_key": llm_api_key}) if llm_api_key is not None else cls()
             except Exception as exc:
                 # BOM detection drives the message swap — we check the file's first
                 # three bytes, not the exception text. Any other parse error keeps

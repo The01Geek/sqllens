@@ -1,92 +1,10 @@
 # Changelog
 
-All notable changes to SQL Lens will be documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [SemVer](https://semver.org/) once it reaches `0.1.0`.
+Released changes are generated from [per-PR fragments](changelog.d/README.md). For upcoming changes, read [the draft fragments](changelog.d/).
 
-## [Unreleased]
+Prepare a release using [the release guide](docs/internal/releasing.md); do not append feature notes here.
 
-### Added
-- `llm.temperature` (`SQLLENS_LLM__TEMPERATURE`, 0–2) and `llm.effort`
-  (`SQLLENS_LLM__EFFORT`, `low|medium|high|xhigh|max`). Both are unset by
-  default, and SQL Lens sends nothing for a setting that is unset. A set
-  effort is sent as Anthropic `output_config.effort`. SQL Lens no longer
-  sends a hard-coded temperature of 0.7, which models that reject any
-  temperature answered with a 400. (#262)
-- `llm.max_tokens` (`SQLLENS_LLM__MAX_TOKENS`, default `8192`, range 1–128000):
-  output-token cap for every agent LLM call, wired into `AgentConfig.max_tokens`
-  by `build_agent`. Previously unset, so each call fell back to 512 tokens. (#247)
-- Self-driving MCP App widget at `ui://sqllens/memory-admin.html` that
-  renders the memory-administration surface (Browse / Import / Stats /
-  Danger zone) and drives the seven backing tools (`list_memories`,
-  `get_memory`, `delete_memory`, `clear_memories`, `add_memories`,
-  `export_memories`, `get_memory_stats`) directly via the App SDK's
-  `callServerTool`. Registered only inside `cfg.memory.allow_admin_tools`,
-  so a host never advertises a widget whose tools are off. Topology-
-  agnostic: the widget makes no direct network call to the server
-  (no `fetch`, `XHR`, `WebSocket`, or remote `<script src>`); every
-  interaction is brokered by the host as a `tools/call`, so the widget
-  renders identically whether the host reaches the server directly or
-  through a proxy. Partial `add_memories` and lossy `export_memories`
-  render as explicit errors per the `isError` contract; destructive
-  actions are confirm-gated and surface the server's write-auth
-  refusal. Dev preview shim at `scripts/memory_admin_preview.html`.
-  (#188)
-- Config schema (additive, backward-compatible — no behavior change yet):
-  `config_version` (top-level, default `1`, accepted-but-ignored —
-  reserved so a future schema migration can branch on it),
-  `server.log_level`, `agent.show_sql`, and an `[agent.audit]` section
-  (`enabled`/`log_level`/`include_response_text`/`sanitize_parameters`),
-  plus a `DatabaseConfig.dialect` helper property. `0.1.0` is the first
-  stable config schema: `config_version` defaults to `1` and is currently
-  ignored. Because the top-level config sets `extra="forbid"`, introducing
-  a new **required** field in a future schema version would break existing
-  TOMLs, so the compatibility contract is additive-with-defaults only. (#109)
-- `examples/mcp-clients/claude_desktop_stdio.json` snippet so Claude
-  Desktop users land on the recommended stdio launch pattern by default.
-- README and getting-started guide now surface the Windows config path
-  (`%APPDATA%\Claude\claude_desktop_config.json`) alongside the macOS
-  path, and link the Windows-specific install runbook that documents the
-  `.cmd` launcher workaround for the non-writable CWD issue (#10).
-
-### Changed
-- Renamed `examples/mcp-clients/claude_desktop.json` →
-  `claude_desktop_http.json` to disambiguate the HTTP and stdio
-  transports now that both example shapes ship.
-- `query_database` table blocks now carry an additive `column_labels`
-  list of humanized display headers (`_humanize_label` in `_format.py`):
-  a lowercase snake_case identifier such as `customer_id` becomes
-  "Customer ID" and `total_amount_usd` becomes "Total Amount USD",
-  while any already reader-friendly name (a SQL alias, `count(*)`, …) is
-  passed through unchanged. The raw `columns` keys are untouched, so the
-  widget's typed sort, the `column_types` lookup, and CSV export keep
-  matching on the original names. Both the interactive table widget and
-  the Markdown fallback (and the one-row small-result text path) render
-  the humanized header, falling back to the raw name when the field is
-  absent. Chart axis titles are defaulted the same way server-side
-  (`_compute_chart_payload` → `_default_axis_label`): an axis whose field
-  is snake_case and whose label the LLM left empty shows the humanized
-  field, while a label the LLM set on purpose is preserved. Chart legend
-  and series names are unchanged. (#259)
-
-### Fixed
-- Enforce bounded ASCII profile names across administration, persistence and
-  query selection, with short errors that do not echo rejected names. Invalid
-  legacy names require manual repair; profile writes stay disabled until
-  repair and restart so excluded entries are not lost. (#211, #214)
-- Block database views while row-level security is active, using relation-type checks on the execution connection. Unprotected base-table reads remain available; failed catalog checks block execution. (#261)
-- Agent looped on tool calls cut off by the output-token cap until
-  `max_tool_iterations` (#247). A `tool_use` block in a `max_tokens` response is
-  now marked `truncated` and refused by `ToolRegistry.execute` with an
-  explanatory error instead of running; missing tool input is parsed as `{}`
-  instead of the `{"_raw": None}` placeholder the model kept copying; and the
-  agent stops after 3 consecutive rounds of invalid or truncated tool calls,
-  reported as an error.
-- The `query_database` result widget painted text blocks as raw Markdown
-  source (`#`, `**`, `-` visible in the host). Text blocks are now rendered
-  with a vendored markdown-it 14.3.2 (`src/sqllens/ui/vendor/markdown-it.min.js`,
-  inlined like the other bundles) configured with `html: false` (raw HTML
-  escaped), its default link validation (`javascript:` / `vbscript:` / `file:`
-  / `data:` targets stay literal) and image syntax disabled (no remote
-  fetches), so agent output cannot inject markup into the widget.
+<!-- towncrier release notes start -->
 
 ## [0.0.2] - 2026-04-28
 

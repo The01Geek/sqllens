@@ -726,11 +726,10 @@ def test_cell_value_coercion_none_and_decimal_and_datetime() -> None:
     assert body_line == "| None | 1.50 | 2026-01-02 03:04:05 |"
 
 
-def test_markdown_pipe_in_cell_value_is_escaped_or_documented() -> None:
+def test_markdown_pipe_in_cell_value_is_escaped() -> None:
     rendered = _render_dataframe(_df(["text"], [{"text": "a|b"}]))
     body_line = rendered.splitlines()[-1]
-    assert body_line == "| a|b |"
-    assert "a\\|b" not in rendered
+    assert body_line == "| a\\|b |"
 
 
 def test_table_small_dataframe_exact_block_payload() -> None:
@@ -1502,9 +1501,24 @@ def test_build_agent_trace_caps_oversized_arguments() -> None:
     cards = make_tool_cards("run_sql", {"sql": huge_sql}, ok=True)
     trace = build_agent_trace(cards, total_duration_ms=5, max_iterations=20)
     assert trace["arguments_truncated"] is True
-    assert "arguments" not in trace["steps"][0] or trace["steps"][0]["arguments"] == {}
+    assert trace["steps"][0]["arguments"] == {"sql": huge_sql[:1024] + "…(truncated)"}
     assert trace["steps"][0]["tool"] == "run_sql"
     assert _serialized_len(trace) <= _MAX_TABLE_PAYLOAD_BYTES
+
+
+def test_build_agent_trace_strips_arguments_when_small_steps_exceed_total_budget() -> None:
+    arguments = {"sql": "x" * 1024}
+    stream = []
+    for _ in range(140):
+        stream.extend(make_tool_cards("run_sql", arguments, ok=True))
+    trace = build_agent_trace(stream, total_duration_ms=5, max_iterations=200)
+    assert _serialized_len(trace) <= _MAX_TABLE_PAYLOAD_BYTES
+    assert trace["arguments_truncated"] is True
+    assert trace["iterations"] == 140
+    assert len(trace["steps"]) == 140
+    assert all("arguments" not in step for step in trace["steps"])
+    assert not trace.get("steps_truncated")
+    assert all(card.rich_component.metadata == {"sql": "x" * 1024} for card in stream)
 
 
 # ---------------------------------------------------------------------------
@@ -1774,7 +1788,7 @@ def test_table_markdown_header_falls_back_to_raw_when_labels_absent() -> None:
         "row_count": 1,
         "truncated": 0,
     }
-    assert _table_block_to_markdown(block).splitlines()[0] == "| customer_id | name |"
+    assert _table_block_to_markdown(block).splitlines()[0] == r"| customer\_id | name |"
 
 
 def test_small_result_one_column_uses_humanized_label() -> None:

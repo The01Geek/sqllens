@@ -54,13 +54,13 @@ def probe_database(cfg: Config) -> None:
     effectively instant for local files).
 
     Raises:
-        PreflightError: with ``subsystem='database'`` and the driver error as
-        the detail. The original driver exception is chained via ``__cause__``.
+        PreflightError: with ``subsystem='database'`` and a sanitized category
+        as the detail. The original driver exception is chained via ``__cause__``.
     """
     url = cfg.database.url
     if "://" not in url:
         raise PreflightError(
-            "database", f"database.url {url!r} is missing the '://' separator"
+            "database", "database.url is missing the '://' separator"
         )
     scheme, rest = url.split("://", 1)
     scheme = scheme.lower()
@@ -79,7 +79,9 @@ def probe_database(cfg: Config) -> None:
             ):
                 pass
         except sqlite3.Error as exc:
-            raise PreflightError("database", f"{type(exc).__name__}: {exc}") from exc
+            raise PreflightError(
+                "database", f"{type(exc).__name__}: connection failed; check connection settings."
+            ) from exc
         return
 
     if scheme.startswith("postgres"):
@@ -100,7 +102,9 @@ def probe_database(cfg: Config) -> None:
             ):
                 pass
         except psycopg2.Error as exc:
-            raise PreflightError("database", f"{type(exc).__name__}: {exc}") from exc
+            raise PreflightError(
+                "database", f"{type(exc).__name__}: connection failed; check connection settings."
+            ) from exc
         return
 
     if scheme.startswith("mysql"):
@@ -112,20 +116,26 @@ def probe_database(cfg: Config) -> None:
                 "mysql driver not installed — run: pip install 'sqllens[mysql]'",
             ) from exc
 
-        parsed = urlparse(url)
-        if not parsed.hostname or not parsed.username:
+        try:
+            parsed = urlparse(url)
+            host, user, port = parsed.hostname, parsed.username, parsed.port
+        except ValueError as exc:
+            raise PreflightError(
+                "database", "invalid MySQL URL; check its format and port"
+            ) from exc
+        if not host or not user:
             raise PreflightError(
                 "database", "mysql url must include user and host"
             )
         try:
             with contextlib.closing(
                 pymysql.connect(
-                    host=parsed.hostname,
-                    port=parsed.port or 3306,
+                    host=host,
+                    port=port or 3306,
                     # urlparse does not percent-decode credentials; SQLAlchemy's
                     # make_url does. Decode here so a password containing e.g. '/'
                     # written as %2F authenticates instead of being sent literally.
-                    user=unquote(parsed.username),
+                    user=unquote(user),
                     password=unquote(parsed.password) if parsed.password else "",
                     database=(parsed.path or "").lstrip("/"),
                     connect_timeout=_DB_CONNECT_TIMEOUT_SECONDS,
@@ -133,12 +143,14 @@ def probe_database(cfg: Config) -> None:
             ):
                 pass
         except pymysql.MySQLError as exc:
-            raise PreflightError("database", f"{type(exc).__name__}: {exc}") from exc
+            raise PreflightError(
+                "database", f"{type(exc).__name__}: connection failed; check connection settings."
+            ) from exc
         return
 
     raise PreflightError(
         "database",
-        f"unsupported database scheme: {scheme!r} (expected sqlite/postgres/mysql)",
+        "unsupported database scheme (expected sqlite/postgres/mysql)",
     )
 
 

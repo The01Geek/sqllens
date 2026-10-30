@@ -113,4 +113,4 @@ When `[[rls]]` rules are configured, dynamic rule values (`value_from_metadata`)
 - [src/sqllens/tools/query_database.py](../../../src/sqllens/tools/query_database.py) strips reserved internal-control keys (`_RESERVED_METADATA_KEYS` = `{"starter_ui_request", "ui_features_available"}`) before passing the metadata into the `RequestContext`, so untrusted MCP metadata cannot steer agent-internal control flow — only supply RLS predicate values.
 - `RlsGuardRunner` (composed outermost in the `SqlRunner` stack — see [agent/factory.md](../agent/factory.md) and [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md)) rewrites the agent-generated SQL using `context.metadata`; the read-only guard then validates the rewritten SQL.
 
-Dynamic RLS rules therefore work **only on the HTTP transport** (stdio has no per-request `_meta` channel, so `_request_metadata` always returns `{}` and any dynamic rule would block). Static rules (`value = ...`) need no metadata and work on every transport.
+Static rules (`value = ...`) need no metadata and work on every transport.
