@@ -150,7 +150,9 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     Best-effort, fail-open-to-``False``: apart from a ``SHOW``, a query that
     does not parse under ``dialect`` (a sqlglot parse or tokenize error, or an
     empty parse) is treated as a data query, so its result is shown. Any other
-    exception from the parser fails closed to ``True`` and logs a warning.
+    exception from the parser propagates, so the caller reports an error
+    rather than guessing (``query_database`` returns its sanitized internal
+    error).
     """
     if dialect is not None:
         try:
@@ -174,14 +176,6 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
             type(exc).__name__,
         )
         return False
-    except Exception:
-        logger.warning(
-            "is_introspection_query: parser failed unexpectedly under dialect %r; "
-            "classifying it as introspection so its result stays withheld",
-            dialect,
-            exc_info=True,
-        )
-        return True
     if parsed is None:
         logger.info(
             "is_introspection_query: SQL parsed to nothing under dialect %r; "

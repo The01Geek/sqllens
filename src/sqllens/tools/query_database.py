@@ -287,9 +287,16 @@ async def query_database_impl_with_widgets(
             raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
 
         total_duration_ms = int((time.monotonic() - started) * 1000)
-        answer, is_error, blocks, query_info, memory_info = components_to_blocks(
-            components, dialect=sqlglot_dialect_for_url(cfg.database.url)
-        )
+        try:
+            answer, is_error, blocks, query_info, memory_info = components_to_blocks(
+                components, dialect=sqlglot_dialect_for_url(cfg.database.url)
+            )
+        except Exception as e:
+            # A formatter failure (e.g. an unexpected sqlglot exception from the
+            # introspection classifier) must not decide what the user sees by
+            # guessing; surface it as the sanitized internal error.
+            logger.exception("formatting the agent's response failed")
+            raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
         # The build-time UiFeatures gate now always admits the tool-args card,
         # so the run_sql STATUS_CARD is always present in the component stream
         # — meaning ``query_info`` is always populated when SQL ran. The

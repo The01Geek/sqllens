@@ -892,18 +892,19 @@ class TestIsIntrospectionQueryPerDialect:
         # Control: these catalogs already count without a dialect before #301.
         assert is_introspection_query(sql) is True
 
-    def test_unexpected_parser_error_fails_closed(
+    def test_unexpected_parser_error_propagates(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # Only sqlglot parse/tokenize errors fail open; any other parser
-        # exception keeps the result withheld.
+        # exception propagates instead of guessing a classification.
         import sqllens.safety.readonly as readonly_mod
 
         def boom(*_args: object, **_kwargs: object) -> None:
             raise RecursionError("too deep")
 
         monkeypatch.setattr(readonly_mod.sqlglot, "parse_one", boom)
-        assert is_introspection_query("SELECT id FROM widgets", dialect="mysql") is True
+        with pytest.raises(RecursionError):
+            is_introspection_query("SELECT id FROM widgets", dialect="mysql")
 
     @pytest.mark.parametrize("dialect", ["postgresql", "no-such-dialect"])
     @pytest.mark.parametrize(
