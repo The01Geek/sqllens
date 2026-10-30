@@ -99,6 +99,7 @@ def verification_config(cfg: Config) -> Config:
             "memory": cfg.memory.model_copy(
                 update={
                     "save_queries": False,
+                    "save_text_memories": False,
                     "similarity_threshold": effective.similarity_threshold,
                 }
             ),

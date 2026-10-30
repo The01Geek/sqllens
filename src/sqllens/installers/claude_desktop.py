@@ -20,7 +20,6 @@ from __future__ import annotations
 import copy
 import difflib
 import json
-import os
 import shutil
 import sys
 from collections.abc import Callable, Mapping
@@ -30,6 +29,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from sqllens._atomic import atomic_write_bytes as _atomic_write_bytes
 from sqllens._atomic import atomic_write_text as _atomic_write_text
 
 PLATFORM_WIN = "win32"
@@ -346,31 +346,15 @@ def make_backup_path(json_path: Path, now: datetime) -> Path:
 
 
 def validate_toml(toml_path: Path, *, api_key: str) -> None:
-    """Round-trip the generated TOML through :class:`sqllens.config.Config`.
-
-    The API key is required at load time but is intentionally not stored in
-    the TOML, so we set ``SQLLENS_LLM__API_KEY`` in the env for the duration
-    of this check. ``Config.load`` also exports ``SQLLENS_CONFIG`` as a side
-    effect, so both variables are snapshot-and-restored on exit (success or
-    failure) to keep this function side-effect-free at the process-env level.
-    """
+    """Validate the generated TOML with an explicit key, without exporting it."""
     from sqllens.config import Config
 
-    previous_key = os.environ.get("SQLLENS_LLM__API_KEY")
-    previous_cfg = os.environ.get("SQLLENS_CONFIG")
-    try:
-        os.environ["SQLLENS_LLM__API_KEY"] = api_key
-        Config.load(toml_path)
-    finally:
-        _restore_env("SQLLENS_LLM__API_KEY", previous_key)
-        _restore_env("SQLLENS_CONFIG", previous_cfg)
+    Config.load(toml_path, llm_api_key=api_key)
 
 
-def _restore_env(key: str, previous: str | None) -> None:
-    if previous is None:
-        os.environ.pop(key, None)
-    else:
-        os.environ[key] = previous
+def _reject_symlink(path: Path) -> None:
+    if path.is_symlink():
+        raise InstallError(f"Refusing symlink destination: {path}")
 
 
 def resolve_options(
@@ -401,7 +385,9 @@ def resolve_options(
     try:
         make_url(db_url)
     except (ArgumentError, ValueError) as exc:
-        raise InstallError(f"--db is not a valid SQLAlchemy URL: {exc}") from exc
+        raise InstallError(
+            "--db is not a valid SQLAlchemy URL; check its format and port."
+        ) from exc
 
     resolved_working = working_dir or default_working_dir(platform_name, env)
     resolved_memory = memory_dir or default_memory_dir(platform_name, env)
@@ -441,7 +427,7 @@ def run_install(
 ) -> InstallResult:
     """Perform (or simulate) the install end-to-end.
 
-    On dry-run, the function never touches disk and reports the plan. On a
+    On dry-run, the function never writes to disk and reports the plan. On a
     real run, TOML and ``.cmd`` failures revert their respective writes and
     leave Claude Desktop's JSON untouched; the JSON itself is updated
     atomically (tempfile + rename) so a kill mid-write cannot truncate the
@@ -488,6 +474,10 @@ def run_install(
         api_key=options.api_key,
     )
 
+    for destination in (toml_path, cmd_path, options.config_path):
+        if destination is not None:
+            _reject_symlink(destination)
+
     # During a dry-run, a brand-new machine without Claude Desktop installed
     # should still be able to preview the planned changes. Treat a missing
     # file as an empty config; on a real run, _read_existing_config still
@@ -503,6 +493,11 @@ def run_install(
     json_after_serialized = json.dumps(json_after, indent=2) + "\n"
     json_diff = _unified_json_diff(json_before, json_after, str(options.config_path))
     json_after_frozen: Mapping[str, Any] = MappingProxyType(json_after)
+
+    planned_backup = None
+    if not dry_run and json_after != json_before:
+        planned_backup = make_backup_path(options.config_path, now_fn())
+        _reject_symlink(planned_backup)
 
     if dry_run:
         return InstallResult(
@@ -538,11 +533,10 @@ def run_install(
         )
     if toml_changed:
         try:
-            toml_path.write_text(toml_content, encoding="utf-8")
-        except OSError as exc:
-            # A failed write may leave the file truncated; restore the prior
-            # contents so the next run isn't blocked by a "different content"
-            # gate that reflects our half-finished write, not the user's intent.
+            _reject_symlink(toml_path)
+            _atomic_write_text(toml_path, toml_content)
+        except (OSError, InstallError) as exc:
+            # Preserve the existing best-effort rollback/error contract.
             _revert_toml(toml_path, existing_toml)
             raise InstallError(f"Could not write {toml_path}: {exc}") from exc
 
@@ -564,11 +558,10 @@ def run_install(
             )
         if cmd_changed:
             try:
-                cmd_path.write_bytes(cmd_content_bytes)
-            except OSError as exc:
-                # Revert both: the .cmd may be truncated after a partial write,
-                # and the TOML write we just succeeded is meaningless without
-                # the launcher Claude Desktop will exec.
+                _reject_symlink(cmd_path)
+                _atomic_write_bytes(cmd_path, cmd_content_bytes)
+            except (OSError, InstallError) as exc:
+                # Restore both artifacts if the launcher update fails.
                 _revert_cmd_bytes(cmd_path, existing_cmd_bytes)
                 _revert_toml(toml_path, existing_toml)
                 raise InstallError(
@@ -577,7 +570,7 @@ def run_install(
             cmd_written = True
 
     # Catch *any* exception, not just (ValueError, OSError, ImportError): we
-    # just wrote a TOML embedding the user's --api-key / --db secret, so on
+    # just wrote a TOML that can contain the user's --db secret, so on
     # ANY validate_toml failure we must (a) revert to avoid leaving a
     # half-applied state and (b) route the message through
     # _format_config_error so a value-bearing exception (a pydantic
@@ -611,13 +604,19 @@ def run_install(
     backup_path: Path | None = None
     if json_after != json_before:
         try:
-            backup_path = make_backup_path(options.config_path, now_fn())
-            shutil.copy2(options.config_path, backup_path)
+            backup_path = planned_backup
+            assert backup_path is not None
+            _reject_symlink(backup_path)
+            original_json = _read_bytes_or_none(options.config_path)
+            if original_json is None:
+                raise InstallError("Configuration disappeared before backup; retry the install.")
+            _atomic_write_bytes(backup_path, original_json)
         except OSError as exc:
             raise InstallError(
                 f"Failed to back up {options.config_path}: {exc}"
             ) from exc
         try:
+            _reject_symlink(options.config_path)
             _atomic_write_text(options.config_path, json_after_serialized)
         except OSError as exc:
             # _atomic_write_text uses tempfile + os.replace; the original is
@@ -660,6 +659,7 @@ def _read_existing_config(path: Path) -> dict[str, Any]:
     surfaced through `InstallError` so the CLI's user-friendly channel handles
     it rather than the generic "file an issue" backstop.
     """
+    _reject_symlink(path)
     try:
         raw = path.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
@@ -683,6 +683,7 @@ def _read_existing_config(path: Path) -> dict[str, Any]:
 
 
 def _read_text_or_none(path: Path) -> str | None:
+    _reject_symlink(path)
     try:
         return path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -692,6 +693,7 @@ def _read_text_or_none(path: Path) -> str | None:
 
 
 def _read_bytes_or_none(path: Path) -> bytes | None:
+    _reject_symlink(path)
     try:
         return path.read_bytes()
     except FileNotFoundError:
@@ -712,11 +714,12 @@ def _revert_toml(toml_path: Path, original: str | None) -> None:
     has at least one visible signal.
     """
     try:
+        _reject_symlink(toml_path)
         if original is None:
             toml_path.unlink(missing_ok=True)
         else:
-            toml_path.write_text(original, encoding="utf-8")
-    except OSError as exc:
+            _atomic_write_text(toml_path, original)
+    except (OSError, InstallError) as exc:
         print(
             f"WARNING: failed to revert {toml_path}: {exc}. "
             "File may be in an inconsistent state.",
@@ -728,11 +731,12 @@ def _revert_toml(toml_path: Path, original: str | None) -> None:
 def _revert_cmd_bytes(cmd_path: Path, original: bytes | None) -> None:
     """Bytes-mode counterpart of :func:`_revert_toml` for the Windows ``.cmd``."""
     try:
+        _reject_symlink(cmd_path)
         if original is None:
             cmd_path.unlink(missing_ok=True)
         else:
-            cmd_path.write_bytes(original)
-    except OSError as exc:
+            _atomic_write_bytes(cmd_path, original)
+    except (OSError, InstallError) as exc:
         print(
             f"WARNING: failed to revert {cmd_path}: {exc}. "
             "File may be in an inconsistent state.",

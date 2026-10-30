@@ -40,6 +40,7 @@ def _clean_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SQLLENS_AGENT__SHOW_DETAILS", raising=False)
     monkeypatch.delenv("SQLLENS_AGENT__AUDIT__ENABLED", raising=False)
     monkeypatch.delenv("SQLLENS_AGENT__MAX_CONVERSATIONS", raising=False)
+    monkeypatch.delenv("SQLLENS_MEMORY__SAVE_TEXT_MEMORIES", raising=False)
 
 
 def _minimal_toml(tmp_path: Path, extra: str = "") -> Path:
@@ -486,3 +487,85 @@ def test_context_similarity_threshold_env_beats_toml(
         _minimal_toml(tmp_path, "\n[memory]\ncontext_similarity_threshold = 0.6\n")
     )
     assert cfg.memory.context_similarity_threshold == 0.3
+
+
+# --- MemoryConfig.save_text_memories (issue #267) ---------------------------
+
+
+def test_save_text_memories_default_is_false(tmp_path: Path) -> None:
+    # A config file written before this change carries no [memory] table at
+    # all; it must load and leave note saving off.
+    assert MemoryConfig().save_text_memories is False
+    cfg = Config.load(_minimal_toml(tmp_path))
+    assert cfg.memory.save_text_memories is False
+
+
+def test_save_text_memories_env_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SQLLENS_MEMORY__SAVE_TEXT_MEMORIES", "true")
+    cfg = Config.load(_minimal_toml(tmp_path))
+    assert cfg.memory.save_text_memories is True
+
+
+def test_save_text_memories_toml_override(tmp_path: Path) -> None:
+    cfg = Config.load(
+        _minimal_toml(tmp_path, "\n[memory]\nsave_text_memories = true\n")
+    )
+    assert cfg.memory.save_text_memories is True
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\t"])
+def test_blank_save_text_memories_env_loads_as_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blank: str
+) -> None:
+    # An unset shell variable expanded into the environment arrives as an empty
+    # string. It must load cleanly and read as off, not stop startup.
+    monkeypatch.setenv("SQLLENS_MEMORY__SAVE_TEXT_MEMORIES", blank)
+    cfg = Config.load(_minimal_toml(tmp_path))
+    assert cfg.memory.save_text_memories is False
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_save_text_memories_toml_loads_as_off(
+    tmp_path: Path, blank: str
+) -> None:
+    cfg = Config.load(
+        _minimal_toml(tmp_path, f'\n[memory]\nsave_text_memories = "{blank}"\n')
+    )
+    assert cfg.memory.save_text_memories is False
+
+
+def test_blank_save_text_memories_env_beats_true_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The blank coercion must not be a special "fall through to TOML" path:
+    # env wins over TOML everywhere else, so a blank override reads as off.
+    monkeypatch.setenv("SQLLENS_MEMORY__SAVE_TEXT_MEMORIES", "")
+    cfg = Config.load(
+        _minimal_toml(tmp_path, "\n[memory]\nsave_text_memories = true\n")
+    )
+    assert cfg.memory.save_text_memories is False
+
+
+def test_non_boolean_save_text_memories_still_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A typo must fail loudly rather than be absorbed by the blank coercion,
+    # which would silently leave note saving off for an operator who asked
+    # for it.
+    monkeypatch.setenv("SQLLENS_MEMORY__SAVE_TEXT_MEMORIES", "ture")
+    with pytest.raises(ValidationError):
+        Config.load(_minimal_toml(tmp_path))
+    with pytest.raises(ValidationError):
+        MemoryConfig(save_text_memories="ture")
+
+
+def test_misspelled_memory_key_is_still_ignored(tmp_path: Path) -> None:
+    # MemoryConfig sets no model_config, so it keeps pydantic's extra="ignore":
+    # a misspelled singular key is dropped and the tool stays unregistered.
+    cfg = Config.load(
+        _minimal_toml(tmp_path, "\n[memory]\nsave_text_memory = true\n")
+    )
+    assert cfg.memory.save_text_memories is False
+    assert not hasattr(cfg.memory, "save_text_memory")

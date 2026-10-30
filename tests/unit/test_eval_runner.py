@@ -260,9 +260,12 @@ def _config_saving_queries(tmp_path: Path) -> Config:
     """A config whose operator opted into agent-side query saving."""
     cfg = _config(tmp_path)
     saving = cfg.model_copy(
-        update={"memory": cfg.memory.model_copy(update={"save_queries": True})}
+        update={"memory": cfg.memory.model_copy(
+            update={"save_queries": True, "save_text_memories": True}
+        )}
     )
     assert saving.memory.save_queries is True
+    assert saving.memory.save_text_memories is True
     return saving
 
 
@@ -327,6 +330,7 @@ def test_production_driver_agent_has_no_memory_write_tools(
     assert "save_text_memory" not in tools
     assert "run_sql" in tools
     assert used_cfg.memory.save_queries is False
+    assert used_cfg.memory.save_text_memories is False
     assert used_cfg.agent.show_details is True
 
 

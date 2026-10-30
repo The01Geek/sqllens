@@ -60,8 +60,7 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     ``cfg.memory``, and disables retrieval counter and timestamp updates.
     ``sqllens verify-memory`` builds its agent this way.
     Save-tool registration composes with any per-tool config gate
-    (``memory.save_queries`` today, a future text-memory flag) as a logical
-    AND.
+    as a logical AND.
     """
     # Every CLI-launched transport already exits 2 in ``cli.serve`` before reaching
     # here. This guard catches the residual bypass paths — programmatic embedders
@@ -140,11 +139,14 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
         access_groups=access,
     )
     # save_text_memory persists free-form domain knowledge (vocabulary, semantic
-    # notes) so subsequent questions can land on the right tables/columns. The
-    # default system prompt switches on its presence via has_text_memory.
-    # ``allow_memory_writes=False`` (verify-memory) suppresses it; if a config
-    # flag later gates this registration, AND it with ``allow_memory_writes``.
-    if allow_memory_writes:
+    # notes) so subsequent questions can land on the right tables/columns. Gated
+    # by memory.save_text_memories (OFF by default); the default system prompt
+    # switches its TEXT MEMORY section on the tool's presence via
+    # has_text_memory, so dropping the registration cleanly drops the prompt
+    # guidance too. Do not move this gate into SaveTextMemoryTool.execute or
+    # ChromaAgentMemory.save_text_memory: curated imports (sqllens.memory.store)
+    # call the same storage method, so a gate there would drop curated notes.
+    if cfg.memory.save_text_memories and allow_memory_writes:
         tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
 
     # The framework default gates the tool-arguments card to admin-only. We

@@ -1,6 +1,6 @@
 # Agent memory (ChromaDB-backed vector store)
 
-<!-- verified-against: issue-251 branch 2026-09-17 -->
+<!-- verified-against: 1e58a05 2026-10-29 -->
 
 How the agent recalls prior successful tool uses, and what tunables affect retrieval quality. Source-of-truth reference for [src/sqllens/agent/integrations/chromadb/agent_memory.py](../../../src/sqllens/agent/integrations/chromadb/agent_memory.py), [src/sqllens/agent/capabilities/agent_memory/](../../../src/sqllens/agent/capabilities/agent_memory/), and [src/sqllens/agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py).
 
@@ -23,7 +23,7 @@ The on-demand search tool accepts `limit` values from 1 to 100 (default 10); an 
 
 `SaveQuestionToolArgsTool` is registered **only when `cfg.memory.save_queries` is true** (it defaults to `false`). When the flag is off the tool is never wired into the agent, so the agent cannot write tool-use memory — reading existing tool-use memory via `SearchSavedCorrectToolUsesTool` is unaffected.
 
-**Text memory (free-form).** The agent can also call `SaveTextMemoryTool` to record free-form notes — domain vocabulary, semantic hints, "column X actually means Y in this schema", etc. These are stored in the same Chroma collection but as text-memory entries rather than tool-arg recordings. The default system prompt (`src/sqllens/agent/core/system_prompt/default.py`) gates its text-memory instructions on `has_text_memory = "save_text_memory" in tool_names`, so the tool must be registered for the LLM to be told about it.
+**Text memory (free-form).** `SaveTextMemoryTool` records free-form notes — domain vocabulary, semantic hints, "column X actually means Y in this schema", etc. These are stored in the same Chroma collection but as text-memory entries rather than tool-arg recordings. It is registered **only when `cfg.memory.save_text_memories` is true** (it defaults to `false`, issue #267). The default system prompt (`src/sqllens/agent/core/system_prompt/default.py`) gates its text-memory instructions on `has_text_memory = "save_text_memory" in tool_names`, so leaving the flag off drops the tool and its `TEXT MEMORY` prompt section together. Notes already in the store — curated imports included — are untouched, and the context enhancer still injects the ones matching a question: `DefaultLlmContextEnhancer.enhance_system_prompt` searches the collection and never consults the tool list.
 
 There are two separate ways a memory reaches the model, and they use different thresholds:
 
@@ -50,7 +50,7 @@ When the floor is unset, or is not below the effective strict bar, the tier is o
 
 **Reference-data boundary.** Text memories and SQL examples are encoded as JSON records inside a `sqllens_memory_data` block, preceded by instructions to treat them as untrusted reference data. Angle brackets, ampersands, newlines and control characters in values are escaped so stored text cannot close the outer delimiter. Text, prior questions and SQL are capped at 4,000, 1,000 and 8,000 characters respectively, including a visible truncation marker. The entire appended section is capped at 32,768 characters. Records that would exceed the remaining encoded budget are omitted with a notice; escaping can make a record larger than its source text.
 
-This framing reduces ambiguity and bounds prompt growth; it cannot guarantee that a model will resist prompt injection. Give memory write access only to trusted curators, and review imported knowledge. Stored content, search thresholds and the current text-memory save default are unchanged. The separate text-save configuration proposal in #267 is not implemented here.
+This framing reduces ambiguity and bounds prompt growth; it cannot guarantee that a model will resist prompt injection. Give memory write access only to trusted curators, and review imported knowledge.
 
 **Hit counting.** `search_similar_usage` bumps `hit_count` / `last_hit_date` for every row it returns (see *Per-memory hit tracking*). With the tier on, each request therefore counts up to 5 pairs as retrieved, and a pair that the search tool also returns in the same request is counted twice.
 
@@ -81,7 +81,7 @@ context_enhancer = DefaultLlmContextEnhancer(
 
 This explicit wiring matters: if `llm_context_enhancer` is left unset, `Agent` falls back to a `DefaultLlmContextEnhancer` built with only `agent_memory`, which cannot see either configured threshold and therefore leaves the text-search floor at the enhancer's own `0.7` default and the context tier permanently off. See [System-prompt context injection](#system-prompt-context-injection) above.
 
-The memory tools are then registered alongside `RunSqlTool` inside `build_agent` ([factory.py](../../../src/sqllens/agent/factory.py)). The structured-save tool is gated on `cfg.memory.save_queries`; the search tool is always registered; the text-memory tool is registered unless the caller passed `allow_memory_writes=False` (only `verify-memory` does, see [Verifying an import](#verifying-an-import-verify-memory)), which also suppresses the structured-save tool:
+The memory tools are then registered alongside `RunSqlTool` inside `build_agent` ([factory.py](../../../src/sqllens/agent/factory.py)). Each save tool requires its own config flag and `allow_memory_writes=True`; the search tool is always registered:
 
 ```python
 if cfg.memory.save_queries and allow_memory_writes:
@@ -92,15 +92,15 @@ tools.register_local_tool(
     ),
     access_groups=access,
 )
-if allow_memory_writes:
+if cfg.memory.save_text_memories and allow_memory_writes:
     tools.register_local_tool(SaveTextMemoryTool(), access_groups=access)
 ```
 
 Three things to note about this wiring:
 
 - `cfg.memory.similarity_threshold` is threaded into `SearchSavedCorrectToolUsesTool` as a constructor argument. The LLM can still override it per call via the tool's `similarity_threshold` parameter, but when the LLM omits it the operator-facing config knob takes effect. (Before this wiring landed, the configured value was dead — the runtime fallback was a hardcoded `0.7` inside the tool's `execute()`. See issue #76.)
-- `SaveQuestionToolArgsTool` is registered only when `cfg.memory.save_queries` is true. The default system prompt switches its "save successful queries" instructions on `has_save = "save_question_tool_args" in tool_names` (in [src/sqllens/agent/core/system_prompt/default.py](../../../src/sqllens/agent/core/system_prompt/default.py)), so leaving the flag off drops both the tool and the prompt guidance cleanly — no orphaned instructions.
-- `SaveTextMemoryTool` must be registered for the default system prompt to enable its text-memory branch (`has_text_memory` check in [src/sqllens/agent/core/system_prompt/default.py](../../../src/sqllens/agent/core/system_prompt/default.py)). Drop the registration and the LLM never sees the tool — free-form domain knowledge can't be persisted.
+- `SaveQuestionToolArgsTool` is registered only when `cfg.memory.save_queries` is true. The default system prompt switches its save guidance on `has_save = "save_question_tool_args" in tool_names` (in [src/sqllens/agent/core/system_prompt/default.py](../../../src/sqllens/agent/core/system_prompt/default.py)), so leaving the flag off drops the tool and its save guidance together. Reading saved memory is unaffected.
+- `SaveTextMemoryTool` is registered only when `cfg.memory.save_text_memories` is true, and the default system prompt's text-memory branch (`has_text_memory` check in [src/sqllens/agent/core/system_prompt/default.py](../../../src/sqllens/agent/core/system_prompt/default.py)) follows it. With the flag off the LLM never sees the tool, so the agent writes no free-form notes; curated notes still arrive through `sqllens import-memory` and the memory-administration tools, which call `ChromaAgentMemory.save_text_memory` directly rather than through this tool. Do not move the gate into the tool's `execute()` or into `ChromaAgentMemory.save_text_memory`: those paths are shared with curated imports ([src/sqllens/memory/store.py](../../../src/sqllens/memory/store.py)), so a gate there would drop curated notes too.
 
 The memory itself is handed to the `Agent` constructor as `agent_memory=memory` so the framework can reference it from internal code paths.
 
@@ -114,7 +114,8 @@ These live under `[memory]` in `sqllens.toml` (or `SQLLENS_MEMORY__*` env vars).
 | `collection` | `sqllens` | `SQLLENS_MEMORY__COLLECTION` | Logical collection name inside the persisted store. Letting two processes share a `persist_dir` with different collections is supported but rarely useful. |
 | `similarity_threshold` | `0.7` | `SQLLENS_MEMORY__SIMILARITY_THRESHOLD` | Cosine similarity floor in `[0.0, 1.0]`. Hits below this are dropped. Used as the *server-configured default* for the on-demand tool-use search: the LLM may override it per call via the `similarity_threshold` parameter on `search_saved_correct_tool_uses`, including the legitimate value `0.0` (return everything) which is preserved exactly — not coerced. It is also the strict hit bar for [system-prompt context injection](#system-prompt-context-injection). |
 | `context_similarity_threshold` | unset (`None`) | `SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD` | Opt-in floor in `[0.0, 1.0]` used **only** by [system-prompt context injection](#system-prompt-context-injection). When set below the effective `similarity_threshold`, text memories and saved question → SQL pairs scoring at or above it are eligible for bounded reference context. Unset keeps the tier off, whatever `similarity_threshold` is. |
-| `save_queries` | `false` | `SQLLENS_MEMORY__SAVE_QUERIES` | Registers `SaveQuestionToolArgsTool` so the agent can persist successful question → SQL pairs into tool-use memory. Off by default; when off the tool is not registered and the system prompt drops its save instructions. Reading saved memory is unaffected. |
+| `save_queries` | `false` | `SQLLENS_MEMORY__SAVE_QUERIES` | Registers `SaveQuestionToolArgsTool` so the agent can persist successful question → SQL pairs into tool-use memory. Off by default; when off the tool is not registered and the system prompt drops its save guidance. Reading saved memory is unaffected. |
+| `save_text_memories` | `false` | `SQLLENS_MEMORY__SAVE_TEXT_MEMORIES` | Registers `SaveTextMemoryTool` so the agent can persist free-form notes into text memory. Off by default (issue #267). When off the tool is not registered and the prompt's `2. TEXT MEMORY` section is not printed. A blank value (an empty or whitespace-only env var or TOML string) reads as `false`; any other non-boolean still fails config load. Notes already stored, curated imports included, are untouched and still injected by the context enhancer. |
 | `allow_import` | `false` | `SQLLENS_MEMORY__ALLOW_IMPORT` | Registers the single `import_memory` MCP tool. Off by default — a remote writer can poison future SQL generation. Calls require bearer authentication or an explicit closed-network `auth.insecure=true` opt-in. The CLI import/export commands are unaffected. |
 | `allow_admin_tools` | `false` | `SQLLENS_MEMORY__ALLOW_ADMIN_TOOLS` | Registers the seven memory-administration MCP tools (`list_memories`, `get_memory`, `delete_memory`, `clear_memories`, `add_memories`, `export_memories`, `get_memory_stats`) for curating the training set. Off by default — they enumerate and mutate the store. The destructive subset (`delete_memory` / `clear_memories` / `add_memories`) additionally refuses to run on an unauthenticated endpoint (`auth.mode='none'`) unless `auth.insecure` acknowledges a closed network. See [Memory-administration tools](#memory-administration-tools-opt-in-default-off) below. |
 
@@ -142,7 +143,7 @@ The configured value is the *server-side default*. The LLM may pass a per-call `
 
 ## Async-over-thread pattern
 
-`ChromaAgentMemory` exposes async methods (`save_tool_usage`, `search_similar_usage`, `get_recent_memories`, `delete_by_id`, `save_text_memory`, `search_text_memories`), all of which are reachable from the agent: the first two via `SaveQuestionToolArgsTool` / `SearchSavedCorrectToolUsesTool`, `save_text_memory` via the now-registered `SaveTextMemoryTool`, and the rest via internal code paths on `agent_memory` itself. ChromaDB's Python client is synchronous, so each method defines a sync inner function and runs it on a `ThreadPoolExecutor` so the agent's async loop doesn't block.
+`ChromaAgentMemory` exposes async methods (`save_tool_usage`, `search_similar_usage`, `get_recent_memories`, `delete_by_id`, `save_text_memory`, `search_text_memories`), all of which are reachable from the agent: the first two via `SaveQuestionToolArgsTool` / `SearchSavedCorrectToolUsesTool`, `save_text_memory` via `SaveTextMemoryTool` when `cfg.memory.save_text_memories` is on, and the rest via internal code paths on `agent_memory` itself. ChromaDB's Python client is synchronous, so each method defines a sync inner function and runs it on a `ThreadPoolExecutor` so the agent's async loop doesn't block.
 
 If you're profiling and see Chroma operations blocking, check that the executor is actually being used — bypassing it is an easy regression.
 
@@ -150,7 +151,7 @@ If you're profiling and see Chroma operations blocking, check that the executor 
 
 The upstream framework also defined memory backends other than Chroma; those were dropped during the lift. `ChromaAgentMemory` is the only concrete `AgentMemory` implementation in SQL Lens. The abstract `AgentMemory` interface lives at [src/sqllens/agent/capabilities/agent_memory/base.py](../../../src/sqllens/agent/capabilities/agent_memory/base.py) — if a second backend is ever needed, that's the contract to implement.
 
-All three memory tool classes defined in [agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py) — `SaveQuestionToolArgsTool`, `SearchSavedCorrectToolUsesTool`, and `SaveTextMemoryTool` — are now registered in `factory.py`. There is no dedicated search tool for text memories on the LLM surface today; text memories saved via `save_text_memory` are read back through the agent's internal code paths over `agent_memory.search_text_memories` — chiefly the context enhancer's automatic [system-prompt injection](#system-prompt-context-injection).
+All three memory tool classes defined in [agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py) — `SaveQuestionToolArgsTool`, `SearchSavedCorrectToolUsesTool`, and `SaveTextMemoryTool` — are wired in `factory.py`, each save tool behind its own flag (see [Wiring](#wiring)); of those three, a default config registers the search tool alone. There is no dedicated search tool for text memories on the LLM surface today; text memories saved via `save_text_memory` are read back through the agent's internal code paths over `agent_memory.search_text_memories` — chiefly the context enhancer's automatic [system-prompt injection](#system-prompt-context-injection).
 
 ## First-party import/export (`src/sqllens/memory/`)
 
@@ -249,7 +250,7 @@ Implementation lives outside the vendored agent tree in [src/sqllens/eval/](../.
 
 - `build_agent(..., allow_memory_writes=False)` ([src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py)) skips registering both `save_question_tool_args` and `save_text_memory`, whatever `cfg.memory` says. The default system prompt switches its save guidance on tool presence, so that guidance drops out too. Any config gate on a save tool must be ANDed with this flag.
 - The factory sets `ChromaAgentMemory(track_usage=False)`, suppressing retrieval hit-counter and timestamp updates from both search tools and context injection.
-- The cloned config forces `memory.save_queries=False`, so the config itself agrees with the agent.
+- The cloned config forces `memory.save_queries=False` and `memory.save_text_memories=False`, so the config itself agrees with the agent.
 - The verify agent is never the process-wide cached agent from `tools/_agent.py`. That singleton is keyed on whichever `Config` built it first and may carry both save tools. The runner neither reads nor populates it.
 
 The verifier uses the persisted `default` profile's similarity threshold and limits, capped by the configured row and iteration limits. It overrides `show_details` to retain executed SQL without changing the caller's config or the stored profile. It does not select named profiles.
