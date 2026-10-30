@@ -1,0 +1,372 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:code-reviewer",
+   "severity": "important",
+   "weighed_severity": "suggestion",
+   "description": "docs/internal/mcp-server/tools.md line 164 (CHAT_INPUT_UPDATE row of the render_interactive table, unchanged by the diff) still ends 'Those are not clarifying questions, so they must never render as the answer', implying other chat-input placeholders are clarifying questions; contradicts the new paragraph at line 158 and the reworded _format.py comment. Criterion 6 sweep site.",
+   "defect_signature": {
+    "file": "docs/internal/mcp-server/tools.md",
+    "line_range": [
+     164,
+     164
+    ],
+    "kind": "documented_falsehood"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:requesting-code-review",
+   "severity": "suggestion",
+   "weighed_severity": "suggestion",
+   "description": "Same docs/internal/mcp-server/tools.md line 164 sentence left in the old framing that treats chat-input placeholders as clarifying questions; the matching _format.py comment was reworded but this table row was not.",
+   "defect_signature": {
+    "file": "docs/internal/mcp-server/tools.md",
+    "line_range": [
+     164,
+     164
+    ],
+    "kind": "comment_drift"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-3",
+   "agent": "prflow:code-reviewer",
+   "severity": "important",
+   "weighed_severity": "important",
+   "description": "docs/external/managing-memory.md is unchanged and lacks everything acceptance criterion 5 requires: marking a known ambiguity with a note, a note naming the meaning or a saved pair stopping the question with an example of each, notes reaching the assistant only when background context retrieves them, and the Verifying Memory After an Import guidance (ERROR when no query ran, lookup SQL comparison, state the choice in golden questions).",
+   "defect_signature": {
+    "file": "docs/external/managing-memory.md",
+    "line_range": null,
+    "kind": "other"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-4",
+   "agent": "prflow:requesting-code-review",
+   "severity": "important",
+   "weighed_severity": "important",
+   "description": "Acceptance criterion 5 not met: docs/external/managing-memory.md is not edited; no ambiguity-note guidance, no examples, no retrieval caveat, and the Verifying Memory After an Import section (head line 118) has no clarifying-question guidance.",
+   "defect_signature": {
+    "file": "docs/external/managing-memory.md",
+    "line_range": null,
+    "kind": "test_gap"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-5",
+   "agent": "prflow:comment-analyzer",
+   "severity": "suggestion",
+   "weighed_severity": "suggestion",
+   "description": "tests/unit/test_server.py new round-trip test docstring says only the model is scripted, but _agent(...) also uses a fake run_sql tool (_FakeRunSql) and a StubAgentMemory.",
+   "defect_signature": {
+    "file": "tests/unit/test_server.py",
+    "line_range": [
+     212,
+     216
+    ],
+    "kind": "comment_drift"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-6",
+   "agent": "prflow:comment-analyzer",
+   "severity": "suggestion",
+   "weighed_severity": "suggestion",
+   "description": "src/sqllens/tools/_format.py render_interactive docstring's unchanged last sentence says it is used only when a turn produced no TEXT/DATAFRAME answer, but components_to_blocks (lines 555-557) also calls it when blocks serialize to empty Markdown, as the updated tools.md now states.",
+   "defect_signature": {
+    "file": "src/sqllens/tools/_format.py",
+    "line_range": [
+     190,
+     192
+    ],
+    "kind": "comment_drift"
+   },
+   "corroboration": 1
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (no finding or checklist FAIL at or above the critical threshold; acceptance criterion 5 unmet at Important)\n\nThe prompt section, the search-before-asking rule, the tool description and the two-turn test are correct, but the PR is not ready to merge as the complete issue fix because `docs/external/managing-memory.md` still lacks the content acceptance criterion 5 requires.\nRule applied: rule 6 — findings and checklist FAILs remain below the critical threshold → APPROVE with notes\n\n## Code Review Findings\n\n### 🟠 Important / Major\n\n1. `docs/external/managing-memory.md` is unchanged, so acceptance criterion 5 is unmet. The page does not explain how a note marks a known ambiguity, how a note naming the meaning or a saved question-and-SQL pair stops the question (with an example of each), or that a note reaches the assistant only on a turn whose message the background context retrieves it for. Its \"Verifying Memory After an Import\" section also says nothing about a golden question getting a clarifying question, the ERROR result when no query ran, comparison against the lookup SQL, or stating the choice in golden questions. (raised by 1/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=not-held; evidence: criterion 5 asks for doc content only, no mechanism under discussion; git grep —no-index of view-head for managing-memory finds only Markdown links, changelog fragments and inventory.json; published external page -->\n2. The same missing `docs/external/managing-memory.md` content, filed as a gap against acceptance criterion 5 (same file and defect as item 1, different `kind`, so not counted as corroboration). (raised by 1/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=not-held; evidence: as item 1 -->\n- VC-24: FAIL (critical) — `docs/external/managing-memory.md` explains how a deployment marks a known ambiguity with a free-form note that states, as a fact, that a term has more than one meaning, and how a note naming the meaning to use, or a saved question-and-SQL pair for the question that the assistant's memory search finds, can stop the question. It gives a made-up example of each, and says a note reaches the assistant only on a turn whose message the automatic background context retrieves it for. Its \"Verifying Memory After an Import\" section says a golden question that leaves such a choice open may get a clarifying question instead of SQL, reported as ERROR when no query ran and compared using the lookup query's SQL when one ran, and tells operators to state the choice in golden questions. [docs/external/managing-memory.md:118-165] — fix the code, or have the issue author amend this criterion [behavior-inert prose cap] <!-- inertness: first-conjunct=held limb-one=held limb-two=not-held; evidence: first-conjunct=held (criterion 5 requires explanatory content in docs/external/managing-memory.md; writing it changes no output, branch taken or covered set — no mechanism under discussion) limb-one=held (git grep —no-index -I -e managing-memory over view-head finds only Markdown links in docs/external/*.md, changelog.d fragments and inventory.json; no .sh/.py/.jq/.yml/workflow consumer and no agent-instruction file reads it) limb-two=not-held (docs/external/managing-memory.md is a published user-facing doc page, indexed from docs/external/index.md) -->\n\n  <details><summary>Evidence</summary>\n\n  criteria.json counts (criterion 5 present, all {criterion,text}). Read head-view docs/external/managing-memory.md in full relevant parts (lines 1-40, 116-165) and grepped docs/external for 'meaning|clarifying'. The file has no explanation of marking a known ambiguity with a note stating a term has more than one meaning, no note-naming-the-meaning or saved-pair settling, no made-up examples of each, no statement that a note reaches the assistant only when the background context retrieves it for the turn's message. The 'Verifying Memory After an Import' section (lines 118-165) says nothing about golden questions getting a clarifying question, ERROR when no query ran, comparison using the lookup query's SQL, or stating the choice in golden questions. ERROR is defined only as parse failure or no SQL produced (line 149). diff.patch contains no match for managing-memory, so the PR did not change this file. No trigger condition applies; no sibling criterion excuses missing docs.\n\n  </details>\n\n### 🟡 Suggestion / Minor (5)\n\n<details><summary>5 items</summary>\n\n1. `docs/internal/mcp-server/tools.md` line 164 (the `CHAT_INPUT_UPDATE` row of the `render_interactive` table, a line this diff did not change) still ends \"Those are not clarifying questions, so they must never render as the answer.\" That wording suggests any other chat-input placeholder is a clarifying question, which the new paragraph at line 158 and the reworded `_format.py` comment retire. (raised by 1/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: internal doc sentence, rewording changes no output or branch; no tool or agent-instruction file reads docs/internal/mcp-server/tools.md; internal page not published -->\n2. The same `docs/internal/mcp-server/tools.md` line 164 sentence, filed as comment drift (same line as item 1, different `kind`). (raised by 1/5 agents)\n3. `tests/unit/test_server.py`: the new round-trip test's docstring says only the model is scripted, but the agent built by `_agent(...)` also uses a fake `run_sql` tool and a stub memory. (raised by 1/5 agents)\n4. `src/sqllens/tools/_format.py` lines 190-192: the unchanged last sentence of the `render_interactive` docstring says it is used only when a turn produced no `TEXT`/`DATAFRAME` answer, but `components_to_blocks` also calls it when blocks exist and their Markdown serialization is empty, as the updated `tools.md` now says. (raised by 1/5 agents)\n- VC-10: FAIL (suggestion) — The _GENERIC_INPUT_PLACEHOLDERS comment states none of the four listed finalization placeholders carries content for the user, and that agent.py emits exactly those on a normal turn's finalization and 'Try again...' on the error path. [src/sqllens/tools/_format.py:119]\n\n  <details><summary>Evidence</summary>\n\n  agent.py emits ChatInputUpdateComponent placeholders at lines 241 (\"Try again...\"), 336 and 499 (\"Ask a question...\"), 1098 (\"Ask a follow-up question...\"), 1168 (\"Continue the task or ask me something else...\"), and also 1075 \"Try rephrasing or narrowing the question...\" on the consecutive-argument-failure stop path (agent.py:1063-1079). The fifth is not in _GENERIC_INPUT_PLACEHOLDERS (_format.py:126-133), so the comment's 'exactly those ... and Try again... on the error path' is incomplete: an argument-failure stop with no TEXT/DATAFRAME would have that placeholder surfaced as the answer by the filter at _format.py:203 instead of '(no answer)'. The four listed placeholders are correctly emitted and are content-free, and the extra one is on an abnormal stop path rather than normal finalization, so the drift is narrow.\n\n  </details>\n\n</details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: full review (test_relevant; not small_diff, not config_only, no new types), 8 changed files; detect_all_audit not set.\n- Working tree (Phase 0): clean.\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. Final-pass `requesting-code-review` extension: PROMPT-EXTENSION-STATUS: content-present.\n- Engine root: `.prflow/vendor/prflow/skills/review` and `.devflow/vendor/devflow/skills/review` do not exist; used the running plugin's own engine.\n- CI evidence for head 61140bd: none held; test results missing for this review.\n- Normalized (wording-only): 0\n- Re-verification: none requested.\n- Checklist cap: VC-24 (stored critical) capped at important as behavior-inert prose in a published doc.\n- Dirty-tree check: ran clean.\n- prior-report: none\n- Checklist: 24 passed, 2 failed, 0 inconclusive\n- <details><summary>✅ Passed items (24 of 26)</summary>\n\n  - VC-1: The round-trip test's monkeypatch of `get_agent` on the `sqllens.tools.query_database` module replaces the name that query_database_impl_with_widgets actually calls on the MCP path, so the scripted agent serves both turns. [tests/unit/test_server.py:636]\n  - VC-2: The agent returned by `_agent(llm, _FakeRunSql())` in tests/unit/test_truncated_tool_calls.py uses DefaultSystemPromptBuilder (or a builder producing its prompt), so `request.system_prompt` on each scripted request contains 'Ambiguous Questions:'. [tests/unit/test_server.py:658]\n  - VC-3: The `_agent` fixture shares a conversation store across send_message calls, so the second query_database call with the returned conversation_id loads turn one's history (original question and clarifying reply). [tests/unit/test_server.py:650]\n  - VC-4: Messages in LlmRequest.messages expose a `content` attribute equal to the exact user question string and the exact assistant reply string (no prefixing or enhancement by the context enhancer), so `contents.index(text)` finds the original question, the clarifying question and the reply. [tests/unit/test_server.py:655]\n  - VC-5: _ScriptedLlm scripted with two responses suffices: each turn makes exactly one LLM request when the model replies with plain content and no tool calls, so `len(llm.requests) == 2` holds and the script is not exhausted. [tests/unit/test_server.py:631]\n  - VC-6: An agent turn whose model reply is plain content with no tool calls yields answer-marked TEXT that components_to_blocks renders as the leading text of the markdown, so the tool result text begins with the clarifying question (the conversation footer is appended after it). [tests/unit/test_server.py:646]\n  - VC-7: tools.md states the agent writes the clarifying question either as its final text or as an emit_text call, and that both are answer-marked TEXT rendering as an ordinary text block. [docs/internal/mcp-server/tools.md:158]\n  - VC-8: tools.md states render_interactive is invoked only on the fallback path (no blocks, or blocks whose Markdown serialization is empty), so a normal answer's trailing finalization components are never surfaced. [docs/internal/mcp-server/tools.md:160]\n  - VC-9: The render_interactive docstring says it is used only when a turn produced no TEXT/DATAFRAME answer. [src/sqllens/tools/_format.py:190]\n  - VC-11: tools.md states that no `_meta` flag marks a clarifying-question turn. [docs/internal/mcp-server/tools.md:158]\n  - VC-12: tools.md describes render_interactive as rendering chat-input prompts, buttons, alerts and notifications, and the no-answer table row says it renders a chat-input prompt other than the generic placeholders, labelled button choices, or non-error alert/notification text. [docs/internal/mcp-server/tools.md:511]\n  - VC-13: tools.md says the fallback to render_interactive happens when the blocks list is empty or its Markdown serialization is empty, and '(no answer)' only when render_interactive also returns empty. [docs/internal/mcp-server/tools.md:152]\n  - VC-14: getting-started.md says the agent is instructed to ask one short clarifying question when readings give different numbers and nothing settles the choice, is told not to ask when the question is clear or readings give the same numbers, that the tool description tells the assistant to ask the user unless already answered and pass the answer back, and that dependent follow-ups get the question again with readings as choices and no numbers until the user picks or asks to see several. [docs/external/getting-started.md:82]\n  - VC-15: tools.md states the clarifying-question rule lives in an always-on 'Ambiguous Questions' section of DefaultSystemPromptBuilder.build_system_prompt. [docs/internal/mcp-server/tools.md:158]\n  - VC-16: The Ambiguous Questions bullet overrides the one-row rule on a clarifying turn 'because a lookup's rows are already shown above the question', which requires a lookup's DataFrame block to render before the question text in the tool result. [src/sqllens/agent/core/system_prompt/default.py:84]\n  - VC-17: The `_ambiguity_section` helper assumes the 'Ambiguous Questions:' header is its own line and every bullet of the section is a single line starting with '- ' with the next non-bullet line ending it, both when empty strings are kept (no memory tools) and when they are stripped (memory tools present). [tests/unit/test_system_prompt.py:274]\n  - VC-18: The new search instruction 'BEFORE asking a clarifying question' conflicts with no other instruction in the has_search block, such as the listed exceptions to searching first or the 'Example workflow' steps. [src/sqllens/agent/core/system_prompt/default.py:164]\n  - VC-19: The render_interactive docstring states the agent's own clarifying question is not an interactive component but answer-marked text rendered as a text block. [src/sqllens/tools/_format.py:186]\n  - VC-20: The prompt that `DefaultSystemPromptBuilder().build_system_prompt` returns contains an ambiguous-questions section for every tool list, including the empty list and the full list with both save tools enabled (`run_sql`, `emit_chart`, `emit_text`, `search_saved_correct_tool_uses`, `save_question_tool_args`, `save_text_memory`). The section names no tool and states at minimum these clauses: (1) ask a clarifying question instead of answering when the question allows more than one reading, the readings count different records, a different period, or a different measure or calculation, and the choice is not settled, with whether partially paid orders count toward revenue, whether the order date or the invoice date defines the period, which of several people a name refers to, and whether revenue includes shipping and tax as examples; such a choice counts as material without first measuring the difference, and being unsure which reading is meant is a reason to ask; (2) a choice is settled when the question, an earlier turn of the conversation, a memory note in the context naming the meaning to use, or a saved question-and-SQL pair seen for the question says or shows which reading is meant; a saved pair settles it to the reading its SQL uses, and a memory note saying a term has more than one meaning marks that choice as open, which the question, an earlier turn, a note naming the meaning to use, a saved pair or a reply that picks a reading still settles; (3) a choice stays open until settled: a reply that picks a reading, or asks to see several readings, settles it, and a reply that picks none, such as \"whatever you think\", leaves it open; while a choice the current question depends on stays open, ask again on each turn, offering the readings as choices; a new question that does not depend on an open choice is handled on its own terms; (4) otherwise answer directly: a question with one reasonable reading, or a choice whose readings count the same records, period and measure or differ only in presentation (sort order, chart type, labels, rounding), never needs a question; (5) the question is the agent's whole written reply for that turn: short, naming the readings in business words without table or column names, and stating no result for any reading; on that turn this overrides the rule to state a one-row result's values, because a lookup's rows are already shown above the question; (6) run a lookup query before asking only when it is needed to know the readings, and when many records match, ask for a detail that narrows them; (7) ask at most one question per turn, covering every open choice the current question depends on; (8) on every turn, never state a result computed on a reading of an unsettled choice that changes the numbers. [src/sqllens/agent/core/system_prompt/default.py:78]\n  - VC-21: When `search_saved_correct_tool_uses` is in the tool list, the prompt's memory instructions require calling it before asking a clarifying question as well as before executing `run_sql` or `emit_chart`. When it is not in the tool list, the prompt carries no instruction to search memory before asking. [src/sqllens/agent/core/system_prompt/default.py:164]\n  - VC-22: The `query_database` tool description returned by the server's `list_tools` tells the calling assistant that when a result is a clarifying question rather than an answer, it asks the user that question, or uses the answer the user's earlier messages already give, and then calls `query_database` again with that answer as `question` and the `conversation_id` the result returned. [src/sqllens/server.py:322]\n  - VC-23: An automated test calls the registered `query_database` MCP tool twice, with a scripted model behind a real agent. On turn one the scripted model replies with only a clarifying question: the result is not an error, its text begins with that question, and it carries a conversation id. On turn two, sent with that id and a reply, the request the model receives holds, in order, the original question, the clarifying question and the reply. The system prompt the model receives on both turns contains the ambiguous-questions section. [tests/unit/test_server.py:615]\n  - VC-25: No sentence in `docs/internal/mcp-server/tools.md` or in the docstrings and comments of `src/sqllens/tools/_format.py` says the agent's own clarifying question is expressed as an interactive component (a prompt placeholder, buttons or an alert) or reaches the caller through `render_interactive`. `docs/internal/mcp-server/tools.md` describes `render_interactive` as rendering interactive components and the agent's clarifying question as arriving as answer-marked text. The sites are found by a case-insensitive search of those two files for \"clarifying question\" and \"interactive affordance\". [docs/internal/mcp-server/tools.md:156]\n  - VC-26: The change leaves `src/sqllens/eval/` unchanged: a `verify-memory` case where the agent asks instead of answering is reported ERROR when no query ran, and is compared using the lookup query as its actual SQL when a lookup ran first. The change leaves the block building in `components_to_blocks` unchanged, so rows returned by a lookup against the data run before the question appear as a block before the question. The change adds no `_meta` channel or flag marking a clarifying-question turn, so whether the calling assistant relays the question depends on it following the tool description. The change leaves `src/sqllens/agent/core/enhancer/default.py` unchanged, so a note the context enhancer does not retrieve for the current turn's message does not reach the agent through the memory context. The change adds no code that forces the memory search before a question, so a model that skips the search, or a search with the agent's own wording that misses a saved pair, can still ask on a question a saved pair would settle. The change adds no configuration field, no MCP tool and no agent tool. [src/sqllens/tools/_format.py:550]\n\n  </details>\n- Reviewed against issue #298 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] The prompt that `DefaultSystemPromptBuilder().build_system_prompt` returns contains an ambiguous-questions section for every tool list, including the empty list and the full list with both save tools enabled (`run_sql`, `emit_chart`, `emit_text`, `search_saved_correct_tool_uses`, `save_question_tool_args`, `save_text_memory`). The section names no tool and states at minimum these clauses: (1) ask a clarifying question instead of answering when the question allows more than one reading, the readings count different records, a different period, or a different measure or calculation, and the choice is not settled, with whether partially paid orders count toward revenue, whether the order date or the invoice date defines the period, which of several people a name refers to, and whether revenue includes shipping and tax as examples; such a choice counts as material without first measuring the difference, and being unsure which reading is meant is a reason to ask; (2) a choice is settled when the question, an earlier turn of the conversation, a memory note in the context naming the meaning to use, or a saved question-and-SQL pair seen for the question says or shows which reading is meant; a saved pair settles it to the reading its SQL uses, and a memory note saying a term has more than one meaning marks that choice as open, which the question, an earlier turn, a note naming the meaning to use, a saved pair or a reply that picks a reading still settles; (3) a choice stays open until settled: a reply that picks a reading, or asks to see several readings, settles it, and a reply that picks none, such as \"whatever you think\", leaves it open; while a choice the current question depends on stays open, ask again on each turn, offering the readings as choices; a new question that does not depend on an open choice is handled on its own terms; (4) otherwise answer directly: a question with one reasonable reading, or a choice whose readings count the same records, period and measure or differ only in presentation (sort order, chart type, labels, rounding), never needs a question; (5) the question is the agent's whole written reply for that turn: short, naming the readings in business words without table or column names, and stating no result for any reading; on that turn this overrides the rule to state a one-row result's values, because a lookup's rows are already shown above the question; (6) run a lookup query before asking only when it is needed to know the readings, and when many records match, ask for a detail that narrows them; (7) ask at most one question per turn, covering every open choice the current question depends on; (8) on every turn, never state a result computed on a reading of an unsettled choice that changes the numbers.\n- [ ] When `search_saved_correct_tool_uses` is in the tool list, the prompt's memory instructions require calling it before asking a clarifying question as well as before executing `run_sql` or `emit_chart`. When it is not in the tool list, the prompt carries no instruction to search memory before asking.\n- [ ] The `query_database` tool description returned by the server's `list_tools` tells the calling assistant that when a result is a clarifying question rather than an answer, it asks the user that question, or uses the answer the user's earlier messages already give, and then calls `query_database` again with that answer as `question` and the `conversation_id` the result returned.\n- [ ] An automated test calls the registered `query_database` MCP tool twice, with a scripted model behind a real agent. On turn one the scripted model replies with only a clarifying question: the result is not an error, its text begins with that question, and it carries a conversation id. On turn two, sent with that id and a reply, the request the model receives holds, in order, the original question, the clarifying question and the reply. The system prompt the model receives on both turns contains the ambiguous-questions section.\n- [ ] `docs/external/managing-memory.md` explains how a deployment marks a known ambiguity with a free-form note that states, as a fact, that a term has more than one meaning, and how a note naming the meaning to use, or a saved question-and-SQL pair for the question that the assistant's memory search finds, can stop the question. It gives a made-up example of each, and says a note reaches the assistant only on a turn whose message the automatic background context retrieves it for. Its \"Verifying Memory After an Import\" section says a golden question that leaves such a choice open may get a clarifying question instead of SQL, reported as ERROR when no query ran and compared using the lookup query's SQL when one ran, and tells operators to state the choice in golden questions.\n- [ ] No sentence in `docs/internal/mcp-server/tools.md` or in the docstrings and comments of `src/sqllens/tools/_format.py` says the agent's own clarifying question is expressed as an interactive component (a prompt placeholder, buttons or an alert) or reaches the caller through `render_interactive`. `docs/internal/mcp-server/tools.md` describes `render_interactive` as rendering interactive components and the agent's clarifying question as arriving as answer-marked text. The sites are found by a case-insensitive search of those two files for \"clarifying question\" and \"interactive affordance\".\n- [ ] The change leaves `src/sqllens/eval/` unchanged: a `verify-memory` case where the agent asks instead of answering is reported ERROR when no query ran, and is compared using the lookup query as its actual SQL when a lookup ran first. The change leaves the block building in `components_to_blocks` unchanged, so rows returned by a lookup against the data run before the question appear as a block before the question. The change adds no `_meta` channel or flag marking a clarifying-question turn, so whether the calling assistant relays the question depends on it following the tool description. The change leaves `src/sqllens/agent/core/enhancer/default.py` unchanged, so a note the context enhancer does not retrieve for the current turn's message does not reach the agent through the memory context. The change adds no code that forces the memory search before a question, so a model that skips the search, or a search with the agent's own wording that misses a saved pair, can still ask on a question a saved pair would settle. The change adds no configuration field, no MCP tool and no agent tool.",
+ "diff_produced_at_head": "61140bd7a96ad7d299967f610fecfa190a8695f8",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "test_mock_alignment:test_server.py:get-agent-patch-target",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "test_mock_alignment:test_server.py:system-prompt-builder",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "test_mock_alignment:test_server.py:conversation-store-shared",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "data_format_assumption:test_server.py:message-content-verbatim",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "test_mock_alignment:test_server.py:scripted-response-count",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "api_contract:test_server.py:question-text-leads-result",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "api_contract:tools.md:question-answer-marked-text",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "absolute_claim:tools.md:render-interactive-fallback-only",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "absolute_claim:_format.py:render-interactive-used-only",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "category": "absolute_claim",
+   "claim": "The _GENERIC_INPUT_PLACEHOLDERS comment states none of the four listed finalization placeholders carries content for the user, and that agent.py emits exactly those on a normal turn's finalization and 'Try again...' on the error path.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "# The agent emits one of these placeholders on a normal turn's finalization\n# ChatInputUpdateComponent (agent/core/agent/agent.py emits \"Ask a question...\",\n# \"Ask a follow-up question...\", \"Continue the task or ask me something else...\",\n# and \"Try again...\" on the error path). None carries content for the user, so",
+   "source_file": "src/sqllens/tools/_format.py",
+   "source_line": 119,
+   "source_line_end": 122,
+   "verify_against": "ChatInputUpdateComponent emissions in src/sqllens/agent/core/agent/agent.py",
+   "verify_hint": "Grep agent.py for ChatInputUpdateComponent placeholders and compare with the frozenset; a placeholder agent.py emits that is not in the set would falsify the coverage implied",
+   "claim_signature": "absolute_claim:_format.py:generic-placeholders-no-content",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "agent.py emits ChatInputUpdateComponent placeholders at lines 241 (\"Try again...\"), 336 and 499 (\"Ask a question...\"), 1098 (\"Ask a follow-up question...\"), 1168 (\"Continue the task or ask me something else...\"), and also 1075 \"Try rephrasing or narrowing the question...\" on the consecutive-argument-failure stop path (agent.py:1063-1079). The fifth is not in _GENERIC_INPUT_PLACEHOLDERS (_format.py:126-133), so the comment's 'exactly those ... and Try again... on the error path' is incomplete: an argument-failure stop with no TEXT/DATAFRAME would have that placeholder surfaced as the answer by the filter at _format.py:203 instead of '(no answer)'. The four listed placeholders are correctly emitted and are content-free, and the extra one is on an abnormal stop path rather than normal finalization, so the drift is narrow.",
+   "file_checked": "src/sqllens/agent/core/agent/agent.py:1074-1078",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "absolute_claim:tools.md:no-meta-flag",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "api_contract:tools.md:render-interactive-scope",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "api_contract:tools.md:fallback-conditions",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "api_contract:getting-started.md:clarifying-question-behavior",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "api_contract:tools.md:always-on-section",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "api_contract:default.py:lookup-rows-shown-above",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "data_format_assumption:test_system_prompt.py:section-line-parsing",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "api_contract:default.py:search-instruction-consistency",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "absolute_claim:_format.py:question-not-interactive",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-20",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-21",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-22",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-23",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "`docs/external/managing-memory.md` explains how a deployment marks a known ambiguity with a free-form note that states, as a fact, that a term has more than one meaning, and how a note naming the meaning to use, or a saved question-and-SQL pair for the question that the assistant's memory search finds, can stop the question. It gives a made-up example of each, and says a note reaches the assistant only on a turn whose message the automatic background context retrieves it for. Its \"Verifying Memory After an Import\" section says a golden question that leaves such a choice open may get a clarifying question instead of SQL, reported as ERROR when no query ran and compared using the lookup query's SQL when one ran, and tells operators to state the choice in golden questions.",
+   "claim_signature": "issue-acceptance-5",
+   "criteria_file": ".prflow/tmp/review/pr-313/local-20261030T215607Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-313/local-20261030T215607Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: `docs/external/managing-memory.md` explains how a deployment marks a known ambiguity with a free-form note that states, as a fact, that a term has more than one meaning, and how a note naming the meaning to use, or a saved question-and-SQL pair for the question that the assistant's memory search finds, can stop the question. It gives a made-up example of each, and says a note reaches the assistant only on a turn whose message the automatic background context retrieves it for. Its \"Verifying Memory After an Import\" section says a golden question that leaves such a choice open may get a clarifying question instead of SQL, reported as ERROR when no query ran and compared using the lookup query's SQL when one ran, and tells operators to state the choice in golden questions.",
+   "id": "VC-24",
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "criteria.json counts (criterion 5 present, all {criterion,text}). Read head-view docs/external/managing-memory.md in full relevant parts (lines 1-40, 116-165) and grepped docs/external for 'meaning|clarifying'. The file has no explanation of marking a known ambiguity with a note stating a term has more than one meaning, no note-naming-the-meaning or saved-pair settling, no made-up examples of each, no statement that a note reaches the assistant only when the background context retrieves it for the turn's message. The 'Verifying Memory After an Import' section (lines 118-165) says nothing about golden questions getting a clarifying question, ERROR when no query ran, comparison using the lookup query's SQL, or stating the choice in golden questions. ERROR is defined only as parse failure or no SQL produced (line 149). diff.patch contains no match for managing-memory, so the PR did not change this file. No trigger condition applies; no sibling criterion excuses missing docs.",
+   "file_checked": "docs/external/managing-memory.md:118-165",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-25",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-26",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}
