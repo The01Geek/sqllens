@@ -52,6 +52,7 @@ _SYNC_STORE_METHODS = tuple(
     if not name.startswith("_")
     and inspect.isfunction(attr)
     and not inspect.iscoroutinefunction(attr)
+    and not inspect.isasyncgenfunction(attr)
 )
 """Every public synchronous ``MemoryStore`` instance method (plain ``def``), so a new
 one is checked too; static/class methods and properties are not collected."""
