@@ -143,7 +143,7 @@ def parse_csv(text: str, *, defang: bool = True) -> MemoryBundle:
     truth. Memory imports retain the default formula protection.
     """
     _enforce_size_cap(text)
-    reader = csv.reader(io.StringIO(text))
+    reader = csv.reader(io.StringIO(text, newline=""))
     try:
         rows = list(reader)
     except csv.Error as exc:

@@ -361,6 +361,10 @@ def test_production_driver_uses_default_profile_and_forces_details(
     from ._agent_stubs import make_status_card
 
     cfg = _config(tmp_path)
+    cfg = cfg.model_copy(update={
+        "database": cfg.database.model_copy(update={"max_rows": 100}),
+        "agent": cfg.agent.model_copy(update={"max_tool_iterations": 10}),
+    })
     original = cfg.model_dump()
     store = ProfileStore(cfg)
     asyncio.run(store.upsert("default", Profile(

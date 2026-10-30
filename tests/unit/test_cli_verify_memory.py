@@ -409,7 +409,10 @@ def test_invalid_utf8_file_has_structured_diagnostic(tmp_path: Path, command: st
     assert not isinstance(result.exception, UnicodeError)
 
 
-def test_csv_preserves_embedded_crlf_through_cli(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("record_separator", ["\r", "\n", "\r\n"])
+def test_csv_preserves_embedded_crlf_through_cli(
+    tmp_path: Path, monkeypatch, record_separator: str
+) -> None:
     import csv
 
     from sqllens.eval import CaseResult, RunReport, Status
@@ -418,7 +421,7 @@ def test_csv_preserves_embedded_crlf_through_cli(tmp_path: Path, monkeypatch) ->
     path = tmp_path / "golden.csv"
     question, sql = "first\r\nsecond", "SELECT 'a\r\nb'"
     with path.open("w", encoding="utf-8", newline="") as stream:
-        writer = csv.writer(stream)
+        writer = csv.writer(stream, lineterminator=record_separator)
         writer.writerow(["question", "sql"])
         writer.writerow([question, sql])
     seen = []
