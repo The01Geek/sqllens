@@ -117,7 +117,8 @@ def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
 
 
 # Generic ChatInputUpdateComponent placeholders that agent/core/agent/agent.py
-# emits when a turn finishes. None carries content for the user, so they must
+# emits when a turn ends, normally or on its error and repeated-invalid-tool-call
+# stop paths. None carries content for the user, so they must
 # never be surfaced as the answer when a turn produces no TEXT/DATAFRAME —
 # otherwise an empty result would render the generic placeholder instead of the
 # "(no answer)" fallback. Compared case-insensitively.
