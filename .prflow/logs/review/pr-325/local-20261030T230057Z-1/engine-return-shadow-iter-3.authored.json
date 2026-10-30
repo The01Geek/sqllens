@@ -1,0 +1,100 @@
+{
+  "root_completeness": "established",
+  "verdict": "APPROVE with notes",
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "suggestion",
+      "description": "The denylist refusal text from _refuse_denied_function ends 'refused by the read-only guard', but with rules configured and database.read_only = false it is reached through RlsGuardRunner._refuse_denied_functions while ReadOnlyGuardRunner is not in the chain, so the message names the wrong guard.",
+      "defect_signature": {"file": "src/sqllens/safety/readonly.py", "line_range": [559, 562], "kind": "other"}
+    },
+    {
+      "finding_id": "F-2",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "description": "Docstrings describe the routine check as matching 'a routine defined in the database', wider than the lookup (PostgreSQL skips pg_catalog/information_schema; MySQL checks only ROUTINE_TYPE = 'FUNCTION'). Instances: relations.py 118-120, __init__.py 17-18 and 136-138.",
+      "defect_signature": {"file": "src/sqllens/safety/relations.py", "line_range": [118, 120], "kind": "documented_falsehood"}
+    },
+    {
+      "finding_id": "F-3",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "description": "Module docstring lines 11-13 say 'the guard also applies the read-only guard's function denylist' right after naming the read-only guard, so 'the guard' reads as the read-only guard instead of RlsGuardRunner.",
+      "defect_signature": {"file": "src/sqllens/safety/__init__.py", "line_range": [11, 13], "kind": "comment_drift"}
+    },
+    {
+      "finding_id": "F-4",
+      "agent": "prflow:requesting-code-review",
+      "severity": "important",
+      "description": "The changelog fragment's opening sentence says RLS 'no longer lets PostgreSQL child tables or database functions read past your rules'; the routine check only sees names written before '(', so functions reached by attribute notation or operators/casts still run, as the PR's own docs record.",
+      "defect_signature": {"file": "changelog.d/325.security.md", "line_range": [1, 2], "kind": "documented_falsehood"}
+    },
+    {
+      "finding_id": "F-5",
+      "agent": "prflow:requesting-code-review",
+      "severity": "suggestion",
+      "description": "The diff edits the existing SQLite test test_sqlite_missing_table_list_capability_blocks_execution (adds a comment, tightens the match), departing from criterion 7's wording that existing SQLite RLS tests pass unmodified; the old assertion still passes at head.",
+      "defect_signature": {"file": "tests/unit/test_rls_views.py", "line_range": [394, 395], "kind": "test_gap"}
+    },
+    {
+      "finding_id": "F-6",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "description": "The require_base_tables contract now also requires child-table and routine refusal and fail-closed lookups, but _declares_relation_check only confirms the parameter exists, so a custom runner written to the earlier contract passes startup and skips the new checks.",
+      "defect_signature": {"file": "src/sqllens/agent/capabilities/sql_runner/base.py", "line_range": [22, 34], "kind": "type_design"}
+    },
+    {
+      "finding_id": "F-7",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "description": "_refuse_database_routines treats every non-postgres dialect as MySQL; only the caller's gate at relations.py line 124 keeps other dialects out, while the sibling _verify_relations raises RlsError for an unknown dialect.",
+      "defect_signature": {"file": "src/sqllens/safety/relations.py", "line_range": [237, 262], "kind": "type_design"}
+    },
+    {
+      "finding_id": "F-8",
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "suggestion",
+      "description": "No test exercises the case-insensitive predicates in the routine lookup SQL (lower(p.proname::text) = ANY(%s), LOWER(ROUTINE_NAME) IN (...)); the fake cursor lowercases names itself and connector tests use lowercase names.",
+      "defect_signature": {"file": "tests/unit/test_rls_views.py", "line_range": [458, 491], "kind": "test_gap"}
+    }
+  ],
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "plan_eligible": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": true,
+    "test_relevant": true,
+    "detect_all_audit": false,
+    "checklist_skipped": null
+  },
+  "cap_drops": {"count": 0, "by_category": {}},
+  "phase4_demoted": [],
+  "reject_drivers": [],
+  "criterion_exempt": []
+}

@@ -1,0 +1,738 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "The wider require_base_tables duty for custom runners (refuse child tables, calls matching database-defined routines, failed catalog lookups) is enforced only by documentation; RlsGuardRunner.__init__ checks only the parameter name.",
+   "defect_signature": {
+    "file": "src/sqllens/agent/capabilities/sql_runner/base.py",
+    "line_range": [
+     30,
+     34
+    ],
+    "kind": "type_design"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "_refuse_database_routines treats every non-postgres dialect as MySQL; the postgres/mysql precondition is enforced only by its caller and is not stated in the function or docstring.",
+   "defect_signature": {
+    "file": "src/sqllens/safety/relations.py",
+    "line_range": [
+     222,
+     247
+    ],
+    "kind": "type_design"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-3",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "The PostgreSQL pg_class row is read by position (row[0], row[1:3], row[3]); the child-flag meaning depends on the SELECT list order. Fails closed today.",
+   "defect_signature": {
+    "file": "src/sqllens/safety/relations.py",
+    "line_range": [
+     166,
+     189
+    ],
+    "kind": "type_design"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-4",
+   "agent": "prflow:comment-analyzer",
+   "severity": "suggestion",
+   "description": "The _called_names docstring (and docs/internal/database-connectors/row-level-security.md line 45) says strpos is emitted as POSITION; the PR's own test comment says the rewrite emits STRPOS on sqlglot 25.x and POSITION on 30.x, and the project allows sqlglot>=25.0,<31.",
+   "defect_signature": {
+    "file": "src/sqllens/safety/relations.py",
+    "line_range": [
+     88,
+     89
+    ],
+    "kind": "documented_falsehood"
+   },
+   "corroboration": 1,
+   "inertness_cap": "suggestion"
+  },
+  {
+   "finding_id": "F-5",
+   "agent": "prflow:comment-analyzer",
+   "severity": "suggestion",
+   "description": "Ambiguous sentence 'no collected name skips the query' in the internal RLS doc; the code skips the routine lookup when no name is collected. 'One parameterized query per statement' means per verify_base_tables call.",
+   "defect_signature": {
+    "file": "docs/internal/database-connectors/row-level-security.md",
+    "line_range": [
+     45,
+     45
+    ],
+    "kind": "comment_drift"
+   },
+   "corroboration": 1,
+   "inertness_cap": "suggestion"
+  },
+  {
+   "finding_id": "F-6",
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "suggestion",
+   "description": "The verify_base_tables fail-closed handler now also catches routine-lookup and tokenizer failures but still logs and returns a message about a relation-type check; for a relation-free call the message names a check that never ran.",
+   "defect_signature": {
+    "file": "src/sqllens/safety/relations.py",
+    "line_range": [
+     137,
+     145
+    ],
+    "kind": "other"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-7",
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "suggestion",
+   "description": "The routine check runs only for dialect postgres or mysql; for any other dialect a relation-free call passes unchecked, while _verify_relations raises RlsError for an unknown dialect. No shipped runner reaches this.",
+   "defect_signature": {
+    "file": "src/sqllens/safety/relations.py",
+    "line_range": [
+     124,
+     126
+    ],
+    "kind": "logic_error"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-8",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "suggestion",
+   "description": "_called_names sends each name as written, lower-cased and ASCII-only lower-cased; no test pins all three spellings because _FakeCatalog lower-cases every parameter and connector tests use ASCII names only.",
+   "defect_signature": {
+    "file": "src/sqllens/safety/relations.py",
+    "line_range": [
+     104,
+     106
+    ],
+    "kind": "test_gap"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-9",
+   "agent": "prflow:requesting-code-review",
+   "severity": "important",
+   "description": "The changelog.d/325.security.md fragment required by acceptance criterion twelve is missing; the diff adds no changelog.d file.",
+   "defect_signature": {
+    "file": "changelog.d/325.security.md",
+    "line_range": null,
+    "kind": "test_gap"
+   },
+   "corroboration": 1,
+   "carve_out": "unmet-decided-criterion"
+  },
+  {
+   "finding_id": "F-10",
+   "agent": "prflow:requesting-code-review",
+   "severity": "suggestion",
+   "description": "test_untokenizable_or_unparsable_sql_fails_closed uses inputs that fail inside _relations before _called_names runs, so the _called_names tokenizer failure path is never reached by a test.",
+   "defect_signature": {
+    "file": "tests/unit/test_rls_views.py",
+    "line_range": [
+     646,
+     647
+    ],
+    "kind": "test_gap"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-11",
+   "agent": "prflow:requesting-code-review",
+   "severity": "suggestion",
+   "description": "_FakeCatalog.execute dispatches with sql.startswith('SET ') and splits a qualified name with .split('.'), string handling the repository's sqlglot rule names (test fake over fixed catalog queries only).",
+   "defect_signature": {
+    "file": "tests/unit/test_rls_views.py",
+    "line_range": [
+     477,
+     482
+    ],
+    "kind": "style"
+   },
+   "corroboration": 1
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [
+  "F-9",
+  "VC-55"
+ ],
+ "criterion_exempt": [],
+ "verdict": "REJECT",
+ "report": "## Verdict: REJECT (acceptance criterion twelve unmet: the changelog fragment is missing)\n\nThe code change is sound and fails closed, but this PR is not ready to merge because it does not add the `changelog.d/325.security.md` release-note fragment that acceptance criterion twelve requires.\n\nRule applied: unmet-decided-criterion carve-out (Important finding one), together with rule 1 — a checklist FAIL at or above the threshold (VC-55) → REJECT\n\n## Code Review Findings\n\n### 🔴 Critical\n\n- VC-55: FAIL (critical) — A `changelog.d/<PR>.security.md` fragment states the outcome and the operator action: query top-level tables and move child rules to the parent, and note that, under RLS, calls to PostgreSQL functions outside `pg_catalog`/`information_schema` and to MySQL stored functions are blocked, and that while rules are active the read-only guard's function blocklist applies even when `database.read_only` is false. `changelog.d/274.security.md` is unchanged. [changelog.d] — fix the code, or have the issue author amend this criterion\n\n  <details><summary>Evidence</summary>\n\n  criteria.json counts (criterion 12 present, well-formed list). The diff contains no changelog.d path (grep 'changelog\\.d' on diff.patch: no matches). The head view's changelog.d security fragments (+legacy-001, +legacy-002, 274, 280, 288) are identical in set to the base view's; no new <PR>.security.md exists. The only fragment mentioning pg_inherits/blocklist/stored function is the pre-existing 274.security.md, which the criterion says must stay unchanged. So the required new fragment (child-table operator action, function-call blocking on PostgreSQL/MySQL, blocklist applying with read_only false) is absent. 274.security.md is unchanged, but that is only half of the criterion.\n\n  </details>\n\n### 🟠 Important / Major\n\n1. The required release-note fragment `changelog.d/325.security.md` is missing. Acceptance criterion twelve asks for a security fragment that tells operators to query top-level tables and move child-table rules to the parent, and that says PostgreSQL functions outside `pg_catalog`/`information_schema` and MySQL stored functions are blocked under RLS, and that the function blocklist applies while rules are active even when `database.read_only` is false. The diff adds no file under `changelog.d/`, and the head view holds the same fragment set as the base. (raised by 1/6 agents) [unmet-decided-criterion carve-out] <!-- inertness: first-conjunct=not-held limb-one=not-evaluated limb-two=not-evaluated; evidence: scripts/changelog.py reads changelog.d fragments to generate CHANGELOG.md (line 54) and refuses a release while fragments are unconsumed (line 118), so adding the fragment changes that tool's output and branch -->\n\n### 🟡 Suggestion / Minor (11)\n\n<details><summary>11 items</summary>\n\n1. The `_called_names` docstring in `src/sqllens/safety/relations.py` (lines 88-89) says `strpos` \"is emitted as `POSITION`\", and `docs/internal/database-connectors/row-level-security.md` line 45 says the same. The PR's own test comment in `tests/unit/test_rls_views.py` says the rewrite emits `STRPOS` on sqlglot 25.x and `POSITION` on 30.x, and the project allows `sqlglot>=25.0,<31`. So the example holds only on part of the supported range. (raised by 1/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: the sentence describes sqlglot output and no code branches on it; no .sh, .py, .jq or workflow consumer reads the docstring or the internal page; the docstring is never printed and the internal doc page is not published -->\n2. In `docs/internal/database-connectors/row-level-security.md` line 45, the sentence \"no collected name skips the query\" can be read two ways. The code means that the routine lookup is skipped when no call name is collected (`if called:` in `verify_base_tables`). \"One parameterized query per statement\" also means one per `verify_base_tables` call, that is, per SQL text. (raised by 1/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: wording only, no code branches on it; no tool reads this internal page; it is not published -->\n3. The fail-closed handler in `src/sqllens/safety/relations.py` (lines 137-145) now also catches failures of the routine lookup and of the call-name tokenizer, but it still logs \"row-level-security relation check raised\" and returns \"row-level security could not verify relation types; query blocked\". For a statement with no relation reference, such as `SELECT fn()` with the `pg_proc` or `ROUTINES` grant revoked, both the client message and the log name a check that never ran. `docs/internal/database-connectors/row-level-security.md` line 47 repeats the same wording. (raised by 1/6 agents)\n4. In `src/sqllens/safety/relations.py` (lines 124-126), the routine check runs only when the dialect is `postgres` or `mysql`. For any other dialect string, a statement with no relation reference returns without any check, while `_verify_relations` raises `RlsError` for an unknown dialect. No shipped runner reaches this, because the three runners pass `sqlite`, `postgres` or `mysql`, but a custom runner beneath `RlsGuardRunner` would get this open default. (raised by 1/6 agents)\n5. `_refuse_database_routines` in `src/sqllens/safety/relations.py` (lines 222-247) treats every dialect other than `postgres` as MySQL in its `else` branch. Only its one caller enforces that the dialect is `postgres` or `mysql`, and neither the function nor its docstring states the rule. It still fails closed through the outer `except Exception`. (raised by 1/6 agents)\n6. `_called_names` in `src/sqllens/safety/relations.py` (lines 104-106) sends each name three ways: as written, lower-cased, and with only ASCII letters lower-cased. No test pins all three: `_FakeCatalog` lower-cases every parameter before matching, and the connector tests use only ASCII names. Dropping the ASCII-only form would pass every test, although it would let an unquoted non-ASCII PostgreSQL function name miss the `pg_proc` match on a database whose `lower()` does not fold non-ASCII letters. (raised by 1/6 agents)\n7. `test_untokenizable_or_unparsable_sql_fails_closed` in `tests/unit/test_rls_views.py` (lines 646-647) uses two inputs that both fail inside `_relations` (`sqlglot.parse_one`) before `_called_names` runs. So the tokenizer call in `_called_names` has a stated failure path but no test that reaches it. The outcome is still fail-closed, because `_relations` tokenizes the same SQL under the same dialect first. (raised by 1/6 agents)\n8. The new `_FakeCatalog.execute` test helper in `tests/unit/test_rls_views.py` (lines 477-482) dispatches with `sql.startswith(\"SET \")` and splits a qualified name with `.split(\".\")`. It handles only the guard's own fixed catalog queries, not untrusted SQL, but it uses the string handling the repository's sqlglot rule names. (raised by 1/6 agents)\n9. The wider `require_base_tables` duty described in `src/sqllens/agent/capabilities/sql_runner/base.py` (lines 30-34) is enforced only by documentation. `RlsGuardRunner.__init__` checks only the parameter name, so it cannot tell whether a custom runner performs the new child and routine checks. No shipped runner is affected, and the docs already disclose that a runner which ignores the keyword cannot be detected. (raised by 1/6 agents)\n10. In `src/sqllens/safety/relations.py` (lines 166-189), the PostgreSQL catalog row is read by position (`row[0]`, `row[1:3]`, `row[3]`), so the child-flag meaning depends on the SELECT list order. A missing column or a non-boolean flag already fails closed. (raised by 1/6 agents)\n\n- VC-39: FAIL (suggestion) — The test comment asserts the test pins the REPLACE token shape across the supported sqlglot range. [tests/unit/test_rls_views.py:592]\n\n  <details><summary>Evidence</summary>\n\n  Comment at tests/unit/test_rls_views.py:592-593 says the test pins the token shape 'across the supported sqlglot range'. pyproject.toml:44 allows sqlglot>=25.0,<31, but the test (591-598) tokenizes only with whichever sqlglot is installed. The only sqlglot pin found in the repo is requirements.txt:105 (sqlglot==30.25.0), and no workflow, tox or nox file varies the version. So the test checks one version (30.25.0) and the claim of range coverage is not backed. No evidence a 25.x tokenizer would behave differently, so the defect is an overstated comment.\n\n  </details>\n\n</details>\n\n### ℹ️ Informational — Deferred (3)\n\n<details><summary>3 items</summary>\n\n- VC-23: INCONCLUSIVE (important) — _called_names assumes that across sqlglot>=25.0,<31, sqlglot.Dialect.get_or_raise(dialect) returns a Dialect instance, that type(instance).tokenizer_class.KEYWORDS is a mapping keyed by upper-case keyword text, and that the instance has a tokenize(sql) method returning Token objects with token_type and text attributes. [src/sqllens/safety/relations.py:94]\n\n  <details><summary>Evidence</summary>\n\n  pyproject.toml:44 pins sqlglot>=25.0,<31. Only installed sqlglot 30.26.0 (/Users/the01geek/repos/sqllens/.venv/.../sqlglot) and a 30.2.x copy were readable. In 30.26.0 dialect.py: get_or_raise (l.1047) returns a Dialect instance; tokenizer_class is a class attribute (l.903, set per subclass l.316); Dialect.tokenize(sql, dialect=None) exists (l.1286); tokens.py:229 KEYWORDS is a dict[str, TokenType]; Token is imported from sqlglot.tokenizer_core. I did not read Token's attributes in tokenizer_core.py nor any release between 25.0 and 29.x (no copy available locally), and did not run pip download or tests, so the lower and middle part of the range is unverified.\n\n  </details>\n\n- VC-25: INCONCLUSIVE (important) — The docstring asserts that on PostgreSQL and MySQL a name in call position that matches, ignoring case, a routine defined in the database is refused, whether or not the statement references a relation. [src/sqllens/safety/relations.py:118]\n\n  <details><summary>Evidence</summary>\n\n  Docstring at relations.py:117-120 matches the code path (_called_names 84-107 feeding _refuse_database_routines 222-252, run even with no relations at 125-132). Checked hint vectors: MySQL versioned comments are rejected earlier by readonly.py:505-506 (not by this module); quoted/keyword/VAR names are collected (101-106); PostgreSQL non-ASCII is covered by text, lower and ASCII-lower variants with proname = ANY and lower(proname) = ANY (236). Open risk not settled by reading: sqlglot Postgres tokenizer only supports U&' string escapes (sqlglot/dialects/postgres.py:90), so a Unicode-escaped quoted identifier call such as U&\"\\0066n\"(1) would likely tokenize to VAR U, &, IDENTIFIER with raw text \\0066n, which would not match the routine fn that PostgreSQL decodes to; likewise MySQL routine names use an accent-insensitive collation while the match is LOWER(...) IN (...) on exact text. I did not run parse_one/tokenize or a live database to confirm these, and I did not confirm that the read-only guard lets such statements through, so neither FAIL nor PASS is established.\n\n  </details>\n\n- VC-40: INCONCLUSIVE (suggestion) — The test comment states the PostgreSQL RLS rewrite emits STRPOS on sqlglot 25.x and POSITION on 30.x, and the test asserts the routine lookup parameters contain 'position' or 'strpos' and never 'str_position'. [tests/unit/test_rls_views.py:619]\n\n  <details><summary>Evidence</summary>\n\n  Test at tests/unit/test_rls_views.py:613-623 asserts {'position','strpos'} & set(params[0]) and 'str_position' not in params[0]; this matches the assertion half of the claim. The 30.x half is confirmed: installed sqlglot 30.x (.venv, _version 30.x) generators/postgres.py:416 maps exp.StrPosition to strposition_sql(..., func_name='POSITION'). The 25.x half (STRPOS emitted) could not be verified: no sqlglot 25.x copy exists on this machine (all found venvs are 30.25-30.27; pyproject allows sqlglot>=25.0,<31 at line 44), and I did not run pip/install or inspect 25.x source. Missing evidence: sqlglot 25.x dialects/postgres.py StrPosition mapping.\n\n  </details>\n\n</details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: full review (not small_diff, not config_only; has_new_types and test_relevant set), 12 changed files, 803 changed lines; Phase 1 and Phase 2 ran; completeness critic not run (no audit detected).\n- Working tree: skipped in pr mode (head override on the local checkout).\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. Final-pass reviewer extension (requesting-code-review): PROMPT-EXTENSION-STATUS: content-present.\n- CI evidence: no CI results were supplied and no test suite result for this head is held; test evidence is missing.\n- Severity threshold: critical (read from config).\n- Phase 3 reviewers: 6 of 6 returned results (code-reviewer, silent-failure-hunter, comment-analyzer, requesting-code-review, type-design-analyzer, pr-test-analyzer). Dirty-tree check ran clean.\n- Verified: 50 passed, 2 failed, 3 inconclusive.\n- Normalized (wording-only): 0\n- Re-verification: none requested.\n- Finding rejected lines: none (no Finding rejected line).\n- Engine directory: plugin copy `skills/review` (candidate 3); the vendored `.prflow/vendor/prflow` and `.devflow/vendor/devflow` copies do not exist.\n- prior-report: none\n\n- Checklist: 50 passed, 2 failed, 3 inconclusive\n- <details><summary>✅ Passed items (50 of 55)</summary>\n\n  - VC-1: RlsGuardRunner passes its own self._dialect to assert_no_denied_functions, and the factory constructs RlsGuardRunner with the same sqlglot dialect string it gives ReadOnlyGuardRunner (a key of _DENIED_BY_DIALECT such as 'postgres', 'mysql', 'sqlite'), so the per-dialect denylist applies; a None dialect falls back to the union denylist. [src/sqllens/safety/__init__.py:195]\n  - VC-2: An UnsafeSqlError raised by RlsGuardRunner's _refuse_denied_functions (prefix 'refusing to execute SQL: ') reaches the MCP client through the same path as the read-only guard's UnsafeSqlError refusals (RunSqlTool's exception handling and the `except UnsafeSqlError` branch in query_database_impl_with_widgets), never as rows or an unstructured crash. [src/sqllens/safety/__init__.py:203]\n  - VC-3: RlsGuardRunner runs the function denylist check only when self._rules is non-empty, after apply_rls and before delegating to the inner runner, so with no rules configured the read_only=false path is unchanged and with rules the check runs regardless of database.read_only. [src/sqllens/safety/__init__.py:195]\n  - VC-4: assert_no_denied_functions applies the function denylist without any statement-type checks: it walks every statement sqlglot.parse returns (not only a single one), refusing a denied exp.Func node anywhere, and does not refuse DML/DDL nodes, multiple statements or SELECT ... INTO. [src/sqllens/safety/readonly.py:565]\n  - VC-5: The assert_no_denied_functions docstring asserts it fails closed like assert_select_only: empty SQL, an unresolvable dialect, ambiguous MySQL token boundaries (_mysql_parse_sql), a parse or tokenize error, or an empty statement in the parse each raise UnsafeSqlError. [src/sqllens/safety/readonly.py:568]\n  - VC-6: Extracting _parse_statements and _refuse_denied_function leaves assert_select_only's behavior unchanged: same empty-SQL check, dialect resolution, MySQL preprocessing, parse-error conversion, and the same denied-function match and error message inside the walk. [src/sqllens/safety/readonly.py:582]\n  - VC-7: The CI step connects to the MySQL service as root with password 'sqllens' (matching MYSQL_ROOT_PASSWORD) and sets log_bin_trust_function_creators = 1 globally, which, together with the privileges the image grants MYSQL_USER on MYSQL_DATABASE, lets the sqllens test user create the stored function the connector test needs. [.github/workflows/ci.yml:147]\n  - VC-8: The external doc's blocked-query bullet asserts a query is blocked when it references a PostgreSQL partition or inheritance child table, calls a function whose name matches one defined in the database, or when the child-table or function lookup cannot complete. [docs/external/row-level-security.md:133]\n  - VC-9: The external doc asserts that while rules are configured a query calling a function on the read-only guard's blocklist (examples pg_sleep, generate_series) is blocked, or blocked when the check cannot run, even when database.read_only is false. [docs/external/row-level-security.md:134]\n  - VC-10: The external Limitations bullet asserts that PostgreSQL partition and inheritance child tables are blocked even when a rule names them, and that querying the top-level table applies its rules to the rows stored in its children. [docs/external/row-level-security.md:164]\n  - VC-11: The external Limitations bullet asserts that on PostgreSQL calls to functions outside pg_catalog and information_schema (extension functions included) and on MySQL calls to stored functions are blocked while RLS is active, matched by name alone so a built-in sharing the name is blocked too, and that only names written as calls are checked. [docs/external/row-level-security.md:164]\n  - VC-12: The external Limitations bullet asserts that on PostgreSQL `SELECT o.order_total FROM orders o` can call a function `order_total(orders)` (attribute notation), and instructs operators to grant EXECUTE only on reviewed functions and revoke PostgreSQL's default EXECUTE grant to PUBLIC. [docs/external/row-level-security.md:164]\n  - VC-13: The internal doc asserts the PostgreSQL pg_class lookup also returns `EXISTS (SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid = <relation>)`, refuses a child at any depth whether or not a rule names it, and treats a non-boolean child flag as a failed lookup. [docs/internal/database-connectors/row-level-security.md:43]\n  - VC-14: The internal doc asserts MySQL partitions selected with `FROM orders PARTITION (p0)` remain visible to and filtered by the RLS rewrite. [docs/internal/database-connectors/row-level-security.md:43]\n  - VC-15: The internal doc asserts `_called_names` tokenizes the rewritten SQL with sqlglot under the connection's dialect and collects VAR, IDENTIFIER or keyword tokens directly followed by `(`, with or without a `schema.` prefix, then runs one parameterized, case-insensitive lookup per statement (PostgreSQL pg_proc joined to pg_namespace excluding pg_catalog and information_schema; MySQL information_schema.ROUTINES with ROUTINE_TYPE = 'FUNCTION'), and runs even with no relation references. [docs/internal/database-connectors/row-level-security.md:45]\n  - VC-16: The internal doc asserts both lookups fail closed: any non-refusal error, including a raising lookup, a sqlglot parse or tokenize error, a non-boolean child flag or a pg_class row missing the flag, is logged with a traceback and refused with the sanitized 'could not verify relation types' RlsError. [docs/internal/database-connectors/row-level-security.md:47]\n  - VC-17: The internal doc asserts RlsGuardRunner is composed outside ReadOnlyGuardRunner, so with read_only = true its denylist check runs ahead of the read-only guard's own copy, and with read_only = false it applies only the denylist, not the SELECT-only checks. [docs/internal/database-connectors/row-level-security.md:204]\n  - VC-18: read-only-safety.md asserts that with read_only = false and rules configured RlsGuardRunner runs assert_no_denied_functions (the same list and matcher as assert_select_only) on the rewritten SQL, raising UnsafeSqlError, and that with no rules nothing replaces the guard. [docs/internal/database-connectors/read-only-safety.md:204]\n  - VC-19: The PostgreSQL runner docstring asserts that with require_base_tables it refuses views, partition or inheritance children, calls to database-defined routines, or failed catalog lookups before executing; this relies on verify_base_tables(conn, args.sql, dialect='postgres') performing the child and routine checks on the execution connection. [src/sqllens/agent/integrations/postgres/sql_runner.py:115]\n  - VC-20: The MySQL runner docstring asserts that with require_base_tables it refuses views, calls to stored functions, or failed catalog lookups before executing; this relies on verify_base_tables(conn, args.sql, dialect='mysql') running the information_schema.ROUTINES check. [src/sqllens/agent/integrations/mysql/sql_runner.py:82]\n  - VC-21: The SqlRunner base docstring states the require_base_tables contract covers verifying referenced relations and called routines and refusing views, unverified relation kinds, child tables, calls matching database-defined routines, and failed catalog lookups; the SQLite runner, which declares the keyword, runs no child or routine lookup, consistent with SQLite having neither. [src/sqllens/agent/capabilities/sql_runner/base.py:30]\n  - VC-22: The safety package docstring asserts the engine runner verifies that no PostgreSQL relation is a partition or inheritance child and no called name matches a routine defined in a PostgreSQL or MySQL database, and that any failed catalog lookup blocks the query. [src/sqllens/safety/__init__.py:16]\n  - VC-24: The call-name collector treats a token as a call name when the next token is TokenType.L_PAREN and the token is a VAR or IDENTIFIER, or its upper-cased text is a tokenizer keyword; a quoted identifier token's text holds the name without quotes, and schema-qualified calls (`schema.name(`) yield the name token immediately before `(`. [src/sqllens/safety/relations.py:98]\n  - VC-26: The docstring states that sqlglot parses `strpos` to `StrPosition` and emits it as `POSITION`, and that a keyword such as `replace` is a call name too (i.e. is not tokenized as VAR). [src/sqllens/safety/relations.py:87]\n  - VC-27: The docstring states PostgreSQL folds only ASCII characters in unquoted names, and the collector therefore adds the as-written, Python lower() and ASCII-only-lowered forms of each name. [src/sqllens/safety/relations.py:91]\n  - VC-28: The PostgreSQL relation lookup returns four columns (relkind, nspname, relname, child flag), where the child flag is EXISTS over pg_catalog.pg_inherits with inhrelid equal to the relation's oid, and psycopg2 returns that boolean column as a Python bool. [src/sqllens/safety/relations.py:165]\n  - VC-29: The child check runs only when the relation's relkind is in _BASE_TABLE_KINDS['postgres'] ('r','p'); a non-bool child flag raises TypeError, which verify_base_tables's generic except logs with a traceback and converts to the sanitized 'could not verify relation types' RlsError; a child flag of True raises the child-table RlsError. [src/sqllens/safety/relations.py:177]\n  - VC-30: The PostgreSQL routine lookup passes the Python list of names twice as parameters to `ANY(%s)`, relying on psycopg2 adapting a list of str to a text array comparable with `p.proname::text` and `lower(p.proname::text)`, and excludes only the pg_catalog and information_schema namespaces. [src/sqllens/safety/relations.py:231]\n  - VC-31: The MySQL routine lookup queries information_schema.ROUTINES with ROUTINE_TYPE = 'FUNCTION' and LOWER(ROUTINE_NAME) IN (one pymysql %s placeholder per name), relying on information_schema.ROUTINES listing every stored function the connection's user can call. [src/sqllens/safety/relations.py:240]\n  - VC-32: verify_base_tables runs the routine lookup for statements that reference no relation, which requires the callers (PostgresRunner and MySQLRunner run_sql with require_base_tables=True, reached via RlsGuardRunner) to invoke it with the post-rewrite SQL for every statement while rules are active, not only statements touching a protected table. [src/sqllens/safety/relations.py:123]\n  - VC-33: _FakeCatalog mirrors the real lookups: its pg_class row is (relkind, 'public', name, child flag) in the same column order as the real query; its pg_proc branch reads params[1] and its ROUTINES branch reads the params tuple, matching the real parameter shapes; and it matches routines by lower-casing each parameter, as the real case-insensitive SQL predicates would. [tests/unit/test_rls_views.py:473]\n  - VC-34: _catalog_connections assumes the PostgreSQL and MySQL runners obtain the verification cursor via connection.cursor() with no arguments and the query-executing cursor via cursor(...) with arguments, that the query cursor executes the SQL as a single positional argument, and that results are read with fetchmany. [tests/unit/test_rls_views.py:660]\n  - VC-35: PostgresRunner accepts connection_string and statement_timeout_ms keywords, MySQLRunner accepts host, database, user, password and statement_timeout_ms, and statement_timeout_ms=0 keeps the runner from issuing statements the fake catalog cannot answer; _install_fake_psycopg2/_install_fake_pymysql accept a connect callable. [tests/unit/test_rls_views.py:685]\n  - VC-36: Monkeypatching `assert_no_denied_functions` on the `sqllens.safety` module affects RlsGuardRunner's denylist check, which requires the guard to look the function up through that module attribute at call time; the guard wraps an unexpected error in UnsafeSqlError with a message containing 'denylist check errored'. [tests/unit/test_rls_views.py:788]\n  - VC-37: The tests assume the existing read-only guard function blocklist contains pg_sleep and generate_series for postgres, SLEEP for mysql and load_extension for sqlite, and that its refusal message contains 'refused by the read-only guard' and the function name. [tests/unit/test_rls_views.py:741]\n  - VC-38: The test comment asserts that in the rewritten SQL `AS (` is collected as a call-shaped name, so only the routine lookup runs and the CTE reference needs no relation lookup. [tests/unit/test_rls_views.py:271]\n  - VC-41: The MySQL connector test derives the database name from `urlparse(mysql_url).path.lstrip('/')`, assuming SQLLENS_TEST_MYSQL_URL carries the database as the sole path segment, so `SELECT <database>.<function>()` names the schema the function was created in. [tests/connectors/test_connectors.py:236]\n  - VC-42: The test comment states CREATE FUNCTION needs log_bin_trust_function_creators=1, set by CI's connector job, unless the test user has SUPER. [tests/connectors/test_connectors.py:245]\n  - VC-43: The PostgreSQL connector test expects the scoped built-in query on the inheritance parent to return n=2, t='ALPHA', p=2 (rows 1 and 3 with tenant 'alpha', including the child's row; strpos('alpha','l') = 2), with RowCapRunner/ReadOnlyGuardRunner returning a DataFrame whose columns are the select aliases. [tests/connectors/test_connectors.py:221]\n  - VC-44: With an RLS rule configured on PostgreSQL, a statement that references a relation recorded as a child in `pg_inherits` is refused with `RlsError` before it executes. This covers a declarative partition (`PARTITION OF`) and a traditional inheritance child (`INHERITS`), at any depth and in any position (top-level `FROM`, join, subquery, CTE body), whether or not a rule names the child or its parent. A rule naming a child table no longer makes that child queryable. A query on the hierarchy's top-level table still runs and returns only rows that match that table's rules, including rows stored in its children. [src/sqllens/safety/relations.py:165]\n  - VC-45: With an RLS rule configured on PostgreSQL or MySQL, and with `database.read_only` true or false, a statement is refused with `RlsError` before it executes when it uses call syntax (`name(...)`, schema-qualified or not) with a name that matches, ignoring case, the name of a routine defined in the database. On PostgreSQL that means any `pg_proc` entry outside the `pg_catalog` and `information_schema` schemas, extension-installed routines included. On MySQL it means any stored function listed in `information_schema.ROUTINES`. Matching uses the routine name alone, across every schema and every argument signature. It covers such calls in the select list, `FROM`, joins, filters, aggregates and window functions, including statements that reference no relation. The names checked are the names called in the SQL that will execute after the RLS rewrite, including calls sqlglot parses as recognized built-in function nodes. [src/sqllens/safety/relations.py:84]\n  - VC-46: While RLS rules are active, the read-only guard's function blocklist applies even when `database.read_only` is false: a statement that calls a function on that blocklist is refused before it executes with `UnsafeSqlError`, which reaches the MCP client as the read-only guard's refusals do today. Only the blocklist check is added on that path; with `database.read_only` false, the statement-type checks (SELECT-only) do not start applying. With no RLS rules configured, behavior for either value of `database.read_only` is unchanged. Unit tests cover, with `database.read_only` false: a blocklisted call under a rule refused; a statement that the RLS rewrite accepts but the SELECT-only checks would refuse (for example a PostgreSQL data-modifying CTE on a table without a rule) not refused by the new check; and a blocklisted call with no rules configured not refused, as today. [src/sqllens/safety/__init__.py:195]\n  - VC-47: Functions on the read-only guard's function blocklist are blocked while rules are active, whatever `database.read_only` is: with `database.read_only` true by the existing read-only guard, and with it false by the previous criterion. This change leaves the blocklist's entries as they are; the blocklist additions are delivered in a separate change. [src/sqllens/safety/readonly.py:565]\n  - VC-48: With an RLS rule configured, the routine check and the blocklist check do not refuse a statement whose called names are all outside the read-only guard's function blocklist and match no routine name that the database-defined routine check looks up, and such a statement that the other RLS checks accept keeps running with its rule predicates applied. Tests cover at minimum `count(*)` and `upper()` on PostgreSQL and MySQL, plus a PostgreSQL call that sqlglot parses as a typed node with a different canonical name (`strpos`). [tests/unit/test_rls_views.py:601]\n  - VC-49: When a child or routine catalog lookup raises any exception, or the child lookup returns a child flag that is not a boolean, the query is refused with an `RlsError` whose message carries no driver detail. The cause is logged with a traceback, as for the existing relation lookup. A SQL text the check's sqlglot step cannot parse or tokenize is also refused with `RlsError`. The refusal is the same exception type through the same wrappers as the existing view refusal, so it reaches the MCP client exactly as a view refusal does, never as rows. [docs/internal/database-connectors/row-level-security.md:47]\n  - VC-50: Apart from the blocklist criterion, SQLite RLS behavior is unchanged: SQLite runs no child or routine lookup, and its existing RLS tests pass unmodified. [src/sqllens/safety/__init__.py:195]\n  - VC-51: Unit tests in `tests/unit/test_rls_views.py` drive `verify_base_tables` and the PostgreSQL and MySQL runners with fake cursors. They cover at minimum: child refused; a parent that is not a child allowed; a function call with no relation reference refused; a matching name in another schema or another letter case refused; a call whose name the sqlglot tokenizer reads as a keyword (for example `replace`), with a matching routine, refused; a built-in-only call allowed; and a raising lookup and a non-boolean child flag, both refused without echoing the driver detail. A routine lookup that returns no row allows the call. [tests/unit/test_rls_views.py:506]\n  - VC-52: Connector tests in `tests/connectors/test_connectors.py` against real PostgreSQL create two protected parents: a partitioned table with a `PARTITION OF` child, and an ordinary table with an `INHERITS` child. They assert that each child query is blocked and that each parent query returns only scoped rows. They also create a SQL function that reads the protected table, and assert that calling it is blocked unqualified and schema-qualified. Against real MySQL, they create a stored function that reads the protected table and assert that both the unqualified and the schema-qualified call are blocked. On both engines, a built-in-only query on the protected table still returns scoped rows. [tests/connectors/test_connectors.py:180]\n  - VC-53: In `docs/external/row-level-security.md#limitations`, the bullet opening \"Rules match table names, not every path to the same rows\" is replaced, and no Limitations bullet tells operators to add a rule per child table. The new bullet states that partition and inheritance child tables are unavailable while RLS is active and that rules belong on the top-level table. A second statement says that on PostgreSQL, calls to functions outside the `pg_catalog` and `information_schema` schemas, extension functions included, and on MySQL, calls to stored functions, are blocked while RLS is active, and that a built-in call is also blocked when such a function shares its name. The bullet keeps a least-privilege instruction to grant the SQL Lens database user `EXECUTE` only on routines the operator has reviewed. It does not claim that SQL Lens inspects every way the database can run stored code. [docs/external/row-level-security.md:164]\n  - VC-54: In `docs/internal/database-connectors/row-level-security.md`, the \"Database relation checks\" section describes the child check (`pg_inherits`) and the routine check (`pg_proc` outside `pg_catalog`/`information_schema`; MySQL `information_schema.ROUTINES`; case-insensitive name match; runs with no relation references), and their fail-closed lookups. The paragraph opening \"Known gaps with the same root cause\" no longer describes these two paths as open. \"Unprotected base-table queries still work\" names the child-table exception. The custom-runner paragraph states that runners beneath `RlsGuardRunner` must enforce these checks too. The sentences in `docs/internal/database-connectors/read-only-safety.md` and in this page that say `database.read_only = false` skips the parser guard state that the function blocklist still applies while RLS rules are configured. [docs/internal/database-connectors/row-level-security.md:41]\n\n  </details>\n- Reviewed against issue #295 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] With an RLS rule configured on PostgreSQL, a statement that references a relation recorded as a child in `pg_inherits` is refused with `RlsError` before it executes. This covers a declarative partition (`PARTITION OF`) and a traditional inheritance child (`INHERITS`), at any depth and in any position (top-level `FROM`, join, subquery, CTE body), whether or not a rule names the child or its parent. A rule naming a child table no longer makes that child queryable. A query on the hierarchy's top-level table still runs and returns only rows that match that table's rules, including rows stored in its children.\n- [ ] With an RLS rule configured on PostgreSQL or MySQL, and with `database.read_only` true or false, a statement is refused with `RlsError` before it executes when it uses call syntax (`name(...)`, schema-qualified or not) with a name that matches, ignoring case, the name of a routine defined in the database. On PostgreSQL that means any `pg_proc` entry outside the `pg_catalog` and `information_schema` schemas, extension-installed routines included. On MySQL it means any stored function listed in `information_schema.ROUTINES`. Matching uses the routine name alone, across every schema and every argument signature. It covers such calls in the select list, `FROM`, joins, filters, aggregates and window functions, including statements that reference no relation. The names checked are the names called in the SQL that will execute after the RLS rewrite, including calls sqlglot parses as recognized built-in function nodes.\n- [ ] While RLS rules are active, the read-only guard's function blocklist applies even when `database.read_only` is false: a statement that calls a function on that blocklist is refused before it executes with `UnsafeSqlError`, which reaches the MCP client as the read-only guard's refusals do today. Only the blocklist check is added on that path; with `database.read_only` false, the statement-type checks (SELECT-only) do not start applying. With no RLS rules configured, behavior for either value of `database.read_only` is unchanged. Unit tests cover, with `database.read_only` false: a blocklisted call under a rule refused; a statement that the RLS rewrite accepts but the SELECT-only checks would refuse (for example a PostgreSQL data-modifying CTE on a table without a rule) not refused by the new check; and a blocklisted call with no rules configured not refused, as today.\n- [ ] Functions on the read-only guard's function blocklist are blocked while rules are active, whatever `database.read_only` is: with `database.read_only` true by the existing read-only guard, and with it false by the previous criterion. This change leaves the blocklist's entries as they are; the blocklist additions are delivered in a separate change.\n- [ ] With an RLS rule configured, the routine check and the blocklist check do not refuse a statement whose called names are all outside the read-only guard's function blocklist and match no routine name that the database-defined routine check looks up, and such a statement that the other RLS checks accept keeps running with its rule predicates applied. Tests cover at minimum `count(*)` and `upper()` on PostgreSQL and MySQL, plus a PostgreSQL call that sqlglot parses as a typed node with a different canonical name (`strpos`).\n- [ ] When a child or routine catalog lookup raises any exception, or the child lookup returns a child flag that is not a boolean, the query is refused with an `RlsError` whose message carries no driver detail. The cause is logged with a traceback, as for the existing relation lookup. A SQL text the check's sqlglot step cannot parse or tokenize is also refused with `RlsError`. The refusal is the same exception type through the same wrappers as the existing view refusal, so it reaches the MCP client exactly as a view refusal does, never as rows.\n- [ ] Apart from the blocklist criterion, SQLite RLS behavior is unchanged: SQLite runs no child or routine lookup, and its existing RLS tests pass unmodified.\n- [ ] Unit tests in `tests/unit/test_rls_views.py` drive `verify_base_tables` and the PostgreSQL and MySQL runners with fake cursors. They cover at minimum: child refused; a parent that is not a child allowed; a function call with no relation reference refused; a matching name in another schema or another letter case refused; a call whose name the sqlglot tokenizer reads as a keyword (for example `replace`), with a matching routine, refused; a built-in-only call allowed; and a raising lookup and a non-boolean child flag, both refused without echoing the driver detail. A routine lookup that returns no row allows the call.\n- [ ] Connector tests in `tests/connectors/test_connectors.py` against real PostgreSQL create two protected parents: a partitioned table with a `PARTITION OF` child, and an ordinary table with an `INHERITS` child. They assert that each child query is blocked and that each parent query returns only scoped rows. They also create a SQL function that reads the protected table, and assert that calling it is blocked unqualified and schema-qualified. Against real MySQL, they create a stored function that reads the protected table and assert that both the unqualified and the schema-qualified call are blocked. On both engines, a built-in-only query on the protected table still returns scoped rows.\n- [ ] In `docs/external/row-level-security.md#limitations`, the bullet opening \"Rules match table names, not every path to the same rows\" is replaced, and no Limitations bullet tells operators to add a rule per child table. The new bullet states that partition and inheritance child tables are unavailable while RLS is active and that rules belong on the top-level table. A second statement says that on PostgreSQL, calls to functions outside the `pg_catalog` and `information_schema` schemas, extension functions included, and on MySQL, calls to stored functions, are blocked while RLS is active, and that a built-in call is also blocked when such a function shares its name. The bullet keeps a least-privilege instruction to grant the SQL Lens database user `EXECUTE` only on routines the operator has reviewed. It does not claim that SQL Lens inspects every way the database can run stored code.\n- [ ] In `docs/internal/database-connectors/row-level-security.md`, the \"Database relation checks\" section describes the child check (`pg_inherits`) and the routine check (`pg_proc` outside `pg_catalog`/`information_schema`; MySQL `information_schema.ROUTINES`; case-insensitive name match; runs with no relation references), and their fail-closed lookups. The paragraph opening \"Known gaps with the same root cause\" no longer describes these two paths as open. \"Unprotected base-table queries still work\" names the child-table exception. The custom-runner paragraph states that runners beneath `RlsGuardRunner` must enforce these checks too. The sentences in `docs/internal/database-connectors/read-only-safety.md` and in this page that say `database.read_only = false` skips the parser guard state that the function blocklist still applies while RLS rules are configured.\n- [ ] A `changelog.d/<PR>.security.md` fragment states the outcome and the operator action: query top-level tables and move child rules to the parent, and note that, under RLS, calls to PostgreSQL functions outside `pg_catalog`/`information_schema` and to MySQL stored functions are blocked, and that while rules are active the read-only guard's function blocklist applies even when `database.read_only` is false. `changelog.d/274.security.md` is unchanged.",
+ "diff_produced_at_head": "d2f419f55ee90a7ca8666a36c26a673c7c3a23e8",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:__init__.py:rls-denylist-dialect-source:195",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "api_contract:__init__.py:denylist-error-surfaces-to-client:203",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "api_contract:__init__.py:denylist-only-with-rules:195",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "dependency_interaction:readonly.py:denylist-without-statement-checks:565",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "api_contract:readonly.py:denylist-fail-closed-inputs:568",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "dependency_interaction:readonly.py:assert-select-only-refactor-parity:582",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "dependency_interaction:ci.yml:mysql-function-creator-setup:147",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "api_contract:row-level-security.md:blocked-child-or-routine:133",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "api_contract:row-level-security.md:blocklist-under-rls:134",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "absolute_claim:row-level-security.md:child-blocked-parent-filters:164",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "absolute_claim:row-level-security.md:routine-calls-blocked:164",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "api_contract:row-level-security.md:pg-attribute-notation-grant:164",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "api_contract:row-level-security.md:pg-inherits-child-check:43",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "api_contract:row-level-security.md:mysql-partition-clause-filtered:43",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "api_contract:row-level-security.md:called-names-routine-lookup:45",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "api_contract:row-level-security.md:lookups-fail-closed:47",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "api_contract:row-level-security.md:rls-denylist-runs-first:204",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "api_contract:read-only-safety.md:denylist-survives-readonly-false:204",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "api_contract:sql_runner.py:postgres-runner-checks-doc:115",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "api_contract:sql_runner.py:mysql-runner-checks-doc:82",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "api_contract:base.py:require-base-tables-contract:30",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "api_contract:__init__.py:package-docstring-engine-checks:16",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-23",
+   "category": "dependency_interaction",
+   "claim": "_called_names assumes that across sqlglot>=25.0,<31, sqlglot.Dialect.get_or_raise(dialect) returns a Dialect instance, that type(instance).tokenizer_class.KEYWORDS is a mapping keyed by upper-case keyword text, and that the instance has a tokenize(sql) method returning Token objects with token_type and text attributes.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/safety/relations.py",
+   "source_line": 94,
+   "source_line_end": 96,
+   "verify_against": "sqlglot Dialect and Tokenizer classes (sqlglot/dialects/dialect.py, sqlglot/tokens.py) across the pinned range in pyproject.toml",
+   "verify_hint": "Check `Dialect.get_or_raise`, `Dialect.tokenize`, `Dialect.tokenizer_class` and `Tokenizer.KEYWORDS` in sqlglot's dialects/dialect.py and tokens.py, and the sqlglot version bound in pyproject.toml",
+   "claim_signature": "dependency_interaction:relations.py:sqlglot-dialect-tokenize-api:94",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-1"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "pyproject.toml:44 pins sqlglot>=25.0,<31. Only installed sqlglot 30.26.0 (/Users/the01geek/repos/sqllens/.venv/.../sqlglot) and a 30.2.x copy were readable. In 30.26.0 dialect.py: get_or_raise (l.1047) returns a Dialect instance; tokenizer_class is a class attribute (l.903, set per subclass l.316); Dialect.tokenize(sql, dialect=None) exists (l.1286); tokens.py:229 KEYWORDS is a dict[str, TokenType]; Token is imported from sqlglot.tokenizer_core. I did not read Token's attributes in tokenizer_core.py nor any release between 25.0 and 29.x (no copy available locally), and did not run pip download or tests, so the lower and middle part of the range is unverified.",
+   "file_checked": "src/sqllens/safety/relations.py:94-96",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-24",
+   "claim_signature": "dependency_interaction:relations.py:call-position-token-shape:98",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-25",
+   "category": "absolute_claim",
+   "claim": "The docstring asserts that on PostgreSQL and MySQL a name in call position that matches, ignoring case, a routine defined in the database is refused, whether or not the statement references a relation.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "On PostgreSQL and MySQL a name in call position that matches, ignoring case, a routine defined in the database is\n    refused, whether or not the statement references a relation.",
+   "source_file": "src/sqllens/safety/relations.py",
+   "source_line": 118,
+   "source_line_end": 120,
+   "verify_against": "_called_names and _refuse_database_routines in src/sqllens/safety/relations.py",
+   "verify_hint": "Trace inputs that could reach execution without the name being collected: a MySQL versioned comment such as `SELECT /*!50000 stored_fn() */ 1` (sqlglot drops comments but MySQL executes the body), a call name tokenized as neither VAR/IDENTIFIER nor a KEYWORDS entry, and a non-ASCII name whose PostgreSQL lower() differs from Python's lower()",
+   "claim_signature": "absolute_claim:relations.py:routine-call-always-refused:118",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-3"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Docstring at relations.py:117-120 matches the code path (_called_names 84-107 feeding _refuse_database_routines 222-252, run even with no relations at 125-132). Checked hint vectors: MySQL versioned comments are rejected earlier by readonly.py:505-506 (not by this module); quoted/keyword/VAR names are collected (101-106); PostgreSQL non-ASCII is covered by text, lower and ASCII-lower variants with proname = ANY and lower(proname) = ANY (236). Open risk not settled by reading: sqlglot Postgres tokenizer only supports U&' string escapes (sqlglot/dialects/postgres.py:90), so a Unicode-escaped quoted identifier call such as U&\"\\0066n\"(1) would likely tokenize to VAR U, &, IDENTIFIER with raw text \\0066n, which would not match the routine fn that PostgreSQL decodes to; likewise MySQL routine names use an accent-insensitive collation while the match is LOWER(...) IN (...) on exact text. I did not run parse_one/tokenize or a live database to confirm these, and I did not confirm that the read-only guard lets such statements through, so neither FAIL nor PASS is established.",
+   "file_checked": "src/sqllens/safety/relations.py:84-132",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-26",
+   "claim_signature": "dependency_interaction:relations.py:strpos-renamed-replace-keyword:87",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-27",
+   "claim_signature": "dependency_interaction:relations.py:postgres-ascii-folding:91",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-28",
+   "claim_signature": "dependency_interaction:relations.py:pg-inherits-child-flag:165",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-29",
+   "claim_signature": "data_format_assumption:relations.py:child-flag-type-fail-closed:177",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-30",
+   "claim_signature": "dependency_interaction:relations.py:pg-proc-any-array:231",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-31",
+   "claim_signature": "dependency_interaction:relations.py:mysql-routines-visibility:240",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-32",
+   "claim_signature": "api_contract:relations.py:caller-checks-relationless-sql:123",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-33",
+   "claim_signature": "test_mock_alignment:test_rls_views.py:fake-catalog-shapes:473",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-34",
+   "claim_signature": "test_mock_alignment:test_rls_views.py:runner-cursor-split:660",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-35",
+   "claim_signature": "api_contract:test_rls_views.py:runner-ctor-timeout-zero:685",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-36",
+   "claim_signature": "test_mock_alignment:test_rls_views.py:denylist-monkeypatch-target:788",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-37",
+   "claim_signature": "dependency_interaction:test_rls_views.py:denylist-entries-present:741",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-38",
+   "claim_signature": "data_format_assumption:test_rls_views.py:as-paren-collected:271",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-39",
+   "category": "absolute_claim",
+   "claim": "The test comment asserts the test pins the REPLACE token shape across the supported sqlglot range.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "# The routine check must not rely on VAR tokens alone: this pins the token\n    # shape the keyword branch exists for, across the supported sqlglot range.",
+   "source_file": "tests/unit/test_rls_views.py",
+   "source_line": 592,
+   "source_line_end": 593,
+   "verify_against": "pyproject.toml sqlglot range and CI matrix",
+   "verify_hint": "Trace whether a sqlglot version inside the pyproject.toml range (e.g. 25.0) that CI does not install could tokenize REPLACE as VAR; the test only runs against the installed version",
+   "claim_signature": "absolute_claim:test_rls_views.py:replace-token-across-range:592",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-17"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "Comment at tests/unit/test_rls_views.py:592-593 says the test pins the token shape 'across the supported sqlglot range'. pyproject.toml:44 allows sqlglot>=25.0,<31, but the test (591-598) tokenizes only with whichever sqlglot is installed. The only sqlglot pin found in the repo is requirements.txt:105 (sqlglot==30.25.0), and no workflow, tox or nox file varies the version. So the test checks one version (30.25.0) and the claim of range coverage is not backed. No evidence a 25.x tokenizer would behave differently, so the defect is an overstated comment.",
+   "file_checked": "tests/unit/test_rls_views.py:591-598",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-40",
+   "category": "dependency_interaction",
+   "claim": "The test comment states the PostgreSQL RLS rewrite emits STRPOS on sqlglot 25.x and POSITION on 30.x, and the test asserts the routine lookup parameters contain 'position' or 'strpos' and never 'str_position'.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "# The executed name is what is looked up, not sqlglot's node name. The\n    # rewrite emits STRPOS on sqlglot 25.x and POSITION on 30.x.",
+   "source_file": "tests/unit/test_rls_views.py",
+   "source_line": 619,
+   "source_line_end": 620,
+   "verify_against": "sqlglot postgres generator for exp.StrPosition and apply_rls in src/sqllens/safety/rls.py",
+   "verify_hint": "Check the postgres generator mapping for `exp.StrPosition` in sqlglot/dialects/postgres.py across 25.x-30.x, and that `apply_rls` regenerates SQL with dialect='postgres'",
+   "claim_signature": "dependency_interaction:test_rls_views.py:strpos-emitted-name:619",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-18"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Test at tests/unit/test_rls_views.py:613-623 asserts {'position','strpos'} & set(params[0]) and 'str_position' not in params[0]; this matches the assertion half of the claim. The 30.x half is confirmed: installed sqlglot 30.x (.venv, _version 30.x) generators/postgres.py:416 maps exp.StrPosition to strposition_sql(..., func_name='POSITION'). The 25.x half (STRPOS emitted) could not be verified: no sqlglot 25.x copy exists on this machine (all found venvs are 30.25-30.27; pyproject allows sqlglot>=25.0,<31 at line 44), and I did not run pip/install or inspect 25.x source. Missing evidence: sqlglot 25.x dialects/postgres.py StrPosition mapping.",
+   "file_checked": "tests/unit/test_rls_views.py:619-623",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-41",
+   "claim_signature": "data_format_assumption:test_connectors.py:mysql-url-database-path:236",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-42",
+   "claim_signature": "dependency_interaction:test_connectors.py:mysql-log-bin-trust:245",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-43",
+   "claim_signature": "data_format_assumption:test_connectors.py:scoped-builtin-result:221",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-44",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-45",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-46",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-47",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-48",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-49",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-50",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-51",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-52",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-10",
+   "id": "VC-53",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-11",
+   "id": "VC-54",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "A `changelog.d/<PR>.security.md` fragment states the outcome and the operator action: query top-level tables and move child rules to the parent, and note that, under RLS, calls to PostgreSQL functions outside `pg_catalog`/`information_schema` and to MySQL stored functions are blocked, and that while rules are active the read-only guard's function blocklist applies even when `database.read_only` is false. `changelog.d/274.security.md` is unchanged.",
+   "claim_signature": "issue-acceptance-12",
+   "criteria_file": ".prflow/tmp/review/pr-325/local-20261030T230057Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-325/local-20261030T230057Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: A `changelog.d/<PR>.security.md` fragment states the outcome and the operator action: query top-level tables and move child rules to the parent, and note that, under RLS, calls to PostgreSQL functions outside `pg_catalog`/`information_schema` and to MySQL stored functions are blocked, and that while rules are active the read-only guard's function blocklist applies even when `database.read_only` is false. `changelog.d/274.security.md` is unchanged.",
+   "id": "VC-55",
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "criteria.json counts (criterion 12 present, well-formed list). The diff contains no changelog.d path (grep 'changelog\\.d' on diff.patch: no matches). The head view's changelog.d security fragments (+legacy-001, +legacy-002, 274, 280, 288) are identical in set to the base view's; no new <PR>.security.md exists. The only fragment mentioning pg_inherits/blocklist/stored function is the pre-existing 274.security.md, which the criterion says must stay unchanged. So the required new fragment (child-table operator action, function-call blocking on PostgreSQL/MySQL, blocklist applying with read_only false) is absent. 274.security.md is unchanged, but that is only half of the criterion.",
+   "file_checked": "changelog.d",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  }
+ ]
+}

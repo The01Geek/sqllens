@@ -1,0 +1,50 @@
+[
+  {
+    "criterion": 1,
+    "text": "With an RLS rule configured on PostgreSQL, a statement that references a relation recorded as a child in `pg_inherits` is refused with `RlsError` before it executes. This covers a declarative partition (`PARTITION OF`) and a traditional inheritance child (`INHERITS`), at any depth and in any position (top-level `FROM`, join, subquery, CTE body), whether or not a rule names the child or its parent. A rule naming a child table no longer makes that child queryable. A query on the hierarchy's top-level table still runs and returns only rows that match that table's rules, including rows stored in its children."
+  },
+  {
+    "criterion": 2,
+    "text": "With an RLS rule configured on PostgreSQL or MySQL, and with `database.read_only` true or false, a statement is refused with `RlsError` before it executes when it uses call syntax (`name(...)`, schema-qualified or not) with a name that matches, ignoring case, the name of a routine defined in the database. On PostgreSQL that means any `pg_proc` entry outside the `pg_catalog` and `information_schema` schemas, extension-installed routines included. On MySQL it means any stored function listed in `information_schema.ROUTINES`. Matching uses the routine name alone, across every schema and every argument signature. It covers such calls in the select list, `FROM`, joins, filters, aggregates and window functions, including statements that reference no relation. The names checked are the names called in the SQL that will execute after the RLS rewrite, including calls sqlglot parses as recognized built-in function nodes."
+  },
+  {
+    "criterion": 3,
+    "text": "While RLS rules are active, the read-only guard's function blocklist applies even when `database.read_only` is false: a statement that calls a function on that blocklist is refused before it executes with `UnsafeSqlError`, which reaches the MCP client as the read-only guard's refusals do today. Only the blocklist check is added on that path; with `database.read_only` false, the statement-type checks (SELECT-only) do not start applying. With no RLS rules configured, behavior for either value of `database.read_only` is unchanged. Unit tests cover, with `database.read_only` false: a blocklisted call under a rule refused; a statement that the RLS rewrite accepts but the SELECT-only checks would refuse (for example a PostgreSQL data-modifying CTE on a table without a rule) not refused by the new check; and a blocklisted call with no rules configured not refused, as today."
+  },
+  {
+    "criterion": 4,
+    "text": "Functions on the read-only guard's function blocklist are blocked while rules are active, whatever `database.read_only` is: with `database.read_only` true by the existing read-only guard, and with it false by the previous criterion. This change leaves the blocklist's entries as they are; the blocklist additions are delivered in a separate change."
+  },
+  {
+    "criterion": 5,
+    "text": "With an RLS rule configured, the routine check and the blocklist check do not refuse a statement whose called names are all outside the read-only guard's function blocklist and match no routine name that the database-defined routine check looks up, and such a statement that the other RLS checks accept keeps running with its rule predicates applied. Tests cover at minimum `count(*)` and `upper()` on PostgreSQL and MySQL, plus a PostgreSQL call that sqlglot parses as a typed node with a different canonical name (`strpos`)."
+  },
+  {
+    "criterion": 6,
+    "text": "When a child or routine catalog lookup raises any exception, or the child lookup returns a child flag that is not a boolean, the query is refused with an `RlsError` whose message carries no driver detail. The cause is logged with a traceback, as for the existing relation lookup. A SQL text the check's sqlglot step cannot parse or tokenize is also refused with `RlsError`. The refusal is the same exception type through the same wrappers as the existing view refusal, so it reaches the MCP client exactly as a view refusal does, never as rows."
+  },
+  {
+    "criterion": 7,
+    "text": "Apart from the blocklist criterion, SQLite RLS behavior is unchanged: SQLite runs no child or routine lookup, and its existing RLS tests pass unmodified."
+  },
+  {
+    "criterion": 8,
+    "text": "Unit tests in `tests/unit/test_rls_views.py` drive `verify_base_tables` and the PostgreSQL and MySQL runners with fake cursors. They cover at minimum: child refused; a parent that is not a child allowed; a function call with no relation reference refused; a matching name in another schema or another letter case refused; a call whose name the sqlglot tokenizer reads as a keyword (for example `replace`), with a matching routine, refused; a built-in-only call allowed; and a raising lookup and a non-boolean child flag, both refused without echoing the driver detail. A routine lookup that returns no row allows the call."
+  },
+  {
+    "criterion": 9,
+    "text": "Connector tests in `tests/connectors/test_connectors.py` against real PostgreSQL create two protected parents: a partitioned table with a `PARTITION OF` child, and an ordinary table with an `INHERITS` child. They assert that each child query is blocked and that each parent query returns only scoped rows. They also create a SQL function that reads the protected table, and assert that calling it is blocked unqualified and schema-qualified. Against real MySQL, they create a stored function that reads the protected table and assert that both the unqualified and the schema-qualified call are blocked. On both engines, a built-in-only query on the protected table still returns scoped rows."
+  },
+  {
+    "criterion": 10,
+    "text": "In `docs/external/row-level-security.md#limitations`, the bullet opening \"Rules match table names, not every path to the same rows\" is replaced, and no Limitations bullet tells operators to add a rule per child table. The new bullet states that partition and inheritance child tables are unavailable while RLS is active and that rules belong on the top-level table. A second statement says that on PostgreSQL, calls to functions outside the `pg_catalog` and `information_schema` schemas, extension functions included, and on MySQL, calls to stored functions, are blocked while RLS is active, and that a built-in call is also blocked when such a function shares its name. The bullet keeps a least-privilege instruction to grant the SQL Lens database user `EXECUTE` only on routines the operator has reviewed. It does not claim that SQL Lens inspects every way the database can run stored code."
+  },
+  {
+    "criterion": 11,
+    "text": "In `docs/internal/database-connectors/row-level-security.md`, the \"Database relation checks\" section describes the child check (`pg_inherits`) and the routine check (`pg_proc` outside `pg_catalog`/`information_schema`; MySQL `information_schema.ROUTINES`; case-insensitive name match; runs with no relation references), and their fail-closed lookups. The paragraph opening \"Known gaps with the same root cause\" no longer describes these two paths as open. \"Unprotected base-table queries still work\" names the child-table exception. The custom-runner paragraph states that runners beneath `RlsGuardRunner` must enforce these checks too. The sentences in `docs/internal/database-connectors/read-only-safety.md` and in this page that say `database.read_only = false` skips the parser guard state that the function blocklist still applies while RLS rules are configured."
+  },
+  {
+    "criterion": 12,
+    "text": "A `changelog.d/<PR>.security.md` fragment states the outcome and the operator action: query top-level tables and move child rules to the parent, and note that, under RLS, calls to PostgreSQL functions outside `pg_catalog`/`information_schema` and to MySQL stored functions are blocked, and that while rules are active the read-only guard's function blocklist applies even when `database.read_only` is false. `changelog.d/274.security.md` is unchanged."
+  }
+]

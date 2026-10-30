@@ -1,0 +1,145 @@
+[
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "The wider require_base_tables duty for custom runners (refuse child tables, calls matching database-defined routines, failed catalog lookups) is enforced only by documentation; RlsGuardRunner.__init__ checks only the parameter name.",
+  "defect_signature": {
+   "file": "src/sqllens/agent/capabilities/sql_runner/base.py",
+   "line_range": [
+    30,
+    34
+   ],
+   "kind": "type_design"
+  }
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "_refuse_database_routines treats every non-postgres dialect as MySQL; the postgres/mysql precondition is enforced only by its caller and is not stated in the function or docstring.",
+  "defect_signature": {
+   "file": "src/sqllens/safety/relations.py",
+   "line_range": [
+    222,
+    247
+   ],
+   "kind": "type_design"
+  }
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "The PostgreSQL pg_class row is read by position (row[0], row[1:3], row[3]); the child-flag meaning depends on the SELECT list order. Fails closed today.",
+  "defect_signature": {
+   "file": "src/sqllens/safety/relations.py",
+   "line_range": [
+    166,
+    189
+   ],
+   "kind": "type_design"
+  }
+ },
+ {
+  "agent": "prflow:comment-analyzer",
+  "severity": "suggestion",
+  "description": "The _called_names docstring (and docs/internal/database-connectors/row-level-security.md line 45) says strpos is emitted as POSITION; the PR's own test comment says the rewrite emits STRPOS on sqlglot 25.x and POSITION on 30.x, and the project allows sqlglot>=25.0,<31.",
+  "defect_signature": {
+   "file": "src/sqllens/safety/relations.py",
+   "line_range": [
+    88,
+    89
+   ],
+   "kind": "documented_falsehood"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:comment-analyzer",
+  "severity": "suggestion",
+  "description": "Ambiguous sentence 'no collected name skips the query' in the internal RLS doc; the code skips the routine lookup when no name is collected. 'One parameterized query per statement' means per verify_base_tables call.",
+  "defect_signature": {
+   "file": "docs/internal/database-connectors/row-level-security.md",
+   "line_range": [
+    45,
+    45
+   ],
+   "kind": "comment_drift"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "suggestion",
+  "description": "The verify_base_tables fail-closed handler now also catches routine-lookup and tokenizer failures but still logs and returns a message about a relation-type check; for a relation-free call the message names a check that never ran.",
+  "defect_signature": {
+   "file": "src/sqllens/safety/relations.py",
+   "line_range": [
+    137,
+    145
+   ],
+   "kind": "other"
+  }
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "suggestion",
+  "description": "The routine check runs only for dialect postgres or mysql; for any other dialect a relation-free call passes unchecked, while _verify_relations raises RlsError for an unknown dialect. No shipped runner reaches this.",
+  "defect_signature": {
+   "file": "src/sqllens/safety/relations.py",
+   "line_range": [
+    124,
+    126
+   ],
+   "kind": "logic_error"
+  }
+ },
+ {
+  "agent": "prflow:pr-test-analyzer",
+  "severity": "suggestion",
+  "description": "_called_names sends each name as written, lower-cased and ASCII-only lower-cased; no test pins all three spellings because _FakeCatalog lower-cases every parameter and connector tests use ASCII names only.",
+  "defect_signature": {
+   "file": "src/sqllens/safety/relations.py",
+   "line_range": [
+    104,
+    106
+   ],
+   "kind": "test_gap"
+  }
+ },
+ {
+  "agent": "prflow:requesting-code-review",
+  "severity": "important",
+  "description": "The changelog.d/325.security.md fragment required by acceptance criterion twelve is missing; the diff adds no changelog.d file.",
+  "defect_signature": {
+   "file": "changelog.d/325.security.md",
+   "line_range": null,
+   "kind": "test_gap"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:requesting-code-review",
+  "severity": "suggestion",
+  "description": "test_untokenizable_or_unparsable_sql_fails_closed uses inputs that fail inside _relations before _called_names runs, so the _called_names tokenizer failure path is never reached by a test.",
+  "defect_signature": {
+   "file": "tests/unit/test_rls_views.py",
+   "line_range": [
+    646,
+    647
+   ],
+   "kind": "test_gap"
+  }
+ },
+ {
+  "agent": "prflow:requesting-code-review",
+  "severity": "suggestion",
+  "description": "_FakeCatalog.execute dispatches with sql.startswith('SET ') and splits a qualified name with .split('.'), string handling the repository's sqlglot rule names (test fake over fixed catalog queries only).",
+  "defect_signature": {
+   "file": "tests/unit/test_rls_views.py",
+   "line_range": [
+    477,
+    482
+   ],
+   "kind": "style"
+  }
+ }
+]

@@ -1,0 +1,228 @@
+{
+  "iter": 3,
+  "loop_role": "promoted",
+  "promotion_provenance": "park-calibration-pre-shadow",
+  "fix_commit_sha": "05443b8ba8cfb9fd777e6175d6332bd984dabc7d",
+  "phase3_failed_agents": [],
+  "phase3_dispatched": [],
+  "expected_reviewers": [],
+  "checklist": [],
+  "fix_decisions": [
+    {
+      "finding_id": "F-1",
+      "decision": "applied",
+      "commit": "05443b8ba8cfb9fd777e6175d6332bd984dabc7d"
+    },
+    {
+      "finding_id": null,
+      "decision": "applied",
+      "commit": "05443b8ba8cfb9fd777e6175d6332bd984dabc7d",
+      "source_file": "src/sqllens/safety/relations.py",
+      "claim_text": "The _verify_relations docstring says a failed lookup raises another exception that verify_base_tables logs; an empty lookup (no @@lower_case_table_names row, no relation row) raises RlsError directly and is not logged."
+    },
+    {
+      "finding_id": "D-1",
+      "decision": "applied",
+      "commit": "048e5565a4b76538b4e9f363a0e14ccbd9259f4c",
+      "original_severity": "minor",
+      "source_file": "src/sqllens/safety/relations.py",
+      "claim_text": "The sanitized message 'could not verify relation types or function calls' is raised on SQLite, which never runs a function-call check."
+    }
+  ],
+  "telemetry": "unavailable",
+  "reference_reads": {
+    "fix_delta": {
+      "status": "verified",
+      "outcome": "refixed",
+      "reason": null
+    }
+  },
+  "iteration_head": "048e5565a4b76538b4e9f363a0e14ccbd9259f4c",
+  "parked_class_sweep": {
+    "classes": [
+      {
+        "source_finding_ids": [
+          "F-1",
+          "F-2",
+          "F-3"
+        ],
+        "kind_literal": "type_design",
+        "new_siblings": []
+      },
+      {
+        "source_finding_ids": [
+          "F-7"
+        ],
+        "kind_literal": "logic_error",
+        "new_siblings": []
+      },
+      {
+        "source_finding_ids": [
+          "F-8",
+          "F-10",
+          "D-1"
+        ],
+        "kind_literal": "test_gap",
+        "new_siblings": []
+      },
+      {
+        "source_finding_ids": [
+          "F-11"
+        ],
+        "kind_literal": "style",
+        "new_siblings": []
+      }
+    ],
+    "not_completed": null
+  },
+  "park_calibration": {
+    "evidence_comparisons": []
+  },
+  "shadow": {
+    "dispatch_mode": "fanned-out",
+    "dispatch_disposition": null,
+    "reviewed_sha": "048e5565a4b76538b4e9f363a0e14ccbd9259f4c",
+    "verdict": "APPROVE with notes",
+    "coverage": "full",
+    "reason": null,
+    "expected_reviewers": [
+      "prflow:code-reviewer",
+      "prflow:silent-failure-hunter",
+      "prflow:comment-analyzer",
+      "prflow:requesting-code-review",
+      "prflow:type-design-analyzer",
+      "prflow:pr-test-analyzer"
+    ],
+    "reviewers_dispatched": [
+      "prflow:code-reviewer",
+      "prflow:comment-analyzer",
+      "prflow:pr-test-analyzer",
+      "prflow:requesting-code-review",
+      "prflow:silent-failure-hunter",
+      "prflow:type-design-analyzer"
+    ],
+    "per_reviewer_assessment": [
+      {
+        "agent": "prflow:code-reviewer",
+        "returned": true
+      },
+      {
+        "agent": "prflow:silent-failure-hunter",
+        "returned": true
+      },
+      {
+        "agent": "prflow:comment-analyzer",
+        "returned": true
+      },
+      {
+        "agent": "prflow:requesting-code-review",
+        "returned": true
+      },
+      {
+        "agent": "prflow:type-design-analyzer",
+        "returned": true
+      },
+      {
+        "agent": "prflow:pr-test-analyzer",
+        "returned": true
+      }
+    ],
+    "phase3_findings": [
+      {
+        "finding_id": "S-1",
+        "agent": "prflow:silent-failure-hunter",
+        "severity": "suggestion",
+        "description": "The denylist refusal text from _refuse_denied_function ends 'refused by the read-only guard', but with rules configured and database.read_only = false it is reached through RlsGuardRunner while ReadOnlyGuardRunner is not in the chain, so the message names the wrong guard.",
+        "defect_signature": {
+          "file": "src/sqllens/safety/readonly.py",
+          "line_range": [
+            559,
+            562
+          ],
+          "kind": "other"
+        }
+      },
+      {
+        "finding_id": "S-2",
+        "agent": "prflow:comment-analyzer",
+        "severity": "suggestion",
+        "description": "Docstrings describe the routine check as matching 'a routine defined in the database', wider than the lookup (PostgreSQL skips pg_catalog/information_schema; MySQL checks only ROUTINE_TYPE = 'FUNCTION'). Instances: relations.py 118-120, __init__.py 17-18 and 136-138.",
+        "defect_signature": {
+          "file": "src/sqllens/safety/relations.py",
+          "line_range": [
+            118,
+            120
+          ],
+          "kind": "documented_falsehood"
+        }
+      },
+      {
+        "finding_id": "S-3",
+        "agent": "prflow:comment-analyzer",
+        "severity": "suggestion",
+        "description": "Module docstring lines 11-13 say 'the guard also applies the read-only guard's function denylist' right after naming the read-only guard, so 'the guard' reads as the read-only guard instead of RlsGuardRunner.",
+        "defect_signature": {
+          "file": "src/sqllens/safety/__init__.py",
+          "line_range": [
+            11,
+            13
+          ],
+          "kind": "comment_drift"
+        }
+      },
+      {
+        "finding_id": "S-4",
+        "agent": "prflow:requesting-code-review",
+        "severity": "important",
+        "description": "The changelog fragment's opening sentence says RLS 'no longer lets PostgreSQL child tables or database functions read past your rules'; the routine check only sees names written before '(', so functions reached by attribute notation or operators/casts still run, as the PR's own docs record.",
+        "defect_signature": {
+          "file": "changelog.d/325.security.md",
+          "line_range": [
+            1,
+            2
+          ],
+          "kind": "documented_falsehood"
+        }
+      },
+      {
+        "finding_id": "S-5",
+        "agent": "prflow:requesting-code-review",
+        "severity": "suggestion",
+        "description": "The diff edits the existing SQLite test test_sqlite_missing_table_list_capability_blocks_execution (adds a comment, tightens the match), departing from criterion 7's wording that existing SQLite RLS tests pass unmodified.",
+        "defect_signature": {
+          "file": "tests/unit/test_rls_views.py",
+          "line_range": [
+            394,
+            395
+          ],
+          "kind": "test_gap"
+        }
+      }
+    ],
+    "phase2_fails": [],
+    "promoted_to_iter_next": true
+  },
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "important",
+      "description": "Re-graded by the park-calibration gate (rule 2, misdirected message) from iteration 1 F-6: the verify_base_tables fail-closed handler also catches routine-lookup and tokenizer failures but logs and returns a message about a relation-type check; for a relation-free call the message names a check that never ran.",
+      "defect_signature": {
+        "file": "src/sqllens/safety/relations.py",
+        "line_range": [
+          137,
+          145
+        ],
+        "kind": "other"
+      },
+      "fix_decision": "applied"
+    }
+  ],
+  "fix_files": [
+    "docs/internal/database-connectors/row-level-security.md",
+    "src/sqllens/safety/relations.py",
+    "tests/unit/test_rls_views.py"
+  ],
+  "synthesized": false
+}
