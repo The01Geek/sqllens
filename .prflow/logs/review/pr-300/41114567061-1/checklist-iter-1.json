@@ -1,0 +1,1112 @@
+[
+  {
+    "id": "VC-1",
+    "category": "dependency_interaction",
+    "claim": "`anthropic.AsyncAnthropic` accepts the same constructor kwargs the service passes (`api_key`, `base_url`, plus arbitrary `extra_client_kwargs`) as the previous `anthropic.Anthropic` did, at the pinned `anthropic>=0.49` floor.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/anthropic/llm.py",
+    "source_line": 72,
+    "verify_against": "The installed `anthropic` SDK's `AsyncAnthropic.__init__` signature and the `anthropic` version floor in `pyproject.toml`",
+    "verify_hint": "Check `anthropic.AsyncAnthropic.__init__` in the installed SDK against the `anthropic` dependency pin in `pyproject.toml`",
+    "claim_signature": "dependency_interaction:llm.py:asyncanthropic-constructor-kwargs:72",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "dependency_interaction",
+    "claim": "`AsyncAnthropic().messages.create(**payload)` returns an awaitable whose resolved value exposes `.content`, `.usage.input_tokens`/`.output_tokens` and `.stop_reason` the same way the sync client's return value did.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/anthropic/llm.py",
+    "source_line": 78,
+    "verify_against": "`anthropic.resources.messages.AsyncMessages.create` return type in the installed SDK",
+    "verify_hint": "Check `AsyncMessages.create` and the `Message` model in the installed `anthropic` package",
+    "claim_signature": "dependency_interaction:llm.py:async-messages-create-await:78",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "dependency_interaction",
+    "claim": "`AsyncAnthropic().messages.stream(**payload)` is an async context manager whose `stream.text_stream` is an async iterator and whose `get_final_message()` is awaitable.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/anthropic/llm.py",
+    "source_line": 115,
+    "source_line_end": 120,
+    "verify_against": "`AsyncMessages.stream` / `AsyncMessageStreamManager` in the installed `anthropic` SDK",
+    "verify_hint": "Check `AsyncMessageStreamManager` and `AsyncMessageStream.text_stream` / `get_final_message` in `anthropic/lib/streaming`",
+    "claim_signature": "dependency_interaction:llm.py:async-stream-context-manager:115",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts the SDK rejects a synchronous `http_client` at service construction time, that the service never closes its client, that the client opens connections only when a request is sent, and that those connections belong to the loop that opened them, so one service must be driven from one event loop.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The SDK rejects a synchronous ``http_client`` when the service is built. The\n    service never closes its client; the client opens connections only when a\n    request is sent and lives as long as the service. Those connections belong to\n    the event loop that opened them, so drive one service from one event loop.",
+    "source_file": "src/sqllens/agent/integrations/anthropic/llm.py",
+    "source_line": 41,
+    "source_line_end": 44,
+    "verify_against": "`anthropic.AsyncAnthropic`/`httpx.AsyncClient` construction-time validation of `http_client`, and all call sites that construct `AnthropicLlmService`",
+    "verify_hint": "Falsify by passing a synchronous `httpx.Client` as `http_client` to `AnthropicLlmService(...)` and checking whether construction raises; and by grepping for `AnthropicLlmService(` call sites (e.g. `src/sqllens/preflight.py`, `src/sqllens/agent/factory.py`) that build the service outside a running loop or reuse it across loops",
+    "claim_signature": "absolute_claim:llm.py:async-client-lifecycle-doc:41",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "dependency_interaction",
+    "claim": "`concurrent.futures.Future` used standalone (not produced by an executor) supports `set_running_or_notify_cancel`, `set_result`, `set_exception`, `cancel`, `cancelled`, `done`, `exception` and `add_done_callback` in the ways `_DaemonThreadPool` and `run_blocking_sql` rely on, including that `cancel()` returns False once `set_running_or_notify_cancel()` has been called.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+    "source_line": 133,
+    "source_line_end": 157,
+    "verify_against": "CPython `concurrent.futures._base.Future` semantics",
+    "verify_hint": "Check `concurrent.futures._base.Future.cancel` / `set_running_or_notify_cancel` state machine in the stdlib for the pending/running transitions",
+    "claim_signature": "dependency_interaction:sql_threads.py:standalone-future-state-machine:133",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "dependency_interaction",
+    "claim": "`asyncio.wrap_future(future)` plus `asyncio.wait({result}, timeout=...)` leaves the underlying `concurrent.futures.Future` cancellable after the timeout, and `future.cancel()` on the concurrent future makes the awaited wrapper resolve/raise consistently rather than hanging.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+    "source_line": 184,
+    "source_line_end": 191,
+    "verify_against": "`asyncio.futures.wrap_future` / `_chain_future` cancellation propagation in CPython",
+    "verify_hint": "Check `asyncio.wrap_future` and `asyncio.futures._chain_future` in the stdlib for how cancelling the source concurrent future propagates to the asyncio wrapper",
+    "claim_signature": "dependency_interaction:sql_threads.py:wrap-future-cancel-propagation:184",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "api_contract",
+    "claim": "`SqlWorkersBusyError` raised out of `run_sql` is surfaced to the MCP client as a query error with the message \"All database workers are busy; try again shortly.\" rather than as an unstructured crash.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+    "source_line": 190,
+    "verify_against": "`RunSqlTool.execute` exception handling in `src/sqllens/agent/capabilities/sql_runner.py` and the CLAUDE.md rule that failures surface as structured signal",
+    "verify_hint": "Check the `except` clauses in `RunSqlTool.execute` in `src/sqllens/agent/capabilities/sql_runner.py` to confirm a `RuntimeError`/`SqlWorkersBusyError` is caught and returned as an error result",
+    "claim_signature": "api_contract:sql_threads.py:busy-error-surfaced-as-query-error:190",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "absolute_claim",
+    "claim": "The module docstring asserts the pool runs at most `SQL_WORKER_THREADS` queries at once, that all workers start on first use, that a call not started within `WORKER_WAIT_TIMEOUT_S` never runs, and that the timeout covers only the wait for a worker and never the query's run time.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- The pool has exactly :data:`SQL_WORKER_THREADS` worker threads, all started\n  on first use, so at most that many queries run at once and a burst of slow\n  queries holds no more than that many threads and database connections.\n  Further calls wait in the pool's queue. A call that has not started within\n  :data:`WORKER_WAIT_TIMEOUT_S` seconds is cancelled, so it never runs, and\n  fails with :class:`SqlWorkersBusyError`; the limit covers only the wait for a\n  worker, never the query's own run time.",
+    "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+    "source_line": 10,
+    "source_line_end": 16,
+    "verify_against": "`_DaemonThreadPool.submit`/`_run` and `run_blocking_sql` in the same file",
+    "verify_hint": "Falsify by a call that starts on a worker just as the 60 s `asyncio.wait` timeout elapses: `run_blocking_sql` lines 186-191 call `future.cancel()` only after the timeout, so check whether a call can be reported busy after starting, or be left running while its caller got `SqlWorkersBusyError`",
+    "claim_signature": "absolute_claim:sql_threads.py:pool-limit-and-wait-timeout-doc:10",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts daemon workers never hold up process exit, and that `concurrent.futures.ThreadPoolExecutor` would, because it joins its workers at interpreter exit even after `shutdown(wait=False)`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- The workers are daemon threads, so they never hold up process exit.\n  ``concurrent.futures.ThreadPoolExecutor`` is not used because it joins its\n  workers when the interpreter exits, even after ``shutdown(wait=False)``: a\n  query stuck in its driver would keep the process alive with no time limit.",
+    "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+    "source_line": 25,
+    "source_line_end": 28,
+    "verify_against": "CPython `threading._register_atexit` / `concurrent.futures.thread._python_exit` behaviour on the supported Python versions (3.11+)",
+    "verify_hint": "Falsify with a daemon worker blocked in a driver call at interpreter shutdown: check `concurrent.futures.thread._python_exit` and `threading._shutdown`'s handling of daemon vs non-daemon threads in Python 3.11/3.12",
+    "claim_signature": "absolute_claim:sql_threads.py:daemon-threads-never-block-exit:25",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts the cancellation log lines carry neither the SQL, the data, nor the exception message.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Neither line carries\nthe SQL, the data or the exception message, which can quote the SQL.",
+    "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+    "source_line": 36,
+    "source_line_end": 37,
+    "verify_against": "`_log_call_after_cancel` in the same file and the `logger.exception` calls in `_DaemonThreadPool._run`",
+    "verify_hint": "Falsify by a worker call that raises a driver error quoting the SQL: `_run` lines 148 and 153 use `logger.exception`, which emits the traceback and exception message; check whether those paths can log a SQL-bearing exception",
+    "claim_signature": "absolute_claim:sql_threads.py:logs-omit-sql-and-message:36",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "dependency_interaction",
+    "claim": "Copying the caller's context with `contextvars.copy_context().run(func, *args, **kwargs)` on a pool thread preserves the per-request profile row cap that `effective_row_cap` reads.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+    "source_line": 182,
+    "verify_against": "The ContextVar that `effective_row_cap` reads in `src/sqllens/safety/limits.py` and whichever request middleware sets it",
+    "verify_hint": "Check `effective_row_cap` and the profile ContextVar in `src/sqllens/safety/limits.py`, and where it is set on the request path",
+    "claim_signature": "dependency_interaction:sql_threads.py:contextvar-row-cap-copied:182",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "api_contract",
+    "claim": "The `_run_sql_blocking` refactor preserves each runner's `run_sql` public contract: the `context: ToolContext` argument is no longer passed to the blocking body, and nothing in the moved body needed it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 98,
+    "source_line_end": 105,
+    "verify_against": "The `SqlRunner.run_sql` protocol in `src/sqllens/agent/capabilities/sql_runner.py` and the base-view body of the same method",
+    "verify_hint": "Check the `SqlRunner` abstract signature in `src/sqllens/agent/capabilities/sql_runner.py` and diff the moved body against the base view for any use of `context`",
+    "claim_signature": "api_contract:sql_runner.py:context-arg-dropped-in-blocking-body:98",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "api_contract",
+    "claim": "The MySQL runner's `run_sql` now returns whatever `_run_sql_blocking` returns and still raises `pymysql.Error` from the worker thread as its docstring's Raises section states.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "source_line": 96,
+    "source_line_end": 103,
+    "verify_against": "Callers of the MySQL runner's `run_sql` and their `except pymysql.Error` handling",
+    "verify_hint": "Check `RunSqlTool.execute` in `src/sqllens/agent/capabilities/sql_runner.py` and `src/sqllens/safety/readonly.py`'s `ReadOnlyGuardRunner` for exception types expected from `run_sql`",
+    "claim_signature": "api_contract:sql_runner.py:mysql-run-sql-exception-passthrough:96",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "api_contract",
+    "claim": "Moving the Postgres `conn.set_session(readonly=True)` call inside the `try` block still runs it before any statement opens a transaction, keeping the read-only guarantee the surrounding comment asserts.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/postgres/sql_runner.py",
+    "source_line": 142,
+    "source_line_end": 154,
+    "verify_against": "psycopg2's `connection.set_session` requirements and the Postgres read-only tests",
+    "verify_hint": "Check psycopg2's `connection.set_session` docs/implementation for the no-open-transaction requirement, and `tests/` for the Postgres read-only enforcement test",
+    "claim_signature": "api_contract:sql_runner.py:pg-set-session-inside-try:142",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "absolute_claim",
+    "claim": "The transport doc asserts that at most eight queries run at once, that all eight workers start on first use, that a call unstarted within 60 s is cancelled and never runs, that `RunSqlTool` returns `SqlWorkersBusyError` as a query error, and that the saturation WARNING is logged at most once every 60 s.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "It runs them on a pool of `SQL_WORKER_THREADS` (8) threads shared by every runner in the process and kept apart from the loop's default executor, so at most eight queries run at once. All eight workers start on first use. Further calls wait in the pool's queue. A call that no worker has started within `WORKER_WAIT_TIMEOUT_S` (60 s) is cancelled, so it never runs, and fails with `SqlWorkersBusyError` (\"All database workers are busy; try again shortly.\"), which `RunSqlTool` returns as a query error.",
+    "source_file": "docs/internal/mcp-server/transport.md",
+    "source_line": 41,
+    "verify_against": "`src/sqllens/agent/integrations/sql_threads.py` and `RunSqlTool.execute` in `src/sqllens/agent/capabilities/sql_runner.py`",
+    "verify_hint": "Falsify by tracing `SqlWorkersBusyError` (a `RuntimeError`) through `RunSqlTool.execute`'s except clauses in `src/sqllens/agent/capabilities/sql_runner.py`; also check the 60 s timeout race in `run_blocking_sql` lines 186-191",
+    "claim_signature": "absolute_claim:transport.md:sql-pool-behaviour-doc:41",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "absolute_claim",
+    "claim": "The transport doc asserts the per-engine scope of `statement_timeout_ms`: Postgres applies `SET statement_timeout` to every statement, MySQL's `MAX_EXECUTION_TIME` covers only `SELECT` so a write with `read_only = false` is unbounded, and SQLite's progress-handler deadline covers execution and fetching but not the connect or a lock wait, which sqlite3's default 5-second busy timeout bounds instead.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Postgres applies `SET statement_timeout` to every statement. MySQL's `MAX_EXECUTION_TIME` covers only `SELECT`, so a write with `read_only = false` is not bounded. SQLite's progress-handler deadline covers statement execution and fetching, but not the connect or a wait on a database lock, which `sqlite3`'s default 5-second busy timeout bounds instead.",
+    "source_file": "docs/internal/mcp-server/transport.md",
+    "source_line": 42,
+    "verify_against": "The three runners' timeout setup code and `sqlite3.connect`'s default `timeout` parameter",
+    "verify_hint": "Falsify against `_make_deadline_handler`/`sqlite3.connect` in `src/sqllens/agent/integrations/sqlite/sql_runner.py` (no explicit `timeout=` is passed), the `MAX_EXECUTION_TIME` setup in the MySQL runner, and the `SET statement_timeout` setup in the Postgres runner",
+    "claim_signature": "absolute_claim:transport.md:statement-timeout-scope-doc:42",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "absolute_claim",
+    "claim": "The transport doc asserts the only remaining uncovered blocking work on the request path is the memory-administration tools in `server.py` and `RunSqlTool.execute`'s CSV write through `LocalFileSystem.write_file`, and that `ChromaAgentMemory` already runs its ChromaDB calls on its own two-thread executor.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- **Vector memory.** `ChromaAgentMemory` already runs its ChromaDB calls on its own two-thread executor (see [agent/memory.md](../agent/memory.md)).",
+    "source_file": "docs/internal/mcp-server/transport.md",
+    "source_line": 44,
+    "source_line_end": 49,
+    "verify_against": "`ChromaAgentMemory` in `src/sqllens/agent/integrations/chromadb/`, the memory tool handlers in `src/sqllens/server.py`, and other coroutines on the `query_database` path",
+    "verify_hint": "Falsify by finding another blocking call inside a coroutine on the request path: check `ChromaAgentMemory`'s executor worker count, and grep `src/sqllens/` for synchronous file/network calls inside `async def` (e.g. profile-store reads, `tools/_format.py`)",
+    "claim_signature": "absolute_claim:transport.md:remaining-blocking-work-doc:44",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "absolute_claim",
+    "claim": "The transport doc asserts `RunSqlTool.execute` writes the result CSV through `LocalFileSystem.write_file` exactly when a statement whose first whitespace-separated word is `SELECT`, in any letter case, returns rows, and that `write_file` is an `async` method calling `mkdir` and `write_text` synchronously.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "When a statement whose first whitespace-separated word is `SELECT`, in any letter case, returns rows, `RunSqlTool.execute` writes the result CSV through `LocalFileSystem.write_file`, an `async` method that calls `mkdir` and `write_text` synchronously.",
+    "source_file": "docs/internal/mcp-server/transport.md",
+    "source_line": 49,
+    "verify_against": "`RunSqlTool.execute` in `src/sqllens/agent/capabilities/sql_runner.py` and `LocalFileSystem.write_file`",
+    "verify_hint": "Falsify with a statement starting with a comment, `WITH`, or leading whitespace: check the actual predicate in `RunSqlTool.execute` (`src/sqllens/agent/capabilities/sql_runner.py`) and the body of `LocalFileSystem.write_file`",
+    "claim_signature": "absolute_claim:transport.md:select-csv-write-predicate-doc:49",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "absolute_claim",
+    "claim": "The transport doc's regression-coverage sentence asserts that each listed behaviour — the 2 s `/healthz` and `list_data_sources` answer under a held model call, the at-most-`SQL_WORKER_THREADS` concurrency, the rate-limited saturation warning, the burst warning before any worker starts, the too-long wait failing without later running, failure when handing back a result fails, every worker kept after failing calls, a cancelled queued call dropped, a started call finishing after cancellation with its outcome logged, a profile row cap and the `require_base_tables` relation check applied on the worker thread, and not holding up process exit — is covered by the two named test files.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Regression coverage: `tests/integration/test_slow_agent_run_responsiveness.py` holds a `query_database` model call open against a local stand-in for the Messages API and requires `/healthz` and `list_data_sources` on a second session to answer within 2 s; `tests/unit/test_sql_runner_event_loop.py` checks that a slow driver call in each runner leaves the loop free, and that the SQL pool runs at most `SQL_WORKER_THREADS` calls at once and rate-limits its saturation warning, warns on a burst before any worker starts, fails a call that waits too long for a worker without running it later, still fails the call when handing back its result fails, keeps every worker after failing calls, drops a cancelled call still in its queue, lets a started call finish after its caller is cancelled and logs how it ended, applies a profile's row cap and the `require_base_tables` relation check on the worker thread, and does not hold up process exit.",
+    "source_file": "docs/internal/mcp-server/transport.md",
+    "source_line": 51,
+    "verify_against": "`tests/integration/test_slow_agent_run_responsiveness.py` and `tests/unit/test_sql_runner_event_loop.py`",
+    "verify_hint": "Falsify by listing the test functions in `tests/unit/test_sql_runner_event_loop.py` and `tests/integration/test_slow_agent_run_responsiveness.py` and checking each enumerated behaviour has a corresponding assertion",
+    "claim_signature": "absolute_claim:transport.md:regression-coverage-enumeration:51",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "absolute_claim",
+    "claim": "The preflight doc asserts that `probe_llm` checks only that the service and its SDK client can be built, that an empty key is not forwarded to the SDK, and that neither an empty nor a wrong key fails until the first model request.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Construction alone checks only that the service and its SDK client can be built. It does not check the key: an empty key is not forwarded to the SDK, and neither an empty nor a wrong key fails until the first model request.",
+    "source_file": "docs/internal/setup/preflight.md",
+    "source_line": 68,
+    "verify_against": "`probe_llm` in `src/sqllens/preflight.py`, `AnthropicLlmService.__init__` lines 63-72, and `AsyncAnthropic`'s own missing/empty-key validation",
+    "verify_hint": "Falsify with an empty-string key: `AnthropicLlmService.__init__` only sets `api_key` when truthy, so check whether `anthropic.AsyncAnthropic()` with no `api_key` and no `ANTHROPIC_API_KEY` env var raises at construction in the installed SDK",
+    "claim_signature": "absolute_claim:preflight.md:probe-llm-no-key-check:68",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "absolute_claim",
+    "claim": "The integration conftest docstring asserts no test there calls the real Anthropic API, that most invoke discovery, metadata and memory tools or replace the agent behind `query_database`, and that `test_slow_agent_run_responsiveness.py` runs `query_database` through the real SDK against a local stand-in for the Messages API.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "No test here calls the real Anthropic API. Most invoke discovery, metadata and\nmemory tools, or replace the agent behind ``query_database``.\n``test_slow_agent_run_responsiveness.py`` runs ``query_database`` through the\nreal SDK against a local stand-in for the Messages API.",
+    "source_file": "tests/integration/conftest.py",
+    "source_line": 11,
+    "source_line_end": 14,
+    "verify_against": "Every test module under `tests/integration/`",
+    "verify_hint": "Falsify by listing `tests/integration/*.py` and checking whether any constructs `AnthropicLlmService` without overriding `base_url`/`ANTHROPIC_BASE_URL`, and confirming the named file exists and uses the real SDK",
+    "claim_signature": "absolute_claim:conftest.py:no-real-anthropic-in-integration:11",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "absolute_claim",
+    "claim": "The changelog fragment asserts the HTTP server now stays responsive during `query_database` runs, that SQL queries run on a dedicated pool of eight worker threads, and that a query waiting more than a minute for a free worker fails with \"All database workers are busy; try again shortly.\"",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A query that waits more than a\nminute for a free worker now fails with \"All database workers are busy; try\nagain shortly.\" (#299)",
+    "source_file": "changelog.d/300.fixed.md",
+    "source_line": 5,
+    "source_line_end": 8,
+    "verify_against": "`WORKER_WAIT_TIMEOUT_S`, `SqlWorkersBusyError` and `run_blocking_sql` in `src/sqllens/agent/integrations/sql_threads.py`, and the changelog category conventions in CLAUDE.md",
+    "verify_hint": "Falsify by checking the exact `SqlWorkersBusyError` message string and `WORKER_WAIT_TIMEOUT_S` value in `src/sqllens/agent/integrations/sql_threads.py`, and that the fragment filename/category matches `python scripts/changelog.py check`",
+    "claim_signature": "absolute_claim:300.fixed.md:busy-message-and-pool-size:5",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "api_contract",
+    "claim": "`src/sqllens/agent/integrations/sql_threads.py` is a new first-party (non-lifted) `.py` file and carries the required SPDX header pair.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+    "source_line": 1,
+    "source_line_end": 2,
+    "verify_against": "The SPDX-header rule in CLAUDE.md and `LICENSES/THIRD-PARTY.txt`",
+    "verify_hint": "Check the SPDX header convention in CLAUDE.md ('New first-party `.py` files get SPDX headers') and how sibling first-party files under `src/sqllens/agent/` (e.g. `tools/emit_chart.py`) are headed",
+    "claim_signature": "api_contract:repo:spdx-header",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "data_format_assumption",
+    "claim": "The saturation warning's `_pending` counter is decremented exactly once per submitted call, including for calls skipped via `set_running_or_notify_cancel()` returning False, so the pending count the warning reports equals running plus queued.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+    "source_line": 95,
+    "source_line_end": 107,
+    "verify_against": "`_DaemonThreadPool.submit` and `_run`'s `finally` block in the same file, plus the pool tests",
+    "verify_hint": "Check `_DaemonThreadPool.submit` (increment) against `_run`'s `finally: self._pending -= 1` for any path where a queued item is never dequeued, and the pending-count assertions in `tests/unit/test_sql_runner_event_loop.py`",
+    "claim_signature": "data_format_assumption:sql_threads.py:pending-counter-balance:95",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "dependency_interaction",
+    "claim": "`sqllens.agent.integrations.sql_threads` exports `SQL_WORKER_THREADS`, `run_blocking_sql`, `WORKER_WAIT_TIMEOUT_S`, `SqlWorkersBusyError`, `_DaemonThreadPool`, `_POOL` and a module-level `Future` name, with `run_blocking_sql(fn, *args)` awaitable and returning fn's result.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 141,
+    "verify_against": "the new SQL worker pool module",
+    "verify_hint": "Check the public names and `run_blocking_sql` signature in `src/sqllens/agent/integrations/sql_threads.py`",
+    "claim_signature": "dependency_interaction:test_sql_runner_event_loop.py:sql-threads-public-api",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "dependency_interaction",
+    "claim": "`_DaemonThreadPool` takes `(max_workers, name)` positionally and raises `ValueError` whose message matches \"max_workers must be >= 1\" for a size below one.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 218,
+    "source_line_end": 222,
+    "verify_against": "the pool class constructor",
+    "verify_hint": "Check `_DaemonThreadPool.__init__` in `src/sqllens/agent/integrations/sql_threads.py`",
+    "claim_signature": "dependency_interaction:test_sql_runner_event_loop.py:pool-size-validation:218",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "data_format_assumption",
+    "claim": "The pool's saturation warning is logged on logger `sqllens.agent.integrations.sql_threads` at WARNING with exactly the args tuple `(pending, worker_count)`, rate-limited through an attribute named `_last_saturation_warning` on `_POOL`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 176,
+    "source_line_end": 192,
+    "verify_against": "the saturation-warning log call",
+    "verify_hint": "Check the logger name, `%s` args and `_last_saturation_warning` rate limiting in `src/sqllens/agent/integrations/sql_threads.py`",
+    "claim_signature": "data_format_assumption:test_sql_runner_event_loop.py:saturation-warning-args",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "data_format_assumption",
+    "claim": "A call that waits longer than `WORKER_WAIT_TIMEOUT_S` for a worker raises `SqlWorkersBusyError` whose `str()` is exactly \"All database workers are busy; try again shortly.\" and is never run later.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 273,
+    "source_line_end": 284,
+    "verify_against": "the worker-wait timeout path",
+    "verify_hint": "Check the `SqlWorkersBusyError` message text and the queued-call skip in `src/sqllens/agent/integrations/sql_threads.py`",
+    "claim_signature": "data_format_assumption:test_sql_runner_event_loop.py:workers-busy-message:273",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "dependency_interaction",
+    "claim": "Patching the module-level name `Future` in `sql_threads` intercepts the hand-back future the pool creates, so a failing `set_result` surfaces as the awaiting caller's RuntimeError plus an ERROR log record on the pool logger.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 238,
+    "source_line_end": 255,
+    "verify_against": "how the pool constructs and completes its hand-back future",
+    "verify_hint": "Check that `sql_threads` imports `Future` at module level and the hand-back error logging in `src/sqllens/agent/integrations/sql_threads.py`",
+    "claim_signature": "dependency_interaction:test_sql_runner_event_loop.py:future-hand-back-patch:238",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "data_format_assumption",
+    "claim": "A started call whose caller was cancelled logs exactly one record on the pool logger: INFO with empty args when it returns, WARNING with args `(\"RuntimeError\",)` when it raises, and the message contains no SQL text.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 305,
+    "source_line_end": 345,
+    "verify_against": "the abandoned-call logging",
+    "verify_hint": "Check the abandoned/cancelled-caller log calls and their args in `src/sqllens/agent/integrations/sql_threads.py`",
+    "claim_signature": "data_format_assumption:test_sql_runner_event_loop.py:abandoned-call-log-args",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "dependency_interaction",
+    "claim": "SQL worker threads are named with the prefix `sqllens-sql` and are daemon threads, so a still-running query does not delay interpreter exit.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 367,
+    "source_line_end": 371,
+    "verify_against": "worker thread naming and daemon flag",
+    "verify_hint": "Check the thread name prefix and `daemon=True` in `_DaemonThreadPool` in `src/sqllens/agent/integrations/sql_threads.py`",
+    "claim_signature": "dependency_interaction:test_sql_runner_event_loop.py:worker-thread-name:367",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "test_mock_alignment",
+    "claim": "The sqlite runner uses only `sqlite3.connect`, `sqlite3.Row` and `sqlite3.OperationalError` from its module-level `sqlite3` attribute, so a `SimpleNamespace` with those three members is a sufficient stand-in.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 75,
+    "source_line_end": 78,
+    "verify_against": "the sqlite runner's use of the sqlite3 module",
+    "verify_hint": "Check every `sqlite3.` reference in `src/sqllens/agent/integrations/sqlite/sql_runner.py`",
+    "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:sqlite3-stub-members:75",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "test_mock_alignment",
+    "claim": "The MySQL and Postgres runners fetch rows via `cursor.fetchmany` returning dict-like rows, so a MagicMock cursor whose `execute` sleeps and whose `fetchmany` returns `[{\"x\": 1}]` yields a one-row DataFrame.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 56,
+    "source_line_end": 60,
+    "verify_against": "the row-fetch code of both runners",
+    "verify_hint": "Check the cursor usage in `src/sqllens/agent/integrations/mysql/sql_runner.py` and `src/sqllens/agent/integrations/postgres/sql_runner.py`",
+    "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:slow-cursor-fetchmany:56",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "api_contract",
+    "claim": "`MySQLRunner(host=..., database=..., user=..., password=..., read_only=False)` and `PostgresRunner(connection_string=..., read_only=False)` are valid constructor calls.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 95,
+    "verify_against": "the two runner constructors",
+    "verify_hint": "Check `MySQLRunner.__init__` and `PostgresRunner.__init__` keyword parameters in their `sql_runner.py` modules",
+    "claim_signature": "api_contract:test_sql_runner_event_loop.py:runner-ctor-kwargs:95",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "api_contract",
+    "claim": "`run_sql` accepts `(args, context)` positionally plus keyword-only `require_base_tables`, and with `require_base_tables=True` over a view raises `RlsError` whose message mentions \"view\".",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 428,
+    "source_line_end": 435,
+    "verify_against": "the sqlite runner's run_sql signature and the RLS relation check",
+    "verify_hint": "Check `SqliteRunner.run_sql` in `src/sqllens/agent/integrations/sqlite/sql_runner.py` and `RlsError` messages in `src/sqllens/safety/rls.py`",
+    "claim_signature": "api_contract:test_sql_runner_event_loop.py:run-sql-require-base-tables:428",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "dependency_interaction",
+    "claim": "The sqlite runner resolves `verify_base_tables` through its own module attribute (so monkeypatching the module name takes effect) and calls it as `verify_base_tables(connection, sql, dialect=...)` on the worker thread's connection.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 420,
+    "source_line_end": 427,
+    "verify_against": "the relation-check call site",
+    "verify_hint": "Check the `verify_base_tables` import and call in `src/sqllens/agent/integrations/sqlite/sql_runner.py`",
+    "claim_signature": "dependency_interaction:test_sql_runner_event_loop.py:verify-base-tables-call:420",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-37",
+    "category": "data_format_assumption",
+    "claim": "`sqllens.runtime` exposes `EffectiveSettings`, `set_effective_settings` and `reset_effective_settings`, `EffectiveSettings` takes exactly `show_details`, `max_tool_iterations`, `max_rows` and `similarity_threshold`, and the context value reaches the SQL worker thread so the result frame is capped and carries `attrs[\"truncated\"] is True`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 374,
+    "source_line_end": 404,
+    "verify_against": "the runtime settings context var and the runner's row cap",
+    "verify_hint": "Check `EffectiveSettings` in `src/sqllens/runtime.py` and the `truncated` attr plus contextvar copy in `sql_threads.py` / the sqlite runner",
+    "claim_signature": "data_format_assumption:test_sql_runner_event_loop.py:effective-settings-to-worker",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-38",
+    "category": "test_mock_alignment",
+    "claim": "`_install_fake_psycopg2` and `_install_fake_pymysql` are importable from `tests.unit.test_sql_runner_cleanup` and accept `(monkeypatch, connect_callable)`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 31,
+    "verify_against": "the helper definitions in the sibling test module",
+    "verify_hint": "Check `_install_fake_psycopg2` and `_install_fake_pymysql` in `tests/unit/test_sql_runner_cleanup.py`",
+    "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:fake-driver-helpers:31",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-39",
+    "category": "absolute_claim",
+    "claim": "A blocked event loop allows no heartbeat ticks at all, and a free one allows about SLOW_S / TICK_S of them, so `ticks >= 5` distinguishes the two.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"A blocked loop allows no ticks; a free one allows about SLOW_S / TICK_S.\"\"\"",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 36,
+    "verify_against": "timing behaviour under a loaded CI runner",
+    "verify_hint": "Consider a slow/loaded runner or a scheduler that delivers fewer than 5 ticks in 0.4 s, and whether any awaited step inside `run_sql` yields ticks even when the driver call blocks",
+    "claim_signature": "absolute_claim:test_sql_runner_event_loop.py:ticks-threshold:36",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-40",
+    "category": "absolute_claim",
+    "claim": "A query still running in a worker never holds up process exit, as asserted by the subprocess exiting with status 0 inside 20 s while a 60 s sleep is in flight.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "def test_a_query_still_running_does_not_hold_up_process_exit() -> None:",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 348,
+    "verify_against": "the pool's thread daemon flag and any atexit/shutdown join",
+    "verify_hint": "Check for `atexit` registration, `concurrent.futures.thread._python_exit` participation or a shutdown join in `src/sqllens/agent/integrations/sql_threads.py`, which would make the subprocess wait the full 60 s",
+    "claim_signature": "absolute_claim:test_sql_runner_event_loop.py:no-exit-hold:348",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-41",
+    "category": "absolute_claim",
+    "claim": "A worker must also survive a `BaseException` that is not an `Exception`, and after every worker has run such a failing call the pool still runs a full set of calls at once.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"A BaseException that is not an Exception, which a worker must also survive.\"\"\"",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "source_line": 131,
+    "verify_against": "the worker loop's exception handling",
+    "verify_hint": "Check whether the worker loop in `src/sqllens/agent/integrations/sql_threads.py` catches `BaseException` (not just `Exception`) before continuing",
+    "claim_signature": "absolute_claim:test_sql_runner_event_loop.py:worker-survives-baseexception:131",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-42",
+    "category": "test_mock_alignment",
+    "claim": "The Postgres runner calls `conn.set_session(...)` for read-only setup and closes the connection exactly once when that call raises.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_cleanup.py",
+    "source_line": 321,
+    "source_line_end": 337,
+    "verify_against": "the Postgres runner's connection setup and cleanup",
+    "verify_hint": "Check the `set_session` call and the try/finally around it in `src/sqllens/agent/integrations/postgres/sql_runner.py`",
+    "claim_signature": "test_mock_alignment:test_sql_runner_cleanup.py:set-session-close:321",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-43",
+    "category": "test_mock_alignment",
+    "claim": "`AnthropicLlmService` awaits `client.messages.create(...)` and uses `client.messages.stream(...)` as an async context manager whose object exposes an async-iterable `text_stream` and an awaitable `get_final_message()`, matching the fakes installed on `service._client`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_opus_history.py",
+    "source_line": 32,
+    "source_line_end": 72,
+    "verify_against": "the real async Anthropic client usage",
+    "verify_hint": "Check `send_request` / `stream_request` in `src/sqllens/agent/integrations/anthropic/llm.py` against `anthropic.AsyncAnthropic.messages`",
+    "claim_signature": "test_mock_alignment:test_opus_history.py:async-messages-mock-shape",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-44",
+    "category": "dependency_interaction",
+    "claim": "`AnthropicLlmService(api_key=..., http_client=httpx.AsyncClient(...))` is accepted and the injected async client is used for the request, so a `MockTransport` handler serves it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_opus_history.py",
+    "source_line": 144,
+    "source_line_end": 146,
+    "verify_against": "the service constructor and the Anthropic SDK's http_client parameter",
+    "verify_hint": "Check how `http_client` is passed to `AsyncAnthropic` in `src/sqllens/agent/integrations/anthropic/llm.py`",
+    "claim_signature": "dependency_interaction:test_opus_history.py:async-http-client-injection:144",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-45",
+    "category": "data_format_assumption",
+    "claim": "`send_request` over the real SDK returns an object whose `content` is the joined text, `finish_reason` is the raw `stop_reason`, `usage` is the raw `{\"input_tokens\", \"output_tokens\"}` dict, `provider_content` is the verbatim block list, and `tool_calls` entries carry `.name` and `.arguments`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_opus_history.py",
+    "source_line": 148,
+    "source_line_end": 154,
+    "verify_against": "the LlmResponse construction in the Anthropic service",
+    "verify_hint": "Check the response mapping in `send_request` in `src/sqllens/agent/integrations/anthropic/llm.py` and `LlmResponse` in `src/sqllens/agent/core/llm.py`",
+    "claim_signature": "data_format_assumption:test_opus_history.py:send-request-response-shape:148",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-46",
+    "category": "test_mock_alignment",
+    "claim": "A `stream` fake returning a non-awaited object with async `__aenter__`/`__aexit__`, an exhausted async-generator `text_stream` and async `get_final_message` satisfies what the service does with the stream (it does not await `stream(...)` itself).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_llm_sampling_options.py",
+    "source_line": 47,
+    "source_line_end": 68,
+    "verify_against": "the streaming call site",
+    "verify_hint": "Check whether `stream_request` in `src/sqllens/agent/integrations/anthropic/llm.py` uses `async with client.messages.stream(...)` directly or awaits it first",
+    "claim_signature": "test_mock_alignment:test_llm_sampling_options.py:stream-fake-not-awaited:47",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-47",
+    "category": "dependency_interaction",
+    "claim": "Setting the `ANTHROPIC_BASE_URL` env var and resetting `sqllens.tools._agent._AGENT_STATE` to `None` makes the server build a fresh agent that sends its model calls to the stand-in URL.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_slow_agent_run_responsiveness.py",
+    "source_line": 116,
+    "source_line_end": 127,
+    "verify_against": "the agent caching and client construction",
+    "verify_hint": "Check `_AGENT_STATE` in `src/sqllens/tools/_agent.py` and whether the Anthropic client passes an explicit `base_url` that would override the env var",
+    "claim_signature": "dependency_interaction:test_slow_agent_run_responsiveness.py:agent-state-and-base-url",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-48",
+    "category": "data_format_assumption",
+    "claim": "The stand-in's non-stream JSON body and SSE event sequence match what the Anthropic SDK parses: a `message` object with `id/type/role/model/content/stop_reason/stop_sequence/usage`, and `message_start`, `content_block_start`, `content_block_delta`, `content_block_stop`, `message_delta`, `message_stop` events.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_slow_agent_run_responsiveness.py",
+    "source_line": 44,
+    "source_line_end": 71,
+    "verify_against": "the Anthropic Messages API response and streaming schemas",
+    "verify_hint": "Check the installed `anthropic.types.Message` and `RawMessageStreamEvent` models against these payloads",
+    "claim_signature": "data_format_assumption:test_slow_agent_run_responsiveness.py:stand-in-message-schema",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-49",
+    "category": "api_contract",
+    "claim": "The `make_server` fixture accepts an `AuthConfig(mode=\"none\")` argument and yields a handle with `base_url` and `mcp_url`, the server serves `GET /healthz` with status 200, and `list_data_sources` returns `TextContent` containing \"chinook-test\".",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_slow_agent_run_responsiveness.py",
+    "source_line": 130,
+    "source_line_end": 166,
+    "verify_against": "the integration conftest fixture and the healthz/list_data_sources handlers",
+    "verify_hint": "Check the `make_server` fixture in `tests/integration/conftest.py`, the `/healthz` route in `src/sqllens/transport/http.py` and the demo source name used by `list_data_sources`",
+    "claim_signature": "api_contract:test_slow_agent_run_responsiveness.py:make-server-handle-contract",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-50",
+    "category": "test_mock_alignment",
+    "claim": "`patch_fake_embeddings(monkeypatch)` is importable from `tests.unit._memory_helpers` and prevents the real embedding-model download for this integration server.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_slow_agent_run_responsiveness.py",
+    "source_line": 36,
+    "verify_against": "the shared memory test helper",
+    "verify_hint": "Check `patch_fake_embeddings` in `tests/unit/_memory_helpers.py`",
+    "claim_signature": "test_mock_alignment:test_slow_agent_run_responsiveness.py:patch-fake-embeddings:36",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-51",
+    "category": "absolute_claim",
+    "claim": "The test calls no real model and needs no real credential, because the real SDK is pointed at the local stand-in.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "No real model is\ncalled and no real credential is needed.",
+    "source_file": "tests/integration/test_slow_agent_run_responsiveness.py",
+    "source_line": 13,
+    "source_line_end": 14,
+    "verify_against": "the agent/server construction in this test",
+    "verify_hint": "Check whether `make_server`'s config supplies an API key and whether any code path in `src/sqllens/tools/_agent.py` would contact api.anthropic.com when `ANTHROPIC_BASE_URL` is set",
+    "claim_signature": "absolute_claim:test_slow_agent_run_responsiveness.py:no-real-credential:13",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-52",
+    "category": "absolute_claim",
+    "claim": "`/healthz` and `list_data_sources` are both cheap and share the server's single event loop with `query_database`, so if the model call blocks that loop every other request waits for the model.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "but they share the server's single event loop with ``query_database``. If the\nagent's model call blocks that loop, every other request waits until the\nmodel answers, and short client timeouts fail.",
+    "source_file": "tests/integration/test_slow_agent_run_responsiveness.py",
+    "source_line": 8,
+    "source_line_end": 10,
+    "verify_against": "the transport's request handling and the list_data_sources implementation",
+    "verify_hint": "Check `src/sqllens/transport/http.py` for the healthz handler and `src/sqllens/tools/list_data_sources.py` for any blocking work (schema or Chroma reads) that would make it not cheap",
+    "claim_signature": "absolute_claim:test_slow_agent_run_responsiveness.py:single-loop-shared:8",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-28"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-53",
+    "category": "dependency_interaction",
+    "claim": "In the worker loop, a failure of the hand-back calls themselves (set_running_or_notify_cancel, set_result, set_exception) must still complete the caller's future, so an awaiting run_blocking_sql call never hangs forever without result or exception.",
+    "claim_provenance": "generated_paraphrase",
+    "source_excerpt": "            except BaseException as exc:\n                # Handing the outcome back failed. Never let one call end the\n                # worker, and never leave its caller waiting forever.\n                logger.exception(\"A SQL worker thread failed to hand back a result.\")\n                if not future.done():",
+    "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+    "verify_against": "The _run worker loop and run_blocking_sql in src/sqllens/agent/integrations/sql_threads.py",
+    "verify_hint": "Check `_DaemonThreadPool._run`'s outer `except BaseException` block and the await path in `run_blocking_sql` in src/sqllens/agent/integrations/sql_threads.py",
+    "prior_ref": "1 (Important / Major)",
+    "prior_evidence": "1. In `src/sqllens/agent/integrations/sql_threads.py` (lines 118 to 137) a worker thread catches every exception around the code that hands the result back to the caller, including exceptions raised by `set_running_or_notify_cancel`, `set_result` and `set_exception` themselves. If one of those calls fails, the worker logs the problem and picks up the next item while the caller's future is never completed, so `await asyncio.wrap_future(future)` in `run_blocking_sql` never returns and never raises. The module has no queue timeout and no await timeout, so the `query_database` tool call waits forever and the MCP client receives no result, no error and no exception. (raised by 1/6 agents)",
+    "claim_signature": "dependency_interaction:sql_threads.py:handback-failure-completes-future",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-54",
+    "category": "api_contract",
+    "claim": "A call that arrives while all workers are busy must not wait without a deadline: it must fail with a clear structured error after a bounded wait rather than queue indefinitely.",
+    "claim_provenance": "generated_paraphrase",
+    "source_excerpt": "WORKER_WAIT_TIMEOUT_S = 60.0\n\"\"\"Longest a call waits for a free worker before it fails with ``SqlWorkersBusyError``.\"\"\"",
+    "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+    "verify_against": "run_blocking_sql's wait-and-cancel path and SqlWorkersBusyError in src/sqllens/agent/integrations/sql_threads.py",
+    "verify_hint": "Check `WORKER_WAIT_TIMEOUT_S`, `SqlWorkersBusyError` and the `asyncio.wait(..., timeout=...)` / `future.cancel()` branch in `run_blocking_sql`",
+    "prior_ref": "2 (Important / Major)",
+    "prior_evidence": "2. A query that arrives while all eight workers are busy waits on an unbounded queue with no deadline, in `src/sqllens/agent/integrations/sql_threads.py` (lines 81 to 116 and 155 to 163). If eight driver calls hang — a firewalled host, a lock wait, or a configuration where `statement_timeout_ms` is zero or does not apply — every later query waits without limit instead of returning a clear error, and nothing in the change pins down what the ninth caller observes. (raised by 3/6 agents)",
+    "claim_signature": "api_contract:sql_threads.py:bounded-worker-wait",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-55",
+    "category": "data_format_assumption",
+    "claim": "The saturation warning must fire for a burst that fills the queue before any worker picks up work, and the pending count it reports must be the value decided under the lock.",
+    "claim_provenance": "generated_paraphrase",
+    "source_excerpt": "        with self._lock:\n            self._pending += 1\n            pending = self._pending\n            self._work.put((future, call))\n        if pending > self._max_workers:\n            self._warn_saturated(pending)",
+    "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+    "verify_against": "_DaemonThreadPool.submit and _warn_saturated in src/sqllens/agent/integrations/sql_threads.py",
+    "verify_hint": "Check `_pending` accounting in `_DaemonThreadPool.submit` and the count passed to `_warn_saturated`",
+    "prior_ref": "3 (Important / Major)",
+    "prior_evidence": "3. The saturation warning can stay silent while the queue grows, in `src/sqllens/agent/integrations/sql_threads.py` (lines 81 to 116). The decision to warn is taken from `_busy`, which only counts calls a worker has already picked up, so a burst that fills the queue before any worker latches its work logs nothing at all. The queue length printed in the message is read later and outside the lock, so it can differ from the backlog at the moment the decision was made. (raised by 3/6 agents)",
+    "claim_signature": "data_format_assumption:sql_threads.py:saturation-warning-pending-count",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-56",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 1. The pool tests depend on the exact state and wording of the one process-wide pool, in `tests/unit/test_sql_runner_event_loop.py`. One test asserts the warning message word for word, including the queue count, and another needs all eight shared workers idle at the same moment for its `threading.Barrier(SQL_WORKER_THREADS, timeout=5)` to meet rather than break, so an earlier test that leaves one worker busy fails it for a reason unrelated to the behaviour under test. (raised by 2/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_event_loop.py",
+    "verify_against": "The pool tests in tests/unit/test_sql_runner_event_loop.py and the module-level _POOL in sql_threads.py",
+    "verify_hint": "Check the `threading.Barrier(SQL_WORKER_THREADS, ...)` test and the saturation-warning assertion in tests/unit/test_sql_runner_event_loop.py against `_POOL` in src/sqllens/agent/integrations/sql_threads.py",
+    "prior_ref": "1 (Suggestion / Minor)",
+    "prior_evidence": "1. The pool tests depend on the exact state and wording of the one process-wide pool, in `tests/unit/test_sql_runner_event_loop.py`. One test asserts the warning message word for word, including the queue count, and another needs all eight shared workers idle at the same moment for its `threading.Barrier(SQL_WORKER_THREADS, timeout=5)` to meet rather than break, so an earlier test that leaves one worker busy fails it for a reason unrelated to the behaviour under test. (raised by 2/6 agents)",
+    "claim_signature": "test_mock_alignment:test_sql_runner_event_loop.py:shared-pool-state-coupling",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-57",
+    "category": "data_format_assumption",
+    "claim": "The transport doc's description of which statements get the CSV write must match RunSqlTool.execute's predicate, which compares the upper-cased first word.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- When a statement whose first whitespace-separated word is `SELECT`, in any letter case, returns rows, `RunSqlTool.execute` writes the result CSV through `LocalFileSystem.write_file`, an `async` method that calls `mkdir` and `write_text` synchronously.",
+    "source_file": "docs/internal/mcp-server/transport.md",
+    "source_line": 123,
+    "verify_against": "RunSqlTool.execute in src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check the first-word comparison in `RunSqlTool.execute` in src/sqllens/agent/tools/run_sql.py against this doc sentence",
+    "prior_ref": "2 (Suggestion / Minor)",
+    "prior_evidence": "2. `docs/internal/mcp-server/transport.md` (line 123) says the CSV write happens for \"a statement whose first whitespace-separated word is `SELECT`\", while `RunSqlTool.execute` upper-cases the first word before comparing it, so lower-case `select …` takes the same path. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:transport.md:select-first-word-case",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-58",
+    "category": "absolute_claim",
+    "claim": "The README asserts that no real LLM calls are made by the integration test suite and that tests running query_database through the model path point the SDK at a local stand-in for the Messages API.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The integration test suite spins up a real uvicorn server and exercises the full Streamable HTTP wire protocol end-to-end. No real LLM calls are made: where a test runs `query_database` through the model path, it points the Anthropic SDK at a local stand-in for the Messages API.",
+    "source_file": "README.md",
+    "source_line": 98,
+    "verify_against": "tests/integration/ and its conftest fixtures",
+    "verify_hint": "Check every test under tests/integration/ that calls `query_database` (notably tests/integration/test_slow_agent_run_responsiveness.py and tests/integration/conftest.py) against this README sentence",
+    "prior_ref": "3 (Suggestion / Minor)",
+    "prior_evidence": "3. `README.md` (line 98) still says the `query_database` tool is only exercised by an opt-in test that needs a live Anthropic key, but this change adds an integration test that always runs and calls `query_database` without one. (raised by 1/6 agents)",
+    "claim_signature": "absolute_claim:README.md:integration-no-real-llm-calls",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-59",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 4. There is no regression test for two agent runs happening at the same time, which is the situation the issue describes. `tests/integration/test_slow_agent_run_responsiveness.py` holds one `query_database` run open and then checks only work that never touches the model, so a change that re-serialises agent runs against each other would bring the reported symptom back and still pass. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_slow_agent_run_responsiveness.py",
+    "verify_against": "tests/integration/test_slow_agent_run_responsiveness.py and the regression-coverage sentence in docs/internal/mcp-server/transport.md",
+    "verify_hint": "Check what the tests in tests/integration/test_slow_agent_run_responsiveness.py exercise while a `query_database` run is held open",
+    "prior_ref": "4 (Suggestion / Minor)",
+    "prior_evidence": "4. There is no regression test for two agent runs happening at the same time, which is the situation the issue describes. `tests/integration/test_slow_agent_run_responsiveness.py` holds one `query_database` run open and then checks only work that never touches the model, so a change that re-serialises agent runs against each other would bring the reported symptom back and still pass. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:test_slow_agent_run_responsiveness.py:concurrent-agent-runs-coverage",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-60",
+    "category": "api_contract",
+    "claim": "_DaemonThreadPool must offer a seam for sizing, shutdown or reset, and its warning rate-limit state must not be private module-level state that tests patch directly.",
+    "claim_provenance": "generated_paraphrase",
+    "source_excerpt": "_POOL = _DaemonThreadPool(SQL_WORKER_THREADS, \"sqllens-sql\")",
+    "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+    "verify_against": "_DaemonThreadPool's public surface and _POOL in src/sqllens/agent/integrations/sql_threads.py, plus its test usages",
+    "verify_hint": "Check `_DaemonThreadPool.__init__`, `_last_saturation_warning` and the module-level `_POOL`, and how tests/unit/test_sql_runner_event_loop.py reaches them",
+    "prior_ref": "5 (Suggestion / Minor)",
+    "prior_evidence": "5. `_DaemonThreadPool` in `src/sqllens/agent/integrations/sql_threads.py` offers no way to set its size from configuration and no way to shut it down or reset it, and its warning rate-limit lives in a private field of a module-level instance, which is why a test has to patch that field directly. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:sql_threads.py:pool-lifecycle-sizing-seam",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-61",
+    "category": "dependency_interaction",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 6. In `src/sqllens/agent/integrations/postgres/sql_runner.py` (lines 137 to 155) the connection is opened and `set_session(readonly=True)` is called before the `try` block whose `finally` closes it, so a driver error from `set_session` leaves a server-side session open. The code is unchanged from the base branch, but it now runs on the shared worker pool whose eight connections are the documented bound. The MySQL and SQLite runners enter their `try` immediately. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/postgres/sql_runner.py",
+    "verify_against": "The connect / set_session / try-finally structure in PostgresRunner._run_sql_blocking",
+    "verify_hint": "Check `_run_sql_blocking` in src/sqllens/agent/integrations/postgres/sql_runner.py and compare with the MySQL and SQLite runners' try placement",
+    "prior_ref": "6 (Suggestion / Minor)",
+    "prior_evidence": "6. In `src/sqllens/agent/integrations/postgres/sql_runner.py` (lines 137 to 155) the connection is opened and `set_session(readonly=True)` is called before the `try` block whose `finally` closes it, so a driver error from `set_session` leaves a server-side session open. The code is unchanged from the base branch, but it now runs on the shared worker pool whose eight connections are the documented bound. The MySQL and SQLite runners enter their `try` immediately. (raised by 1/6 agents)",
+    "claim_signature": "dependency_interaction:sql_runner.py:postgres-set-session-leak",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-62",
+    "category": "dependency_interaction",
+    "claim": "probe_llm's construction of AnthropicLlmService must not leave an unclosed anthropic.AsyncAnthropic client, and the `except anthropic.AnthropicError` around it must still have a reachable failure to catch.",
+    "claim_provenance": "generated_paraphrase",
+    "source_excerpt": "    try:\n        AnthropicLlmService(\n            model=cfg.llm.model,\n            api_key=cfg.llm.api_key.get_secret_value(),\n        )\n    except anthropic.AnthropicError as exc:",
+    "source_file": "src/sqllens/preflight.py",
+    "source_line": 173,
+    "source_line_end": 179,
+    "verify_against": "AnthropicLlmService.__init__ in src/sqllens/agent/integrations/anthropic/llm.py and the anthropic SDK's AsyncAnthropic construction behaviour",
+    "verify_hint": "Check `probe_llm` in src/sqllens/preflight.py against `AnthropicLlmService.__init__` in src/sqllens/agent/integrations/anthropic/llm.py",
+    "prior_ref": "7 (Suggestion / Minor)",
+    "prior_evidence": "7. `probe_llm` in `src/sqllens/preflight.py` (lines 173 to 179) now builds an `anthropic.AsyncAnthropic` client in a synchronous function and drops it without closing it. No request is sent, so no socket is opened, and the `except anthropic.AnthropicError` around the construction now has almost no failure left to catch. (raised by 1/6 agents)",
+    "claim_signature": "dependency_interaction:preflight.py:unclosed-async-client",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-63",
+    "category": "api_contract",
+    "claim": "The log lines reporting a call that outlived its cancelled caller must carry enough context for an operator to identify the request.",
+    "claim_provenance": "generated_paraphrase",
+    "source_excerpt": "        logger.info(\"A SQL query finished after its caller was cancelled.\")",
+    "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+    "verify_against": "_log_call_after_cancel in src/sqllens/agent/integrations/sql_threads.py and the log-redaction claims in its module docstring",
+    "verify_hint": "Check `_log_call_after_cancel` in src/sqllens/agent/integrations/sql_threads.py",
+    "prior_ref": "8 (Suggestion / Minor)",
+    "prior_evidence": "8. The log lines that report an abandoned call, in `src/sqllens/agent/integrations/sql_threads.py` (lines 143 to 152), carry nothing that identifies the request: no request identifier, no dialect and no elapsed time. Leaving out the SQL, the data and the exception text is the right call, but an operator reading \"a write may have been committed\" cannot tell which request it was. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:sql_threads.py:abandoned-call-log-context",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-64",
+    "category": "api_contract",
+    "claim": "The memory-reading tools still calling the ChromaDB store synchronously inside async handlers must be recorded as an explicit not-yet-covered gap with its tracking issue.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- The memory-administration tools in `server.py` (`list_memories`, `add_memories`, `export_memories` and the rest) still call the synchronous ChromaDB store directly inside their `async` handlers. Each call is usually short, but it holds the loop for its duration. Tracked in #303.",
+    "source_file": "docs/internal/mcp-server/transport.md",
+    "source_line": 122,
+    "verify_against": "The memory administration handlers in src/sqllens/server.py",
+    "verify_hint": "Check `list_memories`, `add_memories` and `export_memories` in src/sqllens/server.py for a to_thread/executor hop against this doc line",
+    "prior_ref": "9 (Suggestion / Minor)",
+    "prior_evidence": "9. The memory-reading tools still call the ChromaDB store synchronously inside their `async` handlers, so the part of the issue about memory reads answering quickly is not yet met. The pull request body says so and `docs/internal/mcp-server/transport.md` records it with a tracking issue, so this is a deliberate, recorded scope decision. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:transport.md:memory-admin-sync-gap",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-65",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 10. `src/sqllens/agent/integrations/sql_threads.py` is first-party code, but it sits under `src/sqllens/agent`, which `pyproject.toml` excludes from ruff, so the linter never checks it. This matches the existing first-party chart tool in the same tree, so it follows precedent rather than breaking a rule. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/sql_threads.py",
+    "verify_against": "The ruff exclude list in pyproject.toml",
+    "verify_hint": "Check the ruff `exclude`/`extend-exclude` setting in pyproject.toml for `src/sqllens/agent` and compare with src/sqllens/agent/tools/emit_chart.py",
+    "prior_ref": "10 (Suggestion / Minor)",
+    "prior_evidence": "10. `src/sqllens/agent/integrations/sql_threads.py` is first-party code, but it sits under `src/sqllens/agent`, which `pyproject.toml` excludes from ruff, so the linter never checks it. This matches the existing first-party chart tool in the same tree, so it follows precedent rather than breaking a rule. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:repo:ruff-vendored-exclude",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-66",
+    "category": "test_mock_alignment",
+    "claim": "Setting ANTHROPIC_BASE_URL before the server builds its agent redirects the SDK's /v1/messages requests to the stand-in, and the credential the test relies on for that path must be described accurately (build_agent requires a non-None api_key).",
+    "claim_provenance": "generated_paraphrase",
+    "source_excerpt": "    monkeypatch.setenv(\"ANTHROPIC_BASE_URL\", model.url)",
+    "source_file": "tests/integration/test_slow_agent_run_responsiveness.py",
+    "verify_against": "AnthropicLlmService's base_url fallback in src/sqllens/agent/integrations/anthropic/llm.py, build_agent in src/sqllens/agent/factory.py, and the api_key fixture in tests/integration/conftest.py",
+    "verify_hint": "Check `build_agent`'s api_key guard in src/sqllens/agent/factory.py and the placeholder key supplied by tests/integration/conftest.py",
+    "prior_ref": "VC-34",
+    "prior_evidence": "The base-URL half holds: AnthropicLlmService falls back to os.getenv('ANTHROPIC_BASE_URL') (src/sqllens/agent/integrations/anthropic/llm.py:64) and factory.build_agent does not pass base_url, so the env var applies. The 'no API key is required' half is false for SQL Lens: build_agent raises ValueError when cfg.llm.api_key is None (src/sqllens/agent/factory.py:71-72), with no exemption for a custom base URL. The test only works because tests/integration/conftest.py:70 supplies a placeholder key SecretStr('sk-ant-test-not-used'). So a dummy key is required; only a real credential is not.",
+    "claim_signature": "test_mock_alignment:test_slow_agent_run_responsiveness.py:base-url-no-key-claim",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-67",
+    "category": "api_contract",
+    "claim": "The memory-read part of issue #299 is not implemented here; server.py's memory handlers still call the synchronous Chroma store on the loop, and transport.md must record that gap with its tracking issue.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/mcp-server/transport.md",
+    "verify_against": "src/sqllens/server.py's memory handlers and the 'Not yet covered' list in docs/internal/mcp-server/transport.md",
+    "verify_hint": "Check `list_memories` in src/sqllens/server.py for a to_thread/executor hop, and the 'Not yet covered' list in docs/internal/mcp-server/transport.md",
+    "prior_ref": "VC-64",
+    "prior_evidence": "The prior finding still holds at head. server.py:541 list_memories calls the synchronous memory_admin.list_memories directly inside an async handler, with no to_thread or executor. transport.md:122 still records this gap and tracks it in #303. No criteria_file was supplied, so the 'No defect' reason cannot apply. No fix, disclosed entry or rejection covers the finding. The gap is documented and tracked, so its impact is limited.",
+    "claim_signature": "api_contract:transport.md:memory-read-issue-gap-tracked",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  }
+]
