@@ -358,7 +358,7 @@ The signal rides a `Memory Search` `STATUS_CARD` whose `metadata["memory_search"
 {"searched": True, "hit_count": N, "top_similarity": float | None, "threshold": float}
 ```
 
-- It is the tool's own `ui_component`, yielded on **both** the hit and the miss success path — so, unlike the executed-SQL card, it is independent of `agent.show_details`. `top_similarity` is the max similarity across the returned hits (coerced to a plain `float` so it survives JSON serialization into `_meta`); on a miss it is `None` and `hit_count` is `0`.
+- It is the tool's own `ui_component`, yielded on **both** the hit and the miss success path — so it is independent of `agent.show_details`. The executed-SQL card is also always emitted, but `query_database` drops its `query_info` when the resolved `show_details` is off; nothing drops `memory_info` that way. `top_similarity` is the max similarity across the returned hits (coerced to a plain `float` so it survives JSON serialization into `_meta`); on a miss it is `None` and `hit_count` is `0`.
 - A memory search that **errors** emits no `memory_search` card (the tool returns `ToolResult(success=False)` with a status-bar error component and logs at `WARNING`), so it leaves `memory_info` `None` — indistinguishable downstream from "the agent did not consult memory this turn".
 
 `components_to_blocks` captures the **last** such card's dict into `memory_info` (last-wins). `memory_info` is `None` on the error path and whenever no `memory_search` card was seen. The signal then rides a single rail:
