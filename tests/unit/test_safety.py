@@ -281,6 +281,33 @@ _BYPASS_CORPUS: list[tuple[str, str | None]] = [
     ("SELECT database_to_xml_and_xmlschema(true, false, '')", 'postgres'),
     ("SELECT cursor_to_xml('test', 1, true, false, '')", 'postgres'),
     ("SELECT cursor_to_xmlschema('test', true, false, '')", 'postgres'),
+    # Functions that run query text passed as a string, or read a relation
+    # named by a text argument.
+    ("SELECT * FROM ts_stat('SELECT doc FROM synthetic')", 'postgres'),
+    ("SELECT ts_rewrite('a'::tsquery, 'SELECT t, s FROM synthetic')", 'postgres'),
+    ("SELECT * FROM crosstab('SELECT 1, 2, 3') AS t(a int, b int)", 'postgres'),
+    ("SELECT * FROM crosstab('SELECT 1, 2, 3', 'SELECT 2') AS t(a int, b int)", 'postgres'),
+    ("SELECT * FROM crosstab2('SELECT 1, 2, 3')", 'postgres'),
+    ("SELECT * FROM crosstab3('SELECT 1, 2, 3')", 'postgres'),
+    ("SELECT * FROM crosstab4('SELECT 1, 2, 3')", 'postgres'),
+    (
+        "SELECT * FROM connectby('synthetic', 'id', 'parent_id', '1', 0) "
+        "AS t(id text, parent_id text, level int)",
+        'postgres',
+    ),
+    (
+        "SELECT * FROM xpath_table('id', 'doc', 'synthetic', '/a', 'true') "
+        "AS t(id int, a text)",
+        'postgres',
+    ),
+    ("SELECT dblink_build_sql_insert('synthetic', '1', 1, '{1}', '{1}')", 'postgres'),
+    ("SELECT dblink_build_sql_update('synthetic', '1', 1, '{1}', '{1}')", 'postgres'),
+    ("SELECT get_raw_page('synthetic', 0)", 'postgres'),
+    ("SELECT * FROM bt_page_items('synthetic_pkey', 1)", 'postgres'),
+    ("SELECT * FROM pg_catalog.ts_stat('SELECT doc FROM synthetic')", 'postgres'),
+    ("SELECT * FROM public.crosstab('SELECT 1, 2, 3') AS t(a int, b int)", 'postgres'),
+    ("SELECT TS_STAT('SELECT doc FROM synthetic')", 'postgres'),
+    ("SELECT ts_stat('SELECT doc FROM synthetic')", None),
     # Side-effecting / RCE / DoS functions, per dialect.
     ("SELECT load_extension('evil.so')", "sqlite"),  # SQLite RCE (default deploy)
     ("SELECT dblink_exec('dbname=x', 'DROP TABLE t')", "postgres"),
@@ -548,6 +575,43 @@ class TestDenylistEdgeCases:
     def test_denylist_matching_is_case_insensitive(self) -> None:
         with pytest.raises(UnsafeSqlError, match="not allowed"):
             assert_select_only("SELECT LOAD_EXTENSION('x.so')", dialect="sqlite")
+
+    @pytest.mark.parametrize(
+        ("name", "args"),
+        [
+            ("ts_stat", "'SELECT doc FROM synthetic'"),
+            ("ts_rewrite", "'a'::tsquery, 'SELECT t, s FROM synthetic'"),
+            ("crosstab", "'SELECT 1, 2, 3'"),
+            ("crosstab2", "'SELECT 1, 2, 3'"),
+            ("crosstab3", "'SELECT 1, 2, 3'"),
+            ("crosstab4", "'SELECT 1, 2, 3'"),
+            ("connectby", "'synthetic', 'id', 'parent_id', '1', 0"),
+            ("xpath_table", "'id', 'doc', 'synthetic', '/a', 'true'"),
+            ("dblink_build_sql_insert", "'synthetic', '1', 1, '{1}', '{1}'"),
+            ("dblink_build_sql_update", "'synthetic', '1', 1, '{1}', '{1}'"),
+            ("get_raw_page", "'synthetic', 0"),
+            ("bt_page_items", "'synthetic_pkey', 1"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "SELECT {call}",
+            "SELECT * FROM {call}",
+            "SELECT * FROM pg_catalog.{call}",
+            "SELECT {upper_call}",
+        ],
+    )
+    def test_query_text_functions_rejected_by_name(
+        self, name: str, args: str, template: str
+    ) -> None:
+        # The error names the function, so each entry is refused by the
+        # denylist itself (an Anonymous node carrying the written name), in
+        # select-list, FROM-clause, schema-qualified and upper-case forms.
+        call = f"{name}({args})"
+        sql = template.format(call=call, upper_call=call.upper())
+        with pytest.raises(UnsafeSqlError, match=f"function '{name}' is not allowed"):
+            assert_select_only(sql, dialect="postgres")
 
 
 class TestSqliteConnectorReadOnlyEnforced:
