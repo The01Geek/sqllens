@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import itertools
 import logging
 from typing import Any
 
@@ -94,7 +95,7 @@ def _called_names(sql: str, dialect: str) -> list[str]:
     keywords = type(parser_dialect).tokenizer_class.KEYWORDS
     tokens = parser_dialect.tokenize(sql)
     names: set[str] = set()
-    for token, following in zip(tokens, tokens[1:], strict=False):
+    for token, following in itertools.pairwise(tokens):
         if following.token_type != TokenType.L_PAREN or not token.text:
             continue
         if token.token_type in (TokenType.VAR, TokenType.IDENTIFIER) or (
@@ -219,10 +220,13 @@ def _verify_relations(cursor: Any, relations: list[exp.Table], dialect: str) -> 
 
 
 def _refuse_database_routines(cursor: Any, names: list[str], dialect: str) -> None:
-    """Refuse a call whose name matches any routine defined in the database.
+    """Refuse a call whose name matches a routine defined in the database.
 
-    Matching is by name alone across every schema and argument signature, so a
-    built-in call is refused too when a database routine shares its name.
+    PostgreSQL checks ``pg_proc`` outside ``pg_catalog`` and
+    ``information_schema``; MySQL checks stored functions in
+    ``information_schema.ROUTINES``. Matching is by name alone across schemas
+    and argument signatures, so a built-in call is refused too when such a
+    routine shares its name.
     """
     if dialect == "postgres":
         cursor.execute(

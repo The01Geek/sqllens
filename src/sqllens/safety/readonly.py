@@ -546,8 +546,9 @@ def assert_no_denied_functions(sql: str, *, dialect: str | None = None) -> None:
 
     This is the function-denylist part of :func:`assert_select_only` without
     its statement-type checks. It fails closed the same way: empty SQL, an
-    unresolvable dialect, a parse or tokenize error, or an empty statement in
-    the parse raises.
+    unresolvable dialect, MySQL input whose token boundaries are ambiguous
+    (``_mysql_parse_sql``), a parse or tokenize error, or an empty statement
+    in the parse raises.
     """
     denied_funcs = _denied_funcs(dialect)
     for stmt in _parse_statements(sql, dialect):

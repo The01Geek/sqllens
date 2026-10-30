@@ -568,7 +568,7 @@ def test_database_routine_calls_are_refused(sql, dialect) -> None:
     cursor = _FakeCatalog({"orders": ("r", False)}, routines={"all_orders", "replace"})
     with pytest.raises(RlsError, match="functions defined in the database"):
         verify_base_tables(_catalog_connection(cursor), sql, dialect=dialect)
-    routine_sql, params = cursor.queries[-1]
+    routine_sql, _params = cursor.queries[-1]
     assert ("pg_proc" if dialect == "postgres" else "ROUTINES") in routine_sql
     assert cursor.closed
 
@@ -616,17 +616,20 @@ def test_postgres_typed_builtin_with_renamed_canonical_form_is_allowed() -> None
     )
     cursor = _FakeCatalog({"orders": ("r", False)})
     verify_base_tables(_catalog_connection(cursor), rewritten, dialect="postgres")
-    # The executed name (POSITION) is what is looked up, not sqlglot's node name.
+    # The executed name is what is looked up, not sqlglot's node name. The
+    # rewrite emits STRPOS on sqlglot 25.x and POSITION on 30.x.
     _sql, params = cursor.queries[-1]
-    assert "position" in params[0]
+    assert {"position", "strpos"} & set(params[0])
     assert "str_position" not in params[0]
 
 
-@pytest.mark.parametrize("dialect", ["postgres", "mysql"])
-@pytest.mark.parametrize("fail_on", ["pg_class", "information_schema.TABLES", "pg_proc", "ROUTINES"])
+@pytest.mark.parametrize(("dialect", "fail_on"), [
+    ("postgres", "pg_class"),
+    ("postgres", "pg_proc"),
+    ("mysql", "information_schema.TABLES"),
+    ("mysql", "ROUTINES"),
+])
 def test_raising_child_or_routine_lookup_fails_closed(dialect, fail_on, caplog) -> None:
-    if (dialect == "postgres") != (fail_on in ("pg_class", "pg_proc")):
-        pytest.skip("lookup belongs to the other dialect")
     cursor = _FakeCatalog({"orders": ("r", False)}, fail_on=fail_on)
     with caplog.at_level(logging.WARNING, logger="sqllens.safety.relations"):
         with pytest.raises(RlsError, match="could not verify relation types") as error:

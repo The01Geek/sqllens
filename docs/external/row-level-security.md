@@ -130,8 +130,8 @@ SQL Lens blocks a query and surfaces an actionable error to the assistant when:
 - The generated SQL references a protected table in a shape that cannot be safely scoped.
 - The generated SQL fails to parse against the configured database dialect.
 - The query references a database view (including a PostgreSQL materialized view) other than the metadata-only system views listed under [Limitations](#limitations), or SQL Lens cannot verify a referenced relation's type on the database connection.
-- The query references a PostgreSQL partition or inheritance child table, or calls a function defined in the database (see [Limitations](#limitations)).
-- The query calls a function on the read-only guard's blocklist (for example `pg_sleep` or `generate_series`). While rules are configured this applies even when `database.read_only` is `false`.
+- The query references a PostgreSQL partition or inheritance child table, calls a function whose name matches one defined in the database (see [Limitations](#limitations)), or SQL Lens cannot complete the child-table or function lookup on the database connection.
+- The query calls a function on the read-only guard's blocklist (for example `pg_sleep` or `generate_series`), or SQL Lens cannot check it for such calls. While rules are configured this applies even when `database.read_only` is `false`.
 
 When a query is blocked, the assistant receives an actionable message and can re-plan or surface the failure to you. It never sees unfiltered data because of a rewrite failure.
 

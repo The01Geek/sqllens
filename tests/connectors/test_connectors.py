@@ -191,7 +191,9 @@ async def test_postgres_rls_blocks_child_tables_and_functions(postgres_url) -> N
         await execute(
             f"CREATE TABLE {parted} (id INTEGER, tenant_id TEXT) PARTITION BY LIST (tenant_id)"
         )
-        await execute(f"CREATE TABLE {partition} PARTITION OF {parted} FOR VALUES IN ('alpha', 'beta')")
+        await execute(
+            f"CREATE TABLE {partition} PARTITION OF {parted} FOR VALUES IN ('alpha', 'beta')"
+        )
         await execute(f"INSERT INTO {parted} VALUES (1, 'alpha'), (2, 'beta')")
         await execute(f"CREATE TABLE {parent} (id INTEGER, tenant_id TEXT)")
         await execute(f"CREATE TABLE {child} () INHERITS ({parent})")
