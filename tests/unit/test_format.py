@@ -1916,35 +1916,42 @@ def test_sqlite_pragma_introspection_does_not_clear_error() -> None:
     assert is_error is True
 
 
-def test_other_engine_prefix_data_query_shown_and_clears_error_on_mysql() -> None:
+@pytest.mark.parametrize(
+    ("sql", "dialect"),
+    [("SELECT amount FROM pg_payments", "mysql"), ("SELECT amount FROM sys.payments", "postgres")],
+)
+def test_other_engine_catalog_name_data_query_shown_and_clears_error(
+    sql: str, dialect: str
+) -> None:
     stream = [
         *_sql_call("SELECT amount FROM payments", ok=False),
-        *_sql_call("SELECT amount FROM pg_payments"),
+        *_sql_call(sql),
         _ui(DataFrameComponent(rows=[{"amount": 1}, {"amount": 2}], columns=["amount"])),
     ]
-    _markdown, is_error, blocks, _qi, _mi = components_to_blocks(stream, dialect="mysql")
+    _markdown, is_error, blocks, _qi, _mi = components_to_blocks(stream, dialect=dialect)
     assert is_error is False
     assert [b["type"] for b in blocks] == ["table"]
 
 
-def test_data_only_turn_unchanged_by_dialect() -> None:
-    # Control: a data-only turn renders the same with or without a dialect.
+# Controls below pass without a dialect, so they hold on the code before #301.
+
+
+def test_data_only_turn_keeps_table_and_answer() -> None:
     stream = [
         *_sql_call("SELECT id FROM widgets"),
         _ui(DataFrameComponent(rows=[{"id": 1}, {"id": 2}], columns=["id"])),
         _answer_text("Two widgets."),
     ]
-    assert components_to_blocks(stream, dialect="mysql") == components_to_blocks(stream)
     _md, _err, blocks, _qi, _mi = components_to_blocks(stream)
     assert [b["type"] for b in blocks] == ["table", "text"]
 
 
 def test_dataframe_without_preceding_run_sql_card_is_shown() -> None:
-    _md, _err, blocks, _qi, _mi = components_to_blocks([_catalog_df()], dialect="mysql")
+    _md, _err, blocks, _qi, _mi = components_to_blocks([_catalog_df()])
     assert [b["type"] for b in blocks] == ["table"]
 
 
 def test_unparseable_sql_result_still_shown() -> None:
     stream = [*_sql_call("SELECT FROM WHERE ;;;"), _catalog_df()]
-    _md, _err, blocks, _qi, _mi = components_to_blocks(stream, dialect="mysql")
+    _md, _err, blocks, _qi, _mi = components_to_blocks(stream)
     assert [b["type"] for b in blocks] == ["table"]

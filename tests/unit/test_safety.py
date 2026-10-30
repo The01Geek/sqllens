@@ -21,7 +21,6 @@ from sqllens.safety.readonly import (
     assert_select_only,
     is_introspection_query,
     is_read_shaped,
-    sqlglot_dialect_for_url,
 )
 
 
@@ -874,11 +873,17 @@ class TestIsIntrospectionQueryPerDialect:
             "SELECT name FROM mysql.user",
             "SELECT * FROM performance_schema.threads",
             "SELECT name FROM sqlite_master",
-            "SELECT name FROM pragma_table_info('widgets')",
-            "SELECT name FROM pragma_table_list",
         ],
     )
     def test_no_dialect_counts_every_engine(self, sql: str) -> None:
+        # Control: these catalogs already count without a dialect before #301.
+        assert is_introspection_query(sql) is True
+
+    @pytest.mark.parametrize(
+        "sql",
+        ["SELECT name FROM pragma_table_info('widgets')", "SELECT name FROM pragma_table_list"],
+    )
+    def test_no_dialect_counts_pragma_functions(self, sql: str) -> None:
         assert is_introspection_query(sql) is True
 
 
@@ -895,6 +900,8 @@ class TestSqlglotDialectForUrl:
         ],
     )
     def test_maps_url_scheme(self, url: str, expected: str | None) -> None:
+        from sqllens.safety.readonly import sqlglot_dialect_for_url
+
         assert sqlglot_dialect_for_url(url) == expected
 
 
