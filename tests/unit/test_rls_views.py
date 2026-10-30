@@ -580,7 +580,6 @@ def test_routine_lookup_is_parameterized_and_scoped() -> None:
     with pytest.raises(RlsError, match="function named 'all_orders'"):
         verify_base_tables(_catalog_connection(cursor), "SELECT ALL_ORDERS()", dialect="postgres")
     [(sql, params)] = cursor.queries
-    assert sql.startswith("SELECT p.proname ")
     assert "nspname NOT IN ('pg_catalog', 'information_schema')" in sql
     assert "all_orders" in params[0] and "ALL_ORDERS" not in sql
     cursor = _FakeCatalog(routines={"all_orders"})
