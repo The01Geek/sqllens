@@ -88,10 +88,10 @@ class MySQLRunner(SqlRunner):
         # The driver calls below block, so they run on the SQL worker pool and
         # the event loop stays free for health checks and other requests. See
         # ``sql_threads`` for its concurrency limit and cancellation behaviour.
-        return await run_blocking_sql(self._run_sql_blocking, args.sql)
+        return await run_blocking_sql(self._run_sql_blocking, args)
 
-    def _run_sql_blocking(self, sql: str) -> pd.DataFrame:
-        """Execute ``sql`` synchronously; called on a worker thread by ``run_sql``."""
+    def _run_sql_blocking(self, args: RunSqlToolArgs) -> pd.DataFrame:
+        """Execute ``args.sql`` synchronously; called on a worker thread by ``run_sql``."""
         conn = self.pymysql.connect(
             host=self.host,
             user=self.user,
@@ -124,7 +124,7 @@ class MySQLRunner(SqlRunner):
                 finally:
                     setup.close()
 
-            if is_read_shaped(sql):
+            if is_read_shaped(args.sql):
                 # SSDictCursor streams from the server instead of materialising the
                 # whole result set in the driver. We deliberately do NOT call
                 # cursor.close() on this path — PyMySQL's SSCursor.close() drains
@@ -132,14 +132,14 @@ class MySQLRunner(SqlRunner):
                 # which would defeat the row cap for huge result sets. The outer
                 # ``finally: conn.close()`` tears the socket down server-side.
                 cursor = conn.cursor(self.pymysql.cursors.SSDictCursor)
-                cursor.execute(sql)
+                cursor.execute(args.sql)
                 cap = effective_row_cap(self._max_rows)
                 rows = cursor.fetchmany(cap + 1)
                 return rows_to_capped_df(rows, cap)
 
             cursor = conn.cursor(self.pymysql.cursors.DictCursor)
             try:
-                cursor.execute(sql)
+                cursor.execute(args.sql)
                 conn.commit()
                 rows_affected = cursor.rowcount
             finally:

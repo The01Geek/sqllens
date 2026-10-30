@@ -14,7 +14,10 @@ cover the shared SQL worker pool those calls run on.
 from __future__ import annotations
 
 import asyncio
+import logging
 import sqlite3
+import subprocess
+import sys
 import threading
 import time
 from types import SimpleNamespace
@@ -147,9 +150,12 @@ async def _fill_pool(
     return holders, counts
 
 
-async def test_sql_pool_runs_at_most_its_worker_count_at_once() -> None:
+async def test_sql_pool_runs_at_most_its_worker_count_at_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     from sqllens.agent.integrations.sql_threads import SQL_WORKER_THREADS
 
+    caplog.set_level(logging.DEBUG, logger="sqllens.agent.integrations.sql_threads")
     release = threading.Event()
     holders, counts = await _fill_pool(release)
     try:
@@ -159,6 +165,7 @@ async def test_sql_pool_runs_at_most_its_worker_count_at_once() -> None:
     finally:
         release.set()
         await asyncio.gather(*holders)
+    assert any("waits for one" in r.getMessage() for r in caplog.records)
 
 
 async def test_sql_pool_drops_a_queued_call_when_its_caller_is_cancelled() -> None:
@@ -178,6 +185,63 @@ async def test_sql_pool_drops_a_queued_call_when_its_caller_is_cancelled() -> No
         await asyncio.gather(*holders)
     assert ran == []
 
+
+
+async def test_sql_pool_lets_a_started_call_finish_and_logs_its_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A started call outlives its cancelled caller; its error type is logged, not its text."""
+    from sqllens.agent.integrations.sql_threads import run_blocking_sql
+
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    def query() -> None:
+        started.set()
+        try:
+            assert release.wait(5), "the test never released the query"
+            raise RuntimeError("SELECT secret FROM t")
+        finally:
+            finished.set()
+
+    call = asyncio.ensure_future(run_blocking_sql(query))
+    assert await asyncio.to_thread(started.wait, 5)
+    call.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await call
+    assert not finished.is_set()
+
+    release.set()
+    assert await asyncio.to_thread(finished.wait, 5)
+    deadline = time.monotonic() + 5
+    while not caplog.records:
+        assert time.monotonic() < deadline, "the failure was never logged"
+        await asyncio.sleep(TICK_S)
+    [record] = caplog.records
+    assert record.levelno == logging.WARNING
+    assert record.getMessage().endswith(": RuntimeError")
+    assert "secret" not in record.getMessage()
+
+
+def test_a_query_still_running_does_not_hold_up_process_exit() -> None:
+    script = (
+        "import asyncio, time\n"
+        "from sqllens.agent.integrations.sql_threads import run_blocking_sql\n"
+        "async def main():\n"
+        "    try:\n"
+        "        await asyncio.wait_for(run_blocking_sql(time.sleep, 60), 0.2)\n"
+        "    except TimeoutError:\n"
+        "        print('abandoned')\n"
+        "asyncio.run(main())\n"
+    )
+    started = time.monotonic()
+    proc = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=30
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "abandoned"
+    assert time.monotonic() - started < 20
 
 async def test_sql_pool_is_not_the_default_executor() -> None:
     from sqllens.agent.integrations.sql_threads import run_blocking_sql

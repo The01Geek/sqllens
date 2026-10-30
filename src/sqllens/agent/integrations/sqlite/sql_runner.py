@@ -89,10 +89,10 @@ class SqliteRunner(SqlRunner):
         # The driver calls below block, so they run on the SQL worker pool and
         # the event loop stays free for health checks and other requests. See
         # ``sql_threads`` for its concurrency limit and cancellation behaviour.
-        return await run_blocking_sql(self._run_sql_blocking, args.sql)
+        return await run_blocking_sql(self._run_sql_blocking, args)
 
-    def _run_sql_blocking(self, sql: str) -> pd.DataFrame:
-        """Execute ``sql`` synchronously; called on a worker thread by ``run_sql``."""
+    def _run_sql_blocking(self, args: RunSqlToolArgs) -> pd.DataFrame:
+        """Execute ``args.sql`` synchronously; called on a worker thread by ``run_sql``."""
         if self._read_only and self.database_path != ":memory:":
             conn = sqlite3.connect(_readonly_uri(self.database_path), uri=True)
         else:
@@ -124,9 +124,9 @@ class SqliteRunner(SqlRunner):
                     _make_deadline_handler(deadline), _PROGRESS_HANDLER_INSTRUCTIONS
                 )
 
-            cursor.execute(sql)
+            cursor.execute(args.sql)
 
-            if is_read_shaped(sql):
+            if is_read_shaped(args.sql):
                 cap = effective_row_cap(self._max_rows)
                 rows = cursor.fetchmany(cap + 1)
                 return rows_to_capped_df(rows, cap)

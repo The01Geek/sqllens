@@ -121,10 +121,10 @@ class PostgresRunner(SqlRunner):
         # The driver calls below block, so they run on the SQL worker pool and
         # the event loop stays free for health checks and other requests. See
         # ``sql_threads`` for its concurrency limit and cancellation behaviour.
-        return await run_blocking_sql(self._run_sql_blocking, args.sql)
+        return await run_blocking_sql(self._run_sql_blocking, args)
 
-    def _run_sql_blocking(self, sql: str) -> pd.DataFrame:
-        """Execute ``sql`` synchronously; called on a worker thread by ``run_sql``."""
+    def _run_sql_blocking(self, args: RunSqlToolArgs) -> pd.DataFrame:
+        """Execute ``args.sql`` synchronously; called on a worker thread by ``run_sql``."""
         if self.connection_string:
             conn = self.psycopg2.connect(self.connection_string, **self._connection_options)
         else:
@@ -154,7 +154,7 @@ class PostgresRunner(SqlRunner):
                 finally:
                     setup.close()
 
-            if is_read_shaped(sql):
+            if is_read_shaped(args.sql):
                 # Named cursors are server-side and stream from a portal; they
                 # require an open transaction (psycopg2's default autocommit=False).
                 cursor_name = f"sqllens_{uuid.uuid4().hex}"
@@ -163,7 +163,7 @@ class PostgresRunner(SqlRunner):
                     cursor_factory=self.psycopg2.extras.RealDictCursor,
                 )
                 try:
-                    cursor.execute(sql)
+                    cursor.execute(args.sql)
                     cap = effective_row_cap(self._max_rows)
                     rows = cursor.fetchmany(cap + 1)
                 finally:
@@ -182,7 +182,7 @@ class PostgresRunner(SqlRunner):
 
             cursor = conn.cursor()
             try:
-                cursor.execute(sql)
+                cursor.execute(args.sql)
                 conn.commit()
                 rows_affected = cursor.rowcount
             finally:
