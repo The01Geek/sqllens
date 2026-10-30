@@ -1,5 +1,6 @@
 """SQLite implementation of SqlRunner interface."""
 
+import asyncio
 import sqlite3
 import time
 from urllib.parse import quote
@@ -85,6 +86,19 @@ class SqliteRunner(SqlRunner):
             sqlite3.Error: If query execution fails (the progress-handler deadline
                 raises ``sqlite3.OperationalError('interrupted')``).
         """
+
+        # The whole body runs in ONE worker thread. Never split connect from
+        # execute across threads: sqlite3 connections default to
+        # ``check_same_thread=True``, so touching the connection from another
+        # thread raises ProgrammingError. The progress-handler deadline is
+        # installed on this same connection and works unchanged inside the
+        # thread. ``asyncio.to_thread`` (not ``loop.run_in_executor``) because
+        # it copies the caller's ``contextvars.Context``, which
+        # ``effective_row_cap`` reads the per-request profile from.
+        return await asyncio.to_thread(self._run_sql_blocking, args)
+
+    def _run_sql_blocking(self, args: RunSqlToolArgs) -> pd.DataFrame:
+        """Synchronous ``run_sql`` body, executed on a worker thread."""
         if self._read_only and self.database_path != ":memory:":
             conn = sqlite3.connect(_readonly_uri(self.database_path), uri=True)
         else:
@@ -128,6 +142,9 @@ class SqliteRunner(SqlRunner):
             return pd.DataFrame({"rows_affected": [rows_affected]})
 
         finally:
+            # Stays inside the threaded body so teardown runs on the thread
+            # that owns the connection, before any exception surfaces at the
+            # await.
             if self._statement_timeout_ms > 0:
                 conn.set_progress_handler(None, 0)
             cursor.close()

@@ -1,5 +1,6 @@
 """PostgreSQL implementation of SqlRunner interface."""
 
+import asyncio
 import logging
 import os
 import uuid
@@ -117,6 +118,16 @@ class PostgresRunner(SqlRunner):
         Raises:
             psycopg2.Error: If query execution fails (including statement_timeout firing).
         """
+
+        # The whole body — connect, session set-up, execute, fetch, close —
+        # runs in ONE worker thread, so a slow connect or query no longer holds
+        # the event loop. ``asyncio.to_thread`` (not ``loop.run_in_executor``)
+        # because it copies the caller's ``contextvars.Context``, which
+        # ``effective_row_cap`` reads the per-request profile from.
+        return await asyncio.to_thread(self._run_sql_blocking, args)
+
+    def _run_sql_blocking(self, args: RunSqlToolArgs) -> pd.DataFrame:
+        """Synchronous ``run_sql`` body, executed on a worker thread."""
         if self.connection_string:
             conn = self.psycopg2.connect(self.connection_string, **self._connection_options)
         else:

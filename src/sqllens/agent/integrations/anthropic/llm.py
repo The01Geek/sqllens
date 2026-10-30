@@ -9,6 +9,7 @@ non-streaming call as ToolCall entries.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from copy import deepcopy
@@ -67,7 +68,15 @@ class AnthropicLlmService(LlmService):
         """Send a non-streaming request to Anthropic and return the response."""
         payload = self._build_payload(request)
 
-        resp = self._client.messages.create(**payload)
+        # The SDK client is synchronous, so this request would otherwise hold
+        # the event loop for the whole round trip. ``asyncio.to_thread`` (not
+        # ``loop.run_in_executor``) because it copies the caller's
+        # ``contextvars.Context`` into the worker thread, which the
+        # per-request profile settings depend on.
+        def _create() -> Any:
+            return self._client.messages.create(**payload)
+
+        resp = await asyncio.to_thread(_create)
 
         logger.info(f"Anthropic response: {resp}")
 
@@ -104,25 +113,35 @@ class AnthropicLlmService(LlmService):
         logger.info(f"Anthropic streaming payload: {payload}")
 
         # SDK provides a streaming context manager with a text_stream iterator.
-        with self._client.messages.stream(**payload) as stream:
-            for text in stream.text_stream:
-                if text:
-                    yield LlmStreamChunk(content=text)
+        # Both are synchronous, so the whole stream is drained in one worker
+        # thread and the chunks are yielded afterwards. Do not split the
+        # ``with`` block across threads: the stream object is tied to the
+        # thread that opened it. The caller (agent/core/agent/agent.py's
+        # streaming handler) accumulates every chunk and yields nothing
+        # intermediate, so buffering the text here changes no output.
+        def _drain() -> Tuple[List[str], Any]:
+            with self._client.messages.stream(**payload) as stream:
+                texts = [text for text in stream.text_stream if text]
+                return texts, stream.get_final_message()
 
-            final = stream.get_final_message()
-            logger.info(f"Anthropic stream response: {final}")
-            _, tool_calls = self._parse_message_content(final)
-            if tool_calls:
-                yield LlmStreamChunk(
-                    tool_calls=tool_calls,
-                    finish_reason=getattr(final, "stop_reason", None),
-                    provider_content=self._provider_content(final),
-                )
-            else:
-                yield LlmStreamChunk(
-                    finish_reason=getattr(final, "stop_reason", None) or "stop",
-                    provider_content=self._provider_content(final),
-                )
+        texts, final = await asyncio.to_thread(_drain)
+
+        for text in texts:
+            yield LlmStreamChunk(content=text)
+
+        logger.info(f"Anthropic stream response: {final}")
+        _, tool_calls = self._parse_message_content(final)
+        if tool_calls:
+            yield LlmStreamChunk(
+                tool_calls=tool_calls,
+                finish_reason=getattr(final, "stop_reason", None),
+                provider_content=self._provider_content(final),
+            )
+        else:
+            yield LlmStreamChunk(
+                finish_reason=getattr(final, "stop_reason", None) or "stop",
+                provider_content=self._provider_content(final),
+            )
 
     async def validate_tools(self, tools: List[ToolSchema]) -> List[str]:
         """Basic validation of tool schemas for Anthropic."""

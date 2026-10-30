@@ -1,5 +1,6 @@
 """MySQL implementation of SqlRunner interface."""
 
+import asyncio
 import logging
 from typing import Optional
 import pandas as pd
@@ -84,6 +85,17 @@ class MySQLRunner(SqlRunner):
         Raises:
             pymysql.Error: If query execution fails (including MAX_EXECUTION_TIME firing).
         """
+
+        # The whole body — connect, ping, session set-up, execute, fetch,
+        # close — runs in ONE worker thread, so a slow connect or query no
+        # longer holds the event loop. ``asyncio.to_thread`` (not
+        # ``loop.run_in_executor``) because it copies the caller's
+        # ``contextvars.Context``, which ``effective_row_cap`` reads the
+        # per-request profile from.
+        return await asyncio.to_thread(self._run_sql_blocking, args)
+
+    def _run_sql_blocking(self, args: RunSqlToolArgs) -> pd.DataFrame:
+        """Synchronous ``run_sql`` body, executed on a worker thread."""
         conn = self.pymysql.connect(
             host=self.host,
             user=self.user,

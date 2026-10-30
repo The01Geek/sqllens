@@ -19,7 +19,11 @@ clarifying-question flow this store backs.
 Concurrency: assumes a single asyncio event loop. Each method's OrderedDict
 mutations run without an intervening ``await``, so they are atomic under
 cooperative scheduling; the store is **not** thread-safe and would need a lock
-if ever driven from multiple OS threads.
+if ever driven from multiple OS threads. That holds for the synchronous
+``truncate_messages`` too — it is synchronous so a cancelled task can call it
+without suspending, not so it can be called from a worker thread. Issue #255
+moved the Anthropic and database-driver calls onto worker threads but
+deliberately left every store call on the event loop.
 """
 
 from __future__ import annotations
@@ -85,6 +89,39 @@ class BoundedConversationStore(ConversationStore):
         ]
         user_conversations.sort(key=lambda x: x.updated_at, reverse=True)
         return user_conversations[offset : offset + limit]
+
+    def truncate_messages(
+        self, conversation_id: str, user_id: str, length: int
+    ) -> bool:
+        """Drop messages past ``length``; the cancel-rollback seam.
+
+        Deliberately **synchronous**, unlike every other method here. Its one
+        caller is ``tools/query_database.py``'s cancellation handler, which runs
+        inside an already-cancelled task: anyio re-delivers the cancellation on
+        every loop cycle there, so an ``await`` that suspends would never
+        resume and the rollback would be lost. Reads and mutates the same
+        ``Conversation`` object the agent appended to, so no store round trip
+        is needed.
+
+        Does not touch LRU recency: a rollback is cleanup for a turn that never
+        happened, not a use of the conversation.
+
+        Returns True when messages were actually dropped, False when there was
+        nothing to roll back — an unknown or evicted conversation id, a
+        conversation belonging to a different user, or a message list already
+        at or below ``length``. The caller logs that outcome; it is never an
+        error, because a cancelled call that was evicted mid-flight has nothing
+        to restore.
+        """
+        if length < 0:
+            raise ValueError(f"length must be >= 0 (got {length})")
+        conversation = self._conversations.get(conversation_id)
+        if conversation is None or conversation.user.id != user_id:
+            return False
+        if length >= len(conversation.messages):
+            return False
+        del conversation.messages[length:]
+        return True
 
     def _remember(self, conversation: Conversation) -> None:
         self._conversations[conversation.id] = conversation
