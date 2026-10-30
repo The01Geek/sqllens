@@ -403,3 +403,33 @@ async def test_rollback_without_a_truncate_seam_is_logged_loudly(
         and "_StoreWithoutSeam" in record.getMessage()
         for record in caplog.records
     )
+
+
+async def test_rollback_whose_truncate_raises_is_logged_and_does_not_escape(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A store whose truncate raises must not displace the cancellation.
+
+    The sole caller is the ``except asyncio.CancelledError`` handler, which
+    re-raises immediately afterwards. An exception escaping the rollback would
+    replace that cancellation with an unrelated error and leave nothing
+    recording that the rollback did not happen, so it is logged at ERROR
+    naming the store instead.
+    """
+
+    class _RaisingStore:
+        def truncate_messages(self, conversation_id: str, user_id: str, length: int):
+            raise RuntimeError("store exploded")
+
+    class _Agent:
+        conversation_store = _RaisingStore()
+
+    with caplog.at_level("ERROR", logger="sqllens.tools.query_database"):
+        # Must return normally rather than propagate the store's RuntimeError.
+        query_database_module._rollback_conversation(_Agent(), "conv-a", "u", 0)
+
+    assert any(
+        "was not rolled back" in record.message
+        and "_RaisingStore" in record.getMessage()
+        for record in caplog.records
+    )

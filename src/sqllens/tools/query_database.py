@@ -222,10 +222,11 @@ def _rollback_conversation(
 
     ``agent.conversation_store`` is read unguarded: ``Agent.__init__`` always
     sets it, and ``_conversation_baseline`` already dereferenced it before the
-    run. The method lookup *is* guarded, because the ``ConversationStore`` ABC
-    does not declare ``truncate_messages`` — an embedder that constructs
-    ``Agent`` with a different store (the framework's own
-    ``MemoryConversationStore``, say) reaches this branch. It logs at ERROR
+    run. The method lookup *and the call itself* are both guarded, because the
+    ``ConversationStore`` ABC does not declare ``truncate_messages`` — an
+    embedder that constructs ``Agent`` with a different store (the framework's
+    own ``MemoryConversationStore``, say) reaches a missing method, and one
+    whose own implementation raises reaches the second guard. Each logs at ERROR
     naming the store class rather than raising, because the caller is
     propagating a cancellation that must not be replaced by a different
     exception — and a swallowed rollback would otherwise leave the next call on
@@ -244,7 +245,27 @@ def _rollback_conversation(
             type(store).__name__,
         )
         return
-    if truncate(conversation_id, user_id, length):
+    try:
+        rolled_back = truncate(conversation_id, user_id, length)
+    except Exception:
+        # Same rationale as the missing-method branch above: the caller is
+        # propagating a cancellation that must not be replaced by a different
+        # exception, so a store whose truncate_messages raises is logged at
+        # ERROR rather than allowed to escape and displace the CancelledError
+        # with nothing recording that the rollback did not happen. The shipped
+        # BoundedConversationStore raises only ValueError for a negative
+        # length, which this caller's len()-derived baseline cannot produce, so
+        # this is unreachable with the default wiring.
+        logger.exception(
+            "cancelled query_database call on conversation %s was not rolled "
+            "back: conversation store %s raised from truncate_messages; the "
+            "next call on this conversation will see the cancelled call's "
+            "messages",
+            conversation_id,
+            type(store).__name__,
+        )
+        return
+    if rolled_back:
         logger.info(
             "cancelled query_database call: rolled conversation %s back to %d "
             "message(s)",

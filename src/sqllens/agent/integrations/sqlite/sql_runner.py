@@ -141,8 +141,7 @@ class SqliteRunner(SqlRunner):
 
         finally:
             # Stays inside the threaded body so teardown runs on the thread
-            # that owns the connection, before any exception surfaces at the
-            # await.
+            # that owns the connection.
             if self._statement_timeout_ms > 0:
                 conn.set_progress_handler(None, 0)
             cursor.close()
