@@ -3,9 +3,10 @@
 
 """Integration tests for the Postgres and MySQL SqlRunner adapters.
 
-These tests run against **real** Postgres and MySQL instances. They're gated
-behind the ``connectors`` pytest marker and are CI-only — locally, run them
-explicitly with ``pytest -m connectors``.
+These tests run against **real** Postgres and MySQL instances. They live
+outside pyproject's ``testpaths``, so the default ``pytest`` run does not
+collect them; they run in CI's connector job, and locally with
+``pytest tests/connectors``.
 
 Connection URLs come from env vars so the same tests work against
 docker-compose, GH Actions service containers, or a developer's local DBs.
