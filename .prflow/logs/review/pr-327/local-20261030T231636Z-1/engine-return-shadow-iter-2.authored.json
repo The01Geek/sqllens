@@ -1,0 +1,27 @@
+{
+  "root_completeness": "established",
+  "phase3_findings": [
+    {"finding_id": "F-1", "agent": "prflow:silent-failure-hunter", "severity": "Suggestion", "description": "docs/internal/mcp-server/transport.md:120 says a call cancelled while queued never runs, and the run_memory_call docstring says a caller cancelled before its call starts drops it; asyncio.wrap_future cancels the executor future from a call_soon-scheduled done callback, so the single worker can start the queued call in that gap.", "defect_signature": {"file": "docs/internal/mcp-server/transport.md", "line_range": [120, 120], "kind": "documented_falsehood"}},
+    {"finding_id": "F-2", "agent": "prflow:silent-failure-hunter", "severity": "Suggestion", "description": "Test stubs (_StoreCalls._enter, _held_call, held_iter_all) ignore the return value of held.wait(HOLD_LIMIT_S), so a hold timeout is not reported.", "defect_signature": {"file": "tests/unit/test_memory_event_loop.py", "line_range": [440, 440], "kind": "test_gap"}},
+    {"finding_id": "F-3", "agent": "prflow:comment-analyzer", "severity": "Suggestion", "description": "store.py executor rationale comment gives only the object.__new__ test reason, omits that server.py builds two MemoryStore instances, and names a 'store's own executor' MemoryStore does not have (it is ChromaAgentMemory's).", "defect_signature": {"file": "src/sqllens/memory/store.py", "line_range": [70, 74], "kind": "comment_drift"}},
+    {"finding_id": "F-4", "agent": "prflow:comment-analyzer", "severity": "Suggestion", "description": "transport.md:119 names 'the store's own two-thread executor' (it is ChromaAgentMemory's) and says last_skipped_rows is shared by every caller, which holds only per instance.", "defect_signature": {"file": "docs/internal/mcp-server/transport.md", "line_range": [119, 119], "kind": "comment_drift"}},
+    {"finding_id": "F-5", "agent": "prflow:type-design-analyzer", "severity": "Suggestion", "description": "The one-store-call-at-a-time rule is enforced only by convention; MemoryStore's synchronous methods remain public and callable from any thread.", "defect_signature": {"file": "src/sqllens/memory/store.py", "line_range": [70, 116], "kind": "type_design"}},
+    {"finding_id": "F-6", "agent": "prflow:type-design-analyzer", "severity": "Suggestion", "description": "run_memory_call's Callable[P, T] -> T signature accepts generator functions, lazy iterators and async callables whose store work would not run on the worker.", "defect_signature": {"file": "src/sqllens/memory/store.py", "line_range": [99, 116], "kind": "type_design"}},
+    {"finding_id": "F-7", "agent": "prflow:type-design-analyzer", "severity": "Suggestion", "description": "_baseline docstring guarantee is accurate but does not cover async per-entry writes on ChromaAgentMemory's executor, ordered only by the handlers' asyncio.Locks.", "defect_signature": {"file": "src/sqllens/memory/importer.py", "line_range": [36, 41], "kind": "type_design"}},
+    {"finding_id": "F-8", "agent": "prflow:pr-test-analyzer", "severity": "Suggestion", "description": "Overlap test covers only export/list/stats; import_bundle's baseline and clear_memories are never run concurrently with a read tool.", "defect_signature": {"file": "tests/unit/test_memory_event_loop.py", "line_range": [563, 580], "kind": "test_gap"}},
+    {"finding_id": "F-9", "agent": "prflow:pr-test-analyzer", "severity": "Suggestion", "description": "No test checks that a call cancelled while waiting in the memory worker queue is dropped.", "defect_signature": {"file": "src/sqllens/memory/store.py", "line_range": [102, 104], "kind": "test_gap"}},
+    {"finding_id": "F-10", "agent": "prflow:pr-test-analyzer", "severity": "Suggestion", "description": "The 'never runs' cancellation claim in transport.md:120 and the run_memory_call docstring is absolute though a race window exists between task cancel and the wrap_future done callback.", "defect_signature": {"file": "docs/internal/mcp-server/transport.md", "line_range": [120, 120], "kind": "documented_falsehood"}},
+    {"finding_id": "F-11", "agent": "prflow:pr-test-analyzer", "severity": "Suggestion", "description": "Loop-side test replaces server_module.json with a namespace holding only dumps and asserts exactly seven calls, which is brittle to future json use.", "defect_signature": {"file": "tests/unit/test_memory_event_loop.py", "line_range": [638, 664], "kind": "test_gap"}}
+  ],
+  "phase3_dispatched": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "expected_reviewers": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "plan_eligible": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {"small_diff": false, "config_only": false, "has_new_types": true, "test_relevant": true, "detect_all_audit": true, "checklist_skipped": null},
+  "cap_drops": {"count": 0, "by_category": {}},
+  "phase4_demoted": [],
+  "reject_drivers": [],
+  "criterion_exempt": [],
+  "verdict": "APPROVE with notes"
+}

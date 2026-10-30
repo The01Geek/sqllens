@@ -1,0 +1,512 @@
+{
+  "iter": 1,
+  "loop_role": "fix",
+  "dispatch_mode": "fanned-out",
+  "dispatch_disposition": null,
+  "fix_commit_sha": "602bbd7d71a71dfefac9b461b0677b37dfcad9f4",
+  "fix_decisions": [
+    {
+      "finding_id": "F-1",
+      "decision": "applied",
+      "commit": "602bbd7d71a71dfefac9b461b0677b37dfcad9f4",
+      "step25_classification": "codebase"
+    },
+    {
+      "finding_id": "F-2",
+      "decision": "pushed_back",
+      "source_file": "src/sqllens/memory/store.py",
+      "claim_text": "One worker with an unbounded queue: a hung ChromaDB call stalls every later memory tool call forever with no timeout, no caller error and no log line",
+      "skip_category": "uncategorized",
+      "evidence": "Design decision the issue settled: issue #303 Implementation Notes choose one process-wide ThreadPoolExecutor(max_workers=1) and reject other executors; a wait timeout would let a write still queued or running be reported as failed while it later takes effect, a semantic the issue and criteria leave open. The trade-off is disclosed in docs/internal/mcp-server/transport.md (Trade-offs: 'A store call that hangs now stalls later memory tool calls instead of the whole server'). Revisit if a hung ChromaDB call is observed or a bounded-wait design is decided."
+    },
+    {
+      "finding_id": "F-3",
+      "decision": "pushed_back",
+      "source_file": "src/sqllens/memory/store.py",
+      "claim_text": "A nested run_memory_call from code already on the memory worker deadlocks silently; only the docstring guards it",
+      "skip_category": "claim-quality",
+      "evidence": "No caller sends the nested input: run_memory_call's callers are server.py memory handlers (542, 566, 591, 620, 695, 729) and importer.py 76, all event-loop coroutines; the functions they pass (memory.admin functions, importer._baseline) never call run_memory_call.",
+      "parking_evidence": {
+        "basis": "a runtime guard would cover an input no caller sends",
+        "failing_input": "run_memory_call invoked from a function already running on the sqllens-memory worker",
+        "source": "src/sqllens/memory/importer.py:76 and src/sqllens/server.py:542-729 call sites",
+        "finding_ref": {
+          "iter": 1,
+          "index": 3
+        }
+      }
+    },
+    {
+      "finding_id": "F-4",
+      "decision": "pushed_back",
+      "source_file": "src/sqllens/memory/store.py",
+      "claim_text": "The no-overlap / off-loop invariant is held only by call sites and tests, not by MemoryStore",
+      "skip_category": "uncategorized",
+      "evidence": "Design decision the issue settled: issue #303 Implementation Notes decision 1 places one async helper in store.py that call sites route the sync memory.admin functions through, and decision 2 keeps loop-side work on the loop; moving the invariant into MemoryStore's methods would redesign that seam (and the CLI exporter's synchronous path). Every MCP-tool call site is pinned by tests/unit/test_memory_event_loop.py, whose sync-method list is now derived from MemoryStore. Revisit when a new MemoryStore caller is added outside these sites."
+    },
+    {
+      "finding_id": "F-5",
+      "decision": "applied",
+      "commit": "602bbd7d71a71dfefac9b461b0677b37dfcad9f4"
+    },
+    {
+      "finding_id": "F-6",
+      "decision": "applied",
+      "commit": "602bbd7d71a71dfefac9b461b0677b37dfcad9f4"
+    },
+    {
+      "finding_id": "F-7",
+      "decision": "applied",
+      "commit": "602bbd7d71a71dfefac9b461b0677b37dfcad9f4"
+    },
+    {
+      "finding_id": "D-1",
+      "decision": "applied",
+      "commit": "c33b7a2426fe7518e9f8a091ce27c9c308b9bbca",
+      "original_severity": "minor",
+      "source_file": "tests/unit/test_memory_event_loop.py",
+      "claim_text": "_SYNC_STORE_METHODS docstring claims every public synchronous method, but the isfunction filter skips staticmethod/classmethod/property entries"
+    },
+    {
+      "finding_id": "D-2",
+      "decision": "applied",
+      "commit": "72d0da823b04f224ec33bb9b2792b512b85c3879",
+      "original_severity": "minor",
+      "source_file": "tests/unit/test_memory_event_loop.py",
+      "claim_text": "an async generator method passes the derived _SYNC_STORE_METHODS filter because iscoroutinefunction is False for async generators"
+    }
+  ],
+  "telemetry": {
+    "phase_1": {
+      "calls": 1,
+      "tokens": 170888,
+      "wall_clock_s": 535
+    }
+  },
+  "phase3_failed_agents": [],
+  "diff_produced_at_head": "02b79d35a452a9b885dbd3182b2ee8dd592e6926",
+  "reference_reads": {
+    "fix_delta": {
+      "status": "verified",
+      "outcome": "refixed",
+      "reason": null
+    }
+  },
+  "iteration_head": "72d0da823b04f224ec33bb9b2792b512b85c3879",
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "critical",
+      "description": "run_memory_call (src/sqllens/memory/store.py 88-99) attaches nothing to the concurrent future; when the awaiting task is cancelled after the store call starts, asyncio drops the worker's result or exception and nothing logs it. A failing delete_memory / clear_memories / import_memory baseline (clear=True) call whose caller was cancelled loses its error (handler logger.exception at server.py 599-603, 623-627 already unwound with CancelledError), and a successful delete or wipe leaves no log line. Regression versus the on-loop design; the SQL pool's precedent is sql_threads.py 119-122, 157 (future.add_done_callback(_log_call_after_cancel)). Tests cover only ordering of a cancelled delete, not its outcome.",
+      "defect_signature": {
+        "file": "src/sqllens/memory/store.py",
+        "line_range": [
+          88,
+          99
+        ],
+        "kind": "unhandled_exception"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-2",
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "suggestion",
+      "description": "One worker with an unbounded queue: a hung ChromaDB call stalls every later memory tool call forever with no timeout, no caller error and no log line; transport.md line 121 documents the trade-off, but the SQL pool warns on saturation and times out slot waits.",
+      "defect_signature": {
+        "file": "src/sqllens/memory/store.py",
+        "line_range": [
+          80,
+          99
+        ],
+        "kind": "other"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "deferred"
+    },
+    {
+      "finding_id": "F-3",
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "suggestion",
+      "description": "A nested run_memory_call from code already on the memory worker deadlocks silently; only the docstring (store.py 95-96) guards it, with no thread check or error. No current path reaches it.",
+      "defect_signature": {
+        "file": "src/sqllens/memory/store.py",
+        "line_range": [
+          95,
+          99
+        ],
+        "kind": "other"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "pushed_back"
+    },
+    {
+      "finding_id": "F-4",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "description": "The no-overlap / off-loop invariant is held only by call sites (server.py 542, 566, 591, 620, 695, 729; importer.py 76) and tests, not by MemoryStore: its synchronous methods, the memory.admin functions and exporter.py 41/47 stay directly callable from the loop; the no-reentry rule is prose only.",
+      "defect_signature": {
+        "file": "src/sqllens/memory/store.py",
+        "line_range": [
+          70,
+          99
+        ],
+        "kind": "type_design"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "deferred"
+    },
+    {
+      "finding_id": "F-5",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "description": "store.py 70-73 comment (and docs/internal/mcp-server/transport.md line 34) claims the single worker protects ChromaAgentMemory's lazy unlocked client/collection creation, but ChromaAgentMemory's own two-thread executor (agent_memory.py 135-175; _save, _delete, _clear, searches) also calls those and can overlap the memory worker. Not a regression.",
+      "defect_signature": {
+        "file": "src/sqllens/memory/store.py",
+        "line_range": [
+          70,
+          73
+        ],
+        "kind": "comment_drift"
+      },
+      "inertness": "first-conjunct=held limb-one=held limb-two=held; capped at suggestion",
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-6",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "description": "tests/unit/test_memory_event_loop.py 308-309 comment sits above assert len(threads[\"dumps\"]) == 7 but describes the dedup count asserted at line 313 (== 3), and does not explain the 3 (question + sql normalized separately, plus one schema doc; importer.py 83, 90).",
+      "defect_signature": {
+        "file": "tests/unit/test_memory_event_loop.py",
+        "line_range": [
+          308,
+          310
+        ],
+        "kind": "comment_drift"
+      },
+      "inertness": "first-conjunct=held limb-one=held limb-two=held; capped at suggestion",
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    },
+    {
+      "finding_id": "F-7",
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "suggestion",
+      "description": "Brittle exact-count / exact-set assertions in tests/unit/test_memory_event_loop.py: line 310 dumps == 7, line 283 replaces server_module.json with a SimpleNamespace holding only dumps, line 223 fixes the overlap test's store-method set, and _SYNC_STORE_METHODS (line 49) is hand-kept so a new synchronous MemoryStore method would go unchecked.",
+      "defect_signature": {
+        "file": "tests/unit/test_memory_event_loop.py",
+        "line_range": [
+          283,
+          310
+        ],
+        "kind": "test_gap"
+      },
+      "corroboration_count": 1,
+      "fix_decision": "applied"
+    }
+  ],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": true,
+    "test_relevant": true,
+    "detect_all_audit": false,
+    "checklist_skipped": null
+  },
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "cap_drops": {
+    "count": 0,
+    "by_category": {}
+  },
+  "checklist": [
+    {
+      "id": "VC-1",
+      "claim_signature": "dependency_interaction:server.py:list-memories-fully-materialized:542",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-2",
+      "claim_signature": "dependency_interaction:server.py:export-last-skipped-same-call:695",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-3",
+      "claim_signature": "dependency_interaction:server.py:admin-functions-synchronous",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-4",
+      "claim_signature": "api_contract:server.py:worker-exceptions-same-mapping",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-5",
+      "claim_signature": "data_format_assumption:importer.py:baseline-returns-sets",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-6",
+      "claim_signature": "api_contract:importer.py:dry-run-skips-clear:76",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-7",
+      "claim_signature": "dependency_interaction:importer.py:cli-asyncio-run-worker",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-8",
+      "claim_signature": "dependency_interaction:importer.py:per-entry-writes-async",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-9",
+      "claim_signature": "absolute_claim:importer.py:clear-read-atomic:39",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-10",
+      "claim_signature": "absolute_claim:store.py:run-memory-call-ordering:91",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-11",
+      "claim_signature": "absolute_claim:store.py:nested-call-waits-forever:95",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-12",
+      "claim_signature": "data_format_assumption:store.py:lazy-unlocked-collection:70",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-13",
+      "claim_signature": "api_contract:server.py:list-changed-during-listing",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "important"
+    },
+    {
+      "id": "VC-14",
+      "claim_signature": "dependency_interaction:store.py:no-contextvar-copy:98",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-15",
+      "claim_signature": "api_contract:transport.md:memory-store-calls-description:119",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-16",
+      "claim_signature": "absolute_claim:transport.md:cancellation-semantics:120",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-17",
+      "claim_signature": "absolute_claim:transport.md:never-partial-and-exit-delay:121",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-18",
+      "claim_signature": "api_contract:transport.md:memory-regression-coverage:127",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-19",
+      "claim_signature": "api_contract:tools.md:memory-route-description:226",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-20",
+      "claim_signature": "test_mock_alignment:test_memory_event_loop.py:sync-store-method-list:49",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-21",
+      "claim_signature": "test_mock_alignment:test_memory_event_loop.py:concurrent-method-set:223",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-22",
+      "claim_signature": "test_mock_alignment:test_memory_event_loop.py:cancel-delete-ids-path:234",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-23",
+      "claim_signature": "test_mock_alignment:test_memory_event_loop.py:loop-side-patch-targets:279",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-24",
+      "claim_signature": "test_mock_alignment:test_memory_event_loop.py:tool-manager-fn-access:127",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-25",
+      "claim_signature": "test_mock_alignment:test_memory_event_loop.py:config-builder-signature:117",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-26",
+      "claim_signature": "test_mock_alignment:test_memory_tool_responsiveness.py:make-server-fixture",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-27",
+      "claim_signature": "data_format_assumption:test_memory_tool_responsiveness.py:saved-markdown-row:66",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-1",
+      "id": "VC-28",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-2",
+      "id": "VC-29",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-3",
+      "id": "VC-30",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-4",
+      "id": "VC-31",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-5",
+      "id": "VC-32",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-6",
+      "id": "VC-33",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    }
+  ],
+  "fix_files": [
+    "docs/internal/mcp-server/transport.md",
+    "src/sqllens/memory/store.py",
+    "tests/unit/test_memory_event_loop.py"
+  ],
+  "synthesized": false
+}

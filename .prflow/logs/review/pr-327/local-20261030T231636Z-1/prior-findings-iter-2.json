@@ -1,0 +1,100 @@
+[
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "critical",
+  "description": "run_memory_call (src/sqllens/memory/store.py 88-99) attaches nothing to the concurrent future; when the awaiting task is cancelled after the store call starts, asyncio drops the worker's result or exception and nothing logs it. A failing delete_memory / clear_memories / import_memory baseline (clear=True) call whose caller was cancelled loses its error (handler logger.exception at server.py 599-603, 623-627 already unwound with CancelledError), and a successful delete or wipe leaves no log line. Regression versus the on-loop design; the SQL pool's precedent is sql_threads.py 119-122, 157 (future.add_done_callback(_log_call_after_cancel)). Tests cover only ordering of a cancelled delete, not its outcome.",
+  "defect_signature": {
+   "file": "src/sqllens/memory/store.py",
+   "line_range": [
+    88,
+    99
+   ],
+   "kind": "unhandled_exception"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "suggestion",
+  "description": "One worker with an unbounded queue: a hung ChromaDB call stalls every later memory tool call forever with no timeout, no caller error and no log line; transport.md line 121 documents the trade-off, but the SQL pool warns on saturation and times out slot waits.",
+  "defect_signature": {
+   "file": "src/sqllens/memory/store.py",
+   "line_range": [
+    80,
+    99
+   ],
+   "kind": "other"
+  },
+  "fix_decision": "deferred"
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "suggestion",
+  "description": "A nested run_memory_call from code already on the memory worker deadlocks silently; only the docstring (store.py 95-96) guards it, with no thread check or error. No current path reaches it.",
+  "defect_signature": {
+   "file": "src/sqllens/memory/store.py",
+   "line_range": [
+    95,
+    99
+   ],
+   "kind": "other"
+  },
+  "fix_decision": "pushed_back"
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "The no-overlap / off-loop invariant is held only by call sites (server.py 542, 566, 591, 620, 695, 729; importer.py 76) and tests, not by MemoryStore: its synchronous methods, the memory.admin functions and exporter.py 41/47 stay directly callable from the loop; the no-reentry rule is prose only.",
+  "defect_signature": {
+   "file": "src/sqllens/memory/store.py",
+   "line_range": [
+    70,
+    99
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "deferred"
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "store.py 70-73 comment (and docs/internal/mcp-server/transport.md line 34) claims the single worker protects ChromaAgentMemory's lazy unlocked client/collection creation, but ChromaAgentMemory's own two-thread executor (agent_memory.py 135-175; _save, _delete, _clear, searches) also calls those and can overlap the memory worker. Not a regression.",
+  "defect_signature": {
+   "file": "src/sqllens/memory/store.py",
+   "line_range": [
+    70,
+    73
+   ],
+   "kind": "comment_drift"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:comment-analyzer",
+  "severity": "suggestion",
+  "description": "tests/unit/test_memory_event_loop.py 308-309 comment sits above assert len(threads[\"dumps\"]) == 7 but describes the dedup count asserted at line 313 (== 3), and does not explain the 3 (question + sql normalized separately, plus one schema doc; importer.py 83, 90).",
+  "defect_signature": {
+   "file": "tests/unit/test_memory_event_loop.py",
+   "line_range": [
+    308,
+    310
+   ],
+   "kind": "comment_drift"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:pr-test-analyzer",
+  "severity": "suggestion",
+  "description": "Brittle exact-count / exact-set assertions in tests/unit/test_memory_event_loop.py: line 310 dumps == 7, line 283 replaces server_module.json with a SimpleNamespace holding only dumps, line 223 fixes the overlap test's store-method set, and _SYNC_STORE_METHODS (line 49) is hand-kept so a new synchronous MemoryStore method would go unchecked.",
+  "defect_signature": {
+   "file": "tests/unit/test_memory_event_loop.py",
+   "line_range": [
+    283,
+    310
+   ],
+   "kind": "test_gap"
+  },
+  "fix_decision": "applied"
+ }
+]

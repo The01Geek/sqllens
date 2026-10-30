@@ -1,0 +1,26 @@
+[
+  {
+    "criterion": 1,
+    "text": "No call to a synchronous (non-`async`) `MemoryStore` method made by an MCP tool registered under `memory.allow_admin_tools` or `memory.allow_import` runs on the event-loop thread. A test records the thread each such call runs on, for every one of those tools, and asserts it is not the thread running the event loop."
+  },
+  {
+    "criterion": 2,
+    "text": "While a memory tool's store call is held open, `GET /healthz` on the same HTTP server returns 200 within 2 seconds, measured by a 2-second httpx request timeout as in `tests/integration/test_slow_agent_run_responsiveness.py`. Once released, the held tool call returns its normal, non-error result."
+  },
+  {
+    "criterion": 3,
+    "text": "Within one server process, synchronous (non-`async`) `MemoryStore` method calls made for two different calls of those MCP tools are never in progress at the same time. This holds even when the tool call that started one is cancelled while it runs: the next such call starts only after the cancelled call's store work returns."
+  },
+  {
+    "criterion": 4,
+    "text": "For the same store contents and arguments, with no write other than the call's own overlapping it and no cancellation of the call, each of those MCP tools returns the same result as before the change, including each `isError` result and message. That covers, at minimum, a memory that is not found, a corrupt store, invalid input, a lossy export, an add or import with failed items, and a generic store failure. A `list_memories` call whose store reads a managed write (a write inside `CollectionState.writing()`) overlaps returns an `isError` result whose text contains `Memory store changed during listing; retry the request.` and never a partial listing. The existing memory tool tests pass without changes to their assertions."
+  },
+  {
+    "criterion": 5,
+    "text": "The CLI `import-memory` command reports the same saved, duplicate and error counts and exit status as before for the same store and bundle, including with `--clear` and `--dry-run`."
+  },
+  {
+    "criterion": 6,
+    "text": "The change leaves `add_memories`' per-item validation, `import_memory`'s parsing of its bundle JSON, `import_bundle`'s per-item de-duplication check of the incoming items, and each handler's final `json.dumps` of the object its `memory.admin` function returns running on the event loop."
+  }
+]

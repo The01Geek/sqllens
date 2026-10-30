@@ -1,0 +1,479 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "Suggestion",
+   "description": "docs/internal/mcp-server/transport.md:120 says a call cancelled while queued never runs, and the run_memory_call docstring says a caller cancelled before its call starts drops it; asyncio.wrap_future cancels the executor future from a call_soon-scheduled done callback, so the single worker can start the queued call in that gap.",
+   "defect_signature": {
+    "file": "docs/internal/mcp-server/transport.md",
+    "line_range": [
+     120,
+     120
+    ],
+    "kind": "documented_falsehood"
+   }
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "Suggestion",
+   "description": "Test stubs (_StoreCalls._enter, _held_call, held_iter_all) ignore the return value of held.wait(HOLD_LIMIT_S), so a hold timeout is not reported.",
+   "defect_signature": {
+    "file": "tests/unit/test_memory_event_loop.py",
+    "line_range": [
+     440,
+     440
+    ],
+    "kind": "test_gap"
+   }
+  },
+  {
+   "finding_id": "F-3",
+   "agent": "prflow:comment-analyzer",
+   "severity": "Suggestion",
+   "description": "store.py executor rationale comment gives only the object.__new__ test reason, omits that server.py builds two MemoryStore instances, and names a 'store's own executor' MemoryStore does not have (it is ChromaAgentMemory's).",
+   "defect_signature": {
+    "file": "src/sqllens/memory/store.py",
+    "line_range": [
+     70,
+     74
+    ],
+    "kind": "comment_drift"
+   }
+  },
+  {
+   "finding_id": "F-4",
+   "agent": "prflow:comment-analyzer",
+   "severity": "Suggestion",
+   "description": "transport.md:119 names 'the store's own two-thread executor' (it is ChromaAgentMemory's) and says last_skipped_rows is shared by every caller, which holds only per instance.",
+   "defect_signature": {
+    "file": "docs/internal/mcp-server/transport.md",
+    "line_range": [
+     119,
+     119
+    ],
+    "kind": "comment_drift"
+   }
+  },
+  {
+   "finding_id": "F-5",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "Suggestion",
+   "description": "The one-store-call-at-a-time rule is enforced only by convention; MemoryStore's synchronous methods remain public and callable from any thread.",
+   "defect_signature": {
+    "file": "src/sqllens/memory/store.py",
+    "line_range": [
+     70,
+     116
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-6",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "Suggestion",
+   "description": "run_memory_call's Callable[P, T] -> T signature accepts generator functions, lazy iterators and async callables whose store work would not run on the worker.",
+   "defect_signature": {
+    "file": "src/sqllens/memory/store.py",
+    "line_range": [
+     99,
+     116
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-7",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "Suggestion",
+   "description": "_baseline docstring guarantee is accurate but does not cover async per-entry writes on ChromaAgentMemory's executor, ordered only by the handlers' asyncio.Locks.",
+   "defect_signature": {
+    "file": "src/sqllens/memory/importer.py",
+    "line_range": [
+     36,
+     41
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-8",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "Suggestion",
+   "description": "Overlap test covers only export/list/stats; import_bundle's baseline and clear_memories are never run concurrently with a read tool.",
+   "defect_signature": {
+    "file": "tests/unit/test_memory_event_loop.py",
+    "line_range": [
+     563,
+     580
+    ],
+    "kind": "test_gap"
+   }
+  },
+  {
+   "finding_id": "F-9",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "Suggestion",
+   "description": "No test checks that a call cancelled while waiting in the memory worker queue is dropped.",
+   "defect_signature": {
+    "file": "src/sqllens/memory/store.py",
+    "line_range": [
+     102,
+     104
+    ],
+    "kind": "test_gap"
+   }
+  },
+  {
+   "finding_id": "F-10",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "Suggestion",
+   "description": "The 'never runs' cancellation claim in transport.md:120 and the run_memory_call docstring is absolute though a race window exists between task cancel and the wrap_future done callback.",
+   "defect_signature": {
+    "file": "docs/internal/mcp-server/transport.md",
+    "line_range": [
+     120,
+     120
+    ],
+    "kind": "documented_falsehood"
+   }
+  },
+  {
+   "finding_id": "F-11",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "Suggestion",
+   "description": "Loop-side test replaces server_module.json with a namespace holding only dumps and asserts exactly seven calls, which is brittle to future json use.",
+   "defect_signature": {
+    "file": "tests/unit/test_memory_event_loop.py",
+    "line_range": [
+     638,
+     664
+    ],
+    "kind": "test_gap"
+   }
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": true,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (only Suggestion findings; all 34 checklist items passed)\nThe PR is ready to merge: the memory tools' synchronous store calls now run one at a time on a single worker thread, every acceptance criterion passed verification, and no reviewer found a Critical or Important defect.\nRule applied: rule 6 — only findings below the critical threshold remain → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (10)\n\n<details><summary>10 items</summary>\n\n1. `docs/internal/mcp-server/transport.md` line 120 says \"A call cancelled while it waits in the queue never runs\", and the `run_memory_call` docstring in `src/sqllens/memory/store.py` (lines 102-104) says \"A caller cancelled before its call starts drops it\". Both are absolute, but `asyncio.wrap_future` cancels the thread-pool future from a done callback that asyncio schedules with `call_soon`. If the single worker takes the queued item in that gap, the call runs anyway and is then logged as finished after cancel. Write \"normally never runs\" or describe the window. (raised by 2/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: rewording changes no output or branch; git grep of *.sh *.py *.jq *.yml CLAUDE.md AGENTS.md .claude/ .prflow/skill-extensions/ for \"never runs\" and \"drops it\" found only the prose itself and an unrelated SQL pool docstring; internal doc page and a never-printed docstring -->\n2. `tests/unit/test_memory_event_loop.py` line 440 (`_StoreCalls._enter`), `_held_call` near line 675, and `held_iter_all` in `tests/integration/test_memory_tool_responsiveness.py` line 36 ignore the return value of `held.wait(HOLD_LIMIT_S)`, so a hold that times out continues silently and the failure message is less clear. (raised by 1/6 agents)\n3. `src/sqllens/memory/store.py` lines 70-74: the comment explaining the module-level executor gives only a test reason (`object.__new__`) and leaves out the real one: `server.py` builds two `MemoryStore` instances (lines 412 and 501), so a per-instance executor would let import and admin calls overlap. It also names \"the store's own executor\", but `MemoryStore` has no executor; the two-thread executor belongs to `ChromaAgentMemory`. (raised by 1/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: rewording changes no output or branch; git grep of *.sh *.py *.jq *.yml CLAUDE.md AGENTS.md .claude/ .prflow/skill-extensions/ for \"store's own\" found only this comment; source comment never printed -->\n4. `docs/internal/mcp-server/transport.md` line 119 also says \"the store's own two-thread executor\", which belongs to `ChromaAgentMemory`, not `MemoryStore`. Its \"`last_skipped_rows` is shared by every caller\" holds only per instance; the import path and the admin tools use different instances, so the single process-wide thread is what keeps them apart. (raised by 1/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: rewording changes no output or branch; git grep of *.sh *.py *.jq *.yml CLAUDE.md AGENTS.md .claude/ .prflow/skill-extensions/ for \"store's own\" found no tool or agent reader; internal doc page -->\n5. `src/sqllens/memory/store.py` lines 70-116: the \"one store call at a time\" rule is kept only by convention. `MemoryStore`'s synchronous methods stay public, so a future async caller could call them directly or through `asyncio.to_thread` and bring back both loop blocking and overlap with no type or runtime check. (raised by 1/6 agents)\n6. `src/sqllens/memory/store.py` lines 99-116: `run_memory_call` is typed `Callable[P, T] -> T` with no limit, so a generator function or lazy iterator (such as `MemoryStore.iter_records`) or an `async def` would be accepted, and its store work would run wherever the result is consumed. No current caller does this. (raised by 1/6 agents)\n7. `src/sqllens/memory/importer.py` lines 36-41: the `_baseline` docstring's \"no other call routed through `run_memory_call`\" guarantee is accurate but does not cover the async per-entry writes, which run on `ChromaAgentMemory`'s own executor and are ordered only by the handlers' `asyncio.Lock`s. (raised by 1/6 agents)\n8. `tests/unit/test_memory_event_loop.py` lines 563-580: the overlap test runs only `export_memories`, `list_memories` and `get_memory_stats`; no test runs `import_bundle`'s baseline (`add_memories`, `import_memory`) or `clear_memories` concurrently with a read tool, so moving one of those paths off the single worker would still pass. (raised by 1/6 agents)\n9. `src/sqllens/memory/store.py` lines 102-104: no test checks that a call cancelled while waiting in the queue is dropped; the tests cover only a call that has already started, unlike the SQL pool's matching \"never runs a call cancelled while waiting\" test. (raised by 1/6 agents)\n10. `tests/unit/test_memory_event_loop.py` lines 638-664: the loop-side test replaces `server_module.json` with a namespace holding only `dumps` and asserts exactly seven calls, so any added `json` use on these paths breaks it even when behavior is correct. (raised by 1/6 agents)\n\n</details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: has_new_types + test_relevant, 7 changed files; detect_all_audit set; Phase 1+2 ran. Completeness critic ran clean against the `def` listing of `src/sqllens/memory/store.py` (iter_all, clear, get_all, iter_records, get_one, delete_ids all collected by `_SYNC_STORE_METHODS`, the generator wrapped via `yield from`) and a search for direct collection access in admin.py, importer.py and server.py (none).\n- Working tree: clean.\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. Final-pass (requesting-code-review) extension: content-present.\n- CI evidence: none held for head 6b746633497bcc58d9cb8caadf327de5560036fa; no tests were run in this entry.\n- Normalized (wording-only): 0\n- Re-verification: none disputed.\n- \"Finding rejected \\\"A nested run_memory_call from code already on the memory worker deadlocks silently, guarded only by the docstring\\\": src/sqllens/memory/store.py run_memory_call's callers are server.py's memory handlers (lines 542, 566, 591, 620, 695, 729) and importer.py import_bundle (line 76), all coroutines on the event loop; none of the functions they pass (memory.admin functions, importer._baseline) calls run_memory_call, so no caller sends the nested input a runtime guard would catch.\" settled none\n- Dirty-tree check: no changes.\n- Vendored helpers under `.prflow/vendor/prflow/` are absent; the plugin's own scripts ran instead.\n\n- Checklist: 34 passed, 0 failed, 0 inconclusive\n- <details><summary>✅ Passed items (34 of 34)</summary>\n\n  - VC-1: run_memory_call submits the call to a one-worker ThreadPoolExecutor and awaits it through asyncio.wrap_future; cancelling the awaiting task cancels the concurrent Future when it has not started (so the call never runs), and leaves a started call running to completion. [src/sqllens/memory/store.py:110]\n  - VC-2: On caller cancellation, run_memory_call attaches _log_call_after_cancel as a done callback; it logs nothing if the concurrent Future was cancelled, logs INFO naming the function on success, and WARNING with exc_info on failure, including when the future had already completed before the callback was attached. [src/sqllens/memory/store.py:87]\n  - VC-3: The docstring asserts that calls run one at a time in submission order, that a caller cancelled before its call starts drops it, that a started call runs to completion with later calls waiting behind it and its outcome logged, and that exceptions propagate unchanged. [src/sqllens/memory/store.py:101]\n  - VC-4: The docstring asserts that a nested run_memory_call made from code already running on the memory worker waits forever. [src/sqllens/memory/store.py:107]\n  - VC-5: The module comment states the executor is module-level rather than per-instance because tests build MemoryStore via object.__new__. [src/sqllens/memory/store.py:73]\n  - VC-6: The memory worker thread names derive from thread_name_prefix=\"sqllens-memory\" as sqllens-memory_<n>, matching the doc's 'one thread named sqllens-memory_*'. [docs/internal/mcp-server/transport.md:119]\n  - VC-7: The doc asserts that the six tools other than add_memories and import_memory pass their whole synchronous memory.admin function to run_memory_call, so every page fetch of a listing and the last_skipped_rows read after an export's iter_all happen in one call; and that import_bundle passes its optional clear plus the de-duplication read as one call while per-entry writes stay on ChromaAgentMemory's executor. [docs/internal/mcp-server/transport.md:119]\n  - VC-8: The doc's cancellation bullet asserts a call cancelled while queued never runs; a started call runs to completion with later calls waiting behind it even though admin_write_lock/import_lock are released when the cancelled task unwinds; and run_memory_call logs the outcome at INFO naming the store function on success or WARNING with exception and traceback on failure. [docs/internal/mcp-server/transport.md:120]\n  - VC-9: The doc's trade-offs bullet asserts list_memories still never returns a partial result when writes start mid-listing, and that because the worker thread is not a daemon thread a store call running at shutdown (including an interrupted CLI import-memory baseline read or --clear) delays process exit until it returns. [docs/internal/mcp-server/transport.md:121]\n  - VC-10: The regression-coverage paragraph asserts the integration test holds import_memory's de-duplication read and requires /healthz within 2 s, and that test_memory_event_loop.py checks all eight memory tools off-loop with a heartbeat, non-overlap of three concurrent read-only calls (export_memories, list_memories, get_memory_stats), the listing-after-cancelled-delete ordering, and loop-side validation, bundle parsing, per-item dedup and final json.dumps. [docs/internal/mcp-server/transport.md:127]\n  - VC-11: The tools doc asserts the memory tools keep the event loop free because their synchronous MemoryStore calls run on the single memory worker thread. [docs/internal/mcp-server/tools.md:230]\n  - VC-12: The _baseline docstring asserts that, because the clear and the read run as one worker call, no other call routed through run_memory_call runs between them. [src/sqllens/memory/importer.py:39]\n  - VC-13: import_bundle passes clear and not dry_run to _baseline, so a dry run skips the clear but still reads the existing store as the dedup baseline, preserving the CLI import-memory --clear/--dry-run counts. [src/sqllens/memory/importer.py:76]\n  - VC-14: A MemoryCorruptionError raised by store.iter_all inside _baseline on the worker propagates through run_memory_call unchanged, so import_memory's except MemoryCorruptionError branch still returns its 'Memory store looks corrupt' isError message. [src/sqllens/memory/importer.py:76]\n  - VC-15: list_memories' MemoryChangedError and MemoryInputError, raised by memory_admin.list_memories on the worker, propagate through run_memory_call and are converted to RuntimeError(str(exc)), keeping the 'Memory store changed during listing; retry the request.' isError text. [src/sqllens/server.py:546]\n  - VC-16: get_memory's MemoryNotFoundError, raised by memory_admin.get_memory on the worker, propagates through run_memory_call so the handler still returns the {\"error\": \"memory not found\"} isError result. [src/sqllens/server.py:570]\n  - VC-17: delete_memory awaits run_memory_call(memory_admin.delete_memory, ...) inside admin_write_lock, and MemoryNotFoundError from the worker still yields the {\"deleted\": false} isError result. [src/sqllens/server.py:594]\n  - VC-18: clear_memories passes memory_type as a keyword (memory_type=mtype) through run_memory_call, matching memory_admin.clear_memories' keyword parameter. [src/sqllens/server.py:624]\n  - VC-19: export_memories' MemoryCorruptionError propagates from the worker so the corrupt-store message is preserved, and the returned dict's lossy flag (computed from store.last_skipped_rows inside memory_admin.export_memories) is read on the loop to choose the isError path. [src/sqllens/server.py:699]\n  - VC-20: import_memory uses a MemoryStore instance (store) distinct from admin_store, and its import_bundle baseline still serializes with the admin tools' store calls because the executor is module-level rather than per instance. [src/sqllens/memory/importer.py:76]\n  - VC-21: The test file docstring asserts _SYNC_STORE_METHODS collects every public synchronous MemoryStore instance method (plain def), excluding static/class methods and properties. [tests/unit/test_memory_event_loop.py:404]\n  - VC-22: _StoreCalls wraps generator-function store methods (e.g. iter_records) with a generator wrapper so call timing covers the whole iteration, and plain methods with a direct wrapper, matching how the real methods are defined. [tests/unit/test_memory_event_loop.py:448]\n  - VC-23: The concurrency test expects export_memories, list_memories and get_memory_stats to make exactly the synchronous store calls iter_all, iter_records and get_all between them. [tests/unit/test_memory_event_loop.py:579]\n  - VC-24: The loop-side test records validation by patching admin.SqlPair, expecting exactly one call for one added pair, and records json.dumps by replacing server.json with a namespace exposing only dumps, expecting exactly seven calls across the handlers it invokes. [tests/unit/test_memory_event_loop.py:635]\n  - VC-25: The test comment asserts the per-item dedup check normalizes the added pair's question and SQL separately plus the imported schema doc (3 loop calls), while the store baseline normalizes stored rows on the worker. [tests/unit/test_memory_event_loop.py:667]\n  - VC-26: The test comment asserts that once a call queued behind the cancelled one returns, the cancelled call's done callback (which logs) has already fired. [tests/unit/test_memory_event_loop.py:700]\n  - VC-27: The integration test patches MemoryStore.iter_all at class level with a held wrapper taking (self) and returning the real result, and expects import_memory's Markdown output to contain '| saved | 1 |'. [tests/integration/test_memory_tool_responsiveness.py:310]\n  - VC-28: New first-party .py files carry the repository's SPDX header (SPDX-FileCopyrightText: 2026 Daniel Radman / SPDX-License-Identifier: Apache-2.0). [tests/unit/test_memory_event_loop.py]\n  - VC-29: No call to a synchronous (non-`async`) `MemoryStore` method made by an MCP tool registered under `memory.allow_admin_tools` or `memory.allow_import` runs on the event-loop thread. A test records the thread each such call runs on, for every one of those tools, and asserts it is not the thread running the event loop. [tests/unit/test_memory_event_loop.py:543]\n  - VC-30: While a memory tool's store call is held open, `GET /healthz` on the same HTTP server returns 200 within 2 seconds, measured by a 2-second httpx request timeout as in `tests/integration/test_slow_agent_run_responsiveness.py`. Once released, the held tool call returns its normal, non-error result. [tests/integration/test_memory_tool_responsiveness.py:302]\n  - VC-31: Within one server process, synchronous (non-`async`) `MemoryStore` method calls made for two different calls of those MCP tools are never in progress at the same time. This holds even when the tool call that started one is cancelled while it runs: the next such call starts only after the cancelled call's store work returns. [src/sqllens/memory/store.py:79]\n  - VC-32: For the same store contents and arguments, with no write other than the call's own overlapping it and no cancellation of the call, each of those MCP tools returns the same result as before the change, including each `isError` result and message. That covers, at minimum, a memory that is not found, a corrupt store, invalid input, a lossy export, an add or import with failed items, and a generic store failure. A `list_memories` call whose store reads a managed write (a write inside `CollectionState.writing()`) overlaps returns an `isError` result whose text contains `Memory store changed during listing; retry the request.` and never a partial listing. The existing memory tool tests pass without changes to their assertions. [src/sqllens/server.py:546]\n  - VC-33: The CLI `import-memory` command reports the same saved, duplicate and error counts and exit status as before for the same store and bundle, including with `--clear` and `--dry-run`. [src/sqllens/memory/importer.py:76]\n  - VC-34: The change leaves `add_memories`' per-item validation, `import_memory`'s parsing of its bundle JSON, `import_bundle`'s per-item de-duplication check of the incoming items, and each handler's final `json.dumps` of the object its `memory.admin` function returns running on the event loop. [src/sqllens/memory/importer.py:96]\n\n  </details>\n- Reviewed against issue #303 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] No call to a synchronous (non-`async`) `MemoryStore` method made by an MCP tool registered under `memory.allow_admin_tools` or `memory.allow_import` runs on the event-loop thread. A test records the thread each such call runs on, for every one of those tools, and asserts it is not the thread running the event loop.\n- [ ] While a memory tool's store call is held open, `GET /healthz` on the same HTTP server returns 200 within 2 seconds, measured by a 2-second httpx request timeout as in `tests/integration/test_slow_agent_run_responsiveness.py`. Once released, the held tool call returns its normal, non-error result.\n- [ ] Within one server process, synchronous (non-`async`) `MemoryStore` method calls made for two different calls of those MCP tools are never in progress at the same time. This holds even when the tool call that started one is cancelled while it runs: the next such call starts only after the cancelled call's store work returns.\n- [ ] For the same store contents and arguments, with no write other than the call's own overlapping it and no cancellation of the call, each of those MCP tools returns the same result as before the change, including each `isError` result and message. That covers, at minimum, a memory that is not found, a corrupt store, invalid input, a lossy export, an add or import with failed items, and a generic store failure. A `list_memories` call whose store reads a managed write (a write inside `CollectionState.writing()`) overlaps returns an `isError` result whose text contains `Memory store changed during listing; retry the request.` and never a partial listing. The existing memory tool tests pass without changes to their assertions.\n- [ ] The CLI `import-memory` command reports the same saved, duplicate and error counts and exit status as before for the same store and bundle, including with `--clear` and `--dry-run`.\n- [ ] The change leaves `add_memories`' per-item validation, `import_memory`'s parsing of its bundle JSON, `import_bundle`'s per-item de-duplication check of the incoming items, and each handler's final `json.dumps` of the object its `memory.admin` function returns running on the event loop.",
+ "diff_produced_at_head": "6b746633497bcc58d9cb8caadf327de5560036fa",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:store.py:wrap-future-cancel-propagation:110",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "dependency_interaction:store.py:cancel-outcome-logging:87",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "absolute_claim:store.py:serial-submission-order:101",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "absolute_claim:store.py:nested-call-waits-forever:107",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "test_mock_alignment:store.py:object-new-construction:73",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "dependency_interaction:transport.md:worker-thread-name:119",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "absolute_claim:transport.md:six-tools-whole-function:119",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "absolute_claim:transport.md:cancel-queued-never-runs:120",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "absolute_claim:transport.md:never-partial-nondaemon-exit:121",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "absolute_claim:transport.md:regression-coverage-list:127",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "absolute_claim:tools.md:memory-tools-loop-free:230",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "absolute_claim:importer.py:clear-read-atomic:39",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "dependency_interaction:importer.py:dry-run-skips-clear:76",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "api_contract:importer.py:corruption-error-propagates:76",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "api_contract:server.py:list-changed-error-propagates:546",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "api_contract:server.py:get-notfound-propagates:570",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "api_contract:server.py:delete-notfound-propagates:594",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "dependency_interaction:server.py:clear-memory-type-kwarg:624",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "api_contract:server.py:export-lossy-corruption:699",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "dependency_interaction:importer.py:shared-executor-across-stores:76",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "test_mock_alignment:test_memory_event_loop.py:sync-method-collection:404",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "test_mock_alignment:test_memory_event_loop.py:generator-wrapping:448",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-23",
+   "claim_signature": "test_mock_alignment:test_memory_event_loop.py:concurrent-call-names:579",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-24",
+   "claim_signature": "test_mock_alignment:test_memory_event_loop.py:validate-dumps-counts:635",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-25",
+   "claim_signature": "test_mock_alignment:test_memory_event_loop.py:dedup-norm-count:667",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-26",
+   "claim_signature": "dependency_interaction:test_memory_event_loop.py:done-callback-ordering:700",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-27",
+   "claim_signature": "test_mock_alignment:test_memory_tool_responsiveness.py:held-iter-all-markdown",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-28",
+   "claim_signature": "api_contract:repo:spdx-header",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-29",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-30",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-31",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-32",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-33",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-34",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}
