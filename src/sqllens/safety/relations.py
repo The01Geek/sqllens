@@ -137,15 +137,20 @@ def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
     except Exception as exc:
         # The client sees only the sanitized message; log the cause so a guard
         # bug, a revoked catalog grant and a lost connection stay distinguishable.
+        # SQLite runs no function-call check, so its message names relations only.
+        checked = (
+            "relation types or function calls"
+            if dialect in ("postgres", "mysql")
+            else "relation types"
+        )
         logger.warning(
-            "row-level-security relation or function check raised an unexpected %s; "
-            "failing closed",
+            "row-level-security check of %s raised an unexpected %s; failing closed",
+            checked,
             type(exc).__name__,
             exc_info=True,
         )
         raise RlsError(
-            "row-level security could not verify relation types or function calls; "
-            "query blocked"
+            f"row-level security could not verify {checked}; query blocked"
         ) from exc
 
 
