@@ -1,0 +1,205 @@
+# AGENTS.md
+
+Guidance for AI coding assistants (Claude Code, Codex, and others) working in this repo. This is the single source of truth: `CLAUDE.md` only imports this file, so edit here, not there.
+
+## Project overview
+
+**SQL Lens** is a standalone MCP server that exposes a natural-language SQL agent and a vector memory store. It connects MCP-aware AI assistants (Cursor, Claude Desktop, Windsurf, custom clients) to a single configured database. Two tools are always exposed (opt-in memory and profile admin tools are registered only when an operator enables them):
+
+- `query_database(question)` — NL → SQL → executed → Markdown answer, plus ordered table/chart/text blocks that app-widget hosts render as an interactive table or ECharts chart.
+- `list_data_sources()` — describes the configured database.
+
+One database per running instance. Read-only by default, enforced by a `sqlglot` parser guard. Anthropic-only LLM in v1; the LLM interface is pluggable for future providers.
+
+**License:** Apache 2.0. SPDX headers on all first-party `.py` files. Lifted code under `src/sqllens/agent/` is governed by `LICENSES/THIRD-PARTY.txt` — keep that file's copyright line intact.
+
+**Repo:** https://github.com/The01Geek/sqllens (public, owner `The01Geek`).
+
+This repo was extracted from a larger parent product (the maintainer knows the path). The extraction is intentional — SQL Lens is meant to stand on its own. Do **not** add parent-product-specific concerns (multi-tenancy, OAuth login UI, tenant settings JSONB, AILog persistence, RAG, chat skill routing) without an explicit decision recorded in an issue or design doc.
+
+## Architecture
+
+```
+src/sqllens/
+├── __init__.py              # __version__
+├── __main__.py              # python -m sqllens
+├── cli.py                   # Typer: version | init | serve | validate | claude-desktop install
+│                            #   | import-memory | verify-memory | export-memory
+├── config.py                # pydantic-settings: TOML + SQLLENS_ env vars
+├── server.py                # FastMCP factory; dispatches to stdio or HTTP
+├── preflight.py             # eager infrastructure checks run by `sqllens serve`
+├── profiles.py, runtime.py  # named per-request config profiles; request-local effective settings
+├── conversation_store.py    # bounded, in-process multi-turn conversation store
+├── tools/                   # MCP tool implementations (thin wrappers over agent/)
+├── agent/                   # NL-to-SQL agent — lifted code (vendored, see below)
+│   ├── factory.py           # build_agent / build_sql_runner — the only public seam
+│   ├── core/, components/, capabilities/, integrations/, tools/, utils/
+├── memory/                  # first-party memory import/export/admin over the Chroma store
+├── eval/                    # golden-set accuracy regression guard (verify-memory)
+├── installers/              # client wiring helpers (claude_desktop.py)
+├── ui/                      # packaged MCP App widget HTML (query results, memory/config admin)
+├── transport/               # ASGI layer
+│   └── http.py              # Streamable HTTP + auth middleware + path normalizer
+├── connectors/              # Reserved for SQLAlchemy-backed adapters (Phase 4+)
+├── auth/                    # base (Authenticator protocol) + none | bearer | jwt; policy.py bind policy
+└── safety/                  # readonly.py SQL parser; rls.py row scoping; limits.py row cap;
+                             #   ReadOnlyGuardRunner / RlsGuardRunner / RowCapRunner decorators
+```
+
+Underscore-prefixed top-level modules (`_atomic.py`, `_bounded_json.py`, `_errors.py`, `_memory_consistency.py`) are private shared helpers.
+
+Layering: `cli → server → tools → agent.factory → agent.*`. The HTTP transport in `transport/http.py` wraps `server.build_server()` with auth + path normalization. Auth and safety are cross-cutting and may be imported anywhere.
+
+The agent's `send_message` returns an async stream of `UiComponent` objects; `tools/_format.py` collapses that stream into a single Markdown string for the MCP tool result.
+
+## The pruning choice (lifted agent code)
+
+When extracting `sqllens.agent` we made a deliberate **aggressive-pruning** choice: copy only the modules transitively required by the MCP tools we ship, rather than carry the entire upstream framework. The original tree had 283 Python files; we kept ~110 (first-party additions since then bring `src/sqllens/agent/` to ~120). v0.2 reintroduces a chart-emitting tool as a first-party `EmitChartTool` (`src/sqllens/agent/tools/emit_chart.py`) — not lifted from upstream. It is an agent-side tool, not an MCP tool: the chart blocks it emits are returned by `query_database` (the former separate `visualize_data` MCP tool was folded into `query_database`).
+
+**What this means for debugging:**
+
+- If you hit unexpected behavior in the agent — wrong prompt, missing capability, unfamiliar code path, broken integration — **check the upstream source first** before assuming it's our bug. The reference copy lives on disk in the parent project we extracted from (the maintainer knows the path).
+- Useful directories in the upstream to consult: `core/agent/`, `tools/`, `components/`, `integrations/anthropic/`, `integrations/chromadb/`, `integrations/postgres/`, `capabilities/`. We pruned `examples/`, `legacy/`, `web_components/`, `servers/`, most of `agents/`, 24 unused integration backends, and three of five upstream tools (upstream's visualize_data, python, file_system). The chart capability has since been reintroduced as the first-party `EmitChartTool` described above; the other two remain pruned.
+- If a module we *did* copy references something we *didn't*, the import will fail at startup. The fix is usually one of: copy the missing module, replace it with a stub, or remove the dependency by simplifying our caller.
+
+**Upstream brand cleanliness — strict rule:**
+
+The agent code originated as a fork of an MIT-licensed upstream project. The legal copyright line lives in `LICENSES/THIRD-PARTY.txt` and **must not be removed**. Outside that one file, **no reference to the upstream's name may appear anywhere in the repository** — not in docs, not in code, not in module docstrings, not in user-facing strings (CLI help, MCP tool descriptions, log messages, system prompts, error messages). When lifting more code from upstream, sed-rewrite the upstream package namespace (the maintainer knows it) → `sqllens.agent.*` and scrub any upstream brand-name string occurrences in the same change.
+
+## Commands
+
+```bash
+# Install (editable, with dev + all DB drivers), constrained to the same
+# locked versions CI uses. Use this exact command in any agent/cloud setup script.
+pip install -c requirements.txt -c docker/requirements-drivers.txt -e ".[dev,all]"
+
+# Lint + tests (default run does not collect tests/connectors/, which needs real DBs)
+ruff check .
+pytest -q
+
+# Connector tests (need SQLLENS_TEST_POSTGRES_URL + SQLLENS_TEST_MYSQL_URL)
+pytest -q tests/connectors
+
+# Run the server (after `sqllens init` writes a sqllens.toml)
+sqllens serve
+
+# Validate a config without starting
+sqllens validate -c sqllens.toml
+
+# Build wheel + sdist
+python -m build
+```
+
+Python 3.11+ required (CI tests 3.11–3.14). Config can come from `./sqllens.toml`, `--config <path>`, or `SQLLENS_*` env vars. Nested fields use double-underscore: `SQLLENS_LLM__API_KEY=sk-ant-...`. Env wins over TOML.
+
+## Code style
+
+- Ruff with `E F I B UP RUF` selected, line length 100. `src/sqllens/agent/` is excluded — it's vendored.
+- Type hints on every public signature.
+- No new top-level dependencies without discussion.
+- Tools (in `tools/`) are thin: parse args → call agent → format result. Business logic belongs in `agent/`.
+- **Use sqlglot wherever SQL text is parsed, tokenized, classified, split or rewritten.** One parser gives the guards and the runners one view of a statement in every dialect, so they cannot disagree about it. Parse with `sqlglot.parse` / `parse_one` (or tokenize with sqlglot's tokenizer) under the dialect from the database URL (`sqlglot_dialect_for_url` in `src/sqllens/safety/readonly.py`), and work on the expression tree. This covers keyword and statement-type detection, comment stripping and statement splitting: no regexes, `.split()` or first-word checks on SQL text.
+  - **Every sqlglot call on untrusted SQL has a defined, tested failure path:** which errors it catches (`sqlglot.errors.ParseError`, `TokenError`, an empty parse, an unknown dialect) and whether it fails closed or open. The precedents are in `readonly.py`: `assert_select_only` fails closed (a parse or tokenize error, or a dialect that does not resolve, raises `UnsafeSqlError`); `is_introspection_query` fails open to "data query" on a parse or tokenize error or an empty parse (a statement whose leading keyword is `SHOW` is introspection before any parse), lets any other parser exception propagate, and on any exception from identifier normalization or scope analysis excludes no CTE reference (every table counts toward the catalog check); `first_sql_keyword` treats a `TokenError` as "no leading keyword" (`""`) and lets any other tokenizer exception propagate. Both `is_introspection_query` and `first_sql_keyword` log a warning and fall back to no dialect when the dialect does not resolve.
+  - **Behavior that depends on sqlglot's AST shape or tokenizer needs a test.** `pyproject.toml` allows sqlglot `>=30.22,<31` and `requirements.txt` locks the exact version CI tests against; its node names and tokenizer rules change between releases (30.22 is the first whose MySQL tokenizer ends a line comment only at a newline).
+  - **Existing hand-written SQL string handling is known debt; replace it when you touch that code.** `_mysql_parse_sql` is the deliberate exception: it refuses MySQL input that MySQL and sqlglot would split into tokens differently, which sqlglot cannot detect on its own.
+- **Failures must surface as structured signal — never as a silent success or an unguarded crash.** Errors visible to MCP clients must be returned as `isError: true` with a clear message. Do **not** let the LLM apologize inside a tool result; the calling agent needs structured signal. This is the single most-violated rule in this repo — it has recurred across config, transport, and memory work. It covers four cases the terse "return errors as isError" wording kept missing:
+  - **Partial failure is failure.** An operation that completed some work and failed the rest (e.g. `import_memory` with `saved == 0` and `errors > 0`, or any `errors > 0`) must be `isError: true`, not a success object that merely *reports* the error count. If the operation did not fully achieve what its name promises, it errored.
+  - **Lossy / empty success needs a loud warning, not green output.** Bulk read/write operations (export-memory, import-memory) on an empty, corrupt, or version-skewed store must emit an explicit `Warning:` and never print unqualified success — a clean "Done" on a destroyed store is a data-loss trap.
+  - **No unguarded dereference of optional/secret config on a non-CLI path.** Values like `cfg.llm.api_key` are `None` for HTTP-transport and programmatic callers; dereferencing (`.get_secret_value()`) without a guard raises a bare `AttributeError` that reaches the MCP client as an unstructured crash. Guard with a clear message (the `API_KEY_MISSING_MESSAGE` pattern) before dereferencing.
+  - **No blanket `except` that swallows rows or steps.** A broad `except (TypeError, ValueError, ...): continue` over an iterator (e.g. `iter_all`) silently drops every record on schema/version skew and reports the result as a successful empty export. Catch narrowly, count what you skip, and surface a non-success if anything was skipped.
+
+  Before returning success from any tool or CLI command, ask: *did every item this operation promised actually complete, and would a `None`/empty/corrupt input reach this return as a green result?* If the answer is uncertain, it is an error.
+- New first-party `.py` files get SPDX headers:
+  ```
+  # SPDX-FileCopyrightText: 2026 Daniel Radman
+  # SPDX-License-Identifier: Apache-2.0
+  ```
+
+## Claims must match the code (no fabricated behavior)
+
+Every sentence that **describes runtime behavior** — in a docstring, an internal doc (`docs/internal/`), an external doc (`docs/external/`), a release note, a PR body, or a code comment — must describe what the code on this branch **actually does**, not what the issue asked for or what you intend to do next. Writing the doc first and the code second is how SQL Lens has shipped false claims twice (#117, #136).
+
+Before you write or keep any behavioral claim, **trace it to the line that implements it**:
+
+- **Boot vs. lazy / first-call.** If a doc says work happens "at startup" / "at `serve` boot," confirm the constructor (or warmup hook) actually performs that I/O — not just wires objects whose `__init__` is lazy. `build_agent` constructing a `ChromaAgentMemory` does *not* trigger the embedding-model download; only a real query/`get_recent_memories` touch does (#117).
+- **Guard / validation scope.** If a doc claims an input is "blocked," "rejected," or "validated," find the branch that rejects it. Match the doc to the *actual* predicate: don't claim type-mismatch blocking, empty-string blocking, or load-time rejection unless the code does exactly that (#136 claimed RLS type-mismatch and load-time-reject behavior the guard never implemented; empty-string slipped through `_is_suspicious_scalar`).
+- **Exception breadth.** A docstring promising "fail-secure to `{}`" must catch the exceptions that can actually be raised, not a narrower subset (#136 caught only `(ValueError, AttributeError)`).
+- **Counting claims.** "Three orthogonal protections" / "two halves" / "N tools" must equal what the file now contains after your change. Adding a fourth guard means the count updates (#136 left "Three orthogonal protections" after adding `RlsGuardRunner`).
+- **Sibling surfaces.** If two surfaces share a wrapped runner (the `query_database` MCP tool + the `verify-memory` CLI runner, which both call `query_database_impl_with_widgets`), a claim about "every query" must hold for both, or scope the claim and record the gap as an explicit follow-up — do not let the doc imply coverage the sibling lacks.
+
+When a claim cannot yet be backed by code, either cut it or write it as an explicit "not yet / follow-up," and call that out in the PR body. A claim you can't trace to a line is a defect, not a placeholder.
+
+## Release & distribution
+
+Three artifact types, all driven by tag pushes (`vX.Y.Z`):
+
+| Path | Trigger | Workflow | Where it lands |
+|---|---|---|---|
+| **PyPI** | tag `v*` | `release.yml` | https://pypi.org/project/sqllens/ via OIDC Trusted Publishing — no API tokens. The `pypi` GitHub environment exists; the matching pending publisher is configured on PyPI (project=`sqllens`, owner=`The01Geek`, workflow=`release.yml`, environment=`pypi`). |
+| **Docker** | tag `v*`, push to `main` | `docker.yml` | `ghcr.io/the01geek/sqllens:{X.Y.Z, X.Y, latest}` for tags; `:edge` and `:git-<sha>` for main. Multi-arch (amd64 + arm64), cosign-signed (keyless OIDC), SBOM (SPDX) and build provenance attached. |
+| **MCPB** | tag `v*` | `mcpb.yml` | Per-platform `.mcpb` bundles (macOS x86_64/arm64, Linux x86_64, Win32 x86_64) attached as GitHub Release assets. |
+
+**Release notes:** Write one `changelog.d/<PR>.<category>.md` fragment per applicable
+category (`security`, `fixed`, `added`, `changed`, `deprecated`, `removed`). Do not
+append to `CHANGELOG.md` or `docs/external/release-notes.md`; the former is generated
+only during release preparation, and the latter is a frozen historical archive.
+Reuse the PR's fragment when revising a note. Developer-only changes need no note.
+
+**Cutting a release:** Follow [the release guide](docs/internal/releasing.md).
+After the intended fragments have merged, create `codex/release-X.Y.Z`, bump
+`project.version` in `pyproject.toml` and `__version__` in
+`src/sqllens/__init__.py`, and run:
+```bash
+python scripts/changelog.py prepare
+python scripts/changelog.py release --tag vX.Y.Z
+```
+Commit the version, generated changelog, and consumed fragment deletions together;
+review and merge that preparation PR before manually tagging its merged commit.
+Tag workflows refuse mismatched/unprepared entries and unconsumed fragments before
+publishing. The documented `codex/changelog-history-*` route permits focused
+history corrections without changing draft notes or version headings. To correct
+already-merged draft prose, use `codex/changelog-notes-<reason>`: version, shared
+release files, and fragment filenames must stay unchanged.
+
+PyPI versions are immutable after publish — you can yank but not re-upload the same version. Pre-release with `v0.1.0a1` if uncertain. The `softprops/action-gh-release` step on `release.yml` flags any tag containing `-` as a GitHub pre-release automatically.
+
+## Repo conventions
+
+- **`main` is protected** by one ruleset (`main-protected`, ID 15633058; classic branch protection is disabled). It has two rules: `deletion` (the branch cannot be deleted) and `required_status_checks`, which rejects any update to `main` — a direct push, a force push, or a merge — whose commit has not passed these checks:
+  - `Lint + unit + transport (py3.11)`
+  - `Lint + unit + transport (py3.12)`
+  - `Lint + unit + transport (py3.13)`, `Lint + unit + transport (py3.14)` and `Connector tests (Postgres + MySQL)` run on every PR but are **not** currently in the ruleset's required set. Treat them as must-pass by convention; promoting them to required is a separate ruleset change.
+- **Bypass is PR-only.** The ruleset's one bypass actor is the repository Admin role in `pull_request` mode: an admin can merge a PR past failing checks, but cannot bypass them with a direct push. Use a feature branch + PR every time:
+  ```bash
+  git checkout -b fix/short-description
+  # ...edits...
+  git commit -s && git push origin fix/short-description
+  gh pr create --fill
+  gh pr merge --squash --delete-branch --auto    # auto-merge once CI passes
+  ```
+- **CI status check names** in code are load-bearing — if you rename a workflow job, also update the ruleset (`gh api repos/The01Geek/sqllens/rulesets/15633058`).
+- **Workflow file names matter.** Avoid renaming `release.yml` — the PyPI Trusted Publisher is bound to that filename.
+
+## What not to add
+
+- Multi-tenancy. One database per running instance. If you need many, run many servers.
+- A user model, login flow, or session storage. Authentication is delegated to upstream IdPs (JWT) or static bearer tokens.
+- A document RAG pipeline. SQL Lens is SQL-only.
+- A web UI. The MCP transport is the UI.
+- Schema migrations / a server-side database. ChromaDB is the only persistent store, on the local filesystem.
+
+## Gotchas (things that have bitten us)
+
+- **GitHub Actions YAML and bash line continuations.** A `run: |` block scalar requires every line indented. Bash `\` line continuations whose next line starts at column 1 are parsed by YAML as new top-level keys (without colons) and reject the whole workflow file at validation. Use heredocs or single-line forms instead.
+- **Unanchored `.gitignore` entries match anywhere.** A bare `data/` rule silently ignored `src/sqllens/agent/components/rich/data/`, breaking CI. Anchor local-data ignores with a leading slash (`/data/`, `/chroma/`).
+- **OCI image references must be all lowercase.** `${{ github.repository_owner }}` preserves GitHub's case — buildx tolerates uppercase with a warning, but syft (SBOM) and cosign reject it. The Docker workflow lowercases via bash `${VAR,,}` and re-exports through `$GITHUB_ENV`.
+- **Docker `--network=host` on Docker Desktop / WSL2** puts the container in Docker Desktop's internal WSL distro, which is a *different* network namespace than the user's WSL. Native processes in user-WSL (curl, MCP Inspector, IDEs) can't reach `127.0.0.1:<port>` on the container even though sibling containers can. **Always use port mapping** (`-p HOST:CONTAINER`) for local dev unless you specifically need host-shared networking.
+- **FastMCP rejects non-loopback `Host` headers** by default ("421 Misdirected Request"). When connecting from a docker container to `host.docker.internal:<port>`, the inbound `Host` header is `host.docker.internal:<port>` and gets rejected. Either bind from the same network namespace (so `127.0.0.1` resolves locally) or configure FastMCP's transport security if exposing remotely.
+
+## Debugging checklist
+
+1. Reproduce against the bundled SQLite demo first. If it fails there, the issue is local; if not, the user's database/config is involved.
+2. If the agent runs out of tool iterations exploring schema (especially against an untrained DB), the configured `max_tool_iterations` may be too low — or the agent has no memory yet. ChromaDB needs time to build, and the first query downloads ~80 MB of embedding model.
+3. If the answer is wrong, look at memory hits — `SQLLENS_MEMORY__SIMILARITY_THRESHOLD` may be too high or too low.
+4. If a tool errors out in an unfamiliar way, **diff our agent file against the upstream source** to see if we missed a code path during the lift.
+5. For MCP transport issues, escalate slowly: curl first (raw JSON-RPC), then MCP Inspector, then the IDE. Each layer adds its own failure modes.
