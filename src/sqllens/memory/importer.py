@@ -16,7 +16,7 @@ import logging
 from collections.abc import Callable
 
 from sqllens.memory.schema import ImportItemError, ImportReport, MemoryBundle
-from sqllens.memory.store import MemoryStore
+from sqllens.memory.store import MemoryStore, run_memory_call
 
 logger = logging.getLogger("sqllens.memory")
 
@@ -31,6 +31,30 @@ _SYSTEMIC_ERRORS = (MemoryError, OSError, SystemError)
 
 def _norm(text: str) -> str:
     return " ".join(text.split()).lower()
+
+
+def _baseline(store: MemoryStore, clear: bool) -> tuple[set[tuple[str, str]], set[str]]:
+    """Optionally clear, then return the normalized keys already in the store.
+
+    Runs on the memory worker as one call, so no other call routed through
+    ``run_memory_call`` runs between the clear and the read.
+    """
+    if clear:
+        store.clear()
+
+    # Seed the seen-sets from what is already persisted (after an optional
+    # clear) so a re-import of the same file saves zero duplicates. On a
+    # dry-run the clear was skipped, so existing memory is still the baseline.
+    existing = store.iter_all()
+    seen_pairs: set[tuple[str, str]] = set()
+    seen_docs: set[str] = set()
+    if existing.sql_pairs:
+        seen_pairs = {
+            (_norm(p.question), _norm(p.sql)) for p in existing.sql_pairs.pairs
+        }
+    if existing.schema_docs:
+        seen_docs = {_norm(d.content) for d in existing.schema_docs}
+    return seen_pairs, seen_docs
 
 
 async def import_bundle(
@@ -49,21 +73,7 @@ async def import_bundle(
     """
     report = ImportReport()
 
-    if clear and not dry_run:
-        store.clear()
-
-    # Seed the seen-sets from what is already persisted (after an optional
-    # clear) so a re-import of the same file saves zero duplicates. On a
-    # dry-run the clear was skipped, so existing memory is still the baseline.
-    existing = store.iter_all()
-    seen_pairs: set[tuple[str, str]] = set()
-    seen_docs: set[str] = set()
-    if existing.sql_pairs:
-        seen_pairs = {
-            (_norm(p.question), _norm(p.sql)) for p in existing.sql_pairs.pairs
-        }
-    if existing.schema_docs:
-        seen_docs = {_norm(d.content) for d in existing.schema_docs}
+    seen_pairs, seen_docs = await run_memory_call(_baseline, store, clear and not dry_run)
 
     sections: list[tuple[str, list, set, Callable, Callable]] = [
         (

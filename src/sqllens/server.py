@@ -485,6 +485,7 @@ def build_server(cfg: Config) -> FastMCP:
         from sqllens.memory import MemoryCorruptionError, MemoryStore
         from sqllens.memory import admin as memory_admin
         from sqllens.memory.admin import MemoryNotFoundError
+        from sqllens.memory.store import run_memory_call
 
         # Self-driving memory-administration widget. Gated on the same flag as
         # the seven backing tools so a host never advertises a widget it can't
@@ -542,7 +543,8 @@ def build_server(cfg: Config) -> FastMCP:
             """
             mtype = _parse_memory_type(memory_type)
             try:
-                result = memory_admin.list_memories(
+                result = await run_memory_call(
+                    memory_admin.list_memories,
                     admin_store,
                     memory_type=mtype,
                     limit=limit,
@@ -565,7 +567,7 @@ def build_server(cfg: Config) -> FastMCP:
             ``{"error": ...}`` when no memory has that id.
             """
             try:
-                result = memory_admin.get_memory(admin_store, memory_id)
+                result = await run_memory_call(memory_admin.get_memory, admin_store, memory_id)
             except MemoryNotFoundError:
                 return _json_error(
                     {"error": "memory not found", "memory_id": memory_id}
@@ -590,7 +592,9 @@ def build_server(cfg: Config) -> FastMCP:
             _memory_write_auth()
             try:
                 async with admin_write_lock:
-                    result = memory_admin.delete_memory(admin_store, memory_id)
+                    result = await run_memory_call(
+                        memory_admin.delete_memory, admin_store, memory_id
+                    )
             except MemoryNotFoundError:
                 return _json_error(
                     {"deleted": False, "error": "memory not found",
@@ -617,8 +621,8 @@ def build_server(cfg: Config) -> FastMCP:
             mtype = _parse_memory_type(memory_type)
             try:
                 async with admin_write_lock:
-                    result = memory_admin.clear_memories(
-                        admin_store, memory_type=mtype
+                    result = await run_memory_call(
+                        memory_admin.clear_memories, admin_store, memory_type=mtype
                     )
             except Exception:
                 logger.exception("clear_memories tool failed")
@@ -692,7 +696,9 @@ def build_server(cfg: Config) -> FastMCP:
                     f"Unknown export format {format!r}; expected 'json' or 'csv'."
                 )
             try:
-                result = memory_admin.export_memories(admin_store, format)  # type: ignore[arg-type]
+                result = await run_memory_call(
+                    memory_admin.export_memories, admin_store, format  # type: ignore[arg-type]
+                )
             except MemoryCorruptionError as exc:
                 # A wholesale-corrupt store must never serialize as an empty
                 # success — distinct, actionable signal, not the generic message.
@@ -724,7 +730,7 @@ def build_server(cfg: Config) -> FastMCP:
             "top_hit_memories": [...]}``.
             """
             try:
-                result = memory_admin.get_memory_stats(admin_store)
+                result = await run_memory_call(memory_admin.get_memory_stats, admin_store)
             except Exception:
                 logger.exception("get_memory_stats tool failed")
                 raise RuntimeError(
