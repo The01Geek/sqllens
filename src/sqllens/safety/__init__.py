@@ -9,12 +9,17 @@ Four orthogonal protections, composed at the factory:
   anything that isn't a single ``SELECT``/``WITH``.
 * ``apply_rls`` / ``RlsGuardRunner`` — per-request row-level-security
   predicate injection via sqlglot AST rewrite; the rewritten SQL is what
-  flows on to the read-only guard, and the engine runner then verifies on
+  flows on to the read-only guard. With rules configured, ``RlsGuardRunner``
+  also applies the read-only guard's function denylist to the rewritten SQL,
+  whatever ``database.read_only`` is. The engine runner then verifies on
   its execution connection that every referenced relation is a base table
-  or an allowlisted metadata-only system view. Fail-secure: any rewrite
+  or an allowlisted metadata-only system view, that no PostgreSQL relation
+  is a partition or inheritance child, and that no called name matches a
+  PostgreSQL function outside ``pg_catalog`` and ``information_schema`` or a
+  MySQL stored function. Fail-secure: any rewrite
   failure (parse error, scope-analysis error, missing/suspicious dynamic
-  value, unprovable protected-table reference) and any other view or
-  unverifiable relation blocks the query.
+  value, unprovable protected-table reference), any other view or
+  unverifiable relation, and any failed catalog lookup blocks the query.
 * Per-runner statement timeouts (``SET statement_timeout`` on Postgres,
   ``SET SESSION MAX_EXECUTION_TIME`` on MySQL, ``set_progress_handler``
   deadline on SQLite) — server- or driver-side time bound.
@@ -40,6 +45,7 @@ from sqllens.safety.limits import (
 )
 from sqllens.safety.readonly import (
     UnsafeSqlError,
+    assert_no_denied_functions,
     assert_select_only,
     first_sql_keyword,
     is_introspection_query,
@@ -126,8 +132,11 @@ class RlsGuardRunner(SqlRunner):
     request from caller-supplied MCP metadata). Static rules need no metadata
     and so are enforced on every transport, including stdio.
 
-    With active rules, the inner runner must also verify base-table relations
-    on its execution connection; stored views are refused rather than expanded.
+    With active rules, the rewritten SQL must pass the read-only guard's
+    function denylist (``UnsafeSqlError``), and the inner runner must also
+    verify relations and called functions on its execution connection; stored
+    views, child tables and calls matching database-defined functions (as
+    ``verify_base_tables`` scopes them) are refused rather than expanded.
     """
 
     def __init__(
@@ -184,10 +193,30 @@ class RlsGuardRunner(SqlRunner):
                 f"refusing to execute query: row-level-security guard errored "
                 f"({type(e).__name__}: {e})"
             ) from e
+        if self._rules:
+            _refuse_denied_functions(rewritten, self._dialect)
         options = {"require_base_tables": True} if self._rules or require_base_tables else {}
         return await self._inner.run_sql(
             args.model_copy(update={"sql": rewritten}), context, **options
         )
+
+
+def _refuse_denied_functions(sql: str, dialect: str | None) -> None:
+    """Apply the read-only guard's function denylist, whatever ``database.read_only`` is."""
+    try:
+        assert_no_denied_functions(sql, dialect=dialect)
+    except UnsafeSqlError as e:
+        raise UnsafeSqlError(f"refusing to execute SQL: {e}") from e
+    except Exception as e:
+        logger.warning(
+            "row-level-security function denylist check raised an unexpected %s; failing closed",
+            type(e).__name__,
+            exc_info=True,
+        )
+        raise UnsafeSqlError(
+            f"refusing to execute SQL: function denylist check errored "
+            f"({type(e).__name__}: {e})"
+        ) from e
 
 
 def _relation_check_executor(runner: object) -> object:

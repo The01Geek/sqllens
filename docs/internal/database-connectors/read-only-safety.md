@@ -1,6 +1,6 @@
 # SQL safety guards
 
-<!-- verified-against: 0fbeec6 2026-10-30 -->
+<!-- verified-against: eff9038 2026-10-30 -->
 
 Why the agent can't accidentally `DROP TABLE`, can't hang the server on `SELECT generate_series(1, 1e9)`, and can't OOM the process by materialising a billion-row result. Source-of-truth reference for [src/sqllens/safety/readonly.py](../../../src/sqllens/safety/readonly.py), [src/sqllens/safety/limits.py](../../../src/sqllens/safety/limits.py), and [src/sqllens/safety/__init__.py](../../../src/sqllens/safety/__init__.py).
 
@@ -88,7 +88,7 @@ When `database.read_only = true` (the default), each connector enforces read-onl
 
 The `_readonly_uri(path)` helper in [src/sqllens/agent/integrations/sqlite/sql_runner.py](../../../src/sqllens/agent/integrations/sqlite/sql_runner.py) builds the SQLite URI and is factored out as a pure function so the URI construction is unit-testable without a live database file. It percent-encodes the path (keeping `/`) so an unescaped `?` or `#` in the database path cannot truncate the URI and silently drop the `mode=ro` query string.
 
-`read_only=False` disables driver-level enforcement and the parser guard simultaneously (controlled by `cfg.database.read_only`). Do not set it to `false` in production.
+`read_only=False` disables driver-level enforcement and the parser guard simultaneously (controlled by `cfg.database.read_only`). While RLS rules are configured, the parser guard's function denylist still applies (see [Disabling the guard](#disabling-the-guard)). Do not set it to `false` in production.
 
 ## Statement timeout
 
@@ -201,7 +201,7 @@ The dialect is forwarded to `sqlglot.parse(sql, dialect=dialect)`. Without it, d
 
 ## Disabling the guard
 
-`cfg.database.read_only = false` in `sqllens.toml` skips the wrapping entirely. **Don't.** The only justification for turning it off is debugging a specific parse-rejection issue against a development database — and even then, fix the parse issue, don't ship with the guard off. The default is `true` for a reason.
+`cfg.database.read_only = false` in `sqllens.toml` skips the wrapping entirely. One part survives while RLS rules are configured: `RlsGuardRunner` runs the function denylist alone (`assert_no_denied_functions`, the same list and matcher as `assert_select_only`) on the rewritten SQL and raises `UnsafeSqlError`, without the SELECT-only statement checks. With no rules, nothing replaces the guard. **Don't.** The only justification for turning it off is debugging a specific parse-rejection issue against a development database — and even then, fix the parse issue, don't ship with the guard off. The default is `true` for a reason.
 
 There is **no** per-query override. Once the guard is on, every `RunSqlTool` execution is gated.
 
