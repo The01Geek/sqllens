@@ -1,6 +1,6 @@
 # SQL safety guards
 
-<!-- verified-against: 0fbeec6 2026-10-30 -->
+<!-- verified-against: 980bd57 2026-10-30 -->
 
 Why the agent can't accidentally `DROP TABLE`, can't hang the server on `SELECT generate_series(1, 1e9)`, and can't OOM the process by materialising a billion-row result. Source-of-truth reference for [src/sqllens/safety/readonly.py](../../../src/sqllens/safety/readonly.py), [src/sqllens/safety/limits.py](../../../src/sqllens/safety/limits.py), and [src/sqllens/safety/__init__.py](../../../src/sqllens/safety/__init__.py).
 
@@ -200,6 +200,8 @@ Full reference in [row-level-security.md](row-level-security.md).
 | `postgres://`, `postgresql://`, `postgresql+psycopg2://`, … | `"postgres"` |
 | `mysql://` | `"mysql"` |
 | anything else | `None` (sqlglot's generic dialect) |
+
+Read-shaped classification (`is_read_shaped`, which tokenizes with `first_sql_keyword`) uses the same dialect everywhere: each runner passes its own literal (`"sqlite"`, `"postgres"`, `"mysql"`) when it picks the row-returning branch, and `RunSqlTool` receives `build_agent`'s dialect, so the tool builds a result table for the statements the runner sent through that branch and a `row(s) affected` notification for the rest.
 
 The dialect is forwarded to `sqlglot.parse(sql, dialect=dialect)`. Without it, dialect-specific syntax (e.g. Postgres's `::cast`, MySQL's backtick-quoted identifiers) can mis-parse and trigger spurious `UnsafeSqlError`s.
 
