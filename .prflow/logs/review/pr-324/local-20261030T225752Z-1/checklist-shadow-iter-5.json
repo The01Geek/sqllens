@@ -1,0 +1,1564 @@
+[
+  {
+    "id": "VC-1",
+    "category": "api_contract",
+    "claim": "CLAUDE.md states is_introspection_query treats a statement whose leading keyword is SHOW as introspection before any parse, lets any other parser exception (beyond parse/tokenize errors and an empty parse) propagate, and on any exception from identifier normalization or scope analysis excludes no CTE reference so every table counts toward the catalog check.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`is_introspection_query` fails open to \"data query\" on a parse or tokenize error or an empty parse (a statement whose leading keyword is `SHOW` is introspection before any parse), lets any other parser exception propagate, and on any exception from identifier normalization or scope analysis excludes no CTE reference (every table counts toward the catalog check)",
+    "source_file": "CLAUDE.md",
+    "source_line": 90,
+    "verify_against": "src/sqllens/safety/readonly.py in the head view",
+    "verify_hint": "Check `is_introspection_query` in `src/sqllens/safety/readonly.py`: the SHOW early return via `first_sql_keyword`, which exceptions the `sqlglot.parse` call catches, and the try/except around `normalize_identifiers` / `traverse_scope` (its except clause must catch every exception and leave the excluded set empty).",
+    "claim_signature": "api_contract:CLAUDE.md:introspection-failure-path-precedent:90",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "dependency_interaction",
+    "claim": "CLAUDE.md states sqlglot 30.22 is the first release whose MySQL tokenizer ends a line comment only at a newline, and that the project pins sqlglot >=30.22,<31.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "sqlglot is pinned `>=30.22,<31`, and its node names and tokenizer rules change between releases (30.22 is the first whose MySQL tokenizer ends a line comment only at a newline).",
+    "source_file": "CLAUDE.md",
+    "source_line": 91,
+    "verify_against": "pyproject.toml dependency list and the MySQL tokenizer handling in readonly.py plus the tests that pin it",
+    "verify_hint": "Check the `sqlglot` requirement in `pyproject.toml`, and the test pinning `is_read_shaped(\"SELECT n FROM widgets # x\\r'\\n\", \"mysql\")` in `tests/unit/test_safety.py`, which is the in-repo evidence for the 30.22 tokenizer behavior; trace the input `SELECT n FROM widgets # x` + CR + `'` + LF through `first_sql_keyword` with dialect mysql.",
+    "claim_signature": "dependency_interaction:CLAUDE.md:sqlglot-3022-mysql-line-comment:91",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "api_contract",
+    "claim": "The release note states query_database now gets the rows of a read that starts with WITH, an opening parenthesis (such as a parenthesized UNION), a -- or /* */ comment (or # on MySQL), or that writes SELECT*FROM without a space.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`query_database` now gets the rows of a read that starts with `WITH`, an\nopening parenthesis (such as `(SELECT …) UNION (SELECT …)`), a `--` or `/* */`\ncomment (or `#` on MySQL), or that writes `SELECT*FROM` without a space.",
+    "source_file": "changelog.d/324.fixed.md",
+    "source_line": 1,
+    "source_line_end": 3,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py, the three runners' sql_runner.py, and is_read_shaped/first_sql_keyword in src/sqllens/safety/readonly.py",
+    "verify_hint": "Check `RunSqlTool.execute` in `src/sqllens/agent/tools/run_sql.py` and the read-shaped branch in `src/sqllens/agent/integrations/{sqlite,postgres,mysql}/sql_runner.py`; trace `( SELECT 1) UNION (SELECT 2)`, `-- c\\nSELECT 1`, `# c\\nSELECT 1` (mysql) and `SELECT*FROM t` through `is_read_shaped` for each dialect.",
+    "claim_signature": "api_contract:324.fixed.md:comment-cte-paren-reads-return-rows:1",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "api_contract",
+    "claim": "The release note states that before this change such a read was reported to the agent as a row count with its result rows dropped.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Such a\nread was reported to the agent as a row count, with its result rows dropped, so\nthe agent could not answer from them.",
+    "source_file": "changelog.d/324.fixed.md",
+    "source_line": 3,
+    "source_line_end": 5,
+    "verify_against": "base view src/sqllens/agent/tools/run_sql.py and runners",
+    "verify_hint": "Check `RunSqlTool.execute` in the base view's `src/sqllens/agent/tools/run_sql.py` (first-word `SELECT` check) and the base runners' `is_read_shaped` routing, for each read shape the note lists (WITH, parenthesis, comment-led, SELECT*FROM).",
+    "claim_signature": "api_contract:324.fixed.md:prior-behavior-row-count:3",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "api_contract",
+    "claim": "The release note states a query whose CTE name starts with a catalog prefix (e.g. WITH pg_recent AS (...) on Postgres) is no longer treated as a schema lookup, so its result is shown.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A query whose CTE name starts with a catalog\nprefix (for example `WITH pg_recent AS (…)` on Postgres) is no longer treated as\na schema lookup, so its result is shown.",
+    "source_file": "changelog.d/324.fixed.md",
+    "source_line": 5,
+    "source_line_end": 7,
+    "verify_against": "is_introspection_query in src/sqllens/safety/readonly.py and components_to_blocks in src/sqllens/tools/_format.py",
+    "verify_hint": "Check `is_introspection_query` CTE-exclusion logic in `readonly.py` and how `components_to_blocks` in `src/sqllens/tools/_format.py` uses it to decide whether a DataFrame following a run_sql card becomes a table block.",
+    "claim_signature": "api_contract:324.fixed.md:catalog-prefix-cte-shown:5",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "dependency_interaction",
+    "claim": "The release note states SQL Lens now requires sqlglot 30.22 or later and that pip installs it automatically on upgrade.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "SQL Lens now requires `sqlglot` 30.22\nor later; pip installs it automatically on upgrade.",
+    "source_file": "changelog.d/324.fixed.md",
+    "source_line": 7,
+    "source_line_end": 8,
+    "verify_against": "pyproject.toml [project] dependencies",
+    "verify_hint": "Check the `sqlglot` entry in `pyproject.toml` `[project].dependencies` (a hard runtime requirement, not an optional extra, so `pip install --upgrade sqllens` resolves it), including its `<31` ceiling which the note does not mention.",
+    "claim_signature": "dependency_interaction:324.fixed.md:sqlglot-floor-auto-install:7",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "api_contract",
+    "claim": "The changelog fragment follows the repo convention changelog.d/<PR>.<category>.md with a valid category, its PR number matching this PR (324).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "changelog.d/324.fixed.md",
+    "verify_against": "CLAUDE.md 'Release notes' section and scripts/changelog.py",
+    "verify_hint": "Check the fragment naming rule in CLAUDE.md's Release & distribution section and the filename parsing in `scripts/changelog.py`.",
+    "claim_signature": "api_contract:repo:changelog-fragment-naming",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "api_contract",
+    "claim": "factory.md states build_agent hands the sqlglot dialect from sqlglot_dialect_for_url to the read-only guard, the RLS guard and RunSqlTool (which classifies each statement as read-shaped with it).",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "that `build_agent` hands to the read-only guard, the RLS guard and `RunSqlTool` (which classifies each statement as read-shaped or not with it)",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 156,
+    "verify_against": "src/sqllens/agent/factory.py build_agent and src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check `build_agent` in `src/sqllens/agent/factory.py` for `RunSqlTool(..., dialect=dialect)`, `ReadOnlyGuardRunner(..., dialect=...)` and the RLS guard construction; check that `RunSqlTool.__init__` stores the dialect and `execute` passes it to `is_read_shaped`.",
+    "claim_signature": "api_contract:factory.md:dialect-handed-to-runsqltool:156",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "api_contract",
+    "claim": "factory.md states query_database passes the configured dialect to the formatter, which uses it both for the introspection classifier and for query_info[\"query_type\"].",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`query_database` passes the same dialect to the formatter, which uses it for the introspection classifier and for `query_info[\"query_type\"]`.",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 156,
+    "verify_against": "src/sqllens/tools/_format.py components_to_blocks and the query_database tool implementation in src/sqllens/tools/",
+    "verify_hint": "Check that the `query_database` implementation in `src/sqllens/tools/` calls `components_to_blocks(..., dialect=...)` and that `_format.py` computes `query_info[\"query_type\"]` with `first_sql_keyword(sql, dialect)` (not a hand-written first-word check).",
+    "claim_signature": "api_contract:factory.md:formatter-dialect-query-type:156",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "data_format_assumption",
+    "claim": "tool-scratch-storage.md states is_read_shaped classifies as read-shaped a statement whose leading keyword, after comments and opening parentheses, is SELECT, WITH, UNION, INTERSECT, EXCEPT or SHOW.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "That is a statement whose leading keyword, after comments and opening parentheses, is `SELECT`, `WITH`, `UNION`, `INTERSECT`, `EXCEPT` or `SHOW` — including a parenthesized set operation, a comment-led read, and a MySQL `SHOW`",
+    "source_file": "docs/internal/agent/tool-scratch-storage.md",
+    "source_line": 7,
+    "verify_against": "is_read_shaped and its keyword set in src/sqllens/safety/readonly.py",
+    "verify_hint": "Check `is_read_shaped` and the read-shaped keyword constant in `src/sqllens/safety/readonly.py` against exactly these six keywords (e.g. whether VALUES, TABLE, EXPLAIN are absent).",
+    "claim_signature": "data_format_assumption:tool-scratch-storage.md:read-shaped-keyword-set:7",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "api_contract",
+    "claim": "tool-scratch-storage.md states RunSqlTool classifies with is_read_shaped under the configured database's dialect, the same classifier and dialect the runner routes with.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "any statement `is_read_shaped` (in [src/sqllens/safety/readonly.py](../../../src/sqllens/safety/readonly.py)) classifies as read-shaped under the configured database's dialect, the same classifier and dialect the runner routes with.",
+    "source_file": "docs/internal/agent/tool-scratch-storage.md",
+    "source_line": 7,
+    "verify_against": "run_sql.py and the sqlite/postgres/mysql sql_runner.py files",
+    "verify_hint": "Compare the `is_read_shaped(...)` call in `RunSqlTool.execute` (`src/sqllens/agent/tools/run_sql.py`) with the calls in each runner's `run_sql` in `src/sqllens/agent/integrations/{sqlite,postgres,mysql}/sql_runner.py`: same function and the dialect each passes (runner's hardcoded dialect vs the URL-derived one).",
+    "claim_signature": "api_contract:tool-scratch-storage.md:same-classifier-as-runner:7",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "api_contract",
+    "claim": "tool-scratch-storage.md states a read-shaped statement returning no rows writes nothing and reports No rows returned, and only statements that are not read-shaped get the row-count summary (also writing nothing).",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A read-shaped statement that returns no rows writes nothing and reports `No rows returned`. Only statements that are not read-shaped get the row-count summary, and they write nothing either.",
+    "source_file": "docs/internal/agent/tool-scratch-storage.md",
+    "source_line": 14,
+    "verify_against": "RunSqlTool.execute in src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check the branches in `RunSqlTool.execute`: empty DataFrame on the read path, the `read_result` attr override (a frame the runner marks read_result when RunSqlTool's own classification says not read-shaped), and the `row(s) affected` branch; confirm no `write_file` call on the empty and non-read paths.",
+    "claim_signature": "api_contract:tool-scratch-storage.md:no-rows-vs-row-count:14",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "api_contract",
+    "claim": "tool-scratch-storage.md shows build_agent registering RunSqlTool(sql_runner=sql_runner, file_system=scratch_fs, dialect=dialect) where dialect is sqlglot_dialect_for_url(cfg.database.url).",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`dialect` is `sqlglot_dialect_for_url(cfg.database.url)`, the dialect the runners classify with.",
+    "source_file": "docs/internal/agent/tool-scratch-storage.md",
+    "source_line": 60,
+    "source_line_end": 65,
+    "verify_against": "build_agent in src/sqllens/agent/factory.py and runner is_read_shaped calls",
+    "verify_hint": "Check the `RunSqlTool(...)` registration and the `dialect` variable's assignment in `build_agent` (`src/sqllens/agent/factory.py`), and what dialect each runner passes to `is_read_shaped`.",
+    "claim_signature": "api_contract:tool-scratch-storage.md:runsqltool-wiring-dialect:60",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "dependency_interaction",
+    "claim": "read-only-safety.md states the deny-walk lists exp.Alter directly, that sqlglot names the ALTER node exp.Alter at the pinned floor 30.22 (and 30.26), and that a sqlglot without it fails at import.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "sqlglot names the ALTER node `exp.Alter` at the pinned floor (30.22, and 30.26 as checked), so the guard refers to it directly; a sqlglot without it fails at import rather than silently dropping ALTER from the deny-walk.",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 33,
+    "verify_against": "the denied-node tuple in src/sqllens/safety/readonly.py",
+    "verify_hint": "Check the DML/DDL deny tuple in `src/sqllens/safety/readonly.py` references `exp.Alter` at module level (so an AttributeError would raise at import) and that no `_ALTER_TYPE` / `getattr(exp, ...)` fallback remains.",
+    "claim_signature": "dependency_interaction:read-only-safety.md:exp-alter-direct:33",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "dependency_interaction",
+    "claim": "read-only-safety.md states that before 30.22 sqlglot's MySQL tokenizer ended a line comment at a carriage return, so SELECT n FROM widgets # x + CR + ' + LF raised TokenError, while the guard first turns that carriage return into a space in _mysql_parse_sql and accepted it.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Older MySQL tokenizers end it at a carriage return as well, so `SELECT n FROM widgets # x` + carriage return + `'` + newline raised `TokenError` while the guard — which first turns that carriage return into a space in `_mysql_parse_sql` — accepted it",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 52,
+    "verify_against": "_mysql_parse_sql in src/sqllens/safety/readonly.py",
+    "verify_hint": "Check `_mysql_parse_sql` in `src/sqllens/safety/readonly.py` for the carriage-return-to-space rewrite before tokenizing, and whether `first_sql_keyword` applies the same rewrite or not.",
+    "claim_signature": "dependency_interaction:read-only-safety.md:mysql-cr-rewrite:52",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "dependency_interaction",
+    "claim": "read-only-safety.md states that from 30.22 the Postgres, MySQL and SQLite tokenizers treat nested block comments as their engines do: Postgres nests, MySQL and SQLite end a comment at the first */.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "From 30.22 the three dialects' tokenizers also treat nested block comments as their engines do (Postgres nests; MySQL and SQLite end a comment at the first `*/`).",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 52,
+    "verify_against": "tests/unit/test_safety.py first_sql_keyword nested-comment tests",
+    "verify_hint": "Check the `TestFirstSqlKeyword` cases for `/* a /* b */ c */ SELECT 1` in `tests/unit/test_safety.py` (postgres -> SELECT, mysql/sqlite -> C); trace that input through `first_sql_keyword` for each dialect.",
+    "claim_signature": "dependency_interaction:read-only-safety.md:nested-block-comments:52",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "api_contract",
+    "claim": "read-only-safety.md states the MCP formatter withholds from the user the DataFrame of every run_sql query the introspection classifier marks as introspection, including a MySQL SHOW statement's DataFrame.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "it withholds from the user the DataFrame result of every `run_sql` query the [introspection classifier](#schema-introspection-classifier-is_introspection_query) marks as introspection (including a MySQL `SHOW` statement's DataFrame)",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 59,
+    "verify_against": "components_to_blocks in src/sqllens/tools/_format.py",
+    "verify_hint": "Check how `components_to_blocks` in `src/sqllens/tools/_format.py` pairs a run_sql card's SQL with the following `DataFrameComponent` and skips the table block when `is_introspection_query(sql, dialect=...)` is True; trace `SHOW TABLES` with dialect mysql.",
+    "claim_signature": "api_contract:read-only-safety.md:formatter-withholds-show-df:59",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "api_contract",
+    "claim": "read-only-safety.md states is_introspection_query finds the leading SHOW with first_sql_keyword using sqlglot's tokenizer for the dialect, skipping comments, so /* c */ SHOW TABLES and SHOW/**/TABLES count.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A statement whose leading keyword, as `first_sql_keyword` finds it with sqlglot's tokenizer for the dialect (skipping comments, so `/* c */ SHOW TABLES` and `SHOW/**/TABLES` count), is `SHOW`",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 71,
+    "verify_against": "is_introspection_query and first_sql_keyword in src/sqllens/safety/readonly.py",
+    "verify_hint": "Check the SHOW early-return in `is_introspection_query` calls `first_sql_keyword(sql, dialect)`; trace `SHOW/**/TABLES` through the tokenizer (does sqlglot emit SHOW as its own token adjacent to a comment).",
+    "claim_signature": "api_contract:read-only-safety.md:show-via-first-sql-keyword:71",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "dependency_interaction",
+    "claim": "read-only-safety.md states an unqualified table reference whose name (after normalize_identifiers for the dialect) is a CTE visible in its scope under traverse_scope does not count as a catalog table, while a schema-qualified or aliased catalog table beside a same-named CTE or derived table (main.sqlite_master beside CTE sqlite_master, sqlite_master AS c beside CTE c, sqlite_master beside a derived table aliased sqlite_master) and a table in a statement scope analysis does not cover (MySQL DESCRIBE information_schema.tables) still count.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A table reference with no schema or catalog qualifier whose own name (after `normalize_identifiers` for the dialect) is a CTE visible in its scope under sqlglot's scope analysis (`traverse_scope`) does not count as a catalog table, whatever its name",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 75,
+    "verify_against": "is_introspection_query CTE-exclusion code in src/sqllens/safety/readonly.py and sqlglot.optimizer.scope.traverse_scope",
+    "verify_hint": "Check how `is_introspection_query` builds the excluded set from `traverse_scope` (whether it matches on the table's own name vs alias, requires no db/catalog, and distinguishes CTE sources from derived-table sources in `scope.sources`); trace `WITH c AS (SELECT 1) SELECT * FROM c, sqlite_master AS c` and `SELECT * FROM sqlite_master, (SELECT 1) AS sqlite_master` on sqlite.",
+    "claim_signature": "dependency_interaction:read-only-safety.md:cte-exclusion-scope:75",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "api_contract",
+    "claim": "read-only-safety.md states a SHOW-led statement the tokenizer rejects returns False, and an exception from identifier normalization or scope analysis excludes no CTE reference with its type logged at INFO.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "An exception from identifier normalization or scope analysis excludes no CTE reference — every table counts toward the catalog check — and its type is logged at `INFO`.",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 79,
+    "verify_against": "is_introspection_query in src/sqllens/safety/readonly.py",
+    "verify_hint": "Check the except clause around `normalize_identifiers` / `traverse_scope` in `is_introspection_query`: its logger call level (`logger.info`) and that it logs `type(e).__name__`; and that `first_sql_keyword` returning `\"\"` on TokenError makes `/* c */ SHOW 'abc` (mysql) reach the fail-open False path.",
+    "claim_signature": "api_contract:read-only-safety.md:scope-exception-info-log:79",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "data_format_assumption",
+    "claim": "read-only-safety.md states rows_to_capped_df stamps df.attrs[\"read_result\"] in addition to truncated and max_rows, so RunSqlTool reports the frame as a read result even when its own classification differs from the runner's.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "plus `df.attrs[\"read_result\"]` so `RunSqlTool` reports the frame as a read result even when its own classification of the statement differs from the runner's.",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 119,
+    "verify_against": "rows_to_capped_df and RowCapRunner in src/sqllens/safety/limits.py; RunSqlTool.execute in run_sql.py",
+    "verify_hint": "Check `rows_to_capped_df` sets `READ_RESULT_ATTR`, whether `RowCapRunner` preserves that attr when it re-slices the frame, and that `RunSqlTool.execute` reads it to choose the read branch.",
+    "claim_signature": "data_format_assumption:read-only-safety.md:read-result-attr:119",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-30"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "absolute_claim",
+    "claim": "read-only-safety.md asserts TRUNCATED_ATTR, MAX_ROWS_ATTR and READ_RESULT_ATTR = \"read_result\" (in sqllens.safety.limits) are the only contract between the runners, the decorator and RunSqlTool.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The constants `TRUNCATED_ATTR = \"truncated\"` and `MAX_ROWS_ATTR = \"max_rows\"` (both re-exported from `sqllens.safety`), with `READ_RESULT_ATTR = \"read_result\"` in `sqllens.safety.limits`, are the only contract between the runners, the decorator, and `RunSqlTool` — do not invent parallel keys.",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 124,
+    "verify_against": "src/sqllens/safety/limits.py, src/sqllens/safety/__init__.py, runners and run_sql.py",
+    "verify_hint": "Falsifying input: any other df.attrs key, or a string literal 'read_result' rather than the constant, written by a runner or read by `RunSqlTool.execute`; check `READ_RESULT_ATTR` is defined in `limits.py` and whether it is (or is not) re-exported from `sqllens.safety`.",
+    "claim_signature": "absolute_claim:read-only-safety.md:only-attrs-contract:124",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-31"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "test_mock_alignment",
+    "claim": "read-only-safety.md states TestGuardDoesNotCrashOnPinnedSqlglot checks the guard parses/walks cleanly on the pinned sqlglot, rejects ALTER, and that the pinned sqlglot parses ALTER to the exp.Alter node the deny-walk lists.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`TestGuardDoesNotCrashOnPinnedSqlglot` — the guard parses/walks cleanly on the pinned sqlglot, rejects ALTER, and the pinned sqlglot parses ALTER to the `exp.Alter` node the deny-walk lists.",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 240,
+    "verify_against": "TestGuardDoesNotCrashOnPinnedSqlglot in tests/unit/test_safety.py",
+    "verify_hint": "Check each test method of `TestGuardDoesNotCrashOnPinnedSqlglot` in `tests/unit/test_safety.py` for an ALTER-rejection assertion and an `isinstance(..., exp.Alter)` parse assertion.",
+    "claim_signature": "test_mock_alignment:read-only-safety.md:pinned-sqlglot-alter-test:240",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-32"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "dependency_interaction",
+    "claim": "sqlglot.Dialect.get_or_raise raises ValueError (and not another exception type) for a dialect name sqlglot does not know, and get_or_raise(None) returns a usable default Dialect instance exposing tokenize() and tokenizer_class.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 60,
+    "source_line_end": 67,
+    "verify_against": "sqlglot 30.22+ Dialect.get_or_raise in sqlglot/dialects/dialect.py",
+    "verify_hint": "Check `Dialect.get_or_raise` in sqlglot/dialects/dialect.py for the exception raised on an unknown name and the return value for None; the head view's tests for first_sql_keyword with 'no-such-dialect' show the expected outcome.",
+    "claim_signature": "dependency_interaction:readonly.py:get-or-raise-unknown-dialect:60",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "dependency_interaction",
+    "claim": "Dialect.tokenize(sql) is public sqlglot API that returns tokens with comments dropped from the token stream (attached as token comments), and signals un-tokenizable input (unterminated string or block comment) by raising sqlglot.errors.TokenError; first_sql_keyword returns \"\" on TokenError and lets any other exception propagate.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 68,
+    "source_line_end": 71,
+    "verify_against": "sqlglot Dialect.tokenize and sqlglot/tokens.py Tokenizer (including any Rust tokenizer path) in the pinned range",
+    "verify_hint": "Check `Dialect.tokenize` and `Tokenizer.tokenize` / `_scan_comment` / `_scan_string` in sqlglot/tokens.py for what is raised on an unterminated `/*` or `'` and whether comments ever appear as tokens.",
+    "claim_signature": "dependency_interaction:readonly.py:tokenize-tokenerror-contract:68",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "dependency_interaction",
+    "claim": "resolved.tokenizer_class.KEYWORDS maps uppercase keyword text to the TokenType the tokenizer assigns that word, so `keywords.get(text) is token.token_type` holds for each read-shaped keyword (SELECT, WITH, UNION, INTERSECT, EXCEPT, SHOW) under no dialect, sqlite, postgres and mysql, and an unquoted non-keyword word tokenizes as TokenType.VAR; a word the dialect tokenizes as a type other than its KEYWORDS entry (e.g. SHOW turned into a COMMAND token) would yield \"\".",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 72,
+    "source_line_end": 84,
+    "verify_against": "sqlglot/tokens.py Tokenizer.KEYWORDS and COMMANDS, and the mysql/postgres/sqlite dialect Tokenizer subclasses",
+    "verify_hint": "Check `Tokenizer.KEYWORDS`, `Tokenizer.COMMANDS` and `_scan_keywords`/`_add` in sqlglot/tokens.py, plus `MySQL.Tokenizer` / `Postgres.Tokenizer` KEYWORDS overrides, for the token_type assigned to SHOW, WITH, SELECT, UNION, INTERSECT, EXCEPT.",
+    "claim_signature": "dependency_interaction:readonly.py:keywords-tokentype-identity:72",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts that when the first remaining token is a string, number, quoted identifier or symbol, first_sql_keyword returns \"\".",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "number, quoted identifier or symbol gives ``\"\"``",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 52,
+    "verify_against": "first_sql_keyword body in src/sqllens/safety/readonly.py and sqlglot token text for string-like tokens",
+    "verify_hint": "Trace inputs whose token text is an alphabetic word but whose token type is a string kind: Postgres dollar-quoted `$$SELECT$$ ...`, a national string `N'select'`, a MySQL backtick-quoted `` `select` ``, or a hex/bit string; check whether `token.text` holds the unquoted body and whether the `keywords.get(text) is token.token_type` / VAR checks at lines 77-83 then return a word.",
+    "claim_signature": "absolute_claim:readonly.py:string-number-quoted-gives-empty:52",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "dependency_interaction",
+    "claim": "normalize_identifiers(parsed, dialect=dialect) mutates the parsed tree in place (rather than returning a copy), so the exp.Table node ids collected from traverse_scope match the nodes later yielded by parsed.find_all(exp.Table) in is_introspection_query.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 154,
+    "verify_against": "sqlglot/optimizer/normalize_identifiers.py normalize_identifiers",
+    "verify_hint": "Check `normalize_identifiers` in sqlglot/optimizer/normalize_identifiers.py: whether it calls `transform(..., copy=False)` on an Expression argument and returns the same object; then compare with `is_introspection_query` line 236 iterating `parsed.find_all`.",
+    "claim_signature": "dependency_interaction:readonly.py:normalize-identifiers-in-place:154",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "dependency_interaction",
+    "claim": "traverse_scope yields Scope objects whose `tables` are the exp.Table nodes of the original tree and whose `cte_sources` is keyed by the (normalized) CTE names visible in that scope, including CTEs defined in an enclosing scope, so a CTE reference inside a subquery or set-operation branch is excluded.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 156,
+    "source_line_end": 163,
+    "verify_against": "sqlglot/optimizer/scope.py Scope.tables, Scope.cte_sources and traverse_scope",
+    "verify_hint": "Check `Scope.tables`, `Scope.cte_sources` and how `_traverse_ctes` / `branch` propagate cte_sources to child scopes in sqlglot/optimizer/scope.py.",
+    "claim_signature": "dependency_interaction:readonly.py:scope-cte-sources-visibility:156",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "data_format_assumption",
+    "claim": "exp.Table stores its schema qualifier under args key \"db\" and its catalog qualifier under args key \"catalog\", and table.name is the table's own identifier (not its alias), in the pinned sqlglot range.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 160,
+    "source_line_end": 162,
+    "verify_against": "sqlglot/expressions.py class Table arg_types and name property",
+    "verify_hint": "Check `class Table(Expression)` arg_types and its `name` property in sqlglot/expressions.py.",
+    "claim_signature": "data_format_assumption:readonly.py:table-db-catalog-args:160",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "dependency_interaction",
+    "claim": "For statements that are not a SELECT/set-operation tree (e.g. `DESCRIBE information_schema.tables` on mysql, or an exp.Command fallback), traverse_scope either yields no scope or raises, so _cte_reference_ids excludes no table and the catalog check still runs on every exp.Table.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 156,
+    "verify_against": "sqlglot/optimizer/scope.py traverse_scope / build_scope root handling",
+    "verify_hint": "Check `traverse_scope` and `_traverse_scope` in sqlglot/optimizer/scope.py for what happens when the root is exp.Describe or exp.Command, then trace `_cte_reference_ids` lines 153-173.",
+    "claim_signature": "dependency_interaction:readonly.py:traverse-scope-non-select:156",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "data_format_assumption",
+    "source_authored_note": null,
+    "claim": "The _cte_reference_ids docstring asserts that a CTE reference resolves whatever its letter case where the dialect folds unquoted names, and that an aliased or schema-qualified catalog table beside a same-named CTE or derived table still counts as a catalog reference.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "so an aliased or\n    schema-qualified catalog table beside a same-named CTE or derived table\n    still counts.",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 145,
+    "source_line_end": 151,
+    "verify_against": "_cte_reference_ids and is_introspection_query in src/sqllens/safety/readonly.py; sqlglot Scope.cte_sources",
+    "verify_hint": "Trace `WITH pg_x AS (SELECT 1) SELECT * FROM pg_class AS pg_x` and `WITH pg_class AS (SELECT 1) SELECT * FROM pg_catalog.pg_class` on postgres through `_cte_reference_ids` lines 156-163; also a derived table `(SELECT 1) AS pg_class` next to `pg_class`.",
+    "claim_signature": "data_format_assumption:readonly.py:cte-ref-alias-qualified-counts:145",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "absolute_claim",
+    "claim": "The is_introspection_query docstring asserts that any reference sqlglot's scope analysis resolves to a CTE is not treated as a catalog table, whatever its name.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "resolves to a CTE is not a catalog table, whatever its name.",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 181,
+    "source_line_end": 182,
+    "verify_against": "_cte_reference_ids and is_introspection_query in src/sqllens/safety/readonly.py",
+    "verify_hint": "Trace a CTE reference that scope analysis resolves but `_cte_reference_ids` does not collect: a recursive CTE self-reference `WITH RECURSIVE pg_r AS (SELECT 1 UNION ALL SELECT n FROM pg_r) SELECT * FROM pg_r`, a CTE referenced inside a nested CTE body, or a quoted mixed-case CTE name `WITH \"Pg_R\" AS (...) SELECT * FROM \"Pg_R\"` on postgres.",
+    "claim_signature": "absolute_claim:readonly.py:cte-not-catalog-whatever-name:181",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "data_format_assumption",
+    "claim": "Removing the exp.Show / SHOW-Command root check loses no SHOW classification: every statement that parse_one roots at exp.Show or a Command named SHOW under a dialect has first_sql_keyword == \"SHOW\" under the same dialect (including SHOW split by an inline comment such as `SHOW/**/TABLES`).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 215,
+    "source_line_end": 216,
+    "verify_against": "first_sql_keyword in src/sqllens/safety/readonly.py and sqlglot's parser handling of SHOW (MySQL _parse_show, base Command fallback)",
+    "verify_hint": "Compare base-view `is_introspection_query` (the removed root check) with head `first_sql_keyword`; trace `SHOW/**/TABLES` and `/* a /* b */ c */ SHOW TABLES` on postgres, mysql and sqlite.",
+    "claim_signature": "data_format_assumption:readonly.py:show-root-check-removal:215",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "dependency_interaction",
+    "claim": "sqlglot 30.22 (the new floor) provides every API the change relies on: Dialect.get_or_raise, Dialect.tokenize, Dialect.tokenizer_class, sqlglot.tokens.TokenType, sqlglot.optimizer.normalize_identifiers.normalize_identifiers, sqlglot.optimizer.scope.traverse_scope with Scope.cte_sources, and exp.Alter.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "pyproject.toml",
+    "source_line": 46,
+    "verify_against": "sqlglot 30.22 source; imports at the top of src/sqllens/safety/readonly.py",
+    "verify_hint": "Check the imports at lines 19-24 of src/sqllens/safety/readonly.py and the attributes used at lines 61-72, 154-162 and 293 against sqlglot 30.22's dialects/dialect.py, tokens.py, optimizer/scope.py and expressions.py.",
+    "claim_signature": "dependency_interaction:pyproject.toml:sqlglot-floor-api-coverage:46",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "api_contract",
+    "claim": "The pyproject comment asserts that docs/internal/database-connectors/read-only-safety.md explains why the sqlglot floor must not be lowered below 30.22.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Do not lower the floor below 30.22 (why:\n    # docs/internal/database-connectors/read-only-safety.md)",
+    "source_file": "pyproject.toml",
+    "source_line": 43,
+    "source_line_end": 44,
+    "verify_against": "docs/internal/database-connectors/read-only-safety.md",
+    "verify_hint": "Read docs/internal/database-connectors/read-only-safety.md in the head view for a stated reason the floor is 30.22.",
+    "claim_signature": "api_contract:pyproject.toml:floor-reason-doc-pointer:43",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-37",
+    "category": "dependency_interaction",
+    "claim": "The READ_RESULT_ATTR marker set by rows_to_capped_df survives every runner wrapper between the integration runner and RunSqlTool (RowCapRunner including its `df.iloc[:cap].copy()` truncation path, ReadOnlyGuardRunner, RlsGuardRunner), i.e. pandas propagates DataFrame.attrs through iloc slicing and copy.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 78,
+    "verify_against": "RowCapRunner.run_sql in src/sqllens/safety/limits.py; ReadOnlyGuardRunner and RlsGuardRunner run_sql; pandas NDFrame.__finalize__ attrs propagation",
+    "verify_hint": "Check `RowCapRunner.run_sql` in src/sqllens/safety/limits.py (line 97 `df.iloc[:cap].copy()`), the `run_sql` of `ReadOnlyGuardRunner` and `RlsGuardRunner` under src/sqllens/safety/, and pandas `NDFrame.__finalize__` for attrs copying on iloc/copy.",
+    "claim_signature": "dependency_interaction:run_sql.py:read-result-attr-survives-wrappers:78",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-38",
+    "category": "absolute_claim",
+    "claim": "The RunSqlTool docstring asserts that a frame the runner built with rows_to_capped_df (as the built-in runners do for a read) is returned as a read result whatever the tool's own dialect classification.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "dialect: sqlglot dialect of the configured database, used to\n                classify the statement. A frame the runner built with\n                ``rows_to_capped_df`` (as the built-in runners do for a read)\n                is returned as a read result whatever this classification.",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 38,
+    "source_line_end": 41,
+    "verify_against": "RunSqlTool.execute line 78; rows_to_capped_df in src/sqllens/safety/limits.py; the read branches of the sqlite, mysql and postgres runners",
+    "verify_hint": "Trace a read through SqliteRunner/MySQLRunner/PostgresRunner whose rows exceed the cap so RowCapRunner re-slices it, and an empty read (rows_to_capped_df builds `pd.DataFrame()`), to RunSqlTool.execute line 78; confirm each built-in runner's read branch returns via `rows_to_capped_df` (sqlite line 155, mysql line 152, postgres line 195).",
+    "claim_signature": "absolute_claim:run_sql.py:capped-frame-always-read-result:38",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-39",
+    "category": "absolute_claim",
+    "claim": "The execute comment asserts that a frame the runner marked as a read result is reported as one even when the tool's dialect classifies the statement otherwise, so the runner's rows are never dropped as a row count.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# A frame the runner marked as a read result is reported as one\n            # even when this tool's dialect classifies the statement otherwise,\n            # so the runner's rows are never dropped as a row count.",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 75,
+    "source_line_end": 77,
+    "verify_against": "RunSqlTool.execute in src/sqllens/agent/tools/run_sql.py and the runner wrapper chain built in src/sqllens/agent/factory.py",
+    "verify_hint": "Trace a runner that returns rows without the marker (a custom SqlRunner, or a DataFrame rebuilt by any wrapper composed in build_agent lines 82-98) whose SQL first_sql_keyword classifies as non-read under the tool's dialect, e.g. a statement the tool's tokenizer rejects with TokenError.",
+    "claim_signature": "absolute_claim:run_sql.py:rows-never-dropped-as-count:75",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-40",
+    "category": "api_contract",
+    "claim": "For every database URL scheme build_sql_runner accepts, sqlglot_dialect_for_url(cfg.database.url) passed to RunSqlTool yields the same dialect the selected runner passes to is_read_shaped (\"sqlite\", \"mysql\", \"postgres\"), including postgres URL schemes such as `postgresql+psycopg`; for a scheme it maps to None, the tool classifies with no dialect while the runner uses its own.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 123,
+    "verify_against": "build_sql_runner in src/sqllens/agent/factory.py and sqlglot_dialect_for_url in src/sqllens/safety/readonly.py",
+    "verify_hint": "Compare the URL-scheme dispatch in `build_sql_runner` (factory.py) with `sqlglot_dialect_for_url` (readonly.py lines 99-110) and the dialect literals at sqlite/sql_runner.py:152, mysql/sql_runner.py:141, postgres/sql_runner.py:171.",
+    "claim_signature": "api_contract:factory.py:tool-runner-dialect-agreement:123",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-41",
+    "category": "api_contract",
+    "claim": "Every caller of components_to_blocks (the query_database MCP tool and the verify-memory CLI path) passes the configured database's sqlglot dialect, so _query_info_from_sql's query_type is computed under that dialect rather than None.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 113,
+    "verify_against": "call sites of components_to_blocks under src/sqllens/",
+    "verify_hint": "Find every `components_to_blocks(` call (e.g. in src/sqllens/tools/ query_database implementation and the CLI verify-memory runner) and check it passes `dialect=` derived from `sqlglot_dialect_for_url`.",
+    "claim_signature": "api_contract:_format.py:components-to-blocks-dialect-callers:113",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-42",
+    "category": "data_format_assumption",
+    "claim": "tools.md asserts that query_type's first_sql_keyword is shared with the runners' is_read_shaped routing and finds the keyword with sqlglot's tokenizer for the configured database's dialect, skipping comments and opening parentheses, with `-- note` + newline + `SELECT …` giving SELECT and `(WITH ... SELECT ...)` giving WITH.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "which finds it with sqlglot's tokenizer for the configured database's dialect, skipping comments and opening parentheses: `-- note` + newline + `SELECT …` and `(WITH ... SELECT ...)` give `SELECT` and `WITH`.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 302,
+    "verify_against": "_query_info_from_sql and components_to_blocks in src/sqllens/tools/_format.py; first_sql_keyword in src/sqllens/safety/readonly.py",
+    "verify_hint": "Check `_query_info_from_sql` (_format.py line 112-113) and where components_to_blocks' `dialect` comes from, then trace the two examples through `first_sql_keyword`.",
+    "claim_signature": "data_format_assumption:tools.md:query-type-tokenizer-examples:302",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-43",
+    "category": "data_format_assumption",
+    "claim": "tools.md asserts query_type is \"\" when no keyword leads the statement, giving as examples a first token that is a string, number, quoted identifier or symbol, SQL with no token left after comments and parentheses, and SQL the tokenizer rejects.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "It is `\"\"` when no keyword leads the statement — for example a first token that is a string, number, quoted identifier or symbol, SQL with no token left after comments and parentheses, or SQL the tokenizer rejects.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 302,
+    "verify_against": "first_sql_keyword in src/sqllens/safety/readonly.py",
+    "verify_hint": "Trace each listed case through `first_sql_keyword` lines 60-85; note an unquoted non-keyword identifier (TokenType.VAR) is returned rather than \"\".",
+    "claim_signature": "data_format_assumption:tools.md:query-type-empty-cases:302",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-44",
+    "category": "data_format_assumption",
+    "claim": "transport.md asserts that RunSqlTool.execute writes the result CSV through LocalFileSystem.write_file when a read-shaped statement (is_read_shaped under the configured database's dialect) returns rows, and points to tool-scratch-storage.md for that classification.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "When a read-shaped statement (`is_read_shaped` under the configured database's dialect, see [tool-scratch-storage.md](../agent/tool-scratch-storage.md)) returns rows, `RunSqlTool.execute` writes the result CSV through `LocalFileSystem.write_file`",
+    "source_file": "docs/internal/mcp-server/transport.md",
+    "source_line": 125,
+    "verify_against": "RunSqlTool.execute in src/sqllens/agent/tools/run_sql.py (line 78 condition and lines 125-131); docs/internal/agent/tool-scratch-storage.md",
+    "verify_hint": "Compare the doc's stated trigger with run_sql.py line 78, which also takes the CSV branch when `df.attrs.get(READ_RESULT_ATTR)` is set; check tool-scratch-storage.md describes is_read_shaped and the dialect.",
+    "claim_signature": "data_format_assumption:transport.md:csv-write-trigger:125",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-45",
+    "category": "dependency_interaction",
+    "claim": "The tool `build_agent` registers under `run_sql` is reachable through `agent.tool_registry._tools[\"run_sql\"]`, possibly wrapped with the real tool on `_wrapped_tool`, and exposes a public `dialect` attribute equal to `mysql` for a `mysql+pymysql://` URL and `sqlite` for a `sqlite:///` URL.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 98,
+    "source_line_end": 100,
+    "verify_against": "src/sqllens/agent/factory.py and src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check where `build_agent` constructs `RunSqlTool` in `factory.py` (the `dialect=` argument and how it is derived from the URL, e.g. via `sqlglot_dialect_for_url`) and that `RunSqlTool.__init__` stores it as `self.dialect`; check `ToolRegistry` for `_tools` and the access-group wrapper's `_wrapped_tool` attribute.",
+    "claim_signature": "dependency_interaction:test_factory_wiring.py:run-sql-dialect-attribute:100",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-46",
+    "category": "dependency_interaction",
+    "claim": "`build_agent` with a `mysql+pymysql://` URL and `read_only=False` builds the agent without opening a database connection (only `pymysql` importability is required), so the test needs no live MySQL server.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 89,
+    "source_line_end": 98,
+    "verify_against": "src/sqllens/agent/factory.py and src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check `build_sql_runner` / `build_agent` in `factory.py` and `MySQLRunner.__init__` for any connect call at construction time.",
+    "claim_signature": "dependency_interaction:test_factory_wiring.py:mysql-build-no-connect:89",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-47",
+    "category": "test_mock_alignment",
+    "claim": "A plain `pd.DataFrame({\"rows_affected\": [1]})` carries no `read_result` mark, so `RunSqlTool.execute` decides between a result table and a row-count notification from its own `is_read_shaped` classification alone; the fake `_Rows.run_sql(args, context)` and `_Files.write_file(*args, **kwargs)` match the call shapes `RunSqlTool.execute` uses on `sql_runner` and `file_system`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 102,
+    "source_line_end": 113,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py and src/sqllens/safety/limits.py",
+    "verify_hint": "Check `RunSqlTool.execute` for the attrs key it reads to detect a runner-marked read result (and where `rows_to_capped_df` / `mark_*` in `limits.py` set it) and for the exact calls it makes to `self.sql_runner.run_sql` and `self.file_system.write_file`.",
+    "claim_signature": "test_mock_alignment:test_factory_wiring.py:read-result-mark-fake:102",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-48",
+    "category": "api_contract",
+    "claim": "`RunSqlTool.execute` accepts `None` as its context argument on the success path (including the `write_file` call) without dereferencing it, and for `# c\\nSELECT n FROM t` reports `metadata[\"query_type\"]` `SELECT` with a `results` key under `mysql`, and `\"\"` with no `results` key under `sqlite`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 114,
+    "source_line_end": 116,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Trace `RunSqlTool.execute` with `context=None`: every use of `context` (e.g. `context.user`, `context.conversation`) and the metadata built on the read-shaped and non-read-shaped branches.",
+    "claim_signature": "api_contract:test_factory_wiring.py:execute-none-context:114",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-49",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts `#` opens a comment on MySQL and not on SQLite, so a `#`-led statement is read-shaped on MySQL (a result table) and not on SQLite (a row count).",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "``#`` opens a comment on MySQL and not on SQLite, so a ``#``-led statement is read-shaped\n    there (a result table) and not on SQLite (a row count).",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 82,
+    "source_line_end": 83,
+    "verify_against": "src/sqllens/safety/readonly.py (`first_sql_keyword`, `is_read_shaped`) and src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Trace `# c\\nSELECT 1` through `first_sql_keyword` with `sqlite` (sqlglot's SQLite tokenizer `COMMENTS` / single tokens) and through `RunSqlTool.execute` when the SQLite runner returns a read-result-marked frame: does a SQLite `#`-led statement ever produce a result table?",
+    "claim_signature": "absolute_claim:test_factory_wiring.py:hash-comment-dialect-docstring:82",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-50",
+    "category": "api_contract",
+    "claim": "`components_to_blocks` accepts a `dialect` keyword and sets `query_info[\"query_type\"]` from the run_sql card's SQL via `first_sql_keyword` with that dialect, so `-- note\\nSELECT ...` with no dialect and `# note\\nSELECT ...` with `mysql` both give `SELECT`, even with no DataFrame following the card.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_format.py",
+    "source_line": 1985,
+    "source_line_end": 1993,
+    "verify_against": "src/sqllens/tools/_format.py",
+    "verify_hint": "Check `components_to_blocks` in `_format.py`: where `query_info` is built, whether it is produced from a card alone, and whether the `first_sql_keyword` call passes `dialect`.",
+    "claim_signature": "api_contract:test_format.py:query-type-dialect:1989",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-51",
+    "category": "test_mock_alignment",
+    "claim": "The `_sql_card` helper behind `_sql_call` builds run_sql running/success cards with the same component type, fields and SQL location the real `RunSqlTool` / agent stream emits, so `components_to_blocks` associates the SQL with the following `DataFrameComponent` as it would at runtime.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_format.py",
+    "source_line": 1826,
+    "source_line_end": 1829,
+    "verify_against": "tests/unit/test_format.py `_sql_card`, src/sqllens/tools/_format.py and the agent's tool-status card emission under src/sqllens/agent/",
+    "verify_hint": "Compare `_sql_card` in `test_format.py` with how `_format.py` extracts SQL from a run_sql card and with the card the agent core emits around a tool call (status card component and its metadata/args fields).",
+    "claim_signature": "test_mock_alignment:test_format.py:sql-card-shape:1826",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-52",
+    "category": "test_mock_alignment",
+    "claim": "`_widgets_df()` (a two-row `DataFrameComponent(rows=..., columns=[\"n\"])`) has the shape of the `DataFrameComponent` `RunSqlTool` returns for a read, so the table-block assertions reflect runtime output.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_format.py",
+    "source_line": 1996,
+    "source_line_end": 1997,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check how `RunSqlTool.execute` constructs its `DataFrameComponent` (e.g. `DataFrameComponent.from_records` or the constructor with `rows`/`columns`, title, extra fields) and compare with `_widgets_df` in `test_format.py`.",
+    "claim_signature": "test_mock_alignment:test_format.py:widgets-df-shape:1996",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-53",
+    "category": "api_contract",
+    "claim": "The docstring states the sqlglot pin as `>=30.22,<31`, matching the range `pyproject.toml` requires.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "guard against a future sqlglot bump (the ``>=30.22,<31`` pin can be widened",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 506,
+    "verify_against": "pyproject.toml",
+    "verify_hint": "Check the `sqlglot` entry under `[project] dependencies` in `pyproject.toml`.",
+    "claim_signature": "api_contract:test_safety.py:sqlglot-pin-docstring:506",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-54",
+    "category": "dependency_interaction",
+    "claim": "`sqllens.safety.readonly` defines a module-level `_DML_DDL_TYPES` collection containing `exp.Alter`, and `sqlglot.parse_one(\"ALTER TABLE users ADD COLUMN x INT\")` returns an `exp.Alter` root under no dialect, `sqlite`, `postgres` and `mysql` on the pinned sqlglot.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 542,
+    "source_line_end": 546,
+    "verify_against": "src/sqllens/safety/readonly.py and the installed sqlglot `expressions.Alter` / ALTER parser",
+    "verify_hint": "Check the definition of `_DML_DDL_TYPES` in `readonly.py` (name and type, e.g. a tuple used with `isinstance`) and sqlglot's `Parser._parse_alter` for the node it returns for `ALTER TABLE ... ADD COLUMN`.",
+    "claim_signature": "dependency_interaction:test_safety.py:dml-ddl-types-alter:542",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-55",
+    "category": "absolute_claim",
+    "claim": "The comment asserts the root-type gate rejects a root-level ALTER before the deny-walk runs, so the deny-walk's `exp.Alter` entry is only reachable for a non-root ALTER and its AST shape must be pinned separately.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The root-type gate rejects a root-level ALTER before the deny-walk\n        # runs, so pin the AST shape the deny-walk's ``exp.Alter`` entry needs.",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 537,
+    "source_line_end": 538,
+    "verify_against": "src/sqllens/safety/readonly.py `assert_select_only`",
+    "verify_hint": "Trace `ALTER TABLE users ADD COLUMN x INT` through `assert_select_only` in `readonly.py`: which check raises `UnsafeSqlError` first, the root-type gate or the `_DML_DDL_TYPES` walk.",
+    "claim_signature": "absolute_claim:test_safety.py:root-gate-before-deny-walk:537",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-56",
+    "category": "data_format_assumption",
+    "claim": "The comment asserts sqlglot's tokenizer drops an inline comment right after SHOW, so `SHOW/**/TABLES` and `SHOW/* c */ COLUMNS FROM widgets` are detected as introspection on mysql.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The tokenizer drops an inline comment right after SHOW.",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 922,
+    "verify_against": "src/sqllens/safety/readonly.py `is_introspection_query`",
+    "verify_hint": "Check how `is_introspection_query` in `readonly.py` detects a SHOW statement (token stream vs parse root) and how comments attach to tokens in sqlglot's tokenizer.",
+    "claim_signature": "data_format_assumption:test_safety.py:show-inline-comment:922",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-57",
+    "category": "absolute_claim",
+    "claim": "The comment asserts scope analysis builds no scope for DESCRIBE, yet `DESCRIBE information_schema.tables` on mysql still counts as introspection.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Scope analysis builds no scope for DESCRIBE; its table still counts.",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 932,
+    "source_line_end": 933,
+    "verify_against": "src/sqllens/safety/readonly.py `is_introspection_query` and sqlglot `optimizer.scope.traverse_scope`",
+    "verify_hint": "Check `traverse_scope` for a `Describe` root and the branch in `is_introspection_query` that still inspects tables outside any scope.",
+    "claim_signature": "absolute_claim:test_safety.py:describe-no-scope:932",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-58",
+    "category": "absolute_claim",
+    "claim": "The comment asserts a qualified or aliased catalog table beside a same-named CTE or derived table is not treated as a CTE reference, in either order.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# A qualified or aliased catalog table beside a same-named CTE or\n            # derived table is not a CTE reference, in either order.",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 934,
+    "source_line_end": 935,
+    "verify_against": "src/sqllens/safety/readonly.py `is_introspection_query` CTE-exclusion logic",
+    "verify_hint": "Trace `WITH sqlite_master AS (SELECT 1) SELECT * FROM sqlite_master AS s2` and `WITH pg_class AS (SELECT 1) SELECT * FROM pg_class AS pg_class` (an aliased real catalog table sharing the CTE's name) through the CTE-reference exclusion in `readonly.py`.",
+    "claim_signature": "absolute_claim:test_safety.py:qualified-catalog-not-cte:934",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-59",
+    "category": "data_format_assumption",
+    "claim": "The comment asserts a CTE defined inside a derived table is not visible outside it, so an outer `pg_a` reference is a catalog table, not a CTE reference.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# A CTE defined inside a derived table is not visible outside it.",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 951,
+    "verify_against": "src/sqllens/safety/readonly.py `is_introspection_query`",
+    "verify_hint": "Check how `is_introspection_query` resolves a `Table` node to a CTE via `traverse_scope` scopes (per-scope `cte_sources` vs a query-wide set of CTE names).",
+    "claim_signature": "data_format_assumption:test_safety.py:derived-cte-visibility:951",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-60",
+    "category": "absolute_claim",
+    "claim": "The test comment asserts the read-only guard fails closed on the same untokenizable SHOW input and the database rejects it, so it never returns rows to withhold.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The read-only guard fails closed on the same input and the database\n        # rejects it, so it never returns rows to withhold.",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 970,
+    "source_line_end": 971,
+    "verify_against": "src/sqllens/safety/readonly.py `assert_select_only` and `ReadOnlyGuardRunner`",
+    "verify_hint": "Trace `# tables\\n/* again */ SHOW 'abc` (mysql) and `-- c\\nSHOW 'abc` (postgres) through `assert_select_only`'s TokenError handling; then consider `read_only` off, where no guard runs, and whether MySQL/Postgres accept an unterminated string after SHOW.",
+    "claim_signature": "absolute_claim:test_safety.py:untokenizable-show-never-rows:970",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-61",
+    "category": "absolute_claim",
+    "claim": "The comment asserts references from a later CTE, a recursive CTE, a derived table and a subquery resolve to the enclosing query's CTE, so those catalog-prefixed CTE names are excluded.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# References from a later CTE, a recursive CTE, a derived table and\n            # a subquery resolve to the enclosing query's CTE.",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 980,
+    "source_line_end": 981,
+    "verify_against": "src/sqllens/safety/readonly.py `is_introspection_query`",
+    "verify_hint": "Trace the recursive-CTE self-reference `pg_r` inside its own definition and a reference inside a correlated `EXISTS` subquery through the scope-based CTE resolution in `readonly.py`.",
+    "claim_signature": "absolute_claim:test_safety.py:cte-reference-resolution:980",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-62",
+    "category": "test_mock_alignment",
+    "claim": "`sqllens.safety.readonly` imports `traverse_scope` as a module-level name that `is_introspection_query` calls through that name, so patching `readonly_mod.traverse_scope` makes scope analysis raise; on that exception the function excludes no CTE and logs the exception type name at INFO or above on logger `sqllens.safety.readonly`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety.py",
+    "source_line": 1001,
+    "source_line_end": 1013,
+    "verify_against": "src/sqllens/safety/readonly.py",
+    "verify_hint": "Check the import of `traverse_scope` in `readonly.py` (`from sqlglot.optimizer.scope import traverse_scope` vs a module-qualified call), the `except` around it and the identifier normalization call, and the logger name and level of the log call.",
+    "claim_signature": "test_mock_alignment:test_safety.py:traverse-scope-patch:1009",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-63",
+    "category": "test_mock_alignment",
+    "claim": "`first_sql_keyword` tokenizes through `sqlglot.Dialect.tokenize` as resolved on the `sqlglot.Dialect` class reachable as `readonly_mod.sqlglot.Dialect` (no dialect subclass such as Postgres overrides `tokenize`), so patching that attribute makes the `postgres` call raise `RecursionError`, which `first_sql_keyword` lets propagate.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 285,
+    "source_line_end": 293,
+    "verify_against": "src/sqllens/safety/readonly.py `first_sql_keyword` and sqlglot's `Dialect` class",
+    "verify_hint": "Check how `first_sql_keyword` in `readonly.py` obtains tokens (e.g. `Dialect.get_or_raise(d).tokenize(sql)` vs `Tokenizer().tokenize` or `sqlglot.tokenize`), that `readonly.py` does `import sqlglot`, and whether any sqlglot dialect class overrides `tokenize`; also check the `except` clause catches only `TokenError`.",
+    "claim_signature": "test_mock_alignment:test_safety_limits.py:dialect-tokenize-patch:291",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-64",
+    "category": "data_format_assumption",
+    "claim": "For an unknown dialect `first_sql_keyword` falls back to no dialect and logs at WARNING on logger `sqllens.safety.readonly` a message containing `unknown sqlglot dialect 'no-such-dialect'`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 274,
+    "source_line_end": 276,
+    "verify_against": "src/sqllens/safety/readonly.py",
+    "verify_hint": "Check the unknown-dialect handling `first_sql_keyword` uses in `readonly.py` (its own or a shared dialect-resolution helper) for the logger name, level and exact message format, including the quoting of the dialect name.",
+    "claim_signature": "data_format_assumption:test_safety_limits.py:unknown-dialect-warning:276",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-65",
+    "category": "data_format_assumption",
+    "claim": "`first_sql_keyword` returns the upper-cased text of an unquoted identifier first token (`foo bar` gives `FOO`) and `\"\"` when the first non-paren token is a string, number, quoted identifier or operator (`|| 'a'`, `* FROM t`).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 240,
+    "source_line_end": 249,
+    "verify_against": "src/sqllens/safety/readonly.py `first_sql_keyword`",
+    "verify_hint": "Check which sqlglot `TokenType`s `first_sql_keyword` accepts as a keyword (keyword tokens vs `VAR`) and how it handles a quoted `IDENTIFIER`, `STRING`, `NUMBER`, `DPIPE` and `STAR` token.",
+    "claim_signature": "data_format_assumption:test_safety_limits.py:identifier-first-token:246",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-28"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-66",
+    "category": "absolute_claim",
+    "claim": "The comment asserts the test needs sqlglot>=30.22 because older MySQL tokenizers end a `#` comment at the carriage return and reject the quote after it.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Needs sqlglot>=30.22: older MySQL tokenizers end the comment at the\n        # carriage return and reject the quote after it.",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 296,
+    "source_line_end": 297,
+    "verify_against": "pyproject.toml sqlglot pin and the issue file's account of the sqlglot version requirement",
+    "verify_hint": "Check the `sqlglot` pin in `pyproject.toml` and the issue context file for the stated reason for the 30.22 floor; trace `SELECT n FROM widgets # x\\r'\\n` through the MySQL tokenizer's line-comment scan in the pinned sqlglot.",
+    "claim_signature": "absolute_claim:test_safety_limits.py:cr-line-comment-floor:296",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-29"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-67",
+    "category": "absolute_claim",
+    "claim": "The class docstring asserts `RunSqlTool` builds its result table for every statement `is_read_shaped` classifies as read-shaped, with the runner's dialect.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"Issue #304: ``RunSqlTool`` builds its result table for every statement\n    ``is_read_shaped`` classifies as read-shaped, with the runner's dialect.\"\"\"",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 522,
+    "source_line_end": 523,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py `RunSqlTool.execute`",
+    "verify_hint": "Trace a read-shaped statement whose runner returns an empty frame (e.g. `WITH w AS (... WHERE n > 99) SELECT n FROM w`) through `RunSqlTool.execute`: does it build a result table or the `No rows returned` path; also check whether `RunSqlTool`'s dialect is the runner's or one passed separately.",
+    "claim_signature": "absolute_claim:test_safety_limits.py:every-read-shaped-table:522",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-30"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-68",
+    "category": "data_format_assumption",
+    "claim": "On a read, `RunSqlTool.execute` returns `result_for_llm` beginning with the CSV of the rows (`n\\n0\\n1\\n2\\n`) and containing `Results saved to file: query_results_`, a `ui_component.rich_component` that is a `DataFrameComponent`, and metadata keys `query_type`, `row_count`, `columns` and `results` (a list of row dicts).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 525,
+    "source_line_end": 556,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check the read branch of `RunSqlTool.execute` for the CSV preview (`to_csv(index=False)`), the saved-file filename and message, the `ToolResult` ui_component, and the metadata dict keys.",
+    "claim_signature": "data_format_assumption:test_safety_limits.py:run-sql-read-result-shape:525",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-31"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-69",
+    "category": "api_contract",
+    "claim": "`RunSqlTool` accepts a `dialect=` keyword (including `None`), and `_NoopFileSystem.write_file(filename, content, context, overwrite=False)` matches the call `RunSqlTool.execute` makes on its file system.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 553,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py and the FileSystem capability under src/sqllens/agent/capabilities/",
+    "verify_hint": "Check `RunSqlTool.__init__`'s signature and the `self.file_system.write_file(...)` call in `run_sql.py` (positional vs keyword arguments).",
+    "claim_signature": "api_contract:test_safety_limits.py:run-sql-tool-ctor-dialect:553",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-32"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-70",
+    "category": "test_mock_alignment",
+    "claim": "`_StaticRunner.run_sql` returns `self._df.copy()`, and the installed pandas `DataFrame.copy()` keeps `df.attrs`, so the truncation attrs from `mark_truncation` and the read-result mark from `rows_to_capped_df` reach `RunSqlTool` as a real runner's frame would.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 42,
+    "source_line_end": 43,
+    "verify_against": "pandas `NDFrame.copy` / `__finalize__` and src/sqllens/safety/limits.py",
+    "verify_hint": "Check that pandas `DataFrame.copy` propagates `attrs` (via `__finalize__`) in the pandas version the project pins, and which attrs keys `rows_to_capped_df` and `mark_truncation` set in `limits.py`.",
+    "claim_signature": "test_mock_alignment:test_safety_limits.py:static-runner-attrs-copy:43",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-33"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-71",
+    "category": "absolute_claim",
+    "claim": "The comment asserts that under `None`, `postgres` and `sqlite` `#` is not a comment, so the tool does not classify the statement as read-shaped, and that a MySQL runner streams its rows (via a frame `RunSqlTool` keeps as rows whatever the column is called, including `rows_affected`).",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Under these dialects ``#`` is no comment, so the tool does not\n        # classify the statement as read-shaped; a MySQL runner streamed its\n        # rows, which must not be reported as a row count, whatever the\n        # column is called.",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 646,
+    "source_line_end": 649,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py, src/sqllens/safety/limits.py `rows_to_capped_df`, src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check that `MySQLRunner.run_sql`'s streaming branch builds its frame with `rows_to_capped_df` (or otherwise sets the same read-result mark) and that `RunSqlTool.execute` treats a marked frame with a `rows_affected` column as rows; trace a MySQL runner frame from the write branch to confirm it lacks the mark.",
+    "claim_signature": "absolute_claim:test_safety_limits.py:mysql-runner-marks-rows:646",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-34"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-72",
+    "category": "data_format_assumption",
+    "claim": "The comment asserts `SELECT n FROM widgets /* note` (unterminated comment) does not tokenize, so it is not read-shaped, though SQLite runs it, reaching the runner's write branch with `read_only` off and producing the `row(s) affected` notification as a `NotificationComponent` with no `results` metadata.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# read_only off: these reach the runner's write branch. The unterminated\n        # comment does not tokenize, so it is not read-shaped though SQLite runs it.",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 625,
+    "source_line_end": 626,
+    "verify_against": "src/sqllens/agent/integrations/sqlite/ (SqliteRunner) and src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check `SqliteRunner.run_sql`'s non-read-shaped branch (execute + rowcount frame + commit) and `RunSqlTool.execute`'s row-count branch for the `row(s) affected` text and `NotificationComponent`.",
+    "claim_signature": "data_format_assumption:test_safety_limits.py:unterminated-comment-write-branch:625",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-35"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-73",
+    "category": "api_contract",
+    "claim": "`ReadOnlyGuardRunner(runner, dialect=\"sqlite\")` is a valid constructor call, and `RunSqlTool.execute` returns `success=False` for empty or whitespace-only SQL both with the guard (read_only on) and with a bare `SqliteRunner(read_only=False)`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 677,
+    "source_line_end": 688,
+    "verify_against": "src/sqllens/safety/ (ReadOnlyGuardRunner) and src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check `ReadOnlyGuardRunner.__init__` signature and the empty-SQL check in `RunSqlTool.execute` (or the runner/guard error it relies on, and how `execute` converts an exception into `success=False`).",
+    "claim_signature": "api_contract:test_safety_limits.py:empty-sql-fails:677",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-36"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-74",
+    "category": "data_format_assumption",
+    "claim": "For an empty read-shaped result `RunSqlTool.execute` emits `No rows returned` and, when the frame is marked truncated, `Result truncated at <n> rows`, with `metadata[\"row_count\"] == 0` and `query_type` from `first_sql_keyword` (`WITH` for a `--`-led WITH).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_limits.py",
+    "source_line": 589,
+    "source_line_end": 617,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check the empty-DataFrame branch of `RunSqlTool.execute` for the `No rows returned` text, the truncation note and the metadata it sets.",
+    "claim_signature": "data_format_assumption:test_safety_limits.py:empty-read-message:589",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-37"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-75",
+    "category": "test_mock_alignment",
+    "claim": "With `read_only=False`, `MySQLRunner.run_sql` on a `#`-led read calls `conn.cursor(pymysql.cursors.SSDictCursor)` exactly once positionally, `cursor.execute(sql)` exactly once with the SQL as its only argument (no timeout or session SET through the same cursor), calls `fetchmany` a bounded number of times so a MagicMock returning `[{\"x\": 1}]` forever yields one row, and never calls `conn.commit`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_cleanup.py",
+    "source_line": 304,
+    "source_line_end": 322,
+    "verify_against": "src/sqllens/agent/integrations/mysql/sql_runner.py",
+    "verify_hint": "Check `MySQLRunner.run_sql` (and its sync helper) for the cursor class argument, any statement-timeout `SET` executed on a cursor, the `fetchmany` loop and the commit call on the read branch.",
+    "claim_signature": "test_mock_alignment:test_sql_runner_cleanup.py:mysql-ssdictcursor-fake:304",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-38"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-76",
+    "category": "test_mock_alignment",
+    "claim": "With `read_only=False`, `PostgresRunner.run_sql` on a `--`-led read calls `conn.cursor` exactly once with a `name` keyword starting with `sqllens_` (a server-side cursor), calls `cursor.execute(sql)` exactly once with no other statement on that cursor, reads one batch via `fetchmany`, and never calls `conn.commit`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sql_runner_cleanup.py",
+    "source_line": 325,
+    "source_line_end": 344,
+    "verify_against": "src/sqllens/agent/integrations/postgres/sql_runner.py",
+    "verify_hint": "Check `PostgresRunner.run_sql` for the named-cursor creation (name prefix, `cursor_factory`), any `SET statement_timeout` issued via a separate cursor or `options`, the `fetchmany` loop, and commit/rollback calls on the read branch.",
+    "claim_signature": "test_mock_alignment:test_sql_runner_cleanup.py:postgres-named-cursor-fake:325",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-39"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`first_sql_keyword` returns `SELECT` for a `SELECT` preceded by any mix of leading whitespace, opening parentheses, `--` comment lines and `/* … */` comments (at minimum `-- note` + newline + `SELECT 1`, `/* note */ SELECT 1`, `/* a */ (SELECT 1)`, `( -- a` + newline + `SELECT 1)`) and for a keyword touching a symbol (at minimum `SELECT*FROM t`, `SELECT/* c */1`), with no dialect and with each of `sqlite`, `postgres` and `mysql`; it returns `WITH` for the same prefixes before a `WITH` query; and every existing `TestFirstSqlKeyword` case keeps its expected value.",
+    "claim_signature": "issue-acceptance-1",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 45,
+    "verify_hint": "Check `first_sql_keyword` lines 60-85 and the TestFirstSqlKeyword cases.",
+    "id": "VC-77",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`first_sql_keyword(\"/* a /* b */ c */ SELECT 1\", \"postgres\")` returns `SELECT`, and with `mysql` or `sqlite` it returns `C`, matching how each engine ends the comment.",
+    "claim_signature": "issue-acceptance-2",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 69,
+    "verify_hint": "Check `first_sql_keyword` line 69 and the dialect tokenizers' NESTED_COMMENTS settings, plus the unit test pinning it.",
+    "id": "VC-78",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`first_sql_keyword(\"# c\\nSELECT 1\", \"mysql\")` returns `SELECT`; with `postgres`, `sqlite` or no dialect it returns `\"\"`.",
+    "claim_signature": "issue-acceptance-3",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 69,
+    "verify_hint": "Check `first_sql_keyword` lines 68-85 and the unit tests for `#`-led SQL.",
+    "id": "VC-79",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`first_sql_keyword` returns `\"\"` for, at minimum, the SQL texts `'x' AS a`, `1 AS a` and `\"t\"` (a quoted identifier), each with `postgres`, and for empty and whitespace-only SQL; and `first_sql_keyword(sql, \"no-such-dialect\")` equals `first_sql_keyword(sql)` for every input this criterion and the three above name.",
+    "claim_signature": "issue-acceptance-4",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 60,
+    "verify_hint": "Check `first_sql_keyword` lines 60-67 (unknown dialect fallback) and 73-85, and the unit tests for these inputs.",
+    "id": "VC-80",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`first_sql_keyword` returns `\"\"` for a statement sqlglot's tokenizer cannot tokenize, with no dialect and with each of `sqlite`, `postgres` and `mysql` (at minimum `-- c\\nSELECT 'x` and `/* unterminated SELECT 1`), and a unit test pins that result; an exception from the tokenizer other than `TokenError` propagates; `first_sql_keyword` uses only sqlglot's public API; and `src/sqllens/safety/readonly.py` contains no `_strip_leading_comments` and no regex, `.split()` or `startswith` test on SQL text in `first_sql_keyword`.",
+    "claim_signature": "issue-acceptance-5",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 68,
+    "verify_hint": "Check `first_sql_keyword` lines 45-85 and grep readonly.py for `_strip_leading_comments`; check the unit test pinning the unterminated inputs.",
+    "id": "VC-81",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`is_read_shaped(\"SELECT n FROM widgets # x\\r'\\n\", \"mysql\")` is `True`, and `assert_select_only` accepts that statement with `dialect=\"mysql\"`.",
+    "claim_signature": "issue-acceptance-6",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 96,
+    "verify_hint": "Check `is_read_shaped` line 96 and `assert_select_only` (and `_mysql_parse_sql`) for this input.",
+    "id": "VC-82",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Every existing `is_introspection_query` test keeps its expected value except the three unterminated comment-led `SHOW` cases of `test_own_engine_catalogs_detected` (`# tables\\n/* again */ SHOW 'abc` and `/* c */ SHOW 'abc` on `mysql`, `-- c\\nSHOW 'abc` on `postgres`), which now expect `False`, with a test comment saying that the read-only guard fails closed on the same input and the database rejects it, so it never returns rows; `is_introspection_query(\"#x\\nSHOW 'abc\", dialect=\"postgres\")` is still `False`; and `is_introspection_query(\"# c\\nSHOW TABLES\")` with no dialect is `False`.",
+    "claim_signature": "issue-acceptance-7",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 215,
+    "verify_hint": "Check `is_introspection_query` lines 215-233 and the updated test expectations and comment.",
+    "id": "VC-83",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`is_introspection_query` returns `False` for, at minimum, these data queries whose CTE name starts with a catalog prefix: `WITH pg_recent AS (SELECT 1 AS n) SELECT * FROM pg_recent` and `WITH PG_RECENT AS (SELECT 1 AS n) SELECT * FROM pg_recent` on `postgres`, and `WITH sqlite_recent AS (SELECT 1) SELECT * FROM sqlite_recent` on `sqlite`; and it still returns `True` for, at minimum, `WITH x AS (SELECT * FROM pg_class) SELECT * FROM x` and `WITH pg_recent AS (SELECT 1) SELECT * FROM pg_recent JOIN pg_class ON true` on `postgres`, `DESCRIBE information_schema.tables` on `mysql`, and `WITH sqlite_master AS (SELECT 1) SELECT * FROM sqlite_master, main.sqlite_master` on `sqlite`.",
+    "claim_signature": "issue-acceptance-8",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 234,
+    "verify_hint": "Check `_cte_reference_ids` lines 142-173 and the loop at lines 234-246 against each listed SQL.",
+    "id": "VC-84",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "When identifier normalization or scope analysis raises any exception, `is_introspection_query` excludes no node and logs the exception type: with `traverse_scope` patched to raise, `WITH pg_recent AS (SELECT 1) SELECT * FROM pg_recent` on `postgres` is `True`, and a unit test pins it.",
+    "claim_signature": "issue-acceptance-9",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 164,
+    "verify_hint": "Check `_cte_reference_ids` lines 164-172 and the test patching `traverse_scope`.",
+    "id": "VC-85",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A comment-led `SELECT` and a `SELECT*FROM` read, each run through `SqliteRunner` over more rows than `max_rows`, return exactly `max_rows` rows of the selected columns, marked truncated, not a `rows_affected` frame; the MySQL runner, driven through a fake `pymysql`, executes `# c` + newline + `SELECT 1` on its `SSDictCursor` streaming cursor; and the Postgres runner, driven through a fake `psycopg2`, executes `-- c` + newline + `SELECT 1` on its named (server-side) cursor.",
+    "claim_signature": "issue-acceptance-10",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 152,
+    "verify_hint": "Check sqlite/sql_runner.py line 152, mysql/sql_runner.py line 141 and postgres/sql_runner.py line 171, plus the runner unit tests with fake drivers.",
+    "id": "VC-86",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The `run_sql` tool `build_agent` registers for a `mysql` URL classifies with the `mysql` dialect, and for a `sqlite` URL with the `sqlite` dialect.",
+    "claim_signature": "issue-acceptance-11",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 123,
+    "verify_hint": "Check factory.py lines 89 and 123 and the test asserting the registered tool's dialect.",
+    "id": "VC-87",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`RunSqlTool.execute` returns, for each of at minimum these statements, the result a plain `SELECT` returns — the CSV preview and `Results saved to file` line in `result_for_llm`, a `DataFrameComponent`, and `row_count`, `columns` and `results` metadata matching the returned rows — with `metadata[\"query_type\"]` equal to the statement's leading keyword (`WITH`, `SELECT` or `SHOW`): a `WITH … SELECT` query, a `(SELECT …) UNION (SELECT …)` query, a `--`-led `SELECT`, a `/* */`-led `SELECT`, `SELECT*FROM widgets`, a `SHOW TABLES` statement, and, with the MySQL dialect, a `#`-led `SELECT`.",
+    "claim_signature": "issue-acceptance-12",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 73,
+    "verify_hint": "Check run_sql.py lines 73-170.",
+    "id": "VC-88",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A read-shaped statement that returns no rows (for example a `WITH` query whose filter matches nothing) gets `No rows returned`, with the truncation note when the row cap was hit, and never the `row(s) affected` message.",
+    "claim_signature": "issue-acceptance-13",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 95,
+    "verify_hint": "Check run_sql.py lines 86-118.",
+    "id": "VC-89",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A statement `is_read_shaped` does not classify as read-shaped (for example `UPDATE` with `read_only` off) still gets the `row(s) affected` notification and no result table.",
+    "claim_signature": "issue-acceptance-14",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 171,
+    "verify_hint": "Check run_sql.py lines 171-185 together with line 78's READ_RESULT_ATTR condition.",
+    "id": "VC-90",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`RunSqlTool.execute` returns `success=False` for empty or whitespace-only SQL, with `read_only` on and off.",
+    "claim_signature": "issue-acceptance-15",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 67,
+    "verify_hint": "Check run_sql.py lines 67-68 and the except branch at 194-209.",
+    "id": "VC-91",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`query_info[\"query_type\"]` is `SELECT` for a `--`-led `SELECT`, and for a `#`-led `SELECT` when `components_to_blocks` is given `dialect=\"mysql\"`.",
+    "claim_signature": "issue-acceptance-16",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 113,
+    "verify_hint": "Check _format.py lines 112-116, 493 and 573.",
+    "id": "VC-92",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "For a `run_sql` success card carrying a `WITH` data query's SQL (including one whose CTE name starts with a catalog prefix) followed by a multi-row `DataFrameComponent` of the kind `RunSqlTool` returns, `components_to_blocks` adds a user-visible table block; for a `SHOW TABLES` card followed by such a DataFrame, with `dialect=\"mysql\"`, it adds no block.",
+    "claim_signature": "issue-acceptance-17",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 234,
+    "verify_hint": "Check _format.py line 433 (is_introspection_query call) and readonly.py lines 215-246.",
+    "id": "VC-93",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`pyproject.toml` requires `sqlglot>=30.22,<31`; no statement of the sqlglot version range in `src/`, `tests/`, `pyproject.toml`, `CLAUDE.md` or `docs/internal/` (other than the dated `docs/internal/production-readiness-v0.1.0.md`) gives a floor other than `30.22`; the read-only guard refers to `exp.Alter` directly; none of those files other than the dated `docs/internal/production-readiness-v0.1.0.md` mentions `_ALTER_TYPE` or `exp.AlterTable`; CLAUDE.md's sqlglot rule no longer names this issue, `first_sql_keyword`, `is_read_shaped` or `_strip_leading_comments` as open debt; and CLAUDE.md's `is_introspection_query` failure-path precedent states that an exception from identifier normalization or scope analysis excludes no CTE reference.",
+    "claim_signature": "issue-acceptance-18",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "pyproject.toml",
+    "source_line": 46,
+    "verify_hint": "Check pyproject.toml line 46, readonly.py `_DML_DDL_TYPES` and line 611, and search src/, tests/, CLAUDE.md, docs/internal/ for other version-range statements.",
+    "id": "VC-94",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The change leaves the runners' non-read-shaped branch as it is, so with `read_only` off a statement whose leading keyword is outside the read-shaped set, such as `EXPLAIN` or `VALUES`, and on Postgres `INSERT … RETURNING`, still gets the `row(s) affected` message (on SQLite, `INSERT … RETURNING` fails in that branch, as it does today); and with `read_only` off, a read sqlglot's tokenizer rejects but the engine runs — on SQLite, `SELECT n FROM widgets /* note` with no closing `*/` — gets `\"\"` from `first_sql_keyword` and the `row(s) affected` message; and with `read_only` off, a data-modifying statement that starts with `WITH` (such as MySQL `WITH x AS (SELECT 1) UPDATE …`), with or without leading comments, takes the read-shaped branch as an uncommented one does today (on MySQL it is not committed; Postgres returns an error); #316 tracks that routing.",
+    "claim_signature": "issue-acceptance-19",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 157,
+    "verify_hint": "Check sqlite/sql_runner.py lines 157-159, mysql/sql_runner.py lines 154-168, postgres/sql_runner.py from line 197, and run_sql.py line 78.",
+    "id": "VC-95",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Unit tests cover `RunSqlTool` with, at minimum, a `WITH` query, a leading-parenthesis set operation, a comment-led `SELECT` and a `SHOW` statement, and run without a live Postgres or MySQL server.",
+    "claim_signature": "issue-acceptance-20",
+    "criteria_file": ".prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-324/local-20261030T225752Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: Unit tests cover `RunSqlTool` with, at minimum, a `WITH` query, a leading-parenthesis set operation, a comment-led `SELECT` and a `SHOW` statement, and run without a live Postgres or MySQL server.",
+    "id": "VC-96",
+    "reused_from_iter_prev": false
+  }
+]

@@ -1,0 +1,82 @@
+[
+  {
+    "criterion": 1,
+    "text": "`first_sql_keyword` returns `SELECT` for a `SELECT` preceded by any mix of leading whitespace, opening parentheses, `--` comment lines and `/* … */` comments (at minimum `-- note` + newline + `SELECT 1`, `/* note */ SELECT 1`, `/* a */ (SELECT 1)`, `( -- a` + newline + `SELECT 1)`) and for a keyword touching a symbol (at minimum `SELECT*FROM t`, `SELECT/* c */1`), with no dialect and with each of `sqlite`, `postgres` and `mysql`; it returns `WITH` for the same prefixes before a `WITH` query; and every existing `TestFirstSqlKeyword` case keeps its expected value."
+  },
+  {
+    "criterion": 2,
+    "text": "`first_sql_keyword(\"/* a /* b */ c */ SELECT 1\", \"postgres\")` returns `SELECT`, and with `mysql` or `sqlite` it returns `C`, matching how each engine ends the comment."
+  },
+  {
+    "criterion": 3,
+    "text": "`first_sql_keyword(\"# c\\nSELECT 1\", \"mysql\")` returns `SELECT`; with `postgres`, `sqlite` or no dialect it returns `\"\"`."
+  },
+  {
+    "criterion": 4,
+    "text": "`first_sql_keyword` returns `\"\"` for, at minimum, the SQL texts `'x' AS a`, `1 AS a` and `\"t\"` (a quoted identifier), each with `postgres`, and for empty and whitespace-only SQL; and `first_sql_keyword(sql, \"no-such-dialect\")` equals `first_sql_keyword(sql)` for every input this criterion and the three above name."
+  },
+  {
+    "criterion": 5,
+    "text": "`first_sql_keyword` returns `\"\"` for a statement sqlglot's tokenizer cannot tokenize, with no dialect and with each of `sqlite`, `postgres` and `mysql` (at minimum `-- c\\nSELECT 'x` and `/* unterminated SELECT 1`), and a unit test pins that result; an exception from the tokenizer other than `TokenError` propagates; `first_sql_keyword` uses only sqlglot's public API; and `src/sqllens/safety/readonly.py` contains no `_strip_leading_comments` and no regex, `.split()` or `startswith` test on SQL text in `first_sql_keyword`."
+  },
+  {
+    "criterion": 6,
+    "text": "`is_read_shaped(\"SELECT n FROM widgets # x\\r'\\n\", \"mysql\")` is `True`, and `assert_select_only` accepts that statement with `dialect=\"mysql\"`."
+  },
+  {
+    "criterion": 7,
+    "text": "Every existing `is_introspection_query` test keeps its expected value except the three unterminated comment-led `SHOW` cases of `test_own_engine_catalogs_detected` (`# tables\\n/* again */ SHOW 'abc` and `/* c */ SHOW 'abc` on `mysql`, `-- c\\nSHOW 'abc` on `postgres`), which now expect `False`, with a test comment saying that the read-only guard fails closed on the same input and the database rejects it, so it never returns rows; `is_introspection_query(\"#x\\nSHOW 'abc\", dialect=\"postgres\")` is still `False`; and `is_introspection_query(\"# c\\nSHOW TABLES\")` with no dialect is `False`."
+  },
+  {
+    "criterion": 8,
+    "text": "`is_introspection_query` returns `False` for, at minimum, these data queries whose CTE name starts with a catalog prefix: `WITH pg_recent AS (SELECT 1 AS n) SELECT * FROM pg_recent` and `WITH PG_RECENT AS (SELECT 1 AS n) SELECT * FROM pg_recent` on `postgres`, and `WITH sqlite_recent AS (SELECT 1) SELECT * FROM sqlite_recent` on `sqlite`; and it still returns `True` for, at minimum, `WITH x AS (SELECT * FROM pg_class) SELECT * FROM x` and `WITH pg_recent AS (SELECT 1) SELECT * FROM pg_recent JOIN pg_class ON true` on `postgres`, `DESCRIBE information_schema.tables` on `mysql`, and `WITH sqlite_master AS (SELECT 1) SELECT * FROM sqlite_master, main.sqlite_master` on `sqlite`."
+  },
+  {
+    "criterion": 9,
+    "text": "When identifier normalization or scope analysis raises any exception, `is_introspection_query` excludes no node and logs the exception type: with `traverse_scope` patched to raise, `WITH pg_recent AS (SELECT 1) SELECT * FROM pg_recent` on `postgres` is `True`, and a unit test pins it."
+  },
+  {
+    "criterion": 10,
+    "text": "A comment-led `SELECT` and a `SELECT*FROM` read, each run through `SqliteRunner` over more rows than `max_rows`, return exactly `max_rows` rows of the selected columns, marked truncated, not a `rows_affected` frame; the MySQL runner, driven through a fake `pymysql`, executes `# c` + newline + `SELECT 1` on its `SSDictCursor` streaming cursor; and the Postgres runner, driven through a fake `psycopg2`, executes `-- c` + newline + `SELECT 1` on its named (server-side) cursor."
+  },
+  {
+    "criterion": 11,
+    "text": "The `run_sql` tool `build_agent` registers for a `mysql` URL classifies with the `mysql` dialect, and for a `sqlite` URL with the `sqlite` dialect."
+  },
+  {
+    "criterion": 12,
+    "text": "`RunSqlTool.execute` returns, for each of at minimum these statements, the result a plain `SELECT` returns — the CSV preview and `Results saved to file` line in `result_for_llm`, a `DataFrameComponent`, and `row_count`, `columns` and `results` metadata matching the returned rows — with `metadata[\"query_type\"]` equal to the statement's leading keyword (`WITH`, `SELECT` or `SHOW`): a `WITH … SELECT` query, a `(SELECT …) UNION (SELECT …)` query, a `--`-led `SELECT`, a `/* */`-led `SELECT`, `SELECT*FROM widgets`, a `SHOW TABLES` statement, and, with the MySQL dialect, a `#`-led `SELECT`."
+  },
+  {
+    "criterion": 13,
+    "text": "A read-shaped statement that returns no rows (for example a `WITH` query whose filter matches nothing) gets `No rows returned`, with the truncation note when the row cap was hit, and never the `row(s) affected` message."
+  },
+  {
+    "criterion": 14,
+    "text": "A statement `is_read_shaped` does not classify as read-shaped (for example `UPDATE` with `read_only` off) still gets the `row(s) affected` notification and no result table."
+  },
+  {
+    "criterion": 15,
+    "text": "`RunSqlTool.execute` returns `success=False` for empty or whitespace-only SQL, with `read_only` on and off."
+  },
+  {
+    "criterion": 16,
+    "text": "`query_info[\"query_type\"]` is `SELECT` for a `--`-led `SELECT`, and for a `#`-led `SELECT` when `components_to_blocks` is given `dialect=\"mysql\"`."
+  },
+  {
+    "criterion": 17,
+    "text": "For a `run_sql` success card carrying a `WITH` data query's SQL (including one whose CTE name starts with a catalog prefix) followed by a multi-row `DataFrameComponent` of the kind `RunSqlTool` returns, `components_to_blocks` adds a user-visible table block; for a `SHOW TABLES` card followed by such a DataFrame, with `dialect=\"mysql\"`, it adds no block."
+  },
+  {
+    "criterion": 18,
+    "text": "`pyproject.toml` requires `sqlglot>=30.22,<31`; no statement of the sqlglot version range in `src/`, `tests/`, `pyproject.toml`, `CLAUDE.md` or `docs/internal/` (other than the dated `docs/internal/production-readiness-v0.1.0.md`) gives a floor other than `30.22`; the read-only guard refers to `exp.Alter` directly; none of those files other than the dated `docs/internal/production-readiness-v0.1.0.md` mentions `_ALTER_TYPE` or `exp.AlterTable`; CLAUDE.md's sqlglot rule no longer names this issue, `first_sql_keyword`, `is_read_shaped` or `_strip_leading_comments` as open debt; and CLAUDE.md's `is_introspection_query` failure-path precedent states that an exception from identifier normalization or scope analysis excludes no CTE reference."
+  },
+  {
+    "criterion": 19,
+    "text": "The change leaves the runners' non-read-shaped branch as it is, so with `read_only` off a statement whose leading keyword is outside the read-shaped set, such as `EXPLAIN` or `VALUES`, and on Postgres `INSERT … RETURNING`, still gets the `row(s) affected` message (on SQLite, `INSERT … RETURNING` fails in that branch, as it does today); and with `read_only` off, a read sqlglot's tokenizer rejects but the engine runs — on SQLite, `SELECT n FROM widgets /* note` with no closing `*/` — gets `\"\"` from `first_sql_keyword` and the `row(s) affected` message; and with `read_only` off, a data-modifying statement that starts with `WITH` (such as MySQL `WITH x AS (SELECT 1) UPDATE …`), with or without leading comments, takes the read-shaped branch as an uncommented one does today (on MySQL it is not committed; Postgres returns an error); #316 tracks that routing."
+  },
+  {
+    "criterion": 20,
+    "text": "Unit tests cover `RunSqlTool` with, at minimum, a `WITH` query, a leading-parenthesis set operation, a comment-led `SELECT` and a `SHOW` statement, and run without a live Postgres or MySQL server."
+  }
+]
