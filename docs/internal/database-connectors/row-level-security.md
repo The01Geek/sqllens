@@ -1,5 +1,7 @@
 # Row-Level Security (per-request row scoping)
 
+<!-- verified-against: eff9038 2026-10-30 (sections "Database relation checks", "Wiring" and "How errors surface") -->
+
 Why a configured `[[rls]]` rule means every agent-generated read of a protected table is silently filtered to the rows the request is allowed to see, and why a query that cannot be safely scoped is blocked instead of run unfiltered. Source-of-truth reference for [src/sqllens/safety/rls.py](../../../src/sqllens/safety/rls.py), the `RlsGuardRunner` decorator in [src/sqllens/safety/__init__.py](../../../src/sqllens/safety/__init__.py), and the `RlsRule` model in [src/sqllens/config.py](../../../src/sqllens/config.py).
 
 ## What RLS does
