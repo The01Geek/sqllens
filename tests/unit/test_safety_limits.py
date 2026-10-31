@@ -639,37 +639,23 @@ class TestRunSqlToolReadShapedResults:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("dialect", [None, "postgres", "sqlite"])
-    @pytest.mark.parametrize("column", ["n", "rows_affected"])
-    async def test_rows_from_runner_with_other_dialect_are_kept(
-        self, dialect: str | None, column: str
-    ) -> None:
-        # Under these dialects ``#`` is no comment, so the tool does not
-        # classify the statement as read-shaped; a MySQL runner streamed its
-        # rows, which must not be reported as a row count, whatever the
-        # column is called.
+    async def test_tool_dialect_alone_decides_the_output(self, dialect: str | None) -> None:
+        # Under these dialects ``#`` is no comment, so the statement is not
+        # read-shaped: it gets the row-count notification even when the runner
+        # returned capped rows, because the tool must classify with the
+        # runner's own dialect (build_agent passes it).
+        from sqllens.agent.components import NotificationComponent
         from sqllens.agent.tools.run_sql import RunSqlTool
         from sqllens.safety.limits import rows_to_capped_df
 
-        df = rows_to_capped_df([{column: 1}, {column: 2}], 10)
+        df = rows_to_capped_df([{"n": 1}, {"n": 2}], 10)
         tool = RunSqlTool(
             sql_runner=_StaticRunner(df), file_system=_NoopFileSystem(), dialect=dialect
         )
         out = await tool.execute(_ctx(), RunSqlToolArgs(sql="# c\nSELECT n FROM widgets"))
-        self._assert_table(out, "", [{column: 1}, {column: 2}])
-
-    @pytest.mark.asyncio
-    async def test_empty_read_from_runner_with_other_dialect_reports_no_rows(self) -> None:
-        from sqllens.agent.tools.run_sql import RunSqlTool
-        from sqllens.safety.limits import rows_to_capped_df
-
-        tool = RunSqlTool(
-            sql_runner=_StaticRunner(rows_to_capped_df([], 10)),
-            file_system=_NoopFileSystem(),
-            dialect="sqlite",
-        )
-        out = await tool.execute(_ctx(), RunSqlToolArgs(sql="# c\nSELECT n FROM widgets"))
-        assert "No rows returned" in out.result_for_llm
-        assert "row(s) affected" not in out.result_for_llm
+        assert "row(s) affected" in out.result_for_llm
+        assert isinstance(out.ui_component.rich_component, NotificationComponent)
+        assert "results" not in out.metadata
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("read_only", [True, False])
