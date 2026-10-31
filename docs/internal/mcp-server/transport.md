@@ -164,7 +164,7 @@ The allowlist comes from `_allowed_hosts(cfg)`:
 
 ### FastMCP's own Host-header check (footgun)
 
-Separately, FastMCP defaults to rejecting non-loopback `Host` headers with HTTP 421 ("Misdirected Request") — its own DNS-rebinding defense, which bites when running SQL Lens in a container and connecting from a host process. CLAUDE.md "Gotchas" covers the specifics — short version: connect from the same network namespace so `127.0.0.1` resolves locally, or configure FastMCP's transport security explicitly when exposing remotely. SQL Lens does not currently expose a knob for relaxing this; it inherits the FastMCP default. Note this is a *distinct* layer from our `TrustedHostMiddleware`: a disallowed host hits our 400 first; an allowed-but-non-loopback host can still trip FastMCP's 421.
+Separately, FastMCP defaults to rejecting non-loopback `Host` headers with HTTP 421 ("Misdirected Request") — its own DNS-rebinding defense, which bites when running SQL Lens in a container and connecting from a host process. AGENTS.md "Gotchas" covers the specifics — short version: connect from the same network namespace so `127.0.0.1` resolves locally, or configure FastMCP's transport security explicitly when exposing remotely. SQL Lens does not currently expose a knob for relaxing this; it inherits the FastMCP default. Note this is a *distinct* layer from our `TrustedHostMiddleware`: a disallowed host hits our 400 first; an allowed-but-non-loopback host can still trip FastMCP's 421.
 
 ## HTTP construction policy and posture
 
@@ -176,7 +176,7 @@ At build time, `build_asgi_app` calls `_warn_if_plaintext_credentials(cfg)`. Whe
 
 ## Footgun 3 (Docker Desktop / WSL2): `--network=host`
 
-CLAUDE.md "Gotchas" again: `--network=host` on Docker Desktop puts the container in Docker Desktop's internal WSL distro — a different network namespace than the user's WSL. Native processes in user-WSL (curl, MCP Inspector, IDEs) can't reach `127.0.0.1:<port>` on the container. **Always use port mapping** (`-p HOST:CONTAINER`) for local dev unless you specifically need host-shared networking. This isn't a transport-layer bug — it's an environment quirk — but the transport layer is where you'll first notice it as "the port doesn't answer."
+AGENTS.md "Gotchas" again: `--network=host` on Docker Desktop puts the container in Docker Desktop's internal WSL distro — a different network namespace than the user's WSL. Native processes in user-WSL (curl, MCP Inspector, IDEs) can't reach `127.0.0.1:<port>` on the container. **Always use port mapping** (`-p HOST:CONTAINER`) for local dev unless you specifically need host-shared networking. This isn't a transport-layer bug — it's an environment quirk — but the transport layer is where you'll first notice it as "the port doesn't answer."
 
 ## `_AuthMiddleware` — auth runs per-request
 

@@ -86,7 +86,7 @@ if cfg.llm.api_key is None:
     raise ValueError(API_KEY_MISSING_MESSAGE)
 ```
 
-`sqllens serve` ([src/sqllens/cli.py](../../../src/sqllens/cli.py)) does the same check earlier and exits 2 with a friendly error. The CLI gate runs unconditionally; the [preflight](../setup/preflight.md) layer that follows it (`probe_llm`) then constructs `AnthropicLlmService` to surface other LLM-config problems before the transport starts. The factory's check is the third layer: a backstop for programmatic embedders and tests that call `build_agent` directly, where preflight may have been bypassed. Without it, a `None` key surfaces as a bare `AttributeError` at the first `get_secret_value()` call, which violates the CLAUDE.md rule that MCP tool errors must be clear, structured messages.
+`sqllens serve` ([src/sqllens/cli.py](../../../src/sqllens/cli.py)) does the same check earlier and exits 2 with a friendly error. The CLI gate runs unconditionally; the [preflight](../setup/preflight.md) layer that follows it (`probe_llm`) then constructs `AnthropicLlmService` to surface other LLM-config problems before the transport starts. The factory's check is the third layer: a backstop for programmatic embedders and tests that call `build_agent` directly, where preflight may have been bypassed. Without it, a `None` key surfaces as a bare `AttributeError` at the first `get_secret_value()` call, which violates the AGENTS.md rule that MCP tool errors must be clear, structured messages.
 
 ## Why the scratch FS is anchored to `tempfile.gettempdir()`
 
@@ -125,7 +125,7 @@ The streaming path now also keeps the response `finish_reason` on the `LlmRespon
 - When `len > max_conversations`, `_remember` evicts the least-recently-used entries (`popitem(last=False)`).
 - `get_conversation` / `delete_conversation` enforce a `user.id` ownership check before returning or deleting — though SQL Lens is single-user (see "The user resolver is intentionally static"), so in practice every conversation belongs to the same static `sqllens-user`.
 
-It is **ephemeral by design**: in-process only, no server-side database, no cross-restart persistence (CLAUDE.md non-goal — no schema migrations / server-side DB). Restarting the server drops all conversations, which is acceptable for the clarifying-question flow it backs. It is **not** thread-safe: it assumes a single asyncio event loop where each method's `OrderedDict` mutations run without an intervening `await` (atomic under cooperative scheduling). The cap is surfaced as `AgentRuntimeConfig.max_conversations` (default `1000`, range `1`–`1_000_000`, env `SQLLENS_AGENT__MAX_CONVERSATIONS`).
+It is **ephemeral by design**: in-process only, no server-side database, no cross-restart persistence (AGENTS.md non-goal — no schema migrations / server-side DB). Restarting the server drops all conversations, which is acceptable for the clarifying-question flow it backs. It is **not** thread-safe: it assumes a single asyncio event loop where each method's `OrderedDict` mutations run without an intervening `await` (atomic under cooperative scheduling). The cap is surfaced as `AgentRuntimeConfig.max_conversations` (default `1000`, range `1`–`1_000_000`, env `SQLLENS_AGENT__MAX_CONVERSATIONS`).
 
 Pinned by `tests/unit/test_conversation_store.py` (LRU eviction, recency-on-read, ownership checks) and `tests/unit/test_factory_wiring.py` (the agent is wired with a `BoundedConversationStore` sized from config).
 
@@ -164,7 +164,7 @@ class _StaticUserResolver(UserResolver):
                     group_memberships=["default"])
 ```
 
-The agent framework expects a `UserResolver` because upstream supports multi-tenant deployments where each request maps to a different principal. SQL Lens is single-tenant by design (see [CLAUDE.md](../../../CLAUDE.md) "What not to add"), so we return the same `User` every call.
+The agent framework expects a `UserResolver` because upstream supports multi-tenant deployments where each request maps to a different principal. SQL Lens is single-tenant by design (see [AGENTS.md](../../../AGENTS.md) "What not to add"), so we return the same `User` every call.
 
 Side-effect that's worth knowing: `LocalFileSystem` derives a per-user subfolder via `sha256(user.id)[:16]`. With one user ID, that's *always* the same 16-hex folder — a single dead directory under `tempfile.gettempdir()/sqllens/`. See [agent/tool-scratch-storage.md](tool-scratch-storage.md) for why we kept the framework contract intact even though it's wasted indirection.
 

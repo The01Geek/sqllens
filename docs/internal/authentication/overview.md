@@ -100,7 +100,7 @@ Things to check off:
 ## What auth is **not** doing
 
 - **Authorization decisions at the tool boundary** — the two MCP tools are unconditionally available to any authenticated principal. There is no scope gating and no per-tool access list. *Row-level filtering does exist* as a separate, opt-in facility (`[[rls]]` rules + `RlsGuardRunner`) that scopes the rows a SELECT may see, but the rules sit in `sqllens.toml` and read per-request values out of caller-supplied MCP `_meta` — they are **not** derived from the authenticated principal's claims (because `auth.mode = "bearer"` has no principal information beyond the literal string `"bearer"`, and `jwt` is unimplemented). The embedding application is the source of truth for identity; SQL Lens trusts it. See [database-connectors/row-level-security.md](../database-connectors/row-level-security.md).
-- **User management** — there is no user model, no signup, no session storage. CLAUDE.md "What not to add" explicitly forbids these. The bearer mode is for one operator with one token; JWT mode (once implemented) delegates principal identity entirely to the upstream IdP.
+- **User management** — there is no user model, no signup, no session storage. AGENTS.md "What not to add" explicitly forbids these. The bearer mode is for one operator with one token; JWT mode (once implemented) delegates principal identity entirely to the upstream IdP.
 - **TLS** — terminate it externally.
 
 ## How the request flows to the row-level-security guard

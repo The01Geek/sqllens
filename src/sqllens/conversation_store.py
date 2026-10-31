@@ -11,7 +11,7 @@ forever, so a long-running server's memory grows without bound. This store is
 an LRU variant with a hard cap: once ``max_conversations`` is exceeded, the
 least-recently-used conversation is evicted.
 
-Per CLAUDE.md, conversation continuity is **in-process and ephemeral by
+Per AGENTS.md, conversation continuity is **in-process and ephemeral by
 design** — no server-side database, no cross-restart persistence. Restarting
 the server drops all conversations, which is acceptable for the
 clarifying-question flow this store backs.

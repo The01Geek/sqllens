@@ -71,7 +71,7 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     # here. This guard catches the residual bypass paths — programmatic embedders
     # and tests that call ``build_agent`` directly — so a ``None`` key surfaces as
     # an actionable ``ValueError`` instead of slipping into ``get_secret_value()``
-    # and reaching the MCP client as a bare ``AttributeError``, which CLAUDE.md
+    # and reaching the MCP client as a bare ``AttributeError``, which AGENTS.md
     # forbids.
     if cfg.llm.api_key is None:
         raise ValueError(API_KEY_MISSING_MESSAGE)
@@ -183,7 +183,7 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
         # Bounded LRU store backing multi-turn conversations. The framework
         # default (MemoryConversationStore) is unbounded; this caps in-process
         # memory so a long-running server does not leak conversations. Ephemeral
-        # by design — dropped on restart, never persisted (CLAUDE.md non-goal).
+        # by design — dropped on restart, never persisted (AGENTS.md non-goal).
         conversation_store=BoundedConversationStore(
             max_conversations=cfg.agent.max_conversations,
         ),

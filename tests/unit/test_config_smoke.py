@@ -444,7 +444,7 @@ def test_build_agent_raises_when_api_key_missing(tmp_path: Path) -> None:
     # programmatic embedders / tests that build an Agent directly must get a
     # clear ``ValueError`` instead of an ``AttributeError`` from ``None.get_secret_value()``.
     # The factory imports a heavy stack (Anthropic SDK, Chroma, etc.); the test
-    # assumes the project's ``[dev,all]`` extras are installed per CLAUDE.md.
+    # assumes the project's ``[dev,all]`` extras are installed per AGENTS.md.
     cfg_path = tmp_path / "sqllens.toml"
     cfg_path.write_text(
         textwrap.dedent(

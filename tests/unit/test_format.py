@@ -439,7 +439,7 @@ def test_multiple_table_blocks_each_surface_independently() -> None:
 def test_blocks_total_budget_trims_trailing_blocks_with_notice(caplog) -> None:
     # The overall blocks-ceiling: a long stream of in-budget blocks still
     # cannot blow ``_MAX_BLOCKS_TOTAL_BYTES``. Trim trailing blocks, append an
-    # explicit truncation notice, log loud (CLAUDE.md: never silently drop).
+    # explicit truncation notice, log loud (AGENTS.md: never silently drop).
     # Each row's column name is fat enough that one DataFrame ≈ near the
     # per-block cap, so 8 of them blow the 512 KB overall ceiling.
     fat_cell = "x" * (100 * 1024)
@@ -456,7 +456,7 @@ def test_blocks_total_budget_trims_trailing_blocks_with_notice(caplog) -> None:
     assert blocks[-1]["type"] == "text"
     assert "Response truncated" in blocks[-1]["text"]
     assert "trailing block" in blocks[-1]["text"]
-    # And the server-side log fired (CLAUDE.md: never silently drop).
+    # And the server-side log fired (AGENTS.md: never silently drop).
     assert any(
         "sqllens/blocks budget exceeded" in r.getMessage() for r in caplog.records
     ), "expected a warning when blocks were trimmed"
@@ -465,7 +465,7 @@ def test_blocks_total_budget_trims_trailing_blocks_with_notice(caplog) -> None:
 def test_blocks_catastrophic_trim_returns_notice_block_not_empty(
     monkeypatch, caplog
 ) -> None:
-    # The degenerate near-impossible case the CLAUDE.md silent-failure rule
+    # The degenerate near-impossible case the AGENTS.md silent-failure rule
     # warns about: the truncation notice itself exceeds the overall ceiling.
     # Force the situation by monkeypatching the ceiling down to a tiny value
     # (smaller than the notice's serialized length). The function must NOT
@@ -576,7 +576,7 @@ def test_components_to_blocks_unmarked_fallback_logs_info(caplog) -> None:
 
 
 def test_serialize_blocks_to_markdown_unknown_block_type_surfaced(caplog) -> None:
-    # CLAUDE.md "never silently drop" rule: an unknown block type (producer
+    # AGENTS.md "never silently drop" rule: an unknown block type (producer
     # drift — typo, case mismatch, future type the renderer doesn't know
     # yet, missing ``type`` key) must surface to both the log AND the
     # rendered output rather than vanish silently. Pin both surfaces.
@@ -1794,7 +1794,7 @@ def test_table_markdown_header_falls_back_to_raw_when_labels_absent() -> None:
 
 def test_small_result_one_column_uses_humanized_label() -> None:
     # The one-row ≤4-column text path is the third sibling surface (#257); it
-    # must agree with the table header (CLAUDE.md sibling-surfaces rule).
+    # must agree with the table header (AGENTS.md sibling-surfaces rule).
     df = DataFrameComponent(rows=[{"customer_id": 42}], columns=["customer_id"])
     markdown, _is_error, blocks, _qi, _mi = components_to_blocks([_ui(df)])
     assert blocks == [{"type": "text", "text": "**Customer ID:** 42"}]

@@ -129,7 +129,7 @@ async def test_tool_signals_error_on_partial_failure(
     tmp_path, monkeypatch
 ) -> None:
     """A run that saved some items but errored on others is a failed import:
-    per the CLAUDE.md 'partial failure is failure' rule it must reach the
+    per the AGENTS.md 'partial failure is failure' rule it must reach the
     client as isError:true, not a success string that merely reports the count.
     """
     patch_fake_embeddings(monkeypatch)

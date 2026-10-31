@@ -580,7 +580,7 @@ def verify_memory(
         err_console.print(f"[red]Invalid golden file:[/red] {escape(str(e))}")
         raise typer.Exit(code=1) from e
     if not cases:
-        # Empty golden set — per CLAUDE.md "structured signal, never silent
+        # Empty golden set — per AGENTS.md "structured signal, never silent
         # success" — refuse to exit 0 on a vacuous run.
         err_console.print(
             "[red]Error:[/red] golden file is empty (no sql_pairs). "
@@ -648,7 +648,7 @@ def _exit_for_report(report: RunReport, fail_under: float | None) -> None:
     With ``--fail-under``: exits 0 iff the PASS rate (in percent) is greater
     than or equal to the threshold, **and** at least one case PASSed. An
     all-non-PASS run (every case CHANGED or ERROR) always exits non-zero
-    regardless of threshold — the CLAUDE.md "structured signal, never silent
+    regardless of threshold — the AGENTS.md "structured signal, never silent
     success" rule overrides ``--fail-under 0``, which would otherwise score
     ``0% >= 0%`` as a green result on a fully-broken agent.
     """

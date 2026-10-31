@@ -37,7 +37,7 @@ With the wiring in `factory.py` (below), `<configured-working-dir>` is always `t
 
 ## Why the per-user hash is dead weight in SQL Lens
 
-`LocalFileSystem` was lifted from a multi-tenant upstream framework where many users share one server. SQL Lens is **single-tenant by design** ([CLAUDE.md](../../../CLAUDE.md) "What not to add"). The user identity is hardcoded by `_StaticUserResolver` in [src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py):
+`LocalFileSystem` was lifted from a multi-tenant upstream framework where many users share one server. SQL Lens is **single-tenant by design** ([AGENTS.md](../../../AGENTS.md) "What not to add"). The user identity is hardcoded by `_StaticUserResolver` in [src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py):
 
 ```python
 class _StaticUserResolver(UserResolver):

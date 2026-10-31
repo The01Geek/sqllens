@@ -20,7 +20,7 @@ RLS is opt-in: an empty `rls` list disables the guard wholly (no decorator is wr
 - **Not authentication.** SQL Lens does not introspect the principal from a JWT or session — see [authentication/overview.md](../authentication/overview.md). The dynamic value comes from MCP `_meta` that the embedding application asserts; if you cannot trust that assertion, do not use dynamic RLS.
 - **Not authorization at the tool boundary.** Every authenticated principal can still call `query_database`; RLS scopes *what rows* the read sees, not *which tools* can run.
 - **Not a replacement for a least-privilege database role.** It is an application-layer filter on top of the read-only guard; the database role and `database.read_only = true` remain the authoritative backstops (defence in depth — same posture as the parser guard, see [read-only-safety.md](read-only-safety.md)).
-- **Not multi-tenant infrastructure.** SQL Lens is single-database, single-process per the [CLAUDE.md](../../../CLAUDE.md) "What not to add" rule; RLS lets one process serve per-request-scoped reads, not many tenants' databases.
+- **Not multi-tenant infrastructure.** SQL Lens is single-database, single-process per the [AGENTS.md](../../../AGENTS.md) "What not to add" rule; RLS lets one process serve per-request-scoped reads, not many tenants' databases.
 
 ## Fail-secure, proven not assumed
 

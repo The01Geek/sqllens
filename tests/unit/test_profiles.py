@@ -6,7 +6,7 @@
 The tests cover:
 
 - :class:`~sqllens.profiles.ProfileStore` CRUD + persistence round-trip, with
-  the corrupt-store warning + safe fallback that CLAUDE.md's error-discipline
+  the corrupt-store warning + safe fallback that AGENTS.md's error-discipline
   rule mandates.
 - :func:`~sqllens.profiles.resolve_effective_settings` overlay semantics
   (unknown name → ``default`` → base config; ``None`` fields inherit).
@@ -174,7 +174,7 @@ def test_corrupt_store_falls_back_to_default_with_warning(
 ) -> None:
     """A corrupt JSON file emits a loud warning and falls back to default-only.
 
-    CLAUDE.md: a destroyed store must NEVER silently become an empty success.
+    AGENTS.md: a destroyed store must NEVER silently become an empty success.
     """
     persist = tmp_path / "chroma"
     persist.mkdir()
@@ -494,7 +494,7 @@ async def test_row_cap_runner_consults_effective_settings(tmp_path: Path) -> Non
 
 
 # --------------------------------------------------------------------------
-# Corrupt-store short-circuit on admin reads (CLAUDE.md error-discipline)
+# Corrupt-store short-circuit on admin reads (AGENTS.md error-discipline)
 # --------------------------------------------------------------------------
 
 
@@ -511,7 +511,7 @@ async def _build_server_with_corrupt_store(tmp_path: Path):
 
 
 async def test_list_profiles_iserror_when_store_is_corrupt(tmp_path: Path) -> None:
-    """A degraded store must not be served as a clean 'empty list' (CLAUDE.md)."""
+    """A degraded store must not be served as a clean 'empty list' (AGENTS.md)."""
     mcp = await _build_server_with_corrupt_store(tmp_path)
     result = await _fn(mcp, "list_profiles")()
     assert isinstance(result, CallToolResult)

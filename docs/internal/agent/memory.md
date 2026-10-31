@@ -129,13 +129,13 @@ The Claude Desktop installer ([src/sqllens/installers/claude_desktop.py](../../.
 
 `persist_dir` ends up containing a Chroma duckdb-or-sqlite store plus the embedding model files. **First use downloads ~80 MB of embedding model weights** (Chroma's default sentence-transformer) — this is the most common "why is the first query slow / blocked" cause. The download happens inside the Chroma client's constructor on first read/write.
 
-The directory is anchored under `/chroma/` in `.gitignore` (note the leading slash — see CLAUDE.md "Gotchas" for the lesson behind that anchoring). If you need a clean memory, delete the directory; it'll be rebuilt on next run.
+The directory is anchored under `/chroma/` in `.gitignore` (note the leading slash — see AGENTS.md "Gotchas" for the lesson behind that anchoring). If you need a clean memory, delete the directory; it'll be rebuilt on next run.
 
 ## Tuning `similarity_threshold`
 
 This is the single knob most worth tuning per-database.
 
-- **Too high (e.g. 0.95)** → near-exact rephrasings are the only hits. Memory is effectively off for anything but identical questions. The CLAUDE.md debugging checklist calls this out: "may be too high or too low."
+- **Too high (e.g. 0.95)** → near-exact rephrasings are the only hits. Memory is effectively off for anything but identical questions. The AGENTS.md debugging checklist calls this out: "may be too high or too low."
 - **Too low (e.g. 0.3)** → unrelated past questions surface. The agent gets distracting wrong-shape examples and may copy SQL that doesn't fit.
 - **Default 0.7** is a reasonable starting point for English questions over a single schema. If queries vary a lot in length or jargon, lower it; if the same question gets asked in many slightly-different forms, raise it.
 
@@ -268,7 +268,7 @@ The verifier uses the persisted `default` profile's similarity threshold and lim
 - **CHANGED** — both sides parsed cleanly but the normalised forms differ. This is a review signal, not proof of a wrong answer: different JOIN order or `IN` versus `EXISTS` can describe equivalent results.
 - **ERROR** — either side failed to parse, the agent path raised, or the agent answered without SQL. Every `CaseResult` with this status requires a diagnostic. SQL parse failures identify the expected or actual side; missing SQL has its own message. Driver and comparator exceptions are reported as `<ExceptionType>: <message>`.
 
-**Structured-signal contract** (CLAUDE.md "never silent success"). The CLI's `_exit_for_report` explicitly refuses to exit 0 in four vacuous-success traps:
+**Structured-signal contract** (AGENTS.md "never silent success"). The CLI's `_exit_for_report` explicitly refuses to exit 0 in four vacuous-success traps:
 
 - **Empty golden file** — `{}` or an empty `sql_pairs.pairs` list exits 1 with `golden file is empty (no sql_pairs). There is nothing to verify.` `_exit_for_report` re-asserts the same `report.total == 0` guard so a future caller that bypassed the upstream check still fails closed rather than letting `all([])` vacuously succeed.
 - **Any non-PASS case** — without `--fail-under`, any CHANGED or ERROR row exits 1.
@@ -285,7 +285,7 @@ The verifier uses the persisted `default` profile's similarity threshold and lim
 
 `build_server` ([src/sqllens/server.py](../../../src/sqllens/server.py)) registers a third tool, `import_memory(bundle_json: str)`, **only when `cfg.memory.allow_import` is true**. The flag is `MemoryConfig.allow_import` (default `False`, env `SQLLENS_MEMORY__ALLOW_IMPORT`). It defaults OFF because a remote client that can write memory can **poison future SQL generation** — imported pairs are retrieved at query time exactly like agent-learned ones. Enable only for trusted operators.
 
-The tool accepts JSON only (no CSV over MCP), runs `import_bundle` with default `clear=False` / `dry_run=False`, and returns `ImportReport.to_markdown()` (a saved/skipped/errors table) **only when the import was fully clean**. Per the CLAUDE.md `isError` contract:
+The tool accepts JSON only (no CSV over MCP), runs `import_bundle` with default `clear=False` / `dry_run=False`, and returns `ImportReport.to_markdown()` (a saved/skipped/errors table) **only when the import was fully clean**. Per the AGENTS.md `isError` contract:
 
 - Before parsing or importing, `_require_write_auth("memory")` refuses calls when `auth.mode="none"` and `auth.insecure` is false. Configure bearer authentication or explicitly acknowledge a closed network with `auth.insecure=true`. This applies to both MCP transports; the CLI import/export commands are unaffected.
 - A parse failure raises `RuntimeError("Invalid memory bundle: ...")`.
@@ -345,4 +345,4 @@ The agent decides on its own when to call `SearchSavedCorrectToolUsesTool`. If m
 3. If hits exist but the agent doesn't use them well, the issue is prompt-shaped, not memory-shaped — the system prompt for `SearchSavedCorrectToolUsesTool` controls how aggressively it's invoked. That tool's description lives in [src/sqllens/agent/tools/agent_memory.py](../../../src/sqllens/agent/tools/agent_memory.py) and is part of the lifted code; rewrite cautiously.
 4. If the agent exhausts `max_tool_iterations` before getting to a memory search, raise `cfg.agent.max_tool_iterations`.
 
-If the answer is *wrong* despite hits — that's covered in the CLAUDE.md debugging checklist as well: bad memory entries persist until manually deleted. There is no automatic invalidation; `delete_by_id` is the only purge path short of removing the directory.
+If the answer is *wrong* despite hits — that's covered in the AGENTS.md debugging checklist as well: bad memory entries persist until manually deleted. There is no automatic invalidation; `delete_by_id` is the only purge path short of removing the directory.
