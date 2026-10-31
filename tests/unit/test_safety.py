@@ -503,7 +503,7 @@ class TestCorpusStaysRejected:
     """Corpus-regression assertion.
 
     Re-asserts the full bypass corpus stays rejected. This is the explicit
-    guard against a future sqlglot bump (the ``>=25.0,<31`` pin can be widened
+    guard against a future sqlglot bump (the ``>=30.22,<31`` pin can be widened
     later) silently re-opening a parser-level bypass after the ``walk()``
     version shim was removed.
     """
@@ -517,25 +517,33 @@ class TestCorpusStaysRejected:
 
 
 class TestGuardDoesNotCrashOnPinnedSqlglot:
-    """A trivial SELECT must pass without an unhandled exception.
-
-    Pins the ALTER-node version-tolerance fix: a bare ``exp.Alter`` reference
-    AttributeErrors on sqlglot 25.0.x (it ships only ``exp.AlterTable``),
-    which would crash the guard on *every* query — including ``SELECT 1`` —
-    on the low end of the pinned ``>=25.0,<31`` range.
+    """A trivial SELECT must pass without an unhandled exception, an ALTER is
+    rejected, and the pinned sqlglot parses ALTER to the ``exp.Alter`` node the
+    deny-walk lists.
     """
 
     @pytest.mark.parametrize("dialect", [None, "sqlite", "postgres", "mysql"])
     def test_trivial_select_passes(self, dialect: str | None) -> None:
         assert_select_only("SELECT 1", dialect=dialect)
 
-    def test_nested_alter_still_rejected(self) -> None:
-        # Exercises the DML/DDL deny-walk's ALTER branch via a set-operation
-        # operand (reachable from the Union root), not just the root-type gate.
+    def test_alter_rejected(self) -> None:
         with pytest.raises(UnsafeSqlError):
             assert_select_only(
                 "ALTER TABLE users ADD COLUMN x INT", dialect="postgres"
             )
+
+    @pytest.mark.parametrize("dialect", [None, "sqlite", "postgres", "mysql"])
+    def test_alter_parses_to_deny_walk_node(self, dialect: str | None) -> None:
+        # The root-type gate rejects a root-level ALTER before the deny-walk
+        # runs, so pin the AST shape the deny-walk's ``exp.Alter`` entry needs.
+        import sqlglot
+        from sqlglot import expressions as exp
+
+        from sqllens.safety.readonly import _DML_DDL_TYPES
+
+        parsed = sqlglot.parse_one("ALTER TABLE users ADD COLUMN x INT", dialect=dialect)
+        assert type(parsed) is exp.Alter
+        assert exp.Alter in _DML_DDL_TYPES
 
 
 class TestBenignTypedFunctionLiteralsPass:
@@ -911,19 +919,101 @@ class TestIsIntrospectionQueryPerDialect:
             ("-- columns\nSHOW COLUMNS FROM widgets", "mysql"),
             ("/* look up tables */ SHOW TABLES", "postgres"),
             ("/* look up tables */ SHOW TABLES", "sqlite"),
-            # A comment-led SHOW that sqlglot cannot tokenize is still caught
-            # before the parse rather than failing open.
-            ("# tables\n/* again */ SHOW 'abc", "mysql"),
-            ("/* c */ SHOW 'abc", "mysql"),
-            ("-- c\nSHOW 'abc", "postgres"),
-            # An inline comment right after SHOW is caught by the parse root.
+            # The tokenizer drops an inline comment right after SHOW.
             ("SHOW/**/TABLES", "mysql"),
             ("SHOW/* c */ COLUMNS FROM widgets", "mysql"),
             ("/* a /* b */ c */ SHOW TABLES", "postgres"),
+            # A real catalog table inside or beside a CTE still counts.
+            ("WITH x AS (SELECT * FROM pg_class) SELECT * FROM x", "postgres"),
+            (
+                "WITH pg_recent AS (SELECT 1) SELECT * FROM pg_recent JOIN pg_class ON true",
+                "postgres",
+            ),
+            # Scope analysis builds no scope for DESCRIBE; its table still counts.
+            ("DESCRIBE information_schema.tables", "mysql"),
+            # A qualified or aliased catalog table beside a same-named CTE or
+            # derived table is not a CTE reference, in either order.
+            (
+                "WITH sqlite_master AS (SELECT 1) "
+                "SELECT * FROM sqlite_master, main.sqlite_master",
+                "sqlite",
+            ),
+            (
+                "WITH sqlite_master AS (SELECT 1) "
+                "SELECT * FROM main.sqlite_master, sqlite_master",
+                "sqlite",
+            ),
+            ("WITH c AS (SELECT 1 AS k) SELECT * FROM sqlite_master AS c, c", "sqlite"),
+            (
+                "SELECT count(*) FROM sqlite_master, (SELECT 1 AS k) AS sqlite_master",
+                "sqlite",
+            ),
+            # A CTE defined inside a derived table is not visible outside it.
+            (
+                "SELECT * FROM (WITH pg_a AS (SELECT 1) SELECT * FROM pg_a) AS s, pg_a",
+                "postgres",
+            ),
         ],
     )
     def test_own_engine_catalogs_detected(self, sql: str, dialect: str) -> None:
         assert is_introspection_query(sql, dialect=dialect) is True
+
+    @pytest.mark.parametrize(
+        ("sql", "dialect"),
+        [
+            ("# tables\n/* again */ SHOW 'abc", "mysql"),
+            ("/* c */ SHOW 'abc", "mysql"),
+            ("-- c\nSHOW 'abc", "postgres"),
+        ],
+    )
+    def test_untokenizable_show_is_data(self, sql: str, dialect: str) -> None:
+        # The read-only guard fails closed on the same input and the database
+        # rejects it, so it never returns rows to withhold.
+        assert is_introspection_query(sql, dialect=dialect) is False
+
+    @pytest.mark.parametrize(
+        ("sql", "dialect"),
+        [
+            ("WITH pg_recent AS (SELECT 1 AS n) SELECT * FROM pg_recent", "postgres"),
+            ("WITH PG_RECENT AS (SELECT 1 AS n) SELECT * FROM pg_recent", "postgres"),
+            ("WITH sqlite_recent AS (SELECT 1) SELECT * FROM sqlite_recent", "sqlite"),
+            # References from a later CTE, a recursive CTE, a derived table and
+            # a subquery resolve to the enclosing query's CTE.
+            (
+                "WITH pg_a AS (SELECT 1), pg_b AS (SELECT * FROM pg_a) SELECT * FROM pg_b",
+                "postgres",
+            ),
+            (
+                "WITH RECURSIVE pg_r(n) AS (SELECT 1 UNION ALL "
+                "SELECT n + 1 FROM pg_r WHERE n < 3) SELECT * FROM pg_r",
+                "postgres",
+            ),
+            ("WITH pg_a AS (SELECT 1) SELECT * FROM (SELECT * FROM pg_a) AS s", "postgres"),
+            (
+                "WITH pg_a AS (SELECT 1) SELECT * FROM t WHERE EXISTS (SELECT 1 FROM pg_a)",
+                "postgres",
+            ),
+        ],
+    )
+    def test_catalog_prefixed_cte_is_data(self, sql: str, dialect: str) -> None:
+        assert is_introspection_query(sql, dialect=dialect) is False
+
+    def test_scope_failure_excludes_no_cte(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import sqllens.safety.readonly as readonly_mod
+
+        def boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("scope failed")
+
+        monkeypatch.setattr(readonly_mod, "traverse_scope", boom)
+        sql = "WITH pg_recent AS (SELECT 1) SELECT * FROM pg_recent"
+        with caplog.at_level("INFO", logger="sqllens.safety.readonly"):
+            assert is_introspection_query(sql, dialect="postgres") is True
+        assert "RuntimeError" in caplog.text
+
+    def test_hash_is_not_a_comment_without_dialect(self) -> None:
+        assert is_introspection_query("# c\nSHOW TABLES") is False
 
     @pytest.mark.parametrize(
         ("sql", "dialect"),

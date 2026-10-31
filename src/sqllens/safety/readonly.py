@@ -19,6 +19,9 @@ import logging
 import sqlglot
 from sqlglot import expressions as exp
 from sqlglot.dialects.mysql import MySQL
+from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
+from sqlglot.optimizer.scope import traverse_scope
+from sqlglot.tokens import TokenType
 
 logger = logging.getLogger("sqllens.safety.readonly")
 
@@ -39,29 +42,58 @@ _READ_SHAPED_KEYWORDS: frozenset[str] = frozenset(
 )
 
 
-def first_sql_keyword(sql: str) -> str:
+def first_sql_keyword(sql: str, dialect: str | None = None) -> str:
     """Return ``sql``'s leading keyword uppercased, or ``""`` if none.
 
-    Skips a leading ``(`` so wrapped ``(WITH ... SELECT ...)`` / ``(SELECT
-    ...)`` forms classify by their inner verb.
+    The SQL is tokenized with sqlglot's tokenizer for ``dialect``, so comments
+    and opening parentheses are skipped as that dialect's tokenizer skips them.
+    The first remaining token is returned,
+    uppercased, when it is a keyword or an unquoted identifier; a string,
+    number, quoted identifier or symbol gives ``""``, and so does SQL with no
+    remaining token (empty, whitespace-only, or only comments and opening
+    parentheses). A dialect name sqlglot does not know is logged at
+    ``WARNING`` and treated as no dialect.
+
+    SQL the tokenizer rejects (``TokenError``, e.g. an unterminated string or
+    comment) gives ``""``; any other exception from the tokenizer propagates.
     """
-    if not sql:
+    try:
+        resolved = sqlglot.Dialect.get_or_raise(dialect)
+    except ValueError:
+        logger.warning(
+            "first_sql_keyword: unknown sqlglot dialect %r; tokenizing with no dialect",
+            dialect,
+        )
+        resolved = sqlglot.Dialect.get_or_raise(None)
+    try:
+        tokens = resolved.tokenize(sql)
+    except sqlglot.errors.TokenError:
         return ""
-    stripped = sql.strip()
-    while stripped.startswith("("):
-        stripped = stripped[1:].lstrip()
-    return stripped.split(None, 1)[0].upper() if stripped else ""
+    keywords = resolved.tokenizer_class.KEYWORDS
+    for token in tokens:
+        if token.token_type is TokenType.L_PAREN:
+            continue
+        text = token.text.upper()
+        if token.token_type is TokenType.VAR:
+            return text
+        # ``KEYWORDS`` also maps operators (``||``, ``::``); only a word is a
+        # keyword here, so ``||`` must not be returned as one.
+        is_word = text[:1].isalpha() or text[:1] == "_"
+        if is_word and keywords.get(text) is token.token_type:
+            return text
+        return ""
+    return ""
 
 
-def is_read_shaped(sql: str) -> bool:
+def is_read_shaped(sql: str, dialect: str | None = None) -> bool:
     """Return True if ``sql``'s first keyword indicates a row-returning query.
 
-    Cheap first-token check, intentionally lenient — used by SQL runners to
-    decide whether to take the streaming ``fetchmany`` branch. The
-    ``ReadOnlyGuardRunner`` (when enabled) has already enforced that the whole
-    statement is read-only via sqlglot.
+    Cheap first-token check (``first_sql_keyword`` under ``dialect``) — used by
+    SQL runners to decide whether to take the streaming ``fetchmany`` branch.
+    The ``ReadOnlyGuardRunner`` (when enabled) has already enforced that the
+    whole statement is read-only via sqlglot.
     """
-    return first_sql_keyword(sql) in _READ_SHAPED_KEYWORDS
+    return first_sql_keyword(sql, dialect) in _READ_SHAPED_KEYWORDS
 
 
 def sqlglot_dialect_for_url(url: str) -> str | None:
@@ -107,33 +139,47 @@ def _catalog_names(dialect: str | None) -> tuple[frozenset[str], tuple[str, ...]
     return _SHARED_CATALOG_SCHEMAS | schemas, prefixes
 
 
-def _strip_leading_comments(sql: str, dialect: str | None) -> str:
-    """Drop leading whitespace and ``--`` / ``/* */`` comments.
+def _cte_reference_ids(parsed: exp.Expression, dialect: str | None) -> set[int]:
+    """Return the ids of ``exp.Table`` nodes scope analysis resolves to a CTE.
 
-    ``#`` also opens a line comment for ``mysql`` and for no dialect, which
-    counts every engine's syntax.
+    Identifiers are normalized in place first, so a CTE reference resolves
+    whatever its letter case where the dialect folds unquoted names. A table
+    is a CTE reference when it has no schema or catalog qualifier and its own
+    name (not its alias) is a CTE visible in its scope, so an aliased or
+    schema-qualified catalog table beside a same-named CTE or derived table
+    still counts. Any exception from normalization or scope analysis
+    excludes nothing.
     """
-    line_markers = ("--", "#") if dialect in (None, "mysql") else ("--",)
-    rest = sql.lstrip()
-    while True:
-        if rest.startswith(line_markers):
-            _line, _newline, rest = rest.partition("\n")
-        elif rest.startswith("/*"):
-            end = rest.find("*/", 2)
-            if end == -1:
-                return ""
-            rest = rest[end + 2 :]
-        else:
-            return rest
-        rest = rest.lstrip()
+    try:
+        normalize_identifiers(parsed, dialect=dialect)
+        references: set[int] = set()
+        for scope in traverse_scope(parsed):
+            references.update(
+                id(table)
+                for table in scope.tables
+                if not table.args.get("db")
+                and not table.args.get("catalog")
+                and table.name in scope.cte_sources
+            )
+    except Exception as exc:
+        logger.info(
+            "is_introspection_query: identifier normalization or scope analysis "
+            "failed under dialect %r (%s); "
+            "counting every table reference",
+            dialect,
+            type(exc).__name__,
+        )
+        return set()
+    return references
 
 
 def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     """Return True if ``sql`` is a schema-introspection read, not a data query.
 
-    Schema introspection = a statement whose first keyword is ``SHOW`` (leading
-    comments aside), or a statement that references any catalog table, even
-    alongside data tables. The catalogs are
+    Schema introspection = a statement whose ``first_sql_keyword`` under
+    ``dialect`` is ``SHOW``, or a statement that references any catalog table,
+    even alongside data tables. A reference that sqlglot's scope analysis
+    resolves to a CTE is not a catalog table, whatever its name. The catalogs are
     ``information_schema`` for every dialect, plus the engine's own: the
     ``pg_catalog`` schema and ``pg_`` name prefix for ``postgres``; the
     ``mysql``, ``sys`` and ``performance_schema`` schemas for ``mysql``; the
@@ -147,12 +193,14 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     result from the user and to keep a catalog lookup's success from clearing
     an earlier query failure.
 
-    Best-effort, fail-open-to-``False``: apart from a ``SHOW``, a query that
-    does not parse under ``dialect`` (a sqlglot parse or tokenize error, or an
-    empty parse) is treated as a data query, so its result is shown. Any other
-    exception from the parser propagates, so the caller reports an error
-    rather than guessing (``query_database`` returns its sanitized internal
-    error).
+    Best-effort, fail-open-to-``False``: a query whose leading keyword is not
+    ``SHOW`` and that does not parse under ``dialect`` (a sqlglot parse or
+    tokenize error, or an empty parse) is treated as a data query, so its
+    result is shown; a ``SHOW``-led statement returns ``True`` before any
+    parse. Any other exception from
+    the parser propagates, so the caller reports an error rather than guessing
+    (``query_database`` returns its sanitized internal error). An exception
+    from identifier normalization or scope analysis excludes no CTE reference.
     """
     if dialect is not None:
         try:
@@ -164,7 +212,7 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
                 dialect,
             )
             dialect = None
-    if first_sql_keyword(_strip_leading_comments(sql, dialect)) == "SHOW":
+    if first_sql_keyword(sql, dialect) == "SHOW":
         return True
     try:
         parsed = sqlglot.parse_one(sql, dialect=dialect)
@@ -183,15 +231,11 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
             dialect,
         )
         return False
-    # The keyword check above misses a SHOW split by an inline comment
-    # (``SHOW/**/TABLES``) or behind a nested one; when such a statement
-    # parses, its root identifies it (exp.Show, or a SHOW Command fallback).
-    if isinstance(parsed, exp.Show) or (
-        isinstance(parsed, exp.Command) and parsed.name.upper() == "SHOW"
-    ):
-        return True
+    cte_references = _cte_reference_ids(parsed, dialect)
     schemas, prefixes = _catalog_names(dialect)
     for table in parsed.find_all(exp.Table):
+        if id(table) in cte_references:
+            continue
         schema = (table.db or "").lower()
         if schema in schemas:
             return True
@@ -238,26 +282,7 @@ _SAFE_SHOW_SUBKINDS: frozenset[str] = frozenset(
 )
 
 
-# DML/DDL node types refused anywhere in the tree. The ALTER node was renamed
-# ``exp.AlterTable`` → ``exp.Alter`` partway through sqlglot's 25.x line, so a
-# bare ``exp.Alter`` reference AttributeErrors on the low end of the pinned
-# ``>=25.0,<31`` range (25.0.x ships only ``AlterTable``) while a bare
-# ``exp.AlterTable`` AttributeErrors on 30.x. Resolve whichever the installed
-# version exposes so the guard works across the whole pinned range.
-_ALTER_TYPE: type[exp.Expression] | None = getattr(exp, "Alter", None) or getattr(
-    exp, "AlterTable", None
-)
-# Fail closed and loud: if a (future, post-pin-widening) sqlglot exposes
-# neither name, a nested ALTER would silently slip the deny-walk (every other
-# DML/DDL type is a bare attribute that AttributeErrors at import if missing —
-# ALTER is the only one resolved dynamically, so it needs an explicit guard).
-# Not an ``assert`` — that is stripped under ``python -O`` and this is a
-# security invariant.
-if _ALTER_TYPE is None:  # pragma: no cover - unreachable within the pinned range
-    raise RuntimeError(
-        "sqlglot exposes neither exp.Alter nor exp.AlterTable; "
-        "the read-only guard cannot reject nested ALTER (fail-closed)"
-    )
+# DML/DDL node types refused anywhere in the tree.
 _DML_DDL_TYPES: tuple[type[exp.Expression], ...] = (
     exp.Insert,
     exp.Update,
@@ -265,7 +290,7 @@ _DML_DDL_TYPES: tuple[type[exp.Expression], ...] = (
     exp.Merge,
     exp.Drop,
     exp.Create,
-    _ALTER_TYPE,
+    exp.Alter,
 )
 
 
@@ -616,7 +641,7 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
     denied_funcs = _denied_funcs(dialect)
 
     # Reject DML/DDL nested anywhere in the tree (e.g. via CTEs). ``walk()``
-    # yields bare ``exp.Expression`` nodes (sqlglot is pinned ``>=25.0,<31``;
+    # yields bare ``exp.Expression`` nodes (sqlglot is pinned ``>=30.22,<31``;
     # the pre-v20 ``(node, parent, key)`` tuple form is out of range).
     for sub in stmt.walk():
         if isinstance(sub, _DML_DDL_TYPES):

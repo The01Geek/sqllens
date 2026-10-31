@@ -139,7 +139,7 @@ class MySQLRunner(SqlRunner):
             if require_base_tables:
                 verify_base_tables(conn, args.sql, dialect="mysql")
 
-            if is_read_shaped(args.sql):
+            if is_read_shaped(args.sql, "mysql"):
                 # SSDictCursor streams from the server instead of materialising the
                 # whole result set in the driver. We deliberately do NOT call
                 # cursor.close() on this path — PyMySQL's SSCursor.close() drains

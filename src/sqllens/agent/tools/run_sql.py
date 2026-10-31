@@ -14,6 +14,7 @@ from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.capabilities.file_system import FileSystem
 from sqllens.agent.integrations.local import LocalFileSystem
 from sqllens.safety.limits import MAX_ROWS_ATTR, TRUNCATED_ATTR
+from sqllens.safety.readonly import first_sql_keyword, is_read_shaped
 
 
 class RunSqlTool(Tool[RunSqlToolArgs]):
@@ -25,6 +26,7 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
         file_system: Optional[FileSystem] = None,
         custom_tool_name: Optional[str] = None,
         custom_tool_description: Optional[str] = None,
+        dialect: Optional[str] = None,
     ):
         """Initialize the tool with a SqlRunner implementation.
 
@@ -33,11 +35,15 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
             file_system: FileSystem implementation for saving results (defaults to LocalFileSystem)
             custom_tool_name: Optional custom name for the tool (overrides default "run_sql")
             custom_tool_description: Optional custom description for the tool (overrides default description)
+            dialect: sqlglot dialect of the configured database. Must match the
+                dialect the runner classifies with, or a read the runner
+                streamed could be reported as a row count.
         """
         self.sql_runner = sql_runner
         self.file_system = file_system or LocalFileSystem()
         self._custom_name = custom_tool_name
         self._custom_description = custom_tool_description
+        self.dialect = dialect
 
     @property
     def name(self) -> str:
@@ -57,13 +63,15 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
     async def execute(self, context: ToolContext, args: RunSqlToolArgs) -> ToolResult:
         """Execute a SQL query using the injected SqlRunner."""
         try:
+            if not args.sql.strip():
+                raise ValueError("SQL is empty")
+
             # Use the injected SqlRunner to execute the query
             df = await self.sql_runner.run_sql(args, context)
 
-            # Determine query type
-            query_type = args.sql.strip().upper().split()[0]
+            query_type = first_sql_keyword(args.sql, self.dialect)
 
-            if query_type == "SELECT":
+            if is_read_shaped(args.sql, self.dialect):
                 # Read the truncation signal before branching so the empty
                 # branch also surfaces the "re-issue narrower" hint instead of
                 # silently reporting "no rows". The constants index the
@@ -157,7 +165,7 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         "max_rows": cap_size,
                     }
             else:
-                # For non-SELECT queries (INSERT, UPDATE, DELETE, etc.)
+                # For statements that are not read-shaped (INSERT, UPDATE, DELETE, etc.)
                 # The SqlRunner should return a DataFrame with affected row count
                 rows_affected = len(df) if not df.empty else 0
                 result = (

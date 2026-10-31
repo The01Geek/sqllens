@@ -109,8 +109,8 @@ def _humanize_label(name: str) -> str:
     )
 
 
-def _query_info_from_sql(sql: str, row_count: int | None) -> dict:
-    info: dict = {"sql": sql, "query_type": first_sql_keyword(sql)}
+def _query_info_from_sql(sql: str, row_count: int | None, dialect: str | None) -> dict:
+    info: dict = {"sql": sql, "query_type": first_sql_keyword(sql, dialect)}
     if row_count is not None:
         info["row_count"] = row_count
     return info
@@ -490,7 +490,9 @@ def components_to_blocks(
 
     if error_message:
         query_info = (
-            _query_info_from_sql(last_sql, last_sql_row_count) if last_sql is not None else None
+            _query_info_from_sql(last_sql, last_sql_row_count, dialect)
+            if last_sql is not None
+            else None
         )
         return error_message, True, [], query_info, None
 
@@ -568,7 +570,7 @@ def components_to_blocks(
         # ``last_sql_row_count`` is None when the SQL ran but no DATAFRAME was
         # seen (zero rows on stdout-only output, or a tool error after the
         # SQL was logged) — query_info correctly omits row_count in that case.
-        query_info = _query_info_from_sql(last_sql, last_sql_row_count)
+        query_info = _query_info_from_sql(last_sql, last_sql_row_count, dialect)
     return markdown, False, blocks, query_info, last_memory
 
 

@@ -170,7 +170,7 @@ class PostgresRunner(SqlRunner):
             if require_base_tables:
                 verify_base_tables(conn, args.sql, dialect="postgres")
 
-            if is_read_shaped(args.sql):
+            if is_read_shaped(args.sql, "postgres"):
                 # Named cursors are server-side and stream from a portal; they
                 # require an open transaction (psycopg2's default autocommit=False).
                 cursor_name = f"sqllens_{uuid.uuid4().hex}"
