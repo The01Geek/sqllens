@@ -18,6 +18,7 @@ import os
 import time
 import uuid
 from typing import Any
+from urllib.parse import urlparse
 
 import pytest
 from pydantic import SecretStr
@@ -166,6 +167,99 @@ async def test_rls_keeps_metadata_views_and_blocks_value_statistics(
     for sql in blocked:
         with pytest.raises(RlsError, match="view"):
             await guard.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+
+
+def _rls_guard_with(url: str, dialect: str, tables: list[str]) -> RlsGuardRunner:
+    return RlsGuardRunner(
+        ReadOnlyGuardRunner(RowCapRunner(build_sql_runner(url), max_rows=10), dialect=dialect),
+        [RlsRule(table=table, column="tenant_id", value="alpha") for table in tables],
+        dialect=dialect,
+    )
+
+
+async def test_postgres_rls_blocks_child_tables_and_functions(postgres_url) -> None:
+    suffix = uuid.uuid4().hex
+    parted, partition = f"rls_parted_{suffix}", f"rls_parted_{suffix}_p"
+    parent, child = f"rls_inh_{suffix}", f"rls_inh_{suffix}_c"
+    function = f"rls_fn_{suffix}"
+    writer = build_sql_runner(postgres_url, read_only=False)
+
+    async def execute(sql: str) -> None:
+        await writer.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+
+    try:
+        await execute(
+            f"CREATE TABLE {parted} (id INTEGER, tenant_id TEXT) PARTITION BY LIST (tenant_id)"
+        )
+        await execute(
+            f"CREATE TABLE {partition} PARTITION OF {parted} FOR VALUES IN ('alpha', 'beta')"
+        )
+        await execute(f"INSERT INTO {parted} VALUES (1, 'alpha'), (2, 'beta')")
+        await execute(f"CREATE TABLE {parent} (id INTEGER, tenant_id TEXT)")
+        await execute(f"CREATE TABLE {child} () INHERITS ({parent})")
+        await execute(f"INSERT INTO {parent} VALUES (1, 'alpha'), (2, 'beta')")
+        await execute(f"INSERT INTO {child} VALUES (3, 'alpha'), (4, 'beta')")
+        await execute(
+            f"CREATE FUNCTION {function}() RETURNS BIGINT LANGUAGE sql "
+            f"AS 'SELECT count(*) FROM {parent}'"
+        )
+        # A rule naming a child does not make the child queryable.
+        guard = _rls_guard_with(postgres_url, "postgres", [parted, parent, partition])
+
+        async def ids(sql: str) -> list[int]:
+            return sorted((await guard.run_sql(RunSqlToolArgs(sql=sql), _ctx()))["id"].tolist())
+
+        assert await ids(f"SELECT id FROM {parted}") == [1]
+        # The parent's rule scopes rows stored in its inheritance child too.
+        assert await ids(f"SELECT id FROM {parent}") == [1, 3]
+        for table in (partition, child):
+            with pytest.raises(RlsError, match="child tables"):
+                await guard.run_sql(RunSqlToolArgs(sql=f"SELECT id FROM {table}"), _ctx())
+        for call in (f"SELECT {function}()", f"SELECT public.{function}()"):
+            with pytest.raises(RlsError, match=f"database function '{function}'"):
+                await guard.run_sql(RunSqlToolArgs(sql=call), _ctx())
+        result = await guard.run_sql(
+            RunSqlToolArgs(sql=(
+                f"SELECT count(*) AS n, upper(min(tenant_id)) AS t, "
+                f"min(strpos(tenant_id, 'l')) AS p FROM {parent}"
+            )), _ctx()
+        )
+        assert result[["n", "t", "p"]].values.tolist() == [[2, "ALPHA", 2]]
+    finally:
+        await execute(f"DROP FUNCTION IF EXISTS {function}()")
+        await execute(f"DROP TABLE IF EXISTS {child}, {parent}, {parted} CASCADE")
+
+
+async def test_mysql_rls_blocks_stored_functions(mysql_url) -> None:
+    suffix = uuid.uuid4().hex
+    table, function = f"rls_{suffix}", f"rls_fn_{suffix}"
+    database = urlparse(mysql_url).path.lstrip("/")
+    writer = build_sql_runner(mysql_url, read_only=False)
+
+    async def execute(sql: str) -> None:
+        await writer.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+
+    try:
+        await execute(f"CREATE TABLE {table} (id INTEGER, tenant_id VARCHAR(16))")
+        await execute(f"INSERT INTO {table} VALUES (1, 'alpha'), (2, 'beta')")
+        # Needs log_bin_trust_function_creators=1 (set by CI's connector job)
+        # unless the test user has SUPER.
+        await execute(
+            f"CREATE FUNCTION {function}() RETURNS INT READS SQL DATA "
+            f"RETURN (SELECT COUNT(*) FROM {table})"
+        )
+        guard = _rls_guard_with(mysql_url, "mysql", [table])
+        for call in (f"SELECT {function}()", f"SELECT {database}.{function}()"):
+            with pytest.raises(RlsError, match=f"database function '{function}'"):
+                await guard.run_sql(RunSqlToolArgs(sql=call), _ctx())
+        result = await guard.run_sql(
+            RunSqlToolArgs(sql=f"SELECT count(*) AS n, upper(min(tenant_id)) AS t FROM {table}"),
+            _ctx(),
+        )
+        assert result[["n", "t"]].values.tolist() == [[1, "ALPHA"]]
+    finally:
+        await execute(f"DROP FUNCTION IF EXISTS {function}")
+        await execute(f"DROP TABLE IF EXISTS {table}")
 
 
 # ─────────────────────────────── postgres ───────────────────────────────────

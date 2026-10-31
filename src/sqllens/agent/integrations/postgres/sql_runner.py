@@ -112,8 +112,10 @@ class PostgresRunner(SqlRunner):
         Args:
             args: SQL query arguments
             context: Tool execution context
-            require_base_tables: Check relation types on this connection and
-                refuse views or failed catalog lookups before executing RLS SQL.
+            require_base_tables: Check relation types and called routines on this
+                connection and refuse views, partition or inheritance children,
+                calls to database-defined routines, or failed catalog lookups
+                before executing RLS SQL.
 
         Returns:
             DataFrame with query results. For SELECTs, ``df.attrs['truncated']`` is True
