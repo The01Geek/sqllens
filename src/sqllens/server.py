@@ -442,7 +442,7 @@ def build_server(cfg: Config) -> FastMCP:
                     "nothing was written. Check the server logs."
                 ) from exc
             except Exception as exc:
-                # Per the CLAUDE.md isError contract: a Chroma/embedding/disk
+                # Per the AGENTS.md isError contract: a Chroma/embedding/disk
                 # failure must reach the client as a clear message, never a
                 # raw traceback (which can also leak the persist path).
                 logger.exception("import_memory tool failed")
@@ -452,7 +452,7 @@ def build_server(cfg: Config) -> FastMCP:
                 ) from exc
             # Any per-item error makes this a failed import — including a
             # partial run that saved some pairs and errored on others. Per the
-            # CLAUDE.md isError contract "partial failure is failure": returning
+            # AGENTS.md isError contract "partial failure is failure": returning
             # to_markdown() as a plain string would reach the client as
             # isError:false even though some items did not save. The calling
             # agent needs a structured failure signal, so we raise whenever
@@ -832,7 +832,7 @@ def build_server(cfg: Config) -> FastMCP:
 
             Returns the profile's JSON object, or an ``isError`` result with
             ``{"error": "profile not found", "name": ...}`` when no profile
-            has that name. Per CLAUDE.md's isError discipline an unknown name
+            has that name. Per AGENTS.md's isError discipline an unknown name
             is a failed lookup, not a green ``null``. When the underlying
             store failed to load, a degraded-store ``isError`` is returned
             instead — a plain "not found" against a corrupt store would

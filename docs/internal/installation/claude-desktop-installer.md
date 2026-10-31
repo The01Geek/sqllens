@@ -22,7 +22,7 @@ If TOML validation fails the TOML write is reverted and the JSON is left untouch
 
 ## Why it lives under `installers/`
 
-The CLI surface needed a place that wasn't `sqllens.tools` (reserved for MCP tool wrappers) and wasn't `sqllens.cli` (which should stay a thin Typer parse-and-dispatch layer per [CLAUDE.md](../../../CLAUDE.md) "Code style"). A new package `sqllens.installers` was added with a single module today; future client integrations (Cursor, Windsurf, …) belong there too.
+The CLI surface needed a place that wasn't `sqllens.tools` (reserved for MCP tool wrappers, kept thin per [AGENTS.md](../../../AGENTS.md) "Code style") and wasn't `sqllens.cli` (which should stay a thin Typer parse-and-dispatch layer). A new package `sqllens.installers` was added with a single module today; future client integrations (Cursor, Windsurf, …) belong there too.
 
 The CLI command imports `resolve_options`, `run_install`, `format_install_result`, and `InstallError` lazily from inside the Typer callback so the import cost is not paid by `sqllens version` / `sqllens serve` startup.
 

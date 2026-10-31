@@ -124,7 +124,7 @@ def test_error_case_exits_nonzero_and_shows_message(
 
 
 def test_empty_golden_file_exits_nonzero(tmp_path: Path, monkeypatch) -> None:
-    """The CLAUDE.md "structured signal, never silent success" guard."""
+    """The AGENTS.md "structured signal, never silent success" guard."""
     cfg = _config(tmp_path)
     empty = tmp_path / "empty.json"
     empty.write_text("{}")
@@ -171,7 +171,7 @@ def test_fail_under_allows_partial_pass_rate(
 def test_fail_under_zero_rejects_all_error_run(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """The CLAUDE.md vacuous-success guard: --fail-under 0 must not exit 0
+    """The AGENTS.md vacuous-success guard: --fail-under 0 must not exit 0
     on an all-non-PASS run, even though 0% >= 0% reads as a "pass".
     """
     cfg = _config(tmp_path)

@@ -300,7 +300,7 @@ def components_to_blocks(
       tool call (running → completed) with identical metadata; last-wins
       de-dupes them idempotently.
 
-    Size budgets (CLAUDE.md: never silently drop):
+    Size budgets (AGENTS.md: never silently drop):
 
     - Each table / chart block is bounded by ``_MAX_TABLE_PAYLOAD_BYTES`` /
       ``_MAX_CHART_PAYLOAD_BYTES`` via the existing binary search in
@@ -347,7 +347,7 @@ def components_to_blocks(
     #     result → use the raw row count from the component itself
     #     (``len(rich.rows)``) so the over-budget / payload-exception case
     #     doesn't silently misattribute the 0-rows count to a SQL that
-    #     returned N > 0 rows. This is the CLAUDE.md "lossy success needs
+    #     returned N > 0 rows. This is the AGENTS.md "lossy success needs
     #     loud warning, not green output" trap.
     #
     # Preventing the misattribution where an earlier table's row count would
@@ -1184,7 +1184,7 @@ def _trim_blocks_to_budget(blocks: list[dict]) -> list[dict]:
     the iframe ``_meta`` ceiling. When over budget, drop trailing blocks one
     at a time until the kept prefix + an appended truncation-notice text block
     fits; emit a server-side ``logger.warning`` whenever any trimming happens
-    (CLAUDE.md: never silently drop).
+    (AGENTS.md: never silently drop).
     """
     if not blocks or _serialized_len(blocks) <= _MAX_BLOCKS_TOTAL_BYTES:
         return blocks
@@ -1210,7 +1210,7 @@ def _trim_blocks_to_budget(blocks: list[dict]) -> list[dict]:
     # Even the notice alone busts the budget — only reachable if the budget
     # has been configured below the ~100 byte notice size (a configuration
     # error, not a normal state — the production ceiling is hundreds of
-    # kilobytes). Per CLAUDE.md's "Lossy / empty success needs a loud
+    # kilobytes). Per AGENTS.md's "Lossy / empty success needs a loud
     # warning, not green output" rule, returning an empty list here would
     # let the caller's interactive/no-answer fallback render `"(no answer)"`
     # to the user — a silent success on a turn that actually produced data.
@@ -1276,7 +1276,7 @@ def _serialize_blocks_to_markdown(blocks: list[dict]) -> str:
         else:
             # Unknown discriminator — a producer-side regression (typo, case
             # mismatch, future block type the renderer doesn't know yet, or
-            # a missing ``type`` key). CLAUDE.md: never silently drop. Surface
+            # a missing ``type`` key). AGENTS.md: never silently drop. Surface
             # the loss to both the operator log AND the rendered output so a
             # regression cannot ship with the contents invisibly missing.
             #

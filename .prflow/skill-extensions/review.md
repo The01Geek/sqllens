@@ -2,7 +2,7 @@
 
 ## Hand-written SQL parsing
 
-Enforce the sqlglot rule in CLAUDE.md's "Code style" section. Report as a finding
+Enforce the sqlglot rule in AGENTS.md's "Code style" section. Report as a finding
 any added or changed code that parses, tokenizes, classifies, splits, strips
 comments from or rewrites SQL text without sqlglot (a regex, `.split()`,
 `startswith` or first-word check on SQL text); any new sqlglot call on untrusted

@@ -308,7 +308,7 @@ class TestTrustedHost:
         assert r.status_code == 400
 
     async def test_non_loopback_host_header_rejected(self, make_server) -> None:
-        """CLAUDE.md gotcha #4: a non-loopback ``Host`` is rejected. Post-S-8
+        """AGENTS.md gotcha: a non-loopback ``Host`` is rejected. Post-S-8
         the rejection is deterministically ``TrustedHostMiddleware``'s 400 —
         it now fronts FastMCP, so FastMCP's own 421 ``Misdirected Request``
         is no longer reachable for this input. Asserting the exact 400 makes

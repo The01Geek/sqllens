@@ -36,7 +36,7 @@ def load_golden(text: str, fmt: str) -> list[GoldenCase]:
     bundle's ``schema_docs`` block (if any) is ignored — only ``sql_pairs``
     are ground-truth cases. A bundle with no ``sql_pairs`` block, or with an
     empty ``pairs`` list, returns ``[]``; the CLI surfaces that as an explicit
-    "nothing to verify" error per the CLAUDE.md "structured signal, never
+    "nothing to verify" error per the AGENTS.md "structured signal, never
     silent success" contract.
 
     Raises :class:`sqllens.memory.io.BundleFormatError` on a malformed bundle

@@ -115,7 +115,7 @@ def test_widget_does_not_paint_executed_sql_panel() -> None:
     # raw string ``"sqllens/query"`` is intentionally NOT in the deny-list —
     # the header doc comment documents that the meta channel still rides for
     # apps-aware consumers, and that prose is the "claim matches the code"
-    # surface CLAUDE.md requires.
+    # surface AGENTS.md requires.
     html = ui.load_widget_html()
     assert "renderSqlSection" not in html
     assert "sqlHost" not in html

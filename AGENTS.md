@@ -42,7 +42,8 @@ src/sqllens/
 │   └── http.py              # Streamable HTTP + auth middleware + path normalizer
 ├── connectors/              # Reserved for SQLAlchemy-backed adapters (Phase 4+)
 ├── auth/                    # base (Authenticator protocol) + none | bearer | jwt; policy.py bind policy
-└── safety/                  # readonly.py SQL parser; rls.py row scoping; limits.py row cap;
+└── safety/                  # readonly.py SQL parser; rls.py row scoping; relations.py RLS
+                             #   relation verification; limits.py row cap;
                              #   ReadOnlyGuardRunner / RlsGuardRunner / RowCapRunner decorators
 ```
 

@@ -21,7 +21,7 @@ no concurrent multi-process writer story. A single ``asyncio.Lock`` serializes
 in-process writes (CRUD goes through the MCP tool boundary, never the request
 path). A corrupt/unreadable store file surfaces as a loud warning and falls
 back to a default-only in-memory view rather than silently becoming an empty
-store reported as success — see CLAUDE.md's error-discipline rule.
+store reported as success — see AGENTS.md's error-discipline rule.
 """
 
 from __future__ import annotations
@@ -98,7 +98,7 @@ class ProfileStore:
     On a corrupt or unreadable file the constructor logs a loud ``Warning:``
     and falls back to a default-only in-memory view; the bad file is left on
     disk (the operator can inspect or rotate it) and any subsequent upsert
-    overwrites it cleanly. This satisfies CLAUDE.md's "lossy success needs a
+    overwrites it cleanly. This satisfies AGENTS.md's "lossy success needs a
     loud warning, not green output" rule: a corrupt store does not silently
     erase its contents.
 
@@ -171,7 +171,7 @@ class ProfileStore:
                 # Narrow catch: a broader except would silently swallow truly
                 # unexpected failures (MemoryError, env-specific ImportError,
                 # asyncio.CancelledError) and report them as routine "malformed
-                # entry" warnings, violating CLAUDE.md's narrow-catch rule.
+                # entry" warnings, violating AGENTS.md's narrow-catch rule.
                 skipped.append(name)
                 logger.warning(
                     "profile store: skipping malformed entry %r (%s)", name, exc

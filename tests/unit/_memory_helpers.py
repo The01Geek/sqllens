@@ -5,7 +5,7 @@
 
 ``FakeEmbeddingFunction`` is a deterministic, dependency-free stand-in for
 ChromaDB's default embedding function so tests never trigger the ~80 MB model
-download (see CLAUDE.md gotcha). Patch it in via ``patch_fake_embeddings``.
+download (see the AGENTS.md debugging checklist). Patch it in via ``patch_fake_embeddings``.
 """
 
 from __future__ import annotations

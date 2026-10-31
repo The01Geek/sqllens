@@ -100,7 +100,7 @@ What was dropped, and why we might regret it:
 
 ## Process boundaries
 
-- **One database per process.** Multi-tenancy is explicitly out of scope (see [CLAUDE.md](../../../CLAUDE.md) "What not to add"). If you need many, run many servers.
+- **One database per process.** Multi-tenancy is explicitly out of scope (see [AGENTS.md](../../../AGENTS.md) "What not to add"). If you need many, run many servers.
 - **Two transports:** stdio (default; one client per process) and HTTP (Streamable HTTP, multiplexed via FastMCP session manager).
 - **State that survives restarts:** the ChromaDB collection on disk (default `./chroma/`). Everything else is recomputed.
 - **State that does *not* survive restarts:** the agent singleton in `tools/_agent.py` — first call rebuilds it, which pays for the embedding model download on first run if no `chroma/` exists yet.
