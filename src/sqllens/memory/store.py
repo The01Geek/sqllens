@@ -29,11 +29,15 @@ wipe. Both fallbacks are deliberately isolated to this module.
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import json
 import logging
-from collections.abc import Iterator
+import threading
+from collections.abc import Callable, Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar
 
 from pydantic import ValidationError
 
@@ -59,6 +63,57 @@ _IMPORT_SOURCE = "import"
 # meaningful (a 1-row collection with 1 skip is not "wholesale corruption").
 _WHOLESALE_MIN_ROWS = 5
 _WHOLESALE_SKIP_RATIO = 0.9
+
+P = ParamSpec("P")
+T = TypeVar("T")
+
+# One worker, process-wide: the synchronous store calls rely on never running at
+# the same time as each other (the shared ``last_skipped_rows``), as they did
+# when they all ran on the loop. A second worker, ``asyncio.to_thread`` or the
+# store's own executor would let them overlap. Module-level, not per-instance:
+# tests build MemoryStore via ``object.__new__``.
+_executor_lock = threading.Lock()
+_executor: ThreadPoolExecutor | None = None
+
+
+def _get_executor() -> ThreadPoolExecutor:
+    global _executor
+    with _executor_lock:
+        if _executor is None:
+            _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sqllens-memory")
+        return _executor
+
+
+def _log_call_after_cancel(name: str, future: Future[Any]) -> None:
+    if future.cancelled():
+        return
+    exc = future.exception()
+    if exc is None:
+        logger.info("Memory store call %s finished after its caller was cancelled.", name)
+    else:
+        logger.warning(
+            "Memory store call %s failed after its caller was cancelled.", name, exc_info=exc
+        )
+
+
+async def run_memory_call(func: Callable[P, T], /, *args: P.args, **kwargs: P.kwargs) -> T:
+    """Run synchronous store work ``func(*args, **kwargs)`` on the memory worker thread.
+
+    Calls run one at a time in submission order. A caller cancelled before its
+    call starts drops it; a call already started runs to completion, later
+    calls wait behind it, and its outcome is logged (``INFO`` on success,
+    ``WARNING`` with the exception on failure). Exceptions propagate unchanged.
+
+    Never call this from code already running on the memory worker: with one
+    worker, the nested call waits forever.
+    """
+    future = _get_executor().submit(functools.partial(func, *args, **kwargs))
+    try:
+        return await asyncio.wrap_future(future)
+    except asyncio.CancelledError:
+        name = getattr(func, "__qualname__", repr(func))
+        future.add_done_callback(functools.partial(_log_call_after_cancel, name))
+        raise
 
 
 class MemoryCorruptionError(RuntimeError):
