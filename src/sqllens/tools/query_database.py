@@ -275,10 +275,10 @@ async def _trim_unanswered_tool_use(
     Only messages from ``start`` (this call's baseline) are scanned, so an
     earlier call's history is never cut.
 
-    Never raises ``Exception``: the read, the scan of the stored messages, the
-    method lookup and the call are each guarded and logged at ERROR, because the
-    caller is about to return or raise the call's own result, which must not
-    be replaced by a cleanup failure.
+    The read, the scan of the stored messages and the ``truncate_messages``
+    call are each guarded and logged at ERROR, as is a store with no
+    ``truncate_messages``, because the caller is about to return or raise the
+    call's own result, which must not be replaced by a cleanup failure.
     """
     store = agent.conversation_store
     try:
