@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from sqllens.agent import Agent, RequestContext
+from sqllens.agent.core.user import User
 from sqllens.config import RESERVED_METADATA_KEYS, Config
 from sqllens.conversation_store import ConversationOwnerMismatchError
 from sqllens.profiles import ProfileStore, resolve_effective_settings
@@ -206,20 +207,124 @@ async def _conversation_turn(conversation_id: str | None) -> AsyncIterator[str |
 
 async def _conversation_baseline(
     agent: Any, request_context: RequestContext, conversation_id: str
-) -> tuple[str, int]:
+) -> tuple[User, int]:
     """Resolve the request's user and the conversation's current message count.
 
     Read after the turn lock is held and before the agent run, so the count is
     the history as it stood when this call's turn began — including the
     messages of any earlier call on the same id that has already finished. The
-    pair is what the cancellation handler rolls back to. A conversation the
-    agent has not created yet counts zero.
+    pair is what the cancellation handler rolls back to and where the
+    unanswered-``tool_use`` trim starts scanning. A conversation the agent has
+    not created yet counts zero.
     """
     user = await agent.user_resolver.resolve_user(request_context)
     conversation = await agent.conversation_store.get_conversation(
         conversation_id, user
     )
-    return user.id, 0 if conversation is None else len(conversation.messages)
+    return user, 0 if conversation is None else len(conversation.messages)
+
+
+def _tool_use_ids(message: Any) -> set[str]:
+    """Every tool-use id an assistant message carries.
+
+    Both sources count: the Anthropic request builder replays an assistant
+    message from ``provider_content`` when it has one, so its ``tool_use``
+    blocks reach the API even when ``tool_calls`` is empty.
+    """
+    ids = {call.id for call in message.tool_calls or ()}
+    for block in message.provider_content or ():
+        if isinstance(block, dict) and block.get("type") == "tool_use":
+            ids.add(block.get("id"))
+    return ids
+
+
+def _first_unanswered_tool_use(messages: list[Any], start: int) -> int | None:
+    """Index of the earliest assistant message from ``start`` with an unanswered tool use.
+
+    A tool use is answered when a ``role="tool"`` message carrying its id sits
+    in the run of tool messages directly after the assistant message.
+    """
+    for index in range(start, len(messages)):
+        message = messages[index]
+        if message.role != "assistant":
+            continue
+        ids = _tool_use_ids(message)
+        if not ids:
+            continue
+        answered: set[str | None] = set()
+        for following in messages[index + 1 :]:
+            if following.role != "tool":
+                break
+            answered.add(following.tool_call_id)
+        if not ids <= answered:
+            return index
+    return None
+
+
+async def _trim_unanswered_tool_use(
+    agent: Any, conversation_id: str, user: User, start: int
+) -> None:
+    """Cut a finished call's history back to before its first unanswered tool use.
+
+    Runs when a call ends without cancellation, still inside the turn lock. The
+    agent saves an assistant ``tool_use`` before its tools run and their
+    results after, so a call that stopped in between leaves a ``tool_use``
+    the Anthropic API rejects on every later request in this conversation.
+    Only messages from ``start`` (this call's baseline) are scanned, so an
+    earlier call's history is never cut.
+
+    Never raises ``Exception``: the read, the method lookup and the call are
+    each guarded and logged at ERROR naming the store class, because the
+    caller is about to return or raise the call's own result, which must not
+    be replaced by a cleanup failure.
+    """
+    store = agent.conversation_store
+    try:
+        conversation = await store.get_conversation(conversation_id, user)
+    except Exception:
+        logger.exception(
+            "query_database call on conversation %s: could not check for an "
+            "unanswered tool_use; conversation store %s raised from "
+            "get_conversation",
+            conversation_id,
+            type(store).__name__,
+        )
+        return
+    if conversation is None:
+        return
+    cut = _first_unanswered_tool_use(conversation.messages, start)
+    if cut is None:
+        return
+    removed = len(conversation.messages) - cut
+    truncate = getattr(store, "truncate_messages", None)
+    if truncate is None:
+        logger.error(
+            "query_database call on conversation %s left an unanswered tool_use "
+            "that was not removed: conversation store %s has no "
+            "truncate_messages; the next call on this conversation will be "
+            "rejected by the model API",
+            conversation_id,
+            type(store).__name__,
+        )
+        return
+    try:
+        truncate(conversation_id, user.id, cut)
+    except Exception:
+        logger.exception(
+            "query_database call on conversation %s left an unanswered tool_use "
+            "that was not removed: conversation store %s raised from "
+            "truncate_messages; the next call on this conversation will be "
+            "rejected by the model API",
+            conversation_id,
+            type(store).__name__,
+        )
+        return
+    logger.warning(
+        "query_database call on conversation %s ended with an unanswered "
+        "tool_use; removed %d message(s) from its history",
+        conversation_id,
+        removed,
+    )
 
 
 def _rollback_conversation(
@@ -456,7 +561,7 @@ async def query_database_impl_with_widgets(
         # an earlier call on the same conversation does not report that wait as
         # part of its own duration.
         async with _conversation_turn(conversation_id) as queued_id:
-            baseline_user_id = ""
+            baseline_user: User | None = None
             baseline_messages = 0
             if queued_id is not None:
                 # Inside the turn lock but above the agent-run ``try`` below, so
@@ -470,7 +575,7 @@ async def query_database_impl_with_widgets(
                 # raise, so this is unreachable with the default wiring.
                 # CancelledError is a BaseException and so is not caught here.
                 try:
-                    baseline_user_id, baseline_messages = await _conversation_baseline(
+                    baseline_user, baseline_messages = await _conversation_baseline(
                         agent, request_context, queued_id
                     )
                 except Exception as e:
@@ -478,10 +583,24 @@ async def query_database_impl_with_widgets(
                     raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
             started = time.monotonic()
             try:
-                async for comp in agent.send_message(
-                    request_context, question, conversation_id=conversation_id
-                ):
-                    components.append(comp)
+                # A call that ends without cancellation — answered, error
+                # answer, or raised — is trimmed before the lock is released;
+                # a cancelled one takes the full rollback below instead.
+                try:
+                    async for comp in agent.send_message(
+                        request_context, question, conversation_id=conversation_id
+                    ):
+                        components.append(comp)
+                except Exception:
+                    if baseline_user is not None and queued_id is not None:
+                        await _trim_unanswered_tool_use(
+                            agent, queued_id, baseline_user, baseline_messages
+                        )
+                    raise
+                if baseline_user is not None and queued_id is not None:
+                    await _trim_unanswered_tool_use(
+                        agent, queued_id, baseline_user, baseline_messages
+                    )
             except asyncio.CancelledError:
                 # Runs before the turn lock is released (still inside the
                 # context manager), so the next call on this conversation sees
@@ -489,9 +608,9 @@ async def query_database_impl_with_widgets(
                 # a BaseException, so the ``except Exception`` handler below
                 # never catches it; this clause must come first and re-raise,
                 # returning no result.
-                if queued_id is not None:
+                if baseline_user is not None and queued_id is not None:
                     _rollback_conversation(
-                        agent, queued_id, baseline_user_id, baseline_messages
+                        agent, queued_id, baseline_user.id, baseline_messages
                     )
                 raise
             except UnsafeSqlError as e:
