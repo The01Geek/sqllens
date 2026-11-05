@@ -1,0 +1,26 @@
+[
+  {
+    "criterion": 1,
+    "text": "With the real `Agent` and a `BoundedConversationStore`, a `query_database_impl_with_widgets` call on conversation C that is cancelled after the agent saved an assistant `tool_use` and before it saved the matching `tool_result` leaves C with exactly the messages it had before that call, and the next call on C sends an Anthropic request in which every `tool_use` block is directly followed by a `tool_result` block with the same id, and returns a non-error result."
+  },
+  {
+    "criterion": 2,
+    "text": "With the real `Agent` and a `BoundedConversationStore`, a `query_database_impl_with_widgets` call on conversation C that ends without cancellation while a `tool_use` it saved has no `tool_result` leaves C cut back to just before the earliest assistant message that call saved with an unanswered `tool_use` — every message before it stays, the call's user message included — logs a WARNING naming C and the number of messages removed, and the next call on C sends an Anthropic request in which every `tool_use` block is directly followed by a `tool_result` block with the same id, and returns a non-error result. A `tool_use` counts as unanswered when its id, taken from the assistant message's `tool_calls` or from a `tool_use` block in its `provider_content`, has no `role=\"tool\"` message directly after that assistant message."
+  },
+  {
+    "criterion": 3,
+    "text": "A call that ends without cancellation and saved an unanswered `tool_use` still returns the error it returns today: an `AgentRunError` with the `SQL execution error: ` prefix when the agent returned an error answer, and the same `RuntimeError`, with the same message, that it raises today when `send_message` raised."
+  },
+  {
+    "criterion": 4,
+    "text": "A call that ends without cancellation and saved no unanswered `tool_use` leaves C's history exactly as the call appended it: a failed call's user message stays ahead of the next call's, as `tests/unit/test_query_database_queue.py` pins."
+  },
+  {
+    "criterion": 5,
+    "text": "When a trim is needed and the conversation store has no `truncate_messages`, or reading the conversation or calling `truncate_messages` raises, the call logs at ERROR naming the store class, leaves the history as it was, and returns or raises the same result it would have without the trim."
+  },
+  {
+    "criterion": 6,
+    "text": "The change leaves the vendored Anthropic request builder (`_build_payload` in `src/sqllens/agent/integrations/anthropic/llm.py`) unchanged, so a conversation that reaches it with an unmatched `tool_use` by a path other than `query_database` is still sent as it is."
+  }
+]
