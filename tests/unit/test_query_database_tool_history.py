@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Daniel Radman
 # SPDX-License-Identifier: Apache-2.0
 
-"""A stopped ``query_database`` call never leaves an unanswered ``tool_use``.
+"""A stopped ``query_database`` call removes an unanswered ``tool_use``, or logs why not.
 
 The real ``Agent`` saves the assistant message carrying its tool calls before
 any tool runs, and saves the tool results only after the round finishes. A
@@ -33,7 +33,10 @@ from sqllens.agent.core.registry import ToolRegistry
 from sqllens.agent.core.tool import Tool, ToolContext, ToolResult
 from sqllens.agent.factory import DEFAULT_USER_GROUP, _StaticUserResolver
 from sqllens.agent.integrations.anthropic.llm import AnthropicLlmService
-from sqllens.conversation_store import BoundedConversationStore
+from sqllens.conversation_store import (
+    BoundedConversationStore,
+    ConversationOwnerMismatchError,
+)
 from sqllens.tools import query_database as query_database_module
 from sqllens.tools.query_database import AgentRunError, query_database_impl_with_widgets
 
@@ -314,6 +317,26 @@ class _RaisingTruncateStore(BoundedConversationStore):
         raise RuntimeError("store exploded")
 
 
+class _OwnerMismatchTruncateStore(BoundedConversationStore):
+    def truncate_messages(self, conversation_id: str, user_id: str, length: int) -> bool:
+        raise ConversationOwnerMismatchError(conversation_id)
+
+
+class _UnscannableReadStore(BoundedConversationStore):
+    """Once armed, the trim's read returns a message the scan cannot read."""
+
+    armed = False
+    reads = 0
+
+    async def get_conversation(self, conversation_id: str, user: Any) -> Any:
+        conversation = await super().get_conversation(conversation_id, user)
+        if self.armed:
+            self.reads += 1
+            if self.reads >= 3 and conversation is not None:
+                return SimpleNamespace(messages=[*conversation.messages, object()])
+        return conversation
+
+
 class _NoopTruncateStore(BoundedConversationStore):
     def truncate_messages(self, conversation_id: str, user_id: str, length: int) -> bool:
         return False
@@ -341,6 +364,8 @@ class _RaisingReadStore(BoundedConversationStore):
         (_NoTruncateStore, "has no truncate_messages"),
         (_RaisingTruncateStore, "raised from truncate_messages"),
         (_NoopTruncateStore, "truncate_messages removed nothing"),
+        (_OwnerMismatchTruncateStore, "raised ConversationOwnerMismatchError"),
+        (_UnscannableReadStore, "could not be scanned"),
         (_RaisingReadStore, "raised from get_conversation"),
     ],
 )

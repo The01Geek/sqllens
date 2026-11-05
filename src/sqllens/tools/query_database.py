@@ -299,8 +299,10 @@ async def _trim_unanswered_tool_use(
     except Exception:
         logger.exception(
             "query_database call on conversation %s: could not check for an "
-            "unanswered tool_use; a stored message could not be scanned",
+            "unanswered tool_use; a message read from conversation store %s "
+            "could not be scanned",
             conversation_id,
+            type(store).__name__,
         )
         return
     if cut is None:
@@ -322,10 +324,13 @@ async def _trim_unanswered_tool_use(
     except ConversationOwnerMismatchError:
         logger.error(
             "query_database call on conversation %s left an unanswered tool_use "
-            "that was not removed: the conversation belongs to a different user "
-            "than the one the call resolved; the next call on this conversation "
-            "will be rejected by the model API",
+            "that was not removed: conversation store %s raised "
+            "ConversationOwnerMismatchError from truncate_messages (the "
+            "conversation belongs to a different user than the one the call "
+            "resolved); the next call on this conversation will be rejected by "
+            "the model API",
             conversation_id,
+            type(store).__name__,
         )
         return
     except Exception:
@@ -342,7 +347,7 @@ async def _trim_unanswered_tool_use(
         logger.error(
             "query_database call on conversation %s left an unanswered tool_use "
             "that was not removed: conversation store %s truncate_messages "
-            "removed nothing; the next call on this conversation may be "
+            "removed nothing; the next call on this conversation will be "
             "rejected by the model API",
             conversation_id,
             type(store).__name__,
