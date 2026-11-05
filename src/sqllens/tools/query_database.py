@@ -224,19 +224,19 @@ async def _conversation_baseline(
     return user, 0 if conversation is None else len(conversation.messages)
 
 
-def _tool_use_ids(message: Any) -> set[str]:
+def _tool_use_ids(message: Any) -> set[str | None]:
     """Every tool-use id an assistant message carries.
 
     Both sources count: the Anthropic request builder replays an assistant
     message from ``provider_content`` when it has one, so its ``tool_use``
     blocks reach the API even when ``tool_calls`` is empty.
     """
-    ids = {call.id for call in message.tool_calls or ()}
+    ids: set[str | None] = {call.id for call in message.tool_calls or ()}
     for block in message.provider_content or ():
         if isinstance(block, dict) and block.get("type") == "tool_use":
-            # A block with no id still counts: no tool message can answer it,
-            # so it is treated as unanswered and trimmed.
-            ids.add(str(block.get("id")))
+            # A block with no id is kept as None: it is answered only by a
+            # tool message whose tool_call_id is also None.
+            ids.add(block.get("id"))
     return ids
 
 
