@@ -314,6 +314,11 @@ class _RaisingTruncateStore(BoundedConversationStore):
         raise RuntimeError("store exploded")
 
 
+class _NoopTruncateStore(BoundedConversationStore):
+    def truncate_messages(self, conversation_id: str, user_id: str, length: int) -> bool:
+        return False
+
+
 class _RaisingReadStore(BoundedConversationStore):
     """Fails the read only once armed, so the agent itself still works."""
 
@@ -335,6 +340,7 @@ class _RaisingReadStore(BoundedConversationStore):
     [
         (_NoTruncateStore, "has no truncate_messages"),
         (_RaisingTruncateStore, "raised from truncate_messages"),
+        (_NoopTruncateStore, "truncate_messages removed nothing"),
         (_RaisingReadStore, "raised from get_conversation"),
     ],
 )

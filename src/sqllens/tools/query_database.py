@@ -234,7 +234,9 @@ def _tool_use_ids(message: Any) -> set[str]:
     ids = {call.id for call in message.tool_calls or ()}
     for block in message.provider_content or ():
         if isinstance(block, dict) and block.get("type") == "tool_use":
-            ids.add(block.get("id"))
+            # A block with no id still counts: no tool message can answer it,
+            # so it is treated as unanswered and trimmed.
+            ids.add(str(block.get("id")))
     return ids
 
 
@@ -273,8 +275,8 @@ async def _trim_unanswered_tool_use(
     Only messages from ``start`` (this call's baseline) are scanned, so an
     earlier call's history is never cut.
 
-    Never raises ``Exception``: the read, the method lookup and the call are
-    each guarded and logged at ERROR naming the store class, because the
+    Never raises ``Exception``: the read, the scan of the stored messages, the
+    method lookup and the call are each guarded and logged at ERROR, because the
     caller is about to return or raise the call's own result, which must not
     be replaced by a cleanup failure.
     """
@@ -292,7 +294,15 @@ async def _trim_unanswered_tool_use(
         return
     if conversation is None:
         return
-    cut = _first_unanswered_tool_use(conversation.messages, start)
+    try:
+        cut = _first_unanswered_tool_use(conversation.messages, start)
+    except Exception:
+        logger.exception(
+            "query_database call on conversation %s: could not check for an "
+            "unanswered tool_use; a stored message could not be scanned",
+            conversation_id,
+        )
+        return
     if cut is None:
         return
     removed = len(conversation.messages) - cut
@@ -308,12 +318,31 @@ async def _trim_unanswered_tool_use(
         )
         return
     try:
-        truncate(conversation_id, user.id, cut)
+        removed_any = truncate(conversation_id, user.id, cut)
+    except ConversationOwnerMismatchError:
+        logger.error(
+            "query_database call on conversation %s left an unanswered tool_use "
+            "that was not removed: the conversation belongs to a different user "
+            "than the one the call resolved; the next call on this conversation "
+            "will be rejected by the model API",
+            conversation_id,
+        )
+        return
     except Exception:
         logger.exception(
             "query_database call on conversation %s left an unanswered tool_use "
             "that was not removed: conversation store %s raised from "
             "truncate_messages; the next call on this conversation will be "
+            "rejected by the model API",
+            conversation_id,
+            type(store).__name__,
+        )
+        return
+    if not removed_any:
+        logger.error(
+            "query_database call on conversation %s left an unanswered tool_use "
+            "that was not removed: conversation store %s truncate_messages "
+            "removed nothing; the next call on this conversation may be "
             "rejected by the model API",
             conversation_id,
             type(store).__name__,
