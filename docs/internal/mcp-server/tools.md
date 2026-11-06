@@ -221,6 +221,31 @@ same message history. Issue #255 adds two rules in
   any earlier call's messages. A store without `truncate_messages`, or one that
   raises from it, is logged at ERROR naming the store class rather than
   replacing the cancellation with another exception.
+- **A call that ends without cancellation drops an unanswered `tool_use`
+  (issue #333).** The agent saves an assistant `tool_use` before its tools run
+  and their results after, so a run that stops in between leaves a `tool_use`
+  with no `tool_result`, which the Anthropic API rejects on every later request
+  in the conversation. When the agent run ends without cancellation — a normal
+  answer, an error answer, or `send_message` raising — and a `conversation_id`
+  was passed, `_trim_unanswered_tool_use` runs before the turn lock is
+  released (and before the exception is re-raised). It re-reads the
+  conversation and scans from the baseline count onward for the earliest
+  assistant message whose tool-use ids (from `tool_calls` and from `tool_use`
+  blocks in `provider_content`) are not all answered by the run of
+  `role="tool"` messages directly after it. If it finds one, it truncates the
+  history to just before that message, so the call's user message and any
+  earlier, fully answered tool round of the same call stay, and logs a
+  WARNING naming the conversation and the number of messages removed. A call
+  whose tool uses are all answered keeps its history exactly as appended, so a
+  failed call's user message still stays ahead of the next call's. The call
+  returns or raises the same result it would have without the trim. A failed
+  `get_conversation` read, a message that cannot be scanned, a store without
+  `truncate_messages`, one that raises from it (including
+  `ConversationOwnerMismatchError`), or one that removes nothing is logged at
+  ERROR naming the store class and leaves the history as it was. Messages
+  before the baseline are never scanned or cut, and the vendored Anthropic
+  request builder is unchanged, so an unmatched `tool_use` that reaches it by
+  another path is still sent as is.
 
 Cancelling a call does not stop a database query that has already started on
 a worker thread; see the cancellation limit in
@@ -234,7 +259,11 @@ single memory worker thread (see "Memory store calls" in
 
 Pinned by `tests/unit/test_query_database_queue.py` (concurrency across ids,
 ordering on a shared id, entry cleanup, cancel rollback, and the
-`truncate_messages` seam).
+`truncate_messages` seam) and `tests/unit/test_query_database_tool_history.py`
+(with the real `Agent` and a `BoundedConversationStore`: a call cancelled or
+failed between saving a `tool_use` and its `tool_result` leaves a history the
+next call can send, the unchanged error results, and the store-failure
+logging).
 
 ## The MCP App interactive result widget
 
