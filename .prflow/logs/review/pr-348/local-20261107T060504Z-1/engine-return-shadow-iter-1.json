@@ -1,0 +1,293 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "suggestion",
+   "corroboration": 1,
+   "description": "Table widget overlay test does not assert the warning tail survives in the overlay hint (memory admin's does).",
+   "defect_signature": {
+    "file": "tests/unit/test_widget_export_outcomes.py",
+    "line_range": [
+     426,
+     428
+    ],
+    "kind": "test_gap"
+   }
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "suggestion",
+   "corroboration": 1,
+   "description": "isError:true download result is not logged via console.warn while thrown errors are (also memory_admin.html 1110-1112).",
+   "defect_signature": {
+    "file": "src/sqllens/ui/query_results.html",
+    "line_range": [
+     429,
+     430
+    ],
+    "kind": "other"
+   }
+  },
+  {
+   "finding_id": "F-3",
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "suggestion",
+   "corroboration": 1,
+   "description": "Table widget cancel/refusal message auto-hides after 2.5 s like a success message.",
+   "defect_signature": {
+    "file": "src/sqllens/ui/query_results.html",
+    "line_range": [
+     429,
+     431
+    ],
+    "kind": "other"
+   }
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (three suggestions and two inconclusive checklist items; no defect at or above the critical threshold)\nThe PR is ready to merge: both widgets now report the real download outcome, every acceptance criterion's behavior is present in the code, and no reviewer or checklist item found a blocking defect.\nRule applied: rule 6 — findings below the threshold and inconclusive items remain → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (3)\n<details><summary>3 items</summary>\n\n1. `tests/unit/test_widget_export_outcomes.py` lines 426-428: the overlay test checks that memory admin's overlay keeps its warning tail but makes no matching check for the table widget's overlay, so dropping the `warning` argument in `showCsvOverlay` would go uncaught. (raised by 1/5 agents)\n2. `src/sqllens/ui/query_results.html` lines 429-430 (and `src/sqllens/ui/memory_admin.html` lines 1110-1112): a download that resolves with `isError: true` is not logged to `console.warn`, while a thrown download error is, so a host refusal leaves no diagnostic trace. (raised by 1/5 agents)\n3. `src/sqllens/ui/query_results.html` lines 429-431: in the table widget, the cancel or refusal message disappears after 2.5 seconds when there is no warning, styled like a success message. (raised by 1/5 agents)\n\n</details>\n\n### ℹ️ Informational — Deferred\n- VC-6: INCONCLUSIVE (suggestion) — Hosts accept a resource uri of the form file:///<filename> and use its basename as the saved file name [src/sqllens/ui/memory_admin.html]\n\n  <details><summary>Evidence</summary>\n\n  memory_admin.html:1099 sends uri \"file:///\"+filename in ui/download-file, matching query_results.html:414. The claim is about what hosts accept and how they name the saved file. That is MCP Apps spec behavior, and neither the spec nor any host implementation is in the head view, so the claim can't be settled from the source. Missing evidence: the ext-apps spec text for ui/download-file.\n\n  </details>\n\n- VC-21: INCONCLUSIVE (critical) — A node-run test covers each row of the Desired Behavior table, for the table widget (`exportCsv`) and for memory admin (`offerDownload`), at minimum: no capability with clipboard success; download resolving to an empty result; download resolving to `{isError: true}`; download throwing a timeout error; download throwing another error; no capability with both clipboard methods failing (overlay). `pytest -q` passes, and the existing check that warnings survive every export route in `tests/unit/test_output_boundaries.py` still passes. [tests/unit/test_widget_export_outcomes.py]\n\n  <details><summary>Evidence</summary>\n\n  Criteria file counts (criterion 8 present). Coverage half verified by reading tests/unit/test_widget_export_outcomes.py: CASES (lines 32-42) plus tests at 127-200 exercise both _run_table (exportCsv) and _run_memory (offerDownload) for: no capability + clipboard success (async/legacy), resolved {} and undefined, {isError:true}, thrown timeout (-32001), thrown other error, no capability with clipboard failing (overlay), plus timeout+overlay and URI/timeout:600000. Extraction markers exist in query_results.html:277,452 and memory_admin.html:1066,1178. tests/unit/test_output_boundaries.py is not in the diff (only memory_admin.html, query_results.html and the new test file changed). Not settled: that `pytest -q` passes and that test_output_boundaries.py still passes; I did not run pytest (or node), and the new tests skip if node is missing, so pass status needs an actual run.\n\n  </details>\n\n\n## Run details\n<details><summary>Run details</summary>\n\n- Diff profile: test_relevant, 3 changed files, 328 changed lines; detect_all_audit not set.\n- Phase 0 working tree: skipped (PR mode with local head override).\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. Final-pass (requesting-code-review) extension: content-present.\n- CI evidence for the reviewed head: missing (no CI results injected; no test suite was run in this entry).\n- Normalized (wording-only): 0\n- Three checklist verifiers (items 20, 21 and 22) were refused at launch by the concurrent-subagent limit and were dispatched in a second round.\n- Dirty-tree check: clean.\n- Checklist: 20 passed, 0 failed, 2 inconclusive\n- <details><summary>✅ Passed items (20 of 22)</summary>\n\n  - VC-1: app.downloadFile accepts a second request-options argument and honors { timeout } to override the SDK's default request timeout (memory admin) [src/sqllens/ui/memory_admin.html]\n  - VC-2: app.downloadFile accepts a second request-options argument and honors { timeout } (table widget) [src/sqllens/ui/query_results.html]\n  - VC-3: The SDK's request default timeout is 60 s [src/sqllens/ui/query_results.html]\n  - VC-4: A thrown SDK request timeout carries err.code === -32001 (ErrorCode.RequestTimeout) in both widgets [src/sqllens/ui/memory_admin.html]\n  - VC-5: A user cancel or host refusal of ui/download-file resolves with a result whose isError is true rather than throwing [src/sqllens/ui/query_results.html]\n  - VC-7: The test fake of app.downloadFile (records params/options, throws Error with code, resolves value) matches the real SDK's call shape and error object [tests/unit/test_widget_export_outcomes.py:304]\n  - VC-8: The table-widget extraction between '// ── CSV export (per-block)' and '// ── Bar (filter input' contains exportCsv and all helpers it needs, with the fakes (state, sortedRows, filteredRows, render, metaSpan, gridHost) matching real names in renderTableBlock [tests/unit/test_widget_export_outcomes.py:326]\n  - VC-9: The memory-admin fakes showOk(m) and showError(title, msg) match the real signatures, and the red banner is showError [tests/unit/test_widget_export_outcomes.py:350]\n  - VC-10: TABLE_TAIL ' Warning: CSV formula protection' is a prefix of the warning buildCsvExport emits for a '=1+1' cell, and the CSV is 'v\\r\\n'=1+1' [tests/unit/test_widget_export_outcomes.py:366]\n  - VC-11: All other callers of showOverlay / showCsvOverlay were updated to the new (text, warningNote, reason) / (csvText, warning, reason) signatures [src/sqllens/ui/memory_admin.html]\n  - VC-12: The inline textarea overlay always works [src/sqllens/ui/memory_admin.html]\n  - VC-13: test_output_boundaries.py warning-survival checks still match the new export messages [src/sqllens/ui/query_results.html]\n  - VC-14: In both widgets, on a host that does not advertise `downloadFile` and where a clipboard copy succeeds, the export copies the content and shows \"This host can't save files — CSV copied to clipboard\" in the table widget and \"This host can't save files — Export copied to clipboard\" in memory admin, with any warning tail appended. [src/sqllens/ui/query_results.html:388-450]\n  - VC-15: In both widgets, when `app.downloadFile` resolves with a result that does not have `isError: true` (an empty result included), the widget shows \"Downloaded query_results.csv ✓\" in the table widget and \"Downloaded memory-export.json ✓\" or \"Downloaded memory-export.csv ✓\" in memory admin, with any warning tail appended, and copies nothing. [src/sqllens/ui/query_results.html]\n  - VC-16: In both widgets, when `app.downloadFile` resolves with `isError: true`, the widget shows \"Download cancelled or blocked by the host.\" with any warning tail appended (in memory admin, in the red error banner, never the green success banner), never shows a \"Downloaded\" message, does not write to the clipboard, and does not show the overlay. [src/sqllens/ui/memory_admin.html]\n  - VC-17: In both widgets, when `app.downloadFile` throws and a clipboard copy succeeds, the widget shows \"Download failed (timed out) — CSV copied to clipboard\" (memory admin: \"Download failed (timed out) — Export copied to clipboard\") for a thrown error whose `code` is -32001 (the SDK request timeout), and \"Download failed (<the error's message>) — …\" with the same ending for any other thrown error, in both cases with any warning tail appended. [src/sqllens/ui/query_results.html:384-437]\n  - VC-18: In both widgets, when the content reaches the overlay, the overlay hint opens with the same reason the clipboard message would have given (\"This host can't save files\" or \"Download failed (<reason>)\"), followed by \"and the clipboard is blocked. Select all and copy:\", and no longer says \"Host blocked the file download\". [src/sqllens/ui/query_results.html:318-449]\n  - VC-19: Both widgets call `app.downloadFile` with resource URI `file:///query_results.csv` (table widget) or `file:///memory-export.<json|csv>` (memory admin) and with request option `timeout: 600000`. [src/sqllens/ui/memory_admin.html:1076-1102]\n  - VC-20: Each widget's Export button label is unchanged whatever the host's capabilities. [src/sqllens/ui/query_results.html:476]\n  - VC-22: The change leaves host-side `downloadFile` support unchanged: on a host that does not advertise the capability, such as the tenant website chat widget if it does not, export still produces no file. A host-cancel and a host-refusal stay indistinguishable, because the SDK reports both as `isError: true`. A save dialog left open for more than 10 minutes still times out into the \"Download failed (timed out)\" clipboard route. [src/sqllens/ui/query_results.html:173-234]\n\n  </details>\n- Reviewed against issue #340 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] In both widgets, on a host that does not advertise `downloadFile` and where a clipboard copy succeeds, the export copies the content and shows \"This host can't save files — CSV copied to clipboard\" in the table widget and \"This host can't save files — Export copied to clipboard\" in memory admin, with any warning tail appended.\n- [ ] In both widgets, when `app.downloadFile` resolves with a result that does not have `isError: true` (an empty result included), the widget shows \"Downloaded query_results.csv ✓\" in the table widget and \"Downloaded memory-export.json ✓\" or \"Downloaded memory-export.csv ✓\" in memory admin, with any warning tail appended, and copies nothing.\n- [ ] In both widgets, when `app.downloadFile` resolves with `isError: true`, the widget shows \"Download cancelled or blocked by the host.\" with any warning tail appended (in memory admin, in the red error banner, never the green success banner), never shows a \"Downloaded\" message, does not write to the clipboard, and does not show the overlay.\n- [ ] In both widgets, when `app.downloadFile` throws and a clipboard copy succeeds, the widget shows \"Download failed (timed out) — CSV copied to clipboard\" (memory admin: \"Download failed (timed out) — Export copied to clipboard\") for a thrown error whose `code` is -32001 (the SDK request timeout), and \"Download failed (<the error's message>) — …\" with the same ending for any other thrown error, in both cases with any warning tail appended.\n- [ ] In both widgets, when the content reaches the overlay, the overlay hint opens with the same reason the clipboard message would have given (\"This host can't save files\" or \"Download failed (<reason>)\"), followed by \"and the clipboard is blocked. Select all and copy:\", and no longer says \"Host blocked the file download\".\n- [ ] Both widgets call `app.downloadFile` with resource URI `file:///query_results.csv` (table widget) or `file:///memory-export.<json|csv>` (memory admin) and with request option `timeout: 600000`.\n- [ ] Each widget's Export button label is unchanged whatever the host's capabilities.\n- [ ] A node-run test covers each row of the Desired Behavior table, for the table widget (`exportCsv`) and for memory admin (`offerDownload`), at minimum: no capability with clipboard success; download resolving to an empty result; download resolving to `{isError: true}`; download throwing a timeout error; download throwing another error; no capability with both clipboard methods failing (overlay). `pytest -q` passes, and the existing check that warnings survive every export route in `tests/unit/test_output_boundaries.py` still passes.\n- [ ] The change leaves host-side `downloadFile` support unchanged: on a host that does not advertise the capability, such as the tenant website chat widget if it does not, export still produces no file. A host-cancel and a host-refusal stay indistinguishable, because the SDK reports both as `isError: true`. A save dialog left open for more than 10 minutes still times out into the \"Download failed (timed out)\" clipboard route.",
+ "diff_produced_at_head": "fc89e4a1fc8303dbfcdaf5cf13190ba0b1c2480a",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:memory_admin.html:downloadfile-timeout-option",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "dependency_interaction:query_results.html:downloadfile-timeout-option",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "absolute_claim:query_results.html:sdk-60s-default",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "dependency_interaction:memory_admin.html:timeout-code-32001",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "dependency_interaction:query_results.html:iserror-on-cancel",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "category": "api_contract",
+   "claim": "Hosts accept a resource uri of the form file:///<filename> and use its basename as the saved file name",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/ui/memory_admin.html",
+   "verify_against": "MCP Apps spec for ui/download-file resource contents",
+   "verify_hint": "Check the ui/download-file request schema in the ext-apps spec",
+   "claim_signature": "api_contract:memory_admin.html:file-uri-form",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "memory_admin.html:1099 sends uri \"file:///\"+filename in ui/download-file, matching query_results.html:414. The claim is about what hosts accept and how they name the saved file. That is MCP Apps spec behavior, and neither the spec nor any host implementation is in the head view, so the claim can't be settled from the source. Missing evidence: the ext-apps spec text for ui/download-file.",
+   "file_checked": "src/sqllens/ui/memory_admin.html:1099",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "test_mock_alignment:test_widget_export_outcomes.py:downloadfile-fake",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "test_mock_alignment:test_widget_export_outcomes.py:table-extraction-scope",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "test_mock_alignment:test_widget_export_outcomes.py:banner-fakes",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "data_format_assumption:test_widget_export_outcomes.py:table-warning-tail",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "api_contract:memory_admin.html:overlay-signature-callers",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "absolute_claim:memory_admin.html:overlay-always-works",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "api_contract:query_results.html:output-boundaries-test",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-14",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-15",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-16",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-17",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-18",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-19",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-20",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "A node-run test covers each row of the Desired Behavior table, for the table widget (`exportCsv`) and for memory admin (`offerDownload`), at minimum: no capability with clipboard success; download resolving to an empty result; download resolving to `{isError: true}`; download throwing a timeout error; download throwing another error; no capability with both clipboard methods failing (overlay). `pytest -q` passes, and the existing check that warnings survive every export route in `tests/unit/test_output_boundaries.py` still passes.",
+   "claim_signature": "issue-acceptance-8",
+   "criteria_file": ".prflow/tmp/review/pr-348/local-20261107T060504Z-1-shadow/criteria.json",
+   "source_file": "tests/unit/test_widget_export_outcomes.py",
+   "verify_hint": "CASES and tests in test_widget_export_outcomes.py",
+   "id": "VC-21",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Criteria file counts (criterion 8 present). Coverage half verified by reading tests/unit/test_widget_export_outcomes.py: CASES (lines 32-42) plus tests at 127-200 exercise both _run_table (exportCsv) and _run_memory (offerDownload) for: no capability + clipboard success (async/legacy), resolved {} and undefined, {isError:true}, thrown timeout (-32001), thrown other error, no capability with clipboard failing (overlay), plus timeout+overlay and URI/timeout:600000. Extraction markers exist in query_results.html:277,452 and memory_admin.html:1066,1178. tests/unit/test_output_boundaries.py is not in the diff (only memory_admin.html, query_results.html and the new test file changed). Not settled: that `pytest -q` passes and that test_output_boundaries.py still passes; I did not run pytest (or node), and the new tests skip if node is missing, so pass status needs an actual run.",
+   "file_checked": "tests/unit/test_widget_export_outcomes.py:32-200",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-22",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}
