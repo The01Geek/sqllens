@@ -91,7 +91,8 @@ class AgentRunError(RuntimeError):
 #    ("refusing to execute non-SELECT SQL: ..."), not by a constant prefix,
 #  - a turn run while the agent's memory store could not be opened gets the
 #    fixed memory-unavailable message, which must never carry the persist
-#    path or the Chroma exception text (both stay in the server log).
+#    path or the Chroma exception text (the exception, which can name the
+#    path, is logged server-side instead).
 _INTERNAL_ERROR_MESSAGE = "internal error; see server logs"
 _SQL_EXECUTION_ERROR_PREFIX = "SQL execution error: "
 _MEMORY_UNAVAILABLE_MESSAGE = (
@@ -716,12 +717,16 @@ async def query_database_impl_with_widgets(
                 logger.exception("agent trace assembly failed; serving answer without trace")
                 agent_trace = None
         # Checked before ``is_error`` so a turn that ran without saved memory never
-        # reads as a success or as a SQL failure carrying raw Chroma text.
+        # reads as a success or as a SQL failure carrying raw Chroma text. The
+        # memory instance is shared across turns, so a failure recorded by an
+        # earlier turn fails this one too until a later open succeeds.
         open_error = getattr(getattr(agent, "agent_memory", None), "open_error", None)
         if open_error is not None:
+            # The client message omits the cause, so log the exception (its text
+            # can name the persist path) here for the operator.
             logger.warning(
-                "agent memory store could not be opened (%s); failing the query",
-                type(open_error).__name__,
+                "agent memory store could not be opened; failing the query",
+                exc_info=open_error,
             )
             raise AgentRunError(
                 _MEMORY_UNAVAILABLE_MESSAGE,

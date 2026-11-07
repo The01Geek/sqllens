@@ -355,8 +355,9 @@ def build_server(cfg: Config) -> FastMCP:
         result does not carry it.
 
         When the server's vector memory store could not be opened, the call
-        returns an error result starting ``Memory store unavailable:`` instead
-        of an answer produced without saved memory.
+        returns an error result whose message is ``Memory store unavailable: ...``
+        (after the MCP framework's ``Error executing tool`` prefix) instead of
+        an answer produced without saved memory.
         """
         metadata = _request_metadata(ctx)
         # Mint a stable id when the caller did not supply one, so the resolved

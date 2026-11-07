@@ -252,3 +252,53 @@ async def test_mcp_result_is_error_with_memory_unavailable_text(
         with pytest.raises(AgentRunError, match=r"^Memory store unavailable: "):
             await query_database("q", _StubCtx())
     assert len(llm.requests) == 1
+
+
+# --- server-side logging and a real failed open -----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_open_failure_cause_is_logged_server_side(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent_stub_factory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The client message omits the Chroma text, so the server log must carry it."""
+    persist_dir = tmp_path / "chroma"
+    cfg = build_test_config(persist_dir=persist_dir)
+    stub = agent_stub_factory(_turn_ending_in_failed_search())
+    exc = RuntimeError(f"{CHROMA_TEXT} at {persist_dir}")
+    stub.agent_memory.open_error = exc
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    with caplog.at_level("WARNING", logger="sqllens.tools.query_database"):
+        with pytest.raises(AgentRunError):
+            await query_database_impl_with_widgets(cfg, "q")
+
+    records = [r for r in caplog.records if r.exc_info and r.exc_info[1] is exc]
+    assert records, "the open failure was not logged with its exception"
+    assert CHROMA_TEXT in caplog.text
+    assert str(persist_dir) in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_real_memory_failed_open_fails_the_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent_stub_factory
+) -> None:
+    """A real ChromaAgentMemory whose open failed drives the memory-unavailable error."""
+    persist_dir = tmp_path / "chroma"
+    cfg = build_test_config(persist_dir=persist_dir)
+    memory = ChromaAgentMemory(persist_directory=str(persist_dir))
+    with (
+        patch("chromadb.PersistentClient", side_effect=RuntimeError(CHROMA_TEXT)),
+        pytest.raises(RuntimeError),
+    ):
+        memory._get_client()
+    stub = agent_stub_factory(_turn_with_later_data_success())
+    stub.agent_memory = memory
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    with pytest.raises(AgentRunError) as excinfo:
+        await query_database_impl_with_widgets(cfg, "how many orders?")
+    assert str(excinfo.value) == EXPECTED_MESSAGE
