@@ -1,0 +1,82 @@
+[
+  {
+    "criterion": 1,
+    "text": "The shared helper resolves exactly these 9 URLs to these paths — complete by construction: `sqlite:///rel.db` → `rel.db`; `sqlite:///./demo.db` → `./demo.db`; `sqlite:////tmp/x.db` → `/tmp/x.db`; `sqlite+pysqlite:////tmp/x.db` → `/tmp/x.db`; `sqlite:///C:/x.db` → `C:/x.db`; `sqlite://:memory:` → `:memory:`; `sqlite:///:memory:` → `:memory:`; `sqlite://` → `:memory:`; `sqlite:///` → `:memory:`."
+  },
+  {
+    "criterion": 2,
+    "text": "A query run through the SQLite runner built from `sqlite:////<absolute path to an existing SQLite file>` with `read_only = true` returns that file's rows, on Linux."
+  },
+  {
+    "criterion": 3,
+    "text": "The read-only URI the runner opens has no host part: for the resolved path `/tmp/x.db` it is `file:/tmp/x.db?mode=ro`, and for the resolved path `C:/x.db` it is `file:///C:/x.db?mode=ro`."
+  },
+  {
+    "criterion": 4,
+    "text": "For a resolved path that begins with `//` (for example `//tmp/x.db`, which `make_url` returns for `sqlite://///tmp/x.db`), the read-only URI the runner opens has no host part, and connecting with it to an existing file does not raise `invalid uri authority`."
+  },
+  {
+    "criterion": 5,
+    "text": "With `read_only = true`, the shared connect function given the resolved path of an existing file whose name contains `?`, `#` and `%` (for example `<tmp_path>/a?b#c%d.db`) opens that file read-only, and a write through that connection fails."
+  },
+  {
+    "criterion": 6,
+    "text": "`build_sql_runner` and `probe_database` resolve the same path for every URL in the 9-URL list above, and both obtain it from the shared helper rather than from their own parsing."
+  },
+  {
+    "criterion": 7,
+    "text": "With `read_only = true`, `probe_database` on a URL whose file does not exist raises `PreflightError` with subsystem `database` and a message containing the resolved path, and no file exists at that path afterwards."
+  },
+  {
+    "criterion": 8,
+    "text": "With `read_only = true`, `probe_database` on a URL whose resolved path is an existing directory raises `PreflightError` with subsystem `database` and a message containing the resolved path."
+  },
+  {
+    "criterion": 9,
+    "text": "With `read_only = true`, `probe_database` on `sqlite:////<absolute path to an existing SQLite file>` returns without raising."
+  },
+  {
+    "criterion": 10,
+    "text": "In an empty directory, with `SQLLENS_LLM__API_KEY` set, running `sqllens init` and then `sqllens serve` on the unedited config exits with code 2 and prints `Preflight failed: database:` followed by a message containing the resolved `demo.db` path, and no `demo.db` file exists afterwards."
+  },
+  {
+    "criterion": 11,
+    "text": "The message `sqllens init` prints after writing the config tells the user to set `database.url` to an existing database before running `sqllens serve`."
+  },
+  {
+    "criterion": 12,
+    "text": "With `read_only = false`, `probe_database` and the runner both open the resolved path with a plain read-write open, as before this change."
+  },
+  {
+    "criterion": 13,
+    "text": "A SQLite URL with a query string (`sqlite:///x.db?mode=ro`) makes `probe_database` raise `PreflightError` with subsystem `database` and a message stating that SQLite URL query parameters are not supported; `build_sql_runner` raises `ValueError` with the same message."
+  },
+  {
+    "criterion": 14,
+    "text": "`docs/internal/agent/factory.md` and the comment in `build_sql_runner` state that three slashes give a path relative to the working directory and four slashes give an absolute path."
+  },
+  {
+    "criterion": 15,
+    "text": "`docs/internal/setup/config-loading.md` no longer says the SQLite driver does not enforce `read_only`."
+  },
+  {
+    "criterion": 16,
+    "text": "`docs/external/configuration.md` and `docs/external/getting-started.md` show a relative example (`sqlite:///data/app.db`), an absolute POSIX example (`sqlite:////var/data/app.db`) and a Windows example (`sqlite:///C:/data/app.db`), and state that a three-slash path is relative to the directory the server is started from."
+  },
+  {
+    "criterion": 17,
+    "text": "`docs/internal/setup/preflight.md`, `docs/internal/database-connectors/read-only-safety.md` and the `--check-db` row in `docs/external/configuration.md` state that with `read_only = true` the SQLite startup check opens the file read-only and fails, naming the path, when the file does not exist."
+  },
+  {
+    "criterion": 18,
+    "text": "`mcpb/manifest.json` and `mcpb/README.md` show the absolute four-slash form as the SQLite example."
+  },
+  {
+    "criterion": 19,
+    "text": "A `changelog.d/<PR>.fixed.md` fragment says absolute SQLite paths now work and that a `read_only` SQLite config pointing at a missing file now stops `sqllens serve` at startup instead of creating an empty database, including the unedited config `sqllens init` writes."
+  },
+  {
+    "criterion": 20,
+    "text": "`ruff check .` reports no findings and `pytest -q` reports no failures, with the new SQLite URL tests included in that run."
+  }
+]

@@ -1,0 +1,815 @@
+[
+  {
+    "id": "VC-1",
+    "category": "dependency_interaction",
+    "claim": "`sqlite_path_from_url` is importable from `sqllens.agent.integrations.sqlite.sql_runner` and takes the full SQLite URL string, returning the resolved database path (`:memory:` for in-memory forms)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 29,
+    "verify_against": "the definition and signature of `sqlite_path_from_url`",
+    "verify_hint": "Check `sqlite_path_from_url` in `src/sqllens/agent/integrations/sqlite/sql_runner.py` (name exported, parameter is the URL not a path, return type `str`)",
+    "claim_signature": "dependency_interaction:factory.py:sqlite-path-from-url-import:29",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "api_contract",
+    "claim": "`SqliteRunner`'s `database_path` accepts whatever `sqlite_path_from_url` returns, including a relative path, `C:/x.db` and `:memory:`, with no further normalization in `build_sql_runner`",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 227,
+    "source_line_end": 232,
+    "verify_against": "`SqliteRunner.__init__` and its path handling",
+    "verify_hint": "Check `SqliteRunner` in `src/sqllens/agent/integrations/sqlite/sql_runner.py` for how `database_path` is consumed (`connect_sqlite`, `_readonly_uri`)",
+    "claim_signature": "api_contract:factory.py:runner-accepts-resolved-path:227",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "api_contract",
+    "claim": "`build_sql_runner` lets `sqlite_path_from_url`'s rejection surface as `ValueError` to its callers (it adds no try/except), so a SQLite URL with a query string, host, userinfo or port raises `ValueError` from `build_sql_runner`",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 224,
+    "source_line_end": 232,
+    "verify_against": "the exception type raised by `sqlite_path_from_url` and the callers of `build_sql_runner`",
+    "verify_hint": "Check the raise statements in `sqlite_path_from_url` in `src/sqllens/agent/integrations/sqlite/sql_runner.py` and the `build_sql_runner` call sites in `src/sqllens/tools/` and `src/sqllens/preflight.py`",
+    "claim_signature": "api_contract:factory.py:valueerror-propagates:224",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "absolute_claim",
+    "claim": "The comment asserts that `sqlite:///rel.db` is relative to the working directory, that `sqlite:////abs.db` is absolute, and that `build_sql_runner` does no SQLite path parsing of its own because preflight must resolve the same file",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# sqlite:///rel.db is relative to the working directory; sqlite:////abs.db\n        # is absolute. Do not parse here: preflight must resolve the same file.",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 225,
+    "source_line_end": 226,
+    "verify_against": "`sqlite_path_from_url` behavior and the SQLite branch of `probe_database`",
+    "verify_hint": "Check `sqlite_path_from_url` in `src/sqllens/agent/integrations/sqlite/sql_runner.py` for the three- vs four-slash outcome, and `_probe_sqlite` in `src/sqllens/preflight.py` that it calls the same helper; falsifier: a URL whose two code paths resolve different files",
+    "claim_signature": "absolute_claim:factory.py:slash-count-relative-absolute:225",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "absolute_claim",
+    "claim": "The factory doc row asserts that the path comes from `sqlite_path_from_url` under SQLAlchemy `make_url` rules, resolving `sqlite:///rel.db`→`rel.db`, `sqlite:////abs/path.db`→`/abs/path.db`, `sqlite:///C:/x.db`→`C:/x.db`, and all four in-memory forms to `:memory:`, and that it raises `ValueError` for a URL with query parameters, a host, user, password or port",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `sqlite://` | `SqliteRunner` | Path from `sqlite_path_from_url` (SQLAlchemy `make_url` rules): three slashes = relative path (`sqlite:///rel.db` → `rel.db`, resolved against the working directory), four slashes = absolute path (`sqlite:////abs/path.db` → `/abs/path.db`), `sqlite:///C:/x.db` → `C:/x.db`; `sqlite://`, `sqlite:///`, `sqlite://:memory:`, `sqlite:///:memory:` → `:memory:`. Raises `ValueError` for a URL with query parameters, a host, user, password or port. |",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 148,
+    "verify_against": "`sqlite_path_from_url` implementation",
+    "verify_hint": "Check `sqlite_path_from_url` in `src/sqllens/agent/integrations/sqlite/sql_runner.py` against each of the nine listed URLs and each listed rejection; falsifier: `sqlite:///` or `sqlite://` not yielding `:memory:`, or a NUL-byte/other rejection the row omits",
+    "claim_signature": "absolute_claim:factory.md:sqlite-url-resolution-table:148",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "absolute_claim",
+    "claim": "The read-only-safety doc asserts `_readonly_uri` never emits a host part (a `//`-prefixed path gets an explicit empty authority, a Windows drive path takes `file:///C:/...`), that runner and preflight both open through `connect_sqlite(path, read_only=...)` taking the path from `sqlite_path_from_url`, and that with `read_only = true` `_probe_sqlite` opens read-only, reads `PRAGMA schema_version` and fails naming the path and its resolved absolute form when the file is missing or not a SQLite database, while `read_only = false` is a plain open that creates a missing file",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "and never emits a host part (a path starting `//` gets an explicit empty authority; a Windows drive path takes the `file:///C:/...` form). The runner and preflight open the database through the shared `connect_sqlite(path, read_only=...)`, and both take the path from `sqlite_path_from_url` (three slashes relative, four absolute; rejects query parameters and a host/user/password/port). Because `mode=ro` never creates a file, with `read_only = true` the `sqllens serve` startup check (`_probe_sqlite` in [src/sqllens/preflight.py](../../../src/sqllens/preflight.py)) opens the file read-only, reads `PRAGMA schema_version`, and fails naming the path (and its resolved absolute form) when the file is missing or is not a SQLite database. With `read_only = false` the open is plain and creates a missing file.",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 93,
+    "verify_against": "`_readonly_uri`, `connect_sqlite` and `_probe_sqlite`",
+    "verify_hint": "Check `_readonly_uri` and `connect_sqlite` in `src/sqllens/agent/integrations/sqlite/sql_runner.py` and `_probe_sqlite` in `src/sqllens/preflight.py`; falsifier: a zero-byte or truncated non-database file that `PRAGMA schema_version` accepts, or a drive-letter path on POSIX",
+    "claim_signature": "absolute_claim:read-only-safety.md:readonly-uri-no-host-and-probe:93",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "absolute_claim",
+    "claim": "The config-loading doc asserts `read_only` is enforced by the SQL parser guard and, as a backstop, at the driver/session layer of every connector, with SQLite using the `mode=ro` URI plus `PRAGMA query_only=ON`",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`read_only` defaults to `true` (enforced by the SQL parser guard and, as a backstop, at the driver/session layer of every connector — SQLite via the `mode=ro` URI plus `PRAGMA query_only=ON`)",
+    "source_file": "docs/internal/setup/config-loading.md",
+    "source_line": 28,
+    "verify_against": "the read-only enforcement in each connector",
+    "verify_hint": "Check `connect_sqlite`/`SqliteRunner` in `src/sqllens/agent/integrations/sqlite/sql_runner.py` for `PRAGMA query_only`, plus the Postgres and MySQL runners in `src/sqllens/agent/integrations/`; falsifier: a connector with no driver-layer enforcement",
+    "claim_signature": "absolute_claim:config-loading.md:readonly-every-connector-backstop:28",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "absolute_claim",
+    "claim": "The preflight doc asserts the SQLite `probe_database` branch catches `sqlite3.Error` and `ValueError` (URL rejected by `sqlite_path_from_url`, or raised while opening) and propagates everything else as-is",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `probe_database` (sqlite) | `sqlite3.Error`, `ValueError` (URL rejected by `sqlite_path_from_url`, or raised while opening) | everything else |",
+    "source_file": "docs/internal/setup/preflight.md",
+    "source_line": 36,
+    "verify_against": "the except clauses in the SQLite branch of `probe_database`",
+    "verify_hint": "Check `probe_database` and `_probe_sqlite` in `src/sqllens/preflight.py` for exactly which exception types are caught",
+    "claim_signature": "absolute_claim:preflight.md:sqlite-probe-caught-exceptions:36",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "absolute_claim",
+    "claim": "The preflight doc asserts the SQLite probe calls `connect_sqlite(path, read_only=cfg.database.read_only, timeout=5)` with the path from `sqlite_path_from_url`, and that with `read_only = true` a missing file, a directory or a non-empty non-database file fails with the message `could not open SQLite database <path> (resolved to <absolute path>)` while a zero-byte file opens as an empty database, and `read_only = false` is a plain open that creates a missing file",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `sqlite://`, `sqlite+...://` | `connect_sqlite(path, read_only=cfg.database.read_only, timeout=5)` — the same open the query runner uses, with the path from `sqlite_path_from_url` (three slashes relative to the working directory, four absolute; a URL with query parameters or a host/user/password/port fails with the helper's message). With `read_only = true` the file opens through the `mode=ro` URI and the probe reads `PRAGMA schema_version`, so a missing file, a directory or a non-empty non-database file fails with `could not open SQLite database <path> (resolved to <absolute path>)` instead of being created (a zero-byte file opens as an empty database). With `read_only = false` it is a plain open, which creates a missing file.",
+    "source_file": "docs/internal/setup/preflight.md",
+    "source_line": 54,
+    "verify_against": "`_probe_sqlite` in preflight and `connect_sqlite`'s signature",
+    "verify_hint": "Check `_probe_sqlite` in `src/sqllens/preflight.py` for the exact call keywords and error string, and `connect_sqlite` in `src/sqllens/agent/integrations/sqlite/sql_runner.py` for the `timeout` parameter name; falsifier: a directory path or zero-byte file behaving differently than stated",
+    "claim_signature": "absolute_claim:preflight.md:sqlite-probe-connect-sqlite:54",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "absolute_claim",
+    "claim": "The `--check-db` row asserts that for SQLite with `read_only = true` the flag opens the file read-only and reads its schema header, so a missing file or a file that is not a SQLite database fails with an error naming the path instead of creating an empty database, and that with `read_only = false` a plain open creates a missing file",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `--check-db` | Opens and immediately closes a connection to `database.url`. For SQLite with `read_only = true`, opens the file read-only and reads its schema header, so a missing file (or a file that is not a SQLite database) fails with an error naming the path instead of creating an empty database. With `read_only = false`, a plain open creates a missing file. |",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 249,
+    "verify_against": "the `--check-db` path in `sqllens validate` and the SQLite probe",
+    "verify_hint": "Check the `validate` command's `--check-db` handling in `src/sqllens/cli.py` and `_probe_sqlite` in `src/sqllens/preflight.py`; falsifier: a non-database file that passes the schema read",
+    "claim_signature": "absolute_claim:configuration.md:check-db-sqlite-readonly:249",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "absolute_claim",
+    "claim": "The configuration doc asserts a SQLite URL must not contain a host, user, password, port or `?...` query parameters and that SQL Lens rejects such a URL, that three slashes is relative to the server's start directory and four slashes absolute, and that with `read_only = true` SQL Lens opens the file read-only and never creates it, stopping `sqllens serve` at startup with an error naming the path",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A SQLite URL must not contain a host, user, password, port or `?...` query parameters; SQL Lens rejects such a URL. With `read_only = true` (the default), SQL Lens opens the file read-only and never creates it: if the file does not exist, `sqllens serve` stops at startup with an error naming the path.",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 49,
+    "verify_against": "`sqlite_path_from_url` rejections and the `serve` preflight failure path",
+    "verify_hint": "Check `sqlite_path_from_url` in `src/sqllens/agent/integrations/sqlite/sql_runner.py` and the `serve` command's preflight handling in `src/sqllens/cli.py`/`src/sqllens/preflight.py`; falsifier: a URL with userinfo or a port that is accepted",
+    "claim_signature": "absolute_claim:configuration.md:sqlite-url-restrictions:49",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "absolute_claim",
+    "claim": "The getting-started doc makes the same assertions: SQLite URLs must not contain a host, user, password, port or `?...` query parameters and are rejected; three slashes is relative to the start directory, four absolute; with `read_only = true` the file is opened read-only, never created, and a missing file stops `sqllens serve` at startup naming the path",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A SQLite URL must not contain a host, user, password, port or `?...` query parameters; SQL Lens rejects such a URL. With `read_only = true` (the default), SQL Lens opens the file read-only and never creates it: if the file does not exist, `sqllens serve` stops at startup with an error naming the path.",
+    "source_file": "docs/external/getting-started.md",
+    "source_line": 100,
+    "verify_against": "`sqlite_path_from_url` rejections and the `serve` preflight failure path",
+    "verify_hint": "Check `sqlite_path_from_url` in `src/sqllens/agent/integrations/sqlite/sql_runner.py` and `probe_database` in `src/sqllens/preflight.py`",
+    "claim_signature": "absolute_claim:getting-started.md:sqlite-url-restrictions:100",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "absolute_claim",
+    "claim": "The changelog fragment asserts absolute SQLite paths now work (`sqlite:////var/data/app.db` opens `/var/data/app.db`), three slashes is relative to the server's start directory, `sqlite:///C:/data/app.db` works on Windows, a URL with a host or `?...` query is rejected with a clear error, and with `read_only = true` a missing file stops `sqllens serve` at startup naming the path — including the unedited configuration `sqllens init` writes",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Absolute SQLite paths in `database.url` now work: `sqlite:////var/data/app.db`\n(four slashes) opens `/var/data/app.db`, `sqlite:///data/app.db` (three slashes)\nis relative to the directory the server starts in, and `sqlite:///C:/data/app.db`\nworks on Windows.",
+    "source_file": "changelog.d/353.fixed.md",
+    "source_line": 1,
+    "source_line_end": 8,
+    "verify_against": "the implemented behavior in the SQLite helper, preflight and the `init` default config",
+    "verify_hint": "Check `sqlite_path_from_url`/`connect_sqlite` in `src/sqllens/agent/integrations/sqlite/sql_runner.py`, `_probe_sqlite` in `src/sqllens/preflight.py`, and the template config written by `init` in `src/sqllens/cli.py`; falsifier: the default `init` config's `demo.db` still passing preflight",
+    "claim_signature": "absolute_claim:353.fixed.md:changelog-sqlite-claims:1",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "data_format_assumption",
+    "claim": "The MCPB manifest's `database_url` description advertises `sqlite:////absolute/path/to/db.sqlite` as the SQLite DSN example, and the manifest remains valid MCPB JSON with that string",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"description\": \"SQLAlchemy-style DSN. Examples: sqlite:////absolute/path/to/db.sqlite, postgresql://user:pw@host:5432/db, mysql+pymysql://user:pw@host:3306/db\",",
+    "source_file": "mcpb/manifest.json",
+    "source_line": 41,
+    "verify_against": "how `database_url` is consumed when the bundle wires the server config",
+    "verify_hint": "Check the user_config/`database_url` substitution in `mcpb/manifest.json`'s `server` block and any MCPB entrypoint script under `mcpb/`",
+    "claim_signature": "data_format_assumption:manifest.json:sqlite-dsn-example:41",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "dependency_interaction",
+    "claim": "sqlalchemy.engine.make_url exists as an import target and sqlalchemy.exc.ArgumentError is the error it raises for an unparseable URL, so catching (ArgumentError, ValueError) covers make_url's failure modes for inputs like 'not a url'.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 45,
+    "source_line_end": 57,
+    "verify_against": "SQLAlchemy's installed version (pyproject/requirements pin) engine.make_url and sqlalchemy.exc",
+    "verify_hint": "Check `make_url` in sqlalchemy/engine/url.py and the exception types it raises in the version locked by requirements.txt",
+    "claim_signature": "dependency_interaction:sql_runner.py:make-url-error-types:45",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "data_format_assumption",
+    "claim": "make_url exposes `.query`, `.host`, `.username`, `.password`, `.port` and `.database` on the parsed URL, with `.database` being the resolved SQLite path (empty/None for the in-memory forms) and percent escapes already decoded so a '%00' in the URL appears as a literal NUL byte in `.database`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 58,
+    "source_line_end": 67,
+    "verify_against": "SQLAlchemy URL object attribute semantics and its percent-decoding of the database component",
+    "verify_hint": "Check the `URL` class attributes and `_parse_url` percent-unquoting in sqlalchemy/engine/url.py",
+    "claim_signature": "data_format_assumption:sql_runner.py:make-url-attributes:58",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "dependency_interaction",
+    "claim": "sqlite3.connect accepts the URI forms this builder produces with uri=True — 'file:rel.db?mode=ro' (relative, no authority), 'file:/abs.db?mode=ro', 'file:////tmp/x.db?mode=ro' and 'file:///C:/x.db?mode=ro' — without raising 'invalid uri authority'.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 81,
+    "source_line_end": 105,
+    "verify_against": "SQLite URI filename grammar as implemented by the sqlite3 C library / CPython sqlite3 module",
+    "verify_hint": "Check SQLite's URI filename rules (sqlite3_open_v2 URI parsing) against `_readonly_uri` and `connect_sqlite` in sql_runner.py",
+    "claim_signature": "dependency_interaction:sql_runner.py:sqlite-uri-authority:81",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "absolute_claim",
+    "claim": "The authored docstring asserts the read-only URI never carries a host part for any input path, because a '//'-prefixed path gets an explicit empty authority and a Windows drive path takes the file:///C:/... form.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The URI never carries a host part, which SQLite rejects with ``invalid uri\n    authority``: a path starting ``//`` gets an explicit empty authority, and a\n    Windows drive path takes the documented ``file:///C:/...`` form.",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 73,
+    "source_line_end": 75,
+    "verify_against": "_readonly_uri's branches versus paths that could yield an authority",
+    "verify_hint": "Falsify by passing paths such as '//host/share/x.db', '///x.db' and a drive path with backslashes ('C:\\\\x.db') to `_readonly_uri` in sql_runner.py and inspecting the authority component",
+    "claim_signature": "absolute_claim:sql_runner.py:uri-never-has-host:73",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "absolute_claim",
+    "claim": "The authored Raises docstring asserts sqlite_path_from_url raises ValueError for query parameters, a host, a username, password or port, or when SQLAlchemy cannot parse the URL — the list it gives of the ValueError cases.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    Raises:\n        ValueError: the URL carries query parameters, a host, a username,\n            password or port, or SQLAlchemy cannot parse it.",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 41,
+    "source_line_end": 43,
+    "verify_against": "every `raise ValueError` in sqlite_path_from_url's body",
+    "verify_hint": "Compare the docstring list against the NUL-byte branch at sql_runner.py line 65-66 in `sqlite_path_from_url`",
+    "claim_signature": "absolute_claim:sql_runner.py:raises-list-completeness:41",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "absolute_claim",
+    "claim": "The authored comment asserts make_url reads a bare ':memory:' after '://' as host plus port and raises, which is why the function short-circuits that form before calling make_url.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    # make_url reads ``:memory:`` here as host + port and raises.",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 48,
+    "verify_against": "make_url's behavior on 'sqlite://:memory:' in the pinned SQLAlchemy version",
+    "verify_hint": "Falsify by calling `make_url('sqlite://:memory:')` directly with the SQLAlchemy version locked in requirements.txt",
+    "claim_signature": "absolute_claim:sql_runner.py:memory-host-port-comment:48",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "absolute_claim",
+    "claim": "The authored docstring asserts that with read_only the schema-header read makes a directory or a non-empty non-database file fail, while a zero-byte file opens as an empty database, and that a driver error is reported with the path and exception type and never the driver's str(exc).",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    With ``read_only`` the open goes through the ``mode=ro`` URI, so a missing\n    file fails here instead of being created, and the schema header is read so\n    a directory or a non-empty non-database file fails too (a zero-byte file\n    opens as an empty database). A URL the helper rejects is reported with the\n    helper's own message; a driver error names the path (a SQLite path carries\n    no credentials) and the exception type, never the driver's ``str(exc)``.",
+    "source_file": "src/sqllens/preflight.py",
+    "source_line": 54,
+    "source_line_end": 59,
+    "verify_against": "_probe_sqlite's branches and SQLite's mode=ro behavior on a directory, a zero-byte file and a non-database file",
+    "verify_hint": "Falsify by running `_probe_sqlite` in src/sqllens/preflight.py with read_only=True against a directory, a zero-byte file and a text file, and check whether any raised error path interpolates str(exc)",
+    "claim_signature": "absolute_claim:preflight.py:probe-sqlite-failure-scope:54",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "absolute_claim",
+    "claim": "The authored module docstring asserts the remaining probes are non-mutating with the single exception that a read_only = false SQLite probe creates a missing database file.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The remaining probes are non-mutating, except that a\n``read_only = false`` SQLite probe creates a missing database file: open and\nimmediately close a connection (no query; a read-only SQLite probe reads the\nschema header), construct the LLM client (no\nAPI round-trip), and build the authenticator (catches bearer-mode configs\nmissing a token).",
+    "source_file": "src/sqllens/preflight.py",
+    "source_line": 17,
+    "source_line_end": 22,
+    "verify_against": "every probe function in preflight.py and its side effects",
+    "verify_hint": "Check each `probe_*` function in src/sqllens/preflight.py for writes; falsify with a read_only=false SQLite URL whose parent directory does not exist",
+    "claim_signature": "absolute_claim:preflight.py:probes-non-mutating:17",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "dependency_interaction",
+    "claim": "Exceptions raised by connect_sqlite and by `PRAGMA schema_version` for a missing file, a directory and a non-database file are all instances of sqlite3.Error or ValueError, so the except clause converts them to PreflightError rather than letting them escape; the code reports whichever outcome each host/filesystem produces through that same clause.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/preflight.py",
+    "source_line": 67,
+    "source_line_end": 84,
+    "verify_against": "CPython sqlite3 exception hierarchy and the errors sqlite3.connect raises for bad URI/paths",
+    "verify_hint": "Check the sqlite3 module's exception classes (sqlite3.Error subclasses, and whether OperationalError/DatabaseError cover 'unable to open database file' and 'file is not a database') against the except clause in `_probe_sqlite`",
+    "claim_signature": "dependency_interaction:preflight.py:sqlite-error-coverage:73",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "dependency_interaction",
+    "claim": "Path(path).absolute() raises only OSError subclasses when the working directory is unavailable, so the OSError handler yields the 'working directory unavailable' message rather than an uncaught exception.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/preflight.py",
+    "source_line": 76,
+    "source_line_end": 79,
+    "verify_against": "pathlib.Path.absolute / os.getcwd error behavior in CPython 3.11-3.14",
+    "verify_hint": "Check `pathlib.Path.absolute` in CPython and what it raises when the cwd has been removed",
+    "claim_signature": "dependency_interaction:preflight.py:absolute-oserror:76",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "api_contract",
+    "claim": "probe_database's SQLite branch no longer uses the `rest` it computes from splitting the URL, and `cfg.database.read_only` exists on the Config object every caller of probe_database passes.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/preflight.py",
+    "source_line": 109,
+    "source_line_end": 114,
+    "verify_against": "DatabaseConfig in src/sqllens/config.py and the remaining uses of `rest` in probe_database",
+    "verify_hint": "Check the `DatabaseConfig` model in src/sqllens/config.py for a `read_only` field and scan probe_database for other `rest` uses",
+    "claim_signature": "api_contract:preflight.py:read-only-config-field:113",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "test_mock_alignment",
+    "claim": "The spy replacing sqllens.preflight.connect_sqlite matches the real signature (positional path, keyword-only read_only, keyword timeout) that _probe_sqlite calls it with, and returning an in-memory connection lets the subsequent `PRAGMA schema_version` succeed.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sqlite_url.py",
+    "source_line": 374,
+    "source_line_end": 380,
+    "verify_against": "connect_sqlite's real signature in src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "verify_hint": "Compare the `spy` function in test_factory_and_preflight_resolve_same_path with `connect_sqlite` in sql_runner.py, including its default timeout value",
+    "claim_signature": "test_mock_alignment:test_sqlite_url.py:connect-sqlite-spy-signature:374",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "test_mock_alignment",
+    "claim": "Patching sqllens.agent.factory.sqlite_path_from_url and sqllens.preflight.sqlite_path_from_url intercepts both call sites, i.e. each module imports the helper by name into its own namespace rather than calling it through the module object.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sqlite_url.py",
+    "source_line": 390,
+    "source_line_end": 396,
+    "verify_against": "the import statements and call sites in src/sqllens/agent/factory.py and src/sqllens/preflight.py",
+    "verify_hint": "Check how `build_sql_runner` in src/sqllens/agent/factory.py imports and calls `sqlite_path_from_url`",
+    "claim_signature": "test_mock_alignment:test_sqlite_url.py:patch-helper-targets:390",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "api_contract",
+    "claim": "build_sql_runner accepts a URL positionally plus a `read_only` keyword and returns an object exposing a `database_path` attribute equal to the resolved path.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sqlite_url.py",
+    "source_line": 452,
+    "source_line_end": 456,
+    "verify_against": "build_sql_runner in src/sqllens/agent/factory.py and SqliteRunner.__init__",
+    "verify_hint": "Check `build_sql_runner`'s signature in src/sqllens/agent/factory.py and the `database_path` attribute set by `SqliteRunner.__init__`",
+    "claim_signature": "api_contract:test_sqlite_url.py:build-sql-runner-signature:452",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "test_mock_alignment",
+    "claim": "ToolContext.model_construct() with no fields is a usable context for SqliteRunner.run_sql, i.e. run_sql reads no ToolContext attribute that model_construct leaves unset.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sqlite_url.py",
+    "source_line": 455,
+    "verify_against": "SqliteRunner.run_sql / _run_sql_blocking use of the ToolContext argument",
+    "verify_hint": "Check which `ToolContext` fields `run_sql` and `_run_sql_blocking` in sql_runner.py dereference, and `ToolContext` in src/sqllens/agent/core/tool.py",
+    "claim_signature": "test_mock_alignment:test_sqlite_url.py:toolcontext-model-construct:455",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "test_mock_alignment",
+    "claim": "Patching sqllens.server.run and invoking the CLI 'serve' command exercises preflight before the server starts, and typer's CliRunner result exposes `stderr` separately for the assertions on the preflight message.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sqlite_url.py",
+    "source_line": 513,
+    "source_line_end": 520,
+    "verify_against": "the `serve` command in src/sqllens/cli.py and typer.testing.CliRunner result attributes in the pinned typer/click versions",
+    "verify_hint": "Check the `serve` command in src/sqllens/cli.py for how it calls `sqllens.server.run` and prints 'Preflight failed:', and whether `Result.stderr` is populated by the pinned click version",
+    "claim_signature": "test_mock_alignment:test_sqlite_url.py:cli-serve-stderr:513",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "test_mock_alignment",
+    "claim": "patch.object(Path, 'absolute', side_effect=FileNotFoundError) only affects the absolute() call inside _probe_sqlite and does not break the connect path that must first fail for that branch to be reached.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sqlite_url.py",
+    "source_line": 353,
+    "source_line_end": 360,
+    "verify_against": "_probe_sqlite's use of Path in src/sqllens/preflight.py",
+    "verify_hint": "Check every `Path(...)` use reachable from `_probe_sqlite` in src/sqllens/preflight.py",
+    "claim_signature": "test_mock_alignment:test_sqlite_url.py:patch-path-absolute:353",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "test_mock_alignment",
+    "claim": "The read-write preflight assertion expects sqlite3.connect to be called exactly once with the path positionally and timeout=_DB_CONNECT_TIMEOUT_SECONDS, matching connect_sqlite's plain-open call shape.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sqlite_url.py",
+    "source_line": 483,
+    "source_line_end": 487,
+    "verify_against": "connect_sqlite's read_only=False branch and _DB_CONNECT_TIMEOUT_SECONDS in preflight.py",
+    "verify_hint": "Compare the `sqlite3.connect(database_path, timeout=timeout)` call in `connect_sqlite` with this assertion and with `_DB_CONNECT_TIMEOUT_SECONDS` in src/sqllens/preflight.py",
+    "claim_signature": "test_mock_alignment:test_sqlite_url.py:plain-open-call-args:483",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "test_mock_alignment",
+    "claim": "_cfg builds a valid Config with only database/llm/memory/auth supplied, so Config requires no other field and DatabaseConfig accepts url/name/read_only.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_sqlite_url.py",
+    "source_line": 302,
+    "source_line_end": 308,
+    "verify_against": "Config, DatabaseConfig, LLMConfig, MemoryConfig and AuthConfig in src/sqllens/config.py",
+    "verify_hint": "Check the required fields of `Config` and `DatabaseConfig` in src/sqllens/config.py",
+    "claim_signature": "test_mock_alignment:test_sqlite_url.py:config-fixture-fields:302",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The shared helper resolves exactly these 9 URLs to these paths — complete by construction: `sqlite:///rel.db` → `rel.db`; `sqlite:///./demo.db` → `./demo.db`; `sqlite:////tmp/x.db` → `/tmp/x.db`; `sqlite+pysqlite:////tmp/x.db` → `/tmp/x.db`; `sqlite:///C:/x.db` → `C:/x.db`; `sqlite://:memory:` → `:memory:`; `sqlite:///:memory:` → `:memory:`; `sqlite://` → `:memory:`; `sqlite:///` → `:memory:`.",
+    "claim_signature": "issue-acceptance-1",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 34,
+    "verify_hint": "Check `sqlite_path_from_url` in sql_runner.py against URL_TABLE in tests/unit/test_sqlite_url.py",
+    "id": "VC-34",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A query run through the SQLite runner built from `sqlite:////<absolute path to an existing SQLite file>` with `read_only = true` returns that file's rows, on Linux.",
+    "claim_signature": "issue-acceptance-2",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-353/42359176712-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: A query run through the SQLite runner built from `sqlite:////<absolute path to an existing SQLite file>` with `read_only = true` returns that file's rows, on Linux.",
+    "id": "VC-35",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The read-only URI the runner opens has no host part: for the resolved path `/tmp/x.db` it is `file:/tmp/x.db?mode=ro`, and for the resolved path `C:/x.db` it is `file:///C:/x.db?mode=ro`.",
+    "claim_signature": "issue-acceptance-3",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 81,
+    "verify_hint": "Check `_readonly_uri` in sql_runner.py and test_readonly_uri_has_no_host in tests/unit/test_sqlite_url.py",
+    "id": "VC-36",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "For a resolved path that begins with `//` (for example `//tmp/x.db`, which `make_url` returns for `sqlite://///tmp/x.db`), the read-only URI the runner opens has no host part, and connecting with it to an existing file does not raise `invalid uri authority`.",
+    "claim_signature": "issue-acceptance-4",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 85,
+    "verify_hint": "Check the `database_path.startswith('//')` branch in `_readonly_uri` and test_double_slash_path_opens in tests/unit/test_sqlite_url.py",
+    "id": "VC-37",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With `read_only = true`, the shared connect function given the resolved path of an existing file whose name contains `?`, `#` and `%` (for example `<tmp_path>/a?b#c%d.db`) opens that file read-only, and a write through that connection fails.",
+    "claim_signature": "issue-acceptance-5",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 103,
+    "verify_hint": "Check `connect_sqlite`'s read_only branch plus the `quote` call in `_readonly_uri`, and test_special_chars_open_read_only in tests/unit/test_sqlite_url.py",
+    "id": "VC-38",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`build_sql_runner` and `probe_database` resolve the same path for every URL in the 9-URL list above, and both obtain it from the shared helper rather than from their own parsing.",
+    "claim_signature": "issue-acceptance-6",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-353/42359176712-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: `build_sql_runner` and `probe_database` resolve the same path for every URL in the 9-URL list above, and both obtain it from the shared helper rather than from their own parsing.",
+    "id": "VC-39",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With `read_only = true`, `probe_database` on a URL whose file does not exist raises `PreflightError` with subsystem `database` and a message containing the resolved path, and no file exists at that path afterwards.",
+    "claim_signature": "issue-acceptance-7",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "source_file": "src/sqllens/preflight.py",
+    "source_line": 80,
+    "verify_hint": "Check `_probe_sqlite`'s PreflightError message in src/sqllens/preflight.py and test_preflight_missing_file_fails_and_creates_nothing",
+    "id": "VC-40",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With `read_only = true`, `probe_database` on a URL whose resolved path is an existing directory raises `PreflightError` with subsystem `database` and a message containing the resolved path.",
+    "claim_signature": "issue-acceptance-8",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "source_file": "src/sqllens/preflight.py",
+    "source_line": 71,
+    "verify_hint": "Check the `PRAGMA schema_version` read in `_probe_sqlite` and test_preflight_directory_fails in tests/unit/test_sqlite_url.py",
+    "id": "VC-41",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With `read_only = true`, `probe_database` on `sqlite:////<absolute path to an existing SQLite file>` returns without raising.",
+    "claim_signature": "issue-acceptance-9",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-353/42359176712-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: With `read_only = true`, `probe_database` on `sqlite:////<absolute path to an existing SQLite file>` returns without raising.",
+    "id": "VC-42",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "In an empty directory, with `SQLLENS_LLM__API_KEY` set, running `sqllens init` and then `sqllens serve` on the unedited config exits with code 2 and prints `Preflight failed: database:` followed by a message containing the resolved `demo.db` path, and no `demo.db` file exists afterwards.",
+    "claim_signature": "issue-acceptance-10",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-353/42359176712-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: In an empty directory, with `SQLLENS_LLM__API_KEY` set, running `sqllens init` and then `sqllens serve` on the unedited config exits with code 2 and prints `Preflight failed: database:` followed by a message containing the resolved `demo.db` path, and no `demo.db` file exists afterwards.",
+    "id": "VC-43",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The message `sqllens init` prints after writing the config tells the user to set `database.url` to an existing database before running `sqllens serve`.",
+    "claim_signature": "issue-acceptance-11",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 176,
+    "verify_hint": "Check the console.print after `Wrote {path}` in the `init` command in src/sqllens/cli.py",
+    "id": "VC-44",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With `read_only = false`, `probe_database` and the runner both open the resolved path with a plain read-write open, as before this change.",
+    "claim_signature": "issue-acceptance-12",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "source_file": "src/sqllens/agent/integrations/sqlite/sql_runner.py",
+    "source_line": 105,
+    "verify_hint": "Check `connect_sqlite`'s fallback plain `sqlite3.connect` and its callers in `_probe_sqlite` (preflight.py) and `_run_sql_blocking` (sql_runner.py)",
+    "id": "VC-45",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A SQLite URL with a query string (`sqlite:///x.db?mode=ro`) makes `probe_database` raise `PreflightError` with subsystem `database` and a message stating that SQLite URL query parameters are not supported; `build_sql_runner` raises `ValueError` with the same message.",
+    "claim_signature": "issue-acceptance-13",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-353/42359176712-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: A SQLite URL with a query string (`sqlite:///x.db?mode=ro`) makes `probe_database` raise `PreflightError` with subsystem `database` and a message stating that SQLite URL query parameters are not supported; `build_sql_runner` raises `ValueError` with the same message.",
+    "id": "VC-46",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`docs/internal/agent/factory.md` and the comment in `build_sql_runner` state that three slashes give a path relative to the working directory and four slashes give an absolute path.",
+    "claim_signature": "issue-acceptance-14",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 225,
+    "verify_hint": "Compare the comment at `build_sql_runner` in `src/sqllens/agent/factory.py` lines 225-226 with the `sqlite://` row of `docs/internal/agent/factory.md` line 148",
+    "id": "VC-47",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`docs/internal/setup/config-loading.md` no longer says the SQLite driver does not enforce `read_only`.",
+    "claim_signature": "issue-acceptance-15",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "source_file": "docs/internal/setup/config-loading.md",
+    "source_line": 28,
+    "verify_hint": "Check the `[database]` row of the table in `docs/internal/setup/config-loading.md` for any remaining 'not the SQLite driver' wording",
+    "id": "VC-48",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`docs/external/configuration.md` and `docs/external/getting-started.md` show a relative example (`sqlite:///data/app.db`), an absolute POSIX example (`sqlite:////var/data/app.db`) and a Windows example (`sqlite:///C:/data/app.db`), and state that a three-slash path is relative to the directory the server is started from.",
+    "claim_signature": "issue-acceptance-16",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 43,
+    "verify_hint": "Check the SQLite table row and following paragraph in `docs/external/configuration.md` (lines 43-49) and in `docs/external/getting-started.md` (lines 96-100)",
+    "id": "VC-49",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`docs/internal/setup/preflight.md`, `docs/internal/database-connectors/read-only-safety.md` and the `--check-db` row in `docs/external/configuration.md` state that with `read_only = true` the SQLite startup check opens the file read-only and fails, naming the path, when the file does not exist.",
+    "claim_signature": "issue-acceptance-17",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "source_file": "docs/internal/setup/preflight.md",
+    "source_line": 54,
+    "verify_hint": "Check `docs/internal/setup/preflight.md` line 54, `docs/internal/database-connectors/read-only-safety.md` line 93 and the `--check-db` row in `docs/external/configuration.md` line 249",
+    "id": "VC-50",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`mcpb/manifest.json` and `mcpb/README.md` show the absolute four-slash form as the SQLite example.",
+    "claim_signature": "issue-acceptance-18",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "source_file": "mcpb/README.md",
+    "source_line": 30,
+    "verify_hint": "Check the Database URL row in `mcpb/README.md` line 30 and the `database_url` description in `mcpb/manifest.json` line 41",
+    "id": "VC-51",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A `changelog.d/<PR>.fixed.md` fragment says absolute SQLite paths now work and that a `read_only` SQLite config pointing at a missing file now stops `sqllens serve` at startup instead of creating an empty database, including the unedited config `sqllens init` writes.",
+    "claim_signature": "issue-acceptance-19",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "source_file": "changelog.d/353.fixed.md",
+    "source_line": 1,
+    "verify_hint": "Check `changelog.d/353.fixed.md` filename category and content against the fragment rules in `AGENTS.md` (Release & distribution)",
+    "id": "VC-52",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`ruff check .` reports no findings and `pytest -q` reports no failures, with the new SQLite URL tests included in that run.",
+    "claim_signature": "issue-acceptance-20",
+    "criteria_file": ".prflow/tmp/review/pr-353/42359176712-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-353/42359176712-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: `ruff check .` reports no findings and `pytest -q` reports no failures, with the new SQLite URL tests included in that run.",
+    "id": "VC-53",
+    "reused_from_iter_prev": false
+  }
+]
