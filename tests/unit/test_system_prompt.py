@@ -369,6 +369,7 @@ async def test_cut_result_rule_and_no_full_table_wording() -> None:
         assert phrase not in lowered, phrase
     assert "states how many rows the table shows and how many the query returned" in prompt
     assert "says the query hit the row limit and more rows exist" in prompt
+    assert "that they could not be shown as a table" in prompt
     assert "Never make these statements about a schema-lookup result" in prompt
     assert "the rule that the question is your whole written reply wins" in prompt
     assert "Never call a result table or a result full or complete" in prompt
