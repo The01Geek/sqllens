@@ -315,7 +315,7 @@ function renderTableBlock(block) {
   // always read/copy it manually. Works in any sandbox because it requires no
   // permissions and no host capability. The "Back to table" button restores
   // the grid.
-  function showCsvOverlay(csvText, warning) {
+  function showCsvOverlay(csvText, warning, reason) {
     ++metaMessageVersion; // An earlier success timer must not remove the CSV.
     gridHost.textContent = "";
     const wrap = document.createElement("div");
@@ -325,7 +325,7 @@ function renderTableBlock(block) {
     hint.className = "meta";
     hint.style.marginBottom = "6px";
     hint.textContent =
-      "Host blocked the file download and clipboard. Select all and copy:" +
+      reason + " and the clipboard is blocked. Select all and copy:" +
       (warning ? " " + warning : "");
     const ta = document.createElement("textarea");
     ta.readOnly = true;
@@ -375,6 +375,16 @@ function renderTableBlock(block) {
     return ok;
   }
 
+  // Overrides the SDK's 60 s request default so a host save dialog left open
+  // does not time out into a clipboard copy.
+  const DOWNLOAD_TIMEOUT_MS = 600000;
+
+  // Match the SDK timeout by its McpError code (RequestTimeout), not by text.
+  function downloadFailureReason(err) {
+    if (err && err.code === -32001) return "timed out";
+    return err && err.message ? err.message : String(err);
+  }
+
   async function exportCsv() {
     // Tiered export. MCP App iframes are sandboxed without `allow-downloads`
     // and Inspector doesn't grant `clipboard-write` permissions-policy, so
@@ -384,41 +394,59 @@ function renderTableBlock(block) {
     //   2) navigator.clipboard.writeText — modern, needs clipboard-write.
     //   3) document.execCommand("copy") — legacy, works without that grant.
     //   4) Inline textarea overlay — always works; user copies manually.
+    // A resolved download with isError: true means the user cancelled or the
+    // host refused: stop there, never fall through to a clipboard copy.
     const { text: csvText, warning } = buildCsvExport();
     const warningTail = warning ? " " + warning : "";
+    const flashDuration = warning ? 0 : 2500;
     const caps = (app.getHostCapabilities && app.getHostCapabilities()) || {};
+    let reason = "This host can't save files";
     if (caps.downloadFile) {
+      let result;
+      let thrown = false;
       try {
-        await app.downloadFile({
-          contents: [
-            {
-              type: "resource",
-              resource: {
-                uri: "query_results.csv",
-                mimeType: "text/csv",
-                text: csvText,
+        result = await app.downloadFile(
+          {
+            contents: [
+              {
+                type: "resource",
+                resource: {
+                  uri: "file:///query_results.csv",
+                  mimeType: "text/csv",
+                  text: csvText,
+                },
               },
-            },
-          ],
-        });
-        flashMeta("downloaded ✓" + warningTail, warning ? 0 : 2500);
-        return;
+            ],
+          },
+          { timeout: DOWNLOAD_TIMEOUT_MS },
+        );
       } catch (err) {
         console.warn("ui/download-file failed:", err);
+        thrown = true;
+        reason = "Download failed (" + downloadFailureReason(err) + ")";
+      }
+      if (!thrown) {
+        if (result && result.isError === true) {
+          flashMeta("Download cancelled or blocked by the host." + warningTail, flashDuration);
+        } else {
+          flashMeta("Downloaded query_results.csv ✓" + warningTail, flashDuration);
+        }
+        return;
       }
     }
+    const copied = reason + " — CSV copied to clipboard" + warningTail;
     try {
       await navigator.clipboard.writeText(csvText);
-      flashMeta("copied to clipboard ✓" + warningTail, warning ? 0 : 2500);
+      flashMeta(copied, flashDuration);
       return;
     } catch (err) {
       console.warn("clipboard.writeText failed:", err);
     }
     if (copyViaExecCommand(csvText)) {
-      flashMeta("copied to clipboard ✓" + warningTail, warning ? 0 : 2500);
+      flashMeta(copied, flashDuration);
       return;
     }
-    showCsvOverlay(csvText, warning);
+    showCsvOverlay(csvText, warning, reason);
   }
 
   // ── Bar (filter input + meta span) ───────────────────────────────────────
