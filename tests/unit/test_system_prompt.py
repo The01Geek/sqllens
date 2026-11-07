@@ -353,6 +353,28 @@ async def test_search_before_asking_requires_search_tool(has_search: bool) -> No
     assert ("BEFORE asking" in prompt) is has_search
 
 
+async def test_cut_result_rule_and_no_full_table_wording() -> None:
+    """Issue #337: the agent must say when the user's table is cut or capped,
+    and the prompt must never itself describe a result table as full."""
+    builder = DefaultSystemPromptBuilder()
+    prompt = await builder.build_system_prompt(
+        User(id="test-user"),
+        tools=[_ToolSchemaStub("run_sql"), _ToolSchemaStub("emit_text")],
+    )
+    assert prompt is not None
+    assert "full per-region" not in prompt
+    assert "Here are the per-region numbers:" in prompt
+    lowered = prompt.lower()
+    for phrase in ("the full ", "full list", "full table", "complete list", "complete table"):
+        assert phrase not in lowered, phrase
+    assert "states how many rows the table shows and how many the query returned" in prompt
+    assert "says the query hit the row limit and more rows exist" in prompt
+    assert "that they could not be shown as a table" in prompt
+    assert "Never make these statements about a schema-lookup result" in prompt
+    assert "the rule that the question is your whole written reply wins" in prompt
+    assert "Never call a result table or a result full or complete" in prompt
+
+
 # Issue #343: the prompt names the connected engine and routes the agent's own
 # SQL-text errors to a bounded corrected retry instead of quote-and-ask.
 

@@ -115,6 +115,7 @@ def test_widget_csv_defangs_both_headers_and_rows_before_quoting() -> None:
     assert functions
     source = f"const values = {json.dumps(VALUES)}; const state = {{columns:values}};\n"
     source += "const filteredRows=()=>[values]; const sortedRows=x=>x;\n"
+    source += "const csvCutWarning=()=>\"\";\n"
     source += functions.group() + "\nconsole.log(JSON.stringify(buildCsvExport().text));"
     output = _run_js(source)
     expected = ["'" + value if value and value.strip() and value[0] in "=+-@\t\r\n" else value
