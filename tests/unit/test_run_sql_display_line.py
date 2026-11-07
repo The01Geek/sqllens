@@ -138,3 +138,17 @@ async def test_raising_display_work_keeps_todays_result(
     )[0]
     assert any(r.levelno == logging.WARNING for r in caplog.records)
     assert isinstance(out.ui_component, UiComponent)
+
+
+@pytest.mark.parametrize("bad_cap", [0, -1, True, False, "300", 2.5, None])
+def test_row_cap_of_rejects_malformed_values(bad_cap: object) -> None:
+    from types import SimpleNamespace
+
+    assert row_cap_of(SimpleNamespace(data={"row_cap": bad_cap})) is None
+
+
+def test_row_cap_of_ignores_non_dict_data() -> None:
+    from types import SimpleNamespace
+
+    assert row_cap_of(SimpleNamespace(data=None)) is None
+    assert row_cap_of(SimpleNamespace(data={"row_cap": 7})) == 7

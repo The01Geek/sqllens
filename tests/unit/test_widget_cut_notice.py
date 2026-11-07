@@ -124,3 +124,20 @@ def test_csv_warning_row_cap_and_formula_warning_together() -> None:
 def test_csv_uncut_table_keeps_only_formula_warning() -> None:
     state = {"columns": ["v"], "rows": [["=1+1"]], "rowCount": 1, "truncated": 0, "rowCap": 0}
     assert _csv_warning(state) == FORMULA
+
+
+@pytest.mark.parametrize("bad_cap", [0, -5, "5000", True, 2.5, None])
+def test_invalid_row_cap_shows_no_cap_notice(bad_cap: object) -> None:
+    block = _block(3)
+    block["row_cap"] = bad_cap
+    out = _render(block)
+    assert out["notices"] == []
+
+
+def test_csv_warning_display_cut_and_row_cap_together() -> None:
+    state = {"columns": ["v"], "rows": [["a"], ["b"]], "rowCount": 2, "truncated": 9998,
+             "rowCap": 10000}
+    assert _csv_warning(state) == (
+        "Warning: this CSV holds only the 2 rows shown, not all 10,000. The query "
+        "stopped at the 10,000-row limit; more rows exist."
+    )
