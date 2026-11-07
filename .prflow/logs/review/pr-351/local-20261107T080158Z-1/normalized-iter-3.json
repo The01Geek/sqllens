@@ -1,0 +1,117 @@
+{
+  "results": [
+    {
+      "id": "VC-51",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "The original excerpt no longer exists. The reworded sentence in changelog.d/351.fixed.md (final sentence, about lines 8-10) is graded against the code. In src/sqllens/_table_payload.py, _compute_table_payload returns None for an empty frame (line 149) and when the header-only payload exceeds _MAX_TABLE_PAYLOAD_BYTES (lines 192-194). The sentence's \"table could not be built\" case rests on the comment in src/sqllens/tools/_format.py about a broad except in the payload builder; I did not read that except block. In src/sqllens/tools/_format.py (the else branch around lines 345-369), when the payload is None and the component has raw rows and the query is not a schema lookup, a result_text candidate is appended with _undisplayable_result_text(len(raw_rows), row_cap_of(rich)). That function (line 1200) returns 'The query returned N rows that could not be displayed.', plus a row-cap sentence when a cap applies. Candidates of type result_text are emitted as public {'type':'text'} blocks (lines 470-473), unfiltered by the answer marker. The only unmentioned limit is that schema-lookup results are withheld, which the sentence does not claim to cover.",
+      "file_checked": "src/sqllens/tools/_format.py:345-369,1200-1204; src/sqllens/_table_payload.py:141-194; changelog.d/351.fixed.md",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-52",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "src/sqllens/tools/_format.py _table_block_to_markdown (~1175-1190): whenever block['truncated'] > 0 it appends 'Showing the first {shown} of {total} rows. The other {dropped} rows were left out to fit the display size limit.', with shown = min(kept, 500). When shown < kept (min(N,500) < N) it adds a second sentence that the Markdown table lists at most 500 rows. Small-result path returns None when truncated != 0, so it cannot suppress the note. Caveat: in the shown<kept case the 'other {dropped}' figure counts only budget-dropped rows, but the total and the 500 cap are both stated, so the left-out count is still noted.",
+      "file_checked": "src/sqllens/tools/_format.py:1175",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-66",
+      "raw_verdict": "FAIL",
+      "verdict": "FAIL",
+      "normalized": false,
+      "evidence": "The mechanism exists: _compute_table_payload (src/sqllens/_table_payload.py:~190-193) returns None when the header-only payload exceeds the budget, and the else branch in components_to_blocks (src/sqllens/tools/_format.py:~349-370) appends a result_text block built by _undisplayable_result_text ('The query returned N rows that could not be displayed.'). But the note states this unconditionally, and the code gates it on `if raw_rows and not last_sql_is_introspection` (_format.py:~359). A schema-lookup (introspection) query with oversize headers, or a result with no rows, gets no such block. The release note has no such qualifier, so the absolute statement is not fully true.",
+      "file_checked": "src/sqllens/tools/_format.py:359",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": "source_authored provenance; property not proven; inaccuracy_scope not generated_claim_text"
+    },
+    {
+      "id": "VC-67",
+      "raw_verdict": "FAIL",
+      "verdict": "FAIL",
+      "normalized": false,
+      "evidence": "The note (changelog.d/351.fixed.md lines 9-10) says a result 'whose table could not be built' now produces a text block saying the rows could not be displayed. The code does this only conditionally. In src/sqllens/tools/_format.py, _build_table_payload (829-846) returns None on any Exception from _compute_table_payload. _compute_table_payload also returns None when the header-only form is over budget (src/sqllens/_table_payload.py:193-194) or when there are no columns and no rows (:148-149). The None branch (_format.py:349-370) emits the 'The query returned N rows that could not be displayed.' result_text block (_undisplayable_result_text, :1200-1204) only when `raw_rows and not last_sql_is_introspection`. So there is no text block in two cases. (1) The failing result belongs to a schema-introspection query, which is deliberately withheld. (2) rich.rows is empty, for example an exception on a columns-only frame. The 'any build failure' wording is therefore broader than the code. The over-budget-headers and exception-with-rows cases do match. The mismatch is in the source-authored release note text.",
+      "file_checked": "src/sqllens/tools/_format.py:349-370",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": "source_authored provenance; property not proven; inaccuracy_scope not generated_claim_text"
+    },
+    {
+      "id": "VC-68",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "src/sqllens/ui/query_results.html:126-129 .cutnotice sets color: var(--fg) (normal text colour, not --muted), border-left: 3px solid var(--accent), and overflow-wrap: anywhere with no white-space: nowrap (wraps on narrow frames). AC1 at acs-337.md:1 requires exactly these.",
+      "file_checked": "src/sqllens/ui/query_results.html:126",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-69",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "state keys rowCount/truncated/rowCap at query_results.html:234-236; csvCutWarning (307-316) reads them; test helper runs real CSV source.",
+      "file_checked": "src/sqllens/ui/query_results.html:234-236,307-331",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-70",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "query_results.html:328-331 buildCsvExport sets rows = sortedRows(filteredRows()), serializes exactly those rows (line 330), and passes rows.length to csvCutWarning (line 331), so C is computed from the same array it serializes. The test harness (tests/unit/test_widget_cut_notice.py:50-58) extracts the real source and stubs filteredRows (skips rows with r[0]=='skip') and sortedRows as identity, so the count reflects the filtered rows. acs-337.md had no greppable AC10 line; verified against the code behavior itself.",
+      "file_checked": "src/sqllens/ui/query_results.html:328",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-71",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "Searched default.py for entire/all rows/every row/whole/complete/full/all: only hits are line 109 (a prohibition on calling a table full or complete), line 129 (whole written reply, about the question), line 162 (part-of-whole chart hint), line 223 (unrelated). No wording describes a result table as full. Test at tests/unit/test_system_prompt.py:358-370 also asserts absence of several phrases.",
+      "file_checked": "src/sqllens/agent/core/system_prompt/default.py:108-109",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-72",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "default.py:108 says the answer to the user is 'your emit_text text, or your final reply when no emit_text call has succeeded in this request' and must state rows shown and rows returned. default.py:109 says never call a result table or result full or complete anywhere in the answer, 'including an introduction you write before the query that produces the table runs'. Both clauses are present. The claim's remark that the test does not assert them was not checked.",
+      "file_checked": "src/sqllens/agent/core/system_prompt/default.py:108-109",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    }
+  ],
+  "needs_retry": [],
+  "counts": {
+    "normalized_count": 0,
+    "field_defect_fail_count": 0
+  }
+}

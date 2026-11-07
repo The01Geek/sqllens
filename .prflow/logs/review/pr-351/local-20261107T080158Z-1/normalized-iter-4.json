@@ -1,0 +1,81 @@
+{
+  "results": [
+    {
+      "id": "VC-51",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "The current changelog (351.fixed.md:8-11) scopes the claim to a query that returns rows, is not a schema lookup, and whose headers are too large or whose table could not be built. _build_table_payload (_format.py:829-846) wraps _compute_table_payload in try/except Exception and returns None, so a raising build does not escape. components_to_blocks (_format.py:349-371) handles the None case: it counts rows from rich.rows and, if raw_rows and not introspection, appends a result_text candidate with _undisplayable_result_text ('The query returned N rows that could not be displayed.', _format.py:1200). At _format.py:470-473 result_text candidates are emitted as public text blocks and are never filtered by the answer marker. The failure scenario in the claim (build raises, no candidate added) does not occur.",
+      "file_checked": "src/sqllens/tools/_format.py:329-371",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-52",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "In `_table_block_to_markdown` in src/sqllens/tools/_format.py, lines 1173-1192, the note is built whenever `dropped = block['truncated'] > 0`. That is exactly when the display size limit leaves rows out. The sentence reads 'Showing the first {shown} of {total} rows. The other {dropped} rows were left out to fit the display size limit.', so it states the left-out count (`dropped`). When `shown = min(kept, 500)` is less than `kept`, a second sentence says the Markdown table lists at most 500 rows. That case is not silent either, but the note does not state the exact count of rows missing from the Markdown table (total minus 500). The changelog sentence is scoped to rows the display size limit leaves out, and the note gives that count in every case. I did not check the one-row small-result path, which only applies when `truncated == 0`. I read the source only and ran no tests. No displaced-paths file was present.",
+      "file_checked": "src/sqllens/tools/_format.py:1173-1192",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-66",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "changelog.d/351.fixed.md:8-11 scopes the claim to 'a query returns rows and is not a schema lookup'. _table_payload.py _compute_table_payload returns None when the header-only payload exceeds _MAX_TABLE_PAYLOAD_BYTES (and _build_table_payload in _format.py:829-847 returns None on exception). components_to_blocks (_format.py:349-369) then, when rich.rows is non-empty and not last_sql_is_introspection, appends a result_text candidate with _undisplayable_result_text (_format.py:1200-1204: 'The query returned N rows that could not be displayed.'), which is emitted as a public text block (_format.py:470-473). Empty results and introspection are excluded, matching the stated scope. Minor caveat: the generic _trim_blocks_to_budget (512KB total) could drop a trailing block, but it adds an explicit truncation notice and is a separate mechanism.",
+      "file_checked": "src/sqllens/tools/_format.py:349",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-67",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "Current changelog.d/351.fixed.md lines 8-11 scope the sentence to 'When a query returns rows and is not a schema lookup'. src/sqllens/tools/_format.py:829-847 _build_table_payload wraps _compute_table_payload in `except Exception` and returns None (logs a warning). _table_payload.py:194 returns None when the header-only form exceeds the size cap. In components_to_blocks (_format.py:349-369), a None payload with non-empty rich.rows and not last_sql_is_introspection appends a result_text block via _undisplayable_result_text ('The query returned N rows that could not be displayed.'), which is normalized to a public text block. The empty-DataFrame None case (_table_payload.py:149) has no rows, so it is outside the stated scope. Only non-Exception BaseException types would escape, which is not a build failure in the ordinary sense.",
+      "file_checked": "src/sqllens/tools/_format.py:349",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-73",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "src/sqllens/tools/_format.py:349-369: the only producer of the 'could not be displayed' text is in the branch where _build_table_payload returns None (headers too large or construction exception), gated by `if raw_rows and not last_sql_is_introspection`. Zero rows -> no block; schema lookup -> no block; non-schema with rows -> block via _undisplayable_result_text (line 1200). grep shows no other emitter.",
+      "file_checked": "src/sqllens/tools/_format.py:349",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    },
+    {
+      "id": "VC-74",
+      "raw_verdict": "PASS",
+      "verdict": "PASS",
+      "normalized": false,
+      "evidence": "default.py:109 carries an unconditional bullet: 'Never call a result table or a result full or complete anywhere in your answer, including an introduction you write before the query ... runs.' It has no 'when the table is cut' condition; the cut-conditional rule is the separate bullet at line 108.",
+      "file_checked": "src/sqllens/agent/core/system_prompt/default.py:109",
+      "source": "file",
+      "defect": null,
+      "defect_class": null,
+      "normalization_ineligible": null
+    }
+  ],
+  "needs_retry": [],
+  "counts": {
+    "normalized_count": 0,
+    "field_defect_fail_count": 0
+  }
+}

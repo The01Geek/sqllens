@@ -1,0 +1,98 @@
+{
+ "phase3_findings": [
+  {
+   "agent": "engine:checklist",
+   "severity": "Critical",
+   "description": "VC-66/VC-67 FAIL: changelog.d/351.fixed.md lines 8-10 state unconditionally that a result whose headers are too large, or whose table could not be built, produces a could-not-be-displayed text block; _format.py:349-370 emits it only when raw_rows and not last_sql_is_introspection (schema-lookup results and row-less frames get no block). Release note ships to users, so not behavior-inert (self-contradicting-diff carve-out).",
+   "defect_signature": {
+    "file": "changelog.d/351.fixed.md",
+    "line_range": [
+     8,
+     10
+    ],
+    "kind": "documented_falsehood"
+   }
+  },
+  {
+   "agent": "prflow:requesting-code-review",
+   "severity": "Important",
+   "description": "Release note omits the schema-lookup (introspection) exception at _format.py:361; sentence is false for SHOW/catalog results whose headers are too large or whose table could not be built.",
+   "defect_signature": {
+    "file": "changelog.d/351.fixed.md",
+    "line_range": [
+     8,
+     10
+    ],
+    "kind": "documented_falsehood"
+   }
+  },
+  {
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "Important",
+   "description": "run_sql_display_line's broad except returns '' when _compute_table_payload raises, while the formatter replaces the table with 'could not be displayed' text; the agent is told nothing and may describe rows the user never sees (fails open on the PR's core promise).",
+   "defect_signature": {
+    "file": "src/sqllens/_table_payload.py",
+    "line_range": [
+     258,
+     281
+    ],
+    "kind": "logic_error"
+   }
+  },
+  {
+   "agent": "prflow:type-design-analyzer",
+   "severity": "Suggestion",
+   "description": "'Agent told N == user table shows N' invariant lives in call sequence: _small_result_to_markdown or _trim_blocks_to_budget can change/drop the block after run_sql_display_line computed its line.",
+   "defect_signature": {
+    "file": "src/sqllens/_table_payload.py",
+    "line_range": [
+     226,
+     260
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "agent": "prflow:type-design-analyzer",
+   "severity": "Suggestion",
+   "description": "Table payload is an untyped dict; a TypedDict with NotRequired row_cap and a total_rows helper would remove duplicated row_count+truncated reconstructions in _format.py and the underscore-named cross-module seam.",
+   "defect_signature": {
+    "file": "src/sqllens/_table_payload.py",
+    "line_range": [
+     141,
+     214
+    ],
+    "kind": "type_design"
+   }
+  }
+ ],
+ "fix_decisions": [
+  {
+   "finding_id": "VC-66",
+   "decision": "applied",
+   "commit": "e9804c7637176c5894fb9a20bea8ae7d802f0428"
+  },
+  {
+   "finding_id": "VC-67",
+   "decision": "applied",
+   "commit": "e9804c7637176c5894fb9a20bea8ae7d802f0428"
+  },
+  {
+   "finding_id": "F3-silent",
+   "decision": "pushed_back",
+   "source_file": "src/sqllens/_table_payload.py",
+   "claim_text": "run_sql_display_line returns empty on payload-build exception while user sees could-not-be-displayed",
+   "skip_category": "claim-quality",
+   "evidence": "AC12 mandates no display line when the display-line work raises",
+   "parking_evidence": {
+    "basis": "specified behavior",
+    "failing_input": "exception in _compute_table_payload",
+    "source": ".prflow/tmp/implement/337/acs-337.md AC12",
+    "finding_ref": {
+     "iter": 3,
+     "index": 0
+    }
+   }
+  }
+ ]
+}
