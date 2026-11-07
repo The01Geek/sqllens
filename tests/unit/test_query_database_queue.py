@@ -609,8 +609,9 @@ async def test_rollback_whose_truncate_raises_is_logged_and_does_not_escape(
 ) -> None:
     """A store whose truncate raises must not displace the cancellation.
 
-    The sole caller is the ``except asyncio.CancelledError`` handler, which
-    re-raises immediately afterwards. An exception escaping the rollback would
+    The cancelled caller is the ``except asyncio.CancelledError`` handler, which
+    re-raises immediately afterwards (the memory-unavailable caller raises its
+    own structured error right after, too). An exception escaping the rollback would
     replace that cancellation with an unrelated error and leave nothing
     recording that the rollback did not happen, so it is logged at ERROR
     naming the store instead.

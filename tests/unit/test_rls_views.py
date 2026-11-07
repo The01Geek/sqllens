@@ -621,11 +621,17 @@ def test_postgres_typed_builtin_with_renamed_canonical_form_is_allowed() -> None
     )
     cursor = _FakeCatalog({"orders": ("r", False)})
     verify_base_tables(_catalog_connection(cursor), rewritten, dialect="postgres")
-    # The executed name is what is looked up, not sqlglot's node name. The
-    # rewrite emits STRPOS on sqlglot 25.x and POSITION on 30.x.
+    # The executed name is what is looked up, not sqlglot's node name.
     _sql, params = cursor.queries[-1]
     assert {"position", "strpos"} & set(params[0])
     assert "str_position" not in params[0]
+
+
+def test_quoted_database_routine_is_refused_after_rewrite() -> None:
+    rewritten = apply_rls('SELECT "MyFunc"(name) FROM orders', [_RULE], dialect="postgres")
+    cursor = _FakeCatalog({"orders": ("r", False)}, routines={"myfunc"})
+    with pytest.raises(RlsError, match="functions defined in the database"):
+        verify_base_tables(_catalog_connection(cursor), rewritten, dialect="postgres")
 
 
 @pytest.mark.parametrize(("dialect", "fail_on"), [
@@ -756,6 +762,7 @@ class _RecordingRunner:
 
 @pytest.mark.parametrize(("dialect", "sql"), [
     ("postgres", "SELECT pg_sleep(1) FROM orders"),
+    ("postgres", 'SELECT "pg_sleep"(1) FROM orders'),
     ("postgres", "SELECT * FROM public_values WHERE id IN (SELECT generate_series(1, 3))"),
     ("mysql", "SELECT SLEEP(1)"),
     ("sqlite", "SELECT load_extension('x')"),

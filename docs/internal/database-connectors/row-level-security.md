@@ -104,6 +104,8 @@ and a caller-supplied request `_meta` of `{"tenant_id": "acme"}`, the agent's `S
 SELECT id, total FROM orders WHERE status = 'paid' AND orders.tenant_id = 'acme'
 ```
 
+The whole statement is printed again by sqlglot (`tree.sql(dialect=..., normalize_functions=False)` in `apply_rls`), not patched in place. Function names sqlglot does not recognise keep their written case and quotes, so a PostgreSQL call such as `"quote_ident"(name)` still resolves. Built-in functions sqlglot recognises are printed in sqlglot's canonical form, for example `count(*)` as `COUNT(*)` and PostgreSQL `strpos(a, 'x')` as `POSITION('x' IN a)`.
+
 The same predicate is injected in every SELECT scope where `orders` appears as a real base table — top-level query, subquery, CTE *body*, joined sub-select. A same-named CTE/derived-table *reference* is correctly left alone: its rows already came from the filtered body, so filtering again would be redundant (and worse, would compose AND with a possibly-different alias-qualified column reference).
 
 ## Scope analysis (why we use sqlglot's scope walker)
@@ -227,11 +229,15 @@ Unit tests live in [tests/unit/test_safety_rls.py](../../../tests/unit/test_safe
 
 - `TestRlsRuleValidation` — every well-formed-or-rejected case at the config-model layer (bad identifiers, unsupported operators, both/neither of `value`/`value_from_metadata`, empty-list `in`, bad metadata key, `extra="forbid"`).
 - The end-to-end "misconfigured rule fails config load" case proves `sqllens validate` rejects a typo before the server starts.
-- `TestApplyRls` — the positive rewrites (single table, AND-combined `WHERE`, qualified join predicate, subquery filtered, CTE body filtered + CTE reference left alone, sibling tables ignored, `IN` and numeric forms).
-- `TestApplyRlsScopeEdgeCases` — the scope-walker edges (CTE/derived alias colliding with a protected table name; recursive CTE same name; `WHERE … IN (SELECT …)`; comma joins; schema-qualified or parenthesized table sources still filter; unprovable shape blocks; `TABLE` statement blocks).
-- `TestApplyRlsDynamicFailSecure` — every dynamic-value sanitization path (present, missing, suspicious string, wrong type, `bool` blocks on both the scalar `=` path (`test_bool_dynamic_value_blocks`) and as an `in`-list element (`test_bool_item_in_dynamic_in_list_blocks`), list-required for `in`, list-form `in`).
-- `TestApplyRlsParseFailures` — parse failures and multi-statement input.
-- The decorator-level tests in the same file (rewritten SQL reaches the inner runner; missing dynamic value blocks before the inner runner sees anything; dynamic value from `ToolContext.metadata`; unexpected error in the rewrite fails closed; static rule works with empty metadata).
+- `TestApplyRlsStatic` — the positive rewrites (single table, AND-combined `WHERE`, qualified join predicate, subquery filtered, CTE body filtered + CTE reference left alone, sibling tables ignored, unrecognised function names keeping their written case, `IN` and numeric forms).
+- `TestApplyRlsScopeCoverage` — the scope-walker edges (CTE/derived alias colliding with a protected table name; recursive CTE same name; `WHERE … IN (SELECT …)`; comma joins; schema-qualified or parenthesized table sources still filter; unprovable shape blocks; `TABLE` statement blocks).
+- `TestApplyRlsDynamicFailSecure` — every dynamic-value sanitization path (present, missing, suspicious string, wrong type, `bool` blocks on both the scalar `=` path (`test_bool_dynamic_value_blocks`) and as an `in`-list element (`test_bool_item_in_dynamic_in_list_blocks`), list-required for `in`, list-form `in`), plus tokenization failures, parse failures and multi-statement input.
+- `TestRlsGuardRunner` — the decorator-level tests (rewritten SQL reaches the inner runner; missing dynamic value blocks before the inner runner sees anything; dynamic value from `ToolContext.metadata`; unexpected error in the rewrite fails closed; static rule works with empty metadata).
+
+- `TestFactoryComposition` — the RLS guard wraps outermost, ahead of the read-only guard, and is absent when no rules are configured.
+- `TestMetadataPlumbing` — request metadata reaching the request context.
+
+Database relation checks (views blocked while RLS is active, catalog failures closing) are tested in [tests/unit/test_rls_views.py](../../../tests/unit/test_rls_views.py).
 
 The metadata plumbing through FastMCP `Context` → `_request_metadata` → tool impl is pinned in [tests/unit/test_server.py](../../../tests/unit/test_server.py).
 

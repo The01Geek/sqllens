@@ -33,7 +33,7 @@ Connection probes catch the driver / SDK exception base for the subsystem they v
 
 | Probe | Caught (re-labelled as `PreflightError`) | Propagated as-is |
 |---|---|---|
-| `probe_database` (sqlite) | `sqlite3.Error` | everything else |
+| `probe_database` (sqlite) | `sqlite3.Error`, `ValueError` (URL rejected by `sqlite_path_from_url`, or raised while opening) | everything else |
 | `probe_database` (postgres) | `psycopg2.Error` | everything else (the explicit `ImportError` branch above this catch handles the "driver not installed" case) |
 | `probe_database` (mysql) | `pymysql.MySQLError`; URL-parser `ValueError` before connecting | everything else (same: the explicit `ImportError` branch handles a missing driver) |
 | `probe_llm` | `anthropic.AnthropicError` | everything else, including `ImportError` from `import anthropic` or `from sqllens.agent.integrations import AnthropicLlmService` — these imports are deliberately kept **outside** the `try` block so a packaging breakage doesn't masquerade as an "llm" subsystem failure |
@@ -45,13 +45,13 @@ Connection probes catch the driver / SDK exception base for the subsystem they v
 
 ### `probe_database`
 
-Opens and immediately closes a connection to `cfg.database.url`. **Does not run a query** — that would burn a round-trip and could trigger permission errors unrelated to reachability.
+Opens and immediately closes a connection to `cfg.database.url`. **Does not run a query** (except the SQLite read-only schema-header read described below) — that would burn a round-trip and could trigger permission errors unrelated to reachability.
 
 Scheme handling:
 
 | URL prefix | Driver | Timeout |
 |---|---|---|
-| `sqlite://`, `sqlite+...://` | `sqlite3.connect(path, timeout=5)` | `timeout` is lock-wait, **not** connect-timeout. The `open()` call is the only blocking step and is effectively instant for local files. |
+| `sqlite://`, `sqlite+...://` | `connect_sqlite(path, read_only=cfg.database.read_only, timeout=5)` — the same open the query runner uses, with the path from `sqlite_path_from_url` (three slashes relative to the working directory, four absolute; a URL with query parameters or a host/user/password/port fails with the helper's message). With `read_only = true` the file opens through the `mode=ro` URI and the probe reads `PRAGMA schema_version`, so a missing file, a directory or a non-empty non-database file fails with `could not open SQLite database <path> (resolved to <absolute path>)` instead of being created (a zero-byte file opens as an empty database). With `read_only = false` it is a plain open, which creates a missing file. | `timeout` is lock-wait, **not** connect-timeout. The `open()` call is the only blocking step and is effectively instant for local files. |
 | `postgres://`, `postgresql://`, `postgresql+...://` | `psycopg2.connect(normalized, connect_timeout=5)` | psycopg2 only accepts the `postgresql://` spelling; the probe collapses the legacy and SQLAlchemy-style aliases before connecting. |
 | `mysql://`, `mysql+...://` | `pymysql.connect(connect_timeout=5)` | URL is parsed with `urllib.parse.urlparse` and decomposed into `host/port/user/password/database`. Missing user or host raises a `PreflightError` before connecting. `urllib.parse.unquote` is applied to the username and password before they are passed to pymysql, matching the percent-decoding that SQLAlchemy's `make_url` performs — so a password containing `/` written as `%2F` in the DSN authenticates correctly. |
 
