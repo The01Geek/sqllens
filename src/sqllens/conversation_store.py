@@ -98,13 +98,15 @@ class BoundedConversationStore(ConversationStore):
     def truncate_messages(
         self, conversation_id: str, user_id: str, length: int
     ) -> bool:
-        """Drop messages past ``length``; the cancel-rollback seam.
+        """Drop messages past ``length``; the rollback and trim seam.
 
-        Deliberately **synchronous**, unlike every other method here. Its only
-        production caller is ``tools/query_database.py``'s cancellation
-        handler, which runs inside an already-cancelled task: anyio re-delivers
-        the cancellation on every loop cycle there, so an ``await`` that
-        suspends would never resume and the rollback would be lost. Reads and mutates the same
+        Deliberately **synchronous**, unlike every other method here. It has two
+        production callers in ``tools/query_database.py``: the cancellation
+        handler, and the trim that removes an unanswered ``tool_use`` from a
+        call that ended without cancellation. The cancellation handler runs
+        inside an already-cancelled task: anyio re-delivers the cancellation
+        on every loop cycle there, so an ``await`` that suspends would never
+        resume and the rollback would be lost. Reads and mutates the same
         ``Conversation`` object the agent appended to, so no store round trip
         is needed.
 

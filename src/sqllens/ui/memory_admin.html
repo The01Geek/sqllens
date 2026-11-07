@@ -1063,43 +1063,69 @@ function disposeChart() {
 
 // ───────────────────────────── Danger zone ──────────────────────────────────
 
-// Export download cascade — same tiered approach as query_results.html. MCP
+// ── Export download cascade (tests/unit/test_widget_export_outcomes.py extracts up to the end marker)
+// Same tiered approach as query_results.html. MCP
 // App iframes are commonly sandboxed without allow-downloads, and Inspector
 // doesn't grant clipboard-write permissions-policy, so the obvious paths
 // silently no-op there. Cascade: ui/download-file → clipboard → execCommand
-// → inline textarea overlay (always works).
+// → inline textarea overlay (always works). A resolved download with
+// isError: true (user cancelled or host refused) stops the cascade.
+
+// Overrides the SDK's 60 s request default so a host save dialog left open
+// does not time out into a clipboard copy.
+const DOWNLOAD_TIMEOUT_MS = 600000;
+
+// Match the SDK timeout by its McpError code (RequestTimeout), not by text.
+function downloadFailureReason(err) {
+  if (err && err.code === -32001) return "timed out";
+  return err && err.message ? err.message : String(err);
+}
+
 async function offerDownload(filename, mimeType, text, warnings) {
   const warningsTail =
     Array.isArray(warnings) && warnings.length > 0
       ? " Warnings: " + warnings.join("; ")
       : "";
   const caps = (app.getHostCapabilities && app.getHostCapabilities()) || {};
+  let reason = "This host can't save files";
   if (caps.downloadFile) {
+    let result;
+    let thrown = false;
     try {
-      await app.downloadFile({
-        contents: [
-          { type: "resource",
-            resource: { uri: filename, mimeType: mimeType, text: text } },
-        ],
-      });
-      showOk("Exported via host download (" + filename + ")." + warningsTail);
-      return;
+      result = await app.downloadFile(
+        {
+          contents: [
+            { type: "resource",
+              resource: { uri: "file:///" + filename, mimeType: mimeType, text: text } },
+          ],
+        },
+        { timeout: DOWNLOAD_TIMEOUT_MS },
+      );
     } catch (err) {
       console.warn("ui/download-file failed:", err);
+      thrown = true;
+      reason = "Download failed (" + downloadFailureReason(err) + ")";
+    }
+    if (!thrown) {
+      if (result && result.isError === true) {
+        showError("Export not saved",
+          "Download cancelled or blocked by the host." + warningsTail);
+      } else {
+        showOk("Downloaded " + filename + " ✓" + warningsTail);
+      }
+      return;
     }
   }
+  const copied = reason + " — Export copied to clipboard" + warningsTail;
   try {
     await navigator.clipboard.writeText(text);
-    showOk(
-      "Export copied to clipboard (" + filename + ", " + text.length + " chars)." +
-      warningsTail
-    );
+    showOk(copied);
     return;
   } catch (err) {
     console.warn("clipboard.writeText failed:", err);
   }
   if (copyViaExecCommand(text)) {
-    showOk("Export copied to clipboard (" + filename + ")." + warningsTail);
+    showOk(copied);
     return;
   }
   // The textarea overlay IS the visible success surface; surface warnings
@@ -1108,7 +1134,7 @@ async function offerDownload(filename, mimeType, text, warnings) {
   // same server response look like a failure on one cascade branch and a
   // success on three others. Lossy warnings already short-circuited to red
   // before this function was called (export handler branches on isError).
-  showOverlay(filename, text, warningsTail.trim());
+  showOverlay(text, warningsTail.trim(), reason);
 }
 
 function copyViaExecCommand(text) {
@@ -1128,13 +1154,12 @@ function copyViaExecCommand(text) {
   return ok;
 }
 
-function showOverlay(filename, text, warningNote) {
+function showOverlay(text, warningNote, reason) {
   modalBody.textContent = "";
   const hint = document.createElement("div");
   hint.className = "meta";
   hint.style.marginBottom = "6px";
-  hint.textContent =
-    "Host blocked the file download and clipboard. Select all and copy (" + filename + "):";
+  hint.textContent = reason + " and the clipboard is blocked. Select all and copy:";
   const ta = document.createElement("textarea");
   ta.readOnly = true;
   ta.value = text;
@@ -1150,6 +1175,7 @@ function showOverlay(filename, text, warningNote) {
   rowModal.classList.add("on");
   ta.focus(); ta.select();
 }
+// ── End export download cascade
 
 const exportMeta = document.getElementById("exportMeta");
 for (const btn of document.querySelectorAll('button[data-export]')) {
