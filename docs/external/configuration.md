@@ -40,11 +40,13 @@ Both `statement_timeout_ms` and `max_rows` are safety bounds that protect SQL Le
 
 | Dialect | URL format |
 |---|---|
-| SQLite | `sqlite:///path/to/file.db` |
+| SQLite | `sqlite:///data/app.db` (relative), `sqlite:////var/data/app.db` (absolute), `sqlite:///C:/data/app.db` (Windows) |
 | Postgres | `postgresql://user:password@host:5432/dbname` |
 | MySQL | `mysql+pymysql://user:password@host:3306/dbname` |
 
 On Windows, always use forward slashes inside the URL even though the underlying file path uses backslashes.
+
+For SQLite, three slashes followed by a path (`sqlite:///data/app.db`) is a path relative to the directory the server was started from; four slashes (`sqlite:////var/data/app.db`) is an absolute path. On Windows, write the drive after three slashes (`sqlite:///C:/data/app.db`). A SQLite URL must not contain a host, user, password, port or `?...` query parameters; SQL Lens rejects such a URL. With `read_only = true` (the default), SQL Lens opens the file read-only and never creates it: if the file does not exist, `sqllens serve` stops at startup with an error naming the path.
 
 PostgreSQL runtime connections use a five-second connection timeout by default. Set `connect_timeout` in the database URL (for example, `?connect_timeout=10`) or use `PGCONNECT_TIMEOUT` to override it; direct `PostgresRunner` callers may also pass the constructor option. A DSN value takes precedence, including `0` to disable this timeout. The default overrides a timeout supplied only in a libpq service file. This libpq timeout applies per host and is separate from `statement_timeout_ms`.
 
@@ -244,7 +246,7 @@ By default `validate` checks only that the file parses and the fields are well-t
 
 | Flag | What it checks |
 |---|---|
-| `--check-db` | Opens and immediately closes a connection to `database.url`. |
+| `--check-db` | Opens and immediately closes a connection to `database.url`. For SQLite with `read_only = true`, opens the file read-only and reads its schema header, so a missing file (or a file that is not a SQLite database) fails with an error naming the path instead of creating an empty database. With `read_only = false`, a plain open creates a missing file. |
 | `--check-llm` | Constructs the Anthropic client. Does not call the API. |
 | `--check-memory` | Confirms the Chroma `persist_dir` exists and is writable and, when the directory already holds a memory store, that its `chroma.sqlite3` file is writable by the process running the check. Does not change the file. |
 | `--check-auth` | Builds the configured authenticator, catching mistakes such as `bearer` mode with no token. |

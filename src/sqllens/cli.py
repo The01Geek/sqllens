@@ -173,7 +173,10 @@ def init(
         err_console.print(f"[red]Could not write config:[/red] {escape(str(exc))}")
         raise typer.Exit(code=1) from exc
     console.print(f"[green]Wrote {path}[/green]")
-    console.print("Edit it, then run [bold]sqllens serve[/bold].")
+    console.print(
+        "Edit it: set [bold]database.url[/bold] to an existing database, "
+        "then run [bold]sqllens serve[/bold]."
+    )
 
 
 @app.command()
