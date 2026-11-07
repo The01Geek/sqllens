@@ -1,0 +1,384 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "The already-masked guarantee for frames reaching RunSqlTool rests only on build_agent's runner wiring; no type or check enforces it.",
+   "defect_signature": {
+    "file": "src/sqllens/safety/masking.py",
+    "line_range": [
+     170,
+     188
+    ],
+    "kind": "type_design"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "MASKED_COLUMNS_ATTR holds one entry per masked position, so duplicate labels repeat in the note; no test pins the attribute for duplicates.",
+   "defect_signature": {
+    "file": "src/sqllens/safety/masking.py",
+    "line_range": [
+     166,
+     166
+    ],
+    "kind": "type_design"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-3",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "suggestion",
+   "description": "SecretColumnMatcher repeats ResultMaskingConfig's no-words check and self._entries lacks a type annotation.",
+   "defect_signature": {
+    "file": "src/sqllens/safety/masking.py",
+    "line_range": [
+     135,
+     140
+    ],
+    "kind": "type_design"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-4",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "suggestion",
+   "description": "test_env_wrong_type_fails_naming_setting tests a no-words entry, not a wrong type; no env test covers a wrong-type JSON value or an unknown key.",
+   "defect_signature": {
+    "file": "tests/unit/test_safety_masking.py",
+    "line_range": [
+     356,
+     361
+    ],
+    "kind": "test_gap"
+   },
+   "corroboration": 1
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": false
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (four Suggestion findings, no blocking finding)\nThe PR is ready to merge: all 34 checklist items passed, every acceptance criterion was itemized, and no reviewer raised a finding at or above the Critical threshold.\nRule applied: rule 6 — only findings below the threshold remain → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (4)\n\n<details><summary>4 items</summary>\n\n1. In `src/sqllens/safety/masking.py` lines 170–188, the guarantee that a frame reaching `RunSqlTool` is already masked rests only on how `build_agent` wraps the runner. No type or check in `RunSqlTool` enforces it, so a `RunSqlTool` built over an unwrapped runner would write secret values without any signal. Today `build_agent` is the only construction path, so behavior is correct. (raised by 1/6 agents)\n2. In `src/sqllens/safety/masking.py` line 166, the masked-label list holds one entry per masked column position, not one per distinct label. Two columns both labelled `token` give a note reading `token, token`. No test pins the attribute for duplicate labels. (raised by 1/6 agents)\n3. In `src/sqllens/safety/masking.py` lines 135–140, `SecretColumnMatcher.__init__` repeats the \"every entry has words\" check that `ResultMaskingConfig` already performs, and `self._entries` has no type annotation. Behavior is correct, because the config check runs first. (raised by 1/6 agents)\n4. In `tests/unit/test_safety_masking.py` lines 356–361, `test_env_wrong_type_fails_naming_setting` sets an entry with no words, not a value of the wrong type. No test checks a wrong-type JSON environment value or an unknown key supplied through the environment. The TOML versions of both cases are tested and share the same model. (raised by 1/6 agents)\n\n</details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: has_new_types + test_relevant (not small_diff, not config_only); 18 changed files; detect_all_audit not set.\n- Working tree: skipped (head-override PR mode reviews the commit-bound source views).\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. Reviewer extension `requesting-code-review`: content-present.\n- CI evidence: no CI results were provided and no in-environment test result for this head is held; test evidence is missing.\n- Normalized (wording-only): 0\n- Verified: 34 passed, 0 failed, 0 inconclusive.\n- Finding rejected lines: none in the PR body.\n- Dirty-tree check: ran clean.\n- Fifteen verifier launches (VC-20 to VC-34) were first refused by the concurrent-subagent limit and were relaunched once slots freed; all returned PASS.\n- Checklist: 34 passed, 0 failed, 0 inconclusive\n- <details><summary>✅ Passed items (34 of 34)</summary>\n\n  - VC-1: RunSqlTool reads the masked column labels from df.attrs[MASKED_COLUMNS_ATTR], which ResultMaskingRunner sets as a list of label strings on the returned DataFrame, and that attr survives any later DataFrame operations before it is read [src/sqllens/agent/tools/run_sql.py]\n  - VC-2: RlsGuardRunner's relation-check executor lookup (_relation_check_executor) still reaches the engine runner when ResultMaskingRunner wraps RlsGuardRunner outermost, as the factory comment states [src/sqllens/agent/factory.py]\n  - VC-3: ResultMaskingRunner accepts keyword arguments extra_words and unmasked_columns with list[str] values [src/sqllens/agent/factory.py]\n  - VC-4: split_label_words exists in sqllens.safety.masking and returns an empty sequence for an entry with no words; importing it inside the validator causes no circular import with config.py [src/sqllens/config.py]\n  - VC-5: The doc asserts that ResultMaskingRunner replaces every value in a matching column before RunSqlTool builds any output, and decides from the label alone [docs/internal/database-connectors/read-only-safety.md]\n  - VC-6: The internal tools.md doc states the agent sees the first 1,000 CSV characters plus the saved-file line and the row-cap and masking notes [docs/internal/mcp-server/tools.md]\n  - VC-7: The safety package docstring's count 'Five orthogonal protections' equals the bullets it lists after the change [src/sqllens/safety/__init__.py]\n  - VC-8: The scratch-storage doc says the CSV written to disk is the DataFrame already masked by ResultMaskingRunner [docs/internal/agent/tool-scratch-storage.md]\n  - VC-9: The read-only-safety.md 'Safety layers' list item 5 and the Composition with RLS section stay consistent with factory composition (RLS directly beneath masking), and other docs saying RLS is 'outermost' were all updated [docs/internal/database-connectors/read-only-safety.md]\n  - VC-10: DataFrame.isetitem exists in the pandas version the project allows and replaces the column at a position even when labels are duplicated [src/sqllens/safety/masking.py:168]\n  - VC-11: ResultMaskingRunner.run_sql matches the SqlRunner.run_sql signature, forwarding require_base_tables only when true, and every inner runner accepts that keyword [src/sqllens/safety/masking.py:189]\n  - VC-12: RunSqlTool reads df.attrs['masked_columns'] to emit the withheld note and reads 'truncated'/'max_rows' attrs that the masked copy preserves [src/sqllens/safety/masking.py:171]\n  - VC-13: The placeholder replaces values before the DataFrame reaches RunSqlTool and every sink built from it [src/sqllens/safety/masking.py:14]\n  - VC-14: The masking rule never parses SQL text [src/sqllens/safety/masking.py:15]\n  - VC-15: split_label_words splits camelCase/acronym runs so that criterion labels (APIKey, OTPSecret, PINs, PasswordHash) and non-ASCII-alnum characters behave per the Desired Behavior's secret-word rule; digits form separate words [src/sqllens/safety/masking.py:69]\n  - VC-16: _FrameRunner and _Spy mock SqlRunner.run_sql with the same signature and return type as real runners [tests/unit/test_safety_masking.py]\n  - VC-17: The wiring test's unwrap via _wrapped_tool and _relation_check_executor(inner._inner) matches the real tool wrapper attribute and the RLS runner's inner chain [tests/unit/test_safety_masking.py]\n  - VC-18: test_note_survives_long_preview asserts the RunSqlTool preview truncation text '(Results truncated to 1000 characters for preview.)' and 'Result truncated at 200 rows.' as the real code emits them [tests/unit/test_safety_masking.py]\n  - VC-19: Connector test: Postgres and MySQL drivers label SELECT * columns with bare names (id, password_hash) and build_sql_runner(url, read_only=False) permits CREATE/INSERT/DROP [tests/connectors/test_connectors.py]\n  - VC-20: sqllens.safety exports ResultMaskingRunner, MASKED_COLUMNS_ATTR, _relation_check_executor and mark_truncation, and sqllens.config exports ResultMaskingConfig [tests/unit/test_safety_masking.py]\n  - VC-21: Data Confidentiality section is terminated by a blank line so splitting on '\\n\\n' captures the whole section [tests/unit/test_system_prompt.py]\n  - VC-22: For a query result holding a column whose label matches the secret-word rule, every value in that column, NULL included, is replaced by the placeholder `[withheld]`, and none of the original values appears, in each of: the block `query_database` returns (table or text, where Markdown output carries the placeholder in its existing escaped form `\\[withheld\\]`), the run_sql text the model reads (which the conversation keeps and the model payload log records), the scratch CSV file, and the run_sql result metadata. The column label itself still appears. [src/sqllens/safety/masking.py:150-165]\n  - VC-23: The built-in entry list is exactly these 31 — complete by construction: `password`, `passwd`, `pwd`, `passcode`, `secret`, `token`, `hash`, `salt`, `pin`, `otp`, `totp`, `mfa`, `credential`, `apikey`, `api key`, `access key`, `private key`, `encryption key`, `signing key`, `auth key`, `recovery key`, `master key`, `session key`, `one time code`, `verification code`, `reset code`, `recovery code`, `security code`, `auth code`, `sms code`, `backup code`. [src/sqllens/safety/masking.py:34]\n  - VC-24: Labels split and match as the Desired Behavior's secret-word rule states. At minimum these labels are masked: `password_hash`, `PasswordHash`, `session_token`, `recovery_hash`, `pin`, `PINs`, `APIKey`, `api_keys`, `OTPSecret`, `password2`, `users.password_hash`, `access_key`, `encryption_key`, `verification_code`, `one_time_code`. At minimum these are not masked: `id`, `name`, `email`, `phone`, `last_login_ip`, `session_expires`, `Key`, `COLUMN_KEY`, `sort_key`, `zip_code`, `author_id`. [src/sqllens/safety/masking.py:149]\n  - VC-25: When a query result has at least one masked column, the run_sql text the model reads ends with `SQL Lens withheld the values in these columns: <labels>. Tell the user these values are hidden; do not try to retrieve them with another query.`, with `<labels>` the masked labels joined by `, `. The line is present in full however long the result's CSV preview is. A result with no masked column carries no such line. [src/sqllens/agent/tools/run_sql.py]\n  - VC-26: The system prompt's \"Data Confidentiality\" section contains the line `- Select only the columns the question needs. Do not use SELECT * on data tables, and do not select columns that hold secrets, such as passwords, password hashes, tokens, PINs, keys or one-time codes.` [src/sqllens/agent/core/system_prompt/default.py]\n  - VC-27: An entry in `[result_masking].extra_words` masks matching columns in addition to the built-in entries, and is split into words by the same rule as labels: `phone_number` masks a column labelled `PhoneNumber`. [src/sqllens/safety/masking.py:127-148]\n  - VC-28: A label listed in `[result_masking].unmasked_columns` is shown unmasked, matched without regard to case: `token_count` exempts `TOKEN_COUNT`. The match is on the whole label, so `token_count` does not exempt the prefixed label MySQL gives a duplicate column (`users.token_count`, or `u.token_count` when the query aliases the table). [src/sqllens/safety/result_masking.py]\n  - VC-29: With `[result_masking]` absent from the config, the built-in entries mask matching columns and no column is exempt. No `[result_masking]` setting turns masking off. [src/sqllens/safety/masking.py:127-148]\n  - VC-30: `[result_masking]` with an unknown key, a value of the wrong type, or an entry that splits into no words makes config loading fail with a validation error naming the setting, from TOML and from a JSON-valued `SQLLENS_RESULT_MASKING__*` environment variable. An environment value that is not valid JSON (for example `SQLLENS_RESULT_MASKING__EXTRA_WORDS=phone`) also makes loading fail, with an error that names the `result_masking` section. In every one of these cases `sqllens validate` exits non-zero. [src/sqllens/agent/factory.py]\n  - VC-31: Masking applies in all four combinations of `database.read_only` (true or false) and `[[rls]]` (rules present or absent), and for answers produced by the `verify-memory` command. [src/sqllens/agent/factory.py]\n  - VC-32: With `[[rls]]` rules configured, the agent still builds, and the RLS relation check still runs on the engine runner. [src/sqllens/agent/tools/run_sql.py]\n  - VC-33: A result the row cap truncated still carries the \"Result truncated at N rows\" note in the model's text after masking. [src/sqllens/agent/tools/run_sql.py:83-150]\n  - VC-34: The change leaves these cases unmasked: a secret column renamed by an alias, a UNION's first-branch label or a view (for example `password_hash AS h`); an unaliased expression whose result label the database builds without the column's name (SQLite labels `upper(password_hash)` with that text, so the rule masks it; how MySQL and PostgreSQL label each expression is not established); a PostgreSQL whole-row value (`row_to_json(u)`); a label whose words run together (`passwordhash`); a PIN-type or other secret column whose label holds none of the entry words (the label of the reported PIN-type column was not recorded, so whether the built-in list covers it is not established); values a database error message repeats; sampled values that catalog statistics views return. It also leaves contact columns (email, phone, IP, browser) unmasked unless an operator adds them, and leaves the INFO level of the model payload log in `src/sqllens/agent/integrations/anthropic/llm.py` unchanged. [src/sqllens/safety/masking.py:99-148]\n\n  </details>\n- Reviewed against issue #346 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] For a query result holding a column whose label matches the secret-word rule, every value in that column, NULL included, is replaced by the placeholder `[withheld]`, and none of the original values appears, in each of: the block `query_database` returns (table or text, where Markdown output carries the placeholder in its existing escaped form `\\[withheld\\]`), the run_sql text the model reads (which the conversation keeps and the model payload log records), the scratch CSV file, and the run_sql result metadata. The column label itself still appears.\n- [ ] The built-in entry list is exactly these 31 — complete by construction: `password`, `passwd`, `pwd`, `passcode`, `secret`, `token`, `hash`, `salt`, `pin`, `otp`, `totp`, `mfa`, `credential`, `apikey`, `api key`, `access key`, `private key`, `encryption key`, `signing key`, `auth key`, `recovery key`, `master key`, `session key`, `one time code`, `verification code`, `reset code`, `recovery code`, `security code`, `auth code`, `sms code`, `backup code`.\n- [ ] Labels split and match as the Desired Behavior's secret-word rule states. At minimum these labels are masked: `password_hash`, `PasswordHash`, `session_token`, `recovery_hash`, `pin`, `PINs`, `APIKey`, `api_keys`, `OTPSecret`, `password2`, `users.password_hash`, `access_key`, `encryption_key`, `verification_code`, `one_time_code`. At minimum these are not masked: `id`, `name`, `email`, `phone`, `last_login_ip`, `session_expires`, `Key`, `COLUMN_KEY`, `sort_key`, `zip_code`, `author_id`.\n- [ ] When a query result has at least one masked column, the run_sql text the model reads ends with `SQL Lens withheld the values in these columns: <labels>. Tell the user these values are hidden; do not try to retrieve them with another query.`, with `<labels>` the masked labels joined by `, `. The line is present in full however long the result's CSV preview is. A result with no masked column carries no such line.\n- [ ] The system prompt's \"Data Confidentiality\" section contains the line `- Select only the columns the question needs. Do not use SELECT * on data tables, and do not select columns that hold secrets, such as passwords, password hashes, tokens, PINs, keys or one-time codes.`\n- [ ] An entry in `[result_masking].extra_words` masks matching columns in addition to the built-in entries, and is split into words by the same rule as labels: `phone_number` masks a column labelled `PhoneNumber`.\n- [ ] A label listed in `[result_masking].unmasked_columns` is shown unmasked, matched without regard to case: `token_count` exempts `TOKEN_COUNT`. The match is on the whole label, so `token_count` does not exempt the prefixed label MySQL gives a duplicate column (`users.token_count`, or `u.token_count` when the query aliases the table).\n- [ ] With `[result_masking]` absent from the config, the built-in entries mask matching columns and no column is exempt. No `[result_masking]` setting turns masking off.\n- [ ] `[result_masking]` with an unknown key, a value of the wrong type, or an entry that splits into no words makes config loading fail with a validation error naming the setting, from TOML and from a JSON-valued `SQLLENS_RESULT_MASKING__*` environment variable. An environment value that is not valid JSON (for example `SQLLENS_RESULT_MASKING__EXTRA_WORDS=phone`) also makes loading fail, with an error that names the `result_masking` section. In every one of these cases `sqllens validate` exits non-zero.\n- [ ] Masking applies in all four combinations of `database.read_only` (true or false) and `[[rls]]` (rules present or absent), and for answers produced by the `verify-memory` command.\n- [ ] With `[[rls]]` rules configured, the agent still builds, and the RLS relation check still runs on the engine runner.\n- [ ] A result the row cap truncated still carries the \"Result truncated at N rows\" note in the model's text after masking.\n- [ ] The change leaves these cases unmasked: a secret column renamed by an alias, a UNION's first-branch label or a view (for example `password_hash AS h`); an unaliased expression whose result label the database builds without the column's name (SQLite labels `upper(password_hash)` with that text, so the rule masks it; how MySQL and PostgreSQL label each expression is not established); a PostgreSQL whole-row value (`row_to_json(u)`); a label whose words run together (`passwordhash`); a PIN-type or other secret column whose label holds none of the entry words (the label of the reported PIN-type column was not recorded, so whether the built-in list covers it is not established); values a database error message repeats; sampled values that catalog statistics views return. It also leaves contact columns (email, phone, IP, browser) unmasked unless an operator adds them, and leaves the INFO level of the model payload log in `src/sqllens/agent/integrations/anthropic/llm.py` unchanged.",
+ "diff_produced_at_head": "dfd12c0eb298a1275a4d28344a6f36e9399e765f",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:run_sql.py:masked-columns-attr",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "api_contract:factory.py:masking-outermost-rls-check",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "dependency_interaction:factory.py:masking-runner-kwargs",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "dependency_interaction:config.py:split-label-words",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "absolute_claim:read-only-safety.md:every-value-masked",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "api_contract:tools.md:preview-1000-chars",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "api_contract:__init__.py:protection-count",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "api_contract:tool-scratch-storage.md:csv-masked",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "api_contract:read-only-safety.md:rls-outermost-stale",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "dependency_interaction:masking.py:pandas-isetitem-available:168",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "api_contract:masking.py:run-sql-signature-forwarding:189",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "data_format_assumption:masking.py:masked-columns-attr:171",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "absolute_claim:masking.py:every-sink-masked",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "absolute_claim:masking.py:never-parses-sql",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "data_format_assumption:masking.py:label-split-rule",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "test_mock_alignment:test_safety_masking.py:frame-runner-signature",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "test_mock_alignment:test_safety_masking.py:wrapper-unwrap",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "test_mock_alignment:test_safety_masking.py:preview-truncation-text",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "dependency_interaction:test_connectors.py:driver-labels-writer",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "api_contract:test_safety_masking.py:safety-exports",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "test_mock_alignment:test_system_prompt.py:section-split",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-22",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-23",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-24",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-25",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-26",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-27",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-28",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-29",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-30",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-10",
+   "id": "VC-31",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-11",
+   "id": "VC-32",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-12",
+   "id": "VC-33",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-13",
+   "id": "VC-34",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}
