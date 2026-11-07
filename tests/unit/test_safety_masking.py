@@ -440,3 +440,37 @@ def test_config_reaches_the_guard(tmp_path: Path) -> None:
     )
     assert runner._matcher.is_secret("phone")
     assert not runner._matcher.is_secret("token_count")
+
+
+# --- documented under-masks -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["h", "row_to_json", "passwordhash", "email", "phone", "last_login_ip", "user_agent"],
+)
+def test_labels_without_an_entry_word_stay_unmasked(label: str) -> None:
+    assert not SecretColumnMatcher().is_secret(label)
+
+
+def test_sqlite_alias_hides_secret_but_unaliased_expression_is_masked(tmp_path: Path) -> None:
+    import sqlite3
+
+    from sqllens.agent.integrations.sqlite import SqliteRunner
+
+    db = tmp_path / "u.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE users (id INTEGER, password_hash TEXT)")
+    conn.execute("INSERT INTO users VALUES (1, 'SENTINEL-HASH')")
+    conn.commit()
+    conn.close()
+    guard = ResultMaskingRunner(SqliteRunner(database_path=str(db)))
+
+    aliased = asyncio.run(
+        guard.run_sql(RunSqlToolArgs(sql="SELECT password_hash AS h FROM users"), _context())
+    )
+    assert aliased["h"].tolist() == ["SENTINEL-HASH"]
+    expression = asyncio.run(
+        guard.run_sql(RunSqlToolArgs(sql="SELECT upper(password_hash) FROM users"), _context())
+    )
+    assert expression.iloc[0, 0] == W
