@@ -1,0 +1,772 @@
+[
+  {
+    "id": "VC-1",
+    "category": "dependency_interaction",
+    "claim": "row_cap_of(rich) from sqllens.agent.markers accepts a DataFrameComponent-like object and returns a positive int cap or None, reading the row_cap marker RunSqlTool set in the component's data",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/_table_payload.py",
+    "source_line": 180,
+    "source_line_end": 182,
+    "verify_against": "src/sqllens/agent/markers.py and src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check row_cap_of and row_cap_marker_data in markers.py and where RunSqlTool attaches the marker to the DataFrameComponent",
+    "claim_signature": "dependency_interaction:_table_payload.py:row-cap-of-contract:180",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "dependency_interaction",
+    "claim": "is_introspection_query(sql, dialect=dialect) accepts a dialect keyword taking the value run_sql passes (configured dialect name or None) and treats unparseable SQL as a data query; any other parser exception is caught by the broad except and yields no line with a WARNING",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/_table_payload.py",
+    "source_line": 237,
+    "verify_against": "src/sqllens/safety/readonly.py",
+    "verify_hint": "Check is_introspection_query signature and the dialect value RunSqlTool passes to run_sql_display_line in agent/tools/run_sql.py",
+    "claim_signature": "dependency_interaction:_table_payload.py:introspection-dialect-arg:237",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "api_contract",
+    "claim": "run_sql_display_line is called on the same component the formatter later receives, so its N equals the table block's row_count (including the row_cap field counted in the budget at both call sites)",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The line is computed with :func:`_compute_table_payload` on the same\n    component the formatter later receives, so its N is the block's\n    ``row_count``.",
+    "source_file": "src/sqllens/_table_payload.py",
+    "source_line": 230,
+    "source_line_end": 232,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py and src/sqllens/tools/_format.py",
+    "verify_hint": "Check that RunSqlTool sets the row_cap marker before calling run_sql_display_line and that _format._build_table_payload calls _compute_table_payload on that same component unchanged",
+    "claim_signature": "api_contract:_table_payload.py:display-line-n-matches-row-count:230",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "absolute_claim",
+    "claim": "The line is advisory and never fails the query: every exception from the schema-lookup check or size calculation yields an empty string",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "``\"\"``: the line is advisory and must never fail the query.",
+    "source_file": "src/sqllens/_table_payload.py",
+    "source_line": 234,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Falsify with a BaseException-derived error (e.g. asyncio.CancelledError/KeyboardInterrupt) or an exception raised by RunSqlTool code around the call (string concatenation, metadata) outside run_sql_display_line's try",
+    "claim_signature": "absolute_claim:_table_payload.py:never-fail-query:234",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "api_contract",
+    "claim": "tools/_format.py re-imports _compute_table_payload, _serialized_len, _MAX_TABLE_PAYLOAD_BYTES and _humanize_label from sqllens._table_payload so existing tests and callers referencing _format names still resolve",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/tools/_format.py and tests/unit/test_format.py",
+    "verify_hint": "Check the imports at the top of _format.py against names tests import from sqllens.tools._format",
+    "claim_signature": "api_contract:tools.md:format-reimports-payload",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "data_format_assumption",
+    "claim": "The Markdown note reads 'Showing the first R of M rows. The other K rows were left out to fit the display size limit.' with R = min(row_count,500), adds 'This Markdown table lists at most 500 rows.' when R < row_count, otherwise 'Showing first 500 of M rows.' when M > 500, and appends the row-cap sentence last; numbers use comma separators",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`_table_block_to_markdown` appends an italic note directly under the table (issue #337)",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/tools/_format.py",
+    "verify_hint": "Check _table_block_to_markdown in _format.py for the exact note text, ordering and italic formatting",
+    "claim_signature": "data_format_assumption:tools.md:markdown-cut-note",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "data_format_assumption",
+    "claim": "Widget .cutnotice and CSV warning texts match the doc: 'Warning: this CSV holds only the C rows shown, not all M.' / row-cap form, row-cap sentence following the first form when both cuts apply, formula warning after it; meta span 'showing {matching} of {row_count}' with no truncated suffix",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Export CSV on a cut table adds \"Warning: this CSV holds only the C rows shown, not all M.\" (display cut) or \"Warning: this CSV holds only the C rows shown. The query stopped at the {cap}-row limit; more rows exist.\" (row cap only), C being the exported data rows; with both cuts the row-cap sentence follows the first form.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/ui/query_results.html",
+    "verify_hint": "Check the cut-notice rendering and CSV export warning construction in renderTableBlock in query_results.html",
+    "claim_signature": "data_format_assumption:tools.md:widget-cut-notice-csv",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "absolute_claim",
+    "claim": "No display line is sent for an uncut result, an empty result, or a schema-lookup query, and the 500-row Markdown cap is not reported to the agent",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "No line is sent for an uncut result, an empty result, or a schema-lookup query (`is_introspection_query` under the configured dialect); any exception from that check or the size calculation is logged at `WARNING` and the line is omitted.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/_table_payload.py run_sql_display_line and src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Falsify with a SHOW statement on MySQL, a DataFrame with columns but zero rows, and a result whose row_cap pushes it just over budget",
+    "claim_signature": "absolute_claim:tools.md:no-line-cases",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "data_format_assumption",
+    "claim": "The agent's run_sql tool result is a CSV preview of at most 1,000 characters plus the scratch-file line, the row-cap note and the display line",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "its `run_sql` tool result is a CSV preview of at most 1,000 characters plus the scratch-file line, the row-cap note when the cap was hit, and (issue #337) a display line",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check how RunSqlTool.execute builds result_for_llm (preview length, appended lines)",
+    "claim_signature": "data_format_assumption:tools.md:run-sql-result-shape",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "api_contract",
+    "claim": "A payload build exception now degrades that table to the 'could not be displayed' text block, and the header-only-over-budget case does too (not silent drop)",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Payload construction is best-effort: any exception degrades that one table to the same \"could not be displayed\" text block (the rest of the blocks still ride) rather than escaping the sanitized error taxonomy.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/tools/_format.py",
+    "verify_hint": "Check _build_table_payload's except branch and components_to_blocks DATAFRAME handling when the payload is None, including schema-lookup suppression",
+    "claim_signature": "api_contract:tools.md:undisplayable-text-block",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "data_format_assumption",
+    "claim": "RunSqlTool stamps data['row_cap'] on the DataFrameComponent via row_cap_marker_data, and the table block's row_cap is a separate key from df.attrs['truncated']",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`RunSqlTool` stamps the cap on the `DataFrameComponent` (`data[\"row_cap\"]`, via `row_cap_marker_data` in [src/sqllens/agent/markers.py](../../../src/sqllens/agent/markers.py))",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "verify_against": "src/sqllens/agent/markers.py and src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check ROW_CAP_MARKER_KEY value and where run_sql.py applies row_cap_marker_data",
+    "claim_signature": "data_format_assumption:read-only-safety.md:row-cap-marker-key",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "data_format_assumption",
+    "claim": "The display line wording quoted in tool-scratch-storage.md matches run_sql_display_line's strings",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "(\"The query returned M rows; the user's table shows only the first N of them. Say so in your answer.\") or too large to show (\"...which are too large to show the user as a table.\")",
+    "source_file": "docs/internal/agent/tool-scratch-storage.md",
+    "verify_against": "src/sqllens/_table_payload.py",
+    "verify_hint": "Compare with run_sql_display_line return strings",
+    "claim_signature": "data_format_assumption:tool-scratch-storage.md:display-line-wording",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "data_format_assumption",
+    "claim": "The table widget and Markdown answer say 'The query stopped at the N-row limit; more rows exist.' when max_rows is hit",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The answer also tells you: the table widget and the Markdown answer say \"The query stopped at the N-row limit; more rows exist.\"",
+    "source_file": "docs/external/configuration.md",
+    "verify_against": "src/sqllens/tools/_format.py and src/sqllens/ui/query_results.html",
+    "verify_hint": "Check the row-cap sentence in _format.py and the widget notice in query_results.html",
+    "claim_signature": "data_format_assumption:configuration.md:row-cap-sentence",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "data_format_assumption",
+    "claim": "User guide describes widget notice text, row-limit sentence with 'the 10,000-row limit' formatted per limit, Markdown notes under the table capped at 500 rows, CSV warning on shortened tables, and a could-not-be-displayed message",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Export CSV exports only the rows shown and warns you when the table was shortened. If the rows are too large to show as a table at all, the answer says how many rows could not be displayed.",
+    "source_file": "docs/external/getting-started.md",
+    "verify_against": "src/sqllens/ui/query_results.html and src/sqllens/tools/_format.py",
+    "verify_hint": "Check CSV export warning and undisplayable text block in _format.py components_to_blocks",
+    "claim_signature": "data_format_assumption:getting-started.md:cut-display-description",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "absolute_claim",
+    "claim": "The changelog states that the Markdown answer notes rows left out and both surfaces name the limit in effect when the query stopped at the row limit",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "When\nthe query stopped at the row limit, both say so and name the limit in effect.",
+    "source_file": "changelog.d/351.fixed.md",
+    "verify_against": "src/sqllens/tools/_format.py and src/sqllens/ui/query_results.html",
+    "verify_hint": "Falsify with a row-capped result whose one-row text form or whose row_cap marker is non-int (row_cap_of rejects it) to see whether either surface omits the cap",
+    "claim_signature": "absolute_claim:351.fixed.md:limit-named",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "dependency_interaction",
+    "claim": "DataFrameComponent.from_records accepts a `data` keyword and stores it on the component's `data` attribute so row_cap_of can read it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 143,
+    "source_line_end": 148,
+    "verify_against": "Vendored DataFrameComponent and RichComponent definitions",
+    "verify_hint": "Check `DataFrameComponent.from_records` in src/sqllens/agent/components (rich data components) and the `data` field on `RichComponent` in src/sqllens/agent/core/rich_component.py",
+    "claim_signature": "dependency_interaction:run_sql.py:from-records-data-kwarg:147",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "data_format_assumption",
+    "claim": "df.attrs[MAX_ROWS_ATTR] holds the row cap in effect for this query when TRUNCATED_ATTR is set, so the marker carries the actual cap (not a fixed 10,000); a cap_size of 0 yields a marker that row_cap_of rejects.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 147,
+    "verify_against": "Row cap producer in sqllens.safety.limits",
+    "verify_hint": "Check `mark_truncation` and `RowCapRunner` in src/sqllens/safety/limits.py for what MAX_ROWS_ATTR is set to (configured/profile cap)",
+    "claim_signature": "data_format_assumption:run_sql.py:max-rows-attr-cap:147",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "api_contract",
+    "claim": "run_sql_display_line(rich, sql, dialect) never raises (it logs WARNING and returns '' on any exception), so the run_sql success result is unchanged when display work fails.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 150,
+    "source_line_end": 158,
+    "verify_against": "src/sqllens/_table_payload.py",
+    "verify_hint": "Check `run_sql_display_line` (line ~227) in src/sqllens/_table_payload.py for a broad try/except wrapping is_introspection_query and _compute_table_payload",
+    "criterion": null,
+    "claim_signature": "api_contract:run_sql.py:display-line-never-raises:150",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "api_contract",
+    "claim": "The N in the run_sql display line comes from the same _compute_table_payload used by the formatter on the same DataFrame component (including the row_cap field in the size budget), so it equals the widget block's row_count.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 150,
+    "verify_against": "src/sqllens/_table_payload.py and src/sqllens/tools/_format.py",
+    "verify_hint": "Compare `run_sql_display_line` and `_compute_table_payload` in _table_payload.py with `_build_table_payload` / table block construction in components_to_blocks in tools/_format.py",
+    "claim_signature": "api_contract:run_sql.py:display-line-n-matches-row-count:150",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "dependency_interaction",
+    "claim": "_format.py imports _MAX_TABLE_PAYLOAD_BYTES, _coerce_cell, _columns_and_rows, _compute_table_payload, _humanize_label and _serialized_len from sqllens._table_payload, and every remaining use in _format.py (including _infer_column_types/_EMPTY_CELLS/_looks_numeric/_safe_column_types callers, and the `math`/`json`/`re` removals) still resolves.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/tools/_format.py",
+    "verify_against": "src/sqllens/_table_payload.py and remaining references in src/sqllens/tools/_format.py",
+    "verify_hint": "Grep tools/_format.py for json., re., _infer_column_types, _EMPTY_CELLS, _looks_numeric, _safe_column_types; check names defined in _table_payload.py",
+    "claim_signature": "dependency_interaction:_format.py:moved-helper-imports",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "test_mock_alignment",
+    "claim": "Tests that monkeypatch `sqllens.tools._format._compute_table_payload` still affect the formatter's table building, because _build_table_payload calls the name bound in _format's module namespace rather than inside _table_payload.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_format.py",
+    "verify_against": "_build_table_payload in src/sqllens/tools/_format.py",
+    "verify_hint": "Check `_build_table_payload` in tools/_format.py calls `_compute_table_payload` by its module-level imported name; compare test_payload_build_failure_emits_could_not_be_displayed_text",
+    "claim_signature": "test_mock_alignment:test_format.py:monkeypatch-compute-payload",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "test_mock_alignment",
+    "claim": "Monkeypatching `sqllens._table_payload.is_introspection_query` and `_compute_table_payload` reaches the calls made by run_sql_display_line (it looks those names up in its own module).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_run_sql_display_line.py",
+    "verify_against": "src/sqllens/_table_payload.py",
+    "verify_hint": "Check how `run_sql_display_line` imports/calls `is_introspection_query` and `_compute_table_payload` in _table_payload.py",
+    "claim_signature": "test_mock_alignment:test_run_sql_display_line.py:monkeypatch-targets",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "test_mock_alignment",
+    "claim": "The test's _StaticRunner, _NoopFileSystem and _Ctx stubs match what RunSqlTool.execute uses (SqlRunner.run_sql signature, FileSystem.write_file signature, context attributes) and RunSqlTool accepts sql_runner, file_system and dialect keywords.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_run_sql_display_line.py",
+    "verify_against": "RunSqlTool constructor and execute; SqlRunner and FileSystem protocols",
+    "verify_hint": "Check `RunSqlTool.__init__`/`execute` in src/sqllens/agent/tools/run_sql.py, `SqlRunner` in agent/capabilities/sql_runner, `FileSystem.write_file` in agent/capabilities/file_system",
+    "claim_signature": "test_mock_alignment:test_run_sql_display_line.py:runner-fs-stubs",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "dependency_interaction",
+    "claim": "mark_truncation(df, truncated=..., max_rows=...) sets TRUNCATED_ATTR and MAX_ROWS_ATTR on df.attrs, and the attrs survive the test runner's df.copy().",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_run_sql_display_line.py",
+    "verify_against": "src/sqllens/safety/limits.py",
+    "verify_hint": "Check `mark_truncation` signature in src/sqllens/safety/limits.py and pandas attrs propagation on DataFrame.copy",
+    "claim_signature": "dependency_interaction:test_run_sql_display_line.py:mark-truncation-signature",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "test_mock_alignment",
+    "claim": "FAKES, NODE, _between and _run_js exist in tests/unit/test_widget_export_outcomes.py, and FAKES' fake DOM nodes support className, children, textContent, append and appendChild as renderTableBlock uses them.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_widget_cut_notice.py",
+    "verify_against": "tests/unit/test_widget_export_outcomes.py",
+    "verify_hint": "Check the FAKES fake-DOM string and helper functions in tests/unit/test_widget_export_outcomes.py",
+    "claim_signature": "test_mock_alignment:test_widget_cut_notice.py:fake-dom-helpers",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "test_mock_alignment",
+    "claim": "The extraction markers 'function renderTableBlock(', '// ───────────────────────────── chart block', '  // ── CSV export (per-block)' and '  // ── Bar (filter input' occur in query_results.html, and the extracted CSV section defines everything buildCsvExport needs given the stubbed state/filteredRows/sortedRows.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_widget_cut_notice.py",
+    "verify_against": "src/sqllens/ui/query_results.html",
+    "verify_hint": "Grep query_results.html for those comment markers and check buildCsvExport's dependencies between them",
+    "claim_signature": "test_mock_alignment:test_widget_cut_notice.py:html-extraction-markers",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "test_mock_alignment",
+    "claim": "The csvCutWarning stub added to test_output_boundaries.py is consistent with the extracted function range: buildCsvExport calls csvCutWarning, which the extracted regex range does not itself define.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_output_boundaries.py",
+    "source_line": 118,
+    "verify_against": "The function regex in test_widget_csv_defangs_both_headers_and_rows_before_quoting and query_results.html",
+    "verify_hint": "Check the `functions` regex in tests/unit/test_output_boundaries.py against buildCsvExport in query_results.html",
+    "claim_signature": "test_mock_alignment:test_output_boundaries.py:csv-cut-warning-stub",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "api_contract",
+    "claim": "The widget reads the table block field `row_cap` (positive integer) emitted by the Python table payload, the same key ROW_CAP_MARKER_KEY the payload copies into the block.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/ui/query_results.html",
+    "source_line": 236,
+    "verify_against": "src/sqllens/_table_payload.py and src/sqllens/agent/markers.py",
+    "verify_hint": "Check where `_compute_table_payload` sets the row_cap key in _table_payload.py",
+    "claim_signature": "api_contract:query_results.html:row-cap-block-field:236",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "api_contract",
+    "claim": "The Markdown formatter reads `row_cap` from the table block and from the small-result payload, which only carries it when the component was row-cap marked; a missing key yields no cap sentence.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 1138,
+    "verify_against": "src/sqllens/_table_payload.py",
+    "verify_hint": "Check `_compute_table_payload` in _table_payload.py adds row_cap only when row_cap_of(rich) is not None, and that the small-result path builds its payload from it",
+    "claim_signature": "api_contract:_format.py:row-cap-payload-key:1138",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "data_format_assumption",
+    "claim": "The undisplayable-result text uses len(rich.rows) as M, the number of rows the query returned, and is emitted only when the table payload is None and the last SQL is not introspection.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 365,
+    "verify_against": "components_to_blocks in src/sqllens/tools/_format.py",
+    "verify_hint": "Check the DATAFRAME branch around line 350-370 of components_to_blocks and how last_sql_is_introspection is set before the dataframe arrives",
+    "claim_signature": "data_format_assumption:_format.py:undisplayable-row-count:365",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "api_contract",
+    "claim": "A candidate of type `result_text` is turned into a text block at its position and into Markdown by the rest of components_to_blocks.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 365,
+    "verify_against": "components_to_blocks candidate handling",
+    "verify_hint": "Check how `candidates` entries with type 'result_text' are consumed later in components_to_blocks in tools/_format.py",
+    "claim_signature": "api_contract:_format.py:result-text-candidate:365",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "absolute_claim",
+    "claim": "row_cap_of returns a cap only for a positive int that is not a bool, so a malformed value never produces a notice with a nonsense cap.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Only a positive ``int`` (not a ``bool``) counts, so a malformed value never\n    produces a notice with a nonsense cap.",
+    "source_file": "src/sqllens/agent/markers.py",
+    "verify_against": "row_cap_of and the widget's own check in query_results.html",
+    "verify_hint": "Falsify with an int subclass, a huge int, or a block row_cap arriving via a path other than row_cap_of (widget's Number.isInteger check, e.g. 1e21)",
+    "claim_signature": "absolute_claim:markers.py:malformed-cap-never-notice",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "absolute_claim",
+    "claim": "The markers module docstring says ROW_CAP_MARKER_KEY is set on a DATAFRAME component whose query stopped at the row cap, and RunSqlTool sets it and the shared table payload copies it into the table block.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The ``data`` key holding the row cap (an ``int``) on a DATAFRAME component\n# whose query stopped at that cap. ``RunSqlTool`` sets it; the shared table\n# payload (``sqllens._table_payload``) copies it into the table block.",
+    "source_file": "src/sqllens/agent/markers.py",
+    "verify_against": "run_sql.py and _table_payload.py",
+    "verify_hint": "Check the empty-df branch of RunSqlTool.execute (no marker set) and _compute_table_payload's row_cap copy",
+    "claim_signature": "absolute_claim:markers.py:row-cap-marker-doc",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "data_format_assumption",
+    "claim": "fmtCount uses Number.prototype.toLocaleString('en-US'), producing comma thousands separators in the widget notice and CSV warning regardless of host locale (including in node and sandboxed iframe runtimes without full ICU).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/ui/query_results.html",
+    "verify_against": "JS runtime Intl support",
+    "verify_hint": "Check fmtCount in query_results.html; consider runtimes where toLocaleString ignores the locale argument",
+    "claim_signature": "data_format_assumption:query_results.html:fmtcount-en-us",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "api_contract",
+    "claim": "The widget meta count is now 'showing {matched} of {rowCount}' with no truncated suffix.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/ui/query_results.html",
+    "source_line": 538,
+    "verify_against": "Acceptance criterion 1",
+    "verify_hint": "Check render() in renderTableBlock and any other metaSpan writers (e.g. line ~351 flashMeta restore) for leftover suffix text",
+    "claim_signature": "api_contract:query_results.html:meta-count-no-suffix:538",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "api_contract",
+    "claim": "The system prompt's phrases match what run_sql results actually say: 'the user's table shows only the first N', 'too large to show the user as a table', and the row-cap note 'Result truncated at N rows' (which the prompt calls 'the query stopped at the row limit').",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "source_line": 108,
+    "verify_against": "run_sql.py truncation_note and run_sql_display_line strings",
+    "verify_hint": "Compare the prompt line in default.py with truncation_note in RunSqlTool.execute and the strings in run_sql_display_line in _table_payload.py",
+    "claim_signature": "api_contract:default.py:prompt-matches-run-sql-wording:108",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-31"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "For a table cut by the display size limit, the widget shows above the search/export bar the line \"Showing the first N of M rows. The other K rows were left out to fit the display size limit.\", with N = the block's `row_count`, K = its `truncated` and M = N + K, in normal text colour with a 3px accent-coloured left border, wrapping on narrow frames, and the grey count reads \"showing {matching rows} of N\" with no \"truncated\" suffix.",
+    "claim_signature": "issue-acceptance-1",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "source_file": "src/sqllens/ui/query_results.html",
+    "source_line": 538,
+    "verify_hint": "tableNoticeText, .cutnotice CSS, noticeHost placement in renderTableBlock in query_results.html",
+    "id": "VC-37",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "For a table whose query hit the row cap, the widget shows above the search/export bar the line \"The query stopped at the cap-row limit; more rows exist.\", with cap = the row cap value in effect for that query (not a fixed 10,000); when the display size limit also cut it, the one notice line holds both sentences, the display-limit sentence first.",
+    "claim_signature": "issue-acceptance-2",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "source_file": "src/sqllens/ui/query_results.html",
+    "source_line": 236,
+    "verify_hint": "tableNoticeText/capSentence in query_results.html and cap_size source in run_sql.py",
+    "id": "VC-38",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A table cut by neither limit shows no notice line in the widget and no new note in the Markdown.",
+    "claim_signature": "issue-acceptance-3",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-351/local-20261107T100102Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: A table cut by neither limit shows no notice line in the widget and no new note in the Markdown.",
+    "id": "VC-39",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "For a table cut by the display size limit, the Markdown answer has, directly under that table and as part of the table's own Markdown text, a note stating R (the rows the Markdown table shows, N but at most 500), M, and that K rows were left out to fit the display size limit, plus, when R < N, that the Markdown lists at most 500 rows, in place of the \"Showing first 500 of M rows\" footer; this holds at M ≤ 500 (where today there is no note) and at R < 500 < M (where today the footer says 500).",
+    "claim_signature": "issue-acceptance-4",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 1189,
+    "verify_hint": "_table_block_to_markdown in tools/_format.py",
+    "id": "VC-40",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "For a table whose query hit the row cap, the Markdown answer has, directly under that table, the sentence \"The query stopped at the cap-row limit; more rows exist.\" with the cap value in effect, placed after the display-limit note when both apply and after the \"Showing first 500 of M rows\" footer when that footer is present.",
+    "claim_signature": "issue-acceptance-5",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 1189,
+    "verify_hint": "_table_block_to_markdown and _row_cap_sentence in tools/_format.py",
+    "id": "VC-41",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A one-row result shown as short text whose query hit the row cap ends its text block with \"The query stopped at the cap-row limit; more rows exist.\"",
+    "claim_signature": "issue-acceptance-6",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 1138,
+    "verify_hint": "_small_result_to_markdown in tools/_format.py",
+    "id": "VC-42",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A non-empty result that is not a schema-lookup result and gets no table block — because its column headers alone exceed 130 KB or because building the table failed — produces, at the result's position in the blocks and in the Markdown, a text block stating that the query returned M rows that could not be displayed, ending with \"The query stopped at the cap-row limit; more rows exist.\" when the query hit the row cap.",
+    "claim_signature": "issue-acceptance-7",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "source_file": "src/sqllens/tools/_format.py",
+    "source_line": 365,
+    "verify_hint": "DATAFRAME branch of components_to_blocks and _undisplayable_result_text",
+    "id": "VC-43",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A schema-lookup result that the server hides from the user still produces no block, no notice and no display line in the agent's tool result; the classification uses the existing `is_introspection_query` under the configured database dialect, which treats SQL it cannot parse as a data query (so the display line is sent).",
+    "claim_signature": "issue-acceptance-8",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-351/local-20261107T100102Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: A schema-lookup result that the server hides from the user still produces no block, no notice and no display line in the agent's tool result; the classification uses the existing `is_introspection_query` under the configured database dialect, which treats SQL it cannot parse as a data query (so the display line is sent).",
+    "id": "VC-44",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Every number in the widget notice, the Markdown notes and the Export CSV warning is written with comma thousands separators (for example \"10,000\").",
+    "claim_signature": "issue-acceptance-9",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-351/local-20261107T100102Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: Every number in the widget notice, the Markdown notes and the Export CSV warning is written with comma thousands separators (for example \"10,000\").",
+    "id": "VC-45",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Export CSV on a table cut by the display size limit shows \"Warning: this CSV holds only the C rows shown, not all M.\", where C is the number of data rows in the exported file; on a table whose query hit the row cap it shows a warning stating that the file holds only the C rows shown and that the query stopped at the cap-row limit; an existing formula-protection warning still shows alongside it.",
+    "claim_signature": "issue-acceptance-10",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "source_file": "src/sqllens/ui/query_results.html",
+    "source_line": 331,
+    "verify_hint": "csvCutWarning and buildCsvExport in query_results.html",
+    "id": "VC-46",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Table blocks carry a new field holding the row cap value when the query hit the row cap; `row_count` and `truncated` keep their current meaning (`row_count + truncated` equals the rows the query returned); every table block without its `\"type\"` key — the shape the size search measures today and `tests/unit/test_format.py` measures — the new field included, serializes to at most `_MAX_TABLE_PAYLOAD_BYTES` as measured by `_serialized_len`.",
+    "claim_signature": "issue-acceptance-11",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-351/local-20261107T100102Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: Table blocks carry a new field holding the row cap value when the query hit the row cap; `row_count` and `truncated` keep their current meaning (`row_count + truncated` equals the rows the query returned); every table block without its `\"type\"` key — the shape the size search measures today and `tests/unit/test_format.py` measures — the new field included, serializes to at most `_MAX_TABLE_PAYLOAD_BYTES` as measured by `_serialized_len`.",
+    "id": "VC-47",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "When the display size limit will cut a `run_sql` result's table, the tool result the agent receives states the number of rows the query returned (M) and that the user's table shows only the first N of them, with N equal to the `row_count` the formatter's per-table size calculation gives for that same result; when the headers alone exceed the limit, it states that the M rows are too large to show the user as a table.",
+    "claim_signature": "issue-acceptance-12",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 150,
+    "verify_hint": "run_sql_display_line in _table_payload.py and its call in run_sql.py",
+    "id": "VC-48",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "When the display-line work inside `run_sql` raises — the schema-lookup check (which lets parser errors other than parse and tokenize errors propagate) or the shared size calculation — the query still succeeds with today's tool result (no display line), and a server WARNING is logged.",
+    "claim_signature": "issue-acceptance-13",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 150,
+    "verify_hint": "exception handling in run_sql_display_line in _table_payload.py",
+    "id": "VC-49",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The agent's system prompt contains no wording that calls a result table full or complete (the \"Here are the full per-region numbers:\" example is reworded), and it instructs the agent that when a `run_sql` result for a data query (not a schema lookup) says the user's table is cut, its answer to the user — its `emit_text` text, or its final reply when no `emit_text` call succeeded in the request — states how many rows the table shows and how many the query returned, that when a `run_sql` result for a data query says the query stopped at the row cap that answer says the query hit the row limit and more rows exist, and that the agent never calls a result table or result full or complete anywhere in its answer, including an introduction written before the query that produces the table runs. The prompt also states that these cut statements are never made about a schema-lookup result, and that on a turn whose reply is a clarifying question the existing \"the question is your whole written reply\" rule wins.",
+    "claim_signature": "issue-acceptance-14",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "source_line": 108,
+    "verify_hint": "DefaultSystemPromptBuilder prompt lines in default.py",
+    "id": "VC-50",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The count told to the agent is the widget's N; a Markdown-only client shows at most 500 of those rows, and only its own Markdown note states that smaller count. A result cut by neither limit but longer than 500 rows keeps today's Markdown footer \"Showing first 500 of M rows\" and sends the agent no display line.",
+    "claim_signature": "issue-acceptance-15",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-351/local-20261107T100102Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: The count told to the agent is the widget's N; a Markdown-only client shows at most 500 of those rows, and only its own Markdown note states that smaller count. A result cut by neither limit but longer than 500 rows keeps today's Markdown footer \"Showing first 500 of M rows\" and sends the agent no display line.",
+    "id": "VC-51",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The change leaves the following as they are: chart blocks' truncation display (widget \"Rendering first N of M rows.\" note and the Markdown chart placeholder); the 512 KB whole-response trim and its \"_Response truncated: …_\" notice, which can still drop a table block the agent was told about; the full result, which is not offered as a file or download; and the formatter's own unguarded call to the schema-lookup check, so a parser exception there other than a parse or tokenize error still ends the request in today's internal error.",
+    "claim_signature": "issue-acceptance-16",
+    "criteria_file": ".prflow/tmp/review/pr-351/local-20261107T100102Z-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-351/local-20261107T100102Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: The change leaves the following as they are: chart blocks' truncation display (widget \"Rendering first N of M rows.\" note and the Markdown chart placeholder); the 512 KB whole-response trim and its \"_Response truncated: …_\" notice, which can still drop a table block the agent was told about; the full result, which is not offered as a file or download; and the formatter's own unguarded call to the schema-lookup check, so a parser exception there other than a parse or tokenize error still ends the request in today's internal error.",
+    "id": "VC-52",
+    "reused_from_iter_prev": false
+  }
+]

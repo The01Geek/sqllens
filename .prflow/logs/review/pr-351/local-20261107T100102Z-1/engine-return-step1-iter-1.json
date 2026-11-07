@@ -1,0 +1,594 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "severity": "suggestion",
+   "agents": [
+    "prflow:silent-failure-hunter"
+   ],
+   "defect_signature": {
+    "file": "src/sqllens/tools/_format.py",
+    "line_range": [
+     830,
+     846
+    ],
+    "kind": "comment_drift"
+   },
+   "description": "Payload-build fallback comment and WARNING text ('serving Markdown only') are stale: a 'could not be displayed' text block now reaches the widget too."
+  },
+  {
+   "finding_id": "F-2",
+   "severity": "suggestion",
+   "agents": [
+    "prflow:type-design-analyzer"
+   ],
+   "defect_signature": {
+    "file": "src/sqllens/agent/markers.py",
+    "line_range": [
+     447,
+     464
+    ],
+    "kind": "type_design"
+   },
+   "description": "row_cap_marker_data stores int(cap) unvalidated while row_cap_of accepts only positive non-bool ints; a cap of 0 would be written and silently ignored."
+  },
+  {
+   "finding_id": "F-3",
+   "severity": "suggestion",
+   "agents": [
+    "prflow:type-design-analyzer"
+   ],
+   "defect_signature": {
+    "file": "src/sqllens/_table_payload.py",
+    "line_range": [
+     300,
+     343
+    ],
+    "kind": "type_design"
+   },
+   "description": "Table payload is an untyped dict whose invariants are kept by convention; underscore-private helpers serve as the cross-module interface."
+  },
+  {
+   "finding_id": "F-4",
+   "severity": "suggestion",
+   "agents": [
+    "prflow:pr-test-analyzer"
+   ],
+   "defect_signature": {
+    "file": "tests/unit/test_format.py",
+    "line_range": [
+     2106,
+     2134
+    ],
+    "kind": "test_gap"
+   },
+   "description": "No test pins the position of the 'could not be displayed' block in a multi-component stream."
+  },
+  {
+   "finding_id": "F-5",
+   "severity": "suggestion",
+   "agents": [
+    "prflow:pr-test-analyzer"
+   ],
+   "defect_signature": {
+    "file": "tests/unit/test_widget_cut_notice.py",
+    "line_range": [
+     117,
+     125
+    ],
+    "kind": "test_gap"
+   },
+   "description": "CSV warning combination of display cut plus formula-protection warning is untested."
+  },
+  {
+   "finding_id": "F-6",
+   "severity": "suggestion",
+   "agents": [
+    "prflow:pr-test-analyzer"
+   ],
+   "defect_signature": {
+    "file": "tests/unit/test_format.py",
+    "line_range": [
+     2090,
+     2096
+    ],
+    "kind": "test_gap"
+   },
+   "description": "Uncut-table test only asserts the last line has no underscore."
+  },
+  {
+   "finding_id": "F-7",
+   "severity": "suggestion",
+   "agents": [
+    "prflow:comment-analyzer"
+   ],
+   "defect_signature": {
+    "file": "src/sqllens/tools/_format.py",
+    "line_range": [
+     829,
+     844
+    ],
+    "kind": "comment_drift"
+   },
+   "description": "Stale fallback comment and log message in _build_table_payload (corroborates F-1)."
+  },
+  {
+   "finding_id": "F-8",
+   "severity": "suggestion",
+   "agents": [
+    "prflow:comment-analyzer"
+   ],
+   "defect_signature": {
+    "file": "docs/internal/mcp-server/tools.md",
+    "line_range": null,
+    "kind": "documented_falsehood"
+   },
+   "description": "Internal doc omits the '(Results truncated to 1000 characters for preview.)' suffix from the run_sql tool-result description; capped at Suggestion as behavior-inert internal prose."
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (no finding at or above the critical threshold; eight Suggestions remain)\n\nThe PR is ready to merge: all 52 checklist items passed, including all 16 acceptance criteria, and the reviewers raised only Suggestions.\nRule applied: rule 6 — only findings below the threshold remain → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (7)\n\n<details><summary>7 items</summary>\n\n1. The comment and the WARNING text around the table-payload build failure in `src/sqllens/tools/_format.py` (lines 829-846) are out of date. They still say the failure leaves \"no widget\" and serves \"Markdown only\". Since this change, the same failure also emits a \"could not be displayed\" text block that reaches the widget. (raised by 2/6 agents)\n2. In `src/sqllens/agent/markers.py` (lines 447-464), `row_cap_marker_data` stores `int(cap)` without checking it, but `row_cap_of` accepts only a positive int that is not a bool. A cap of 0, for example when `MAX_ROWS_ATTR` is missing, would be written and then quietly ignored. No current producer reaches this case. (raised by 1/6 agents)\n3. In `src/sqllens/_table_payload.py` (lines 300-343), the table payload is an untyped dict. Its invariants (`row_count + truncated`, and `row_cap` either absent or positive) are kept only by convention. Its underscore-private helpers are also used as the interface for other modules. (raised by 1/6 agents)\n4. In `tests/unit/test_format.py` (lines 2106-2134), no test checks where the \"could not be displayed\" block sits in a stream with more than one component. (raised by 1/6 agents)\n5. In `tests/unit/test_widget_cut_notice.py`, no test covers the CSV warning shown when a display-limit cut and the formula-protection warning apply together. (raised by 1/6 agents)\n6. In `tests/unit/test_format.py` (lines 2090-2096), the uncut-table test only checks that the last line contains no underscore. That check would pass even if a note were added somewhere else. (raised by 1/6 agents)\n7. `docs/internal/mcp-server/tools.md` describes the agent's `run_sql` tool result as a CSV preview of at most 1,000 characters. That description leaves out the \"(Results truncated to 1000 characters for preview.)\" suffix that a cut preview gets. (raised by 1/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: internal doc page under docs/internal, which no tool reads and nothing publishes; making the sentence true changes no output -->\n\n</details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: full review (not small_diff, not config_only; has_new_types, test_relevant); 17 changed files.\n- Working tree: clean.\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. Final-pass (requesting-code-review) extension: content-present.\n- CI evidence: none held for head 6c1865a5d738c8d843d25fdf01ef7237c45904e2 (missing; no tests were run in this review).\n- Normalized (wording-only): 0\n- Deferral matcher failed: match-deferrals.py: PyYAML required to parse deferred-findings block\n- The concurrent-agent limit refused verifier dispatches VC-20 through VC-52 in the first wave. They were sent again in later rounds, and all 52 returned verdicts. VC-20 wrote its verdict file only after a delivery message.\n- Engine resolved from the plugin cache: the vendored `.prflow/vendor/prflow/skills/review` and `.devflow/vendor/devflow/skills/review` paths do not exist.\n- prior-report: none\n- Dirty-tree check: clean (dirty-tree-compare-done).\n- Checklist: 52 passed, 0 failed, 0 inconclusive\n- <details><summary>✅ Passed items (52 of 52)</summary>\n\n  - VC-1: row_cap_of(rich) from sqllens.agent.markers accepts a DataFrameComponent-like object and returns a positive int cap or None, reading the row_cap marker RunSqlTool set in the component's data [src/sqllens/_table_payload.py:180]\n  - VC-2: is_introspection_query(sql, dialect=dialect) accepts a dialect keyword taking the value run_sql passes (configured dialect name or None) and treats unparseable SQL as a data query; any other parser exception is caught by the broad except and yields no line with a WARNING [src/sqllens/_table_payload.py:237]\n  - VC-3: run_sql_display_line is called on the same component the formatter later receives, so its N equals the table block's row_count (including the row_cap field counted in the budget at both call sites) [src/sqllens/_table_payload.py:230]\n  - VC-4: The line is advisory and never fails the query: every exception from the schema-lookup check or size calculation yields an empty string [src/sqllens/_table_payload.py:234]\n  - VC-5: tools/_format.py re-imports _compute_table_payload, _serialized_len, _MAX_TABLE_PAYLOAD_BYTES and _humanize_label from sqllens._table_payload so existing tests and callers referencing _format names still resolve [docs/internal/mcp-server/tools.md]\n  - VC-6: The Markdown note reads 'Showing the first R of M rows. The other K rows were left out to fit the display size limit.' with R = min(row_count,500), adds 'This Markdown table lists at most 500 rows.' when R < row_count, otherwise 'Showing first 500 of M rows.' when M > 500, and appends the row-cap sentence last; numbers use comma separators [docs/internal/mcp-server/tools.md]\n  - VC-7: Widget .cutnotice and CSV warning texts match the doc: 'Warning: this CSV holds only the C rows shown, not all M.' / row-cap form, row-cap sentence following the first form when both cuts apply, formula warning after it; meta span 'showing {matching} of {row_count}' with no truncated suffix [docs/internal/mcp-server/tools.md]\n  - VC-8: No display line is sent for an uncut result, an empty result, or a schema-lookup query, and the 500-row Markdown cap is not reported to the agent [docs/internal/mcp-server/tools.md]\n  - VC-9: The agent's run_sql tool result is a CSV preview of at most 1,000 characters plus the scratch-file line, the row-cap note and the display line [docs/internal/mcp-server/tools.md]\n  - VC-10: A payload build exception now degrades that table to the 'could not be displayed' text block, and the header-only-over-budget case does too (not silent drop) [docs/internal/mcp-server/tools.md]\n  - VC-11: RunSqlTool stamps data['row_cap'] on the DataFrameComponent via row_cap_marker_data, and the table block's row_cap is a separate key from df.attrs['truncated'] [docs/internal/database-connectors/read-only-safety.md]\n  - VC-12: The display line wording quoted in tool-scratch-storage.md matches run_sql_display_line's strings [docs/internal/agent/tool-scratch-storage.md]\n  - VC-13: The table widget and Markdown answer say 'The query stopped at the N-row limit; more rows exist.' when max_rows is hit [docs/external/configuration.md]\n  - VC-14: User guide describes widget notice text, row-limit sentence with 'the 10,000-row limit' formatted per limit, Markdown notes under the table capped at 500 rows, CSV warning on shortened tables, and a could-not-be-displayed message [docs/external/getting-started.md]\n  - VC-15: The changelog states that the Markdown answer notes rows left out and both surfaces name the limit in effect when the query stopped at the row limit [changelog.d/351.fixed.md]\n  - VC-16: DataFrameComponent.from_records accepts a `data` keyword and stores it on the component's `data` attribute so row_cap_of can read it. [src/sqllens/agent/tools/run_sql.py:143]\n  - VC-17: df.attrs[MAX_ROWS_ATTR] holds the row cap in effect for this query when TRUNCATED_ATTR is set, so the marker carries the actual cap (not a fixed 10,000); a cap_size of 0 yields a marker that row_cap_of rejects. [src/sqllens/agent/tools/run_sql.py:147]\n  - VC-18: run_sql_display_line(rich, sql, dialect) never raises (it logs WARNING and returns '' on any exception), so the run_sql success result is unchanged when display work fails. [src/sqllens/agent/tools/run_sql.py:150]\n  - VC-19: The N in the run_sql display line comes from the same _compute_table_payload used by the formatter on the same DataFrame component (including the row_cap field in the size budget), so it equals the widget block's row_count. [src/sqllens/agent/tools/run_sql.py:150]\n  - VC-20: _format.py imports _MAX_TABLE_PAYLOAD_BYTES, _coerce_cell, _columns_and_rows, _compute_table_payload, _humanize_label and _serialized_len from sqllens._table_payload, and every remaining use in _format.py (including _infer_column_types/_EMPTY_CELLS/_looks_numeric/_safe_column_types callers, and the `math`/`json`/`re` removals) still resolves. [src/sqllens/tools/_format.py]\n  - VC-21: Tests that monkeypatch `sqllens.tools._format._compute_table_payload` still affect the formatter's table building, because _build_table_payload calls the name bound in _format's module namespace rather than inside _table_payload. [tests/unit/test_format.py]\n  - VC-22: Monkeypatching `sqllens._table_payload.is_introspection_query` and `_compute_table_payload` reaches the calls made by run_sql_display_line (it looks those names up in its own module). [tests/unit/test_run_sql_display_line.py]\n  - VC-23: The test's _StaticRunner, _NoopFileSystem and _Ctx stubs match what RunSqlTool.execute uses (SqlRunner.run_sql signature, FileSystem.write_file signature, context attributes) and RunSqlTool accepts sql_runner, file_system and dialect keywords. [tests/unit/test_run_sql_display_line.py]\n  - VC-24: mark_truncation(df, truncated=..., max_rows=...) sets TRUNCATED_ATTR and MAX_ROWS_ATTR on df.attrs, and the attrs survive the test runner's df.copy(). [tests/unit/test_run_sql_display_line.py]\n  - VC-25: FAKES, NODE, _between and _run_js exist in tests/unit/test_widget_export_outcomes.py, and FAKES' fake DOM nodes support className, children, textContent, append and appendChild as renderTableBlock uses them. [tests/unit/test_widget_cut_notice.py]\n  - VC-26: The extraction markers 'function renderTableBlock(', '// ───────────────────────────── chart block', ' // ── CSV export (per-block)' and ' // ── Bar (filter input' occur in query_results.html, and the extracted CSV section defines everything buildCsvExport needs given the stubbed state/filteredRows/sortedRows. [tests/unit/test_widget_cut_notice.py]\n  - VC-27: The csvCutWarning stub added to test_output_boundaries.py is consistent with the extracted function range: buildCsvExport calls csvCutWarning, which the extracted regex range does not itself define. [tests/unit/test_output_boundaries.py:118]\n  - VC-28: The widget reads the table block field `row_cap` (positive integer) emitted by the Python table payload, the same key ROW_CAP_MARKER_KEY the payload copies into the block. [src/sqllens/ui/query_results.html:236]\n  - VC-29: The Markdown formatter reads `row_cap` from the table block and from the small-result payload, which only carries it when the component was row-cap marked; a missing key yields no cap sentence. [src/sqllens/tools/_format.py:1138]\n  - VC-30: The undisplayable-result text uses len(rich.rows) as M, the number of rows the query returned, and is emitted only when the table payload is None and the last SQL is not introspection. [src/sqllens/tools/_format.py:365]\n  - VC-31: A candidate of type `result_text` is turned into a text block at its position and into Markdown by the rest of components_to_blocks. [src/sqllens/tools/_format.py:365]\n  - VC-32: row_cap_of returns a cap only for a positive int that is not a bool, so a malformed value never produces a notice with a nonsense cap. [src/sqllens/agent/markers.py]\n  - VC-33: The markers module docstring says ROW_CAP_MARKER_KEY is set on a DATAFRAME component whose query stopped at the row cap, and RunSqlTool sets it and the shared table payload copies it into the table block. [src/sqllens/agent/markers.py]\n  - VC-34: fmtCount uses Number.prototype.toLocaleString('en-US'), producing comma thousands separators in the widget notice and CSV warning regardless of host locale (including in node and sandboxed iframe runtimes without full ICU). [src/sqllens/ui/query_results.html]\n  - VC-35: The widget meta count is now 'showing {matched} of {rowCount}' with no truncated suffix. [src/sqllens/ui/query_results.html:538]\n  - VC-36: The system prompt's phrases match what run_sql results actually say: 'the user's table shows only the first N', 'too large to show the user as a table', and the row-cap note 'Result truncated at N rows' (which the prompt calls 'the query stopped at the row limit'). [src/sqllens/agent/core/system_prompt/default.py:108]\n  - VC-37: For a table cut by the display size limit, the widget shows above the search/export bar the line \"Showing the first N of M rows. The other K rows were left out to fit the display size limit.\", with N = the block's `row_count`, K = its `truncated` and M = N + K, in normal text colour with a 3px accent-coloured left border, wrapping on narrow frames, and the grey count reads \"showing {matching rows} of N\" with no \"truncated\" suffix. [src/sqllens/ui/query_results.html:538]\n  - VC-38: For a table whose query hit the row cap, the widget shows above the search/export bar the line \"The query stopped at the cap-row limit; more rows exist.\", with cap = the row cap value in effect for that query (not a fixed 10,000); when the display size limit also cut it, the one notice line holds both sentences, the display-limit sentence first. [src/sqllens/ui/query_results.html:236]\n  - VC-39: A table cut by neither limit shows no notice line in the widget and no new note in the Markdown. [src/sqllens/tools/_format.py:1173-1193]\n  - VC-40: For a table cut by the display size limit, the Markdown answer has, directly under that table and as part of the table's own Markdown text, a note stating R (the rows the Markdown table shows, N but at most 500), M, and that K rows were left out to fit the display size limit, plus, when R < N, that the Markdown lists at most 500 rows, in place of the \"Showing first 500 of M rows\" footer; this holds at M ≤ 500 (where today there is no note) and at R < 500 < M (where today the footer says 500). [src/sqllens/tools/_format.py:1189]\n  - VC-41: For a table whose query hit the row cap, the Markdown answer has, directly under that table, the sentence \"The query stopped at the cap-row limit; more rows exist.\" with the cap value in effect, placed after the display-limit note when both apply and after the \"Showing first 500 of M rows\" footer when that footer is present. [src/sqllens/tools/_format.py:1189]\n  - VC-42: A one-row result shown as short text whose query hit the row cap ends its text block with \"The query stopped at the cap-row limit; more rows exist.\" [src/sqllens/tools/_format.py:1138]\n  - VC-43: A non-empty result that is not a schema-lookup result and gets no table block — because its column headers alone exceed 130 KB or because building the table failed — produces, at the result's position in the blocks and in the Markdown, a text block stating that the query returned M rows that could not be displayed, ending with \"The query stopped at the cap-row limit; more rows exist.\" when the query hit the row cap. [src/sqllens/tools/_format.py:365]\n  - VC-44: A schema-lookup result that the server hides from the user still produces no block, no notice and no display line in the agent's tool result; the classification uses the existing `is_introspection_query` under the configured database dialect, which treats SQL it cannot parse as a data query (so the display line is sent). [src/sqllens/_table_payload.py:227-260]\n  - VC-45: Every number in the widget notice, the Markdown notes and the Export CSV warning is written with comma thousands separators (for example \"10,000\"). [src/sqllens/ui/query_results.html:285-310]\n  - VC-46: Export CSV on a table cut by the display size limit shows \"Warning: this CSV holds only the C rows shown, not all M.\", where C is the number of data rows in the exported file; on a table whose query hit the row cap it shows a warning stating that the file holds only the C rows shown and that the query stopped at the cap-row limit; an existing formula-protection warning still shows alongside it. [src/sqllens/ui/query_results.html:331]\n  - VC-47: Table blocks carry a new field holding the row cap value when the query hit the row cap; `row_count` and `truncated` keep their current meaning (`row_count + truncated` equals the rows the query returned); every table block without its `\"type\"` key — the shape the size search measures today and `tests/unit/test_format.py` measures — the new field included, serializes to at most `_MAX_TABLE_PAYLOAD_BYTES` as measured by `_serialized_len`. [src/sqllens/_table_payload.py:171-214]\n  - VC-48: When the display size limit will cut a `run_sql` result's table, the tool result the agent receives states the number of rows the query returned (M) and that the user's table shows only the first N of them, with N equal to the `row_count` the formatter's per-table size calculation gives for that same result; when the headers alone exceed the limit, it states that the M rows are too large to show the user as a table. [src/sqllens/agent/tools/run_sql.py:150]\n  - VC-49: When the display-line work inside `run_sql` raises — the schema-lookup check (which lets parser errors other than parse and tokenize errors propagate) or the shared size calculation — the query still succeeds with today's tool result (no display line), and a server WARNING is logged. [src/sqllens/agent/tools/run_sql.py:150]\n  - VC-50: The agent's system prompt contains no wording that calls a result table full or complete (the \"Here are the full per-region numbers:\" example is reworded), and it instructs the agent that when a `run_sql` result for a data query (not a schema lookup) says the user's table is cut, its answer to the user — its `emit_text` text, or its final reply when no `emit_text` call succeeded in the request — states how many rows the table shows and how many the query returned, that when a `run_sql` result for a data query says the query stopped at the row cap that answer says the query hit the row limit and more rows exist, and that the agent never calls a result table or result full or complete anywhere in its answer, including an introduction written before the query that produces the table runs. The prompt also states that these cut statements are never made about a schema-lookup result, and that on a turn whose reply is a clarifying question the existing \"the question is your whole written reply\" rule wins. [src/sqllens/agent/core/system_prompt/default.py:108]\n  - VC-51: The count told to the agent is the widget's N; a Markdown-only client shows at most 500 of those rows, and only its own Markdown note states that smaller count. A result cut by neither limit but longer than 500 rows keeps today's Markdown footer \"Showing first 500 of M rows\" and sends the agent no display line. [src/sqllens/format.py:1170-1190]\n  - VC-52: The change leaves the following as they are: chart blocks' truncation display (widget \"Rendering first N of M rows.\" note and the Markdown chart placeholder); the 512 KB whole-response trim and its \"_Response truncated: …_\" notice, which can still drop a table block the agent was told about; the full result, which is not offered as a file or download; and the formatter's own unguarded call to the schema-lookup check, so a parser exception there other than a parse or tokenize error still ends the request in today's internal error. [src/sqllens/tools/_format.py:383]\n\n  </details>\n- Reviewed against issue #337 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] For a table cut by the display size limit, the widget shows above the search/export bar the line \"Showing the first N of M rows. The other K rows were left out to fit the display size limit.\", with N = the block's `row_count`, K = its `truncated` and M = N + K, in normal text colour with a 3px accent-coloured left border, wrapping on narrow frames, and the grey count reads \"showing {matching rows} of N\" with no \"truncated\" suffix.\n- [ ] For a table whose query hit the row cap, the widget shows above the search/export bar the line \"The query stopped at the cap-row limit; more rows exist.\", with cap = the row cap value in effect for that query (not a fixed 10,000); when the display size limit also cut it, the one notice line holds both sentences, the display-limit sentence first.\n- [ ] A table cut by neither limit shows no notice line in the widget and no new note in the Markdown.\n- [ ] For a table cut by the display size limit, the Markdown answer has, directly under that table and as part of the table's own Markdown text, a note stating R (the rows the Markdown table shows, N but at most 500), M, and that K rows were left out to fit the display size limit, plus, when R < N, that the Markdown lists at most 500 rows, in place of the \"Showing first 500 of M rows\" footer; this holds at M ≤ 500 (where today there is no note) and at R < 500 < M (where today the footer says 500).\n- [ ] For a table whose query hit the row cap, the Markdown answer has, directly under that table, the sentence \"The query stopped at the cap-row limit; more rows exist.\" with the cap value in effect, placed after the display-limit note when both apply and after the \"Showing first 500 of M rows\" footer when that footer is present.\n- [ ] A one-row result shown as short text whose query hit the row cap ends its text block with \"The query stopped at the cap-row limit; more rows exist.\"\n- [ ] A non-empty result that is not a schema-lookup result and gets no table block — because its column headers alone exceed 130 KB or because building the table failed — produces, at the result's position in the blocks and in the Markdown, a text block stating that the query returned M rows that could not be displayed, ending with \"The query stopped at the cap-row limit; more rows exist.\" when the query hit the row cap.\n- [ ] A schema-lookup result that the server hides from the user still produces no block, no notice and no display line in the agent's tool result; the classification uses the existing `is_introspection_query` under the configured database dialect, which treats SQL it cannot parse as a data query (so the display line is sent).\n- [ ] Every number in the widget notice, the Markdown notes and the Export CSV warning is written with comma thousands separators (for example \"10,000\").\n- [ ] Export CSV on a table cut by the display size limit shows \"Warning: this CSV holds only the C rows shown, not all M.\", where C is the number of data rows in the exported file; on a table whose query hit the row cap it shows a warning stating that the file holds only the C rows shown and that the query stopped at the cap-row limit; an existing formula-protection warning still shows alongside it.\n- [ ] Table blocks carry a new field holding the row cap value when the query hit the row cap; `row_count` and `truncated` keep their current meaning (`row_count + truncated` equals the rows the query returned); every table block without its `\"type\"` key — the shape the size search measures today and `tests/unit/test_format.py` measures — the new field included, serializes to at most `_MAX_TABLE_PAYLOAD_BYTES` as measured by `_serialized_len`.\n- [ ] When the display size limit will cut a `run_sql` result's table, the tool result the agent receives states the number of rows the query returned (M) and that the user's table shows only the first N of them, with N equal to the `row_count` the formatter's per-table size calculation gives for that same result; when the headers alone exceed the limit, it states that the M rows are too large to show the user as a table.\n- [ ] When the display-line work inside `run_sql` raises — the schema-lookup check (which lets parser errors other than parse and tokenize errors propagate) or the shared size calculation — the query still succeeds with today's tool result (no display line), and a server WARNING is logged.\n- [ ] The agent's system prompt contains no wording that calls a result table full or complete (the \"Here are the full per-region numbers:\" example is reworded), and it instructs the agent that when a `run_sql` result for a data query (not a schema lookup) says the user's table is cut, its answer to the user — its `emit_text` text, or its final reply when no `emit_text` call succeeded in the request — states how many rows the table shows and how many the query returned, that when a `run_sql` result for a data query says the query stopped at the row cap that answer says the query hit the row limit and more rows exist, and that the agent never calls a result table or result full or complete anywhere in its answer, including an introduction written before the query that produces the table runs. The prompt also states that these cut statements are never made about a schema-lookup result, and that on a turn whose reply is a clarifying question the existing \"the question is your whole written reply\" rule wins.\n- [ ] The count told to the agent is the widget's N; a Markdown-only client shows at most 500 of those rows, and only its own Markdown note states that smaller count. A result cut by neither limit but longer than 500 rows keeps today's Markdown footer \"Showing first 500 of M rows\" and sends the agent no display line.\n- [ ] The change leaves the following as they are: chart blocks' truncation display (widget \"Rendering first N of M rows.\" note and the Markdown chart placeholder); the 512 KB whole-response trim and its \"_Response truncated: …_\" notice, which can still drop a table block the agent was told about; the full result, which is not offered as a file or download; and the formatter's own unguarded call to the schema-lookup check, so a parser exception there other than a parse or tokenize error still ends the request in today's internal error.",
+ "diff_produced_at_head": "6c1865a5d738c8d843d25fdf01ef7237c45904e2",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:_table_payload.py:row-cap-of-contract:180",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "dependency_interaction:_table_payload.py:introspection-dialect-arg:237",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "api_contract:_table_payload.py:display-line-n-matches-row-count:230",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "absolute_claim:_table_payload.py:never-fail-query:234",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "api_contract:tools.md:format-reimports-payload",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "data_format_assumption:tools.md:markdown-cut-note",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "data_format_assumption:tools.md:widget-cut-notice-csv",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "absolute_claim:tools.md:no-line-cases",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "data_format_assumption:tools.md:run-sql-result-shape",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "api_contract:tools.md:undisplayable-text-block",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "data_format_assumption:read-only-safety.md:row-cap-marker-key",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "data_format_assumption:tool-scratch-storage.md:display-line-wording",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "data_format_assumption:configuration.md:row-cap-sentence",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "data_format_assumption:getting-started.md:cut-display-description",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "absolute_claim:351.fixed.md:limit-named",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "dependency_interaction:run_sql.py:from-records-data-kwarg:147",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "data_format_assumption:run_sql.py:max-rows-attr-cap:147",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "api_contract:run_sql.py:display-line-never-raises:150",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "api_contract:run_sql.py:display-line-n-matches-row-count:150",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "dependency_interaction:_format.py:moved-helper-imports",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "test_mock_alignment:test_format.py:monkeypatch-compute-payload",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-22",
+   "claim_signature": "test_mock_alignment:test_run_sql_display_line.py:monkeypatch-targets",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-23",
+   "claim_signature": "test_mock_alignment:test_run_sql_display_line.py:runner-fs-stubs",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-24",
+   "claim_signature": "dependency_interaction:test_run_sql_display_line.py:mark-truncation-signature",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-25",
+   "claim_signature": "test_mock_alignment:test_widget_cut_notice.py:fake-dom-helpers",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-26",
+   "claim_signature": "test_mock_alignment:test_widget_cut_notice.py:html-extraction-markers",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-27",
+   "claim_signature": "test_mock_alignment:test_output_boundaries.py:csv-cut-warning-stub",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-28",
+   "claim_signature": "api_contract:query_results.html:row-cap-block-field:236",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-29",
+   "claim_signature": "api_contract:_format.py:row-cap-payload-key:1138",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-30",
+   "claim_signature": "data_format_assumption:_format.py:undisplayable-row-count:365",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-31",
+   "claim_signature": "api_contract:_format.py:result-text-candidate:365",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-32",
+   "claim_signature": "absolute_claim:markers.py:malformed-cap-never-notice",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-33",
+   "claim_signature": "absolute_claim:markers.py:row-cap-marker-doc",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-34",
+   "claim_signature": "data_format_assumption:query_results.html:fmtcount-en-us",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-35",
+   "claim_signature": "api_contract:query_results.html:meta-count-no-suffix:538",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-36",
+   "claim_signature": "api_contract:default.py:prompt-matches-run-sql-wording:108",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-37",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-38",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-39",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-40",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-41",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-42",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-43",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-44",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-45",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-10",
+   "id": "VC-46",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-11",
+   "id": "VC-47",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-12",
+   "id": "VC-48",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-13",
+   "id": "VC-49",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-14",
+   "id": "VC-50",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-15",
+   "id": "VC-51",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-16",
+   "id": "VC-52",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}
