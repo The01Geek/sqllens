@@ -79,7 +79,7 @@ class AgentRunError(RuntimeError):
 
 # Client-facing error taxonomy. The MCP wrapper collapses every failure into
 # one ``isError: true`` result, so the *message* is the only category signal
-# the caller gets — keep both forms named here so the split stays observable
+# the caller gets — keep every form named here so the split stays observable
 # in one place:
 #  - tool-internal / infrastructure failures get the stable sanitized message
 #    (driver exceptions carry host/port/db/role; the full traceback is logged
@@ -88,9 +88,18 @@ class AgentRunError(RuntimeError):
 #  - ``UnsafeSqlError`` is surfaced verbatim — issue #91 mandates the original
 #    safety message reach the client unaltered, so this form is deliberately
 #    *not* prefixed; it stays distinguishable by its own recognizable text
-#    ("refusing to execute non-SELECT SQL: ..."), not by a constant prefix.
+#    ("refusing to execute non-SELECT SQL: ..."), not by a constant prefix,
+#  - a turn run while the agent's memory store could not be opened gets the
+#    fixed memory-unavailable message, which must never carry the persist
+#    path or the Chroma exception text (both stay in the server log).
 _INTERNAL_ERROR_MESSAGE = "internal error; see server logs"
 _SQL_EXECUTION_ERROR_PREFIX = "SQL execution error: "
+_MEMORY_UNAVAILABLE_MESSAGE = (
+    "Memory store unavailable: the vector memory store could not be opened, so the "
+    "answer would have been produced without saved memory. Check that "
+    "memory.persist_dir and the files in it are writable by the server process, "
+    "then check the server logs."
+)
 
 # Internal agent-control keys that the agent reads off
 # ``request_context.metadata`` (e.g. ``starter_ui_request`` at
@@ -520,6 +529,8 @@ async def query_database_impl_with_widgets(
     Tool-internal failures raise
     ``_INTERNAL_ERROR_MESSAGE``, agent-reported SQL failures raise
     ``_SQL_EXECUTION_ERROR_PREFIX + answer`` (as an :class:`AgentRunError`),
+    a turn finished while the agent memory reports an ``open_error`` raises
+    ``_MEMORY_UNAVAILABLE_MESSAGE`` (as an :class:`AgentRunError`),
     and ``UnsafeSqlError`` is re-raised verbatim. ``blocks`` is an empty list
     on the error path and on a turn that produced no structured artifacts;
     callers attach it to ``_meta`` only when non-empty.
@@ -704,6 +715,19 @@ async def query_database_impl_with_widgets(
             except Exception:
                 logger.exception("agent trace assembly failed; serving answer without trace")
                 agent_trace = None
+        # Checked before ``is_error`` so a turn that ran without saved memory never
+        # reads as a success or as a SQL failure carrying raw Chroma text.
+        open_error = getattr(getattr(agent, "agent_memory", None), "open_error", None)
+        if open_error is not None:
+            logger.warning(
+                "agent memory store could not be opened (%s); failing the query",
+                type(open_error).__name__,
+            )
+            raise AgentRunError(
+                _MEMORY_UNAVAILABLE_MESSAGE,
+                agent_trace=agent_trace,
+                query_info=query_info,
+            )
         if is_error:
             logger.warning("agent reported query failure: %s", answer)
             raise AgentRunError(

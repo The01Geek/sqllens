@@ -167,8 +167,9 @@ def _trace_error_result(
 ) -> CallToolResult:
     """Build the ``isError`` CallToolResult that carries the agent trace.
 
-    Used only when ``agent.show_details`` is on and the agent reported a query
-    failure. The text deliberately mirrors FastMCP's own tool-error format
+    Used only when ``agent.show_details`` is on and the agent run raised an
+    ``AgentRunError`` (a reported query failure or an unopenable memory store). The text
+    deliberately mirrors FastMCP's own tool-error format
     (``Error executing tool query_database: <message>`` — see
     ``mcp.server.fastmcp.tools.base.Tool.run``) so the client-facing message is
     byte-for-byte identical to the details-off path; the only difference with
@@ -352,6 +353,10 @@ def build_server(cfg: Config) -> FastMCP:
         ``{"model", "reasoning_effort"}``, the model id and reasoning effort
         this server is configured to request — gated by no flag. The error
         result does not carry it.
+
+        When the server's vector memory store could not be opened, the call
+        returns an error result starting ``Memory store unavailable:`` instead
+        of an answer produced without saved memory.
         """
         metadata = _request_metadata(ctx)
         # Mint a stable id when the caller did not supply one, so the resolved
