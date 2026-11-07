@@ -272,6 +272,16 @@ def test_no_note_for_empty_result(tmp_path: Path) -> None:
     assert "withheld" not in _run(tool).result_for_llm
 
 
+def test_note_for_zero_row_result_with_masked_column(tmp_path: Path) -> None:
+    tool = RunSqlTool(
+        sql_runner=ResultMaskingRunner(_FrameRunner(_user_rows(1).iloc[0:0])),
+        file_system=LocalFileSystem(str(tmp_path)),
+    )
+    text = _run(tool).result_for_llm
+    assert text.startswith("Query executed successfully. No rows returned.")
+    assert text.endswith(NOTE)
+
+
 def test_guard_forwards_require_base_tables() -> None:
     seen: list[bool] = []
 
