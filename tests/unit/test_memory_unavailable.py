@@ -342,3 +342,22 @@ async def test_memory_unavailable_turn_is_rolled_back_from_history(tmp_path: Pat
     with pytest.raises(AgentRunError, match=r"^Memory store unavailable: "):
         await query_database_impl_with_widgets(cfg, "second", conversation_id="c1", agent=agent)
     assert await history() == before
+
+
+@pytest.mark.asyncio
+async def test_format_failure_with_open_error_still_reports_memory_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent_stub_factory
+) -> None:
+    """The memory-unavailable category wins over a formatter failure in the same turn."""
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+    stub = agent_stub_factory(_turn_ending_in_failed_search())
+    stub.agent_memory.open_error = RuntimeError(CHROMA_TEXT)
+    monkeypatch.setattr(agent_module, "build_agent", lambda _c: stub)
+
+    def _boom(*_a, **_k):
+        raise ValueError("formatter broke")
+
+    monkeypatch.setattr(qd, "components_to_blocks", _boom)
+    with pytest.raises(AgentRunError) as excinfo:
+        await query_database_impl_with_widgets(cfg, "q")
+    assert str(excinfo.value) == EXPECTED_MESSAGE

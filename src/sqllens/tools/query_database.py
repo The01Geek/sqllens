@@ -372,14 +372,17 @@ async def _trim_unanswered_tool_use(
 
 
 def _rollback_conversation(
-    agent: Any, conversation_id: str, user_id: str, length: int
+    agent: Any, conversation_id: str, user_id: str, length: int, reason: str = "cancelled"
 ) -> None:
-    """Remove the cancelled call's messages, synchronously.
+    """Remove a call's messages, synchronously.
 
-    Must not suspend: the caller is already inside a cancelled task, where a
-    suspending ``await`` would never resume and the rollback would silently not
-    happen. ``BoundedConversationStore.truncate_messages`` is synchronous for
-    exactly this call site.
+    Two callers: a cancelled call (``reason="cancelled"``) and a call that ran
+    while the memory store could not be opened (``reason="memory-unavailable"``);
+    ``reason`` names which one in the log lines below. Must not suspend: the
+    cancelled caller is already inside a cancelled task, where a suspending
+    ``await`` would never resume and the rollback would silently not happen.
+    ``BoundedConversationStore.truncate_messages`` is synchronous for exactly
+    this call site.
 
     ``agent.conversation_store`` is read unguarded: ``Agent.__init__`` always
     sets it, and ``_conversation_baseline`` already dereferenced it before the
@@ -389,19 +392,20 @@ def _rollback_conversation(
     own ``MemoryConversationStore``, say) reaches a missing method, and one
     whose own implementation raises reaches the second guard. Each logs at ERROR
     naming the store class rather than raising, because the caller is
-    propagating a cancellation that must not be replaced by a different
-    exception — and a swallowed rollback would otherwise leave the next call on
-    this conversation reading a half-finished turn's messages with no signal at
-    all.
+    propagating a cancellation (or its own structured error) that must not be
+    replaced by a different exception — and a swallowed rollback would
+    otherwise leave the next call on this conversation reading a half-finished
+    turn's messages with no signal at all.
     """
     store = agent.conversation_store
     truncate = getattr(store, "truncate_messages", None)
     if truncate is None:
         logger.error(
-            "cancelled query_database call on conversation %s was not rolled "
+            "%s query_database call on conversation %s was not rolled "
             "back: conversation store %s has no synchronous truncate_messages; "
-            "the next call on this conversation will see the cancelled call's "
+            "the next call on this conversation will see that call's "
             "messages",
+            reason,
             conversation_id,
             type(store).__name__,
         )
@@ -413,45 +417,50 @@ def _rollback_conversation(
         # still there. Not reachable with the shipped _StaticUserResolver,
         # which always resolves the same user.
         logger.error(
-            "cancelled query_database call on conversation %s was not rolled "
+            "%s query_database call on conversation %s was not rolled "
             "back: the conversation belongs to a different user than the one "
             "the call resolved; the next call on this conversation will see "
-            "the cancelled call's messages",
+            "that call's messages",
+            reason,
             conversation_id,
         )
         return
     except Exception:
         # Same rationale as the missing-method branch above: the caller is
-        # propagating a cancellation that must not be replaced by a different
-        # exception, so a store whose truncate_messages raises is logged at
-        # ERROR rather than allowed to escape and displace the CancelledError
-        # with nothing recording that the rollback did not happen. Apart from
+        # propagating a cancellation (or its own structured error) that must not
+        # be replaced by a different exception, so a store whose
+        # truncate_messages raises is logged at ERROR rather than allowed to
+        # escape and displace the CancelledError or AgentRunError with nothing
+        # recording that the rollback did not happen. Apart from
         # the owner mismatch handled above, the shipped BoundedConversationStore
         # raises only ValueError for a negative length, which this caller's
         # len()-derived baseline cannot produce, so this is unreachable with the
         # default wiring.
         logger.exception(
-            "cancelled query_database call on conversation %s was not rolled "
+            "%s query_database call on conversation %s was not rolled "
             "back: conversation store %s raised from truncate_messages; the "
-            "next call on this conversation will see the cancelled call's "
+            "next call on this conversation will see that call's "
             "messages",
+            reason,
             conversation_id,
             type(store).__name__,
         )
         return
     if rolled_back:
         logger.info(
-            "cancelled query_database call: rolled conversation %s back to %d "
+            "%s query_database call: rolled conversation %s back to %d "
             "message(s)",
+            reason,
             conversation_id,
             length,
         )
     else:
-        # Not an error: a conversation evicted mid-call, or one the cancelled
+        # Not an error: a conversation evicted mid-call, or one the
         # call never got far enough to append to, has nothing to restore.
         logger.info(
-            "cancelled query_database call on conversation %s: nothing to roll "
+            "%s query_database call on conversation %s: nothing to roll "
             "back (unknown/evicted id, or already at %d message(s))",
+            reason,
             conversation_id,
             length,
         )
@@ -680,12 +689,21 @@ async def query_database_impl_with_widgets(
                 raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
 
             total_duration_ms = int((time.monotonic() - started) * 1000)
-            # Read inside the turn lock: a turn that ran without saved memory is
-            # failed below, so its messages are removed here, before the next call
-            # on this conversation can build on an answer the caller never got.
+            # Read inside the turn lock: a turn that ran to completion without
+            # saved memory is failed below, so its messages are rolled back here,
+            # before the next call on this conversation can build on an answer the
+            # caller never got. A failed rollback is logged at ERROR by the helper.
+            # A turn whose ``send_message`` raised left above with the internal
+            # error and only the unanswered-tool_use trim.
             open_error = getattr(getattr(agent, "agent_memory", None), "open_error", None)
             if open_error is not None and baseline_user is not None and queued_id is not None:
-                _rollback_conversation(agent, queued_id, baseline_user.id, baseline_messages)
+                _rollback_conversation(
+                    agent,
+                    queued_id,
+                    baseline_user.id,
+                    baseline_messages,
+                    reason="memory-unavailable",
+                )
 
         try:
             answer, is_error, blocks, query_info, memory_info = components_to_blocks(
@@ -696,6 +714,9 @@ async def query_database_impl_with_widgets(
             # introspection classifier) must not decide what the user sees by
             # guessing; surface it as the sanitized internal error.
             logger.exception("formatting the agent's response failed")
+            if open_error is not None:
+                # Keep the memory-unavailable category when both failed.
+                raise AgentRunError(_MEMORY_UNAVAILABLE_MESSAGE) from e
             raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
         # The build-time UiFeatures gate now always admits the tool-args card,
         # so the run_sql STATUS_CARD is always present in the component stream
