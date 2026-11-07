@@ -145,7 +145,7 @@ Dialect picked from the URL scheme prefix:
 
 | Scheme | Runner | Notes |
 |---|---|---|
-| `sqlite://` | `SqliteRunner` | `sqlite:///abs/path.db` → `/abs/path.db`; `sqlite://:memory:` preserved. |
+| `sqlite://` | `SqliteRunner` | Path from `sqlite_path_from_url` (SQLAlchemy `make_url` rules): three slashes = relative path (`sqlite:///rel.db` → `rel.db`, resolved against the working directory), four slashes = absolute path (`sqlite:////abs/path.db` → `/abs/path.db`), `sqlite:///C:/x.db` → `C:/x.db`; `sqlite://`, `sqlite:///`, `sqlite://:memory:`, `sqlite:///:memory:` → `:memory:`. Raises `ValueError` for a URL with query parameters, a host, user, password or port. |
 | `postgres://`, `postgresql://`, `postgresql+psycopg2://`, … | `PostgresRunner` | SQLAlchemy-style schemes are normalized to `postgresql://` for psycopg2. |
 | `mysql://` | `MySQLRunner` | Parsed with `urlparse`; requires user, host, and database name. `urllib.parse.unquote` is applied to the username and password so percent-encoded characters (e.g. `%2F` → `/`) are decoded before being passed to pymysql — matching the behaviour of SQLAlchemy's `make_url`. |
 

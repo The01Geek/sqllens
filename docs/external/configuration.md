@@ -30,7 +30,7 @@ Defines the database SQL Lens connects to.
 | `name` | String | A short name for the database, surfaced to the assistant. |
 | `read_only` | Boolean | When true (the default), only read-only statements are allowed: a `SELECT`, or (on MySQL) a structural `SHOW` schema-discovery command such as `SHOW TABLES` / `SHOW COLUMNS`. Generated SQL is parsed before execution, and anything else — including statements hidden inside subqueries or common table expressions, known unsafe or denial-of-service database functions, and information-disclosing `SHOW` variants such as `SHOW GRANTS` — is rejected. As a second line of defense, the database connection itself is also opened in read-only mode, so a write cannot reach your database even if it somehow slips past the parser. When false, these checks are off, except that calls to the unsafe or denial-of-service functions are still rejected while [row-level security](row-level-security.md) rules are configured. Keep this enabled in production. |
 | `statement_timeout_ms` | Integer | Maximum time (in milliseconds) a single query may run before the database aborts it. Default is `30000` (30 seconds). `0` disables the timeout on every engine. Raise this for long-running analytical queries; lower it for tightly-bounded interactive use. |
-| `max_rows` | Integer | Hard ceiling on the number of rows a single query may return. Default is `10000`; valid range is `1` to `1000000`. When a query would return more rows, SQL Lens trims the result and tells the assistant the answer was truncated so it can re-issue a narrower query (for example, by adding a `LIMIT` clause or a more specific `WHERE` filter). |
+| `max_rows` | Integer | Hard ceiling on the number of rows a single query may return. Default is `10000`; valid range is `1` to `1000000`. When a query would return more rows, SQL Lens trims the result and tells the assistant the answer was truncated so it can re-issue a narrower query (for example, by adding a `LIMIT` clause or a more specific `WHERE` filter). The answer also tells you: the table widget and the Markdown answer say "The query stopped at the N-row limit; more rows exist." |
 
 Both `statement_timeout_ms` and `max_rows` are safety bounds that protect SQL Lens (and your database) from runaway queries. The defaults are chosen to handle the vast majority of interactive analytical work without intervention.
 
@@ -40,11 +40,13 @@ Both `statement_timeout_ms` and `max_rows` are safety bounds that protect SQL Le
 
 | Dialect | URL format |
 |---|---|
-| SQLite | `sqlite:///path/to/file.db` |
+| SQLite | `sqlite:///data/app.db` (relative), `sqlite:////var/data/app.db` (absolute), `sqlite:///C:/data/app.db` (Windows) |
 | Postgres | `postgresql://user:password@host:5432/dbname` |
 | MySQL | `mysql+pymysql://user:password@host:3306/dbname` |
 
 On Windows, always use forward slashes inside the URL even though the underlying file path uses backslashes.
+
+For SQLite, three slashes followed by a path (`sqlite:///data/app.db`) is a path relative to the directory the server was started from; four slashes (`sqlite:////var/data/app.db`) is an absolute path. On Windows, write the drive after three slashes (`sqlite:///C:/data/app.db`). A SQLite URL must not contain a host, user, password, port or `?...` query parameters; SQL Lens rejects such a URL. With `read_only = true` (the default), SQL Lens opens the file read-only and never creates it: if the file does not exist, `sqllens serve` stops at startup with an error naming the path.
 
 PostgreSQL runtime connections use a five-second connection timeout by default. Set `connect_timeout` in the database URL (for example, `?connect_timeout=10`) or use `PGCONNECT_TIMEOUT` to override it; direct `PostgresRunner` callers may also pass the constructor option. A DSN value takes precedence, including `0` to disable this timeout. The default overrides a timeout supplied only in a libpq service file. This libpq timeout applies per host and is separate from `statement_timeout_ms`.
 
@@ -272,7 +274,7 @@ By default `validate` checks only that the file parses and the fields are well-t
 
 | Flag | What it checks |
 |---|---|
-| `--check-db` | Opens and immediately closes a connection to `database.url`. |
+| `--check-db` | Opens and immediately closes a connection to `database.url`. For SQLite with `read_only = true`, opens the file read-only and reads its schema header, so a missing file (or a file that is not a SQLite database) fails with an error naming the path instead of creating an empty database. With `read_only = false`, a plain open creates a missing file. |
 | `--check-llm` | Constructs the Anthropic client. Does not call the API. |
 | `--check-memory` | Confirms the Chroma `persist_dir` exists and is writable and, when the directory already holds a memory store, that its `chroma.sqlite3` file is writable by the process running the check. Does not change the file. |
 | `--check-auth` | Builds the configured authenticator, catching mistakes such as `bearer` mode with no token. |

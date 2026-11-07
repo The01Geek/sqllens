@@ -26,6 +26,7 @@ from sqllens.agent.integrations import (
 )
 from sqllens.agent.integrations.local import LocalFileSystem
 from sqllens.agent.integrations.mysql import MySQLRunner
+from sqllens.agent.integrations.sqlite.sql_runner import sqlite_path_from_url
 from sqllens.agent.tools import (
     EmitChartTool,
     EmitTextTool,
@@ -230,12 +231,10 @@ def build_sql_runner(
     """
     scheme = url.split("://", 1)[0].lower()
     if scheme.startswith("sqlite"):
-        # sqlite:///abs/path.db → /abs/path.db ; sqlite://:memory: stays as-is
-        path = url.split("://", 1)[1]
-        if path.startswith("/"):
-            path = path[1:] if not path.startswith("//") else path
+        # sqlite:///rel.db is relative to the working directory; sqlite:////abs.db
+        # is absolute. Do not parse here: preflight must resolve the same file.
         return SqliteRunner(
-            database_path=path or ":memory:",
+            database_path=sqlite_path_from_url(url),
             statement_timeout_ms=statement_timeout_ms,
             max_rows=max_rows,
             read_only=read_only,

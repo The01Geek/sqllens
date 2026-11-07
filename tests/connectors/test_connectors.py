@@ -153,6 +153,31 @@ async def test_select_star_masks_driver_labelled_secret_column(request, engine: 
         await execute(f"DROP TABLE IF EXISTS {table}")
 
 
+async def test_postgres_rls_keeps_quoted_builtin_function_case(postgres_url) -> None:
+    table = f"rls_{uuid.uuid4().hex}"
+    writer = build_sql_runner(postgres_url, read_only=False)
+
+    async def execute(sql: str) -> None:
+        await writer.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+
+    await execute(f"CREATE TABLE {table} (id INTEGER, tenant_id TEXT)")
+    try:
+        await execute(f"INSERT INTO {table} VALUES (1, 'alpha'), (2, 'beta')")
+        guard = RlsGuardRunner(
+            ReadOnlyGuardRunner(
+                RowCapRunner(build_sql_runner(postgres_url), max_rows=10), dialect="postgres"
+            ),
+            [RlsRule(table=table, column="tenant_id", value="alpha")],
+            dialect="postgres",
+        )
+        result = await guard.run_sql(
+            RunSqlToolArgs(sql=f'SELECT "quote_ident"(tenant_id) FROM {table}'), _ctx()
+        )
+        assert result.iloc[:, 0].tolist() == ["alpha"]
+    finally:
+        await execute(f"DROP TABLE IF EXISTS {table}")
+
+
 def _rls_guard(url: str, dialect: str) -> RlsGuardRunner:
     return RlsGuardRunner(
         ReadOnlyGuardRunner(RowCapRunner(build_sql_runner(url), max_rows=10), dialect=dialect),

@@ -105,6 +105,8 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
             "- Use the available tools to help the user accomplish their goals.",
             "- When a query returns more than one row, the result is shown to the user as a table outside of your response, so do NOT repeat the table in your response. Focus on summarizing and interpreting the results.",
             "- When a query returns a single row, always state its key values in a plain sentence in your response (for example, \"There were 1,234 orders last month.\"). A single row with four or fewer columns is usually shown as short text rather than a table, but the values of a very large row may not be shown, so your sentence is what guarantees the user gets the answer.",
+            "- A run_sql result for a data query (not a schema lookup) may say that the user's table is cut, showing only the first N of the M rows the query returned, or that the query stopped at the row limit. When it says the table is cut, your answer to the user (your emit_text text, or your final reply when no emit_text call has succeeded in this request) states how many rows the table shows and how many the query returned. When it says the rows are too large to show the user as a table, that answer says how many rows the query returned and that they could not be shown as a table. When it says the query stopped at the row limit, that answer says the query hit the row limit and more rows exist. Never make these statements about a schema-lookup result. On a turn whose reply is a clarifying question, the rule that the question is your whole written reply wins over this one.",
+            "- Never call a result table or a result full or complete anywhere in your answer, including an introduction you write before the query that produces the table runs.",
             "",
             *database_section,
             "Tool Errors:",
@@ -189,7 +191,7 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
                     "  1. search_saved_correct_tool_uses (memory first)",
                     "  2. run_sql (aggregated)",
                     "  3. emit_chart (the chart of the aggregate)",
-                    "  4. emit_text (\"The top three regions account for ~80% of revenue. Here are the full per-region numbers:\")",
+                    "  4. emit_text (\"The top three regions account for ~80% of revenue. Here are the per-region numbers:\")",
                     "  5. run_sql (the supporting per-region breakdown)",
                     "  6. emit_text (final one-line takeaway)",
                 ]

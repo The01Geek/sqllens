@@ -5,7 +5,7 @@ field (see ``RichComponent.data``). We use it to attach SQL Lens-specific
 opt-in flags without subclassing — keeping the lift surface small and the
 extension shape obvious from one place.
 
-Today's only marker is :data:`IS_ANSWER_MARKER_KEY`, set on every TEXT
+The first marker is :data:`IS_ANSWER_MARKER_KEY`, set on every TEXT
 ``UiComponent`` whose content should reach the user as a deliberate prose
 block in the rendered answer (the agent's terminal answer + iteration-limit
 warning, and every ``EmitTextTool`` output). The MCP-layer block builder
@@ -15,6 +15,9 @@ during a tool call when ``UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT`` is
 on, which carries no marker and must be dropped from the rendered answer.
 The agent loop also reads it: a successful tool result carrying the marker
 hides that request's final reply (only ``EmitTextTool`` marks a tool result).
+
+The second is :data:`ROW_CAP_MARKER_KEY`, set on a DATAFRAME component whose
+query stopped at the row cap.
 """
 
 # The ``data`` key set to ``True`` on TEXT UiComponents whose content the user
@@ -42,3 +45,29 @@ def is_answer_marked(rich: object) -> bool:
     """
     data = getattr(rich, "data", None)
     return isinstance(data, dict) and data.get(IS_ANSWER_MARKER_KEY) is True
+
+
+# The ``data`` key holding the row cap (an ``int``) on a DATAFRAME component
+# whose query stopped at that cap. ``RunSqlTool`` sets it; the shared table
+# payload (``sqllens._table_payload``) copies it into the table block.
+ROW_CAP_MARKER_KEY = "row_cap"
+
+
+def row_cap_marker_data(cap: int) -> dict:
+    """Build the ``data`` dict marking a DATAFRAME component as stopped at ``cap`` rows."""
+    return {ROW_CAP_MARKER_KEY: int(cap)}
+
+
+def row_cap_of(rich: object) -> int | None:
+    """Return the row cap ``rich`` was stopped at, or ``None`` when it was not.
+
+    Only a positive ``int`` (not a ``bool``) counts, so a malformed value never
+    produces a notice with a nonsense cap.
+    """
+    data = getattr(rich, "data", None)
+    if not isinstance(data, dict):
+        return None
+    cap = data.get(ROW_CAP_MARKER_KEY)
+    if isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0:
+        return None
+    return cap

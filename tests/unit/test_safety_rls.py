@@ -211,6 +211,48 @@ class TestApplyRlsStatic:
         assert out.count("tenant_id") == 2
         _assert_filtered_and_readonly(out)
 
+    @pytest.mark.parametrize(("dialect", "sql", "expected"), [
+        (
+            "postgres",
+            'SELECT "quote_ident"(name) FROM orders',
+            "SELECT \"quote_ident\"(name) FROM orders WHERE orders.tenant_id = 'acme'",
+        ),
+        (
+            "postgres",
+            'SELECT "MyFunc"(name) FROM orders',
+            "SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'",
+        ),
+        (
+            "postgres",
+            'SELECT public."MyFunc"(name) FROM orders',
+            "SELECT public.\"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'",
+        ),
+        (
+            "mysql",
+            "SELECT `MyFunc`(name) FROM orders",
+            "SELECT `MyFunc`(name) FROM orders WHERE orders.tenant_id = 'acme'",
+        ),
+        (
+            "sqlite",
+            'SELECT "MyFunc"(name) FROM orders',
+            "SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'",
+        ),
+        (
+            # SQLite names an unaliased result column after the call's text.
+            "sqlite",
+            "SELECT printf('%s', name) FROM orders",
+            "SELECT printf('%s', name) FROM orders WHERE orders.tenant_id = 'acme'",
+        ),
+    ])
+    def test_unrecognised_function_keeps_written_case(
+        self, dialect: str, sql: str, expected: str
+    ) -> None:
+        assert apply_rls(sql, [_rule(value="acme")], dialect=dialect) == expected
+
+    def test_unrecognised_function_on_unprotected_table_is_unchanged(self) -> None:
+        sql = 'SELECT "quote_ident"(name) FROM customers'
+        assert apply_rls(sql, [_rule(value="acme")], dialect="postgres") == sql
+
     def test_unrelated_table_untouched(self) -> None:
         out = apply_rls(
             "SELECT * FROM customers",

@@ -65,6 +65,8 @@ Expected answer: 2 albums.
 
 On Claude Desktop or claude.ai, each `query_database` answer is also shown as an interactive widget alongside the same plain-text answer. The widget renders the answer as an ordered list of blocks — interactive tables you can sort, filter, page through, and export to CSV; interactive Apache ECharts charts (bar, line, area, scatter, pie, or heatmap) that follow the assistant's theme and resize responsively; and Markdown text the agent wrote to introduce or summarize the result. A result with a single row and at most four columns, such as a count or a total, is shown (unless the row is too large to display) as compact text rather than an interactive table: a bold column name followed by its value for a single column, or a simple one-row table for two to four columns. Each table has its own independent controls — sorting one table never affects another in the same answer. Column headers and chart axis titles are shown as readable labels — a database name like `customer_id` is displayed as "Customer ID", and an axis on `total_amount_usd` reads "Total Amount USD" — while a name you already made reader-friendly (a SQL alias, or an axis label the assistant set on purpose) is shown exactly as written; this is display-only and applies to the plain-text answer too, so every assistant sees the same headers. A single answer can include any combination of blocks in any order. The widget reports its own size, so on hosts that support this a small result fits its frame with no surrounding empty space and no extra scrollbar, while larger results get the full height they need. Other assistants display a Markdown rendering of the same blocks. No setup is required either way.
 
+A very large result can be shortened for display. Each table is limited in size, so when a result is too large SQL Lens shows only its first rows, and the widget says so above the table: "Showing the first N of M rows. The other K rows were left out to fit the display size limit." When the query stopped at the configured row limit (`max_rows`), the widget adds "The query stopped at the 10,000-row limit; more rows exist." (with your limit). The Markdown answer carries the same notes under the table and lists at most 500 rows. Export CSV exports only the rows shown and warns you when the table was shortened. If the rows are too large to show as a table at all, the answer says how many rows could not be displayed. The assistant is told when its table is shortened and is instructed to say so.
+
 ### Asking for a chart
 
 To get an interactive chart, phrase the question so the result is aggregated or temporal. For example, against the bundled Chinook demo:
@@ -93,9 +95,11 @@ Keep `read_only = true` unless you specifically need to allow writes.
 
 | Dialect | URL format |
 |---|---|
-| SQLite | `sqlite:///path/to/file.db` (use forward slashes on Windows) |
+| SQLite | `sqlite:///data/app.db` (relative), `sqlite:////var/data/app.db` (absolute), `sqlite:///C:/data/app.db` (Windows) |
 | Postgres | `postgresql://user:password@host:5432/dbname` |
 | MySQL | `mysql+pymysql://user:password@host:3306/dbname` |
+
+For SQLite, three slashes followed by a path (`sqlite:///data/app.db`) is a path relative to the directory the server was started from; four slashes (`sqlite:////var/data/app.db`) is an absolute path. On Windows, write the drive after three slashes (`sqlite:///C:/data/app.db`). A SQLite URL must not contain a host, user, password, port or `?...` query parameters; SQL Lens rejects such a URL. With `read_only = true` (the default), SQL Lens opens the file read-only and never creates it: if the file does not exist, `sqllens serve` stops at startup with an error naming the path.
 
 ## Switching to HTTP transport
 
