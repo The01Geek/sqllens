@@ -1116,7 +1116,13 @@ class Agent:
                 # answer's prose this request: the model tends to repeat it here.
                 # Never skip the history write above to hide it — a tool message
                 # followed directly by the next user message breaks the history.
-                if response.content and not answer_prose_emitted:
+                if response.content and answer_prose_emitted:
+                    logger.info(
+                        "Final reply hidden after a successful emit_text call "
+                        "(%d chars); it is saved to the conversation history only",
+                        len(response.content),
+                    )
+                elif response.content:
                     # Marker (sqllens.agent.markers.IS_ANSWER_MARKER_KEY) shared
                     # with EmitTextTool: the MCP-layer block builder reads it to
                     # include the terminal answer as a rendered TEXT block while

@@ -131,7 +131,7 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
                     "Your answer is an *ordered sequence of blocks* — query results (from run_sql: short text for a one-row result with four or fewer columns that fits the display size limit, otherwise a table; a row too large to display shows at most its column headers, without values), charts (from emit_chart), and prose (from emit_text) — rendered to the user in the order you produce them.",
                     "",
                     "WHAT THE USER SEES:",
-                    "  • Assistant text you write alongside a tool call (your reasoning, tool-call narration, mid-loop thoughts) is NOT shown to the user.",
+                    "  • Assistant text you write alongside a tool call (your reasoning, tool-call narration, mid-loop thoughts) is not part of your answer: do not rely on the user seeing it.",
                     "  • Your final reply (the text you write when you stop calling tools) is NOT shown once an emit_text call has succeeded in this request. It is shown only when no emit_text call has succeeded in this request.",
                     "  • So once an emit_text call succeeds, every sentence the user must see goes in emit_text — including text the other rules tell you to write in your reply, such as a clarifying question, the plain sentence stating a one-row result, a quoted tool error, or a refusal to describe the schema. Do not repeat emit_text prose in your final reply.",
                     "",

@@ -20,17 +20,17 @@ from sqllens.agent.core.agent.agent import Agent
 from sqllens.agent.core.agent.config import UiFeature, UiFeatures
 from sqllens.agent.core.llm import LlmResponse
 from sqllens.agent.core.registry import ToolRegistry
-from sqllens.agent.core.tool import ToolCall
+from sqllens.agent.core.tool import ToolCall, ToolContext, ToolResult
 from sqllens.agent.factory import DEFAULT_USER_GROUP
 from sqllens.agent.tools.emit_text import EmitTextTool
 from sqllens.config import Config
 from sqllens.server import build_server
 from sqllens.tools import query_database as qd
 
-from ._agent_stubs import StubAgentMemory
+from ._agent_stubs import StubAgentMemory, make_dataframe
 from ._config_builders import build_test_config
 from .test_server import _query_database_fn, _StubCtx
-from .test_truncated_tool_calls import _FakeRunSql, _ScriptedLlm, _User
+from .test_truncated_tool_calls import _FakeRunSql, _ScriptedLlm, _SqlArgs, _User
 
 pytestmark = pytest.mark.asyncio
 
@@ -54,13 +54,30 @@ def _sql(id_: str) -> LlmResponse:
     )
 
 
+class _OneRowRunSql(_FakeRunSql):
+    """``run_sql`` returning a one-row result the block builder shows as text."""
+
+    async def execute(self, context: ToolContext, args: _SqlArgs) -> ToolResult:
+        self.executed.append(args.sql)
+        return ToolResult(
+            success=True,
+            result_for_llm="1 row",
+            ui_component=make_dataframe([{"orders": 42}]),
+        )
+
+
 def _query_database(
-    responses: list[LlmResponse], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    responses: list[LlmResponse],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    run_sql: _FakeRunSql | None = None,
+    max_tool_iterations: int = 20,
 ):  # type: ignore[no-untyped-def]
     llm = _ScriptedLlm(responses)
     registry = ToolRegistry()
     registry.register_local_tool(EmitTextTool(), access_groups=[DEFAULT_USER_GROUP])
-    registry.register_local_tool(_FakeRunSql(), access_groups=[DEFAULT_USER_GROUP])
+    registry.register_local_tool(run_sql or _FakeRunSql(), access_groups=[DEFAULT_USER_GROUP])
     # Same UI-feature grant as factory.build_agent, so a failed tool's error
     # status card reaches the block builder exactly as in production.
     ui_features = UiFeatures()
@@ -76,7 +93,9 @@ def _query_database(
         tool_registry=registry,
         user_resolver=_User(),  # type: ignore[arg-type]
         agent_memory=StubAgentMemory(),
-        config=AgentConfig(max_tool_iterations=20, max_tokens=4096, ui_features=ui_features),
+        config=AgentConfig(
+            max_tool_iterations=max_tool_iterations, max_tokens=4096, ui_features=ui_features
+        ),
     )
 
     async def _fake_get_agent(_cfg: Config) -> Agent:
@@ -156,6 +175,42 @@ async def test_repeated_emit_text_blocks_all_shown_in_order(
 
     assert text_blocks == [_PROSE, _PROSE]
     assert markdown.count(_PROSE) == 2
+
+
+async def test_one_row_result_still_shown_in_order_when_final_reply_hidden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    query_database, _ = _query_database(
+        [_sql("s1"), _emit(_PROSE, "e1"), LlmResponse(content="Anything else?")],
+        tmp_path,
+        monkeypatch,
+        run_sql=_OneRowRunSql(),
+    )
+
+    text_blocks, markdown = _texts(await query_database("orders?", _StubCtx()))
+
+    assert len(text_blocks) == 2
+    assert "42" in text_blocks[0]
+    assert text_blocks[1] == _PROSE
+    assert "Anything else?" not in markdown
+
+
+async def test_iteration_limit_warning_shown_after_successful_emit_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The scripted model repeats its last response, so it never stops calling tools.
+    query_database, _ = _query_database(
+        [_emit(_PROSE, "e1"), _sql("s1")],
+        tmp_path,
+        monkeypatch,
+        max_tool_iterations=3,
+    )
+
+    text_blocks, _ = _texts(await query_database("orders?", _StubCtx()))
+
+    assert text_blocks[0] == _PROSE
+    assert len(text_blocks) == 2
+    assert "Tool Execution Limit Reached" in text_blocks[1]
 
 
 async def test_hidden_final_reply_stays_in_history_and_next_request_shows_reply(
