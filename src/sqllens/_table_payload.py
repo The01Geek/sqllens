@@ -236,8 +236,7 @@ def run_sql_display_line(rich: object, sql: str, dialect: str | None) -> str:
     try:
         if is_introspection_query(sql, dialect=dialect):
             return ""
-        rows = getattr(rich, "rows", None) or []
-        total = len(rows)
+        total = len(_columns_and_rows(rich)[1])
         if total == 0:
             return ""
         payload = _compute_table_payload(rich)

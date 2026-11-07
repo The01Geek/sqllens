@@ -116,8 +116,8 @@ def test_csv_warning_counts_exported_rows_after_filter() -> None:
 def test_csv_warning_row_cap_and_formula_warning_together() -> None:
     state = {"columns": ["v"], "rows": [["=1+1"]], "rowCount": 1, "truncated": 0, "rowCap": 5000}
     assert _csv_warning(state) == (
-        "Warning: this CSV holds only the 1 rows shown; the query stopped at the "
-        "5,000-row limit. " + FORMULA
+        "Warning: this CSV holds only the 1 rows shown. The query stopped at the "
+        "5,000-row limit; more rows exist. " + FORMULA
     )
 
 
