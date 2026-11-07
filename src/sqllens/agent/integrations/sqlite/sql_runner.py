@@ -1,5 +1,6 @@
 """SQLite implementation of SqlRunner interface."""
 
+import re
 import sqlite3
 import time
 from urllib.parse import quote
@@ -23,20 +24,80 @@ _DEFAULT_MAX_ROWS = 10_000
 _PROGRESS_HANDLER_INSTRUCTIONS = 1000
 
 
+SQLITE_URL_QUERY_UNSUPPORTED = (
+    "SQLite URL query parameters are not supported; remove the '?...' part of database.url"
+)
+_SQLITE_DEFAULT_TIMEOUT_SECONDS = 5.0
+_WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
+
+
+def sqlite_path_from_url(url: str) -> str:
+    """Return the SQLite file path ``url`` names, by SQLAlchemy's rules.
+
+    ``sqlite:///rel.db`` is relative to the working directory,
+    ``sqlite:////abs.db`` is absolute, and ``sqlite://``, ``sqlite:///``,
+    ``sqlite://:memory:`` and ``sqlite:///:memory:`` are in-memory.
+
+    Raises:
+        ValueError: the URL carries query parameters or a host, or SQLAlchemy
+            cannot parse it.
+    """
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.exc import ArgumentError
+
+    # make_url reads ``:memory:`` here as host + port and raises.
+    if url.split("://", 1)[-1] == ":memory:":
+        return ":memory:"
+    try:
+        parsed = make_url(url)
+    except ArgumentError as exc:
+        raise ValueError(f"could not parse database.url as a SQLite URL: {exc}") from exc
+    if parsed.query:
+        raise ValueError(SQLITE_URL_QUERY_UNSUPPORTED)
+    if parsed.host:
+        raise ValueError(
+            "SQLite URLs take no host; use sqlite:///relative/path.db or "
+            "sqlite:////absolute/path.db"
+        )
+    return parsed.database or ":memory:"
+
+
 def _readonly_uri(database_path: str) -> str:
     """Build the SQLite read-only connection URI for ``database_path``.
 
-    SQLite has no DB role to fall back on, so the ``mode=ro`` URI is one of
-    the connector-level backstops when the parser guard misses a write.
-    Factored out as a pure function so the URI construction is unit-testable
-    without a live database file.
+    The URI never carries a host part, which SQLite rejects with ``invalid uri
+    authority``: a path starting ``//`` gets an explicit empty authority, and a
+    Windows drive path takes the documented ``file:///C:/...`` form.
 
     The path is percent-encoded (keeping ``/`` as the separator): an
-    unescaped ``?`` or ``#`` in the database path would otherwise terminate
-    the URI path component, drop the ``mode=ro`` query string, and silently
-    open a *writable* connection to a truncated/wrong file.
+    unescaped ``?`` or ``#`` would otherwise end the URI path, drop
+    ``mode=ro``, and open a writable connection to a truncated file.
     """
-    return f"file:{quote(database_path, safe='/')}?mode=ro"
+    if _WINDOWS_DRIVE.match(database_path):
+        encoded = database_path[:2] + quote(database_path[2:], safe="/")
+        return f"file:///{encoded}?mode=ro"
+    encoded = quote(database_path, safe="/")
+    if database_path.startswith("//"):
+        return f"file://{encoded}?mode=ro"
+    return f"file:{encoded}?mode=ro"
+
+
+def connect_sqlite(
+    database_path: str,
+    *,
+    read_only: bool,
+    timeout: float = _SQLITE_DEFAULT_TIMEOUT_SECONDS,
+) -> sqlite3.Connection:
+    """Open ``database_path`` as the query runner and preflight both do.
+
+    With ``read_only`` a file path opens through the ``mode=ro`` URI, so a
+    missing file fails instead of being created. ``:memory:`` and
+    ``read_only=False`` open plainly (``mode=ro`` on ``:memory:`` would open a
+    separate empty database).
+    """
+    if read_only and database_path != ":memory:":
+        return sqlite3.connect(_readonly_uri(database_path), uri=True, timeout=timeout)
+    return sqlite3.connect(database_path, timeout=timeout)
 
 
 class SqliteRunner(SqlRunner):
@@ -105,10 +166,7 @@ class SqliteRunner(SqlRunner):
         self, args: RunSqlToolArgs, *, require_base_tables: bool
     ) -> pd.DataFrame:
         """Execute ``args.sql`` synchronously; called on a worker thread by ``run_sql``."""
-        if self._read_only and self.database_path != ":memory:":
-            conn = sqlite3.connect(_readonly_uri(self.database_path), uri=True)
-        else:
-            conn = sqlite3.connect(self.database_path)
+        conn = connect_sqlite(self.database_path, read_only=self._read_only)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 

@@ -14,8 +14,10 @@ parents) and touches then removes a sentinel file to confirm writability,
 since ``os.access`` alone gives wrong answers under EUID/ACL setups; an
 existing ``chroma.sqlite3`` is opened for writing but left unchanged. Even
 ``probe_memory`` avoids opening a Chroma collection so the ~80 MB embedding
-download stays lazy. The remaining probes are non-mutating: open and
-immediately close a connection (no query), construct the LLM client (no
+download stays lazy. The remaining probes are non-mutating, except that a
+``read_only = false`` SQLite probe creates a missing database file: open and
+immediately close a connection (no query; a read-only SQLite probe reads the
+schema header), construct the LLM client (no
 API round-trip), and build the authenticator (catches bearer-mode configs
 missing a token).
 """
@@ -28,6 +30,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import unquote, urlparse
 
+from sqllens.agent.integrations.sqlite.sql_runner import connect_sqlite, sqlite_path_from_url
 from sqllens.auth import build_authenticator
 from sqllens.config import API_KEY_MISSING_MESSAGE, Config
 
@@ -43,6 +46,35 @@ class PreflightError(Exception):
         super().__init__(f"{subsystem}: {detail}")
         self.subsystem = subsystem
         self.detail = detail
+
+
+def _probe_sqlite(url: str, *, read_only: bool) -> None:
+    """Open the SQLite file the query runner will open, the way it opens it.
+
+    With ``read_only`` the open goes through the ``mode=ro`` URI, so a missing
+    file fails here instead of being created, and the schema header is read so
+    a directory or non-database file fails too. The message names the path
+    (a SQLite path carries no credentials) but never ``str(exc)``.
+    """
+    import sqlite3
+
+    try:
+        path = sqlite_path_from_url(url)
+    except ValueError as exc:
+        raise PreflightError("database", str(exc)) from exc
+    shown = path if path == ":memory:" else f"{path} (resolved to {Path(path).absolute()})"
+    try:
+        with contextlib.closing(
+            connect_sqlite(path, read_only=read_only, timeout=_DB_CONNECT_TIMEOUT_SECONDS)
+        ) as conn:
+            if read_only:
+                conn.execute("PRAGMA schema_version").fetchone()
+    except sqlite3.Error as exc:
+        raise PreflightError(
+            "database",
+            f"{type(exc).__name__}: could not open SQLite database {shown}; "
+            "check that the file exists and is a readable SQLite database.",
+        ) from exc
 
 
 def probe_database(cfg: Config) -> None:
@@ -68,22 +100,7 @@ def probe_database(cfg: Config) -> None:
     scheme = scheme.lower()
 
     if scheme.startswith("sqlite"):
-        import sqlite3
-
-        path = rest
-        if path.startswith("/") and not path.startswith("//"):
-            path = path[1:]
-        # sqlite3's ``timeout`` is lock-wait, NOT connect-timeout — passed only
-        # for completeness; the file open() is the only blocking step.
-        try:
-            with contextlib.closing(
-                sqlite3.connect(path or ":memory:", timeout=_DB_CONNECT_TIMEOUT_SECONDS)
-            ):
-                pass
-        except sqlite3.Error as exc:
-            raise PreflightError(
-                "database", f"{type(exc).__name__}: connection failed; check connection settings."
-            ) from exc
+        _probe_sqlite(url, read_only=cfg.database.read_only)
         return
 
     if scheme.startswith("postgres"):
