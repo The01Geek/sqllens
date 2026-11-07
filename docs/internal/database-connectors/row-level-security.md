@@ -169,6 +169,8 @@ Agent.send_message → ToolContext(metadata=...)     (caller-supplied keys sprea
   ↓
 RunSqlTool → SqlRunner.run_sql(args, context)
   ↓
+ResultMaskingRunner.run_sql                        (masks secret-looking result columns on the way back)
+  ↓
 RlsGuardRunner.run_sql                             (rewrites args.sql, reading context.metadata)
   ↓
 ReadOnlyGuardRunner.run_sql                        (validates the REWRITTEN sql — see Wiring)
@@ -194,13 +196,14 @@ if cfg.database.read_only:
     sql_runner = ReadOnlyGuardRunner(sql_runner, dialect=dialect)
 if cfg.rls:
     sql_runner = RlsGuardRunner(sql_runner, cfg.rls, dialect=dialect)
+sql_runner = ResultMaskingRunner(sql_runner, ...)
 ```
 
-Resulting call order on every query: **RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**.
+Resulting call order on every query: **ResultMaskingRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**.
 
 The order is deliberate:
 
-- **RLS is outermost** so the rewrite happens *before* the read-only guard runs. The read-only guard's full-tree walk then validates the *rewritten* SQL — meaning the same DML/DDL deny-walk and denied-function check applies to the injected predicates too. A rule whose composition somehow produced a denied function would be caught.
+- **RLS sits ahead of the read-only guard** so the rewrite happens *before* the read-only guard runs. The read-only guard's full-tree walk then validates the *rewritten* SQL — meaning the same DML/DDL deny-walk and denied-function check applies to the injected predicates too. A rule whose composition somehow produced a denied function would be caught.
 - **The decorator is only wrapped when `cfg.rls` is non-empty.** The no-RLS path adds no RLS rewrite or catalog checks.
 
 When `cfg.database.read_only = false` (disabled — don't), the read-only guard is skipped *and* RLS still wraps if rules are configured. `RlsGuardRunner` then still applies the read-only guard's function denylist to the rewritten SQL (`assert_no_denied_functions`, raising `UnsafeSqlError`) — only the denylist, not the SELECT-only statement checks — and the engine runner still verifies the referenced relations and called routines before executing it. `RlsGuardRunner` runs that denylist check whenever it has rules, so with `read_only = true` it runs ahead of the read-only guard's own copy.

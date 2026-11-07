@@ -167,7 +167,7 @@ The agent's own clarifying question does not take this path. The rule for when t
 
 Returns `""` when no renderable affordance is present, which the callers treat as "fall back to `(no answer)`". Pinned by `tests/unit/test_format.py`.
 
-The 500-row cap is intentional: it keeps tool results inside typical MCP message size limits and protects the calling LLM from drowning in token-expensive table dumps. The agent itself sees the (already row-capped) DataFrame; this renderer cap only affects what travels back over MCP. Truncation from the underlying `DatabaseConfig.max_rows` (e.g. "Result truncated at 10 000 rows") is surfaced separately by `RunSqlTool` inside `result_for_llm` — see [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md#row-cap-and-truncation-surface).
+The 500-row cap is intentional: it keeps tool results inside typical MCP message size limits and protects the calling LLM from drowning in token-expensive table dumps. The agent itself sees the first 1,000 CSV characters of the (already row-capped, already masked) DataFrame, plus the saved-file line and the row-cap and masking notes `RunSqlTool` appends when they apply; this renderer cap only affects what travels back over MCP. Truncation from the underlying `DatabaseConfig.max_rows` (e.g. "Result truncated at 10 000 rows") is surfaced separately by `RunSqlTool` inside `result_for_llm` — see [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md#row-cap-and-truncation-surface).
 
 ## Multi-turn conversations (`conversation_id`)
 
