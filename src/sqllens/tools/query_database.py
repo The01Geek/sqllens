@@ -391,9 +391,10 @@ def _rollback_conversation(
     embedder that constructs ``Agent`` with a different store (the framework's
     own ``MemoryConversationStore``, say) reaches a missing method, and one
     whose own implementation raises reaches the second guard. Each logs at ERROR
-    naming the store class rather than raising, because the caller is
-    propagating a cancellation (or its own structured error) that must not be
-    replaced by a different exception — and a swallowed rollback would
+    naming the store class rather than raising, because the cancelled caller is
+    propagating a cancellation, and the memory-unavailable caller raises its
+    structured error right after, and neither may be replaced by a different
+    exception — and a swallowed rollback would
     otherwise leave the next call on this conversation reading a half-finished
     turn's messages with no signal at all.
     """
@@ -693,8 +694,9 @@ async def query_database_impl_with_widgets(
             # saved memory is failed below, so its messages are rolled back here,
             # before the next call on this conversation can build on an answer the
             # caller never got. A failed rollback is logged at ERROR by the helper.
-            # A turn whose ``send_message`` raised left above with the internal
-            # error and only the unanswered-tool_use trim.
+            # A turn whose ``send_message`` raised never gets here: it left through
+            # one of the handlers above (a cancellation's full rollback, the guard
+            # errors, or the internal error after the unanswered-tool_use trim).
             open_error = getattr(getattr(agent, "agent_memory", None), "open_error", None)
             if open_error is not None and baseline_user is not None and queued_id is not None:
                 _rollback_conversation(
@@ -715,7 +717,12 @@ async def query_database_impl_with_widgets(
             # guessing; surface it as the sanitized internal error.
             logger.exception("formatting the agent's response failed")
             if open_error is not None:
-                # Keep the memory-unavailable category when both failed.
+                # Keep the memory-unavailable category when both failed, and log
+                # its cause as the normal path below does.
+                logger.warning(
+                    "agent memory store could not be opened; failing the query",
+                    exc_info=open_error,
+                )
                 raise AgentRunError(_MEMORY_UNAVAILABLE_MESSAGE) from e
             raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
         # The build-time UiFeatures gate now always admits the tool-args card,
