@@ -121,6 +121,7 @@ class ChromaAgentMemory(AgentMemory):
         self.collection_name = collection_name
         self._write_state = None
         self._client = None
+        self._open_error: BaseException | None = None
         self._collection = None
         self._executor = ThreadPoolExecutor(max_workers=2)
         self._embedding_function = embedding_function
@@ -135,13 +136,32 @@ class ChromaAgentMemory(AgentMemory):
     def _get_client(self):
         """Get or create ChromaDB client."""
         if self._client is None:
-            client = chromadb.PersistentClient(
-                path=self.persist_directory,
-                settings=Settings(anonymized_telemetry=False, allow_reset=True),
-            )
-            self._write_state = collection_state(self.persist_directory, self.collection_name)
+            try:
+                client = chromadb.PersistentClient(
+                    path=self.persist_directory,
+                    settings=Settings(anonymized_telemetry=False, allow_reset=True),
+                )
+                self._write_state = collection_state(
+                    self.persist_directory, self.collection_name
+                )
+            except Exception as exc:
+                self._open_error = exc
+                raise
+            self._open_error = None
             self._client = client
         return self._client
+
+    @property
+    def open_error(self) -> BaseException | None:
+        """The exception from the latest failed store open, or ``None``.
+
+        Reads ``None`` whenever a client is open, so a failed open that finishes
+        after a concurrent successful one (two executor threads) cannot leave it set.
+        ``query_database`` turns a set value into its memory-unavailable error.
+        """
+        if self._client is not None:
+            return None
+        return self._open_error
 
     def _get_embedding_function(self):
         """Get or create the embedding function.
