@@ -1,0 +1,38 @@
+[
+  {
+    "criterion": 1,
+    "text": "In both widgets, on a host that does not advertise `downloadFile` and where a clipboard copy succeeds, the export copies the content and shows \"This host can't save files — CSV copied to clipboard\" in the table widget and \"This host can't save files — Export copied to clipboard\" in memory admin, with any warning tail appended."
+  },
+  {
+    "criterion": 2,
+    "text": "In both widgets, when `app.downloadFile` resolves with a result that does not have `isError: true` (an empty result included), the widget shows \"Downloaded query_results.csv ✓\" in the table widget and \"Downloaded memory-export.json ✓\" or \"Downloaded memory-export.csv ✓\" in memory admin, with any warning tail appended, and copies nothing."
+  },
+  {
+    "criterion": 3,
+    "text": "In both widgets, when `app.downloadFile` resolves with `isError: true`, the widget shows \"Download cancelled or blocked by the host.\" with any warning tail appended (in memory admin, in the red error banner, never the green success banner), never shows a \"Downloaded\" message, does not write to the clipboard, and does not show the overlay."
+  },
+  {
+    "criterion": 4,
+    "text": "In both widgets, when `app.downloadFile` throws and a clipboard copy succeeds, the widget shows \"Download failed (timed out) — CSV copied to clipboard\" (memory admin: \"Download failed (timed out) — Export copied to clipboard\") for a thrown error whose `code` is -32001 (the SDK request timeout), and \"Download failed (<the error's message>) — …\" with the same ending for any other thrown error, in both cases with any warning tail appended."
+  },
+  {
+    "criterion": 5,
+    "text": "In both widgets, when the content reaches the overlay, the overlay hint opens with the same reason the clipboard message would have given (\"This host can't save files\" or \"Download failed (<reason>)\"), followed by \"and the clipboard is blocked. Select all and copy:\", and no longer says \"Host blocked the file download\"."
+  },
+  {
+    "criterion": 6,
+    "text": "Both widgets call `app.downloadFile` with resource URI `file:///query_results.csv` (table widget) or `file:///memory-export.<json|csv>` (memory admin) and with request option `timeout: 600000`."
+  },
+  {
+    "criterion": 7,
+    "text": "Each widget's Export button label is unchanged whatever the host's capabilities."
+  },
+  {
+    "criterion": 8,
+    "text": "A node-run test covers each row of the Desired Behavior table, for the table widget (`exportCsv`) and for memory admin (`offerDownload`), at minimum: no capability with clipboard success; download resolving to an empty result; download resolving to `{isError: true}`; download throwing a timeout error; download throwing another error; no capability with both clipboard methods failing (overlay). `pytest -q` passes, and the existing check that warnings survive every export route in `tests/unit/test_output_boundaries.py` still passes."
+  },
+  {
+    "criterion": 9,
+    "text": "The change leaves host-side `downloadFile` support unchanged: on a host that does not advertise the capability, such as the tenant website chat widget if it does not, export still produces no file. A host-cancel and a host-refusal stay indistinguishable, because the SDK reports both as `isError: true`. A save dialog left open for more than 10 minutes still times out into the \"Download failed (timed out)\" clipboard route."
+  }
+]
