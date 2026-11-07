@@ -8,7 +8,8 @@ set so the MCP-layer block builder (``components_to_blocks``) can include this
 prose without leaking intermediate-reasoning TEXT (the assistant text that
 accompanies a tool call when ``UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT``
 is on, see ``agent/core/agent/agent.py``). The terminal answer TEXT carries the
-same marker, so the two converge on one discriminator.
+same marker, so the two converge on one discriminator. A successful call also
+makes the agent loop skip yielding that request's terminal answer.
 """
 
 import logging
@@ -58,8 +59,11 @@ class EmitTextTool(Tool[EmitTextParams]):
         return (
             "Render a Markdown prose block in the response at this position. "
             "Call between run_sql / emit_chart steps to interleave deliberate "
-            "user-facing text with charts and tables. Non-emit_text assistant "
-            "text is treated as hidden reasoning and is NOT shown to the user."
+            "user-facing text with charts and tables. Assistant text written "
+            "alongside a tool call is NOT shown to the user. Once an emit_text "
+            "call succeeds in a request, your final reply is NOT shown either, "
+            "so put every sentence the user must see in emit_text; when no "
+            "emit_text call succeeds in the request, the final reply is shown."
         )
 
     def get_args_schema(self) -> Type[EmitTextParams]:

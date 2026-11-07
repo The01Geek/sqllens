@@ -103,3 +103,15 @@ async def test_execute_error_path_returns_structured_failure(
     assert any(
         "emit_text execute failed" in r.getMessage() for r in caplog.records
     ), "expected a logger.exception call on the broad-except path"
+
+
+def test_description_states_when_the_final_reply_is_shown() -> None:
+    description = EmitTextTool().description
+    assert "alongside a tool call is NOT shown" in description
+    assert "Once an emit_text call succeeds in a request, your final reply is NOT shown" in (
+        description
+    )
+    assert "when no emit_text call succeeds in the request, the final reply is shown" in (
+        description
+    )
+    assert "hidden reasoning" not in description

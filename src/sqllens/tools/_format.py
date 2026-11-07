@@ -28,7 +28,7 @@ from decimal import Decimal
 from sqllens._bounded_json import JsonBoundsError, copy_bounded_json
 from sqllens.agent.core.components import UiComponent
 from sqllens.agent.core.rich_component import ComponentType
-from sqllens.agent.markers import IS_ANSWER_MARKER_KEY
+from sqllens.agent.markers import is_answer_marked
 from sqllens.safety import first_sql_keyword, is_introspection_query
 
 logger = logging.getLogger("sqllens.tools._format")
@@ -243,8 +243,7 @@ def _text_is_answer_marked(rich) -> bool:  # type: ignore[no-untyped-def]
     producer drift that stuffs a non-bool value under the marker key (string
     "yes", truthy list) does not silently flip the discrimination.
     """
-    data = getattr(rich, "data", None)
-    return isinstance(data, dict) and data.get(IS_ANSWER_MARKER_KEY) is True
+    return is_answer_marked(rich)
 
 
 def components_to_blocks(
@@ -274,7 +273,9 @@ def components_to_blocks(
     - Every ``CHART`` becomes a ``{"type": "chart", ...chart payload...}``
       block at its stream position.
     - Every **answer-marked** ``TEXT`` (deliberate prose: ``EmitTextTool``
-      output and the agent's terminal answer / iteration-limit warning) becomes
+      output and the agent's terminal answer / iteration-limit warning; the
+      agent yields no terminal answer once an ``emit_text`` call succeeded in
+      the request) becomes
       a ``{"type": "text", "text": ...}`` block at its stream position.
       Intermediate-reasoning ``TEXT`` (the assistant prose that accompanies a
       tool call when ``UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT`` is on)

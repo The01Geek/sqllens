@@ -30,3 +30,13 @@ def answer_marker_data() -> dict:
     out of whatever ``data`` dict ends up on the component.
     """
     return {IS_ANSWER_MARKER_KEY: True}
+
+
+def is_answer_marked(rich: object) -> bool:
+    """True iff ``rich`` carries the answer marker set by :func:`answer_marker_data`.
+
+    Strict identity (``is True``): a non-bool value under the key must not
+    count as a marker.
+    """
+    data = getattr(rich, "data", None)
+    return isinstance(data, dict) and data.get(IS_ANSWER_MARKER_KEY) is True

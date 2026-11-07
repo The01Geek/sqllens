@@ -19,7 +19,7 @@ from sqllens.agent.components import (
     StatusCardComponent,
     Task,
 )
-from sqllens.agent.markers import answer_marker_data
+from sqllens.agent.markers import answer_marker_data, is_answer_marked
 from .config import AgentConfig
 from sqllens.agent.core.storage import ConversationStore
 from sqllens.agent.core.llm import LlmService
@@ -663,6 +663,8 @@ class Agent:
         tool_iterations = 0
         consecutive_argument_failures = 0
         stopped_on_argument_failures = False
+        # Request-local, never on self: one Agent serves concurrent requests.
+        answer_prose_emitted = False
 
         # Per-request profile may narrow the iteration cap; never widen above
         # the constructor cap (the operator's ceiling). The effective cap is
@@ -1024,6 +1026,8 @@ class Agent:
                         else:
                             # Success results are always shown if they exist
                             yield result.ui_component
+                            if is_answer_marked(result.ui_component.rich_component):
+                                answer_prose_emitted = True
 
                     # Collect tool result data
                     tool_results.append(
@@ -1108,8 +1112,11 @@ class Agent:
                             provider_content=response.provider_content,
                         )
                     )
-                # Yield final text response
-                if response.content:
+                # Yield final text response, unless emit_text already wrote the
+                # answer's prose this request: the model tends to repeat it here.
+                # Never skip the history write above to hide it — a tool message
+                # followed directly by the next user message breaks the history.
+                if response.content and not answer_prose_emitted:
                     # Marker (sqllens.agent.markers.IS_ANSWER_MARKER_KEY) shared
                     # with EmitTextTool: the MCP-layer block builder reads it to
                     # include the terminal answer as a rendered TEXT block while
