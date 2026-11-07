@@ -1,0 +1,22 @@
+[
+  {
+    "criterion": 1,
+    "text": "While the agent's memory store cannot be opened, every `query_database` call whose agent turn reaches the model and completes returns `isError: true` whose text is `Error executing tool query_database: ` followed by the memory-unavailable message stated in Desired Behavior, both with `show_details` off and with `show_details` on (where the result also carries `_meta[\"sqllens/agent_trace\"]`), including a turn in which a later data `run_sql` succeeded and a turn that previously ended as `SQL execution error: Tool failed: …`."
+  },
+  {
+    "criterion": 2,
+    "text": "The error message of such a call contains neither the configured `memory.persist_dir` path nor the Chroma exception text. With `show_details` on, the attached `_meta[\"sqllens/agent_trace\"]` keeps reporting each failed step's error as it does today."
+  },
+  {
+    "criterion": 3,
+    "text": "Once `chroma.sqlite3` is writable again, without a server restart, `query_database` returns normal results from the first call whose store open succeeds; while the store stays open, results are as before, with no memory-unavailable error and `_meta[\"sqllens/memory_info\"]` still reporting search hits and misses. A failed open that finishes after a concurrent successful open on the same memory instance does not make any later call return the memory-unavailable error."
+  },
+  {
+    "criterion": 4,
+    "text": "When the agent's memory object has no recorded-failure attribute, `query_database` results are unchanged by this change."
+  },
+  {
+    "criterion": 5,
+    "text": "The change leaves Chroma's in-process client cache alone: no SQL Lens code reads or changes `SharedSystemClient._identifier_to_system`, so the server log can still show the `AttributeError` on every other failed open. The change does not edit `src/sqllens/agent/core/system_prompt/default.py`. The change leaves memory failures that happen after the store opened, for example an embedding-model download failure during a search, handled as they are today. A call made while the store cannot be opened still runs the whole agent turn, including its model requests, before it returns the error. A message the default workflow handler answers without calling the model (for example `help`) makes no store open attempt; it returns the memory-unavailable error exactly when a failure from an earlier open attempt is recorded."
+  }
+]
