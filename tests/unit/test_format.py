@@ -867,8 +867,8 @@ def test_table_header_fits_but_no_row_fits_emits_empty_rows_block() -> None:
 
 def test_table_payload_construction_failure_drops_table_block_only(monkeypatch) -> None:
     # The iter-2 robustness wrapper: if payload construction raises, the table
-    # block is silently dropped (Markdown answer still stands) rather than
-    # letting the exception escape the sanitized error taxonomy.
+    # block is dropped (a "could not be displayed" text block takes its place)
+    # rather than letting the exception escape the sanitized error taxonomy.
     import sqllens.tools._format as fmt
 
     def boom(_rich):
@@ -2014,4 +2014,143 @@ def test_cte_data_query_result_is_shown(sql: str, dialect: str) -> None:
 def test_mysql_show_tables_result_is_withheld() -> None:
     stream = [*_sql_call("SHOW TABLES"), _widgets_df()]
     _md, _err, blocks, _qi, _mi = components_to_blocks(stream, dialect="mysql")
+    assert blocks == []
+
+
+# ─────────────── cut-table notices (issue #337) ───────────────
+
+
+from sqllens.agent.markers import row_cap_marker_data  # noqa: E402
+
+_DISPLAY_SENTENCE = (
+    "Showing the first {n} of {m} rows. "
+    "The other {k} rows were left out to fit the display size limit."
+)
+
+
+def _wide_frame(n_rows: int, width: int = 600, cap: int | None = None) -> DataFrameComponent:
+    rows = [{"c": f"{i}-" + "x" * width} for i in range(n_rows)]
+    data = row_cap_marker_data(cap) if cap is not None else {}
+    return DataFrameComponent(rows=rows, columns=["c"], data=data)
+
+
+def _table_and_markdown(rich) -> tuple[dict, str]:  # type: ignore[no-untyped-def]
+    markdown, is_error, blocks, _qi, _mi = components_to_blocks([_ui(rich)])
+    assert is_error is False
+    return next(b for b in blocks if b["type"] == "table"), markdown
+
+
+def test_display_cut_at_most_500_rows_gets_markdown_note() -> None:
+    table, markdown = _table_and_markdown(_wide_frame(300))
+    n, k = table["row_count"], table["truncated"]
+    assert k > 0 and n + k == 300
+    assert markdown.endswith("_" + _DISPLAY_SENTENCE.format(n=n, m=300, k=k) + "_")
+    assert "Showing first" not in markdown
+
+
+def test_display_cut_with_fewer_than_500_kept_of_more_than_500_states_kept_count() -> None:
+    table, markdown = _table_and_markdown(_wide_frame(800))
+    n, k = table["row_count"], table["truncated"]
+    assert n < _MAX_ROWS_RENDERED < n + k
+    assert markdown.endswith("_" + _DISPLAY_SENTENCE.format(n=n, m=800, k=k) + "_")
+    assert "Showing first 500" not in markdown
+
+
+def test_display_cut_keeping_more_than_500_rows_says_markdown_lists_500() -> None:
+    table, markdown = _table_and_markdown(_wide_frame(3000, width=60))
+    n, k = table["row_count"], table["truncated"]
+    assert n > _MAX_ROWS_RENDERED and k > 0
+    expected = _DISPLAY_SENTENCE.format(n="500", m=f"{n + k:,}", k=f"{k:,}")
+    assert markdown.endswith(
+        "_" + expected + " This Markdown table lists at most 500 rows._"
+    )
+
+
+def test_row_cap_only_table_gets_cap_sentence_and_field() -> None:
+    rich = DataFrameComponent(
+        rows=[{"n": i} for i in range(5)], columns=["n"], data=row_cap_marker_data(10000)
+    )
+    table, markdown = _table_and_markdown(rich)
+    assert table["row_cap"] == 10000
+    assert table["truncated"] == 0
+    assert markdown.endswith("_The query stopped at the 10,000-row limit; more rows exist._")
+
+
+def test_row_cap_sentence_follows_500_row_footer() -> None:
+    rich = DataFrameComponent(
+        rows=[{"n": i} for i in range(600)], columns=["n"], data=row_cap_marker_data(600)
+    )
+    _table, markdown = _table_and_markdown(rich)
+    assert markdown.endswith(
+        "_Showing first 500 of 600 rows. "
+        "The query stopped at the 600-row limit; more rows exist._"
+    )
+
+
+def test_both_limits_put_display_sentence_first() -> None:
+    table, markdown = _table_and_markdown(_wide_frame(300, cap=300))
+    n, k = table["row_count"], table["truncated"]
+    assert table["row_cap"] == 300
+    assert markdown.endswith(
+        "_" + _DISPLAY_SENTENCE.format(n=n, m=300, k=k)
+        + " The query stopped at the 300-row limit; more rows exist._"
+    )
+    inner = {key: v for key, v in table.items() if key != "type"}
+    assert _serialized_len(inner) <= _MAX_TABLE_PAYLOAD_BYTES
+
+
+def test_uncut_table_has_no_note_and_no_row_cap_field() -> None:
+    table, markdown = _table_and_markdown(
+        DataFrameComponent(rows=[{"n": 1}, {"n": 2}], columns=["n"])
+    )
+    assert "row_cap" not in table
+    assert "_" not in markdown.splitlines()[-1]
+
+
+def test_one_row_text_result_with_row_cap_ends_with_cap_sentence() -> None:
+    rich = DataFrameComponent(rows=[{"n": 7}], columns=["n"], data=row_cap_marker_data(1))
+    _md, _err, blocks, _qi, _mi = components_to_blocks([_ui(rich)])
+    text = next(b for b in blocks if b["type"] == "text")["text"]
+    assert text.endswith("The query stopped at the 1-row limit; more rows exist.")
+
+
+@pytest.mark.parametrize("cap", [None, 2000])
+def test_headers_too_large_emit_could_not_be_displayed_text(cap: int | None) -> None:
+    huge_col = "h" * (_MAX_TABLE_PAYLOAD_BYTES + 50)
+    data = row_cap_marker_data(cap) if cap is not None else {}
+    rich = DataFrameComponent(
+        rows=[{huge_col: i} for i in range(2000)], columns=[huge_col], data=data
+    )
+    markdown, _err, blocks, _qi, _mi = components_to_blocks([_ui(rich)])
+    assert [b for b in blocks if b["type"] == "table"] == []
+    text = next(b for b in blocks if b["type"] == "text")["text"]
+    expected = "The query returned 2,000 rows that could not be displayed."
+    if cap is not None:
+        expected += " The query stopped at the 2,000-row limit; more rows exist."
+    assert text == expected
+    assert expected in markdown
+
+
+def test_payload_build_failure_emits_could_not_be_displayed_text(monkeypatch) -> None:
+    import sqllens.tools._format as fmt
+
+    def boom(_rich):
+        raise RuntimeError("pathological column object")
+
+    monkeypatch.setattr(fmt, "_compute_table_payload", boom)
+    rich = DataFrameComponent(rows=[{"id": 1}, {"id": 2}], columns=["id"])
+    _md, _err, blocks, _qi, _mi = components_to_blocks([_ui(rich)])
+    assert [b["text"] for b in blocks if b["type"] == "text"] == [
+        "The query returned 2 rows that could not be displayed."
+    ]
+
+
+def test_hidden_schema_lookup_with_oversized_headers_adds_nothing() -> None:
+    huge_col = "h" * (_MAX_TABLE_PAYLOAD_BYTES + 50)
+    stream = [
+        _sql_card("SELECT name FROM sqlite_master", status="running"),
+        _ui(DataFrameComponent(rows=[{huge_col: 1}], columns=[huge_col])),
+        _sql_card("SELECT name FROM sqlite_master"),
+    ]
+    _md, _err, blocks, _qi, _mi = components_to_blocks(stream, dialect="sqlite")
     assert blocks == []
