@@ -28,7 +28,7 @@ SQLITE_URL_QUERY_UNSUPPORTED = (
     "SQLite URL query parameters are not supported; remove the '?...' part of database.url"
 )
 _SQLITE_DEFAULT_TIMEOUT_SECONDS = 5.0
-_WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
+_WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
 
 
 def sqlite_path_from_url(url: str) -> str:
@@ -39,8 +39,8 @@ def sqlite_path_from_url(url: str) -> str:
     ``sqlite://:memory:`` and ``sqlite:///:memory:`` are in-memory.
 
     Raises:
-        ValueError: the URL carries query parameters or a host, or SQLAlchemy
-            cannot parse it.
+        ValueError: the URL carries query parameters, a host, a username,
+            password or port, or SQLAlchemy cannot parse it.
     """
     from sqlalchemy.engine import make_url
     from sqlalchemy.exc import ArgumentError
@@ -50,13 +50,13 @@ def sqlite_path_from_url(url: str) -> str:
         return ":memory:"
     try:
         parsed = make_url(url)
-    except ArgumentError as exc:
+    except (ArgumentError, ValueError) as exc:
         raise ValueError(f"could not parse database.url as a SQLite URL: {exc}") from exc
     if parsed.query:
         raise ValueError(SQLITE_URL_QUERY_UNSUPPORTED)
-    if parsed.host:
+    if parsed.host or parsed.username or parsed.password or parsed.port:
         raise ValueError(
-            "SQLite URLs take no host; use sqlite:///relative/path.db or "
+            "SQLite URLs take no host, user, password or port; use sqlite:///relative/path.db or "
             "sqlite:////absolute/path.db"
         )
     return parsed.database or ":memory:"

@@ -69,7 +69,12 @@ def _probe_sqlite(url: str, *, read_only: bool) -> None:
             if read_only:
                 conn.execute("PRAGMA schema_version").fetchone()
     except sqlite3.Error as exc:
-        shown = path if path == ":memory:" else f"{path} (resolved to {Path(path).absolute()})"
+        shown = path
+        if path != ":memory:":
+            try:
+                shown = f"{path} (resolved to {Path(path).absolute()})"
+            except OSError:
+                shown = f"{path} (working directory unavailable)"
         raise PreflightError(
             "database",
             f"{type(exc).__name__}: could not open SQLite database {shown}; "
@@ -80,8 +85,10 @@ def _probe_sqlite(url: str, *, read_only: bool) -> None:
 def probe_database(cfg: Config) -> None:
     """Open and immediately close a connection to the configured database.
 
-    Does **not** run a query — that would burn round-trips and could trigger
-    permission checks unrelated to reachability. For PG/MySQL the connect
+    Does **not** run a query against PG/MySQL — that would burn round-trips and
+    could trigger permission checks unrelated to reachability. A read-only
+    SQLite probe does read the schema header (``PRAGMA schema_version``) so a
+    directory or non-database file fails here. For PG/MySQL the connect
     timeout is bounded by ``_DB_CONNECT_TIMEOUT_SECONDS`` so a wedged host
     can't extend startup indefinitely; SQLite has no connect-timeout knob
     (the underlying ``open()`` is unbounded on a wedged remote mount but

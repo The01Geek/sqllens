@@ -77,6 +77,23 @@ def test_helper_rejects_host() -> None:
         sqlite_path_from_url("sqlite://foo.db")
 
 
+@pytest.mark.parametrize("url", ["sqlite://user@/x.db", "sqlite://:pw@/x.db", "sqlite://:1/x.db"])
+def test_helper_rejects_userinfo_and_port(url: str) -> None:
+    # Silently dropping these would open the relative file the URL never named.
+    with pytest.raises(ValueError, match="SQLite URL"):
+        sqlite_path_from_url(url)
+
+
+def test_helper_wraps_unparseable_url() -> None:
+    with pytest.raises(ValueError, match=r"could not parse database\.url"):
+        sqlite_path_from_url("not a url")
+
+
+@pytest.mark.parametrize("name", ["a:b.db", "c:data.db"])
+def test_readonly_uri_relative_colon_name_is_not_a_drive(name: str) -> None:
+    assert sqlite_module._readonly_uri(name) == "file:" + name.replace(":", "%3A") + "?mode=ro"
+
+
 @pytest.mark.parametrize(("url", "expected"), URL_TABLE)
 def test_factory_and_preflight_resolve_same_path(url: str, expected: str) -> None:
     runner = build_sql_runner(url)
