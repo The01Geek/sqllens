@@ -236,6 +236,12 @@ class TestApplyRlsStatic:
             'SELECT "MyFunc"(name) FROM orders',
             "SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'",
         ),
+        (
+            # SQLite names an unaliased result column after the call's text.
+            "sqlite",
+            "SELECT printf('%s', name) FROM orders",
+            "SELECT printf('%s', name) FROM orders WHERE orders.tenant_id = 'acme'",
+        ),
     ])
     def test_unrecognised_function_keeps_written_case(
         self, dialect: str, sql: str, expected: str
