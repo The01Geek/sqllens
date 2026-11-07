@@ -1,0 +1,306 @@
+[
+  {
+    "id": "VC-1",
+    "verdict": "PASS",
+    "evidence": "Probed installed SQLAlchemy 2.1.6 make_url: sqlite:////tmp/x.db -> database '/tmp/x.db'; sqlite:///rel.db -> 'rel.db'; sqlite:///C:/x.db -> 'C:/x.db' (host None, no query). sql_runner.py:52,62 return parsed.database.",
+    "file_checked": "src/sqllens/agent/integrations/sqlite/sql_runner.py:52",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-2",
+    "verdict": "FAIL",
+    "evidence": "make_url('sqlite://:memory:') raises ValueError (invalid literal for int() ... 'memory:'), NOT ArgumentError (probe, SQLAlchemy 2.1.6). Only unparseable strings like 'garbage' raise ArgumentError. sql_runner.py:48-49 pre-handles ':memory:' for exactly this reason. Also the consequence is muddled: a ValueError escaping make_url is still a ValueError, so preflight's `except ValueError` (preflight.py:63) would catch it; sqlite_path_from_url only wraps ArgumentError (line 53) so a ValueError escapes unwrapped (only the sqlite://:memory: form is pre-handled; e.g. sqlite://:abc/x.db would raise a raw ValueError with an unwrapped message).",
+    "file_checked": "src/sqllens/agent/integrations/sqlite/sql_runner.py:48-54",
+    "property_proven": false,
+    "inaccuracy_scope": "generated_claim_text"
+  },
+  {
+    "id": "VC-3",
+    "verdict": "PASS",
+    "evidence": "sqlite_path_from_url: sqlite:// -> make_url database None -> ':memory:' (line 62); sqlite:/// -> database '' -> ':memory:'; sqlite://:memory: -> special-cased line 49-50 -> ':memory:'; sqlite:///:memory: -> database ':memory:'. connect_sqlite (line 98) treats ':memory:' as in-memory. Minor nuance: 'by SQLAlchemy's rules' is loose since SQLAlchemy itself raises on sqlite://:memory:, but the four-forms-in-memory assertion holds in this code.",
+    "file_checked": "src/sqllens/agent/integrations/sqlite/sql_runner.py:34-62",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-4",
+    "verdict": "FAIL",
+    "evidence": "parsed.host check (line 57) does reject sqlite://foo.db (host='foo.db'). But host-free forms with credentials/port are silently accepted: probe shows sqlite://user@/x.db -> database 'x.db', host None, username 'user'; sqlite://u:p@/x.db -> 'x.db'; sqlite://:1/x.db -> 'x.db', port 1. None of username/password/port is checked (lines 55-62), so the user/password/port are silently dropped and a relative 'x.db' is opened. parsed.query is the sole query carrier (true), but the 'not silently accepted' part is false.",
+    "file_checked": "src/sqllens/agent/integrations/sqlite/sql_runner.py:55-62",
+    "property_proven": false,
+    "inaccuracy_scope": "generated_claim_text"
+  },
+  {
+    "id": "VC-5",
+    "verdict": "PASS",
+    "evidence": "Probed sqlite3 on Linux: file:///tmp/<existing>?mode=ro and file:////tmp/<existing>?mode=ro (empty authority) open OK. file:///C:/x.db?mode=ro and file:////tmp/x.db?mode=ro on nonexistent files fail with 'unable to open database file', not 'invalid uri authority'; the only authority error seen was for file://tmp/x.db (non-empty host 'tmp'), which _readonly_uri never emits (lines 76-82).",
+    "file_checked": "src/sqllens/agent/integrations/sqlite/sql_runner.py:76-82",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-6",
+    "verdict": "FAIL",
+    "evidence": "_WINDOWS_DRIVE = ^[A-Za-z]: (line 31) matches any single letter + ':' with no slash required, so a RELATIVE path like 'a:b.db' or 'C:foo.db' is treated as a drive path: _readonly_uri('a:b.db') -> 'file:///a:b.db?mode=ro', which opens the absolute path /a:b.db on POSIX, not the relative file. So drive-like relative names are mishandled. (Multi-letter first segment such as 'dir:x/a.db' does not match and is percent-encoded correctly.) The regex-matches-'C:'-without-slash half of the claim is true; 'handled correctly' is false.",
+    "file_checked": "src/sqllens/agent/integrations/sqlite/sql_runner.py:31,76-78",
+    "property_proven": false,
+    "inaccuracy_scope": "generated_claim_text"
+  },
+  {
+    "id": "VC-7",
+    "verdict": "PASS",
+    "evidence": "_SQLITE_DEFAULT_TIMEOUT_SECONDS = 5.0 (line 30) is connect_sqlite's default (line 89) and both sqlite3.connect calls pass it (lines 99-100). The runner calls connect_sqlite(self.database_path, read_only=...) (line 169) without a timeout, so it gets 5.0; base code used sqlite3.connect(...) with no timeout (main:109,111), whose Python default is 5.0. Behavior unchanged.",
+    "file_checked": "src/sqllens/agent/integrations/sqlite/sql_runner.py:30,85-100,169",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-8",
+    "verdict": "PASS",
+    "evidence": "build_sql_runner (factory.py:227-228) calls sqlite_path_from_url, which raises ValueError. Callers in src: build_agent -> (a) tools/_agent.get_agent, reached from query_database.py:581-585 where `except Exception` logs and raises RuntimeError(_INTERNAL_ERROR_MESSAGE) (structured); (b) prime_agent in transport/http.py warmup, whose failures are caught and logged (http.py ~539-561), server still boots and the request path then errors structurally; (c) eval/runner.py:133 build_agent, called from cli verify-memory inside `except Exception` -> exit 1 (cli.py:594-600); (d) cli serve runs run_preflight first, which converts ValueError into PreflightError exit 2 (preflight.py:62-64, cli.py:226-229). tests/connectors use fixed URLs. No unguarded crash in repo callers; programmatic embedders get the documented ValueError.",
+    "file_checked": "src/sqllens/agent/factory.py:223-232",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-9",
+    "verdict": "FAIL",
+    "evidence": "preflight.py:71 catches only sqlite3.Error around connect_sqlite, and line 72 evaluates Path(path).absolute() inside that handler. Path.absolute() calls os.getcwd(), which raises FileNotFoundError (an OSError, not sqlite3.Error) when the cwd is deleted, so a failure inside the handler escapes as an unstructured exception. connect_sqlite (sql_runner.py:98-100) can also raise ValueError for a path with an embedded NUL on the plain-open branch. The code does catch only sqlite3.Error, but the claim that other errors cannot escape unstructured is false.",
+    "file_checked": "src/sqllens/preflight.py:71",
+    "property_proven": false,
+    "inaccuracy_scope": "generated_claim_text"
+  },
+  {
+    "id": "VC-10",
+    "verdict": "PASS",
+    "evidence": "preflight.py:17-22. probe_memory is the documented mutating probe (lines 218-256). The read_only=false SQLite path is a plain sqlite3.connect (sql_runner.py:100), which creates a missing file. The read_only=true path uses the mode=ro URI (sql_runner.py:99) and reads PRAGMA schema_version (preflight.py:70), so it does not create the file. The PG/MySQL probes only connect and close, and the LLM and auth probes do not touch disk. The docstring matches the code.",
+    "file_checked": "src/sqllens/preflight.py:17",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-11",
+    "verdict": "PASS",
+    "evidence": "preflight.py:95-104. The scheme is split on '://' and lowercased, so 'sqlite+pysqlite' satisfies startswith('sqlite') and reaches _probe_sqlite(url, ...). 'rest' is unused in the sqlite branch and only used in the postgres branch (line 117), so it is harmless. URL_TABLE in the tests includes the sqlite+pysqlite URL.",
+    "file_checked": "src/sqllens/preflight.py:99-104",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-12",
+    "verdict": "PASS",
+    "evidence": "preflight.py:33 imports connect_sqlite and sqlite_path_from_url at module level, so patching sqllens.preflight.<name> takes effect. factory.py:29 imports sqlite_path_from_url at module level too (used at line 228). spy(path, *, read_only, timeout=5.0) matches connect_sqlite(database_path, *, read_only, timeout) and the call at preflight.py:66-68. fake(url)->str matches sqlite_path_from_url(url).",
+    "file_checked": "tests/unit/test_sqlite_url.py:87",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-13",
+    "verdict": "PASS",
+    "evidence": "Test at lines 196-200 patches sqlite_module.sqlite3.connect. sqlite_module.sqlite3 is the global sqlite3 module, so the patch is process-wide. probe_database with read_only=False calls connect_sqlite once (preflight.py:66), which calls sqlite3.connect(path, timeout=5) once (sql_runner.py:100). _DB_CONNECT_TIMEOUT_SECONDS=5 matches the assertion. No PRAGMA runs when read_only is false, and the wrapped real connect creates the file and returns a real connection that is closed.",
+    "file_checked": "tests/unit/test_sqlite_url.py:196",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-14",
+    "verdict": "PASS",
+    "evidence": "cli.py:200-201 imports run_preflight and run inside serve() at call time, so patching sqllens.server.run works. Preflight failure prints '[red]Preflight failed:[/red] <PreflightError str>' to err_console (stderr) and exits with code 2 (cli.py:226-230). PreflightError str is 'database: ...'. init writes url sqlite:///./demo.db (cli.py:752), read_only defaults to true, so the missing demo.db fails the probe without creating it. run(cfg) is never reached, so mock_run.assert_not_called holds. The stderr text is rejoined after line wrapping.",
+    "file_checked": "src/sqllens/cli.py:226",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-15",
+    "verdict": "PASS",
+    "evidence": "pyproject.toml:110 sets asyncio_mode='auto', so the bare async def test needs no marker. SqliteRunner.run_sql (sql_runner.py:136-160) never reads context. It passes only args to run_blocking_sql, so ToolContext.model_construct(), which skips the required-field validation, suffices.",
+    "file_checked": "tests/unit/test_sqlite_url.py:165",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-16",
+    "verdict": "PASS",
+    "evidence": "_cfg (test lines 51-57) builds Config(database=DatabaseConfig(url,name,read_only), llm=LLMConfig(api_key=...), memory=MemoryConfig(persist_dir=Path), auth=AuthConfig(mode='none')). Every field exists in config.py (DatabaseConfig:49-57, LLMConfig:111, MemoryConfig:147, AuthConfig:267), and the url is a plain str. AuthConfig mode='none' with no bearer_token passes its validators. Config has extra='forbid' but no unknown fields are passed.",
+    "file_checked": "src/sqllens/config.py:589",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-17",
+    "verdict": "PASS",
+    "evidence": "pyproject.toml:39 lists sqlalchemy>=2.0,<3 in core [project] dependencies; sql_runner.py imports it lazily inside sqlite_path_from_url.",
+    "file_checked": "pyproject.toml:39",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-18",
+    "verdict": "PASS",
+    "evidence": "factory.py:225-228 build_sql_runner delegates to sqlite_path_from_url(url); preflight.py:33,62 uses the same helper and connect_sqlite, so both resolve the same file. test_factory_and_preflight_use_shared_helper patches both call sites.",
+    "file_checked": "src/sqllens/agent/factory.py:226",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-19",
+    "verdict": "PASS",
+    "evidence": "Probed sqlite_path_from_url against the venv: all 9 URLs give the listed paths (rel.db, ./demo.db, /tmp/x.db, /tmp/x.db, C:/x.db, and :memory: x4). test_sqlite_url.py URL_TABLE/test_helper_resolves_url_table covers the same 9.",
+    "file_checked": "src/sqllens/agent/integrations/sqlite/sql_runner.py:38",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-20",
+    "verdict": "PASS",
+    "evidence": "test_four_slash_runner_returns_rows (test_sqlite_url.py) builds sqlite:///{abs db} (four slashes) with read_only=True and asserts the row value 42. Not run; the equivalent read-only open of an absolute path was probed and returned rows.",
+    "file_checked": "tests/unit/test_sqlite_url.py:test_four_slash_runner_returns_rows",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-21",
+    "verdict": "PASS",
+    "evidence": "_readonly_uri (sql_runner.py:67-83): /tmp/x.db -> file:/tmp/x.db?mode=ro; C:/x.db -> file:///C:/x.db?mode=ro. No host. test_readonly_uri_has_no_host asserts both.",
+    "file_checked": "src/sqllens/agent/integrations/sqlite/sql_runner.py:67",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-22",
+    "verdict": "PASS",
+    "evidence": "For //tmp/x.db, _readonly_uri returns file:////tmp/x.db?mode=ro (empty authority). Probe: make_url('sqlite://///tmp/x.db') gives //tmp/x.db, and connect_sqlite on '/'+abs path opened the existing file read-only and returned rows without an authority error.",
+    "file_checked": "src/sqllens/agent/integrations/sqlite/sql_runner.py:79",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-23",
+    "verdict": "PASS",
+    "evidence": "_readonly_uri percent-encodes the path (quote, safe='/'). Probe with a file named a?b#c%d.db: URI file:/.../a%3Fb%23c%25d.db?mode=ro read the row and the INSERT failed with 'attempt to write a readonly database'. test_special_chars_open_read_only asserts the same.",
+    "file_checked": "src/sqllens/agent/integrations/sqlite/sql_runner.py:67-83",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-24",
+    "verdict": "PASS",
+    "evidence": "factory.py:228 and preflight.py:62 both call sqlite_path_from_url. test_factory_and_preflight_resolve_same_path is parametrized over all 9 URLs and compares runner.database_path with the path passed to connect_sqlite. test_factory_and_preflight_use_shared_helper patches the helper at both import sites.",
+    "file_checked": "src/sqllens/preflight.py:62",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-25",
+    "verdict": "PASS",
+    "evidence": "With read_only=true, connect_sqlite (sql_runner.py:97-99) opens file:...?mode=ro, which fails on a missing file without creating it (sqlite3.Error). _probe_sqlite (preflight.py:51-77) converts it to PreflightError('database', ...) with message naming path and its absolute resolution. Verified by reading only; no tests run.",
+    "file_checked": "src/sqllens/preflight.py:51",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-26",
+    "verdict": "PASS",
+    "evidence": "Directory path: read-only connect and the PRAGMA schema_version read (preflight.py:68-69) raise sqlite3.Error, caught at :71 and raised as PreflightError('database') naming the path (:74-77).",
+    "file_checked": "src/sqllens/preflight.py:51",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-27",
+    "verdict": "PASS",
+    "evidence": "Existing absolute file: sqlite_path_from_url resolves sqlite:////abs to /abs (sql_runner.py:60-63 make_url), read-only URI file:/abs?mode=ro opens, schema_version read succeeds, no exception raised (preflight.py:62-70).",
+    "file_checked": "src/sqllens/preflight.py:51",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-28",
+    "verdict": "PASS",
+    "evidence": "_SAMPLE_CONFIG (cli.py:752-755) has url sqlite:///./demo.db, read_only=true. serve: api key check, then run_preflight; _PROBES puts probe_database first (preflight.py:278); PreflightError prints 'Preflight failed:' + 'database: ...' (cli.py:228-230) and Exit(code=2); message contains './demo.db (resolved to <abs>/demo.db)'; mode=ro creates nothing.",
+    "file_checked": "src/sqllens/cli.py:197-230",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-29",
+    "verdict": "PASS",
+    "evidence": "cli.py:176-179 prints 'Edit it: set database.url to an existing database, then run sqllens serve.'",
+    "file_checked": "src/sqllens/cli.py:176",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-30",
+    "verdict": "PASS",
+    "evidence": "connect_sqlite (sql_runner.py:92-99): when read_only is False it falls through to plain sqlite3.connect(database_path, timeout). Both the probe (preflight.py:66-67, no schema read when not read_only) and SqliteRunner._run_sql_blocking (line ~157) use it.",
+    "file_checked": "src/sqllens/agent/integrations/sqlite/sql_runner.py:88",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-31",
+    "verdict": "PASS",
+    "evidence": "sqlite_path_from_url raises ValueError(SQLITE_URL_QUERY_UNSUPPORTED) when parsed.query is non-empty (sql_runner.py:58-59). _probe_sqlite wraps it in PreflightError('database', str(exc)) (preflight.py:61-64); build_sql_runner calls the same helper (factory.py:228) so ValueError propagates with the same message.",
+    "file_checked": "src/sqllens/preflight.py:51",
+    "property_proven": true,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-32",
+    "verdict": "FAIL",
+    "evidence": "src/sqllens/agent/factory.py:225 comment says sqlite:///rel.db is relative to cwd and sqlite:////abs.db absolute (comment half OK). But docs/internal/agent/factory.md:148 still reads `sqlite:///abs/path.db` -> `/abs/path.db` (wrong: three slashes are relative) and has no three/four-slash statement.",
+    "file_checked": "docs/internal/agent/factory.md:148",
+    "property_proven": false,
+    "inaccuracy_scope": "source_authored_text"
+  },
+  {
+    "id": "VC-33",
+    "verdict": "FAIL",
+    "evidence": "docs/internal/setup/config-loading.md:28 still says read_only is 'enforced by the SQL parser guard, not the SQLite driver'.",
+    "file_checked": "docs/internal/setup/config-loading.md:28",
+    "property_proven": false,
+    "inaccuracy_scope": "source_authored_text"
+  },
+  {
+    "id": "VC-34",
+    "verdict": "FAIL",
+    "evidence": "docs/external/configuration.md:43 and getting-started.md:96 show only `sqlite:///path/to/file.db`; no sqlite:///data/app.db, sqlite:////var/data/app.db or sqlite:///C:/data/app.db examples, and no 'relative to directory server started from' statement.",
+    "file_checked": "docs/external/configuration.md:43",
+    "property_proven": false,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-35",
+    "verdict": "FAIL",
+    "evidence": "preflight.md:54 documents sqlite3.connect(path, timeout=5) with no read-only open or missing-file failure; read-only-safety.md has no startup-check statement about missing file; configuration.md:247 --check-db row just says 'Opens and immediately closes a connection'.",
+    "file_checked": "docs/internal/setup/preflight.md:54",
+    "property_proven": false,
+    "inaccuracy_scope": "source_authored_text"
+  },
+  {
+    "id": "VC-36",
+    "verdict": "FAIL",
+    "evidence": "mcpb/manifest.json:41 and mcpb/README.md:30 still use `sqlite:///path/to/db.sqlite`; no four-slash form.",
+    "file_checked": "mcpb/manifest.json:41",
+    "property_proven": false,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-37",
+    "verdict": "FAIL",
+    "evidence": "No changelog.d fragment for this PR (353 or 318) exists; ls changelog.d shows none, and git diff main --stat lists no changelog.d addition.",
+    "file_checked": "changelog.d/",
+    "property_proven": false,
+    "inaccuracy_scope": "none"
+  },
+  {
+    "id": "VC-38",
+    "verdict": "INCONCLUSIVE",
+    "evidence": "tests/unit/test_sqlite_url.py exists with 17 test functions, but whether ruff and pytest pass cannot be settled by reading. Commands not run: `ruff check .` and `pytest -q`.",
+    "file_checked": "tests/unit/test_sqlite_url.py",
+    "property_proven": false,
+    "inaccuracy_scope": "none"
+  }
+]
