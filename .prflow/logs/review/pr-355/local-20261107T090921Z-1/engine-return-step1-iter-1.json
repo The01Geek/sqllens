@@ -1,0 +1,261 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:requesting-code-review",
+   "severity": "Important",
+   "capped_severity": "Important",
+   "description": "Acceptance criteria five, six and seven are unmet. The required edits to docs/internal/database-connectors/row-level-security.md (the 'How a single rule rewrites SQL' and 'Testing the guard' sections) and to docs/external/row-level-security.md ('What gets rewritten') are not in the diff.",
+   "defect_signature": {
+    "file": "docs/internal/database-connectors/row-level-security.md",
+    "line_range": null,
+    "kind": "other"
+   }
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:requesting-code-review",
+   "severity": "Important",
+   "capped_severity": "Important",
+   "description": "Acceptance criterion nine is unmet: the diff adds no changelog.d/355.fixed.md fragment.",
+   "defect_signature": {
+    "file": "changelog.d/355.fixed.md",
+    "line_range": null,
+    "kind": "other"
+   }
+  },
+  {
+   "finding_id": "F-3",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "Suggestion",
+   "description": "No test checks the SQLite result-column name for an unaliased lower-case call such as printf('%s', name), which criterion nine's changelog will claim.",
+   "defect_signature": {
+    "file": "tests/unit/test_safety_rls.py",
+    "line_range": null,
+    "kind": "test_gap"
+   }
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (no finding at or above the critical threshold; four documentation and changelog criteria still open)\nThe code fix and its tests are correct, but the PR should not merge until the documentation and changelog criteria are met.\nRule applied: rule 6 — findings and checklist FAILs remain below the threshold → APPROVE with notes\n\n## Code Review Findings\n\n### 🟠 Important / Major\n1. Criteria seven and nine are unmet. The diff changes only `src/sqllens/safety/rls.py` and three test files. Criterion seven needs the \"What gets rewritten\" section of `docs/external/row-level-security.md` to describe how function names are printed, and the diff does not change that file. Criterion nine needs a `changelog.d/355.fixed.md` fragment, and the diff adds none. (raised by 1/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=not-held; evidence: prose-only criteria; git grep of sh/py/jq/yml/AGENTS.md/CLAUDE.md/.claude found no reader; scripts/changelog.py only assembles release notes -->\n- VC-15: FAIL (critical) — `docs/external/row-level-security.md`, section \"What gets rewritten\", states that the name of a function SQL Lens's SQL parser does not recognise keeps the case and quotes it was written in, and that functions the parser recognises are printed in its standard form, which can differ in case or spelling (for example `count(*)` is printed as `COUNT(*)` and `strpos(a, 'x')` as `POSITION('x' IN a)`). [docs/external/row-level-security.md:107-121] — fix the code, or have the issue author amend this criterion [behavior-inert prose cap] <!-- inertness: first-conjunct=held limb-one=held limb-two=not-held; evidence: criterion 7 requires prose only in docs/external/row-level-security.md; changes no output; git grep found no tool or agent reader; published external doc fails limb two -->\n\n  <details><summary>Evidence</summary>\n\n  criteria.json counts (criterion 7 matches). Head view docs/external/row-level-security.md section 'What gets rewritten' (lines 107-121) contains only the tenant_id example and the CTE note; no statement about unrecognised function names keeping case/quotes, nor recognised functions printed in standard form. Grep of docs/external for POSITION/strpos/COUNT( finds nothing in this file (only an unrelated managing-memory.md hit). The documentation required by the criterion is absent.\n\n  </details>\n\n- VC-17: FAIL (critical) — A `changelog.d/<PR>.fixed.md` fragment states that, with row-level security rules active on PostgreSQL, a quoted call to a built-in PostgreSQL function that SQL Lens's SQL parser does not recognise (for example `\"quote_ident\"(name)`) now runs with its written case instead of failing with \"function does not exist\"; states that, with row-level security rules active on SQLite, the result column of an unaliased call to a function the parser does not recognise is named with the case it was written in (for example `printf('%s', name)` instead of `PRINTF('%s', name)`); and does not claim that quoted calls to functions defined in the database now run. [changelog.d] — fix the code, or have the issue author amend this criterion [behavior-inert prose cap] <!-- inertness: first-conjunct=held limb-one=held limb-two=not-held; evidence: criterion 9 requires a changelog.d fragment (release-note prose); scripts/changelog.py only assembles fragments into release notes and decides no program behavior; release note is read outside the repository, failing limb two -->\n\n  <details><summary>Evidence</summary>\n\n  criteria.json is a valid list of {criterion,text} objects and carries criterion 9, so it counts. The diff (diff.patch) touches only src/sqllens/safety/rls.py, tests/connectors/test_connectors.py, tests/unit/test_rls_views.py and tests/unit/test_safety_rls.py; no changelog.d file is added. The head-view changelog.d listing has no fragment for this PR (355) or issue 314 (no 355.fixed.md or 314.fixed.md; the newest are 348-350, all already in the base view). No sibling criterion or extra coverage supplies a changelog fragment. The required fragment does not exist.\n\n  </details>\n\n### 🟡 Suggestion / Minor (4)\n<details><summary>4 items</summary>\n\n1. Criteria five and six are unmet. `docs/internal/database-connectors/row-level-security.md` lacks the rewrite-printing explanation. Its \"Testing the guard\" section names test classes that do not exist and does not name `tests/unit/test_rls_views.py`. (raised by 1/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: internal doc page, no tool or agent reader found by git grep -->\n2. In `tests/unit/test_safety_rls.py`, no test checks the SQLite result-column name for an unaliased lower-case call such as `printf('%s', name)`, yet criterion nine's changelog will claim that behavior. (raised by 1/5 agents)\n- VC-13: FAIL (critical) — `docs/internal/database-connectors/row-level-security.md`, section \"How a single rule rewrites SQL\", states that the whole statement is printed again by sqlglot, that function names sqlglot does not recognise keep their written case and quotes, and that built-in functions sqlglot recognises are printed in sqlglot's canonical form. [docs/internal/database-connectors/row-level-security.md:89-107] — fix the code, or have the issue author amend this criterion [behavior-inert prose cap] <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: criterion 5 requires prose only in docs/internal/database-connectors/row-level-security.md; adding it changes no output, branch or covered set (no mechanism under discussion); git grep of *.sh/*.py/*.jq/*.yml/AGENTS.md/CLAUDE.md/.claude for row-level-security.md found no reader; internal doc page nothing publishes -->\n\n  <details><summary>Evidence</summary>\n\n  criteria.json counts (criterion 5 present, all {criterion,text} objects). Head view docs/internal/database-connectors/row-level-security.md section 'How a single rule rewrites SQL' (lines 89-107) contains only the tenant_id example and the scope/CTE paragraph; it says nothing about sqlglot printing the whole statement again, unrecognised function names keeping written case/quotes, or recognised built-ins printed in canonical form. Grep of the whole file for canonical|printed again|written case|recognis matches only line 34 (unrelated 'unrecognised parse shape'). diff.patch touches only src/sqllens/safety/rls.py, tests/connectors/test_connectors.py, tests/unit/test_rls_views.py, tests/unit/test_safety_rls.py; the doc is not changed. Criterion unmet.\n\n  </details>\n\n- VC-14: FAIL (critical) — The \"Testing the guard\" section of `docs/internal/database-connectors/row-level-security.md` names only test classes that exist in `tests/unit/test_safety_rls.py`, and names `tests/unit/test_rls_views.py`. [docs/internal/database-connectors/row-level-security.md:224-243] — fix the code, or have the issue author amend this criterion [behavior-inert prose cap] <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: criterion 6 requires prose only in docs/internal/database-connectors/row-level-security.md \"Testing the guard\"; changes no output; same git grep found no tool or agent reader; internal doc page nothing publishes -->\n\n  <details><summary>Evidence</summary>\n\n  Graded the criterion directly from the head view. The 'Testing the guard' section (docs/internal/database-connectors/row-level-security.md:224-243) names TestApplyRls (line 230), TestApplyRlsScopeEdgeCases (231) and TestApplyRlsParseFailures (233). tests/unit/test_safety_rls.py defines only TestRlsRuleValidation, TestApplyRlsStatic, TestApplyRlsScopeCoverage, TestApplyRlsDynamicFailSecure, _RecordingRunner, TestRlsGuardRunner, TestFactoryComposition and TestMetadataPlumbing (lines 54-703). So TestApplyRls, TestApplyRlsScopeEdgeCases and TestApplyRlsParseFailures do not exist. The section also never mentions tests/unit/test_rls_views.py, which does exist in the head view. Both halves of the criterion fail. I did not read criteria.json and graded the criterion alone.\n\n  </details>\n\n</details>\n\n\n## Run details\n<details><summary>Run details</summary>\n\n- Diff profile: test_relevant, 4 changed files\n- Working tree: skipped (head-override PR mode)\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present; requesting-code-review extension: content-present\n- CI evidence: none for this head (not run in this review)\n- Normalized (wording-only): 0\n- Re-verification: none\n- prior-report: none\n- Checklist: 13 passed, 4 failed, 0 inconclusive\n- <details><summary>✅ Passed items (13 of 17)</summary>\n\n  - VC-1: sqlglot Expression.sql accepts a normalize_functions keyword and, set to False, prints unrecognised (Anonymous) function names with their written case and quotes in postgres, mysql and sqlite dialects, under the locked sqlglot version [src/sqllens/safety/rls.py]\n  - VC-2: The comment asserts the default upper-cases unrecognised function names including quoted ones, and PostgreSQL resolves quoted names case-sensitively [src/sqllens/safety/rls.py]\n  - VC-3: Disabling normalize_functions does not change how recognised built-ins (e.g. COUNT, strpos->POSITION) are printed, nor other rls.py callers that rely on the rewritten SQL text (verify_base_tables routine lookup, readonly guard) [src/sqllens/safety/rls.py]\n  - VC-4: verify_base_tables lower-cases or case-folds the quoted function name \"MyFunc\" when matching it against catalog routines, so routine 'myfunc' is refused [tests/unit/test_rls_views.py]\n  - VC-5: _FakeCatalog accepts a routines= keyword and answers the routine query the way the real PostgreSQL catalog query in relations.py would for a routine named myfunc [tests/unit/test_rls_views.py]\n  - VC-6: RlsGuardRunner refuses quoted \"pg_sleep\"(1) with UnsafeSqlError, i.e. the denylist check matches quoted function names case-insensitively after the rewrite [tests/unit/test_rls_views.py:80]\n  - VC-7: The connector test's run_sql result is a pandas DataFrame (iloc usable) and quote_ident('alpha') returns 'alpha' unquoted on PostgreSQL [tests/connectors/test_connectors.py]\n  - VC-8: The connector test's RlsRule(table=..., column=..., value=...) signature, RowCapRunner(max_rows=), ReadOnlyGuardRunner(dialect=) and RlsGuardRunner(runner, rules, dialect=) match their definitions, and the table name matches RLS rule unqualified [tests/connectors/test_connectors.py]\n  - VC-9: With one static RLS rule on `orders` (column `tenant_id`, value `acme`), `apply_rls` returns exactly the expected output for each of exactly these five inputs — complete by construction: - PostgreSQL, `SELECT \"quote_ident\"(name) FROM orders` → `SELECT \"quote_ident\"(name) FROM orders WHERE orders.tenant_id = 'acme'` - PostgreSQL, `SELECT \"MyFunc\"(name) FROM orders` → `SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'` - PostgreSQL, `SELECT public.\"MyFunc\"(name) FROM orders` → `SELECT public.\"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'` - MySQL, ``SELECT `MyFunc`(name) FROM orders`` → ``SELECT `MyFunc`(name) FROM orders WHERE orders.tenant_id = 'acme'`` - SQLite, `SELECT \"MyFunc\"(name) FROM orders` → `SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'` [tests/unit/test_safety_rls.py:92]\n  - VC-10: With the same rule on `orders` and the PostgreSQL dialect, `apply_rls` returns `SELECT \"quote_ident\"(name) FROM customers` unchanged for the input `SELECT \"quote_ident\"(name) FROM customers`. [tests/unit/test_safety_rls.py:124]\n  - VC-11: Against a real PostgreSQL server (the `SQLLENS_TEST_POSTGRES_URL` connector tests), a `RlsGuardRunner` with a rule limiting a table to `tenant_id = 'alpha'` runs `SELECT \"quote_ident\"(tenant_id) FROM <table>` over rows `alpha` and `beta` and returns exactly one row, `alpha`. [tests/connectors/test_connectors.py:22]\n  - VC-12: With an RLS rule configured on PostgreSQL, `RlsGuardRunner` still raises `UnsafeSqlError` for `SELECT \"pg_sleep\"(1) FROM orders`, and `verify_base_tables` run on the `apply_rls` output of `SELECT \"MyFunc\"(name) FROM orders` still raises `RlsError` matching \"functions defined in the database\" when the catalog holds a routine named `myfunc`. [tests/unit/test_rls_views.py:66]\n  - VC-16: No comment in `tests/unit/test_rls_views.py` refers to sqlglot 25.x. [tests/unit/test_rls_views.py:58]\n\n  </details>\n- Reviewed against issue #314 — criteria from the workpad; scope unchanged.\n- Dirty-tree check: clean\n- Note: the vendored `.prflow/vendor/prflow` was absent, so the plugin-cache engine and scripts were used. `.prflow/tmp/command-shapes.md` was absent.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] With one static RLS rule on `orders` (column `tenant_id`, value `acme`), `apply_rls` returns exactly the expected output for each of exactly these five inputs — complete by construction: - PostgreSQL, `SELECT \"quote_ident\"(name) FROM orders` → `SELECT \"quote_ident\"(name) FROM orders WHERE orders.tenant_id = 'acme'` - PostgreSQL, `SELECT \"MyFunc\"(name) FROM orders` → `SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'` - PostgreSQL, `SELECT public.\"MyFunc\"(name) FROM orders` → `SELECT public.\"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'` - MySQL, ``SELECT `MyFunc`(name) FROM orders`` → ``SELECT `MyFunc`(name) FROM orders WHERE orders.tenant_id = 'acme'`` - SQLite, `SELECT \"MyFunc\"(name) FROM orders` → `SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'`\n- [ ] With the same rule on `orders` and the PostgreSQL dialect, `apply_rls` returns `SELECT \"quote_ident\"(name) FROM customers` unchanged for the input `SELECT \"quote_ident\"(name) FROM customers`.\n- [ ] Against a real PostgreSQL server (the `SQLLENS_TEST_POSTGRES_URL` connector tests), a `RlsGuardRunner` with a rule limiting a table to `tenant_id = 'alpha'` runs `SELECT \"quote_ident\"(tenant_id) FROM <table>` over rows `alpha` and `beta` and returns exactly one row, `alpha`.\n- [ ] With an RLS rule configured on PostgreSQL, `RlsGuardRunner` still raises `UnsafeSqlError` for `SELECT \"pg_sleep\"(1) FROM orders`, and `verify_base_tables` run on the `apply_rls` output of `SELECT \"MyFunc\"(name) FROM orders` still raises `RlsError` matching \"functions defined in the database\" when the catalog holds a routine named `myfunc`.\n- [ ] `docs/internal/database-connectors/row-level-security.md`, section \"How a single rule rewrites SQL\", states that the whole statement is printed again by sqlglot, that function names sqlglot does not recognise keep their written case and quotes, and that built-in functions sqlglot recognises are printed in sqlglot's canonical form.\n- [ ] The \"Testing the guard\" section of `docs/internal/database-connectors/row-level-security.md` names only test classes that exist in `tests/unit/test_safety_rls.py`, and names `tests/unit/test_rls_views.py`.\n- [ ] `docs/external/row-level-security.md`, section \"What gets rewritten\", states that the name of a function SQL Lens's SQL parser does not recognise keeps the case and quotes it was written in, and that functions the parser recognises are printed in its standard form, which can differ in case or spelling (for example `count(*)` is printed as `COUNT(*)` and `strpos(a, 'x')` as `POSITION('x' IN a)`).\n- [ ] No comment in `tests/unit/test_rls_views.py` refers to sqlglot 25.x.\n- [ ] A `changelog.d/<PR>.fixed.md` fragment states that, with row-level security rules active on PostgreSQL, a quoted call to a built-in PostgreSQL function that SQL Lens's SQL parser does not recognise (for example `\"quote_ident\"(name)`) now runs with its written case instead of failing with \"function does not exist\"; states that, with row-level security rules active on SQLite, the result column of an unaliased call to a function the parser does not recognise is named with the case it was written in (for example `printf('%s', name)` instead of `PRINTF('%s', name)`); and does not claim that quoted calls to functions defined in the database now run.",
+ "diff_produced_at_head": "5265f50d1ee0f52a4d3c795f10fb5a01c055907d",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:rls.py:normalize-functions-false",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "absolute_claim:rls.py:default-uppercases-quoted",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "dependency_interaction:rls.py:recognised-builtins-unchanged",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "dependency_interaction:test_rls_views.py:quoted-routine-casefold",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "test_mock_alignment:test_rls_views.py:fakecatalog-routines",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "dependency_interaction:test_rls_views.py:quoted-pg-sleep-refused",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "dependency_interaction:test_connectors.py:run-sql-dataframe",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "api_contract:test_connectors.py:guard-constructors",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-9",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-10",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-11",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-12",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "`docs/internal/database-connectors/row-level-security.md`, section \"How a single rule rewrites SQL\", states that the whole statement is printed again by sqlglot, that function names sqlglot does not recognise keep their written case and quotes, and that built-in functions sqlglot recognises are printed in sqlglot's canonical form.",
+   "claim_signature": "issue-acceptance-5",
+   "criteria_file": ".prflow/tmp/review/pr-355/local-20261107T090921Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-355/local-20261107T090921Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: `docs/internal/database-connectors/row-level-security.md`, section \"How a single rule rewrites SQL\", states that the whole statement is printed again by sqlglot, that function names sqlglot does not recognise keep their written case and quotes, and that built-in functions sqlglot recognises are printed in sqlglot's canonical form.",
+   "id": "VC-13",
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "criteria.json counts (criterion 5 present, all {criterion,text} objects). Head view docs/internal/database-connectors/row-level-security.md section 'How a single rule rewrites SQL' (lines 89-107) contains only the tenant_id example and the scope/CTE paragraph; it says nothing about sqlglot printing the whole statement again, unrecognised function names keeping written case/quotes, or recognised built-ins printed in canonical form. Grep of the whole file for canonical|printed again|written case|recognis matches only line 34 (unrelated 'unrecognised parse shape'). diff.patch touches only src/sqllens/safety/rls.py, tests/connectors/test_connectors.py, tests/unit/test_rls_views.py, tests/unit/test_safety_rls.py; the doc is not changed. Criterion unmet.",
+   "file_checked": "docs/internal/database-connectors/row-level-security.md:89-107",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "The \"Testing the guard\" section of `docs/internal/database-connectors/row-level-security.md` names only test classes that exist in `tests/unit/test_safety_rls.py`, and names `tests/unit/test_rls_views.py`.",
+   "claim_signature": "issue-acceptance-6",
+   "criteria_file": ".prflow/tmp/review/pr-355/local-20261107T090921Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-355/local-20261107T090921Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: The \"Testing the guard\" section of `docs/internal/database-connectors/row-level-security.md` names only test classes that exist in `tests/unit/test_safety_rls.py`, and names `tests/unit/test_rls_views.py`.",
+   "id": "VC-14",
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "Graded the criterion directly from the head view. The 'Testing the guard' section (docs/internal/database-connectors/row-level-security.md:224-243) names TestApplyRls (line 230), TestApplyRlsScopeEdgeCases (231) and TestApplyRlsParseFailures (233). tests/unit/test_safety_rls.py defines only TestRlsRuleValidation, TestApplyRlsStatic, TestApplyRlsScopeCoverage, TestApplyRlsDynamicFailSecure, _RecordingRunner, TestRlsGuardRunner, TestFactoryComposition and TestMetadataPlumbing (lines 54-703). So TestApplyRls, TestApplyRlsScopeEdgeCases and TestApplyRlsParseFailures do not exist. The section also never mentions tests/unit/test_rls_views.py, which does exist in the head view. Both halves of the criterion fail. I did not read criteria.json and graded the criterion alone.",
+   "file_checked": "docs/internal/database-connectors/row-level-security.md:224-243",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "`docs/external/row-level-security.md`, section \"What gets rewritten\", states that the name of a function SQL Lens's SQL parser does not recognise keeps the case and quotes it was written in, and that functions the parser recognises are printed in its standard form, which can differ in case or spelling (for example `count(*)` is printed as `COUNT(*)` and `strpos(a, 'x')` as `POSITION('x' IN a)`).",
+   "claim_signature": "issue-acceptance-7",
+   "criteria_file": ".prflow/tmp/review/pr-355/local-20261107T090921Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-355/local-20261107T090921Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: `docs/external/row-level-security.md`, section \"What gets rewritten\", states that the name of a function SQL Lens's SQL parser does not recognise keeps the case and quotes it was written in, and that functions the parser recognises are printed in its standard form, which can differ in case or spelling (for example `count(*)` is printed as `COUNT(*)` and `strpos(a, 'x')` as `POSITION('x' IN a)`).",
+   "id": "VC-15",
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "criteria.json counts (criterion 7 matches). Head view docs/external/row-level-security.md section 'What gets rewritten' (lines 107-121) contains only the tenant_id example and the CTE note; no statement about unrecognised function names keeping case/quotes, nor recognised functions printed in standard form. Grep of docs/external for POSITION/strpos/COUNT( finds nothing in this file (only an unrelated managing-memory.md hit). The documentation required by the criterion is absent.",
+   "file_checked": "docs/external/row-level-security.md:107-121",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-16",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "A `changelog.d/<PR>.fixed.md` fragment states that, with row-level security rules active on PostgreSQL, a quoted call to a built-in PostgreSQL function that SQL Lens's SQL parser does not recognise (for example `\"quote_ident\"(name)`) now runs with its written case instead of failing with \"function does not exist\"; states that, with row-level security rules active on SQLite, the result column of an unaliased call to a function the parser does not recognise is named with the case it was written in (for example `printf('%s', name)` instead of `PRINTF('%s', name)`); and does not claim that quoted calls to functions defined in the database now run.",
+   "claim_signature": "issue-acceptance-9",
+   "criteria_file": ".prflow/tmp/review/pr-355/local-20261107T090921Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-355/local-20261107T090921Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: A `changelog.d/<PR>.fixed.md` fragment states that, with row-level security rules active on PostgreSQL, a quoted call to a built-in PostgreSQL function that SQL Lens's SQL parser does not recognise (for example `\"quote_ident\"(name)`) now runs with its written case instead of failing with \"function does not exist\"; states that, with row-level security rules active on SQLite, the result column of an unaliased call to a function the parser does not recognise is named with the case it was written in (for example `printf('%s', name)` instead of `PRINTF('%s', name)`); and does not claim that quoted calls to functions defined in the database now run.",
+   "id": "VC-17",
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "criteria.json is a valid list of {criterion,text} objects and carries criterion 9, so it counts. The diff (diff.patch) touches only src/sqllens/safety/rls.py, tests/connectors/test_connectors.py, tests/unit/test_rls_views.py and tests/unit/test_safety_rls.py; no changelog.d file is added. The head-view changelog.d listing has no fragment for this PR (355) or issue 314 (no 355.fixed.md or 314.fixed.md; the newest are 348-350, all already in the base view). No sibling criterion or extra coverage supplies a changelog fragment. The required fragment does not exist.",
+   "file_checked": "changelog.d",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  }
+ ]
+}

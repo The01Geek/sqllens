@@ -1,0 +1,232 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "severity": "suggestion",
+   "agent": "prflow:requesting-code-review",
+   "description": "A stray blank line splits the 'Testing the guard' class list between the TestRlsGuardRunner and TestFactoryComposition bullets.",
+   "defect_signature": {
+    "file": "docs/internal/database-connectors/row-level-security.md",
+    "line_range": [
+     235,
+     237
+    ],
+    "kind": "style"
+   },
+   "corroboration": 1
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "test_relevant": true,
+  "detect_all_audit": false
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (one cosmetic suggestion)\nThe PR is ready to merge: all 21 checklist items passed, every acceptance criterion is met, and the only finding is a stray blank line in an internal doc.\nRule applied: rule 6 — a finding below the threshold remains → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (1)\n<details><summary>1 item</summary>\n\n1. `docs/internal/database-connectors/row-level-security.md` lines 235-237: a stray blank line splits the \"Testing the guard\" class list between the `TestRlsGuardRunner` and `TestFactoryComposition` bullets. (raised by 1/5 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: Markdown list spacing in an internal doc page; no tool or agent reads it for behavior and nothing publishes it -->\n\n</details>\n\n\n## Run details\n<details><summary>Run details</summary>\n\n- Diff profile: test_relevant, 7 changed files.\n- Working tree: skipped in head-override PR mode (snapshot taken; dirty-tree check clean).\n- Review prompt extension: content-present; requesting-code-review extension: content-present.\n- CI evidence: none held for this head; no tests were run in this entry.\n- Normalized (wording-only): 0\n- Engine resolved from the running plugin (`.prflow/vendor/prflow/skills/review` and `.devflow/vendor/devflow/skills/review` do not exist).\n- VC-17's verifier first returned no verdict file; a delivery message produced its PASS verdict.\n\n- Checklist: 21 passed, 0 failed, 0 inconclusive\n- <details><summary>✅ Passed items (21 of 21)</summary>\n\n  - VC-1: sqlglot Expression.sql accepts the normalize_functions keyword and, set to False, prints unrecognised (Anonymous) function names with their written case and quotes, for the postgres, mysql and sqlite dialects under the locked sqlglot version [src/sqllens/safety/rls.py:335]\n  - VC-2: The comment asserts the default sqlglot output upper-cases unrecognised function names including quoted ones, and that PostgreSQL resolves quoted function names case-sensitively [src/sqllens/safety/rls.py:332]\n  - VC-3: With normalize_functions=False, functions sqlglot recognises are still printed in canonical form (count(*) as COUNT(*), postgres strpos(a,'x') as POSITION('x' IN a)) [docs/internal/database-connectors/row-level-security.md]\n  - VC-4: External doc states unrecognised function names keep written case and quotes, and recognised functions print in standard form e.g. count(*) as COUNT(*) and strpos(a, 'x') as POSITION('x' IN a) [docs/external/row-level-security.md]\n  - VC-5: Internal doc 'Testing the guard' names test classes TestApplyRlsStatic, TestApplyRlsScopeCoverage, TestApplyRlsDynamicFailSecure, TestRlsGuardRunner, TestFactoryComposition, TestMetadataPlumbing, and their described contents (e.g. tokenization/parse/multi-statement tests in TestApplyRlsDynamicFailSecure) exist in tests/unit/test_safety_rls.py [docs/internal/database-connectors/row-level-security.md]\n  - VC-6: Internal doc states views blocked while RLS is active and catalog failures closing are tested in tests/unit/test_rls_views.py, and metadata plumbing is pinned in tests/unit/test_server.py [docs/internal/database-connectors/row-level-security.md]\n  - VC-7: _FakeCatalog accepts a routines= argument and simulates the routine catalog lookup verify_base_tables performs, so a 'myfunc' routine triggers RlsError 'functions defined in the database' for the rewritten \"MyFunc\" call [tests/unit/test_rls_views.py]\n  - VC-8: verify_base_tables looks up a quoted mixed-case function \"MyFunc\" in a way that matches a catalog routine named myfunc (case folding of the lookup name) [tests/unit/test_rls_views.py]\n  - VC-9: The parametrized blocked-function test passes 'SELECT \"pg_sleep\"(1) FROM orders' through a RlsGuardRunner with an RLS rule so the quoted pg_sleep raises UnsafeSqlError [tests/unit/test_rls_views.py]\n  - VC-10: The connector test builds runners with build_sql_runner(url, read_only=False) and RowCapRunner/ReadOnlyGuardRunner/RlsGuardRunner signatures as used, and run_sql returns a pandas DataFrame whose first column holds the quote_ident result [tests/connectors/test_connectors.py]\n  - VC-11: PostgreSQL quote_ident('alpha') returns 'alpha' unquoted, so the result equals ['alpha'] [tests/connectors/test_connectors.py]\n  - VC-12: Changelog asserts SQLite unaliased result columns of unrecognised functions now keep written case, e.g. printf('%s', name) rather than PRINTF('%s', name) — implying sqlglot does not recognise printf in sqlite dialect [changelog.d/355.fixed.md]\n  - VC-13: With one static RLS rule on `orders` (column `tenant_id`, value `acme`), `apply_rls` returns exactly the expected output for each of exactly these five inputs — complete by construction: - PostgreSQL, `SELECT \"quote_ident\"(name) FROM orders` → `SELECT \"quote_ident\"(name) FROM orders WHERE orders.tenant_id = 'acme'` - PostgreSQL, `SELECT \"MyFunc\"(name) FROM orders` → `SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'` - PostgreSQL, `SELECT public.\"MyFunc\"(name) FROM orders` → `SELECT public.\"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'` - MySQL, ``SELECT `MyFunc`(name) FROM orders`` → ``SELECT `MyFunc`(name) FROM orders WHERE orders.tenant_id = 'acme'`` - SQLite, `SELECT \"MyFunc\"(name) FROM orders` → `SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'` [tests/unit/test_safety_rls.py]\n  - VC-14: With the same rule on `orders` and the PostgreSQL dialect, `apply_rls` returns `SELECT \"quote_ident\"(name) FROM customers` unchanged for the input `SELECT \"quote_ident\"(name) FROM customers`. [tests/unit/test_safety_rls.py]\n  - VC-15: Against a real PostgreSQL server (the `SQLLENS_TEST_POSTGRES_URL` connector tests), a `RlsGuardRunner` with a rule limiting a table to `tenant_id = 'alpha'` runs `SELECT \"quote_ident\"(tenant_id) FROM <table>` over rows `alpha` and `beta` and returns exactly one row, `alpha`. [tests/connectors/test_connectors.py]\n  - VC-16: With an RLS rule configured on PostgreSQL, `RlsGuardRunner` still raises `UnsafeSqlError` for `SELECT \"pg_sleep\"(1) FROM orders`, and `verify_base_tables` run on the `apply_rls` output of `SELECT \"MyFunc\"(name) FROM orders` still raises `RlsError` matching \"functions defined in the database\" when the catalog holds a routine named `myfunc`. [tests/unit/test_rls_views.py]\n  - VC-17: `docs/internal/database-connectors/row-level-security.md`, section \"How a single rule rewrites SQL\", states that the whole statement is printed again by sqlglot, that function names sqlglot does not recognise keep their written case and quotes, and that built-in functions sqlglot recognises are printed in sqlglot's canonical form. [docs/internal/database-connectors/row-level-security.md]\n  - VC-18: The \"Testing the guard\" section of `docs/internal/database-connectors/row-level-security.md` names only test classes that exist in `tests/unit/test_safety_rls.py`, and names `tests/unit/test_rls_views.py`. [docs/internal/database-connectors/row-level-security.md]\n  - VC-19: `docs/external/row-level-security.md`, section \"What gets rewritten\", states that the name of a function SQL Lens's SQL parser does not recognise keeps the case and quotes it was written in, and that functions the parser recognises are printed in its standard form, which can differ in case or spelling (for example `count(*)` is printed as `COUNT(*)` and `strpos(a, 'x')` as `POSITION('x' IN a)`). [docs/external/row-level-security.md]\n  - VC-20: No comment in `tests/unit/test_rls_views.py` refers to sqlglot 25.x. [tests/unit/test_rls_views.py]\n  - VC-21: A `changelog.d/<PR>.fixed.md` fragment states that, with row-level security rules active on PostgreSQL, a quoted call to a built-in PostgreSQL function that SQL Lens's SQL parser does not recognise (for example `\"quote_ident\"(name)`) now runs with its written case instead of failing with \"function does not exist\"; states that, with row-level security rules active on SQLite, the result column of an unaliased call to a function the parser does not recognise is named with the case it was written in (for example `printf('%s', name)` instead of `PRINTF('%s', name)`); and does not claim that quoted calls to functions defined in the database now run. [changelog.d/355.fixed.md]\n\n  </details>\n- Reviewed against issue #314 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] With one static RLS rule on `orders` (column `tenant_id`, value `acme`), `apply_rls` returns exactly the expected output for each of exactly these five inputs — complete by construction: - PostgreSQL, `SELECT \"quote_ident\"(name) FROM orders` → `SELECT \"quote_ident\"(name) FROM orders WHERE orders.tenant_id = 'acme'` - PostgreSQL, `SELECT \"MyFunc\"(name) FROM orders` → `SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'` - PostgreSQL, `SELECT public.\"MyFunc\"(name) FROM orders` → `SELECT public.\"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'` - MySQL, ``SELECT `MyFunc`(name) FROM orders`` → ``SELECT `MyFunc`(name) FROM orders WHERE orders.tenant_id = 'acme'`` - SQLite, `SELECT \"MyFunc\"(name) FROM orders` → `SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'`\n- [ ] With the same rule on `orders` and the PostgreSQL dialect, `apply_rls` returns `SELECT \"quote_ident\"(name) FROM customers` unchanged for the input `SELECT \"quote_ident\"(name) FROM customers`.\n- [ ] Against a real PostgreSQL server (the `SQLLENS_TEST_POSTGRES_URL` connector tests), a `RlsGuardRunner` with a rule limiting a table to `tenant_id = 'alpha'` runs `SELECT \"quote_ident\"(tenant_id) FROM <table>` over rows `alpha` and `beta` and returns exactly one row, `alpha`.\n- [ ] With an RLS rule configured on PostgreSQL, `RlsGuardRunner` still raises `UnsafeSqlError` for `SELECT \"pg_sleep\"(1) FROM orders`, and `verify_base_tables` run on the `apply_rls` output of `SELECT \"MyFunc\"(name) FROM orders` still raises `RlsError` matching \"functions defined in the database\" when the catalog holds a routine named `myfunc`.\n- [ ] `docs/internal/database-connectors/row-level-security.md`, section \"How a single rule rewrites SQL\", states that the whole statement is printed again by sqlglot, that function names sqlglot does not recognise keep their written case and quotes, and that built-in functions sqlglot recognises are printed in sqlglot's canonical form.\n- [ ] The \"Testing the guard\" section of `docs/internal/database-connectors/row-level-security.md` names only test classes that exist in `tests/unit/test_safety_rls.py`, and names `tests/unit/test_rls_views.py`.\n- [ ] `docs/external/row-level-security.md`, section \"What gets rewritten\", states that the name of a function SQL Lens's SQL parser does not recognise keeps the case and quotes it was written in, and that functions the parser recognises are printed in its standard form, which can differ in case or spelling (for example `count(*)` is printed as `COUNT(*)` and `strpos(a, 'x')` as `POSITION('x' IN a)`).\n- [ ] No comment in `tests/unit/test_rls_views.py` refers to sqlglot 25.x.\n- [ ] A `changelog.d/<PR>.fixed.md` fragment states that, with row-level security rules active on PostgreSQL, a quoted call to a built-in PostgreSQL function that SQL Lens's SQL parser does not recognise (for example `\"quote_ident\"(name)`) now runs with its written case instead of failing with \"function does not exist\"; states that, with row-level security rules active on SQLite, the result column of an unaliased call to a function the parser does not recognise is named with the case it was written in (for example `printf('%s', name)` instead of `PRINTF('%s', name)`); and does not claim that quoted calls to functions defined in the database now run.",
+ "diff_produced_at_head": "f315e6fdb24c99ab6100535071c0bd04925547f5",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:rls.py:normalize-functions-false:335",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "dependency_interaction:rls.py:default-uppercases-quoted:332",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "dependency_interaction:row-level-security.md:recognised-canonical-form",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "dependency_interaction:row-level-security.md:external-function-case",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "api_contract:row-level-security.md:testing-section-classes",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "api_contract:row-level-security.md:rls-views-tests",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "test_mock_alignment:test_rls_views.py:fake-catalog-routines",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "dependency_interaction:test_rls_views.py:quoted-routine-lookup-case",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "test_mock_alignment:test_rls_views.py:quoted-pg-sleep-blocked",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "dependency_interaction:test_connectors.py:runner-signatures",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "data_format_assumption:test_connectors.py:quote-ident-output",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "absolute_claim:355.fixed.md:sqlite-printf-case",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-13",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-14",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-15",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-16",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-17",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-18",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-19",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-20",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-21",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}
