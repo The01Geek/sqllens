@@ -60,7 +60,7 @@ class EmitTextTool(Tool[EmitTextParams]):
             "Render a Markdown prose block in the response at this position. "
             "Call between run_sql / emit_chart steps to interleave deliberate "
             "user-facing text with charts and tables. Assistant text written "
-            "alongside a tool call is not part of your answer. Once an emit_text "
+            "alongside a tool call may not be shown to the user. Once an emit_text "
             "call succeeds in a request, your final reply is NOT shown either, "
             "so put every sentence the user must see in emit_text; when no "
             "emit_text call succeeds in the request, the final reply is shown."

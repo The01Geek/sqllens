@@ -1026,6 +1026,8 @@ class Agent:
                         else:
                             # Success results are always shown if they exist
                             yield result.ui_component
+                            # Any marked tool result hides the final reply;
+                            # EmitTextTool is the only tool that marks one.
                             if is_answer_marked(result.ui_component.rich_component):
                                 answer_prose_emitted = True
 

@@ -107,7 +107,7 @@ async def test_execute_error_path_returns_structured_failure(
 
 def test_description_states_when_the_final_reply_is_shown() -> None:
     description = EmitTextTool().description
-    assert "alongside a tool call is not part of your answer" in description
+    assert "alongside a tool call may not be shown to the user" in description
     assert "Once an emit_text call succeeds in a request, your final reply is NOT shown" in (
         description
     )

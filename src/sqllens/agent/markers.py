@@ -13,6 +13,8 @@ warning, and every ``EmitTextTool`` output). The MCP-layer block builder
 deliberate prose from intermediate reasoning chatter — assistant text yielded
 during a tool call when ``UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT`` is
 on, which carries no marker and must be dropped from the rendered answer.
+The agent loop also reads it: a successful tool result carrying the marker
+hides that request's final reply (only ``EmitTextTool`` marks a tool result).
 """
 
 # The ``data`` key set to ``True`` on TEXT UiComponents whose content the user
