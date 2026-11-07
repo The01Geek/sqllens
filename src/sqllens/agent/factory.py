@@ -98,9 +98,9 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     # stays a zero-overhead passthrough.
     if cfg.rls:
         sql_runner = RlsGuardRunner(sql_runner, cfg.rls, dialect=dialect)
-    # Masking must stay outermost: beneath RlsGuardRunner, _relation_check_executor
-    # would stop unwrapping at it and RlsGuardRunner's constructor would raise
-    # TypeError.
+    # Keep masking outermost: beneath RlsGuardRunner, _relation_check_executor
+    # would stop at this wrapper, so RLS's construction check would inspect its
+    # signature instead of the engine runner's.
     sql_runner = ResultMaskingRunner(
         sql_runner,
         extra_words=cfg.result_masking.extra_words,
