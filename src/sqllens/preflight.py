@@ -62,7 +62,6 @@ def _probe_sqlite(url: str, *, read_only: bool) -> None:
         path = sqlite_path_from_url(url)
     except ValueError as exc:
         raise PreflightError("database", str(exc)) from exc
-    shown = path if path == ":memory:" else f"{path} (resolved to {Path(path).absolute()})"
     try:
         with contextlib.closing(
             connect_sqlite(path, read_only=read_only, timeout=_DB_CONNECT_TIMEOUT_SECONDS)
@@ -70,6 +69,7 @@ def _probe_sqlite(url: str, *, read_only: bool) -> None:
             if read_only:
                 conn.execute("PRAGMA schema_version").fetchone()
     except sqlite3.Error as exc:
+        shown = path if path == ":memory:" else f"{path} (resolved to {Path(path).absolute()})"
         raise PreflightError(
             "database",
             f"{type(exc).__name__}: could not open SQLite database {shown}; "

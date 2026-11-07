@@ -24,7 +24,7 @@ from sqllens.agent.integrations.sqlite.sql_runner import (
 )
 from sqllens.cli import app
 from sqllens.config import AuthConfig, Config, DatabaseConfig, LLMConfig, MemoryConfig
-from sqllens.preflight import PreflightError, probe_database
+from sqllens.preflight import _DB_CONNECT_TIMEOUT_SECONDS, PreflightError, probe_database
 
 URL_TABLE = [
     ("sqlite:///rel.db", "rel.db"),
@@ -154,7 +154,9 @@ def test_special_chars_open_read_only(tmp_path: Path) -> None:
 def test_read_write_is_plain_open() -> None:
     with patch.object(sqlite_module.sqlite3, "connect") as connect:
         connect_sqlite("/tmp/x.db", read_only=False)
-    connect.assert_called_once_with("/tmp/x.db", timeout=5.0)
+    connect.assert_called_once_with(
+        "/tmp/x.db", timeout=sqlite_module._SQLITE_DEFAULT_TIMEOUT_SECONDS
+    )
 
 
 # --- runner end to end -------------------------------------------------------
@@ -195,7 +197,7 @@ def test_preflight_read_write_plain_open(tmp_path: Path) -> None:
     target = tmp_path / "new.db"
     with patch.object(sqlite_module.sqlite3, "connect", wraps=sqlite3.connect) as connect:
         probe_database(_cfg(f"sqlite:///{target}", read_only=False))
-    connect.assert_called_once_with(str(target), timeout=5.0)
+    connect.assert_called_once_with(str(target), timeout=_DB_CONNECT_TIMEOUT_SECONDS)
 
 
 def test_preflight_rejects_query_string() -> None:
