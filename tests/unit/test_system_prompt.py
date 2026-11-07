@@ -211,11 +211,18 @@ async def test_answer_composition_block_present_when_emit_text_registered() -> N
 
     assert prompt is not None
     assert "ANSWER COMPOSITION" in prompt
-    # Pin the load-bearing rules: emit_text is the only path for deliberate
-    # prose, multiple calls per request are permitted, and the interleaved
-    # few-shot uses the run_sql → emit_chart → emit_text → run_sql → emit_text
-    # shape (the interleaved AC from issue #194).
-    assert "emit_text is the ONLY way" in prompt
+    # Pin the load-bearing rules: the final reply is hidden once emit_text
+    # succeeds and shown otherwise, user-visible prose then goes in emit_text,
+    # multiple calls per request are permitted, and the interleaved few-shot
+    # uses the run_sql → emit_chart → emit_text → run_sql → emit_text shape.
+    assert "is NOT shown once an emit_text call has succeeded in this request" in prompt
+    assert "shown only when no emit_text call has succeeded in this request" in prompt
+    assert "Assistant text you write alongside a tool call" in prompt
+    assert "every sentence the user must see goes in emit_text" in prompt
+    for kind in ("clarifying question", "one-row result", "quoted tool error", "schema"):
+        assert kind in prompt
+    assert "hidden reasoning" not in prompt
+    assert "emit_text is the ONLY way" not in prompt
     assert "more than once per request" in prompt
     # The example workflow in the rubric demonstrates the interleaved few-shot
     # the issue body explicitly calls out.

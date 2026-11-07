@@ -128,9 +128,7 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     # the aggregated rows to this tool, which only validates the chart DSL.
     tools.register_local_tool(EmitChartTool(), access_groups=access)
     # EmitTextTool emits answer-marked prose so the agent can deliberately
-    # interleave text between artifacts (chart → text → table → ...). Non-
-    # emit_text assistant text is treated as hidden reasoning by the MCP-layer
-    # block builder.
+    # interleave text between artifacts (chart → text → table → ...).
     tools.register_local_tool(EmitTextTool(), access_groups=access)
     # save_question_tool_args lets the agent write question -> SQL pairs into
     # memory. Gated by memory.save_queries (OFF by default); the default system
