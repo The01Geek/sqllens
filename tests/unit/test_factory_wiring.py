@@ -283,18 +283,70 @@ def test_show_details_on_grants_static_user_access_to_tool_arguments(
 
 
 async def _prompt_from_agent_tools(agent: Agent) -> str:
-    """Build the default system prompt from the agent's own tool list.
+    """Build the system prompt with the agent's own builder and tool list.
 
-    ``build_agent`` passes no prompt builder, so the live agent uses
-    ``DefaultSystemPromptBuilder``; going through ``get_available_tools``
-    is what makes the prompt assertions below reflect the registry the
-    factory actually produced rather than a hand-written tool list.
+    A fresh ``DefaultSystemPromptBuilder()`` here would not see the dialect
+    ``build_agent`` gives the agent's builder, so the prompt assertions would
+    miss the ``Database:`` section.
     """
     user = User(id="anyone", group_memberships=["default"])
     tools = await agent.get_available_tools(user)
-    prompt = await DefaultSystemPromptBuilder().build_system_prompt(user, tools)
+    assert isinstance(agent.system_prompt_builder, DefaultSystemPromptBuilder)
+    prompt = await agent.system_prompt_builder.build_system_prompt(user, tools)
     assert prompt is not None
     return prompt
+
+
+@pytest.mark.parametrize(
+    ("url", "driver", "database_lines"),
+    [
+        (
+            "mysql+pymysql://u:p@db.internal:3306/shop",
+            "pymysql",
+            [
+                "- The connected database is MySQL. Write every query, catalog lookups"
+                " included, in MySQL's SQL dialect.",
+                "- MySQL has no ILIKE operator. For a case-insensitive match, use"
+                " LOWER(column) LIKE LOWER('pattern').",
+            ],
+        ),
+        (
+            "sqlite:///:memory:",
+            None,
+            [
+                "- The connected database is SQLite. Write every query, catalog lookups"
+                " included, in SQLite's SQL dialect.",
+                "- SQLite has no ILIKE operator. For a case-insensitive match, use"
+                " LOWER(column) LIKE LOWER('pattern').",
+            ],
+        ),
+        (
+            "postgresql://u:p@db.internal:5432/shop",
+            "psycopg2",
+            [
+                "- The connected database is PostgreSQL. Write every query, catalog lookups"
+                " included, in PostgreSQL's SQL dialect.",
+            ],
+        ),
+    ],
+)
+async def test_build_agent_prompt_names_the_database_engine(
+    tmp_path: Path, url: str, driver: str | None, database_lines: list[str]
+) -> None:
+    """Issue #343: ``build_agent`` hands its dialect to the agent's prompt builder."""
+    if driver:
+        pytest.importorskip(driver)
+    cfg = Config(
+        database=DatabaseConfig(url=url),
+        llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
+        memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
+        auth=AuthConfig(mode="none"),
+        agent=AgentRuntimeConfig(),
+    )
+    lines = (await _prompt_from_agent_tools(build_agent(cfg))).splitlines()
+    start = lines.index("Database:") + 1
+    assert lines[start : start + len(database_lines)] == database_lines
+    assert lines[start + len(database_lines)] == "Tool Errors:"
 
 
 async def test_save_text_memory_tool_omitted_when_field_unset(
