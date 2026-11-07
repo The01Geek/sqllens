@@ -46,8 +46,11 @@ def sqlite_path_from_url(url: str) -> str:
     from sqlalchemy.exc import ArgumentError
 
     # make_url reads ``:memory:`` here as host + port and raises.
-    if url.split("://", 1)[-1] == ":memory:":
+    rest = url.split("://", 1)[-1]
+    if rest == ":memory:":
         return ":memory:"
+    if rest.startswith(":memory:?"):
+        raise ValueError(SQLITE_URL_QUERY_UNSUPPORTED)
     try:
         parsed = make_url(url)
     except (ArgumentError, ValueError) as exc:
@@ -59,6 +62,8 @@ def sqlite_path_from_url(url: str) -> str:
             "SQLite URLs take no host, user, password or port; use sqlite:///relative/path.db or "
             "sqlite:////absolute/path.db"
         )
+    if parsed.database and "\x00" in parsed.database:
+        raise ValueError("SQLite database path in database.url contains a NUL byte")
     return parsed.database or ":memory:"
 
 

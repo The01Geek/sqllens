@@ -89,6 +89,25 @@ def test_helper_wraps_unparseable_url() -> None:
         sqlite_path_from_url("not a url")
 
 
+def test_helper_rejects_memory_with_query() -> None:
+    with pytest.raises(ValueError, match="query parameters are not supported"):
+        sqlite_path_from_url("sqlite://:memory:?x=1")
+
+
+def test_helper_rejects_nul_byte() -> None:
+    with pytest.raises(ValueError, match="NUL byte"):
+        sqlite_path_from_url("sqlite:///a%00b.db")
+
+
+def test_preflight_reports_missing_cwd(tmp_path: Path) -> None:
+    from sqllens.preflight import PreflightError, _probe_sqlite
+
+    with (
+        patch.object(Path, "absolute", side_effect=FileNotFoundError("cwd gone")),
+        pytest.raises(PreflightError, match="working directory unavailable"),
+    ):
+        _probe_sqlite("sqlite:///definitely-missing-318.db", read_only=True)
+
 @pytest.mark.parametrize("name", ["a:b.db", "c:data.db"])
 def test_readonly_uri_relative_colon_name_is_not_a_drive(name: str) -> None:
     assert sqlite_module._readonly_uri(name) == "file:" + name.replace(":", "%3A") + "?mode=ro"

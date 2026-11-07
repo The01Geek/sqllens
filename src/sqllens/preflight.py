@@ -53,8 +53,10 @@ def _probe_sqlite(url: str, *, read_only: bool) -> None:
 
     With ``read_only`` the open goes through the ``mode=ro`` URI, so a missing
     file fails here instead of being created, and the schema header is read so
-    a directory or non-database file fails too. The message names the path
-    (a SQLite path carries no credentials) but never ``str(exc)``.
+    a directory or a non-empty non-database file fails too (a zero-byte file
+    opens as an empty database). A URL the helper rejects is reported with the
+    helper's own message; a driver error names the path (a SQLite path carries
+    no credentials) and the exception type, never the driver's ``str(exc)``.
     """
     import sqlite3
 
@@ -68,7 +70,7 @@ def _probe_sqlite(url: str, *, read_only: bool) -> None:
         ) as conn:
             if read_only:
                 conn.execute("PRAGMA schema_version").fetchone()
-    except sqlite3.Error as exc:
+    except (sqlite3.Error, ValueError) as exc:
         shown = path
         if path != ":memory:":
             try:
@@ -88,15 +90,16 @@ def probe_database(cfg: Config) -> None:
     Does **not** run a query against PG/MySQL — that would burn round-trips and
     could trigger permission checks unrelated to reachability. A read-only
     SQLite probe does read the schema header (``PRAGMA schema_version``) so a
-    directory or non-database file fails here. For PG/MySQL the connect
+    directory or a non-empty non-database file fails here. For PG/MySQL the connect
     timeout is bounded by ``_DB_CONNECT_TIMEOUT_SECONDS`` so a wedged host
     can't extend startup indefinitely; SQLite has no connect-timeout knob
     (the underlying ``open()`` is unbounded on a wedged remote mount but
     effectively instant for local files).
 
     Raises:
-        PreflightError: with ``subsystem='database'`` and a sanitized category
-        as the detail. The original driver exception is chained via ``__cause__``.
+        PreflightError: with ``subsystem='database'`` and a detail that names
+        what failed without echoing credentials. The original driver exception is chained via
+        ``__cause__``.
     """
     url = cfg.database.url
     if "://" not in url:
