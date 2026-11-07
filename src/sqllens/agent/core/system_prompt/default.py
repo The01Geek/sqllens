@@ -82,7 +82,7 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
         # Get today's date
         today_date = datetime.now().strftime("%Y-%m-%d")
 
-        engine = _ENGINE_NAMES.get(self.dialect) if self.dialect else None
+        engine = _ENGINE_NAMES.get(self.dialect)
         catalog_example = _CATALOG_EXAMPLES.get(self.dialect, _NEUTRAL_CATALOG_EXAMPLE)
         database_section: List[str] = []
         if engine:
