@@ -5,8 +5,8 @@
 
 Pins ``EmitTextParams`` validation (non-empty text), ``EmitTextTool.execute``'s
 happy path (an answer-marked ``RichTextComponent`` that the MCP-layer block
-builder includes as a deliberate prose block — see ``_text_is_answer_marked``
-in ``sqllens.tools._format``), and the structured-error path.
+builder includes as a deliberate prose block — see ``is_answer_marked``
+in ``sqllens.agent.markers``), and the structured-error path.
 """
 
 from __future__ import annotations
