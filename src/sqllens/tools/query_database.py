@@ -531,7 +531,8 @@ async def query_database_impl_with_widgets(
     ``_INTERNAL_ERROR_MESSAGE``, agent-reported SQL failures raise
     ``_SQL_EXECUTION_ERROR_PREFIX + answer`` (as an :class:`AgentRunError`),
     a turn finished while the agent memory reports an ``open_error`` raises
-    ``_MEMORY_UNAVAILABLE_MESSAGE`` (as an :class:`AgentRunError`),
+    ``_MEMORY_UNAVAILABLE_MESSAGE`` (as an :class:`AgentRunError`, after the
+    turn's messages are removed from the conversation history),
     and ``UnsafeSqlError`` is re-raised verbatim. ``blocks`` is an empty list
     on the error path and on a turn that produced no structured artifacts;
     callers attach it to ``_meta`` only when non-empty.
@@ -679,6 +680,12 @@ async def query_database_impl_with_widgets(
                 raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
 
             total_duration_ms = int((time.monotonic() - started) * 1000)
+            # Read inside the turn lock: a turn that ran without saved memory is
+            # failed below, so its messages are removed here, before the next call
+            # on this conversation can build on an answer the caller never got.
+            open_error = getattr(getattr(agent, "agent_memory", None), "open_error", None)
+            if open_error is not None and baseline_user is not None and queued_id is not None:
+                _rollback_conversation(agent, queued_id, baseline_user.id, baseline_messages)
 
         try:
             answer, is_error, blocks, query_info, memory_info = components_to_blocks(
@@ -716,11 +723,11 @@ async def query_database_impl_with_widgets(
             except Exception:
                 logger.exception("agent trace assembly failed; serving answer without trace")
                 agent_trace = None
-        # Checked before ``is_error`` so a turn that ran without saved memory never
+        # ``open_error`` was read inside the turn lock above. Checked before
+        # ``is_error`` so a turn that ran without saved memory never
         # reads as a success or as a SQL failure carrying raw Chroma text. The
         # memory instance is shared across turns, so a failure recorded by an
         # earlier turn fails this one too until a later open succeeds.
-        open_error = getattr(getattr(agent, "agent_memory", None), "open_error", None)
         if open_error is not None:
             # The client message omits the cause, so log the exception (its text
             # can name the persist path) here for the operator.

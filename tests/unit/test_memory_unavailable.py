@@ -302,3 +302,43 @@ async def test_real_memory_failed_open_fails_the_query(
     with pytest.raises(AgentRunError) as excinfo:
         await query_database_impl_with_widgets(cfg, "how many orders?")
     assert str(excinfo.value) == EXPECTED_MESSAGE
+
+
+@pytest.mark.asyncio
+async def test_memory_unavailable_turn_is_rolled_back_from_history(tmp_path: Path) -> None:
+    """The failed turn's answer, produced without memory, is not kept for later turns."""
+    from sqllens.agent.core.agent import Agent
+    from sqllens.agent.core.llm import LlmResponse
+    from sqllens.agent.factory import _StaticUserResolver
+    from sqllens.conversation_store import BoundedConversationStore
+
+    from .test_truncated_tool_calls import _agent, _FakeRunSql, _ScriptedLlm
+
+    llm = _ScriptedLlm(
+        [LlmResponse(content="first answer"), LlmResponse(content="answer without memory")]
+    )
+    template = _agent(llm, _FakeRunSql())
+    store = BoundedConversationStore()
+    agent = Agent(
+        llm_service=llm,
+        tool_registry=template.tool_registry,
+        user_resolver=_StaticUserResolver(),
+        agent_memory=template.agent_memory,
+        conversation_store=store,
+        config=template.config,
+    )
+    cfg = build_test_config(persist_dir=tmp_path / "chroma")
+
+    async def history() -> list[str]:
+        user = await _StaticUserResolver().resolve_user(None)
+        conversation = await store.get_conversation("c1", user)
+        return [] if conversation is None else [m.content for m in conversation.messages]
+
+    await query_database_impl_with_widgets(cfg, "first", conversation_id="c1", agent=agent)
+    before = await history()
+    assert before
+
+    agent.agent_memory.open_error = RuntimeError(CHROMA_TEXT)  # type: ignore[attr-defined]
+    with pytest.raises(AgentRunError, match=r"^Memory store unavailable: "):
+        await query_database_impl_with_widgets(cfg, "second", conversation_id="c1", agent=agent)
+    assert await history() == before
