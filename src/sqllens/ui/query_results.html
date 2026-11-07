@@ -123,6 +123,10 @@
   .bar button { cursor: pointer; }
   .bar button:hover { border-color: var(--accent); }
   .meta { color: var(--muted); font-size: 12px; }
+  .cutnotice {
+    color: var(--fg); border-left: 3px solid var(--accent);
+    padding-left: 8px; margin-bottom: 8px; overflow-wrap: anywhere;
+  }
   .wrap { overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
   table { border-collapse: collapse; width: 100%; }
   th, td {
@@ -229,15 +233,17 @@ function renderTableBlock(block) {
     types: (block.column_types && typeof block.column_types === "object") ? block.column_types : {},
     rowCount: typeof block.row_count === "number" ? block.row_count : (Array.isArray(block.rows) ? block.rows.length : 0),
     truncated: typeof block.truncated === "number" ? block.truncated : 0,
+    rowCap: Number.isInteger(block.row_cap) && block.row_cap > 0 ? block.row_cap : 0,
     sortCol: -1,
     sortDir: 1,
     filter: "",
     page: 0,
   };
 
+  const noticeHost = document.createElement("div");
   const barHost = document.createElement("div");
   const gridHost = document.createElement("div");
-  container.append(barHost, gridHost);
+  container.append(noticeHost, barHost, gridHost);
 
   function isNumeric(colIndex) {
     return state.types[state.columns[colIndex]] === "number";
@@ -276,6 +282,41 @@ function renderTableBlock(block) {
 
   // ── CSV export (per-block) ────────────────────────────────────────────────
 
+  function fmtCount(n) {
+    // Explicit locale: a host locale must not change the thousands separator.
+    return Number(n).toLocaleString("en-US");
+  }
+
+  function capSentence() {
+    return `The query stopped at the ${fmtCount(state.rowCap)}-row limit; more rows exist.`;
+  }
+
+  function tableNoticeText() {
+    const sentences = [];
+    if (state.truncated > 0) {
+      const total = state.rowCount + state.truncated;
+      sentences.push(
+        `Showing the first ${fmtCount(state.rowCount)} of ${fmtCount(total)} rows. ` +
+          `The other ${fmtCount(state.truncated)} rows were left out to fit the display size limit.`
+      );
+    }
+    if (state.rowCap > 0) sentences.push(capSentence());
+    return sentences.join(" ");
+  }
+
+  function csvCutWarning(exportedRows) {
+    const shown = `Warning: this CSV holds only the ${fmtCount(exportedRows)} rows shown`;
+    if (state.truncated > 0) {
+      const total = state.rowCount + state.truncated;
+      const tail = state.rowCap > 0 ? " " + capSentence() : "";
+      return `${shown}, not all ${fmtCount(total)}.${tail}`;
+    }
+    if (state.rowCap > 0) {
+      return `${shown}; the query stopped at the ${fmtCount(state.rowCap)}-row limit.`;
+    }
+    return "";
+  }
+
   function buildCsvExport() {
     let defanged = false;
     function csvEscape(v) {
@@ -289,11 +330,15 @@ function renderTableBlock(block) {
     const rows = sortedRows(filteredRows());
     const lines = [state.columns.map(csvEscape).join(",")];
     for (const r of rows) lines.push(r.map(csvEscape).join(","));
+    const warnings = [csvCutWarning(rows.length)];
+    if (defanged) {
+      warnings.push(
+        "Warning: CSV formula protection added apostrophes to some headers or cells; spreadsheets will treat them as text."
+      );
+    }
     return {
       text: lines.join("\r\n"),
-      warning: defanged
-        ? "Warning: CSV formula protection added apostrophes to some headers or cells; spreadsheets will treat them as text."
-        : "",
+      warning: warnings.filter(Boolean).join(" "),
     };
   }
 
@@ -492,9 +537,7 @@ function renderTableBlock(block) {
     const pageRows = sorted.slice(start, start + PAGE_SIZE);
 
     if (metaSpan) {
-      let msg = `showing ${matched.length} of ${state.rowCount}`;
-      if (state.truncated > 0) msg += ` (${state.truncated} truncated)`;
-      metaSpan.textContent = msg;
+      metaSpan.textContent = `showing ${matched.length} of ${state.rowCount}`;
     }
 
     gridHost.textContent = "";
@@ -564,6 +607,13 @@ function renderTableBlock(block) {
 
   renderBar();
   render();
+  const notice = tableNoticeText();
+  if (notice) {
+    const line = document.createElement("div");
+    line.className = "cutnotice";
+    line.textContent = notice;
+    noticeHost.appendChild(line);
+  }
   return container;
 }
 
