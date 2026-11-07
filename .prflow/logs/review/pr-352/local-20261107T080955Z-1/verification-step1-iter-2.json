@@ -1,0 +1,56 @@
+[
+  {
+    "id": "VC-18",
+    "verdict": "PASS",
+    "raw_verdict": "PASS",
+    "normalized": false,
+    "evidence": "The only return in query_database_impl_with_widgets is line 744, after the open_error check at lines 723-735. All earlier exits are raises. No early success return exists.",
+    "file_checked": "src/sqllens/tools/query_database.py:723-744",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "verdict": "FAIL",
+    "raw_verdict": "FAIL",
+    "normalized": false,
+    "evidence": "In src/sqllens/tools/query_database.py the memory-unavailable AgentRunError is raised at ~lines 719-735, after agent.send_message has fully run (lines ~627-640) and the turn lock block has exited. The agent persists its messages into conversation_store during send_message. The only post-run store manipulation is _trim_unanswered_tool_use (removes only an unanswered tool_use) and _rollback_conversation, which is only called in the asyncio.CancelledError branch. Neither runs on the open_error path, so the turn's assistant answer stays in the store and later turns on the same conversation inherit it. server.py:378 only catches AgentRunError for formatting and does not touch the store.",
+    "file_checked": "src/sqllens/tools/query_database.py:719",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "verdict": "PASS",
+    "raw_verdict": "PASS",
+    "normalized": false,
+    "evidence": "query_database.py:723-735 raises AgentRunError(_MEMORY_UNAVAILABLE_MESSAGE) (text begins 'Memory store unavailable: ', line 99) when agent_memory.open_error is set; AgentRunError.__init__ calls super().__init__(message) (lines 69-77) so str(exc) is that message; the raise is outside the try/except at 687 that remaps to internal error. show_details-off: agent_trace None -> server.py:378-384 re-raises; mcp Tool.run (base.py:116-117) wraps as ToolError('Error executing tool query_database: Memory store unavailable: ...'), giving isError. show_details-on: server.py:385 returns _trace_error_result whose text is f'Error executing tool query_database: {message}' (server.py:185-190). Both paths match the docstring at server.py:357-360.",
+    "file_checked": "src/sqllens/server.py:378",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "verdict": "PASS",
+    "raw_verdict": "PASS",
+    "normalized": false,
+    "evidence": "agent_memory.py:124 types _open_error as BaseException | None and :155 open_error returns BaseException | None. _get_client (:136-152) wraps PersistentClient in `except Exception as exc: self._open_error = exc; raise`, so a non-Exception BaseException is not recorded and the `self._open_error = None` at :150 is skipped, leaving any stale earlier record. The literal mechanics hold. The CancelledError example is unrealistic: _get_client runs inside a ThreadPoolExecutor thread (run_in_executor), and asyncio cancellation is delivered to the awaiting task, not raised inside the worker thread. Only KeyboardInterrupt or SystemExit-type exceptions could escape there, and rarely. The gap is real but low-impact, and the example is inaccurate.",
+    "file_checked": "src/sqllens/agent/integrations/chromadb/agent_memory.py:136-164",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "verdict": "PASS",
+    "raw_verdict": "PASS",
+    "normalized": false,
+    "evidence": "The real DefaultWorkflowHandler.try_handle (src/sqllens/agent/core/workflow/default.py:56-95) handles 'help' by building a static string. It checks only user.group_memberships and returns WorkflowResult(should_skip_llm=True) with a RichTextComponent. It never touches agent_memory, search, get_recent_memories or ChromaAgentMemory._get_client. In Agent.send_message (src/sqllens/agent/core/agent/agent.py), the steps before the workflow check are the status bar yield, the in-process conversation_store.get_conversation, observability spans and before_message lifecycle hooks (about lines 357-452). None of these access agent_memory. The factory (src/sqllens/agent/factory.py) registers no lifecycle hooks (grep found none). The workflow check at about lines 454-472 skips the LLM when should_skip_llm is true. So a help turn makes no model call and does not open the store. The open_error check in query_database.py:723-731 reads the shared memory's recorded open_error attribute without opening the store, which matches the test's claim that the turn reports an earlier recorded failure. One caveat: the test itself uses a stub agent, but the docstring's claim about the real code path holds.",
+    "file_checked": "src/sqllens/agent/core/workflow/default.py:56",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "verdict": "PASS",
+    "raw_verdict": "PASS",
+    "normalized": false,
+    "evidence": "tests/unit/test_memory_unavailable.py:163-182: the test feeds _memory_card(hit_count=2, top_similarity=0.9) but asserts only 'done' in markdown and memory_info is not None; no hit/miss count assertion. No other assertion on memory_info in that test.",
+    "file_checked": "tests/unit/test_memory_unavailable.py:182",
+    "reused_from_iter_prev": false
+  }
+]

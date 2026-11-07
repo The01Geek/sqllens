@@ -1,0 +1,441 @@
+{
+  "iter": 3,
+  "loop_role": "fix",
+  "current_step": "4.5",
+  "current_substep": null,
+  "pending_dispatch": null,
+  "dispatch_mode": "agent",
+  "fix_commit_sha": "8e73aa86d994557da1bdeebb32b01b496dd812ae",
+  "fix_files": [
+    "src/sqllens/tools/query_database.py",
+    "tests/unit/test_memory_unavailable.py"
+  ],
+  "sweep_defs_read": [],
+  "sweep_evidence": {
+    "status": "not-run",
+    "reason": "phase 2.3 sweeps not executed on this fix delta; Step 3.5 gate and shadow are the backstop"
+  },
+  "checklist": [
+    {
+      "id": "VC-1",
+      "generator_id": "VC-24",
+      "category": "dependency_interaction",
+      "claim": "Every path reaching `if open_error is not None:` in query_database_impl_with_widgets has assigned the local `open_error` (no UnboundLocalError on a path that skips the turn-lock block).",
+      "claim_provenance": "generated_paraphrase",
+      "source_file": "src/sqllens/tools/query_database.py",
+      "verification_mode": "agent",
+      "claim_signature": "dependency_interaction:query_database.py:open-error-unbound-path",
+      "lite_probe": null,
+      "verdict": "PASS",
+      "evidence": "query_database.py:686 assigns open_error unconditionally at the end of the `async with _conversation_turn(...)` body (line 610), after the agent-run try/except (632-680) whose every failure branch re-raises. _conversation_turn (177-208) yields on both the conversation_id None path (194-196) and the locked path, so the body always runs; unqueued calls still execute line 686 (only the rollback at 687 is gated on queued_id). The read at 731 is therefore reachable only after 686 has assigned open_error; no UnboundLocalError path.",
+      "file_checked": "src/sqllens/tools/query_database.py:686",
+      "raw_verdict": "PASS",
+      "normalized": false,
+      "reused_from_iter_prev": false,
+      "source_excerpt": null
+    },
+    {
+      "id": "VC-2",
+      "generator_id": "VC-25",
+      "category": "dependency_interaction",
+      "claim": "If components_to_blocks/trace assembly raises after the open_error rollback, the client gets _INTERNAL_ERROR_MESSAGE instead of the memory-unavailable message, contradicting criterion 1 (check ordering).",
+      "claim_provenance": "generated_paraphrase",
+      "source_file": "src/sqllens/tools/query_database.py",
+      "verification_mode": "agent",
+      "claim_signature": "dependency_interaction:query_database.py:blocks-failure-preempts-memory-error",
+      "lite_probe": null,
+      "verdict": "FAIL",
+      "evidence": "src/sqllens/tools/query_database.py:690-699: components_to_blocks failure raises RuntimeError(_INTERNAL_ERROR_MESSAGE) before the open_error check at line 731, after the rollback at 688. So when open_error is set and formatting raises, the client gets the internal error, not the memory-unavailable message. The defect exists for components_to_blocks. Trace assembly (718-725) is caught and does not preempt, so the claim is only partly accurate.",
+      "file_checked": "src/sqllens/tools/query_database.py:690",
+      "raw_verdict": "FAIL",
+      "normalized": false,
+      "reused_from_iter_prev": false,
+      "source_excerpt": null
+    },
+    {
+      "id": "VC-3",
+      "generator_id": "VC-26",
+      "category": "dependency_interaction",
+      "claim": "`_rollback_conversation(agent, queued_id, baseline_user.id, baseline_messages)` matches its definition's parameter order/types, and baseline_messages is always bound when baseline_user and queued_id are not None.",
+      "claim_provenance": "generated_paraphrase",
+      "source_file": "src/sqllens/tools/query_database.py",
+      "verification_mode": "agent",
+      "claim_signature": "dependency_interaction:query_database.py:rollback-call-signature",
+      "lite_probe": null,
+      "verdict": "PASS",
+      "evidence": "Definition query_database.py:374 _rollback_conversation(agent: Any, conversation_id: str, user_id: str, length: int). Calls at :659-661 and :688 pass (agent, queued_id, baseline_user.id, baseline_messages): queued_id is str|None narrowed to str by the guard (_conversation_turn yields str|None, :178), User.id is str (agent/core/user/models.py:15), baseline_messages is int. baseline_messages is bound unconditionally at :612 (=0) before any branch, and every call is guarded by baseline_user is not None and queued_id is not None.",
+      "file_checked": "src/sqllens/tools/query_database.py:374",
+      "raw_verdict": "PASS",
+      "normalized": false,
+      "reused_from_iter_prev": false,
+      "source_excerpt": null
+    },
+    {
+      "id": "VC-4",
+      "generator_id": "VC-27",
+      "category": "absolute_claim",
+      "claim": "The comment's claim that a memory-less turn's messages are removed before the next call on this conversation can build on them holds for every case (incl. no conversation_id, baseline_user or queued_id None).",
+      "claim_provenance": "source_authored",
+      "source_excerpt": "a turn that ran without saved memory is\n            # failed below, so its messages are removed here, before the next call\n            # on this conversation can build on an answer the caller never got.",
+      "source_file": "src/sqllens/tools/query_database.py",
+      "verification_mode": "agent",
+      "claim_signature": "absolute_claim:query_database.py:rollback-before-next-call",
+      "lite_probe": null,
+      "verdict": "FAIL",
+      "evidence": "The rollback at src/sqllens/tools/query_database.py:683-688 runs only when send_message completes without raising and requires baseline_user and queued_id non-None. (1) conversation_id None: no rollback, but harmless because the agent mints a private id no caller can name (docstring lines 178-190), and baseline_user is None only when queued_id is None, so the guard adds no gap. (2) Counterexample: if send_message raises on a turn that ran with agent_memory.open_error set, the except Exception at ~641-646 only calls _trim_unanswered_tool_use (removes from the first unanswered tool_use, not the whole turn) and re-raises, so the open_error read/rollback at 686-688 is never reached; the turn's remaining messages stay in the conversation. (3) _rollback_conversation (374-460) swallows failures and returns without removing messages: store without truncate_messages, ConversationOwnerMismatchError, other exceptions (logged at ERROR), and truncate returning False (evicted). So the 'removed here, before the next call can build on it' claim is not true for every case.",
+      "file_checked": "src/sqllens/tools/query_database.py:683",
+      "raw_verdict": "FAIL",
+      "normalized": false,
+      "reused_from_iter_prev": false
+    },
+    {
+      "id": "VC-5",
+      "generator_id": "VC-28",
+      "category": "test_mock_alignment",
+      "claim": "agent_stub_factory builds agent_memory as an object without auto-created attributes (not a bare MagicMock), so `not hasattr(stub.agent_memory, 'open_error')` and getattr defaults behave as tests assume.",
+      "claim_provenance": "generated_paraphrase",
+      "source_file": "tests/unit/test_memory_unavailable.py",
+      "verification_mode": "agent",
+      "claim_signature": "test_mock_alignment:test_memory_unavailable.py:stub-memory-no-autoattr",
+      "lite_probe": null,
+      "verdict": "PASS",
+      "evidence": "agent_stub_factory returns StubAgent class (tests/unit/conftest.py:21-24). StubAgent.__init__ sets self.agent_memory = StubAgentMemory(...) (tests/unit/_agent_stubs.py:301), a plain AgentMemory subclass (lines 213-260) with only _raise_exc, get_recent_memories_calls and explicit methods; no __getattr__, no MagicMock, and AgentMemory ABC defines no open_error (grep empty). So hasattr(stub.agent_memory,'open_error') is False until a test sets it (test_memory_unavailable.py:191) and getattr defaults work.",
+      "file_checked": "tests/unit/_agent_stubs.py:301",
+      "raw_verdict": "PASS",
+      "normalized": false,
+      "reused_from_iter_prev": false,
+      "source_excerpt": null
+    },
+    {
+      "id": "VC-6",
+      "generator_id": "VC-29",
+      "category": "test_mock_alignment",
+      "claim": "The rollback test's Agent(...) kwargs, _StaticUserResolver().resolve_user(None), BoundedConversationStore.get_conversation(id, user) and query_database_impl_with_widgets(agent=...) all match the real signatures.",
+      "claim_provenance": "generated_paraphrase",
+      "source_file": "tests/unit/test_memory_unavailable.py",
+      "verification_mode": "agent",
+      "claim_signature": "test_mock_alignment:test_memory_unavailable.py:rollback-test-agent-ctor",
+      "lite_probe": null,
+      "verdict": "PASS",
+      "evidence": "Agent.__init__ (agent.py:~97-115) accepts llm_service, tool_registry, user_resolver, agent_memory, conversation_store, config; template attrs tool_registry/agent_memory/config exist (agent.py:116-127). _StaticUserResolver.resolve_user(request_context) is async (factory.py:53). BoundedConversationStore.get_conversation(conversation_id, user) async (conversation_store.py:68). query_database_impl_with_widgets accepts keyword conversation_id and agent (query_database.py:502-511). Conversation.messages and Message.content exist (models.py).",
+      "file_checked": "src/sqllens/agent/core/agent/agent.py:97",
+      "raw_verdict": "PASS",
+      "normalized": false,
+      "reused_from_iter_prev": false,
+      "source_excerpt": null
+    },
+    {
+      "id": "VC-7",
+      "generator_id": "VC-30",
+      "category": "issue_acceptance",
+      "claim": "AC1: while the store cannot be opened, every completed query_database turn returns isError with text `Error executing tool query_database: ` + memory-unavailable message, show_details off and on (with agent_trace), including a later successful run_sql and a former `SQL execution error: Tool failed:` turn.",
+      "claim_provenance": "generated_paraphrase",
+      "source_file": "src/sqllens/tools/query_database.py",
+      "verification_mode": "agent",
+      "claim_signature": "issue_acceptance:query_database.py:criterion-1-iserror-message",
+      "lite_probe": null,
+      "verdict": "PASS",
+      "evidence": "query_database.py:686 reads open_error from agent.agent_memory inside the turn lock; :731 `if open_error is not None` raises AgentRunError(_MEMORY_UNAVAILABLE_MESSAGE, agent_trace=agent_trace, ...) and precedes `if is_error` at :743, so a later successful run_sql (is_error False) and a former 'SQL execution error: Tool failed:' turn both get the memory message. Message constant at :98-103 matches the issue text. server.py:378-384: AgentRunError with agent_trace None (details off) is re-raised so FastMCP yields 'Error executing tool query_database: <msg>' isError; with details on, _trace_error_result (server.py:164-190) returns isError with text f'Error executing tool query_database: {message}' plus _meta agent_trace. agent_memory.py:148-164 sets/clears _open_error and exposes open_error.",
+      "file_checked": "src/sqllens/tools/query_database.py:731",
+      "raw_verdict": "PASS",
+      "normalized": false,
+      "reused_from_iter_prev": false,
+      "source_excerpt": null
+    },
+    {
+      "id": "VC-8",
+      "generator_id": "VC-31",
+      "category": "issue_acceptance",
+      "claim": "AC2: the error message contains neither the persist_dir value nor Chroma exception text; with show_details on agent_trace still reports each failed step's error.",
+      "claim_provenance": "generated_paraphrase",
+      "source_file": "src/sqllens/tools/query_database.py",
+      "verification_mode": "agent",
+      "claim_signature": "issue_acceptance:query_database.py:criterion-2-no-path-leak",
+      "lite_probe": null,
+      "verdict": "PASS",
+      "evidence": "query_database.py:98-103 _MEMORY_UNAVAILABLE_MESSAGE is a fixed constant; it names only the config key 'memory.persist_dir', not its value, and has no Chroma text. Raised at :731-742 as AgentRunError with that constant; the exception is only logged server-side (exc_info=open_error, :733-737). agent_trace is built at :715-725 when effective.show_details and passed into AgentRunError (:739-741). _format.py:783-784 puts each failed step's error into the public trace step; server.py:378-387 returns it in _meta via _trace_error_result.",
+      "file_checked": "src/sqllens/tools/query_database.py:731",
+      "raw_verdict": "PASS",
+      "normalized": false,
+      "reused_from_iter_prev": false,
+      "source_excerpt": null
+    },
+    {
+      "id": "VC-9",
+      "generator_id": "VC-32",
+      "category": "issue_acceptance",
+      "claim": "AC3: recovery without restart; first successful open returns normal results with memory_info hits/misses; a late failed open after a concurrent successful open causes no later error.",
+      "claim_provenance": "generated_paraphrase",
+      "source_file": "src/sqllens/agent/integrations/chromadb/agent_memory.py",
+      "verification_mode": "agent",
+      "claim_signature": "issue_acceptance:agent_memory.py:criterion-3-recovery",
+      "lite_probe": null,
+      "verdict": "PASS",
+      "evidence": "agent_memory.py:136-152 leaves _client None on failed open (records _open_error, re-raises) so the next call retries, and sets _open_error=None and _client on success: recovery without restart. open_error property (155-164) returns None whenever _client is not None, so a late failed open after a concurrent success cannot leave it set. query_database.py:686,731 raises the memory-unavailable error only when open_error is not None; otherwise 743-751 returns normal markdown/blocks/memory_info from components_to_blocks. Tests (test_memory_unavailable.py:82-101, 163-177) read consistent.",
+      "file_checked": "src/sqllens/agent/integrations/chromadb/agent_memory.py:136-164",
+      "raw_verdict": "PASS",
+      "normalized": false,
+      "reused_from_iter_prev": false,
+      "source_excerpt": null
+    },
+    {
+      "id": "VC-10",
+      "generator_id": "VC-33",
+      "category": "issue_acceptance",
+      "claim": "AC4: when the memory object has no open_error attribute, query_database results are unchanged.",
+      "claim_provenance": "generated_paraphrase",
+      "source_file": "src/sqllens/tools/query_database.py",
+      "verification_mode": "agent",
+      "claim_signature": "issue_acceptance:query_database.py:criterion-4-no-attr-unchanged",
+      "lite_probe": null,
+      "verdict": "PASS",
+      "evidence": "query_database.py:686 reads open_error via getattr(getattr(agent,'agent_memory',None),'open_error',None), so a missing attribute (or missing agent_memory) yields None. The rollback at 687-688 is gated on open_error is not None, and the raise at 731-742 is gated on open_error is not None. With None neither runs and flow continues to the unchanged is_error handling at 743.",
+      "file_checked": "src/sqllens/tools/query_database.py:686-742",
+      "raw_verdict": "PASS",
+      "normalized": false,
+      "reused_from_iter_prev": false,
+      "source_excerpt": null
+    },
+    {
+      "id": "VC-11",
+      "generator_id": "VC-34",
+      "category": "issue_acceptance",
+      "claim": "AC5: no reads/writes of SharedSystemClient._identifier_to_system; default.py not edited; post-open memory failures unchanged; full turn runs before the error; workflow-handled `help` makes no open attempt but errors exactly when an earlier failure is recorded.",
+      "claim_provenance": "generated_paraphrase",
+      "source_file": "src/sqllens/tools/query_database.py",
+      "verification_mode": "agent",
+      "claim_signature": "issue_acceptance:query_database.py:criterion-5-scope-limits",
+      "lite_probe": null,
+      "verdict": "PASS",
+      "evidence": "grep of src for _identifier_to_system: no matches. git diff --stat 874474c...HEAD touches only agent_memory.py, server.py, query_database.py, tests/unit/test_memory_unavailable.py; default.py not edited. agent_memory.py: open_error is set only on a failed PersistentClient open and the property returns None whenever self._client is set, so post-open failures take the old path. query_database.py (~683-742): open_error is read after the agent stream completes (full turn runs), then AgentRunError(_MEMORY_UNAVAILABLE_MESSAGE) is raised before the is_error check. Workflow-handled messages never touch the store (no open is triggered), and the error is raised iff open_error is already recorded; test_turn_without_model_call_raises_only_when_failure_recorded (tests/unit/test_memory_unavailable.py:199-212) reflects this.",
+      "file_checked": "src/sqllens/tools/query_database.py:683-742",
+      "raw_verdict": "PASS",
+      "normalized": false,
+      "reused_from_iter_prev": false,
+      "source_excerpt": null
+    }
+  ],
+  "phase3_dispatched": [
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review"
+  ],
+  "expected_reviewers": [
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review"
+  ],
+  "phase3_failed_agents": [],
+  "dispatched_effort": [],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": false,
+    "detect_all_audit": false,
+    "profile": "full engine",
+    "files": 4,
+    "lines_changed": 424
+  },
+  "phase3_findings": [
+    {
+      "agent": "silent-failure-hunter",
+      "severity": "Important",
+      "description": "Shared open_error is cleared by a concurrent successful open on another conversation, so a turn whose own memory open failed returns a normal success (silent no-memory answer)",
+      "defect_signature": {
+        "file": "src/sqllens/tools/query_database.py",
+        "line_range": [
+          683,
+          688
+        ],
+        "kind": "race"
+      },
+      "corroboration_count": 1,
+      "step25_classification": "codebase",
+      "fix_decision": "pushed_back"
+    },
+    {
+      "agent": "silent-failure-hunter",
+      "severity": "Important",
+      "description": "_rollback_conversation reused for the memory-unavailable rollback but its docstring and ERROR logs describe a cancelled call; a failed rollback on this path logs a misleading cause",
+      "defect_signature": {
+        "file": "src/sqllens/tools/query_database.py",
+        "line_range": [
+          374,
+          440
+        ],
+        "kind": "comment_drift"
+      },
+      "corroboration_count": 2,
+      "step25_classification": "codebase",
+      "fix_decision": "applied"
+    },
+    {
+      "agent": "requesting-code-review",
+      "severity": "Suggestion",
+      "description": "_rollback_conversation docstring/log text says 'cancelled' for the new non-cancelled caller",
+      "defect_signature": {
+        "file": "src/sqllens/tools/query_database.py",
+        "line_range": [
+          374,
+          437
+        ],
+        "kind": "comment_drift"
+      },
+      "corroboration_count": 2,
+      "step25_classification": "codebase",
+      "fix_decision": "applied"
+    },
+    {
+      "agent": "requesting-code-review",
+      "severity": "Important",
+      "description": "Missing changelog.d/352.fixed.md fragment for a user-visible fix (previously deferred in iter 1, still absent)",
+      "defect_signature": {
+        "file": "changelog.d/352.fixed.md",
+        "line_range": null,
+        "kind": "other"
+      },
+      "corroboration_count": 1,
+      "step25_classification": "codebase",
+      "fix_decision": "deferred"
+    },
+    {
+      "agent": "silent-failure-hunter",
+      "severity": "Suggestion",
+      "description": "If send_message raises while memory is unavailable, the client gets the generic internal error instead of the memory-unavailable message",
+      "defect_signature": {
+        "file": "src/sqllens/tools/query_database.py",
+        "line_range": [
+          675,
+          688
+        ],
+        "kind": "logic_error"
+      },
+      "corroboration_count": 1,
+      "step25_classification": "codebase",
+      "fix_decision": "advisory"
+    },
+    {
+      "agent": "requesting-code-review",
+      "severity": "Suggestion",
+      "description": "Recorded open failure re-logs full traceback at WARNING on every later call (re-raise of parked iter-2 finding)",
+      "defect_signature": {
+        "file": "src/sqllens/tools/query_database.py",
+        "line_range": [
+          733,
+          736
+        ],
+        "kind": "other"
+      },
+      "corroboration_count": 1,
+      "step25_classification": "codebase",
+      "fix_decision": "advisory"
+    }
+  ],
+  "fix_decisions": [
+    {
+      "finding_id": "VC-2",
+      "decision": "applied",
+      "commit": "8e73aa86d994557da1bdeebb32b01b496dd812ae"
+    },
+    {
+      "finding_id": "VC-4",
+      "decision": "applied",
+      "commit": "8e73aa86d994557da1bdeebb32b01b496dd812ae"
+    },
+    {
+      "finding_id": "F3-0",
+      "decision": "pushed_back",
+      "source_file": "src/sqllens/agent/integrations/chromadb/agent_memory.py",
+      "claim_text": "Shared open_error is cleared by a concurrent successful open on another conversation, so a turn whose own memory open failed returns a normal success (silent no-memory answer)",
+      "skip_category": "claim-quality",
+      "evidence": "issue 323 Desired Behavior requires _get_client to clear the recorded failure on a successful open (workpad Phase 3.2 decision); a store that opened is available, so clearing is the specified behavior",
+      "parking_evidence": {
+        "basis": "clearing on a successful open is the issue-specified recovery behavior",
+        "failing_input": "a concurrent successful open on another conversation before this turn reads open_error",
+        "source": "agent_memory.py:150-164 and issue 323 Desired Behavior",
+        "finding_ref": {
+          "iter": 3,
+          "index": 0
+        }
+      }
+    },
+    {
+      "finding_id": "F3-1",
+      "decision": "applied",
+      "commit": "8e73aa86d994557da1bdeebb32b01b496dd812ae"
+    },
+    {
+      "finding_id": "F3-2",
+      "decision": "applied",
+      "commit": "8e73aa86d994557da1bdeebb32b01b496dd812ae"
+    },
+    {
+      "finding_id": "F3-3",
+      "decision": "deferred",
+      "source_file": "changelog.d/352.fixed.md",
+      "claim_text": "Missing changelog.d/352.fixed.md fragment for a user-visible fix (previously deferred in iter 1, still absent)",
+      "skip_category": "uncategorized",
+      "evidence": "implement orchestrator assigns the changelog fragment to its Phase 4 docs pass"
+    },
+    {
+      "finding_id": "F3-4",
+      "decision": "below-threshold",
+      "source_file": "src/sqllens/tools/query_database.py",
+      "claim_text": "If send_message raises while memory is unavailable, the client gets the generic internal error instead of the memory-unavailable message",
+      "skip_category": "below-threshold-parked",
+      "evidence": "parked-origin: below-threshold"
+    },
+    {
+      "finding_id": "F3-5",
+      "decision": "below-threshold",
+      "source_file": "src/sqllens/tools/query_database.py",
+      "claim_text": "Recorded open failure re-logs full traceback at WARNING on every later call (re-raise of parked iter-2 finding)",
+      "skip_category": "below-threshold-parked",
+      "evidence": "parked-origin: below-threshold"
+    }
+  ],
+  "convergence_inputs": {
+    "fixes_applied": 2,
+    "fix_diff_lines": 8,
+    "new_corroborated_critical_count": 2
+  },
+  "cap_drops": {
+    "count": 0,
+    "by_category": {}
+  },
+  "telemetry": "unavailable",
+  "base_checkpoint": {
+    "token": "UP_TO_DATE",
+    "behind_by": null
+  },
+  "stale_prose_check": {
+    "rc": 0,
+    "rows": []
+  },
+  "verification_evidence": {
+    "command": "PYTHONPATH=src ../sqllens/.venv/bin/python -m pytest -q -p no:cacheprovider",
+    "result": "pass",
+    "duration_s": 36,
+    "skipped_checks": []
+  },
+  "test_first_gate": [
+    {
+      "decision": "red-first",
+      "command": "pytest -k format_failure",
+      "result": "RED then GREEN",
+      "evidence": "internal error returned before fix"
+    }
+  ],
+  "reference_reads": {
+    "fix_delta": {
+      "status": "verified",
+      "outcome": "clean",
+      "reason": null
+    }
+  },
+  "fix_delta_advisories": [
+    "formatter-failure memory-unavailable branch does not log open_error (Suggestion)",
+    "test_query_database_queue.py:609-617 docstring says sole caller is the CancelledError handler (Suggestion)"
+  ],
+  "synthesized": false
+}

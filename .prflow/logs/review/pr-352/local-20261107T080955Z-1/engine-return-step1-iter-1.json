@@ -1,0 +1,498 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "engine_dir_selected": "/home/waran/.claude-radman/plugins/cache/devflow-marketplace/prflow/2.44.0/skills/review",
+ "engine_dir_advance_notes": "advanced past <root>/.prflow/vendor/prflow/skills/review (absent) and <root>/.devflow/vendor/devflow/skills/review (absent)",
+ "verdict": "REJECT",
+ "report": "## Verdict: REJECT (1 checklist FAIL plus 2 self-contradicting-diff findings: a false tool docstring and a false logging claim in a comment)\n\n## Issue Compliance\nReviewed against issue #323: query_database: memory-unavailable signal when the memory store cannot be opened \u2014 criteria from workpad; scope unchanged. Requirement-based checklist items are included in the verification results below.\nCriteria came from the `/prflow:implement` workpad comment \u2014 this run's authoritative set, possibly narrowed from the issue.\nNo divergence between the workpad's criteria and the issue body's.\nAll five acceptance criteria verified PASS (VC-13 to VC-17).\n\n## Verification Checklist Results\n16 passed, 1 failed, 0 inconclusive \u2014 0 via lite probe, 17 via agent.\n- VC-12: FAIL \u2014 Taxonomy comment says the memory-unavailable message must never carry the persist path or Chroma exception text \"(both stay in the server log)\" [src/sqllens/tools/query_database.py:92-94]. The message half holds. The server-log half does not: the new warning logs only `type(open_error).__name__`, `_get_client` re-raises without logging, and nothing logs the persist path.\n\n<details><summary>\u2705 Passed items (16 \u2212 0 of 17) \u2014 click to expand</summary>\n\n- VC-1: _get_client records the open exception, re-raises, clears on success [agent_memory.py:136]\n- VC-2: open_error reads None whenever a client is open (late-failure race) [agent_memory.py:155]\n- VC-3: check reads agent.agent_memory.open_error before is_error [query_database.py:720]\n- VC-4: AgentRunError is not swallowed by an outer except [query_database.py:720]\n- VC-5: server maps AgentRunError to isError with trace when show_details [server.py:377]\n- VC-6: verify-memory runner records the new error as ERROR [eval/runner.py:160]\n- VC-7: stub memory lacks open_error by default [tests/unit/_agent_stubs.py:213]\n- VC-8: imported test helpers exist with matching signatures [tests/unit/test_truncated_tool_calls.py:173]\n- VC-9: chromadb.PersistentClient patch target is effective [agent_memory.py:18,140]\n- VC-10: MCP test agent memory accepts open_error; one model request [tests/unit/test_truncated_tool_calls.py:208]\n- VC-11: trace steps carry status/error with raw Chroma text [tools/_format.py:774]\n- VC-13: AC1 isError with fixed message, both show_details modes [query_database.py:718]\n- VC-14: AC2 message excludes path and Chroma text; trace kept [query_database.py:97]\n- VC-15: AC3 recovery without restart; race safe [agent_memory.py:136-164]\n- VC-16: AC4 memory without attribute unchanged [query_database.py:720]\n- VC-17: AC5 scope limits held [query_database.py:718]\n\n</details>\n\n## Code Review Findings\n### \ud83d\udd34 Critical\n1. `query_database` tool docstring (diff-added) says the call \"returns an error result starting ``Memory store unavailable:``\". At HEAD the client text starts `Error executing tool query_database: ` in both show_details modes (FastMCP prefix; `_trace_error_result` mirrors it), as the PR's own tests assert. FastMCP publishes this docstring to MCP clients as the tool description. (raised by 2/5 agents) [self-contradicting-diff carve-out: src/sqllens/server.py] [inertness: first-conjunct=held limb-one=held limb-two=not-held; evidence: the docstring is the FastMCP tool description sent to MCP clients]\n\n### \ud83d\udfe0 Important / Major\n1. Diff-added taxonomy comment claims the persist path and Chroma text \"stay in the server log\". The only log on the new path (query_database.py:722-725) records just the exception class name. `_get_client` re-raises without logging, the registry (registry.py:292-299) swallows tool exceptions without logging, and no code logs the persist path. The enhancer's `exc_info` warning and the memory tool's `%s` warning can carry the Chroma text, but not the path. The client message tells operators to \"check the server logs\", which do not hold the path. This corroborates checklist item VC-12. (raised by 1/5 agents) [self-contradicting-diff carve-out: src/sqllens/tools/query_database.py] [inertness: first-conjunct=held limb-one=held limb-two=unestablished; evidence: searched for readers; the comment ships in the wheel source and whether anything outside the repo reads it could not be established]\n2. No `changelog.d/352.fixed.md` fragment. AGENTS.md requires one for this client-visible fix (a new isError category). (raised by 1/5 agents)\n3. Test gap: every query-path test sets `open_error` by hand. No test drives a real `ChromaAgentMemory` whose open fails through a turn, including the AC1 case of a turn that previously ended as `SQL execution error`. (raised by 2/5 agents) [suspected over-grade: shape 3 \u2014 observable fail-direction is a missing regression guard, milder than the Important label]\n4. Test or scope gap: a collection get or create failure after a successful client open (agent_memory.py:178-195) is not recorded, so that turn still succeeds without memory. This is untested. (raised by 1/5 agents) [suspected over-grade: shape 3 \u2014 observable fail-direction is outside the issue's stated store-open scope, milder than the Important label]\n\n### \ud83d\udfe1 Suggestion / Minor\n1. The record lives on the shared memory instance and is read after the turn, so a stale or concurrent failure fails turns that never touched memory. AC5 accepts this. Add a comment at the check so nobody later \"fixes\" it. (raised by 2/5 agents)\n2. The taxonomy comment's bullet list now ends in a comma join. (raised by 1/5 agents)\n3. Minor test-quality notes: an either-exception `pytest.raises`, simulated concurrency, and an untested `_collection_state` re-raise. (raised by 1/5 agents)\n\nover-grade annotation: Important items 3 and 4 are flagged above (advisory only; verdict unchanged).\ntruthfulness sweep: Critical item 1 and Important item 1 confirmed false against HEAD and routed into the carve-out.\nintra-diff contradiction scan: no contradiction found.\n\n## Verdict Criteria\n- Any FAIL in verification checklist \u2192 REJECT (VC-12)\n- Self-contradicting-diff carve-out \u2192 REJECT (server.py docstring; query_database.py log claim)\n- Threshold: critical (config). No coverage shortfall (dropped_count 0). All 5 Phase 3 agents returned. No deferral block in the PR body.\n- Prompt extension: content-present (review); final-pass EXTENSION-STATUS: loaded-with-content resolved-root=unset (the orchestrator resolved no trusted root either).\n- Test evidence: no test suite run in this review (NO-SUITE-LAUNCH); the orchestrator's in-env suite result was not handed in.\n",
+ "phase3_findings": [
+  {
+   "agent": "comment-analyzer",
+   "severity": "Critical",
+   "description": "server.py query_database docstring falsely says the error result starts 'Memory store unavailable:'",
+   "defect_signature": {
+    "file": "src/sqllens/server.py",
+    "line_range": [
+     357,
+     359
+    ],
+    "kind": "documented_falsehood"
+   },
+   "corroboration_count": 2
+  },
+  {
+   "agent": "requesting-code-review",
+   "severity": "Important",
+   "description": "server.py query_database docstring falsely says the error result starts 'Memory store unavailable:'",
+   "defect_signature": {
+    "file": "src/sqllens/server.py",
+    "line_range": [
+     356,
+     359
+    ],
+    "kind": "documented_falsehood"
+   },
+   "corroboration_count": 2
+  },
+  {
+   "agent": "silent-failure-hunter",
+   "severity": "Critical",
+   "description": "taxonomy comment claims persist path and Chroma text stay in the server log; the new path logs only the class name",
+   "defect_signature": {
+    "file": "src/sqllens/tools/query_database.py",
+    "line_range": [
+     92,
+     94
+    ],
+    "kind": "documented_falsehood"
+   },
+   "corroboration_count": 1
+  },
+  {
+   "agent": "silent-failure-hunter",
+   "severity": "Important",
+   "description": "open-failure cause not logged server-side (only the exception class name)",
+   "defect_signature": {
+    "file": "src/sqllens/tools/query_database.py",
+    "line_range": [
+     718,
+     730
+    ],
+    "kind": "other"
+   },
+   "corroboration_count": 1
+  },
+  {
+   "agent": "silent-failure-hunter",
+   "severity": "Suggestion",
+   "description": "stale recorded failure fails turns that never touched memory (accepted by AC5)",
+   "defect_signature": {
+    "file": "src/sqllens/tools/query_database.py",
+    "line_range": [
+     718,
+     730
+    ],
+    "kind": "logic_error"
+   },
+   "corroboration_count": 1
+  },
+  {
+   "agent": "requesting-code-review",
+   "severity": "Important",
+   "description": "missing changelog.d fixed fragment",
+   "defect_signature": {
+    "file": "changelog.d/352.fixed.md",
+    "line_range": null,
+    "kind": "other"
+   },
+   "corroboration_count": 1
+  },
+  {
+   "agent": "requesting-code-review",
+   "severity": "Suggestion",
+   "description": "comment needed at the shared-instance check",
+   "defect_signature": {
+    "file": "src/sqllens/tools/query_database.py",
+    "line_range": [
+     718,
+     730
+    ],
+    "kind": "comment_drift"
+   },
+   "corroboration_count": 1
+  },
+  {
+   "agent": "requesting-code-review",
+   "severity": "Suggestion",
+   "description": "no end-to-end real-memory failure test; memory_info after recovery not asserted",
+   "defect_signature": {
+    "file": "tests/unit/test_memory_unavailable.py",
+    "line_range": [
+     127,
+     216
+    ],
+    "kind": "test_gap"
+   },
+   "corroboration_count": 2
+  },
+  {
+   "agent": "pr-test-analyzer",
+   "severity": "Important",
+   "description": "query-path tests set open_error by hand; no real failed-open test",
+   "defect_signature": {
+    "file": "tests/unit/test_memory_unavailable.py",
+    "line_range": [
+     126,
+     160
+    ],
+    "kind": "test_gap"
+   },
+   "corroboration_count": 2
+  },
+  {
+   "agent": "pr-test-analyzer",
+   "severity": "Important",
+   "description": "collection get/create failure not recorded or tested",
+   "defect_signature": {
+    "file": "src/sqllens/agent/integrations/chromadb/agent_memory.py",
+    "line_range": [
+     178,
+     195
+    ],
+    "kind": "test_gap"
+   },
+   "corroboration_count": 1
+  },
+  {
+   "agent": "pr-test-analyzer",
+   "severity": "Suggestion",
+   "description": "_collection_state re-raise untested",
+   "defect_signature": {
+    "file": "src/sqllens/agent/integrations/chromadb/agent_memory.py",
+    "line_range": [
+     130,
+     134
+    ],
+    "kind": "test_gap"
+   },
+   "corroboration_count": 1
+  },
+  {
+   "agent": "pr-test-analyzer",
+   "severity": "Suggestion",
+   "description": "either-exception pytest.raises",
+   "defect_signature": {
+    "file": "tests/unit/test_memory_unavailable.py",
+    "line_range": [
+     58,
+     66
+    ],
+    "kind": "test_gap"
+   },
+   "corroboration_count": 1
+  },
+  {
+   "agent": "pr-test-analyzer",
+   "severity": "Suggestion",
+   "description": "concurrency simulated via private fields",
+   "defect_signature": {
+    "file": "tests/unit/test_memory_unavailable.py",
+    "line_range": [
+     95,
+     101
+    ],
+    "kind": "test_gap"
+   },
+   "corroboration_count": 1
+  },
+  {
+   "agent": "comment-analyzer",
+   "severity": "Suggestion",
+   "description": "taxonomy comment comma-joined bullet",
+   "defect_signature": {
+    "file": "src/sqllens/tools/query_database.py",
+    "line_range": [
+     88,
+     94
+    ],
+    "kind": "style"
+   },
+   "corroboration_count": 1
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:pr-test-analyzer",
+  "prflow:requesting-code-review"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:pr-test-analyzer",
+  "prflow:requesting-code-review"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:pr-test-analyzer",
+  "prflow:requesting-code-review"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "detect_all_audit": false,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "diff_produced_at_head": "f52a804069efdb33d01273637d55670b4c528ea2",
+ "prompt_extension_status": "content-present",
+ "acceptance_criteria_source": "workpad",
+ "stale_prose_lint": "rc=0, no rows",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "category": "dependency_interaction",
+   "claim": "_get_client records the exception from chromadb.PersistentClient or collection_state, re-raises, and clears _open_error only after both succeed; _client assigned after clearing",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/agent/integrations/chromadb/agent_memory.py",
+   "verify_against": "_get_client and open_error property",
+   "verify_hint": "Check ChromaAgentMemory._get_client; confirm `except Exception` covers what PersistentClient raises (Chroma alternates RuntimeError/AttributeError; any BaseException-only cases?)",
+   "verification_mode": "agent",
+   "claim_signature": "dependency_interaction:agent_memory.py:get-client-records-open-error",
+   "lite_probe": null,
+   "source_excerpt": null,
+   "verdict": "PASS",
+   "evidence": "agent_memory.py:136-152: try wraps chromadb.PersistentClient (140) and collection_state (144); `except Exception as exc` records self._open_error = exc and re-raises (147-149); self._open_error = None at 150 only after both succeed; self._client = client assigned at 151 after clearing. Caveat: `except Exception` does not catch BaseException-only exceptions (KeyboardInterrupt/SystemExit); those propagate without recording, which is appropriate."
+  },
+  {
+   "id": "VC-2",
+   "category": "absolute_claim",
+   "claim": "open_error docstring says a failed open finishing after a concurrent successful open cannot leave it set",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "Reads ``None`` whenever a client is open, so a failed open that finishes after a concurrent successful one (two executor threads) cannot leave it set.",
+   "source_file": "src/sqllens/agent/integrations/chromadb/agent_memory.py",
+   "verify_against": "open_error property and every place _client is reset to None",
+   "verify_hint": "Interleave thread A success (sets _client) and thread B failure (sets _open_error afterwards); then search agent_memory.py for any code path setting self._client = None (e.g. reset/close) that would re-expose the stale _open_error",
+   "verification_mode": "agent",
+   "claim_signature": "absolute_claim:agent_memory.py:late-failure-cannot-stick",
+   "lite_probe": null,
+   "verdict": "PASS",
+   "evidence": "agent_memory.py:155-164 open_error returns None whenever self._client is not None. grep shows _client assigned only at line 123 (init None) and line 151 (set to a client); never reset to None (no close/reset path). So a late failure writing _open_error (line 148) after a concurrent success (line 151) is masked by the _client check."
+  },
+  {
+   "id": "VC-3",
+   "category": "dependency_interaction",
+   "claim": "query_database_impl_with_widgets reads getattr(agent.agent_memory,'open_error') after the turn and before the is_error branch, raising AgentRunError with agent_trace and query_info",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/query_database.py",
+   "verify_against": "Agent class attribute name for memory",
+   "verify_hint": "Confirm the agent object built by build_agent exposes memory as `agent_memory` (src/sqllens/agent/core/agent/*.py, factory.py); otherwise check is dead",
+   "verification_mode": "agent",
+   "claim_signature": "dependency_interaction:query_database.py:agent-memory-attr-name",
+   "lite_probe": null,
+   "source_excerpt": null,
+   "verdict": "PASS",
+   "evidence": "query_database.py:720 reads getattr(getattr(agent,'agent_memory',None),'open_error',None) after the turn and agent_trace build (705-717) and before 'if is_error' (731); raises AgentRunError(_MEMORY_UNAVAILABLE_MESSAGE, agent_trace=, query_info=) at 726-730. Agent.__init__ sets self.agent_memory (agent/core/agent/agent.py:118); factory.py:176-180 builds Agent(agent_memory=memory); ChromaAgentMemory exposes open_error property (agent_memory.py:155-164). Attribute name matches, check is live."
+  },
+  {
+   "id": "VC-4",
+   "category": "dependency_interaction",
+   "claim": "The open_error check sits outside any broad except that would convert AgentRunError into the internal-error message or swallow it",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/query_database.py",
+   "verify_against": "try/except structure of query_database_impl_with_widgets",
+   "verify_hint": "Read surrounding try blocks near the new check and the outer exception handlers in query_database_impl_with_widgets",
+   "verification_mode": "agent",
+   "claim_signature": "dependency_interaction:query_database.py:agentrunerror-not-swallowed",
+   "lite_probe": null,
+   "source_excerpt": null,
+   "verdict": "PASS",
+   "evidence": "Outer try at query_database.py:590 has only finally; inner except blocks (591-596, ~630-678, 682-691, 709-716) all closed before the check at 720-731; raise propagates unchanged."
+  },
+  {
+   "id": "VC-5",
+   "category": "api_contract",
+   "claim": "server.py turns AgentRunError into isError with text `Error executing tool query_database: <msg>` and attaches _meta sqllens/agent_trace when show_details on; re-raises otherwise",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/server.py",
+   "verify_against": "_trace_error_result and the query_database tool handler",
+   "verify_hint": "Check server.py handler's except AgentRunError branch and _trace_error_result; also whether agent_trace None with show_details on falls back correctly",
+   "verification_mode": "agent",
+   "claim_signature": "api_contract:server.py:agentrunerror-to-iserror",
+   "lite_probe": null,
+   "source_excerpt": null,
+   "verdict": "PASS",
+   "evidence": "server.py:377-386 catches AgentRunError; if exc.agent_trace is None it re-raises, else returns _trace_error_result(str(exc), conversation_id, exc.agent_trace). _trace_error_result (165-190) builds CallToolResult isError=True, text 'Error executing tool query_database: {message}', _meta with sqllens/agent_trace (plus conversation key). tools/query_database.py:707-717 sets agent_trace only when effective.show_details is on, and None on trace-build failure (717), which falls back to re-raise."
+  },
+  {
+   "id": "VC-6",
+   "category": "api_contract",
+   "claim": "sqllens verify-memory runner calling query_database_impl_with_widgets handles the new AgentRunError path as failure",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/query_database.py",
+   "verify_against": "src/sqllens/eval/ verify-memory runner",
+   "verify_hint": "grep query_database_impl_with_widgets in src/sqllens/eval and cli.py; check AgentRunError handling",
+   "verification_mode": "agent",
+   "claim_signature": "api_contract:query_database.py:verify-memory-sibling",
+   "lite_probe": null,
+   "source_excerpt": null,
+   "verdict": "PASS",
+   "evidence": "eval/runner.py:131-138 calls query_database_impl_with_widgets; _run_one_case (160-173) except Exception returns CaseResult status=ERROR with '<Type>: <msg>'."
+  },
+  {
+   "id": "VC-7",
+   "category": "test_mock_alignment",
+   "claim": "agent_stub_factory stub's agent_memory lacks an open_error attribute by default (test asserts not hasattr) yet allows setting it",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_memory_unavailable.py",
+   "verify_against": "agent_stub_factory fixture",
+   "verify_hint": "Check tests/unit/conftest.py and tests/unit/_agent_stubs.py for agent_memory construction (MagicMock would make hasattr True)",
+   "verification_mode": "agent",
+   "claim_signature": "test_mock_alignment:test_memory_unavailable.py:stub-memory-no-attr",
+   "lite_probe": null,
+   "source_excerpt": null,
+   "verdict": "PASS",
+   "evidence": "StubAgentMemory (tests/unit/_agent_stubs.py:213-236) is a plain AgentMemory subclass, no open_error/__slots__; test asserts not hasattr at test_memory_unavailable.py:191 and assigns at 143,177,210."
+  },
+  {
+   "id": "VC-8",
+   "category": "test_mock_alignment",
+   "claim": "Test helpers imported (make_tool_cards ok/error kwargs, make_dataframe, make_text_component, build_test_config persist_dir/agent kwargs, _query_database_fn, _StubCtx, _memory_card(hit_count, top_similarity), _agent, _FakeRunSql, _ScriptedLlm with .requests) exist with these signatures",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_memory_unavailable.py",
+   "verify_against": "tests/unit/_agent_stubs.py, _config_builders.py, test_server.py, test_query_database.py, test_truncated_tool_calls.py",
+   "verify_hint": "Read each helper's definition and compare signatures",
+   "verification_mode": "agent",
+   "claim_signature": "test_mock_alignment:test_memory_unavailable.py:helper-signatures",
+   "lite_probe": null,
+   "source_excerpt": null,
+   "verdict": "PASS",
+   "evidence": "All helpers exist with compatible signatures: make_tool_cards(tool, arguments=None, *, ok=True, error=None, ...) at _agent_stubs.py:98; make_dataframe(rows, columns=None) :176; make_text_component(content) :37; build_test_config(persist_dir, agent=None, *, ...) _config_builders.py:27; _query_database_fn(mcp) and class _StubCtx in test_server.py:36/46; _memory_card(*, hit_count, top_similarity, threshold=0.7) test_query_database.py:589; _agent(llm, tool, max_iterations=20), _FakeRunSql, _ScriptedLlm (self.requests list, :179) in test_truncated_tool_calls.py. Call sites in test_memory_unavailable.py use matching kwargs."
+  },
+  {
+   "id": "VC-9",
+   "category": "test_mock_alignment",
+   "claim": "Patching `chromadb.PersistentClient` affects the call in agent_memory.py (module accesses chromadb.PersistentClient via attribute, not a from-import)",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_memory_unavailable.py",
+   "verify_against": "imports in agent_memory.py",
+   "verify_hint": "Check how chromadb is imported at top of agent_memory.py (and whether it is lazily imported/None when absent)",
+   "verification_mode": "agent",
+   "claim_signature": "test_mock_alignment:test_memory_unavailable.py:persistentclient-patch-target",
+   "lite_probe": null,
+   "source_excerpt": null,
+   "verdict": "PASS",
+   "evidence": "agent_memory.py:18 'import chromadb' (module import); line 140 calls chromadb.PersistentClient by attribute, so patch('chromadb.PersistentClient') is effective."
+  },
+  {
+   "id": "VC-10",
+   "category": "test_mock_alignment",
+   "claim": "In the MCP test, _agent(...) from test_truncated_tool_calls returns an agent whose agent_memory accepts attribute assignment of open_error and the scripted turn reaches the model exactly once",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_memory_unavailable.py",
+   "verify_against": "_agent in tests/unit/test_truncated_tool_calls.py",
+   "verify_hint": "Check what memory object _agent constructs (slots/frozen would break setattr) and that qd.get_agent is the seam query_database_impl_with_widgets uses",
+   "verification_mode": "agent",
+   "claim_signature": "test_mock_alignment:test_memory_unavailable.py:mcp-agent-memory-settable",
+   "lite_probe": null,
+   "source_excerpt": null,
+   "verdict": "PASS",
+   "evidence": "_agent (tests/unit/test_truncated_tool_calls.py:208-229) builds Agent(agent_memory=StubAgentMemory()). StubAgentMemory (tests/unit/_agent_stubs.py:213) is a plain AgentMemory ABC subclass with no __slots__/frozen, and Agent stores it as a plain attribute (agent.py:118 self.agent_memory = agent_memory), so setting open_error at test_memory_unavailable.py:230 works. qd.get_agent is monkeypatched (line 235); query_database.py:38 imports get_agent by name and :593 calls it when agent is None, so patching qd.get_agent is the seam. The scripted LLM records every request (test_truncated_tool_calls.py:186-188, 191); the test script has one text response and the test asserts len(llm.requests)==1. I did not run the test, so the exactly-once outcome rests on reading the code."
+  },
+  {
+   "id": "VC-11",
+   "category": "data_format_assumption",
+   "claim": "Agent trace steps carry `status` and `error` keys and failed search step error contains the raw Chroma text",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_memory_unavailable.py",
+   "verify_against": "agent trace assembly in query_database.py / tools/_format.py",
+   "verify_hint": "Find the trace builder producing trace['steps'] entries",
+   "verification_mode": "agent",
+   "claim_signature": "data_format_assumption:test_memory_unavailable.py:trace-step-shape",
+   "lite_probe": null,
+   "source_excerpt": null,
+   "verdict": "PASS",
+   "evidence": "Trace builder in src/sqllens/tools/_format.py:774-785 emits every public step with 'status' (always) and adds 'error' only when status=='error' and _error is non-empty. Failed-step _error is the card description with 'Tool failed: ' prefix stripped (lines 738-743), so the raw Chroma text is preserved (make_tool_cards in tests/unit/_agent_stubs.py:137 builds 'Tool failed: {error}'). Test (tests/unit/test_memory_unavailable.py:154-157) reads s['status'] and s.get('error'), consistent with this. Nuance: 'error' key is present only on failed steps, not all steps."
+  },
+  {
+   "id": "VC-12",
+   "category": "absolute_claim",
+   "claim": "Taxonomy comment says the memory-unavailable message must never carry the persist path or Chroma exception text",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "fixed memory-unavailable message, which must never carry the persist\n#    path or the Chroma exception text (both stay in the server log).",
+   "source_file": "src/sqllens/tools/query_database.py",
+   "verify_against": "logger.warning call and the message constant",
+   "verify_hint": "Note warning logs only type(open_error).__name__ - verify whether the persist path/Chroma text actually reaches the server log anywhere (claim 'both stay in the server log')",
+   "verification_mode": "agent",
+   "claim_signature": "absolute_claim:query_database.py:path-and-text-stay-in-log",
+   "lite_probe": null,
+   "verdict": "FAIL",
+   "evidence": "First half holds: the message is the constant _MEMORY_UNAVAILABLE_MESSAGE (query_database.py:97-102) and is raised unformatted at :726-730, so it never carries the persist path or Chroma text. Second half ('both stay in the server log') is not established by this code: the only log call tied to the open failure (query_database.py:722-725) logs just type(open_error).__name__, not the path or the Chroma message. ChromaAgentMemory._get_client (agent_memory.py:147-149) stores the exception and re-raises without logging. Whether path/text reach the log depends on unrelated callers (e.g. enhancer/default.py:159-162 logs exc_info only on search failure; workflow/default.py:545 has no log there), so the comment's guarantee is not backed by the warning it implies."
+  },
+  {
+   "id": "VC-13",
+   "category": "issue_acceptance",
+   "claim": "AC1: while store unopenable, every completed query_database turn returns isError text `Error executing tool query_database: ` + fixed message, show_details on/off (trace attached when on), incl. later successful run_sql and prior SQL execution error turns",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/query_database.py",
+   "verify_against": "AC1",
+   "verify_hint": "Check check order vs is_error branch in query_database_impl_with_widgets and server.py AgentRunError handling",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:query_database.py:ac1-iserror-memory-unavailable",
+   "lite_probe": null,
+   "source_excerpt": null,
+   "verdict": "PASS",
+   "evidence": "query_database.py:718-730 checks agent.agent_memory.open_error after components_to_blocks and before `if is_error` (731), raising AgentRunError(_MEMORY_UNAVAILABLE_MESSAGE, agent_trace, query_info); independent of is_error/run_sql outcome, so successful run_sql and prior SQL-error turns both get the fixed message. agent_trace built at 708-716 only when effective.show_details. server.py:377-385: AgentRunError with trace -> _trace_error_result (isError, text 'Error executing tool query_database: '+message, trace in _meta); without trace re-raised so FastMCP emits same prefix. open_error (agent_memory.py:154-164) stays set while no client is open."
+  },
+  {
+   "id": "VC-14",
+   "category": "issue_acceptance",
+   "claim": "AC2: error message excludes persist_dir and Chroma text; agent_trace still reports each failed step's error",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/query_database.py",
+   "verify_against": "AC2",
+   "verify_hint": "_MEMORY_UNAVAILABLE_MESSAGE constant and agent_trace passthrough",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:query_database.py:ac2-no-path-trace-kept",
+   "lite_probe": null,
+   "source_excerpt": null,
+   "verdict": "PASS",
+   "evidence": "query_database.py:97-102 the constant is fixed text with no interpolation; it names the config key 'memory.persist_dir' but never the configured path value or any Chroma exception text (only type(open_error).__name__ is logged, line ~722). Raised at lines 726-730 with agent_trace=agent_trace, built at 707-717 from the component stream via build_agent_trace (_format.py:621+), which records per-step status and error. server.py:384-386 returns the trace on the error result. Wording nit: the message does contain the literal config-key token 'persist_dir', not the path value."
+  },
+  {
+   "id": "VC-15",
+   "category": "issue_acceptance",
+   "claim": "AC3: recovery without restart from first successful open; memory_info unchanged while open; late failed open after concurrent success never errors later calls",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/agent/integrations/chromadb/agent_memory.py",
+   "verify_against": "AC3",
+   "verify_hint": "_get_client retry on each call when _client None; open_error property; agent cached across calls (get_agent) so same memory instance",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:agent_memory.py:ac3-recovery-and-race",
+   "lite_probe": null,
+   "source_excerpt": null,
+   "verdict": "PASS",
+   "evidence": "agent_memory.py:136-152 _get_client retries chromadb.PersistentClient on every call while self._client is None; on failure it records _open_error and re-raises, on success sets _open_error=None and caches _client, so recovery needs no restart. open_error (154-164) returns None whenever _client is not None, so a late failed open from a concurrent executor thread cannot make later calls error. query_database.py:720-730 raises the memory-unavailable AgentRunError only when agent_memory.open_error is non-None. tools/_agent.py:40-74 get_agent caches the agent singleton, so the same memory instance is reused across calls. memory_info is built from components (query_database.py:683) independent of open_error, so it is unchanged while the store is open."
+  },
+  {
+   "id": "VC-16",
+   "category": "issue_acceptance",
+   "claim": "AC4: memory object without open_error attribute leaves results unchanged",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/query_database.py",
+   "verify_against": "AC4",
+   "verify_hint": "getattr default None in query_database_impl_with_widgets",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:query_database.py:ac4-no-attr-unchanged",
+   "lite_probe": null,
+   "source_excerpt": null,
+   "verdict": "PASS",
+   "evidence": "src/sqllens/tools/query_database.py:720 computes open_error = getattr(getattr(agent, 'agent_memory', None), 'open_error', None). The memory-unavailable raise at lines 721-730 only runs when open_error is not None. With no attribute, or no agent_memory, the value is None. The branch is skipped, and the existing is_error handling (731-737) and the normal return (738-739) run unchanged."
+  },
+  {
+   "id": "VC-17",
+   "category": "issue_acceptance",
+   "claim": "AC5: no code touches SharedSystemClient._identifier_to_system; default.py system prompt unedited; post-open memory failures unchanged; full agent turn runs before error; workflow-handled messages (help) make no open attempt and error only when an earlier failure is recorded",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/tools/query_database.py",
+   "verify_against": "AC5",
+   "verify_hint": "grep _identifier_to_system in src; confirm diff lacks system_prompt/default.py; check workflow handler path does not call _get_client; check placement after agent stream completes",
+   "verification_mode": "agent",
+   "claim_signature": "issue_acceptance:query_database.py:ac5-scope-limits",
+   "lite_probe": null,
+   "source_excerpt": null,
+   "verdict": "PASS",
+   "evidence": "grep of src finds no _identifier_to_system. git diff 874474c..HEAD touches only agent_memory.py, server.py, query_database.py and a test; no default.py or system prompt edit. The agent_memory.py change only wraps the existing open in try/except to record _open_error and re-raise, and adds a read-only open_error property (agent_memory.py:136-164), so post-open memory failures are unchanged. The check in query_database.py (~718-730) runs after send_message completes and after components_to_blocks and the trace build, so the full agent turn runs first. The check only reads the open_error property via getattr and never calls _get_client, so a workflow-handled message makes no open attempt and errors only when a failure was recorded earlier. This is covered by test_turn_without_model_call_raises_only_when_failure_recorded."
+  }
+ ]
+}
