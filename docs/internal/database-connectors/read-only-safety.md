@@ -12,7 +12,7 @@ AGENTS.md says: *"Read-only by default, enforced by a `sqlglot` parser guard."* 
 2. **Driver-level read-only** — when `database.read_only = true` (the default), each connector enforces read-only at the session/connection layer before any user SQL runs: SQLite opens via the `mode=ro` URI and sets `PRAGMA query_only=ON`; Postgres calls psycopg2's `conn.set_session(readonly=True)` right after connect; MySQL executes `SET SESSION TRANSACTION READ ONLY`. Defence-in-depth backstop so a parser-guard miss still cannot mutate. See [Driver-level read-only enforcement](#driver-level-read-only-enforcement).
 3. **Per-query timeout** — each runner sets its native statement-timeout primitive before executing user SQL. See [Statement timeout](#statement-timeout).
 4. **Row cap** — each runner streams via `cursor.fetchmany(max_rows + 1)` and stops at `max_rows`; `RowCapRunner` re-applies the cap on the returned DataFrame as a second-line check. See [Row cap and truncation surface](#row-cap-and-truncation-surface).
-5. **Row-Level Security (opt-in)** — when one or more `[[rls]]` rules are configured, `RlsGuardRunner` rewrites the agent's SQL via a `sqlglot` AST rewrite so every reference to a protected table is filtered by a configured `WHERE` predicate, AND-combined with whatever filter the agent already produced. A query that cannot be safely scoped is blocked (`RlsError`), never run unfiltered. Composed outermost — see [Composition with RLS](#composition-with-rls) — so the read-only guard validates the *rewritten* SQL. Full reference in [row-level-security.md](row-level-security.md).
+5. **Row-Level Security (opt-in)** — when one or more `[[rls]]` rules are configured, `RlsGuardRunner` rewrites the agent's SQL via a `sqlglot` AST rewrite so every reference to a protected table is filtered by a configured `WHERE` predicate, AND-combined with whatever filter the agent already produced. A query that cannot be safely scoped is blocked (`RlsError`), never run unfiltered. Composed directly beneath the masking guard — see [Composition with RLS](#composition-with-rls) — so the read-only guard validates the *rewritten* SQL. Full reference in [row-level-security.md](row-level-security.md).
 
 These are *defence in depth*, not a single line of defence. You should also:
 1. Use a database role with no DML/DDL privileges (the operator's job, not the code's).
@@ -174,15 +174,20 @@ if cfg.database.read_only:
     sql_runner = ReadOnlyGuardRunner(sql_runner, dialect=dialect)
 if cfg.rls:
     sql_runner = RlsGuardRunner(sql_runner, cfg.rls, dialect=dialect)
+sql_runner = ResultMaskingRunner(
+    sql_runner,
+    extra_words=cfg.result_masking.extra_words,
+    unmasked_columns=cfg.result_masking.unmasked_columns,
+)
 ```
 
-Resulting call order on every query when RLS is unconfigured: **ReadOnlyGuardRunner → RowCapRunner → engine runner**. The parser rejects unsafe SQL (including denylisted functions) before any connection opens; the engine runner enforces driver-level read-only, streams, and applies its native timeout; the decorator clamps the result on the way back out.
+Resulting call order on every query when RLS is unconfigured: **ResultMaskingRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner** (`ReadOnlyGuardRunner` only when `database.read_only = true`). `ResultMaskingRunner` replaces the values of secret-looking result columns with `[withheld]` on the way back out. The parser rejects unsafe SQL (including denylisted functions) before any connection opens; the engine runner enforces driver-level read-only, streams, and applies its native timeout; the decorator clamps the result on the way back out.
 
 The composition pattern is deliberate: none of these wrappers touch the lifted agent code, so re-syncing from upstream won't disturb them. See [agent/factory.md](../agent/factory.md).
 
 ### Composition with RLS
 
-When at least one `[[rls]]` rule is configured (the `cfg.rls` list is non-empty), `RlsGuardRunner` wraps the stack **outermost**, so the call order becomes **RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. This is deliberate:
+When at least one `[[rls]]` rule is configured (the `cfg.rls` list is non-empty), `RlsGuardRunner` wraps the stack directly beneath `ResultMaskingRunner`, so the call order becomes **ResultMaskingRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. This is deliberate:
 
 - The RLS rewrite runs *before* the read-only guard, so the read-only guard validates the **rewritten** SQL — meaning its full-tree DML/DDL deny-walk and denied-function check apply to the injected predicates too.
 - The decorator is only wrapped when `cfg.rls` is non-empty — the no-RLS path stays a zero-overhead passthrough.

@@ -8,7 +8,7 @@ How `RunSqlTool` persists per-query CSVs to disk, how the `LocalFileSystem` capa
 
 1. Runs the SQL via the injected `SqlRunner` and gets a `pd.DataFrame`.
 2. Generates a short random file id (`uuid4().hex[:8]`).
-3. Serializes the DataFrame as CSV and writes it to `query_results_<file_id>.csv` via `self.file_system.write_file(...)`.
+3. Serializes the DataFrame — already masked by `ResultMaskingRunner`, so secret-looking columns hold `[withheld]` — as CSV and writes it to `query_results_<file_id>.csv` via `self.file_system.write_file(...)`.
 4. Returns a `result_for_llm` string that **includes the absolute filename** so the model can refer to it from a downstream tool (the upstream `visualize_data` tool consumed it; that tool was pruned, and SQL Lens's first-party `EmitChartTool` takes already-aggregated rows directly instead of reading the CSV — so nothing reads it today).
 
 A read-shaped statement that returns no rows writes nothing and reports `No rows returned`. Only statements that are not read-shaped get the row-count summary, and they write nothing either. Empty or whitespace-only SQL is a failed call before the runner is reached.
