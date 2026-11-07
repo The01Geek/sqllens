@@ -8,7 +8,8 @@ set so the MCP-layer block builder (``components_to_blocks``) can include this
 prose without leaking intermediate-reasoning TEXT (the assistant text that
 accompanies a tool call when ``UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT``
 is on, see ``agent/core/agent/agent.py``). The terminal answer TEXT carries the
-same marker, so the two converge on one discriminator.
+same marker, so the two converge on one discriminator. A successful call also
+makes the agent loop skip yielding that request's terminal answer.
 """
 
 import logging
@@ -58,8 +59,11 @@ class EmitTextTool(Tool[EmitTextParams]):
         return (
             "Render a Markdown prose block in the response at this position. "
             "Call between run_sql / emit_chart steps to interleave deliberate "
-            "user-facing text with charts and tables. Non-emit_text assistant "
-            "text is treated as hidden reasoning and is NOT shown to the user."
+            "user-facing text with charts and tables. Assistant text written "
+            "alongside a tool call may not be shown to the user. Once an emit_text "
+            "call succeeds in a request, your final reply is NOT shown either, "
+            "so put every sentence the user must see in emit_text; when no "
+            "emit_text call succeeds in the request, the final reply is shown."
         )
 
     def get_args_schema(self) -> Type[EmitTextParams]:
@@ -78,14 +82,8 @@ class EmitTextTool(Tool[EmitTextParams]):
         try:
             # The answer marker (sqllens.agent.markers.IS_ANSWER_MARKER_KEY)
             # is the discriminator the MCP-layer block builder reads to
-            # include this TEXT in the rendered answer. Without it, the
-            # builder treats this block as intermediate reasoning chatter and
-            # excludes it whenever any answer-marked TEXT is present in the
-            # stream — i.e. on every normal multi-block turn (the agent's
-            # terminal answer is always marked). It would survive only via
-            # the backwards-compat unmarked-only fallback (with an info-level
-            # server-side log), which is the test-fixture safety net rather
-            # than a production path.
+            # include this TEXT in the rendered answer; the agent loop also
+            # reads it to hide the request's final reply.
             text_component = RichTextComponent(
                 content=args.text,
                 markdown=True,

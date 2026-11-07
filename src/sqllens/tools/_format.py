@@ -28,7 +28,7 @@ from decimal import Decimal
 from sqllens._bounded_json import JsonBoundsError, copy_bounded_json
 from sqllens.agent.core.components import UiComponent
 from sqllens.agent.core.rich_component import ComponentType
-from sqllens.agent.markers import IS_ANSWER_MARKER_KEY
+from sqllens.agent.markers import is_answer_marked
 from sqllens.safety import first_sql_keyword, is_introspection_query
 
 logger = logging.getLogger("sqllens.tools._format")
@@ -223,30 +223,6 @@ def render_interactive(components: Iterable[UiComponent]) -> str:
     return "\n\n".join(pieces)
 
 
-def _text_is_answer_marked(rich) -> bool:  # type: ignore[no-untyped-def]
-    """True iff this TEXT component is deliberate prose, not reasoning chatter.
-
-    The agent emits two distinct kinds of TEXT, and only one sets the marker:
-
-    - **Intermediate reasoning** that accompanies a tool call
-      (``agent/core/agent/agent.py``: ``RichTextComponent(content=response.
-      content, ...)`` inside the LLM loop, gated on
-      ``UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT``). This branch does
-      **NOT** set the marker — that is the discriminator.
-    - The **terminal answer** and **iteration-limit warning** at end-of-turn,
-      both of which DO set the
-      :data:`~sqllens.agent.markers.IS_ANSWER_MARKER_KEY` flag in ``data``.
-
-    The ``EmitTextTool`` sets the same flag on deliberate interleaved prose.
-    So a marked TEXT is something the user should see; an unmarked TEXT is
-    reasoning chatter. The check is strict-identity (``is True``) so a
-    producer drift that stuffs a non-bool value under the marker key (string
-    "yes", truthy list) does not silently flip the discrimination.
-    """
-    data = getattr(rich, "data", None)
-    return isinstance(data, dict) and data.get(IS_ANSWER_MARKER_KEY) is True
-
-
 def components_to_blocks(
     components: Iterable[UiComponent],
     *,
@@ -274,7 +250,9 @@ def components_to_blocks(
     - Every ``CHART`` becomes a ``{"type": "chart", ...chart payload...}``
       block at its stream position.
     - Every **answer-marked** ``TEXT`` (deliberate prose: ``EmitTextTool``
-      output and the agent's terminal answer / iteration-limit warning) becomes
+      output and the agent's terminal answer / iteration-limit warning; the
+      agent yields no terminal answer once an ``emit_text`` call succeeded in
+      the request) becomes
       a ``{"type": "text", "text": ...}`` block at its stream position.
       Intermediate-reasoning ``TEXT`` (the assistant prose that accompanies a
       tool call when ``UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT`` is on)
@@ -376,7 +354,7 @@ def components_to_blocks(
             content = (getattr(rich, "content", "") or "").strip()
             if not content:
                 continue
-            is_marked = _text_is_answer_marked(rich)
+            is_marked = is_answer_marked(rich)
             if is_marked:
                 any_marked_text = True
             candidates.append(
