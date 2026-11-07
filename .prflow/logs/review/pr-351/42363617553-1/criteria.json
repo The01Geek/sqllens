@@ -1,0 +1,66 @@
+[
+  {
+    "criterion": 1,
+    "text": "For a table cut by the display size limit, the widget shows above the search/export bar the line \"Showing the first N of M rows. The other K rows were left out to fit the display size limit.\", with N = the block's `row_count`, K = its `truncated` and M = N + K, in normal text colour with a 3px accent-coloured left border, wrapping on narrow frames, and the grey count reads \"showing {matching rows} of N\" with no \"truncated\" suffix."
+  },
+  {
+    "criterion": 2,
+    "text": "For a table whose query hit the row cap, the widget shows above the search/export bar the line \"The query stopped at the cap-row limit; more rows exist.\", with cap = the row cap value in effect for that query (not a fixed 10,000); when the display size limit also cut it, the one notice line holds both sentences, the display-limit sentence first."
+  },
+  {
+    "criterion": 3,
+    "text": "A table cut by neither limit shows no notice line in the widget and no new note in the Markdown."
+  },
+  {
+    "criterion": 4,
+    "text": "For a table cut by the display size limit, the Markdown answer has, directly under that table and as part of the table's own Markdown text, a note stating R (the rows the Markdown table shows, N but at most 500), M, and that K rows were left out to fit the display size limit, plus, when R < N, that the Markdown lists at most 500 rows, in place of the \"Showing first 500 of M rows\" footer; this holds at M ≤ 500 (where today there is no note) and at R < 500 < M (where today the footer says 500)."
+  },
+  {
+    "criterion": 5,
+    "text": "For a table whose query hit the row cap, the Markdown answer has, directly under that table, the sentence \"The query stopped at the cap-row limit; more rows exist.\" with the cap value in effect, placed after the display-limit note when both apply and after the \"Showing first 500 of M rows\" footer when that footer is present."
+  },
+  {
+    "criterion": 6,
+    "text": "A one-row result shown as short text whose query hit the row cap ends its text block with \"The query stopped at the cap-row limit; more rows exist.\""
+  },
+  {
+    "criterion": 7,
+    "text": "A non-empty result that is not a schema-lookup result and gets no table block — because its column headers alone exceed 130 KB or because building the table failed — produces, at the result's position in the blocks and in the Markdown, a text block stating that the query returned M rows that could not be displayed, ending with \"The query stopped at the cap-row limit; more rows exist.\" when the query hit the row cap."
+  },
+  {
+    "criterion": 8,
+    "text": "A schema-lookup result that the server hides from the user still produces no block, no notice and no display line in the agent's tool result; the classification uses the existing `is_introspection_query` under the configured database dialect, which treats SQL it cannot parse as a data query (so the display line is sent)."
+  },
+  {
+    "criterion": 9,
+    "text": "Every number in the widget notice, the Markdown notes and the Export CSV warning is written with comma thousands separators (for example \"10,000\")."
+  },
+  {
+    "criterion": 10,
+    "text": "Export CSV on a table cut by the display size limit shows \"Warning: this CSV holds only the C rows shown, not all M.\", where C is the number of data rows in the exported file; on a table whose query hit the row cap it shows a warning stating that the file holds only the C rows shown and that the query stopped at the cap-row limit; an existing formula-protection warning still shows alongside it."
+  },
+  {
+    "criterion": 11,
+    "text": "Table blocks carry a new field holding the row cap value when the query hit the row cap; `row_count` and `truncated` keep their current meaning (`row_count + truncated` equals the rows the query returned); every table block without its `\"type\"` key — the shape the size search measures today and `tests/unit/test_format.py` measures — the new field included, serializes to at most `_MAX_TABLE_PAYLOAD_BYTES` as measured by `_serialized_len`."
+  },
+  {
+    "criterion": 12,
+    "text": "When the display size limit will cut a `run_sql` result's table, the tool result the agent receives states the number of rows the query returned (M) and that the user's table shows only the first N of them, with N equal to the `row_count` the formatter's per-table size calculation gives for that same result; when the headers alone exceed the limit, it states that the M rows are too large to show the user as a table."
+  },
+  {
+    "criterion": 13,
+    "text": "When the display-line work inside `run_sql` raises — the schema-lookup check (which lets parser errors other than parse and tokenize errors propagate) or the shared size calculation — the query still succeeds with today's tool result (no display line), and a server WARNING is logged."
+  },
+  {
+    "criterion": 14,
+    "text": "The agent's system prompt contains no wording that calls a result table full or complete (the \"Here are the full per-region numbers:\" example is reworded), and it instructs the agent that when a `run_sql` result for a data query (not a schema lookup) says the user's table is cut, its answer to the user — its `emit_text` text, or its final reply when no `emit_text` call succeeded in the request — states how many rows the table shows and how many the query returned, that when a `run_sql` result for a data query says the query stopped at the row cap that answer says the query hit the row limit and more rows exist, and that the agent never calls a result table or result full or complete anywhere in its answer, including an introduction written before the query that produces the table runs. The prompt also states that these cut statements are never made about a schema-lookup result, and that on a turn whose reply is a clarifying question the existing \"the question is your whole written reply\" rule wins."
+  },
+  {
+    "criterion": 15,
+    "text": "The count told to the agent is the widget's N; a Markdown-only client shows at most 500 of those rows, and only its own Markdown note states that smaller count. A result cut by neither limit but longer than 500 rows keeps today's Markdown footer \"Showing first 500 of M rows\" and sends the agent no display line."
+  },
+  {
+    "criterion": 16,
+    "text": "The change leaves the following as they are: chart blocks' truncation display (widget \"Rendering first N of M rows.\" note and the Markdown chart placeholder); the 512 KB whole-response trim and its \"_Response truncated: …_\" notice, which can still drop a table block the agent was told about; the full result, which is not offered as a file or download; and the formatter's own unguarded call to the schema-lookup check, so a parser exception there other than a parse or tokenize error still ends the request in today's internal error."
+  }
+]
