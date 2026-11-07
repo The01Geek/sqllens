@@ -329,4 +329,7 @@ def apply_rls(
             "blocking the query"
         )
 
-    return tree.sql(dialect=dialect)
+    # normalize_functions=False: the default upper-cases unrecognised function
+    # names, quotes included, and PostgreSQL resolves quoted names
+    # case-sensitively, so "quote_ident"(x) would become a missing function.
+    return tree.sql(dialect=dialect, normalize_functions=False)
