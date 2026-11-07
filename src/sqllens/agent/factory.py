@@ -17,6 +17,7 @@ from sqllens.agent import Agent, RequestContext, ToolRegistry, User, UserResolve
 from sqllens.agent.capabilities.sql_runner import SqlRunner
 from sqllens.agent.core import AgentConfig, DefaultLlmContextEnhancer
 from sqllens.agent.core.agent.config import UiFeature, UiFeatures
+from sqllens.agent.core.system_prompt import DefaultSystemPromptBuilder
 from sqllens.agent.integrations import (
     AnthropicLlmService,
     ChromaAgentMemory,
@@ -180,6 +181,9 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
         user_resolver=_StaticUserResolver(),
         agent_memory=memory,
         llm_context_enhancer=context_enhancer,
+        # A fresh builder per agent: Agent's constructor default is one instance
+        # shared by every Agent, so setting the dialect on it would leak across agents.
+        system_prompt_builder=DefaultSystemPromptBuilder(dialect=dialect),
         # Bounded LRU store backing multi-turn conversations. The framework
         # default (MemoryConversationStore) is unbounded; this caps in-process
         # memory so a long-running server does not leak conversations. Ephemeral
