@@ -1,0 +1,286 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "suggestion",
+   "description": "No test checks that a one-row query-result text block still shows, in stream order, when a successful emit_text hides the final reply.",
+   "defect_signature": {
+    "file": "tests/unit/test_emit_text_final_reply.py",
+    "line_range": [
+     348,
+     366
+    ],
+    "kind": "test_gap"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "suggestion",
+   "description": "No test checks that the iteration-limit warning still shows after a successful emit_text call in the same request.",
+   "defect_signature": {
+    "file": "src/sqllens/agent/core/agent/agent.py",
+    "line_range": null,
+    "kind": "test_gap"
+   },
+   "corroboration": 1
+  },
+  {
+   "finding_id": "F-3",
+   "agent": "prflow:silent-failure-hunter",
+   "severity": "suggestion",
+   "description": "A non-empty final reply hidden after a successful emit_text is not logged, leaving no trace when a clarifying question or tool error goes unseen.",
+   "defect_signature": {
+    "file": "src/sqllens/agent/core/agent/agent.py",
+    "line_range": [
+     1115,
+     1119
+    ],
+    "kind": "other"
+   },
+   "corroboration": 1
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "checklist_skipped": null,
+  "file_count": 11,
+  "changed_lines": 308
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "verdict": "APPROVE with notes",
+ "report": "## Verdict: APPROVE with notes (one Important checklist FAIL and four Suggestions, all below the critical threshold)\n\nThe PR is ready to merge: it hides the final reply once an `emit_text` call succeeds in a request and keeps that reply in history, and nothing found reaches the critical threshold. One internal doc sentence overstates what is hidden and should still be fixed.\nRule applied: rule 6 — findings remain below the threshold → APPROVE with notes\n\n## Code Review Findings\n\n### 🟠 Important / Major\n\n- VC-7: FAIL (important) — Docs: assistant text written alongside a tool call carries no marker and is excluded from the rendered answer; the hidden final reply is still saved to history [docs/internal/agent/factory.md]\n\n  <details><summary>Evidence</summary>\n\n  docs/internal/agent/factory.md:76 says unmarked assistant text alongside a tool call is excluded from the rendered answer. components_to_blocks (src/sqllens/tools/_format.py:485-497) includes the last unmarked TEXT when any_marked_text is False (`elif not any_marked_text and i == last_unmarked_text_idx`), and the comment at 477-483 and the log at 516-524 confirm this is a deliberate fallback. A shipped path reaches it: in agent.py the tool loop breaks on MAX_CONSECUTIVE_ARGUMENT_FAILURES (1054-1083) with no marked terminal answer, and the limit-warning at 1136 is skipped because stopped_on_argument_failures is set. The stream then holds only the unmarked intermediate text, so it is rendered as the answer. The second half of the claim is true: the history write at agent.py:1107-1114 happens before the answer_prose_emitted gate at 1119. The 'excluded' half is absolute and wrong for the no-marked-text fallback.\n\n  </details>\n\n### 🟡 Suggestion / Minor (4)\n\n<details><summary>4 items</summary>\n\n1. `tests/unit/test_emit_text_final_reply.py` (lines 348-366): no test checks that a one-row query-result text block still shows, in stream order, when a successful `emit_text` hides the final reply. (raised by 1/5 agents)\n2. `src/sqllens/agent/core/agent/agent.py`: no test checks that the iteration-limit warning still shows after a successful `emit_text` call in the same request. (raised by 1/5 agents)\n3. `src/sqllens/agent/core/agent/agent.py` (lines 1115-1119): when a successful `emit_text` hides a non-empty final reply, nothing is logged, so an operator debugging a missing clarifying question has no trace. (raised by 1/5 agents)\n\n- VC-4: FAIL (suggestion) — Assistant text written alongside a tool call is not shown to the user [src/sqllens/agent/core/system_prompt/default.py]\n\n  <details><summary>Evidence</summary>\n\n  The prompt line (default.py:134) says assistant text alongside a tool call is NOT shown. agent.py:705-719 yields that text as a RichTextComponent whenever can_user_access_feature(UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT) is true; config.py:31 grants that feature to the 'admin' group by default, so those users see it in the stream. In _format.py:486-497 the intermediate text is unmarked. Unmarked text is dropped only when any_marked_text is true. When the turn has no marked TEXT (for example an abnormal termination before the terminal-answer yield at agent.py:1119-1132, which is marked), line 496 emits the last unmarked TEXT as a public block. _format.py:477-483 and 516-524 describe this fallback. So the absolute statement is false for admin users with the feature on, and for the no-marker fallback. It holds for ordinary users and for turns that reach a marked answer.\n\n  </details>\n\n</details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: test_relevant, 11 changed files, 308 changed lines; Phase 1+2 ran.\n- Working tree: skipped (head-override mode reviews the checked-out PR head); dirty-tree check reported no changes.\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. Final-pass `requesting-code-review` extension: content-present.\n- CI evidence: none held for head 882b5b0; no test suite was run by this entry.\n- Normalized (wording-only): 0\n- Verification: 19 passed, 2 failed, 0 inconclusive. VC-20 and VC-21 were first refused at the concurrent-subagent limit and dispatched again.\n- Severity threshold: critical.\n- prior-report: none\n\n- Checklist: 19 passed, 2 failed, 0 inconclusive\n- <details><summary>✅ Passed items (19 of 21)</summary>\n\n  - VC-1: A successful tool result's ui_component exposes a rich_component whose data carries the answer marker exactly when it is EmitTextTool output, so is_answer_marked(result.ui_component.rich_component) sets answer_prose_emitted only for successful emit_text calls (other success tools such as run_sql one-row text do not carry the marker) [src/sqllens/agent/core/agent/agent.py]\n  - VC-2: result.ui_component is non-None on the success branch where is_answer_marked(result.ui_component.rich_component) is called [src/sqllens/agent/core/agent/agent.py]\n  - VC-3: The final reply is still appended to conversation history as an assistant message before the skipped yield, so the next request sends it [src/sqllens/agent/core/agent/agent.py]\n  - VC-5: The final reply is shown only when no emit_text call has succeeded in the request [src/sqllens/agent/core/system_prompt/default.py]\n  - VC-6: The emit_text description says assistant text alongside a tool call is not shown and the final reply is hidden after a successful emit_text and shown otherwise [src/sqllens/agent/tools/emit_text.py]\n  - VC-8: tools.md states a failed emit_text or one from an earlier request does not set the flag, and the hidden reply is added to history as an assistant message [docs/internal/mcp-server/tools.md]\n  - VC-9: The intermediate-reasoning paragraph in tools.md (unchanged) and other docs/comments under src/sqllens and docs/ no longer state that all non-emit_text text is hidden [docs/internal/mcp-server/tools.md]\n  - VC-10: _ScriptedLlm, _FakeRunSql and _User from test_truncated_tool_calls, and _query_database_fn/_StubCtx from test_server, behave like the real LLM service/run_sql (fake run_sql result with no answer marker, requests recorded in llm.requests with messages) [tests/unit/test_emit_text_final_reply.py]\n  - VC-11: emit_text with text ' ' fails (returns a failure result) via EmitTextParams validation rather than raising, so the test exercises the failed-emit_text path [tests/unit/test_emit_text_final_reply.py]\n  - VC-12: result.meta contains 'sqllens/blocks' and 'sqllens/conversation' with 'conversation_id', and query_database accepts a conversation_id kwarg [tests/unit/test_emit_text_final_reply.py]\n  - VC-13: _format.py imports nothing else that relied on the removed _text_is_answer_marked or IS_ANSWER_MARKER_KEY import; no other module or test references _text_is_answer_marked [src/sqllens/tools/_format.py]\n  - VC-14: In a `query_database` request whose result is not an error and whose blocks fit the response size budget (no truncation notice), where at least one `emit_text` call succeeds (returns a success result) and the model then ends its turn, the result's text blocks are the `emit_text` blocks and any one-row query-result text, in stream order, and none of them comes from the final reply, in both `_meta[\"sqllens/blocks\"]` and the text content. This holds when the final reply is empty, when it repeats an `emit_text` block word for word, when it rewords one, and when its text appears in no `emit_text` block. [src/sqllens/agent/core/agent/agent.py]\n  - VC-15: In a `query_database` request whose result is not an error and where no `emit_text` call succeeds in that request — none was made, every one failed and a later data query succeeded, or the only successful one was in an earlier request of the same conversation — a non-empty final reply is shown as a text block, as today. [src/sqllens/agent/core/agent/agent.py]\n  - VC-16: A final reply that is not shown is still in the conversation history: the next request in the same conversation sends it to the model as an assistant message. [src/sqllens/agent/core/agent/agent.py:1106-1133]\n  - VC-17: In a request whose result is not an error and whose blocks fit the response size budget, two or more successful `emit_text` blocks are all shown, in stream order, even when their texts repeat each other; the change leaves repetition between `emit_text` blocks unchanged. [src/sqllens/tools/_format.py:347-362,492-495]\n  - VC-18: The system prompt built by `DefaultSystemPromptBuilder` when `emit_text` is registered, and the `emit_text` tool description, state that the final reply is not shown once an `emit_text` call succeeds in a request and is shown when none succeeds, and that assistant text written alongside a tool call is not shown. Neither says that all non-`emit_text` assistant text is hidden. [src/sqllens/agent/core/system_prompt/default.py]\n  - VC-19: The system prompt built when `emit_text` is registered tells the model that once an `emit_text` call succeeds in a request, every sentence the user must see goes in `emit_text`, including text the other prompt rules place in its reply, such as a clarifying question, a one-row result sentence, a quoted tool error or a schema refusal. [src/sqllens/agent/core/system_prompt/default.py]\n  - VC-20: No code comment or docstring under `src/sqllens/`, and no page under `docs/`, states that all non-`emit_text` assistant text is hidden, or describes how the final reply is marked or whether it is shown in a way the changed code contradicts. [src/sqllens/agent/tools/emit_text.py:83-92]\n  - VC-21: Automated tests drive a real agent loop through `query_database` with a scripted model and cover: `emit_text` then an identical final reply, `emit_text` then a final reply with different text, no `emit_text` then a final reply, a failed `emit_text` then a successful data `run_sql` then a final reply, two `emit_text` blocks with repeated text, and the hidden reply's presence in the next request's history. [tests/unit/test_emit_text_final_reply.py]\n\n  </details>\n- Reviewed against issue #317 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] In a `query_database` request whose result is not an error and whose blocks fit the response size budget (no truncation notice), where at least one `emit_text` call succeeds (returns a success result) and the model then ends its turn, the result's text blocks are the `emit_text` blocks and any one-row query-result text, in stream order, and none of them comes from the final reply, in both `_meta[\"sqllens/blocks\"]` and the text content. This holds when the final reply is empty, when it repeats an `emit_text` block word for word, when it rewords one, and when its text appears in no `emit_text` block.\n- [ ] In a `query_database` request whose result is not an error and where no `emit_text` call succeeds in that request — none was made, every one failed and a later data query succeeded, or the only successful one was in an earlier request of the same conversation — a non-empty final reply is shown as a text block, as today.\n- [ ] A final reply that is not shown is still in the conversation history: the next request in the same conversation sends it to the model as an assistant message.\n- [ ] In a request whose result is not an error and whose blocks fit the response size budget, two or more successful `emit_text` blocks are all shown, in stream order, even when their texts repeat each other; the change leaves repetition between `emit_text` blocks unchanged.\n- [ ] The system prompt built by `DefaultSystemPromptBuilder` when `emit_text` is registered, and the `emit_text` tool description, state that the final reply is not shown once an `emit_text` call succeeds in a request and is shown when none succeeds, and that assistant text written alongside a tool call is not shown. Neither says that all non-`emit_text` assistant text is hidden.\n- [ ] The system prompt built when `emit_text` is registered tells the model that once an `emit_text` call succeeds in a request, every sentence the user must see goes in `emit_text`, including text the other prompt rules place in its reply, such as a clarifying question, a one-row result sentence, a quoted tool error or a schema refusal.\n- [ ] No code comment or docstring under `src/sqllens/`, and no page under `docs/`, states that all non-`emit_text` assistant text is hidden, or describes how the final reply is marked or whether it is shown in a way the changed code contradicts.\n- [ ] Automated tests drive a real agent loop through `query_database` with a scripted model and cover: `emit_text` then an identical final reply, `emit_text` then a final reply with different text, no `emit_text` then a final reply, a failed `emit_text` then a successful data `run_sql` then a final reply, two `emit_text` blocks with repeated text, and the hidden reply's presence in the next request's history.",
+ "diff_produced_at_head": "882b5b0fb730d4b2901f67fd412f11246bc315bd",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:agent.py:success-marker-sets-flag",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "dependency_interaction:agent.py:ui-component-nonnull",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "issue_acceptance:agent.py:hidden-reply-history",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "category": "absolute_claim",
+   "claim": "Assistant text written alongside a tool call is not shown to the user",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "Assistant text you write alongside a tool call (your reasoning, tool-call narration, mid-loop thoughts) is NOT shown to the user.",
+   "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+   "verify_against": "agent.py intermediate RichTextComponent and _format.components_to_blocks",
+   "verify_hint": "Falsifying input: UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT on with a turn producing no marked text — check whether components_to_blocks falls back to unmarked TEXT when any_marked_text is False",
+   "claim_signature": "absolute_claim:default.py:tool-call-text-hidden",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "The prompt line (default.py:134) says assistant text alongside a tool call is NOT shown. agent.py:705-719 yields that text as a RichTextComponent whenever can_user_access_feature(UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT) is true; config.py:31 grants that feature to the 'admin' group by default, so those users see it in the stream. In _format.py:486-497 the intermediate text is unmarked. Unmarked text is dropped only when any_marked_text is true. When the turn has no marked TEXT (for example an abnormal termination before the terminal-answer yield at agent.py:1119-1132, which is marked), line 496 emits the last unmarked TEXT as a public block. _format.py:477-483 and 516-524 describe this fallback. So the absolute statement is false for admin users with the feature on, and for the no-marker fallback. It holds for ordinary users and for turns that reach a marked answer.",
+   "file_checked": "src/sqllens/tools/_format.py:486-497",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "absolute_claim:default.py:final-reply-shown-condition",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "absolute_claim:emit_text.py:description-visibility",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "category": "absolute_claim",
+   "claim": "Docs: assistant text written alongside a tool call carries no marker and is excluded from the rendered answer; the hidden final reply is still saved to history",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "Assistant text written alongside a tool call carries no marker and is excluded from the rendered answer.",
+   "source_file": "docs/internal/agent/factory.md",
+   "verify_against": "_format.components_to_blocks",
+   "verify_hint": "Check whether components_to_blocks includes unmarked TEXT when no marked TEXT exists (any_marked_text fallback)",
+   "claim_signature": "absolute_claim:factory.md:unmarked-text-excluded",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "docs/internal/agent/factory.md:76 says unmarked assistant text alongside a tool call is excluded from the rendered answer. components_to_blocks (src/sqllens/tools/_format.py:485-497) includes the last unmarked TEXT when any_marked_text is False (`elif not any_marked_text and i == last_unmarked_text_idx`), and the comment at 477-483 and the log at 516-524 confirm this is a deliberate fallback. A shipped path reaches it: in agent.py the tool loop breaks on MAX_CONSECUTIVE_ARGUMENT_FAILURES (1054-1083) with no marked terminal answer, and the limit-warning at 1136 is skipped because stopped_on_argument_failures is set. The stream then holds only the unmarked intermediate text, so it is rendered as the answer. The second half of the claim is true: the history write at agent.py:1107-1114 happens before the answer_prose_emitted gate at 1119. The 'excluded' half is absolute and wrong for the no-marked-text fallback.",
+   "file_checked": "src/sqllens/tools/_format.py:485-497",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "data_format_assumption:tools.md:failed-emit-no-flag",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "issue_acceptance:repo:hidden-reasoning-wording",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "test_mock_alignment:test_emit_text_final_reply.py:scripted-helpers",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "test_mock_alignment:test_emit_text_final_reply.py:whitespace-emit-fails",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "data_format_assumption:test_emit_text_final_reply.py:meta-keys",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "dependency_interaction:_format.py:removed-helper-refs",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-14",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-15",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-16",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-17",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-18",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-19",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-20",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-21",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}

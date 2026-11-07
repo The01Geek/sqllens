@@ -1,0 +1,34 @@
+[
+  {
+    "criterion": 1,
+    "text": "In a `query_database` request whose result is not an error and whose blocks fit the response size budget (no truncation notice), where at least one `emit_text` call succeeds (returns a success result) and the model then ends its turn, the result's text blocks are the `emit_text` blocks and any one-row query-result text, in stream order, and none of them comes from the final reply, in both `_meta[\"sqllens/blocks\"]` and the text content. This holds when the final reply is empty, when it repeats an `emit_text` block word for word, when it rewords one, and when its text appears in no `emit_text` block."
+  },
+  {
+    "criterion": 2,
+    "text": "In a `query_database` request whose result is not an error and where no `emit_text` call succeeds in that request — none was made, every one failed and a later data query succeeded, or the only successful one was in an earlier request of the same conversation — a non-empty final reply is shown as a text block, as today."
+  },
+  {
+    "criterion": 3,
+    "text": "A final reply that is not shown is still in the conversation history: the next request in the same conversation sends it to the model as an assistant message."
+  },
+  {
+    "criterion": 4,
+    "text": "In a request whose result is not an error and whose blocks fit the response size budget, two or more successful `emit_text` blocks are all shown, in stream order, even when their texts repeat each other; the change leaves repetition between `emit_text` blocks unchanged."
+  },
+  {
+    "criterion": 5,
+    "text": "The system prompt built by `DefaultSystemPromptBuilder` when `emit_text` is registered, and the `emit_text` tool description, state that the final reply is not shown once an `emit_text` call succeeds in a request and is shown when none succeeds, and that assistant text written alongside a tool call is not shown. Neither says that all non-`emit_text` assistant text is hidden."
+  },
+  {
+    "criterion": 6,
+    "text": "The system prompt built when `emit_text` is registered tells the model that once an `emit_text` call succeeds in a request, every sentence the user must see goes in `emit_text`, including text the other prompt rules place in its reply, such as a clarifying question, a one-row result sentence, a quoted tool error or a schema refusal."
+  },
+  {
+    "criterion": 7,
+    "text": "No code comment or docstring under `src/sqllens/`, and no page under `docs/`, states that all non-`emit_text` assistant text is hidden, or describes how the final reply is marked or whether it is shown in a way the changed code contradicts."
+  },
+  {
+    "criterion": 8,
+    "text": "Automated tests drive a real agent loop through `query_database` with a scripted model and cover: `emit_text` then an identical final reply, `emit_text` then a final reply with different text, no `emit_text` then a final reply, a failed `emit_text` then a successful data `run_sql` then a final reply, two `emit_text` blocks with repeated text, and the hidden reply's presence in the next request's history."
+  }
+]
