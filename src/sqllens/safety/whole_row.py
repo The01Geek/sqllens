@@ -13,29 +13,39 @@ A star is allowed when it cannot return a table's columns:
 * ``COUNT(*)`` and ``COUNT(t.*)``: the star is the argument of ``COUNT``.
 * Anywhere inside ``EXISTS (...)`` or ``NOT EXISTS (...)``: only a boolean
   leaves the subquery.
-* Over a CTE or derived table that is a query, a ``VALUES`` list, ``UNNEST``,
-  ``LATERAL`` or a table-valued function: those columns are already named in the query, or are
-  computed rather than stored. A CTE or derived table that itself selects a
-  star from a table is refused at that inner star.
-* Over a system catalog (``readonly.is_catalog_table``), for schema lookups.
+* Over a CTE or derived table that is a query, directly or through
+  ``LATERAL``: its columns are the ones its own ``SELECT`` list names, and a
+  star in that list is checked where it stands, so a CTE or derived table
+  that itself selects a star from a table is refused at that inner star.
+* Over a ``VALUES`` list: its rows are written out in the query.
+* Over a system catalog (``readonly.is_catalog_table``), for schema lookups,
+  including a catalog function such as SQLite's ``pragma_table_info('t')``.
 
 Every other star that expands a table or view is refused wherever it
 appears: in the outer projection, a CTE, a derived table, an ``IN`` or scalar
 subquery, or a function argument such as PostgreSQL's ``row_to_json(t.*)``.
-A bare ``*`` is refused when any table or view it expands is not a catalog.
-A star over a parenthesized table or join, such as ``(t) x``, is refused
-whatever it wraps: sqlglot gives it a scope of its own, as it does a derived
-table, but its columns are the table's. A ``t.*`` whose qualifier does not
-resolve to a source of its ``SELECT`` is refused, because the guard cannot
-show it is safe. ``TABLE t``, PostgreSQL's and MySQL's shorthand for
-``SELECT * FROM t``, is refused in any statement or subquery: sqlglot parses
-it as a column or table named ``TABLE``, unquoted and unqualified, which a
-real column or table can only be when quoted.
+A bare ``*`` is refused when any source it expands is not one of the above.
+A star over a table-valued function, such as ``generate_series(...)``,
+``UNNEST(...)`` or a PostgreSQL function declared ``RETURNS SETOF t``, is
+refused whatever the function returns, directly or through ``LATERAL``: the
+query does not name its columns, and a function can return a table's whole
+rows. So is a star over a parenthesized table or join, such as ``(t) x``:
+sqlglot gives it a scope of its own, as it does a derived table, but its
+columns are the table's. A star over an expression, such as PostgreSQL's
+``(f()).*``, is refused, because the expression can be a function's row. A
+``t.*`` whose qualifier does not resolve to a source of its ``SELECT`` is
+refused, because the guard cannot show it is safe. ``TABLE t``, PostgreSQL's
+and MySQL's shorthand for ``SELECT * FROM t``, is refused in any statement or
+subquery: sqlglot parses it as a column or table named ``TABLE``, unquoted and
+unqualified, which a real column or table can only be when quoted; a
+schema-qualified ``TABLE s.t`` does not parse, so it is refused as
+unparseable SQL.
 
 Not covered: a whole row reached without a star, such as PostgreSQL's
-``row_to_json(t)`` or a bare ``t`` as a composite value, and an explicit list
-of every column. A table whose name ``is_catalog_table`` takes for a catalog,
-such as a PostgreSQL table named with the ``pg_`` prefix, counts as one.
+``row_to_json(t)``, a bare ``t`` as a composite value, or a function that
+returns rows called outside ``FROM``, and an explicit list of every column.
+A table or function whose name ``is_catalog_table`` takes for a catalog, such
+as a PostgreSQL table named with the ``pg_`` prefix, counts as one.
 
 Failure paths: SQL that ``readonly._parse_statements`` cannot parse (a parse
 or tokenize error, MySQL input whose token boundaries are ambiguous), and SQL
@@ -137,7 +147,7 @@ def _whole_row_star(statement: exp.Expression, dialect: str | None) -> str | Non
         if _is_exempt(star):
             continue
         if _expands_table(star, scopes, dialect):
-            node = star.parent if isinstance(star.parent, exp.Column) else star
+            node = star.parent if isinstance(star.parent, (exp.Column, exp.Dot)) else star
             return node.sql(dialect=dialect)
     return None
 
@@ -151,6 +161,10 @@ def _is_exempt(star: exp.Star) -> bool:
 
 
 def _expands_table(star: exp.Star, scopes: dict[int, Scope], dialect: str | None) -> bool:
+    if isinstance(star.parent, exp.Dot):
+        # ``(expression).*`` expands whatever row the expression holds, such as
+        # a function's.
+        return True
     select = star.find_ancestor(exp.Select)
     scope = scopes.get(id(select)) if select is not None else None
     if scope is None:
@@ -168,19 +182,17 @@ def _expands_table(star: exp.Star, scopes: dict[int, Scope], dialect: str | None
 
 
 def _source_expands_table(source: exp.Expression | Scope, dialect: str | None) -> bool:
+    """True unless ``source`` is a query, a ``VALUES`` list or a system catalog."""
     if isinstance(source, Scope):
-        # A CTE or derived table names its own columns when it is a query or a
-        # VALUES-style table function. sqlglot also scopes a parenthesized
-        # table or join, such as ``(t) x``, whose columns are the table's.
-        return not isinstance(source.expression, (exp.Query, exp.UDTF))
-    return isinstance(source, exp.Table) and _is_stored_relation(source, dialect)
-
-
-def _is_stored_relation(table: exp.Table, dialect: str | None) -> bool:
-    """A named table or view outside the system catalogs, not a table-valued function."""
-    if isinstance(table.this, exp.Func):
-        return False
-    return not is_catalog_table(table, dialect)
+        expression = source.expression
+        if isinstance(expression, exp.Lateral):
+            expression = expression.this
+        # sqlglot also scopes UNNEST, other table-valued functions and a
+        # parenthesized table or join, such as ``(t) x``, whose columns the
+        # query does not name.
+        return not isinstance(expression, (exp.Query, exp.Values))
+    # A named table or view, or a table-valued function called in FROM.
+    return not (isinstance(source, exp.Table) and is_catalog_table(source, dialect=dialect))
 
 
 class WholeRowSelectGuardRunner(SqlRunner):

@@ -76,6 +76,17 @@ REFUSED = [
     ("SELECT * FROM (users JOIN orders ON orders.user_id = users.id) x", "*"),
     # A star as a function argument other than COUNT.
     ("SELECT row_to_json(u.*) FROM users u", "u.*"),
+    # A star over a table-valued function, which can return a table's whole
+    # rows (a PostgreSQL function declared RETURNS SETOF users does).
+    ("SELECT * FROM list_users()", "*"),
+    ("SELECT t.* FROM list_users() t", "t.*"),
+    ("SELECT * FROM public.list_users()", "*"),
+    ("SELECT t.* FROM orders o CROSS JOIN LATERAL list_users(o.user_id) t", "t.*"),
+    ("SELECT * FROM json_each('{}')", "*"),
+    ("SELECT * FROM generate_series(1, 3) g", "*"),
+    ("SELECT * FROM UNNEST(tags) u", "*"),
+    # A star over an expression, which can be a function's row.
+    ("SELECT (list_users()).*", "(LIST_USERS()).*"),
     # A qualifier that names no source of its SELECT cannot be shown safe.
     ("SELECT z.* FROM users u", "z.*"),
     # A bare star over a catalog joined with a data table.
@@ -130,11 +141,10 @@ def test_allowed_shapes(sql: str, dialect: str | None) -> None:
     ("sql", "dialect"),
     [
         ("SELECT COUNT(u.*) FROM users u", "postgres"),
-        ("SELECT t.* FROM UNNEST(ARRAY[1, 2]) AS t(x)", "postgres"),
-        ("SELECT * FROM generate_series(1, 3)", "postgres"),
         ("SELECT * FROM (VALUES (1), (2)) AS v(x)", "postgres"),
-        ("SELECT * FROM UNNEST(ARRAY[1, 2]) AS t(x)", "postgres"),
         ("SELECT * FROM pg_catalog.pg_tables", "postgres"),
+        ("SELECT * FROM pg_get_keywords()", "postgres"),
+        ("SELECT x FROM list_users() AS t(x)", "postgres"),
         # Unquoted names fold to one case on PostgreSQL, so the qualifier
         # resolves to the CTE whatever its letter case.
         ("WITH Recent AS (SELECT id FROM users) SELECT recent.* FROM RECENT", "postgres"),
@@ -142,6 +152,11 @@ def test_allowed_shapes(sql: str, dialect: str | None) -> None:
         ("SELECT * FROM sqlite_master", "sqlite"),
         ("SELECT * FROM pragma_table_info('users')", "sqlite"),
         ("SELECT `table` FROM t", "mysql"),
+        # MySQL SHOW statements carry no star, and sqlglot keeps their subkind
+        # as a string, not a name TABLE.
+        ("SHOW TABLES", "mysql"),
+        ("SHOW COLUMNS FROM users", "mysql"),
+        ("SHOW CREATE TABLE users", "mysql"),
         # Documented limit: a table whose name has the dialect's catalog
         # prefix counts as a catalog, and with no dialect every prefix counts.
         ("SELECT * FROM pg_payments", "postgres"),
@@ -160,6 +175,11 @@ def test_allowed_dialect_specific_shapes(sql: str, dialect: str | None) -> None:
         ("SELECT `u`.* FROM `users` AS `u`", "mysql"),
         ("SELECT * FROM public.users", "postgres"),
         ("SELECT * FROM pg_users_backup", "mysql"),  # pg_ is a catalog prefix only on postgres
+        # UNNEST is a table-valued function too, whatever its argument.
+        ("SELECT * FROM UNNEST(ARRAY[1, 2]) AS t(x)", "postgres"),
+        ("SELECT t.* FROM UNNEST(ARRAY[1, 2]) AS t(x)", "postgres"),
+        ("SELECT * FROM generate_series(1, 3)", "postgres"),
+        ("SELECT t.* FROM orders o CROSS JOIN LATERAL UNNEST(o.tags) t", "postgres"),
     ],
 )
 def test_refused_dialect_specific_shapes(sql: str, dialect: str) -> None:
@@ -215,6 +235,9 @@ def test_refusal_message_is_actionable(sql: str) -> None:
         ("SELECT * FROM", "postgres"),
         ("SELECT 'unterminated FROM users", "postgres"),
         ("SELECT id /*! , users.* */ FROM users", "mysql"),
+        # A schema-qualified TABLE statement does not parse.
+        ("TABLE public.users", "postgres"),
+        ("TABLE app.users", "mysql"),
     ],
 )
 def test_unparseable_sql_is_refused_as_unsafe(sql: str, dialect: str) -> None:

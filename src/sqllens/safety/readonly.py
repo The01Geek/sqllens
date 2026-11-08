@@ -235,12 +235,12 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     for table in parsed.find_all(exp.Table):
         if id(table) in cte_references:
             continue
-        if is_catalog_table(table, dialect):
+        if is_catalog_table(table, dialect=dialect):
             return True
     return False
 
 
-def is_catalog_table(table: exp.Table, dialect: str | None) -> bool:
+def is_catalog_table(table: exp.Table, *, dialect: str | None) -> bool:
     """True if ``table`` names one of ``dialect``'s system catalogs.
 
     The catalog rule :func:`is_introspection_query` documents: a catalog

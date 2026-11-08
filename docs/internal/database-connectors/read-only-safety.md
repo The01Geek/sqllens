@@ -212,15 +212,17 @@ Full reference in [row-level-security.md](row-level-security.md).
 |---|---|
 | The argument of `COUNT` (`COUNT(*)`, `COUNT(t.*)`) | allowed |
 | Anywhere under an `exp.Exists` (`EXISTS`, `NOT EXISTS`) | allowed |
-| `t.*` where `t` resolves (sqlglot scope analysis, after `normalize_identifiers`) to a CTE or derived table that is a query, or to `VALUES`, `UNNEST` or `LATERAL` | allowed |
-| `t.*` where `t` is a table-valued function, or a system catalog (`is_catalog_table`, the rule `is_introspection_query` uses) | allowed |
-| Bare `*` whose `FROM`/`JOIN` sources include no named table or view outside the catalogs and no parenthesized table or join | allowed |
+| `t.*` where `t` resolves (sqlglot scope analysis, after `normalize_identifiers`) to a CTE or derived table that is a query, directly or through `LATERAL`, or to a `VALUES` list | allowed |
+| `t.*` where `t` is a system catalog (`is_catalog_table`, the rule `is_introspection_query` uses), a catalog function such as `pragma_table_info('t')` included | allowed |
+| Bare `*` whose `FROM`/`JOIN` sources are all of the two kinds above | allowed |
 | `t.*` where `t` is a named table or view, or names no source of its `SELECT` | refused |
-| Bare `*` whose sources include a named table or view outside the catalogs | refused |
+| Bare `*` whose sources include anything else, such as a named table or view outside the catalogs | refused |
+| A star over a table-valued function, such as `generate_series(…)`, `UNNEST(…)`, `json_each(…)` or a PostgreSQL function declared `RETURNS SETOF t`, directly or through `LATERAL`: the query does not name its columns, and a function can return a table's whole rows | refused |
 | A star over a parenthesized table or join, such as `(t) x` or `(a JOIN b ON …) x`, which sqlglot scopes like a derived table but whose columns are the table's | refused |
+| A star over an expression, such as PostgreSQL's `(f()).*`, which can be a function's row | refused |
 | Any other star that expands a table: in a CTE, a derived table, an `IN` or scalar subquery, a set operation, or a function argument such as `row_to_json(t.*)` | refused |
 
-`TABLE t` is refused too, in any statement or subquery: PostgreSQL's and MySQL's `TABLE t` means `SELECT * FROM t`, and sqlglot parses it as a column or table named `TABLE` (`SELECT 1; TABLE t`, `(TABLE t) x`). The guard refuses an unquoted, unqualified column or table of that name, which a real column or table can only be when quoted.
+`TABLE t` is refused too, in any statement or subquery: PostgreSQL's and MySQL's `TABLE t` means `SELECT * FROM t`, and sqlglot parses it as a column or table named `TABLE` (`SELECT 1; TABLE t`, `(TABLE t) x`). The guard refuses an unquoted, unqualified column or table of that name, which a real column or table can only be when quoted. A schema-qualified `TABLE s.t` does not parse, so it is refused as unparseable SQL (below).
 
 The refusal raises `WholeRowSelectError`, a subclass of `UnsafeSqlError`, so `query_database`'s defensive `UnsafeSqlError` branch would treat it like the read-only guard's errors if it ever escaped `RunSqlTool`. `RunSqlTool` catches it and returns it to the model as a failed tool result, `Error executing query: refusing to execute query: it selects every column of a table or view with a *, an alias.* or a TABLE statement. …`. It names no star, because a star's qualifier can be a table or schema name and the error can reach the user. The default system prompt's Tool Errors rule routes an error containing "selects every column" to a corrected retry, and `WHOLE_ROW_REFUSAL` keeps that phrase.
 
@@ -229,7 +231,7 @@ Failure paths:
 - SQL `_parse_statements` cannot parse (a parse or tokenize error, ambiguous MySQL input such as an executable comment), and SQL with an empty statement, raise `UnsafeSqlError` and are refused, as the read-only guard refuses them. With `database.read_only = false` and no RLS rules, this guard is the only parser in the stack, so turning it on refuses such SQL where it used to run.
 - `normalize_identifiers` and `traverse_scope` run only when the statement has a star that is not exempt, so a query without one never depends on them. Any unexpected exception from them is logged at `WARNING` with a traceback and refuses the query (`whole-row select check errored (…)`), as the read-only guard fails closed.
 
-Not covered: a whole row reached without a star (PostgreSQL's `row_to_json(t)` or a bare `t` as a composite value) and an explicit list of every column. A table whose name `is_catalog_table` takes for a catalog, such as a PostgreSQL table named with the `pg_` prefix, counts as one. The default system prompt's Data Confidentiality section tells the agent to decline requests to export whole tables whatever this setting is.
+Not covered: a whole row reached without a star (PostgreSQL's `row_to_json(t)`, a bare `t` as a composite value, or a function that returns rows called outside `FROM`) and an explicit list of every column. A table or function whose name `is_catalog_table` takes for a catalog, such as a PostgreSQL table named with the `pg_` prefix, counts as one. The default system prompt's Data Confidentiality section tells the agent to decline requests to export whole tables whatever this setting is.
 
 ## Dialect handling
 
