@@ -1,0 +1,946 @@
+[
+  {
+    "id": "VC-1",
+    "category": "api_contract",
+    "claim": "The refusal message the whole-row guard returns to the model contains the phrase \"selects every column\", which this prompt bullet routes to a corrected retry.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- If run_sql fails because the database rejected the text of your query (for example a syntax error, or an unknown table, column or function), or because the error says it \\\"could not parse SQL\\\" or that it \\\"selects every column\\\", correct the query and run it again. Make at most two corrected attempts for one failing query.",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "source_line": 114,
+    "verify_against": "The refusal constant and its message text in the whole-row guard",
+    "verify_hint": "Check `WHOLE_ROW_REFUSAL` / `assert_no_whole_row_select` in `src/sqllens/safety/whole_row.py` for the exact phrase \"selects every column\", and the \"could not parse SQL\" message in `src/sqllens/safety/readonly.py`",
+    "claim_signature": "api_contract:default.py:selects-every-column-phrase:114",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "absolute_claim",
+    "claim": "The safety package now contains exactly six orthogonal protections, and the list that follows enumerates each one.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Six orthogonal protections, composed at the factory:",
+    "source_file": "src/sqllens/safety/__init__.py",
+    "source_line": 6,
+    "verify_against": "The guards actually defined in src/sqllens/safety and composed in build_agent",
+    "verify_hint": "Count the runners/guards in `src/sqllens/safety/` (readonly, rls, limits, masking, whole_row, per-runner timeouts) against `build_agent` in `src/sqllens/agent/factory.py`",
+    "claim_signature": "absolute_claim:__init__.py:guard-count:6",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "absolute_claim",
+    "claim": "The whole-row guard is composed directly beneath ResultMaskingRunner and outside every other runner, unless database.refuse_whole_row_selects is off.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "* ``assert_no_whole_row_select`` / ``WholeRowSelectGuardRunner`` — refuses a\n  ``*`` or ``alias.*`` that expands a table or view before the query runs;\n  composed directly beneath ``ResultMaskingRunner`` and outside every other\n  runner, unless ``database.refuse_whole_row_selects`` is off.",
+    "source_file": "src/sqllens/safety/__init__.py",
+    "source_line": 29,
+    "source_line_end": 32,
+    "verify_against": "The composition order in build_agent",
+    "verify_hint": "Check the runner wrapping sequence in `build_agent` in `src/sqllens/agent/factory.py` (lines ~92-115) and whether any other call site composes these runners",
+    "claim_signature": "absolute_claim:__init__.py:guard-beneath-masking:29",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "dependency_interaction",
+    "claim": "WholeRowSelectGuardRunner's constructor takes the inner runner positionally and a keyword-only `dialect` string, and sqlglot_dialect_for_url's return value is an acceptable value for it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 107,
+    "verify_against": "WholeRowSelectGuardRunner.__init__ signature",
+    "verify_hint": "Check `class WholeRowSelectGuardRunner.__init__` in `src/sqllens/safety/whole_row.py`",
+    "claim_signature": "dependency_interaction:factory.py:guard-constructor-signature:107",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "api_contract",
+    "claim": "WholeRowSelectGuardRunner.run_sql declares and only forwards `require_base_tables`, so stripping it in _relation_check_executor still reaches the runner that honors the requirement, and RlsGuardRunner's construction-time _declares_relation_check still passes when the guard wraps it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/__init__.py",
+    "source_line": 253,
+    "source_line_end": 259,
+    "verify_against": "WholeRowSelectGuardRunner.run_sql signature and delegation",
+    "verify_hint": "Check `WholeRowSelectGuardRunner.run_sql` in `src/sqllens/safety/whole_row.py` against `_relation_check_executor` and `_declares_relation_check` in `src/sqllens/safety/__init__.py`",
+    "claim_signature": "api_contract:__init__.py:require-base-tables-unwrap:253",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "dependency_interaction",
+    "claim": "The module `sqllens.safety.whole_row` exports `WholeRowSelectError`, `WholeRowSelectGuardRunner` and `assert_no_whole_row_select`, and WholeRowSelectError is a subclass of UnsafeSqlError as the docs state.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/__init__.py",
+    "source_line": 68,
+    "source_line_end": 72,
+    "verify_against": "Definitions in src/sqllens/safety/whole_row.py",
+    "verify_hint": "Check the class/function definitions and `WholeRowSelectError`'s base class in `src/sqllens/safety/whole_row.py`",
+    "claim_signature": "dependency_interaction:__init__.py:whole-row-exports:68",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "absolute_claim",
+    "claim": "With refuse_whole_row_selects true, COUNT(*), a * inside EXISTS, and a * over a CTE, derived table or system catalog are allowed, while a SELECT * or alias.* that expands a table or view is refused before the query runs.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"Refuse, before it runs, SQL whose SELECT * or alias.* expands a table or \"\n            \"view, so the agent selects only the columns a question needs. COUNT(*), \"\n            \"a * inside EXISTS, and a * over a CTE, derived table or system catalog \"\n            \"are allowed.\"",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 60,
+    "source_line_end": 65,
+    "verify_against": "The star-classification logic in the whole-row guard",
+    "verify_hint": "Check `assert_no_whole_row_select` and its helpers (exempt-star checks, `is_catalog_table` use) in `src/sqllens/safety/whole_row.py`; a derived table that itself selects * is reportedly refused",
+    "claim_signature": "absolute_claim:config.py:allowed-star-shapes:60",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "absolute_claim",
+    "claim": "The agent declines export, download or dump requests for a whole table or the whole database while still answering row-listing questions with only the needed columns, independently of the refuse_whole_row_selects setting.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- If the user asks you to export, download or dump a whole table or the whole database, decline. Say that a full export has to come from the application itself, not from you, and offer to answer with only the columns the question needs. A question that lists rows, such as \\\"show all customers\\\" or \\\"list every employee\\\", is not an export: answer it with only the columns the question needs.",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "source_line": 119,
+    "verify_against": "The prompt assembly and the live-run evidence this behavioral claim rests on",
+    "verify_hint": "Check that `build_system_prompt` in `src/sqllens/agent/core/system_prompt/default.py` emits this line on every configuration (no setting gate), and that it does not contradict the sibling bullet at line 123 about SELECT *",
+    "claim_signature": "absolute_claim:default.py:export-decline-line:119",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "absolute_claim",
+    "claim": "A system catalog for this guard means any table in information_schema, MySQL's mysql/sys/performance_schema, PostgreSQL's pg_catalog, and any table or function named with the `pg_` prefix on PostgreSQL or `sqlite_`/`pragma_` on SQLite, with all of these schemas and prefixes counting on any other database.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A system catalog here means any table in `information_schema`, MySQL's `mysql`, `sys` and `performance_schema` schemas or PostgreSQL's `pg_catalog`, and any table or function whose name starts with `pg_` on PostgreSQL or with `sqlite_` or `pragma_` on SQLite; on any other database, all of these schemas and prefixes count.",
+    "source_file": "docs/external/configuration.md",
+    "verify_against": "The catalog rule factored out of is_introspection_query",
+    "verify_hint": "Check `is_catalog_table` in `src/sqllens/safety/readonly.py` for the exact schema names and name prefixes per dialect",
+    "claim_signature": "absolute_claim:configuration.md:catalog-rule-definition",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "absolute_claim",
+    "claim": "A * over a function that returns rows is refused whatever the function returns unless it is a system catalog function, and a * inside a CTE or subquery that reads a table is refused even when the outer query names its columns.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A `*` inside a common table expression or subquery that reads a table is refused even when the outer query names its columns, and a `*` over a function that returns rows, such as `generate_series(...)` or `UNNEST(...)`, is refused whatever the function returns, unless it is a system catalog function.",
+    "source_file": "docs/external/configuration.md",
+    "verify_against": "The table-valued-function and CTE handling in the whole-row guard",
+    "verify_hint": "Check the source-resolution branches in `assert_no_whole_row_select` in `src/sqllens/safety/whole_row.py`, including `LATERAL` and `exp.Anonymous`/function sources",
+    "claim_signature": "absolute_claim:configuration.md:function-star-refused",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "absolute_claim",
+    "claim": "While refuse_whole_row_selects is on, a query SQL Lens cannot parse is refused too, as it already is while read_only is true.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "While it is on, a query SQL Lens cannot parse is refused too, as it already is while `read_only` is true.",
+    "source_file": "docs/external/configuration.md",
+    "verify_against": "The parse-failure path of the whole-row guard",
+    "verify_hint": "Check how `assert_no_whole_row_select` handles `_parse_statements` errors and empty parse trees in `src/sqllens/safety/whole_row.py` against `assert_select_only` in `src/sqllens/safety/readonly.py`",
+    "claim_signature": "absolute_claim:configuration.md:unparseable-refused",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "absolute_claim",
+    "claim": "TABLE t is refused in any statement or subquery because sqlglot parses it as an unquoted, unqualified column or table named TABLE, which a real column or table can only be when quoted; a schema-qualified TABLE s.t does not parse and is refused as unparseable.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`TABLE t` is refused too, in any statement or subquery: PostgreSQL's and MySQL's `TABLE t` means `SELECT * FROM t`, and sqlglot parses it as a column or table named `TABLE` (`SELECT 1; TABLE t`, `(TABLE t) x`). The guard refuses an unquoted, unqualified column or table of that name, which a real column or table can only be when quoted.",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "verify_against": "sqlglot's parse of `TABLE t` and the guard's TABLE handling",
+    "verify_hint": "Check the TABLE-statement branch in `src/sqllens/safety/whole_row.py` and the pinned sqlglot version's parse of `TABLE t` per dialect (pyproject.toml / requirements.txt)",
+    "claim_signature": "absolute_claim:read-only-safety.md:table-statement-refused",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "absolute_claim",
+    "claim": "normalize_identifiers and traverse_scope run only when a statement has a non-exempt star, and any unexpected exception from them is logged at WARNING with a traceback and refuses the query with a message naming only the exception type.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`normalize_identifiers` and `traverse_scope` run only when the statement has a star that is not exempt, so a query without one never depends on them. Any unexpected exception from them is logged at `WARNING` with a traceback and refuses the query (`whole-row select check errored (<exception type>)`), as the read-only guard fails closed. The exception text stays in the log, out of the error the model and user see, because scope analysis can quote a table or schema name.",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "verify_against": "The scope-analysis call sites and exception handling in the whole-row guard",
+    "verify_hint": "Check where `normalize_identifiers`/`traverse_scope` are invoked and the `except Exception` branch's log level and message in `src/sqllens/safety/whole_row.py` and `WholeRowSelectGuardRunner.run_sql`",
+    "claim_signature": "absolute_claim:read-only-safety.md:scope-analysis-fail-closed",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "api_contract",
+    "claim": "The wiring snippet in the internal docs (read_only guard, then RLS, then WholeRowSelectGuardRunner, then ResultMaskingRunner) matches the actual wrapping order in build_agent.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "if cfg.database.refuse_whole_row_selects:\n    sql_runner = WholeRowSelectGuardRunner(sql_runner, dialect=dialect)",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "verify_against": "build_agent's runner composition",
+    "verify_hint": "Compare the snippet with `build_agent` in `src/sqllens/agent/factory.py` lines ~92-115",
+    "claim_signature": "api_contract:read-only-safety.md:wiring-snippet-order",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "api_contract",
+    "claim": "The factory.md runner diagram's new branch places WholeRowSelectGuardRunner under RlsGuardRunner with ResultMaskingRunner outermost and introduces no duplicate or contradictory ResultMaskingRunner node in the diagram.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/agent/factory.md",
+    "verify_against": "The full diagram in the head view and build_agent",
+    "verify_hint": "Read the ASCII runner diagram near the top of `docs/internal/agent/factory.md` in the head view and compare with `build_agent` in `src/sqllens/agent/factory.py`",
+    "claim_signature": "api_contract:factory.md:runner-diagram-order",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "absolute_claim",
+    "claim": "The release note's allowed/refused list is complete and correct for the shipped guard: catalog-prefixed user tables are allowed, a * over any other row-returning function is refused whatever it returns, and whole rows reached without a * are not caught.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "System catalogs include ones that hold credentials, such as\n`mysql.user` and `pg_catalog.pg_authid`, which database grants should keep out\nof reach, and any of your own tables named with a catalog prefix (`pg_` on\nPostgreSQL, `sqlite_` or `pragma_` on SQLite); a `*` over any other function that returns rows is refused,\nwhatever the function returns.",
+    "source_file": "changelog.d/361.security.md",
+    "verify_against": "The guard implementation and the catalog rule",
+    "verify_hint": "Check `is_catalog_table` in `src/sqllens/safety/readonly.py` and the function-source branches of `assert_no_whole_row_select` in `src/sqllens/safety/whole_row.py`",
+    "claim_signature": "absolute_claim:361.security.md:allowed-refused-list",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "data_format_assumption",
+    "claim": "The setting is spelled `refuse_whole_row_selects` under `[database]` in TOML and `SQLLENS_DATABASE__REFUSE_WHOLE_ROW_SELECTS` as an env var, with default true, exactly as the configuration and config-loading docs state.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 58,
+    "verify_against": "DatabaseConfig field name and the env-var nesting convention",
+    "verify_hint": "Check the field in `DatabaseConfig` in `src/sqllens/config.py` against the row in `docs/external/configuration.md` and the `[database]` row in `docs/internal/setup/config-loading.md`",
+    "claim_signature": "data_format_assumption:config.py:refuse-whole-row-selects-key:58",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "api_contract",
+    "claim": "AGENTS.md's safety/ architecture listing names every decorator the package now exports, including WholeRowSelectGuardRunner and whole_row.py.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "#   secret-column masking; whole_row.py whole-row select guard;\n#   ReadOnlyGuardRunner / RlsGuardRunner / RowCapRunner /\n#   ResultMaskingRunner / WholeRowSelectGuardRunner decorators",
+    "source_file": "AGENTS.md",
+    "verify_against": "The modules and __all__ of src/sqllens/safety",
+    "verify_hint": "Compare with the file list of `src/sqllens/safety/` and `__all__` in `src/sqllens/safety/__init__.py`",
+    "claim_signature": "api_contract:AGENTS.md:safety-module-listing",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "dependency_interaction",
+    "claim": "is_catalog_table calls _catalog_names(dialect) and relies on it returning a 2-tuple of (catalog schema names as a lowercase-comparable collection, catalog name prefixes as a tuple suitable for str.startswith).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 251,
+    "source_line_end": 256,
+    "verify_against": "the _catalog_names helper in the same module",
+    "verify_hint": "Check `_catalog_names` in `src/sqllens/safety/readonly.py` for its return type and whether `prefixes` is a tuple (required by `str.startswith`)",
+    "claim_signature": "dependency_interaction:readonly.py:catalog-names-return-shape:251",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "dependency_interaction",
+    "claim": "The extracted is_catalog_table preserves is_introspection_query's prior behavior exactly: a schema match returns True, otherwise the Anonymous-function-name-or-table-name prefix test decides.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 235,
+    "source_line_end": 240,
+    "verify_against": "the pre-change inline catalog check in is_introspection_query in the base view",
+    "verify_hint": "Diff `is_introspection_query` in `.prflow/tmp/review/pr-361/42510975948-1/view-base/src/sqllens/safety/readonly.py` against the new `is_catalog_table`",
+    "claim_signature": "dependency_interaction:readonly.py:catalog-extraction-behavior-preserved:235",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "absolute_claim",
+    "claim": "The authored docstring asserts that the catalog prefix rule matches in any casing, against either the table name or the name of a table-valued function called in FROM.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "a catalog\n    schema, or a name prefix matched in any casing against the table name or\n    the name of a table-valued function called in ``FROM``.",
+    "source_file": "src/sqllens/safety/readonly.py",
+    "source_line": 246,
+    "source_line_end": 249,
+    "verify_against": "is_catalog_table's own body and _catalog_names' prefix casing",
+    "verify_hint": "Check whether `_catalog_names` returns already-lowercased prefixes; a mixed-case prefix constant would make `.lower().startswith(prefixes)` never match, falsifying 'any casing'",
+    "claim_signature": "absolute_claim:readonly.py:catalog-prefix-any-casing:246",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "dependency_interaction",
+    "claim": "readonly._parse_statements(sql, dialect) is callable with two positional arguments, yields sqlglot expressions (possibly None for an empty statement), and raises UnsafeSqlError with a message beginning 'could not parse SQL' on a parse or tokenize error.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 120,
+    "verify_against": "the _parse_statements helper in readonly.py",
+    "verify_hint": "Check `_parse_statements` in `src/sqllens/safety/readonly.py` for its signature, None yields, and the exact error message text asserted in `test_runner_refuses_unparseable_sql_as_unsafe`",
+    "claim_signature": "dependency_interaction:whole_row.py:parse-statements-contract:120",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "dependency_interaction",
+    "claim": "sqlglot's optimizer exposes normalize_identifiers at sqlglot.optimizer.normalize_identifiers accepting (expression, dialect=...) and mutating/returning the tree, and Scope/traverse_scope at sqlglot.optimizer.scope, in the locked sqlglot version.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 74,
+    "source_line_end": 75,
+    "verify_against": "the sqlglot version pinned in requirements.txt and allowed by pyproject.toml",
+    "verify_hint": "Check the sqlglot pin in `requirements.txt` and `pyproject.toml` (>=30.22,<31) against `sqlglot.optimizer.normalize_identifiers.normalize_identifiers` and `sqlglot.optimizer.scope.traverse_scope` signatures",
+    "claim_signature": "dependency_interaction:whole_row.py:sqlglot-optimizer-imports:74",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "data_format_assumption",
+    "claim": "Scope.selected_sources is a dict keyed by source alias/name whose values are 2-tuples (node, source) where source is either an exp.Expression or a Scope.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 184,
+    "source_line_end": 190,
+    "verify_against": "sqlglot's Scope.selected_sources property",
+    "verify_hint": "Check `selected_sources` in sqlglot's `sqlglot/optimizer/scope.py` for the locked version's value shape",
+    "claim_signature": "data_format_assumption:whole_row.py:selected-sources-tuple-shape:184",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "data_format_assumption",
+    "claim": "Keying scopes by id(scope.expression) and looking up id(star.find_ancestor(exp.Select)) resolves the star's enclosing scope, i.e. traverse_scope yields a scope whose .expression is the identical Select node still present in the normalized tree.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 154,
+    "source_line_end": 178,
+    "verify_against": "sqlglot's traverse_scope / Scope.expression semantics and whether normalize_identifiers replaces Select nodes",
+    "verify_hint": "Check `traverse_scope` and `Scope.expression` in sqlglot's `optimizer/scope.py`, and whether `normalize_identifiers` copies the tree (a copy would make every `scopes.get` miss and refuse everything)",
+    "claim_signature": "data_format_assumption:whole_row.py:scope-identity-by-id:154",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "dependency_interaction",
+    "claim": "The node names exp.Star, exp.Column, exp.Dot, exp.Count, exp.Exists, exp.Query, exp.Values, exp.Lateral, exp.Table and exp.Identifier, and the attributes Column.table, Table.db, Identifier.quoted and Identifier.name, exist with these semantics in the locked sqlglot version.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 164,
+    "source_line_end": 204,
+    "verify_against": "sqlglot's expressions module for the locked version",
+    "verify_hint": "Check `sqlglot/expressions.py` in the version locked by `requirements.txt` for `Query`, `Values`, `Lateral`, `Dot`, `Count` and `Exists` node names",
+    "claim_signature": "dependency_interaction:whole_row.py:sqlglot-node-names:164",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "api_contract",
+    "claim": "WholeRowSelectGuardRunner.run_sql matches the SqlRunner protocol it subclasses: (args: RunSqlToolArgs, context: ToolContext, *, require_base_tables: bool = False) -> pd.DataFrame.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 222,
+    "source_line_end": 224,
+    "verify_against": "SqlRunner in src/sqllens/agent/capabilities/sql_runner.py and the sibling guards in src/sqllens/safety/__init__.py",
+    "verify_hint": "Compare against `SqlRunner.run_sql` in `src/sqllens/agent/capabilities/sql_runner.py` and `ReadOnlyGuardRunner.run_sql` in `src/sqllens/safety/__init__.py`",
+    "claim_signature": "api_contract:whole_row.py:runner-run-sql-signature:222",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "api_contract",
+    "claim": "The guard forwards only require_base_tables to the inner runner and drops any other keyword arguments inner runners may accept.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 244,
+    "source_line_end": 245,
+    "verify_against": "the run_sql keyword arguments the inner runners (RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner, engine runners) accept and callers pass",
+    "verify_hint": "Check every `run_sql(` call site in `src/sqllens/agent/` and the runner signatures in `src/sqllens/safety/__init__.py` for keywords beyond `require_base_tables`",
+    "claim_signature": "api_contract:whole_row.py:forwards-only-require-base-tables:244",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts the guard refuses any star that expands a table or view wherever it appears, and that a bare * is refused when any source it expands is not one of the listed exempt kinds.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Every other star that expands a table or view is refused wherever it\nappears: in the outer projection, a CTE, a derived table, an ``IN`` or scalar\nsubquery, or a function argument such as PostgreSQL's ``row_to_json(t.*)``.\nA bare ``*`` is refused when any source it expands is not one of the above.",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 24,
+    "source_line_end": 27,
+    "verify_against": "_whole_row_star / _expands_table, and a crafted star position outside any exp.Select ancestor or inside a node find_all does not reach",
+    "verify_hint": "Try a star in a position with no enclosing `exp.Select` or inside an ORDER BY / window / UPDATE RETURNING clause against `_expands_table` in `src/sqllens/safety/whole_row.py`",
+    "claim_signature": "absolute_claim:whole_row.py:refused-wherever-it-appears:24",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts TABLE t is refused in any statement or subquery, because sqlglot parses it as an unquoted, unqualified column or table named TABLE, which a real column or table can only be when quoted.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "``TABLE t``, PostgreSQL's\nand MySQL's shorthand for ``SELECT * FROM t``, is refused in any statement or\nsubquery: sqlglot parses it as a column or table named ``TABLE``, unquoted and\nunqualified, which a real column or table can only be when quoted",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 37,
+    "source_line_end": 40,
+    "verify_against": "_uses_table_shorthand and sqlglot's parse of TABLE-shorthand and of statements containing an unquoted name TABLE",
+    "verify_hint": "Check `_uses_table_shorthand` in `src/sqllens/safety/whole_row.py` against sqlglot parses of `SELECT table FROM t` style inputs and of dialects where `TABLE t` parses differently (sqlite, no dialect)",
+    "claim_signature": "absolute_claim:whole_row.py:table-shorthand-any-statement:37",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "absolute_claim",
+    "claim": "assert_no_whole_row_select's docstring asserts that every statement in sql that sqlglot parses into an expression tree is checked, whatever its kind.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Every statement in ``sql`` that sqlglot parses into an expression tree is\n    checked, whatever its kind;",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 108,
+    "source_line_end": 109,
+    "verify_against": "_whole_row_reference's loop over _parse_statements and _parse_statements' own statement splitting",
+    "verify_hint": "Check that `_parse_statements` in `src/sqllens/safety/readonly.py` yields every statement (not only the first) and that `_whole_row_reference` short-circuits only on a refusal",
+    "claim_signature": "absolute_claim:whole_row.py:every-statement-checked:108",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "absolute_claim",
+    "claim": "The runner docstring asserts the guard fails closed like the read-only guard: any unexpected exception refuses the query.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Fails closed like the read-only guard: any unexpected exception refuses\n    the query.",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 214,
+    "source_line_end": 215,
+    "verify_against": "the except clauses in run_sql and the exceptions that do not derive from Exception (BaseException such as KeyboardInterrupt, RecursionError from deep trees)",
+    "verify_hint": "Check the `except Exception` chain in `WholeRowSelectGuardRunner.run_sql` against `ReadOnlyGuardRunner.run_sql` in `src/sqllens/safety/__init__.py`; a deeply nested query raising RecursionError is the falsifying input",
+    "claim_signature": "absolute_claim:whole_row.py:fails-closed-any-exception:214",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts normalization and scope analysis run only when the statement has a non-exempt star, so a query without one never depends on them.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Normalization and scope analysis run\nonly when the statement has a star that is not exempt, so a query without\none never depends on them.",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 62,
+    "source_line_end": 64,
+    "verify_against": "the early return in _whole_row_star",
+    "verify_hint": "Check the `if not any(not _is_exempt(star) ...)` guard at the top of `_whole_row_star` in `src/sqllens/safety/whole_row.py` and whether _is_exempt itself can raise",
+    "claim_signature": "absolute_claim:whole_row.py:scope-analysis-only-for-star:62",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "absolute_claim",
+    "claim": "The _is_exempt docstring asserts the exemption covers COUNT(*) and COUNT(t.*) and any star inside EXISTS.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"True for ``COUNT(*)`` / ``COUNT(t.*)`` and for any star inside ``EXISTS``.\"\"\"",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 165,
+    "verify_against": "sqlglot's parse of COUNT(DISTINCT *), COUNT(t.*) and nested EXISTS across the four dialects",
+    "verify_hint": "Check whether sqlglot wraps `COUNT(t.*)` so that `star.parent` is an `exp.Column` whose parent is `exp.Count`, and whether `COUNT(DISTINCT *)` interposes a node, in `_is_exempt`",
+    "claim_signature": "absolute_claim:whole_row.py:count-exists-exemption:165",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "api_contract",
+    "claim": "The guard's refusal text keeps the phrase 'selects every column' that the default system prompt's Tool Errors rule routes to a corrected retry.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 93,
+    "source_line_end": 98,
+    "verify_against": "the Tool Errors bullet in the default system prompt builder",
+    "verify_hint": "Check the Tool Errors bullets in `DefaultSystemPromptBuilder` (`src/sqllens/agent/components/` system prompt module) for the exact quoted phrase `\"selects every column\"`",
+    "claim_signature": "api_contract:whole_row.py:refusal-phrase-prompt-routing:93",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "api_contract",
+    "claim": "The runner docstring's wiring claim holds: build_agent composes WholeRowSelectGuardRunner directly beneath ResultMaskingRunner and outside RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner and the engine runner.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 210,
+    "source_line_end": 213,
+    "verify_against": "the runner composition in build_agent",
+    "verify_hint": "Check the runner wrapping order in `build_agent` / `build_sql_runner` in `src/sqllens/agent/factory.py`",
+    "claim_signature": "api_contract:whole_row.py:runner-composition-order:210",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-37",
+    "category": "api_contract",
+    "claim": "sqllens.safety re-exports UnsafeSqlError, WholeRowSelectError, WholeRowSelectGuardRunner, assert_no_whole_row_select and the whole_row submodule, as the tests import them from that package.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "verify_against": "the imports and __all__ of src/sqllens/safety/__init__.py",
+    "verify_hint": "Check `src/sqllens/safety/__init__.py` for `WholeRowSelectError`, `WholeRowSelectGuardRunner`, `assert_no_whole_row_select` and whether `whole_row` is importable as an attribute",
+    "claim_signature": "api_contract:test_safety_whole_row.py:safety-package-exports",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-38",
+    "category": "api_contract",
+    "claim": "DatabaseConfig accepts a refuse_whole_row_selects field defaulting to True, loadable from TOML and from SQLLENS_DATABASE__REFUSE_WHOLE_ROW_SELECTS.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "verify_against": "DatabaseConfig in src/sqllens/config.py and its env prefix/nesting settings",
+    "verify_hint": "Check `DatabaseConfig` in `src/sqllens/config.py` for the `refuse_whole_row_selects` field and its default",
+    "claim_signature": "api_contract:config.py:refuse-whole-row-selects-setting",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-39",
+    "category": "api_contract",
+    "claim": "_relation_check_executor unwraps WholeRowSelectGuardRunner, so a relation check through the guard reaches the engine runner.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "verify_against": "the unwrap type tuple in _relation_check_executor",
+    "verify_hint": "Check `_relation_check_executor` in `src/sqllens/safety/__init__.py` for `WholeRowSelectGuardRunner` in its exact-type tuple",
+    "claim_signature": "api_contract:__init__.py:relation-check-unwraps-guard",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-40",
+    "category": "test_mock_alignment",
+    "claim": "_RecordingRunner's run_sql signature and pd.DataFrame return match the real SqlRunner contract the guard delegates to, including the require_base_tables keyword.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "verify_against": "SqlRunner.run_sql in src/sqllens/agent/capabilities/sql_runner.py",
+    "verify_hint": "Compare `_RecordingRunner.run_sql` in `tests/unit/test_safety_whole_row.py` with `SqlRunner.run_sql` and with `SqliteRunner.run_sql` in `src/sqllens/agent/integrations/sqlite.py`",
+    "claim_signature": "test_mock_alignment:test_safety_whole_row.py:recording-runner-signature",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-41",
+    "category": "test_mock_alignment",
+    "claim": "The _Ctx stub (request_context, user, conversation, metadata, output_directory) supplies every attribute RunSqlTool.execute and SqliteRunner.run_sql read from a real ToolContext.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "verify_against": "ToolContext in src/sqllens/agent/core/tool.py and RunSqlTool.execute",
+    "verify_hint": "Check which `context.` attributes `RunSqlTool.execute` in `src/sqllens/agent/tools/run_sql.py` reads, against `ToolContext` in `src/sqllens/agent/core/tool.py`",
+    "claim_signature": "test_mock_alignment:test_safety_whole_row.py:tool-context-stub",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-42",
+    "category": "test_mock_alignment",
+    "claim": "_NoopFileSystem's write_file(filename, content, context, overwrite=False) matches the file-system interface RunSqlTool expects for its file_system argument.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "verify_against": "the file-system capability protocol RunSqlTool consumes",
+    "verify_hint": "Check `RunSqlTool.__init__` and its `file_system` usage in `src/sqllens/agent/tools/run_sql.py` against the real FileSystem protocol in `src/sqllens/agent/capabilities/`",
+    "claim_signature": "test_mock_alignment:test_safety_whole_row.py:noop-filesystem-signature",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-43",
+    "category": "data_format_assumption",
+    "claim": "RunSqlTool.execute returns an object with .success, .result_for_llm prefixed 'Error executing query: ' on failure, and .metadata['columns'] listing the result column names.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "verify_against": "RunSqlTool.execute's result construction",
+    "verify_hint": "Check the error and success result objects built in `RunSqlTool.execute` in `src/sqllens/agent/tools/run_sql.py`, including the `metadata['columns']` key",
+    "claim_signature": "data_format_assumption:run_sql.py:tool-result-fields",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-44",
+    "category": "api_contract",
+    "claim": "The default system prompt's Data Confidentiality section's first bullet is exactly the export/download/dump decline line the test pins, for every dialect including None.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_system_prompt.py",
+    "verify_against": "the Data Confidentiality section in the default system prompt builder",
+    "verify_hint": "Check the Data Confidentiality bullets in `DefaultSystemPromptBuilder` (`src/sqllens/agent/components/prompts` system prompt module) for wording and bullet ordering",
+    "claim_signature": "api_contract:test_system_prompt.py:data-confidentiality-first-bullet",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-45",
+    "category": "api_contract",
+    "claim": "The updated Tool Errors bullet text the test pins, including the '\"could not parse SQL\" or that it \"selects every column\"' clause, matches the prompt verbatim and is at index 1 of the section's bullets.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_system_prompt.py",
+    "verify_against": "the Tool Errors section of the default system prompt",
+    "verify_hint": "Check the Tool Errors bullet list in the default system prompt builder for exact text and ordering, and that `_TOOL_ERRORS_BULLETS[1]` is that bullet",
+    "claim_signature": "api_contract:test_system_prompt.py:tool-errors-bullet-text",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-46",
+    "category": "test_mock_alignment",
+    "claim": "test_safety_rls's _cfg turning refuse_whole_row_selects off still exercises the RLS stack the rest of the module asserts, i.e. no RLS assertion depends on the guard being present.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rls.py",
+    "verify_against": "the assertions in tests/unit/test_safety_rls.py that consume _cfg's built agent",
+    "verify_hint": "Check every use of `_cfg` in `tests/unit/test_safety_rls.py` and the runner-stack assertions that follow it",
+    "claim_signature": "test_mock_alignment:test_safety_rls.py:guard-off-cfg-still-valid",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-28"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-47",
+    "category": "test_mock_alignment",
+    "claim": "test_factory_wiring's stack assertions, with refuse_whole_row_selects=False, still match the shape build_agent produces (masking → read-only → row cap → engine) with the new guard absent.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "verify_against": "the runner composition in build_agent when refuse_whole_row_selects is false",
+    "verify_hint": "Check the conditional wrapping of `WholeRowSelectGuardRunner` in `src/sqllens/agent/factory.py` against the pinned chain in `test_database_timeout_and_cap_flow_through_to_runner`",
+    "claim_signature": "test_mock_alignment:test_factory_wiring.py:stack-with-guard-off",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-29"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-48",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts a star over a CTE or derived table is allowed because a star in that inner SELECT list is itself checked where it stands, so an inner star over a table is always refused at that inner star.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "its columns are the ones its own ``SELECT`` list names, and a\n  star in that list is checked where it stands, so a CTE or derived table\n  that itself selects a star from a table is refused at that inner star.",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "source_line": 17,
+    "source_line_end": 19,
+    "verify_against": "_whole_row_star's traversal and the EXISTS exemption's interaction with nested derived tables",
+    "verify_hint": "Try a derived table whose inner star sits inside EXISTS, or a CTE referenced only through another CTE, against `_whole_row_star` in `src/sqllens/safety/whole_row.py`",
+    "claim_signature": "absolute_claim:whole_row.py:inner-star-checked-where-it-stands:17",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-30"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-49",
+    "category": "data_format_assumption",
+    "claim": "The catalog exemption that delegates to readonly.is_catalog_table has its operator-visible consequences documented: that whole rows of credential-bearing system catalogs (mysql.user, pg_catalog.pg_authid) are allowed, and that a real user table whose name merely starts with a catalog prefix (pg_, sqlite_, pragma_) is treated as a catalog.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "verify_against": "Operator-facing docs: docs/external/configuration.md and changelog.d/361.security.md, against is_catalog_table in src/sqllens/safety/readonly.py",
+    "verify_hint": "Compare the catalog exemption text in docs/external/configuration.md (whole-row select guard row) and changelog.d/361.security.md against the exemption set implemented by `is_catalog_table` in `src/sqllens/safety/readonly.py` and its use at the catalog branch of `_is_exempt`/`_expands_table` in `src/sqllens/safety/whole_row.py`",
+    "prior_ref": "VC-42",
+    "prior_evidence": "Head still delegates to is_catalog_table (src/sqllens/safety/whole_row.py:195). Operator-facing text does not state the two consequences. docs/external/configuration.md:32 says only 'a `*` over a system catalog for schema lookups' and 'unless it is a system catalog function'; it does not say that whole rows of credential-bearing catalogs (mysql.user, pg_catalog.pg_authid) pass, nor that a user table named with pg_/sqlite_/pragma_ prefix is exempt from the whole-row refusal. configuration.md:38 mentions the pg_/sqlite_/pragma_ prefix, but only for hiding catalog results from answers, a different feature, and says nothing about SELECT * being allowed. changelog.d/361.security.md lines 5-8 list only 'a `*` over a system catalog' as allowed. The whole_row.py module docstring (lines 44-48) does document the prefix behavior, but it is developer-facing, and it says nothing about credential catalogs. Search: grep of mysql.user|pg_authid|pg_payments in docs/ and changelog.d found no whole-row exemption text for these in operator docs. Prior finding holds, no fix, no covering rejection (none of the rejections address this).",
+    "claim_signature": "data_format_assumption:whole_row.py:catalog-exemption-operator-docs",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-50",
+    "category": "api_contract",
+    "claim": "The per-request call-flow trace in docs/internal/database-connectors/row-level-security.md describes the same runner chain as line 207 of that page, which states WholeRowSelectGuardRunner sits between ResultMaskingRunner and RlsGuardRunner by default.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "verify_against": "The runner composition order in build_agent in src/sqllens/agent/factory.py",
+    "verify_hint": "Compare the per-request call-flow trace section of `docs/internal/database-connectors/row-level-security.md` with the wiring sentence later on the same page and with the runner wrapping order in `build_agent` in `src/sqllens/agent/factory.py`",
+    "prior_ref": "VC-40",
+    "prior_evidence": "Head row-level-security.md lines 174-181 trace ResultMaskingRunner -> RlsGuardRunner -> ReadOnlyGuardRunner -> RowCapRunner with no WholeRowSelectGuardRunner step, while line 207 says ResultMaskingRunner → WholeRowSelectGuardRunner → RlsGuardRunner → ... and line 203 wires it. The page contradicts itself. No rejection line covers this defect, and it is an authored doc statement that is untrue.",
+    "claim_signature": "api_contract:row-level-security.md:runner-chain-trace",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-51",
+    "category": "api_contract",
+    "claim": "The fail-closed refusal message returned to the model and user from the whole-row guard does not expose raw exception text that can quote a table or schema identifier, consistent with the guard's deliberate no-star/no-name refusal text.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "verify_against": "The WHOLE_ROW_REFUSAL contract comment in src/sqllens/safety/whole_row.py and the sibling fail-closed branches in src/sqllens/safety/__init__.py",
+    "verify_hint": "Check the fail-closed `except` branch of `WholeRowSelectGuardRunner.run_sql` in `src/sqllens/safety/whole_row.py` against the `WHOLE_ROW_REFUSAL` rationale comment and the test `test_refusal_message_is_actionable` in `tests/unit/test_safety_whole_row.py`",
+    "prior_ref": "VC-41",
+    "prior_evidence": "Head src/sqllens/safety/whole_row.py:222-231 still builds the fail-closed message as f\"... whole-row select check errored ({type(e).__name__}: {e})\", so raw exception text goes into the error returned to the model and user. The comment at lines 82-85 gives the contract's rationale: refusal text names no star because a qualifier can be a table or schema name and 'the error can reach the user'. sqlglot scope analysis (traverse_scope/normalize_identifiers, run at lines 144-145 whenever a non-exempt star exists) can raise errors quoting identifiers, e.g. OptimizeError 'Alias already used: users' for SELECT * FROM users JOIN users ON 1=1, which is producible by an agent-written query. The only test (tests/unit/test_safety_whole_row.py:319-329) uses a fixed RuntimeError and matches only the prefix, so it does not pin the detail. The traceback is already logged at line 223-227, so the detail adds nothing to the message. The docs (read-only-safety.md:232) describe the message as 'errored (...)'. No rejection covers this defect: none of the listed rejections addresses the message content. Sibling guards in safety/__init__.py share the shape, but that does not remove the defect at the new site. 'No defect' cannot be shown, because the identifier leak is real. Low reach, since the name came from the model's own SQL, so suggestion.",
+    "claim_signature": "api_contract:whole_row.py:fail-closed-identifier-leak",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-52",
+    "category": "absolute_claim",
+    "claim": "The module docstring's rule that every other star expanding a table or view is refused wherever it appears, with the listed 'Not covered' cases as the only exceptions, holds for statements sqlglot keeps as opaque text (exp.Command, e.g. EXPLAIN SELECT * FROM users), which the guard never examines for stars.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "verify_against": "The star scan in _whole_row_star / assert_no_whole_row_select in src/sqllens/safety/whole_row.py and sqlglot's exp.Command parse shape at the locked version",
+    "verify_hint": "Check the module docstring's universal rule and 'Not covered' paragraph in `src/sqllens/safety/whole_row.py` against the `statement.find_all(exp.Star)` scan in `_whole_row_star`, using `EXPLAIN SELECT * FROM users` / `PREPARE s FROM 'SELECT * FROM users'` as the falsifying input",
+    "prior_ref": "VC-43",
+    "prior_evidence": "whole_row.py:137-139 finds stars only via statement.find_all(exp.Star). sqlglot keeps an exp.Command (e.g. EXPLAIN SELECT * FROM users) as an opaque string in its `expression` arg, so no exp.Star node exists. _whole_row_star returns None and assert_no_whole_row_select returns without refusing. Nothing else in the module examines Command text. The docstring at lines 24-26 says every other star that expands a table or view is refused wherever it appears. The 'Not covered' paragraph (lines 44-48) lists only whole rows reached without a star and explicit column lists, so the Command case is an unlisted exception and the absolute wording is literally untrue. Practical reach is small: the read-only guard rejects such statements by default, and EXPLAIN returns a plan, not table rows. Under the grading rules, 'No defect' cannot apply because the finding shows an authored statement untrue at the head. No rejections line covers this behavior. The criteria file is not supplied. This is a docstring-precision issue only, so the severity is suggestion.",
+    "claim_signature": "absolute_claim:whole_row.py:command-opaque-statement",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-53",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: The new test file never exercises the guard's one fail-open lever against a query that also carries a real table star. `_is_exempt` in `src/sqllens/safety/whole_row.py` (lines 155-160) exempts a star whose parent chain reaches `exp.Count`, and any star with an `exp.Exists` ancestor. The refused-shape table in `tests/unit/test_safety_whole_row.py` (lines 51-99) contains no query that combines an outer whole-row star with one of those constructs — no `SELECT * FROM users WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = users.id)`, and no `SELECT COUNT(*), u.* FROM users u GROUP BY ...`. The allowed-shape entries only put stars *inside* `EXISTS`. The code at this head is correct, because the lookup is `star.find_ancestor`. A later change that widened the exemption from an ancestor test to a per-statement test, or that exempted a whole `SELECT` containing a `Count`, would let `SELECT *` over a people table through — the exact leak this change exists to close — with the whole suite still green. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_whole_row.py",
+    "verify_against": "The _is_exempt exemption branches in src/sqllens/safety/whole_row.py",
+    "verify_hint": "Check the refused-shape parametrization table in `tests/unit/test_safety_whole_row.py` for a case combining an outer whole-row star with COUNT or EXISTS (e.g. `SELECT * FROM users WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = users.id)`, `SELECT COUNT(*), u.* FROM users u GROUP BY ...`) against `_is_exempt` in `src/sqllens/safety/whole_row.py`",
+    "prior_ref": "finding 1 (Important / Major)",
+    "prior_evidence": "The new test file never exercises the guard's one fail-open lever against a query that also carries a real table star. `_is_exempt` in `src/sqllens/safety/whole_row.py` (lines 155-160) exempts a star whose parent chain reaches `exp.Count`, and any star with an `exp.Exists` ancestor. The refused-shape table in `tests/unit/test_safety_whole_row.py` (lines 51-99) contains no query that combines an outer whole-row star with one of those constructs — no `SELECT * FROM users WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = users.id)`, and no `SELECT COUNT(*), u.* FROM users u GROUP BY ...`. The allowed-shape entries only put stars *inside* `EXISTS`. The code at this head is correct, because the lookup is `star.find_ancestor`. A later change that widened the exemption from an ancestor test to a per-statement test, or that exempted a whole `SELECT` containing a `Count`, would let `SELECT *` over a people table through — the exact leak this change exists to close — with the whole suite still green. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:test_safety_whole_row.py:exemption-with-real-star",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-54",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: Two sibling exits of the new guard can put identifiers into a message the model and the user see, which is the one thing the refusal text deliberately avoids. The comment above `WHOLE_ROW_REFUSAL` in `src/sqllens/safety/whole_row.py` (lines 86-91) says the refusal names no star because a qualifier can be a table or schema name and the error can reach the user. The parse-error re-raise at line 221 passes sqlglot's own message through as `could not parse SQL: {e}`, and the fail-closed branch at lines 222-231 builds `whole-row select check errored ({type(e).__name__}: {e})`. A scope or identifier-normalization error routinely quotes the offending name, for example `Alias already used: users`. Both paths still refuse the query and log a traceback, and `test_refusal_message_is_actionable` pins the no-name property only on the third exit. The sibling guards in `src/sqllens/safety/__init__.py` have the same shape. (raised by 2/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "verify_against": "The WHOLE_ROW_REFUSAL comment and test_refusal_message_is_actionable in tests/unit/test_safety_whole_row.py; sibling guards in src/sqllens/safety/__init__.py",
+    "verify_hint": "Check the three refusal exits of `assert_no_whole_row_select` / `WholeRowSelectGuardRunner.run_sql` in `src/sqllens/safety/whole_row.py` (parse-error re-raise `could not parse SQL: {e}`, fail-closed `whole-row select check errored (...)`, and the WholeRowSelectError exit) against the comment above `WHOLE_ROW_REFUSAL`",
+    "prior_ref": "finding 1 (Suggestion / Minor)",
+    "prior_evidence": "Two sibling exits of the new guard can put identifiers into a message the model and the user see, which is the one thing the refusal text deliberately avoids. The comment above `WHOLE_ROW_REFUSAL` in `src/sqllens/safety/whole_row.py` (lines 86-91) says the refusal names no star because a qualifier can be a table or schema name and the error can reach the user. The parse-error re-raise at line 221 passes sqlglot's own message through as `could not parse SQL: {e}`, and the fail-closed branch at lines 222-231 builds `whole-row select check errored ({type(e).__name__}: {e})`. A scope or identifier-normalization error routinely quotes the offending name, for example `Alias already used: users`. Both paths still refuse the query and log a traceback, and `test_refusal_message_is_actionable` pins the no-name property only on the third exit. The sibling guards in `src/sqllens/safety/__init__.py` have the same shape. (raised by 2/6 agents)",
+    "claim_signature": "api_contract:whole_row.py:sibling-exits-identifier-leak",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-55",
+    "category": "absolute_claim",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: The claim that the guard checks every statement whatever its kind is wider than what the code can see. `assert_no_whole_row_select` in `src/sqllens/safety/whole_row.py` (line 101) and `docs/internal/database-connectors/read-only-safety.md` (line 209) both state it without qualification, and the \"Not covered\" paragraph in the same module (lines 44-48) does not list the case. The scan at lines 137-152 walks `exp.Star` nodes only. sqlglot keeps some statements as an opaque `exp.Command` whose payload stays a raw string, so no star node exists to find; `_whole_row_reference(\"PREPARE s FROM 'SELECT * FROM users'\", \"mysql\")` and the PostgreSQL `EXECUTE IMMEDIATE` form both return `None`. This is unreachable in the default configuration, because the read-only guard rejects a `Command` root, and nothing pins the direction. (raised by 2/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "verify_against": "The exp.Star walk in src/sqllens/safety/whole_row.py and sqlglot's exp.Command payload shape at the locked version",
+    "verify_hint": "Check the 'checks every statement, whatever its kind' sentence in `assert_no_whole_row_select` in `src/sqllens/safety/whole_row.py` and in the guard section of `docs/internal/database-connectors/read-only-safety.md` against the `exp.Star` walk, using `_whole_row_reference(\"PREPARE s FROM 'SELECT * FROM users'\", \"mysql\")` as the falsifying input",
+    "prior_ref": "finding 2 (Suggestion / Minor)",
+    "prior_evidence": "The claim that the guard checks every statement whatever its kind is wider than what the code can see. `assert_no_whole_row_select` in `src/sqllens/safety/whole_row.py` (line 101) and `docs/internal/database-connectors/read-only-safety.md` (line 209) both state it without qualification, and the \"Not covered\" paragraph in the same module (lines 44-48) does not list the case. The scan at lines 137-152 walks `exp.Star` nodes only. sqlglot keeps some statements as an opaque `exp.Command` whose payload stays a raw string, so no star node exists to find; `_whole_row_reference(\"PREPARE s FROM 'SELECT * FROM users'\", \"mysql\")` and the PostgreSQL `EXECUTE IMMEDIATE` form both return `None`. This is unreachable in the default configuration, because the read-only guard rejects a `Command` root, and nothing pins the direction. (raised by 2/6 agents)",
+    "claim_signature": "absolute_claim:whole_row.py:checks-every-statement",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-56",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: Two docstrings and two comments in `tests/unit/test_factory_wiring.py` describe the production stack but reach their asserted shape only because the tests switch the new setting off. The docstrings at lines 492-494 and 536-538 name `ResultMaskingRunner` and then the read-only or RLS guard as the layer directly beneath masking; `refuse_whole_row_selects=False` at lines 505 and 548 is what makes that true in those tests. In the default configuration the layer directly beneath masking is `WholeRowSelectGuardRunner`. The added comment at lines 504 and 547, \"Pinned directly beneath masking by test_safety_whole_row.py.\", sits immediately above the setting it annotates and reads as a claim about that line rather than about the guard's position. (raised by 2/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "verify_against": "The runner composition order in build_agent in src/sqllens/agent/factory.py and the default of database.refuse_whole_row_selects in src/sqllens/config.py",
+    "verify_hint": "Check the two test docstrings naming the layer directly beneath `ResultMaskingRunner` and the adjacent `refuse_whole_row_selects=False` lines and 'Pinned directly beneath masking by test_safety_whole_row.py.' comments in `tests/unit/test_factory_wiring.py` against `build_agent` in `src/sqllens/agent/factory.py`",
+    "prior_ref": "finding 3 (Suggestion / Minor)",
+    "prior_evidence": "Two docstrings and two comments in `tests/unit/test_factory_wiring.py` describe the production stack but reach their asserted shape only because the tests switch the new setting off. The docstrings at lines 492-494 and 536-538 name `ResultMaskingRunner` and then the read-only or RLS guard as the layer directly beneath masking; `refuse_whole_row_selects=False` at lines 505 and 548 is what makes that true in those tests. In the default configuration the layer directly beneath masking is `WholeRowSelectGuardRunner`. The added comment at lines 504 and 547, \"Pinned directly beneath masking by test_safety_whole_row.py.\", sits immediately above the setting it annotates and reads as a claim about that line rather than about the guard's position. (raised by 2/6 agents)",
+    "claim_signature": "test_mock_alignment:test_factory_wiring.py:masking-inner-runner-docstrings",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-57",
+    "category": "dependency_interaction",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: The bare-star branch treats \"no source resolved\" as allowed while the qualified-star branch two lines above refuses an unresolvable qualifier, and nothing pins the difference. At `src/sqllens/safety/whole_row.py` lines 179-181 an empty `selected_sources` makes `any([])` false, so the star passes. The asymmetry is deliberate for a `SELECT *` with no `FROM`, but it is the place where a future sqlglot release that stopped registering a `FROM` form as a selected source would turn a refusal into a silent pass. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "verify_against": "sqlglot's Scope.selected_sources at the locked version (requirements.txt) and the test matrix in tests/unit/test_safety_whole_row.py",
+    "verify_hint": "Check the bare-star branch of `_whole_row_reference`/`_expands_table` in `src/sqllens/safety/whole_row.py` that calls `any(...)` over `selected_sources` against `Scope.selected_sources` in sqlglot's `optimizer/scope.py` at the version locked in `requirements.txt`, and for a covering case in `tests/unit/test_safety_whole_row.py`",
+    "prior_ref": "finding 4 (Suggestion / Minor)",
+    "prior_evidence": "The bare-star branch treats \"no source resolved\" as allowed while the qualified-star branch two lines above refuses an unresolvable qualifier, and nothing pins the difference. At `src/sqllens/safety/whole_row.py` lines 179-181 an empty `selected_sources` makes `any([])` false, so the star passes. The asymmetry is deliberate for a `SELECT *` with no `FROM`, but it is the place where a future sqlglot release that stopped registering a `FROM` form as a selected source would turn a refusal into a silent pass. (raised by 1/6 agents)",
+    "claim_signature": "dependency_interaction:whole_row.py:empty-selected-sources-pass",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-58",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: No test covers a star that sits outside any `SELECT` scope, which is the branch at `src/sqllens/safety/whole_row.py` lines 168-172. The shapes that reach it are `UPDATE users SET x = 1 RETURNING *` and `DELETE FROM users RETURNING *`, and those only reach this guard when `database.read_only = false` — the configuration the internal docs describe as leaving this guard the only parser in the stack. The refused-shape table covers `INSERT … SELECT *` and `CREATE TABLE … AS SELECT *`, both of which do have a `Select` ancestor. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/whole_row.py",
+    "verify_against": "The refused- and allowed-shape parametrizations in tests/unit/test_safety_whole_row.py",
+    "verify_hint": "Check the star-outside-any-SELECT-scope branch of `_whole_row_reference` in `src/sqllens/safety/whole_row.py` against the shape tables in `tests/unit/test_safety_whole_row.py` for a `RETURNING *` case",
+    "prior_ref": "finding 5 (Suggestion / Minor)",
+    "prior_evidence": "No test covers a star that sits outside any `SELECT` scope, which is the branch at `src/sqllens/safety/whole_row.py` lines 168-172. The shapes that reach it are `UPDATE users SET x = 1 RETURNING *` and `DELETE FROM users RETURNING *`, and those only reach this guard when `database.read_only = false` — the configuration the internal docs describe as leaving this guard the only parser in the stack. The refused-shape table covers `INSERT … SELECT *` and `CREATE TABLE … AS SELECT *`, both of which do have a `Select` ancestor. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:whole_row.py:star-outside-select-scope",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-59",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: The description of the catalog exemption in `docs/external/configuration.md` (line 32) omits the name-prefix rule, which is the same gap the Important item above reports, raised here against the reference page alone. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/external/configuration.md",
+    "verify_against": "is_catalog_table in src/sqllens/safety/readonly.py",
+    "verify_hint": "Check the `refuse_whole_row_selects` row of the settings table in `docs/external/configuration.md` against the prefix matching in `is_catalog_table` in `src/sqllens/safety/readonly.py`",
+    "prior_ref": "finding 6 (Suggestion / Minor)",
+    "prior_evidence": "The description of the catalog exemption in `docs/external/configuration.md` (line 32) omits the name-prefix rule, which is the same gap the Important item above reports, raised here against the reference page alone. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:configuration.md:catalog-name-prefix-rule",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  }
+]
