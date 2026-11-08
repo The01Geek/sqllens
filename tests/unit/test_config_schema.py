@@ -657,7 +657,7 @@ def test_retired_show_memory_details_in_toml_is_ignored_with_warning(
         cfg = Config.load(_minimal_toml(tmp_path, "\n[agent]\nshow_memory_details = true\n"))
     assert cfg.agent.max_tool_iterations == 20
     assert [r.getMessage() for r in caplog.records] == [
-        "Warning: agent.show_memory_details was removed and is ignored; "
+        "agent.show_memory_details was removed and is ignored; "
         "remove it from your configuration."
     ]
 
@@ -671,3 +671,18 @@ def test_retired_show_memory_details_env_var_is_ignored_with_warning(
     assert cfg.agent.max_tool_iterations == 20
     assert len(caplog.records) == 1
     assert "agent.show_memory_details was removed" in caplog.records[0].getMessage()
+
+
+@pytest.mark.parametrize("key", ["show_memory_details", "show_sql"])
+def test_every_retired_agent_key_is_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, key: str
+) -> None:
+    # Both keys' release notes (#204, #129) promised a leftover is ignored.
+    with caplog.at_level("WARNING", logger="sqllens.config"):
+        Config.load(_minimal_toml(tmp_path, f"\n[agent]\n{key} = true\n"))
+    assert f"agent.{key} was removed and is ignored" in caplog.text
+    caplog.clear()
+    monkeypatch.setenv(f"SQLLENS_AGENT__{key.upper()}", "true")
+    with caplog.at_level("WARNING", logger="sqllens.config"):
+        Config.load(_minimal_toml(tmp_path))
+    assert f"agent.{key} was removed and is ignored" in caplog.text

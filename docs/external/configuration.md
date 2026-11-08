@@ -147,7 +147,7 @@ Configures the transport SQL Lens uses to talk to the assistant.
 
 ## Section: `[agent]`
 
-Tunes how the natural-language agent behaves. An unrecognized key in this section, or an unknown `SQLLENS_AGENT__*` environment variable, is rejected at config load, so a misspelled setting fails loudly instead of being ignored. The removed `show_memory_details` setting is the one exception: it is still accepted and ignored, with a warning in the log.
+Tunes how the natural-language agent behaves. An unrecognized key in this section, or an unknown `SQLLENS_AGENT__*` environment variable, is rejected at config load, so a misspelled setting fails loudly instead of being ignored. The removed `show_memory_details` and `show_sql` settings are the exceptions: they are still accepted and ignored, with a warning in the log.
 
 | Field | Type | Description |
 |---|---|---|

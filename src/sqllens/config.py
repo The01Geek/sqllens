@@ -441,7 +441,7 @@ STANDING_INSTRUCTIONS_DELIMITERS = (STANDING_INSTRUCTIONS_BEGIN, STANDING_INSTRU
 
 #: ``[agent]`` keys removed in earlier releases. The section rejects unknown
 #: keys, but these are accepted and dropped because their removal notes said so.
-_RETIRED_AGENT_KEYS = frozenset({"show_memory_details"})
+_RETIRED_AGENT_KEYS = frozenset({"show_memory_details", "show_sql"})
 
 
 class AgentRuntimeConfig(BaseModel):
@@ -466,9 +466,9 @@ class AgentRuntimeConfig(BaseModel):
             retired = [key for key in _RETIRED_AGENT_KEYS if key in data]
             if retired:
                 data = {k: v for k, v in data.items() if k not in _RETIRED_AGENT_KEYS}
-                for key in retired:
+                for key in sorted(retired):
                     logger.warning(
-                        "Warning: agent.%s was removed and is ignored; remove it from "
+                        "agent.%s was removed and is ignored; remove it from "
                         "your configuration.",
                         key,
                     )
