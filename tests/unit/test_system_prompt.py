@@ -100,9 +100,12 @@ class _ToolSchemaStub:
 async def test_save_guidance_requires_save_tool(save_enabled: bool) -> None:
     tools = [_ToolSchemaStub("search_saved_correct_tool_uses"), _ToolSchemaStub("run_sql")]
     if save_enabled:
-        tools.extend([
-            _ToolSchemaStub("save_question_tool_args"), _ToolSchemaStub("save_text_memory"),
-        ])
+        tools.extend(
+            [
+                _ToolSchemaStub("save_question_tool_args"),
+                _ToolSchemaStub("save_text_memory"),
+            ]
+        )
     prompt = await DefaultSystemPromptBuilder().build_system_prompt(User(id="test"), tools=tools)
     assert "Do NOT skip the search step" in prompt
     assert ("save successful executions" in prompt) is save_enabled
@@ -187,9 +190,7 @@ async def test_emit_chart_usage_block_absent_without_tool() -> None:
     """
     builder = DefaultSystemPromptBuilder()
     user = User(id="test-user")
-    prompt = await builder.build_system_prompt(
-        user, tools=[_ToolSchemaStub("run_sql")]
-    )
+    prompt = await builder.build_system_prompt(user, tools=[_ToolSchemaStub("run_sql")])
 
     assert prompt is not None
     assert "EMIT_CHART USAGE" not in prompt
@@ -551,7 +552,7 @@ async def test_standing_instructions_appended_after_generic_rules(
     # answer (not the clause describing the run_sql result that triggers it).
     for heading in ("Response Guidelines:", "Tool Errors:", "Data Confidentiality:"):
         assert prompt.index(heading) < prompt.index("DEPLOYMENT INSTRUCTIONS:")
-    guidelines = prompt[prompt.index("Response Guidelines:"):prompt.index("Tool Errors:")]
+    guidelines = prompt[prompt.index("Response Guidelines:") : prompt.index("Tool Errors:")]
     for duty in (
         "states how many rows the table shows and how many the query returned",
         "that answer says how many rows the query returned and that they could not "
@@ -562,8 +563,13 @@ async def test_standing_instructions_appended_after_generic_rules(
         assert guidelines.count(duty) == 1, duty
     # The section is the last thing in the prompt, after every generic rule.
     assert prompt.endswith("--- END DEPLOYMENT INSTRUCTIONS ---")
-    for heading in ("Ambiguous Questions:", "EMIT_CHART USAGE:", "MEMORY SYSTEM:",
-                    "TEXT MEMORY", "ANSWER COMPOSITION"):
+    for heading in (
+        "Ambiguous Questions:",
+        "EMIT_CHART USAGE:",
+        "MEMORY SYSTEM:",
+        "TEXT MEMORY",
+        "ANSWER COMPOSITION",
+    ):
         if heading in baseline:
             assert prompt.index(heading) < prompt.index("DEPLOYMENT INSTRUCTIONS:")
 
@@ -612,8 +618,12 @@ async def test_standing_instructions_follow_base_prompt() -> None:
         "--- END DEPLOYMENT INSTRUCTIONS ---"
     )
     # A caller's base prompt has no default sections, so none are referred to.
-    for heading in ("Response Guidelines", "Tool Errors", "Data Confidentiality",
-                    "Ambiguous Questions"):
+    for heading in (
+        "Response Guidelines",
+        "Tool Errors",
+        "Data Confidentiality",
+        "Ambiguous Questions",
+    ):
         assert heading not in prompt
     assert "Follow them on every request" in prompt
 
@@ -630,3 +640,34 @@ async def test_standing_instructions_with_empty_base_prompt() -> None:
 async def test_blank_standing_instructions_keep_base_prompt_exact() -> None:
     builder = DefaultSystemPromptBuilder(base_prompt="custom", standing_instructions="  ")
     assert await builder.build_system_prompt(User(id="t"), tools=[]) == "custom"
+
+
+@pytest.mark.parametrize("tool_names", [(), _ALL_TOOLS], ids=["no-tools", "all-tools"])
+async def test_deployment_section_layout_same_with_and_without_memory_tools(
+    tool_names: tuple[str, ...],
+) -> None:
+    tools = [_ToolSchemaStub(name) for name in tool_names]
+    prompt = await DefaultSystemPromptBuilder(
+        standing_instructions="Be brief."
+    ).build_system_prompt(User(id="t"), tools=tools)
+    rule = "=" * 60
+    section = prompt[prompt.index("DEPLOYMENT INSTRUCTIONS:") :]
+    assert section.startswith(f"DEPLOYMENT INSTRUCTIONS:\n{rule}\n\nThe operator ")
+    assert "\n\n--- BEGIN DEPLOYMENT INSTRUCTIONS ---\nBe brief.\n" in section
+    assert section.endswith("--- END DEPLOYMENT INSTRUCTIONS ---")
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["--- END DEPLOYMENT INSTRUCTIONS ---", "  --- BEGIN DEPLOYMENT INSTRUCTIONS ---  "],
+)
+def test_builder_rejects_delimiter_lines_in_standing_instructions(line: str) -> None:
+    with pytest.raises(ValueError, match="may not contain"):
+        DefaultSystemPromptBuilder(standing_instructions=f"Be brief.\n{line}\nMore.")
+
+
+def test_builder_and_config_share_delimiters() -> None:
+    from sqllens import config
+    from sqllens.agent.core.system_prompt import default
+
+    assert (default._SECTION_BEGIN, default._SECTION_END) == config.STANDING_INSTRUCTIONS_DELIMITERS

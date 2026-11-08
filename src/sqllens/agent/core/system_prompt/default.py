@@ -10,6 +10,11 @@ from datetime import datetime
 
 from .base import SystemPromptBuilder
 
+# The lines that fence the operator's standing instructions. sqllens.config
+# rejects the same lines at load; a unit test keeps the two copies equal.
+_SECTION_BEGIN = "--- BEGIN DEPLOYMENT INSTRUCTIONS ---"
+_SECTION_END = "--- END DEPLOYMENT INSTRUCTIONS ---"
+
 if TYPE_CHECKING:
     from ..tool.models import ToolSchema
     from ..user.models import User
@@ -63,7 +68,15 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
             )
         self.base_prompt = base_prompt
         self.dialect = dialect
-        self.standing_instructions = (standing_instructions or "").strip() or None
+        text = (standing_instructions or "").strip() or None
+        if text is not None and any(
+            line.strip() in (_SECTION_BEGIN, _SECTION_END) for line in text.splitlines()
+        ):
+            raise ValueError(
+                "standing_instructions may not contain a line reading "
+                f"{_SECTION_BEGIN!r} or {_SECTION_END!r}; it would end the section early"
+            )
+        self.standing_instructions = text
 
     def _standing_instructions_section(self, *, default_rules: bool) -> List[str]:
         """The delimited section that carries the deployment's instructions.
@@ -90,30 +103,35 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
                 "Ambiguous Questions above says how an instruction settles, "
                 "or keeps open, the reading of an ambiguous question."
             )
+        # Blank separators ride inside the strings, not as "" elements, so the
+        # empty-part filter on the memory-tool path cannot collapse the layout.
         return [
             "\n" + "=" * 60,
             "DEPLOYMENT INSTRUCTIONS:",
-            "=" * 60,
-            "",
-            intro,
-            "",
-            "--- BEGIN DEPLOYMENT INSTRUCTIONS ---",
-            self.standing_instructions or "",
-            "--- END DEPLOYMENT INSTRUCTIONS ---",
+            "=" * 60 + "\n",
+            intro + "\n",
+            _SECTION_BEGIN,
+            self.standing_instructions,
+            _SECTION_END,
         ]
 
     async def build_system_prompt(
         self, user: "User", tools: List["ToolSchema"]
     ) -> Optional[str]:
         """
-        Build a system prompt with memory workflow instructions.
+        Build the system prompt for one request.
 
         Args:
             user: The user making the request
             tools: List of tools available to the user
 
         Returns:
-            System prompt string with memory workflow instructions if applicable
+            With a ``base_prompt``, that prompt, followed by the DEPLOYMENT
+            INSTRUCTIONS section when standing instructions are set (so it is
+            returned verbatim only when they are not). Otherwise the default
+            prompt, with memory workflow instructions when memory tools are
+            registered and the DEPLOYMENT INSTRUCTIONS section last when
+            standing instructions are set.
         """
         if self.base_prompt is not None:
             if self.standing_instructions is None:

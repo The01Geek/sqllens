@@ -429,6 +429,12 @@ class AuditConfig(BaseModel):
 #: call, so the cap keeps a pasted document from inflating each request.
 MAX_STANDING_INSTRUCTIONS_CHARS = 10_000
 
+#: The lines that fence ``agent.standing_instructions`` in the system prompt.
+#: The text may not contain either one on a line of its own.
+STANDING_INSTRUCTIONS_BEGIN = "--- BEGIN DEPLOYMENT INSTRUCTIONS ---"
+STANDING_INSTRUCTIONS_END = "--- END DEPLOYMENT INSTRUCTIONS ---"
+STANDING_INSTRUCTIONS_DELIMITERS = (STANDING_INSTRUCTIONS_BEGIN, STANDING_INSTRUCTIONS_END)
+
 
 class AgentRuntimeConfig(BaseModel):
     """Agent runtime knobs exposed to deployers.
@@ -436,6 +442,11 @@ class AgentRuntimeConfig(BaseModel):
     Only fields that operators legitimately tune per deployment live here;
     the rest of the framework's ``AgentConfig`` keeps its built-in defaults.
     """
+
+    # The top-level Config's extra="forbid" does not reach nested models, so a
+    # misspelt [agent] key (e.g. ``standing_instruction``) would otherwise be
+    # dropped silently and its rule would never reach a request.
+    model_config = ConfigDict(extra="forbid")
 
     # Default raised from the framework's 10 — real-world schema exploration
     # (catalog lookups + memory searches + final query) routinely needs more
@@ -489,6 +500,13 @@ class AgentRuntimeConfig(BaseModel):
                 f"{MAX_STANDING_INSTRUCTIONS_CHARS}. Every request sends it to the model, "
                 "so keep it to the rules that must hold on every question."
             )
+        for line in text.splitlines():
+            if line.strip() in STANDING_INSTRUCTIONS_DELIMITERS:
+                raise ValueError(
+                    f"agent.standing_instructions contains the line {line.strip()!r}; "
+                    "SQL Lens wraps the text in that line itself, so it would end or "
+                    "restart the instructions section early. Remove that line."
+                )
         return text
 
 

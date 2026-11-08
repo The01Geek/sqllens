@@ -97,9 +97,7 @@ def test_server_log_level_defaults_to_info() -> None:
     assert ServerConfig().log_level == "info"
 
 
-@pytest.mark.parametrize(
-    "level", ["critical", "error", "warning", "info", "debug", "trace"]
-)
+@pytest.mark.parametrize("level", ["critical", "error", "warning", "info", "debug", "trace"])
 def test_server_log_level_accepts_valid_levels(level: str) -> None:
     assert ServerConfig(log_level=level).log_level == level
 
@@ -125,9 +123,7 @@ def test_show_details_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
 
 def test_show_details_toml_override(tmp_path: Path) -> None:
-    cfg = Config.load(
-        _minimal_toml(tmp_path, "\n[agent]\nshow_details = true\n")
-    )
+    cfg = Config.load(_minimal_toml(tmp_path, "\n[agent]\nshow_details = true\n"))
     assert cfg.agent.show_details is True
 
 
@@ -138,9 +134,7 @@ def test_max_conversations_defaults_to_1000() -> None:
     assert AgentRuntimeConfig().max_conversations == 1000
 
 
-def test_max_conversations_env_override(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_max_conversations_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SQLLENS_AGENT__MAX_CONVERSATIONS", "42")
     cfg = Config.load(_minimal_toml(tmp_path))
     assert cfg.agent.max_conversations == 42
@@ -195,9 +189,7 @@ def test_config_version_defaults_to_one() -> None:
 
 
 def test_config_version_accepted_explicitly() -> None:
-    cfg = Config(
-        database=DatabaseConfig(url="sqlite:///demo.db"), config_version=7
-    )
+    cfg = Config(database=DatabaseConfig(url="sqlite:///demo.db"), config_version=7)
     assert cfg.config_version == 7
 
 
@@ -222,9 +214,7 @@ def test_config_version_toml_override(tmp_path: Path) -> None:
     assert cfg.config_version == 2
 
 
-def test_config_version_env_override(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_config_version_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SQLLENS_CONFIG_VERSION", "3")
     cfg = Config.load(_minimal_toml(tmp_path))
     assert cfg.config_version == 3
@@ -334,9 +324,7 @@ def test_load_toml_path_is_context_isolated(tmp_path: Path) -> None:
     # running in one context must not leak its resolved path into another.
     # Pin that property so a regression to a plain global is caught.
     cfg_path = tmp_path / "sqllens.toml"
-    cfg_path.write_text(
-        '[database]\nurl = "sqlite:///ctx.db"\n[llm]\napi_key = "sk-ant-test"\n'
-    )
+    cfg_path.write_text('[database]\nurl = "sqlite:///ctx.db"\n[llm]\napi_key = "sk-ant-test"\n')
     ctx = contextvars.copy_context()
     ctx.run(Config.load, cfg_path)
     # The load mutated _LOAD_TOML_PATH only inside `ctx`; the parent context
@@ -370,8 +358,7 @@ def test_direct_config_honors_sqllens_config_env_via_fallback(
     # SQLLENS_CONFIG (the fallback's non-None path branch).
     cfg_path = tmp_path / "sqllens.toml"
     cfg_path.write_text(
-        '[database]\nurl = "sqlite:///from-env-toml.db"\n'
-        '[llm]\napi_key = "sk-ant-test"\n'
+        '[database]\nurl = "sqlite:///from-env-toml.db"\n[llm]\napi_key = "sk-ant-test"\n'
     )
     monkeypatch.setenv("SQLLENS_CONFIG", str(cfg_path))
     cfg = Config()
@@ -426,9 +413,7 @@ def test_minimal_legacy_toml_still_loads_with_new_defaults(
 # --- resolution precedence + coercion --------------------------------------
 
 
-def test_env_beats_toml_for_new_field(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_env_beats_toml_for_new_field(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Documented resolution order: env wins over TOML. Pin it for a new field.
     monkeypatch.setenv("SQLLENS_AGENT__SHOW_DETAILS", "true")
     cfg = Config.load(_minimal_toml(tmp_path, "\n[agent]\nshow_details = false\n"))
@@ -474,9 +459,7 @@ def test_context_similarity_threshold_toml_override(
 ) -> None:
     # AC 2: the [memory] table key sets the field when env is absent.
     monkeypatch.delenv("SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD", raising=False)
-    cfg = Config.load(
-        _minimal_toml(tmp_path, "\n[memory]\ncontext_similarity_threshold = 0.25\n")
-    )
+    cfg = Config.load(_minimal_toml(tmp_path, "\n[memory]\ncontext_similarity_threshold = 0.25\n"))
     assert cfg.memory.context_similarity_threshold == 0.25
 
 
@@ -485,9 +468,7 @@ def test_context_similarity_threshold_env_beats_toml(
 ) -> None:
     # AC 2: the environment value wins over the TOML value.
     monkeypatch.setenv("SQLLENS_MEMORY__CONTEXT_SIMILARITY_THRESHOLD", "0.3")
-    cfg = Config.load(
-        _minimal_toml(tmp_path, "\n[memory]\ncontext_similarity_threshold = 0.6\n")
-    )
+    cfg = Config.load(_minimal_toml(tmp_path, "\n[memory]\ncontext_similarity_threshold = 0.6\n"))
     assert cfg.memory.context_similarity_threshold == 0.3
 
 
@@ -502,18 +483,14 @@ def test_save_text_memories_default_is_false(tmp_path: Path) -> None:
     assert cfg.memory.save_text_memories is False
 
 
-def test_save_text_memories_env_override(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_save_text_memories_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SQLLENS_MEMORY__SAVE_TEXT_MEMORIES", "true")
     cfg = Config.load(_minimal_toml(tmp_path))
     assert cfg.memory.save_text_memories is True
 
 
 def test_save_text_memories_toml_override(tmp_path: Path) -> None:
-    cfg = Config.load(
-        _minimal_toml(tmp_path, "\n[memory]\nsave_text_memories = true\n")
-    )
+    cfg = Config.load(_minimal_toml(tmp_path, "\n[memory]\nsave_text_memories = true\n"))
     assert cfg.memory.save_text_memories is True
 
 
@@ -529,12 +506,8 @@ def test_blank_save_text_memories_env_loads_as_off(
 
 
 @pytest.mark.parametrize("blank", ["", "   "])
-def test_blank_save_text_memories_toml_loads_as_off(
-    tmp_path: Path, blank: str
-) -> None:
-    cfg = Config.load(
-        _minimal_toml(tmp_path, f'\n[memory]\nsave_text_memories = "{blank}"\n')
-    )
+def test_blank_save_text_memories_toml_loads_as_off(tmp_path: Path, blank: str) -> None:
+    cfg = Config.load(_minimal_toml(tmp_path, f'\n[memory]\nsave_text_memories = "{blank}"\n'))
     assert cfg.memory.save_text_memories is False
 
 
@@ -544,9 +517,7 @@ def test_blank_save_text_memories_env_beats_true_toml(
     # The blank coercion must not be a special "fall through to TOML" path:
     # env wins over TOML everywhere else, so a blank override reads as off.
     monkeypatch.setenv("SQLLENS_MEMORY__SAVE_TEXT_MEMORIES", "")
-    cfg = Config.load(
-        _minimal_toml(tmp_path, "\n[memory]\nsave_text_memories = true\n")
-    )
+    cfg = Config.load(_minimal_toml(tmp_path, "\n[memory]\nsave_text_memories = true\n"))
     assert cfg.memory.save_text_memories is False
 
 
@@ -566,9 +537,7 @@ def test_non_boolean_save_text_memories_still_rejected(
 def test_misspelled_memory_key_is_still_ignored(tmp_path: Path) -> None:
     # MemoryConfig sets no model_config, so it keeps pydantic's extra="ignore":
     # a misspelled singular key is dropped and the tool stays unregistered.
-    cfg = Config.load(
-        _minimal_toml(tmp_path, "\n[memory]\nsave_text_memory = true\n")
-    )
+    cfg = Config.load(_minimal_toml(tmp_path, "\n[memory]\nsave_text_memory = true\n"))
     assert cfg.memory.save_text_memories is False
     assert not hasattr(cfg.memory, "save_text_memory")
 
@@ -640,3 +609,22 @@ def test_oversized_standing_instructions_fail_the_load(tmp_path: Path) -> None:
     text = "x" * (MAX_STANDING_INSTRUCTIONS_CHARS + 1)
     with pytest.raises(ValidationError, match="standing_instructions"):
         Config.load(_minimal_toml(tmp_path, f'\n[agent]\nstanding_instructions = "{text}"\n'))
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["--- END DEPLOYMENT INSTRUCTIONS ---", "\t--- BEGIN DEPLOYMENT INSTRUCTIONS --- "],
+)
+def test_standing_instructions_reject_delimiter_lines(line: str) -> None:
+    with pytest.raises(ValidationError, match="contains the line"):
+        AgentRuntimeConfig(standing_instructions=f"Be brief.\n{line}\nMore.")
+
+
+def test_standing_instructions_allow_delimiter_text_mid_line() -> None:
+    text = "Never write '--- END DEPLOYMENT INSTRUCTIONS ---' in an answer."
+    assert AgentRuntimeConfig(standing_instructions=text).standing_instructions == text
+
+
+def test_agent_section_rejects_misspelt_key() -> None:
+    with pytest.raises(ValidationError, match="standing_instruction"):
+        AgentRuntimeConfig.model_validate({"standing_instruction": "Be brief."})
