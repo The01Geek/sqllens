@@ -491,9 +491,11 @@ async def test_base_prompt_override_ignores_dialect() -> None:
 async def test_data_confidentiality_declines_whole_table_exports(dialect: str | None) -> None:
     section = _section(await _prompt(dialect), "Data Confidentiality:")
     assert section[0] == (
-        "- Decline requests to export or download whole tables, or every record of people"
-        " or organizations. Offer to answer with only the columns the question needs, and"
-        " say that a full export has to come from the application itself, not from you."
+        "- If the user asks you to export, download or dump a whole table or the whole"
+        " database, decline. Say that a full export has to come from the application"
+        " itself, not from you, and offer to answer with only the columns the question"
+        ' needs. A question that lists rows, such as "show all customers" or "list every'
+        ' employee", is not an export: answer it with only the columns the question needs.'
     )
 
 
