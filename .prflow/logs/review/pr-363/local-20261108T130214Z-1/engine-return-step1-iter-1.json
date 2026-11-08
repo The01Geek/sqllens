@@ -1,0 +1,258 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "phase3_findings": [],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": false,
+  "test_relevant": true,
+  "detect_all_audit": false,
+  "file_count": 8,
+  "changed_lines": 386
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [
+  "VC-7"
+ ],
+ "criterion_exempt": [],
+ "verdict": "REJECT",
+ "report": "## Verdict: REJECT (checklist item VC-7: the query_database tool description overstates where the conversation ID is returned)\n\nThe PR is not ready to merge. The new `query_database` tool description says the conversation ID always comes back in `_meta[\"sqllens/conversation\"]`, but some error results carry no `_meta` at all.\nRule applied: rule 1 — a checklist FAIL at or above the threshold → REJECT\n\n## Code Review Findings\n\nAll five reviewers returned no findings.\n\n### 🟠 Important / Major\n\n- VC-7: FAIL (important) — The tool description says the id is returned in _meta['sqllens/conversation'] and also as a text footer unless show_conversation_footer is off; must hold on every result kind the description covers, including error results [src/sqllens/server.py:322]\n\n  <details><summary>Evidence</summary>\n\n  server.py:320-322 says the id is returned in _meta['sqllens/conversation'] and also as a text footer unless show_conversation_footer is off, with no error-result carve-out. The same docstring covers error results (lines 342-360). Counterexample 1 is footer on with details off. query_database_impl_with_widgets raises AgentRunError with agent_trace None, and server.py:387-388 re-raises it. FastMCP then formats the error with no _meta, so _meta['sqllens/conversation'] is absent. The comment at 385-386 confirms this is intended. Counterexample 2 is a non-AgentRunError failure such as 'Memory store unavailable', which the docstring itself documents at 357-360. Nothing in the try/except at 367-389 catches it, so it propagates with no _meta and no id. The unconditional wording therefore does not hold for these error results. Success results and the footer-off or trace-present AgentRunError paths (165-189, 378-384, 407-412) do match. The text footer on error paths comes only from the agent's own catch-all card, not from the server.\n\n  </details>\n\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: test_relevant (not small_diff, not config_only, no new types); 8 changed files, 386 changed lines.\n- Working tree: skipped in head-override PR mode; the dirty-tree check found no changes.\n- Review prompt extension: PROMPT-EXTENSION-STATUS: content-present. Final-pass reviewer extension (requesting-code-review): content-present.\n- CI evidence: none held for head 41f5b4d; this run ran no test suite.\n- Verdict severity threshold: important.\n- Normalized (wording-only): 0\n- Item VC-7 is not capped as behavior-inert prose. The docstring is the MCP tool description that client LLMs load as instructions, and MCP clients show it to users. <!-- inertness: first-conjunct=held limb-one=not-held limb-two=not-held; evidence: FastMCP publishes the query_database docstring as the tool description sent to MCP clients -->\n- prior-report: none\n- One verifier (item VC-24) first sent a reply in the wrong format. After a delivery-only message it wrote a PASS verdict file.\n\n- Checklist: 23 passed, 1 failed, 0 inconclusive\n- <details><summary>✅ Passed items (23 of 24)</summary>\n\n  - VC-1: The vendored agent's catch-all error card appends exactly \"\\n\\nConversation ID: \" + conversation_id to the card description, and AgentRunError's message ends with that tail (after the 'SQL execution error: ' prefix and description), so removesuffix strips it fully [src/sqllens/server.py:383]\n  - VC-2: The conversation_id used in the stripped suffix (the server-minted id) is the same id the vendored agent writes into the tail, including when the caller omits conversation_id [src/sqllens/server.py:383]\n  - VC-3: With show_conversation_footer false, no other SQL Lens-added conversation-ID text reaches query_database text; e.g. the agent's other error path that formats ' (Conversation ID: <id>)' in a text component does not surface in the tool result [src/sqllens/server.py:383]\n  - VC-4: _agent_error_result's text 'Error executing tool query_database: <message>' is byte-identical to what FastMCP produces on the re-raise path [src/sqllens/server.py:165]\n  - VC-5: With footer on, every AgentRunError result (trace and no-trace) is unchanged in text, isError and _meta versus base: the trace path still yields _meta with exactly conversation + agent_trace keys [src/sqllens/server.py:165]\n  - VC-6: With show_footer false, success text is the markdown unchanged and _meta identical to footer-on [src/sqllens/server.py:158]\n  - VC-8: Comment claims the conversation id is returned on every successful turn and every isError result built by _agent_error_result [src/sqllens/server.py]\n  - VC-9: config field show_conversation_footer bool default True loads from TOML and SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER with env winning [src/sqllens/config.py:458]\n  - VC-10: Field description says false returns the id only in _meta['sqllens/conversation'] [src/sqllens/config.py]\n  - VC-11: _SAMPLE_CONFIG [agent] block carries a commented show_conversation_footer = true line naming the env override, and the TOML remains valid [src/sqllens/cli.py]\n  - VC-12: _failing_real_agent makes the real vendored Agent hit its catch-all handler by replacing tool_registry.execute, and the _TOOL_PROMPT question actually triggers a tool call so execute is invoked [tests/unit/test_conversation_footer_setting.py]\n  - VC-13: fake_impl's signature and 5-tuple return match the real query_database_impl_with_widgets [tests/unit/test_conversation_footer_setting.py]\n  - VC-14: Setting agent.agent_memory.open_error yields the _MEMORY_UNAVAILABLE_MESSAGE AgentRunError in the real impl [tests/unit/test_conversation_footer_setting.py]\n  - VC-15: Docs say a message without the tail is unchanged and _meta carries agent_trace only when present on the footer-off path [docs/internal/mcp-server/tools.md]\n  - VC-16: Docs code excerpt in tools.md mirrors the actual server.py except-branch and _conversation_result call [docs/internal/mcp-server/tools.md]\n  - VC-17: `AgentRuntimeConfig` has a boolean field `show_conversation_footer` whose default is `true`. A config without the field loads with `true`; `[agent] show_conversation_footer = false` in TOML and `SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER=false` in the environment each load it as `false`; the environment value wins over the TOML value. The `[agent]` block of the `sqllens init` config template (`_SAMPLE_CONFIG` in `src/sqllens/cli.py`) carries a commented `show_conversation_footer` line naming its default and the env override. [src/sqllens/config.py:458]\n  - VC-18: With the setting `true`, every `query_database` result kind in the Desired Behavior table (success, agent-run failure with a trace, agent-run failure with no trace, any other failure) has the same text, `isError` value and `_meta` as before this change, byte for byte, and an agent-run failure with no trace is still raised rather than returned. [src/sqllens/server.py:157-190]\n  - VC-19: With the setting `false`, a successful `query_database` result's text is the answer with no conversation-ID footer, and its `_meta` holds the same keys and values it holds with the setting `true`, including `_meta[\"sqllens/conversation\"][\"conversation_id\"]`. [src/sqllens/server.py:143-162,378-412]\n  - VC-20: With the setting `false`, every `AgentRunError` that `query_database_impl_with_widgets` raises, with or without a trace, comes back as a returned `isError` result whose text is `Error executing tool query_database: ` followed by the error message with the conversation-ID tail (`\"\\n\\nConversation ID: \" + <the request's conversation id>`) removed from its end, and whose `_meta` holds `sqllens/conversation` with that conversation id, plus `sqllens/agent_trace` only when the error carries a trace. A message that does not end with that tail, such as the memory-store-unavailable message or a `Tool failed: …` message from a SQL statement a guard blocked, keeps its text unchanged. [src/sqllens/server.py:378-389]\n  - VC-21: With the setting `false`, no `query_database` response text, success or error, contains conversation-ID text that SQL Lens adds: neither the footer nor the conversation-ID tail. Text the model writes into its answer is not filtered, so an answer that quotes an ID keeps it. [src/sqllens/server.py:156-158,376-384]\n  - VC-22: The change leaves the failures not raised as `AgentRunError` (for example the internal-error `RuntimeError` or an invalid profile name) as they are today, raised with no conversation ID in text or `_meta`, whatever the setting. It leaves the rest of the error wording unchanged (the `Error executing tool query_database:` prefix, the `SQL execution error:` prefix and the error card's sentence) and leaves the vendored `src/sqllens/agent/core/agent/agent.py` unchanged. [src/sqllens/server.py:383]\n  - VC-23: The `query_database` tool description no longer says the conversation ID is always in a plain-text footer: it says the ID is returned in `_meta[\"sqllens/conversation\"]` and also as a text footer unless the server's `show_conversation_footer` setting is off. [src/sqllens/server.py:320-322]\n  - VC-24: Tests cover both setting values on the success path and on agent-run failures with and without a trace, and assert the result text and `_meta` for each. The agent-run failure tests run the real vendored `Agent` so that its catch-all handler in `src/sqllens/agent/core/agent/agent.py` produces the error card and its conversation-ID tail; a stub that copies the card's text, or a hand-built `AgentRunError`, does not meet this criterion on its own. [tests/unit/test_conversation_footer_setting.py:99-172]\n\n  </details>\n- Reviewed against issue #192 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] `AgentRuntimeConfig` has a boolean field `show_conversation_footer` whose default is `true`. A config without the field loads with `true`; `[agent] show_conversation_footer = false` in TOML and `SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER=false` in the environment each load it as `false`; the environment value wins over the TOML value. The `[agent]` block of the `sqllens init` config template (`_SAMPLE_CONFIG` in `src/sqllens/cli.py`) carries a commented `show_conversation_footer` line naming its default and the env override.\n- [ ] With the setting `true`, every `query_database` result kind in the Desired Behavior table (success, agent-run failure with a trace, agent-run failure with no trace, any other failure) has the same text, `isError` value and `_meta` as before this change, byte for byte, and an agent-run failure with no trace is still raised rather than returned.\n- [ ] With the setting `false`, a successful `query_database` result's text is the answer with no conversation-ID footer, and its `_meta` holds the same keys and values it holds with the setting `true`, including `_meta[\"sqllens/conversation\"][\"conversation_id\"]`.\n- [ ] With the setting `false`, every `AgentRunError` that `query_database_impl_with_widgets` raises, with or without a trace, comes back as a returned `isError` result whose text is `Error executing tool query_database: ` followed by the error message with the conversation-ID tail (`\"\\n\\nConversation ID: \" + <the request's conversation id>`) removed from its end, and whose `_meta` holds `sqllens/conversation` with that conversation id, plus `sqllens/agent_trace` only when the error carries a trace. A message that does not end with that tail, such as the memory-store-unavailable message or a `Tool failed: …` message from a SQL statement a guard blocked, keeps its text unchanged.\n- [ ] With the setting `false`, no `query_database` response text, success or error, contains conversation-ID text that SQL Lens adds: neither the footer nor the conversation-ID tail. Text the model writes into its answer is not filtered, so an answer that quotes an ID keeps it.\n- [ ] The change leaves the failures not raised as `AgentRunError` (for example the internal-error `RuntimeError` or an invalid profile name) as they are today, raised with no conversation ID in text or `_meta`, whatever the setting. It leaves the rest of the error wording unchanged (the `Error executing tool query_database:` prefix, the `SQL execution error:` prefix and the error card's sentence) and leaves the vendored `src/sqllens/agent/core/agent/agent.py` unchanged.\n- [ ] The `query_database` tool description no longer says the conversation ID is always in a plain-text footer: it says the ID is returned in `_meta[\"sqllens/conversation\"]` and also as a text footer unless the server's `show_conversation_footer` setting is off.\n- [ ] Tests cover both setting values on the success path and on agent-run failures with and without a trace, and assert the result text and `_meta` for each. The agent-run failure tests run the real vendored `Agent` so that its catch-all handler in `src/sqllens/agent/core/agent/agent.py` produces the error card and its conversation-ID tail; a stub that copies the card's text, or a hand-built `AgentRunError`, does not meet this criterion on its own.",
+ "diff_produced_at_head": "41f5b4d48b2a4527d325ee19dcb70f3c77521e6e",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:server.py:error-card-tail-suffix:383",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "dependency_interaction:server.py:same-conversation-id:383",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "dependency_interaction:server.py:other-id-text-paths",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "api_contract:server.py:fastmcp-error-format",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "api_contract:server.py:footer-on-unchanged",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "data_format_assumption:server.py:footer-off-success",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "category": "absolute_claim",
+   "claim": "The tool description says the id is returned in _meta['sqllens/conversation'] and also as a text footer unless show_conversation_footer is off; must hold on every result kind the description covers, including error results",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "footer unless the server's ``show_conversation_footer`` setting is off.",
+   "source_file": "src/sqllens/server.py",
+   "source_line": 322,
+   "verify_against": "build_server query_database body in server.py",
+   "verify_hint": "Falsify with a footer-on details-off AgentRunError (re-raised, no _meta) or a non-AgentRunError failure (no id at all)",
+   "criterion": 7,
+   "claim_signature": "absolute_claim:server.py:tool-description-id-rails",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "server.py:320-322 says the id is returned in _meta['sqllens/conversation'] and also as a text footer unless show_conversation_footer is off, with no error-result carve-out. The same docstring covers error results (lines 342-360). Counterexample 1 is footer on with details off. query_database_impl_with_widgets raises AgentRunError with agent_trace None, and server.py:387-388 re-raises it. FastMCP then formats the error with no _meta, so _meta['sqllens/conversation'] is absent. The comment at 385-386 confirms this is intended. Counterexample 2 is a non-AgentRunError failure such as 'Memory store unavailable', which the docstring itself documents at 357-360. Nothing in the try/except at 367-389 catches it, so it propagates with no _meta and no id. The unconditional wording therefore does not hold for these error results. Success results and the footer-off or trace-present AgentRunError paths (165-189, 378-384, 407-412) do match. The text footer on error paths comes only from the agent's own catch-all card, not from the server.",
+   "file_checked": "src/sqllens/server.py:320-322,378-389",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "absolute_claim:server.py:id-every-turn-comment",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "data_format_assumption:config.py:footer-field-loading",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "absolute_claim:config.py:id-only-in-meta",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "api_contract:cli.py:sample-config-footer",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "test_mock_alignment:test_conversation_footer_setting.py:real-agent-catch-all",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "test_mock_alignment:test_conversation_footer_setting.py:fake-impl-shape",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "test_mock_alignment:test_conversation_footer_setting.py:memory-open-error",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "absolute_claim:tools.md:no-tail-unchanged",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "api_contract:tools.md:code-excerpt-sync",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-17",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-18",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-19",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-20",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-21",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-22",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-23",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-24",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}
