@@ -45,7 +45,14 @@ Not covered: a whole row reached without a star, such as PostgreSQL's
 ``row_to_json(t)``, a bare ``t`` as a composite value, or a function that
 returns rows called outside ``FROM``, and an explicit list of every column.
 A table or function whose name ``is_catalog_table`` takes for a catalog, such
-as a PostgreSQL table named with the ``pg_`` prefix, counts as one.
+as a PostgreSQL table named with the ``pg_`` prefix, counts as one. A catalog
+table that holds credentials, such as MySQL's ``mysql.user`` or PostgreSQL's
+``pg_catalog.pg_authid``, is a catalog too, so a star over it is allowed;
+database grants, not this guard, keep it out of reach. A statement sqlglot
+keeps as opaque text (an ``exp.Command``, such as MySQL's
+``PREPARE s FROM '...'``) has no star node, so a star inside it is not seen;
+the read-only guard refuses such a statement while ``database.read_only`` is
+true.
 
 Failure paths: SQL that ``readonly._parse_statements`` cannot parse (a parse
 or tokenize error, MySQL input whose token boundaries are ambiguous), and SQL
@@ -98,7 +105,9 @@ class WholeRowSelectError(UnsafeSqlError):
 def assert_no_whole_row_select(sql: str, *, dialect: str | None = None) -> None:
     """Raise ``WholeRowSelectError`` if ``sql`` has a star that expands a table or view.
 
-    Every statement in ``sql`` is checked, whatever its kind. Raises
+    Every statement in ``sql`` that sqlglot parses into an expression tree is
+    checked, whatever its kind; a statement sqlglot keeps as opaque text (an
+    ``exp.Command``) has no star node to check (see the module docstring). Raises
     ``UnsafeSqlError`` when ``sql`` cannot be parsed or has an empty statement
     (see the module docstring).
     """
@@ -225,9 +234,12 @@ class WholeRowSelectGuardRunner(SqlRunner):
                 type(e).__name__,
                 exc_info=True,
             )
+            # The exception text is logged above but kept out of the message:
+            # scope analysis can quote a table or schema name, and the error
+            # can reach the user (see WHOLE_ROW_REFUSAL).
             raise WholeRowSelectError(
                 f"refusing to execute query: whole-row select check errored "
-                f"({type(e).__name__}: {e})"
+                f"({type(e).__name__})"
             ) from e
         options = {"require_base_tables": True} if require_base_tables else {}
         return await self._inner.run_sql(args, context, **options)

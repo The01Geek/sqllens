@@ -42,6 +42,7 @@ from sqllens.safety import (
     WholeRowSelectGuardRunner,
     _relation_check_executor,
     assert_no_whole_row_select,
+    assert_select_only,
     whole_row,
 )
 
@@ -89,6 +90,11 @@ REFUSED = [
     ("SELECT (list_users()).*", "(LIST_USERS()).*"),
     # A qualifier that names no source of its SELECT cannot be shown safe.
     ("SELECT z.* FROM users u", "z.*"),
+    # An exempt star elsewhere in the query does not exempt a table star:
+    # the COUNT and EXISTS exemptions apply to the star they contain only.
+    ("SELECT COUNT(*), u.* FROM users u GROUP BY u.id", "u.*"),
+    ("SELECT * FROM users WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = users.id)", "*"),
+    ("SELECT u.* FROM users u WHERE EXISTS (SELECT * FROM orders o WHERE o.user_id = u.id)", "u.*"),
     # A bare star over a catalog joined with a data table.
     ("SELECT * FROM information_schema.tables t JOIN users u ON 1 = 1", "*"),
     # Any statement kind, not only SELECT.
@@ -323,10 +329,37 @@ async def test_runner_fails_closed_on_an_unexpected_error(monkeypatch, caplog) -
     monkeypatch.setattr(whole_row, "traverse_scope", _boom)
     inner = _RecordingRunner()
     runner = WholeRowSelectGuardRunner(inner, dialect="postgres")
-    with pytest.raises(WholeRowSelectError, match="whole-row select check errored"):
+    with pytest.raises(WholeRowSelectError, match="whole-row select check errored") as info:
         await runner.run_sql(RunSqlToolArgs(sql="SELECT * FROM users"), _ctx())
     assert inner.calls == []
     assert "failing closed" in caplog.text
+    # The exception text, which can quote a table name, is logged, not returned.
+    assert str(info.value) == (
+        "refusing to execute query: whole-row select check errored (RuntimeError)"
+    )
+    assert "scope analysis failed" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("sql", "dialect"),
+    [
+        ("SELECT * FROM mysql.user", "mysql"),
+        ("SELECT * FROM pg_catalog.pg_authid", "postgres"),
+    ],
+)
+def test_star_over_a_credential_catalog_is_allowed(sql: str, dialect: str) -> None:
+    # Documented limit: a credential-bearing catalog is still a catalog;
+    # database grants, not this guard, keep it out of reach.
+    assert_no_whole_row_select(sql, dialect=dialect)
+
+
+def test_star_inside_an_opaque_command_is_not_seen() -> None:
+    # Documented limit: sqlglot keeps PREPARE as an exp.Command with no star
+    # node; the read-only guard refuses the statement while read_only is true.
+    sql = "PREPARE s FROM 'SELECT * FROM users'"
+    assert_no_whole_row_select(sql, dialect="mysql")
+    with pytest.raises(UnsafeSqlError):
+        assert_select_only(sql, dialect="mysql")
 
 
 # --- RunSqlTool surface ----------------------------------------------------

@@ -173,6 +173,9 @@ RunSqlTool → SqlRunner.run_sql(args, context)
   ↓
 ResultMaskingRunner.run_sql                        (masks secret-looking result columns on the way back)
   ↓
+WholeRowSelectGuardRunner.run_sql                  (refuses a whole-row star in the agent's sql;
+                                                    absent when database.refuse_whole_row_selects = false)
+  ↓
 RlsGuardRunner.run_sql                             (rewrites args.sql, reading context.metadata)
   ↓
 ReadOnlyGuardRunner.run_sql                        (validates the REWRITTEN sql — see Wiring;
