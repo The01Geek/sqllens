@@ -1,0 +1,58 @@
+[
+  {
+    "criterion": 1,
+    "text": "For a query result holding a column whose label matches the secret-word rule, every value in that column, NULL included, is replaced by the placeholder `[withheld]`, and none of the original values appears, in each of: the block `query_database` returns (table or text, where Markdown output carries the placeholder in its existing escaped form `\\[withheld\\]`), the run_sql text the model reads (which the conversation keeps and the model payload log records), the scratch CSV file, and the run_sql result metadata. The column label itself still appears."
+  },
+  {
+    "criterion": 2,
+    "text": "The built-in entry list is exactly these 31 — complete by construction: `password`, `passwd`, `pwd`, `passcode`, `secret`, `token`, `hash`, `salt`, `pin`, `otp`, `totp`, `mfa`, `credential`, `apikey`, `api key`, `access key`, `private key`, `encryption key`, `signing key`, `auth key`, `recovery key`, `master key`, `session key`, `one time code`, `verification code`, `reset code`, `recovery code`, `security code`, `auth code`, `sms code`, `backup code`."
+  },
+  {
+    "criterion": 3,
+    "text": "Labels split and match as the Desired Behavior's secret-word rule states. At minimum these labels are masked: `password_hash`, `PasswordHash`, `session_token`, `recovery_hash`, `pin`, `PINs`, `APIKey`, `api_keys`, `OTPSecret`, `password2`, `users.password_hash`, `access_key`, `encryption_key`, `verification_code`, `one_time_code`. At minimum these are not masked: `id`, `name`, `email`, `phone`, `last_login_ip`, `session_expires`, `Key`, `COLUMN_KEY`, `sort_key`, `zip_code`, `author_id`."
+  },
+  {
+    "criterion": 4,
+    "text": "When a query result has at least one masked column, the run_sql text the model reads ends with `SQL Lens withheld the values in these columns: <labels>. Tell the user these values are hidden; do not try to retrieve them with another query.`, with `<labels>` the masked labels joined by `, `. The line is present in full however long the result's CSV preview is. A result with no masked column carries no such line."
+  },
+  {
+    "criterion": 5,
+    "text": "The system prompt's \"Data Confidentiality\" section contains the line `- Select only the columns the question needs. Do not use SELECT * on data tables, and do not select columns that hold secrets, such as passwords, password hashes, tokens, PINs, keys or one-time codes.`"
+  },
+  {
+    "criterion": 6,
+    "text": "An entry in `[result_masking].extra_words` masks matching columns in addition to the built-in entries, and is split into words by the same rule as labels: `phone_number` masks a column labelled `PhoneNumber`."
+  },
+  {
+    "criterion": 7,
+    "text": "A label listed in `[result_masking].unmasked_columns` is shown unmasked, matched without regard to case: `token_count` exempts `TOKEN_COUNT`. The match is on the whole label, so `token_count` does not exempt the prefixed label MySQL gives a duplicate column (`users.token_count`, or `u.token_count` when the query aliases the table)."
+  },
+  {
+    "criterion": 8,
+    "text": "An entry in `[result_masking].unmasked_words` stops that built-in entry from applying (`token` leaves `SUM(output_tokens)` unmasked) while every other entry, built-in or `extra_words`, still applies. Only `token`, `hash`, `salt`, `pin`, `otp`, `totp` and `mfa` are accepted; any other entry (for example `password`) makes config loading fail with a validation error naming `unmasked_words`."
+  },
+  {
+    "criterion": 9,
+    "text": "With `[result_masking]` absent from the config, the built-in entries mask matching columns and no column is exempt. No `[result_masking]` setting turns masking off."
+  },
+  {
+    "criterion": 10,
+    "text": "`[result_masking]` with an unknown key, a value of the wrong type, or an entry that splits into no words makes config loading fail with a validation error naming the setting, from TOML and from a JSON-valued `SQLLENS_RESULT_MASKING__*` environment variable. An environment value that is not valid JSON (for example `SQLLENS_RESULT_MASKING__EXTRA_WORDS=phone`) also makes loading fail, with an error that names the `result_masking` section. In every one of these cases `sqllens validate` exits non-zero."
+  },
+  {
+    "criterion": 11,
+    "text": "Masking applies in all four combinations of `database.read_only` (true or false) and `[[rls]]` (rules present or absent), and for answers produced by the `verify-memory` command."
+  },
+  {
+    "criterion": 12,
+    "text": "With `[[rls]]` rules configured, the agent still builds, and the RLS relation check still runs on the engine runner."
+  },
+  {
+    "criterion": 13,
+    "text": "A result the row cap truncated still carries the \"Result truncated at N rows\" note in the model's text after masking."
+  },
+  {
+    "criterion": 14,
+    "text": "The change leaves these cases unmasked: a secret column renamed by an alias, a UNION's first-branch label or a view (for example `password_hash AS h`); an unaliased expression whose result label the database builds without the column's name (SQLite labels `upper(password_hash)` with that text, so the rule masks it; how MySQL and PostgreSQL label each expression is not established); a PostgreSQL whole-row value (`row_to_json(u)`); a label whose words run together (`passwordhash`); a PIN-type or other secret column whose label holds none of the entry words (the label of the reported PIN-type column was not recorded, so whether the built-in list covers it is not established); values a database error message repeats; sampled values that catalog statistics views return. It also leaves contact columns (email, phone, IP, browser) unmasked unless an operator adds them, and leaves the INFO level of the model payload log in `src/sqllens/agent/integrations/anthropic/llm.py` unchanged."
+  }
+]

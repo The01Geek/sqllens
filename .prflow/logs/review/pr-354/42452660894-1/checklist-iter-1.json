@@ -1,0 +1,1596 @@
+[
+  {
+    "id": "VC-1",
+    "category": "dependency_interaction",
+    "claim": "The safety package contains a `masking.py` module providing secret-column masking, and exposes a `ResultMaskingRunner` decorator alongside `ReadOnlyGuardRunner`, `RlsGuardRunner` and `RowCapRunner`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "└── safety/                  # readonly.py SQL parser; rls.py row scoping; relations.py RLS\n                             #   relation verification; limits.py row cap; masking.py\n                             #   secret-column masking; ReadOnlyGuardRunner / RlsGuardRunner /\n                             #   RowCapRunner / ResultMaskingRunner decorators",
+    "source_file": "AGENTS.md",
+    "source_line": 45,
+    "source_line_end": 48,
+    "verify_against": "The actual contents and exports of the safety package",
+    "verify_hint": "Check `src/sqllens/safety/masking.py` exists and that `__all__` in `src/sqllens/safety/__init__.py` exports `ResultMaskingRunner`",
+    "claim_signature": "dependency_interaction:AGENTS.md:safety-tree-masking-entry:45",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "absolute_claim",
+    "claim": "Masking is always on and no setting turns it off; when a result column's label matches a secret word, every value in that column including NULL is replaced with `[withheld]` before the result reaches the table, the model, the conversation history, the server log and the temp-directory result CSV, the column itself stays, and the model is told which columns were withheld.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "SQL Lens hides the values of secret-looking columns in every query result. Masking is always on; no setting turns it off. When a result column's label matches a secret word, every value in that column, NULL included, is replaced with `[withheld]` before the result reaches your table, the model, the conversation history, the server log or the result CSV written to the temp directory.",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 217,
+    "verify_against": "The masking runner and the run_sql tool sinks",
+    "verify_hint": "Check `ResultMaskingRunner.run_sql` in `src/sqllens/safety/masking.py` (NULL/NaN handling) and every DataFrame sink in `src/sqllens/agent/tools/run_sql.py`, plus `ResultMaskingConfig` in `src/sqllens/config.py` for any setting that could disable masking",
+    "claim_signature": "absolute_claim:configuration.md:masking-always-on-all-sinks:217",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "data_format_assumption",
+    "claim": "`[result_masking].extra_words` is a list of strings defaulting to `[]` whose entries are added to the built-in list, and each entry must contain at least one letter or digit.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `extra_words` | list of strings | `[]` | Entries added to the built-in list below. For example, add `\"phone\"` to also hide phone numbers. Each entry must contain at least one letter or digit. |",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 221,
+    "verify_against": "The config model for result masking",
+    "verify_hint": "Check the `extra_words` field and its validator on `ResultMaskingConfig` in `src/sqllens/config.py`",
+    "claim_signature": "data_format_assumption:configuration.md:extra-words-field:221",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "data_format_assumption",
+    "claim": "`[result_masking].unmasked_columns` entries are exact column labels compared without regard to case, never masked, matched on the whole label (so `token_count` does not exempt `users.token_count`), and each entry must contain at least one letter or digit.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `unmasked_columns` | list of strings | `[]` | Exact column labels, compared without regard to case, that are never masked. Use it for false positives such as `token_count`. The match is on the whole label, so `token_count` does not exempt `users.token_count`. Each entry must contain at least one letter or digit. |",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 222,
+    "verify_against": "The exemption logic in the matcher and the config validator",
+    "verify_hint": "Check `SecretColumnMatcher` unmasked-column handling in `src/sqllens/safety/masking.py` and the `unmasked_columns` validator on `ResultMaskingConfig` in `src/sqllens/config.py`",
+    "claim_signature": "data_format_assumption:configuration.md:unmasked-columns-field:222",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "data_format_assumption",
+    "claim": "`[result_masking].unmasked_words` accepts only `token`, `hash`, `salt`, `pin`, `otp`, `totp` and `mfa` (any other entry fails config loading), and removing `token` unmasks every label holding it including `SUM(output_tokens)` and `session_token`, which `extra_words` entries such as `\"session token\"` can restore.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `unmasked_words` | list of strings | `[]` | Built-in entries to stop applying, for a database that uses one of them for ordinary data. Only `token`, `hash`, `salt`, `pin`, `otp`, `totp` and `mfa` can be removed; any other entry makes the configuration fail to load. Removing `token` shows every column whose label holds it, including aggregate labels such as `SUM(output_tokens)` and secrets such as `session_token`, so add the secret ones back through `extra_words` (`\"session token\"`). |",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 223,
+    "verify_against": "The removable-word allowlist and matcher removal logic",
+    "verify_hint": "Check the `unmasked_words` validator on `ResultMaskingConfig` in `src/sqllens/config.py` and how `SecretColumnMatcher` removes entries in `src/sqllens/safety/masking.py`",
+    "claim_signature": "data_format_assumption:configuration.md:unmasked-words-field:223",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "absolute_claim",
+    "claim": "The documented list of built-in entries (31 entries from `password` through `backup code`) is exactly the built-in entry list the code ships.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The built-in entries are: `password`, `passwd`, `pwd`, `passcode`, `secret`, `token`, `hash`, `salt`, `pin`, `otp`, `totp`, `mfa`, `credential`, `apikey`, `api key`, `access key`, `private key`, `encryption key`, `signing key`, `auth key`, `recovery key`, `master key`, `session key`, `one time code`, `verification code`, `reset code`, `recovery code`, `security code`, `auth code`, `sms code`, `backup code`.",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 225,
+    "verify_against": "The built-in entry constant",
+    "verify_hint": "Compare against `BUILTIN_SECRET_ENTRIES` in `src/sqllens/safety/masking.py`",
+    "claim_signature": "absolute_claim:configuration.md:builtin-entry-list-doc:225",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "absolute_claim",
+    "claim": "Labels and entries are split into words at every non-letter-non-digit character, at lowercase-to-uppercase changes, before the last capital of an uppercase run followed by lowercase letters, and between letters and digits, with one exception keeping an uppercase run plus a single lowercase `s` followed by a non-letter or end of label as one word; a label matches when its words contain all of an entry's words consecutively and in order, each word optionally carrying a trailing `s` or `es`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "**How labels match.** SQL Lens splits a column label into words at every character that is not a letter or digit, at lowercase-to-uppercase changes, before the last capital of an uppercase run followed by lowercase letters, and between letters and digits (`password_hash` → password, hash; `APIKey` → api, key; `password2` → password, 2). One exception keeps a plural together: an uppercase run followed by a single lowercase `s` and then a non-letter or the end of the label stays one word (`PINs` → pins). Entries split the same way. A label matches when its words contain all of an entry's words, consecutively and in order; each word may also carry a trailing `s` or `es` (`api_keys`, `PINs`).",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 227,
+    "verify_against": "The label word splitter and matching predicate",
+    "verify_hint": "Check the word-splitting function and the entry-matching method of `SecretColumnMatcher` in `src/sqllens/safety/masking.py`, including the plural-`s` exception and the trailing `s`/`es` allowance",
+    "claim_signature": "absolute_claim:configuration.md:word-split-and-match-rule:227",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "absolute_claim",
+    "claim": "The rule masks the non-secret columns `token_count`, `content_hash` and `mfa_enabled`, and misses each listed case: alias/view/UNION-first-branch labels, an expression label built without the column name, `row_to_json(u)`, run-together labels such as `passwordhash` and `OTPsCount` (splitting as ot, ps, count), labels containing no entry, values in database error messages, and sampled values from catalog statistics views.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The rule looks at the label alone, so it masks some non-secret columns (`token_count`, `content_hash`, `mfa_enabled`) and misses others:",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 227,
+    "source_line_end": 235,
+    "verify_against": "The splitter's actual output for the cited labels",
+    "verify_hint": "Run the word splitter in `src/sqllens/safety/masking.py` against `OTPsCount`, `passwordhash`, `mfa_enabled`, `content_hash`; check `tests/unit/test_safety_masking.py` for the over/under-mask cases",
+    "claim_signature": "absolute_claim:configuration.md:over-and-under-mask-examples:229",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "data_format_assumption",
+    "claim": "Each `[result_masking]` setting is supplied as a JSON array environment variable (for example `SQLLENS_RESULT_MASKING__EXTRA_WORDS='[\"phone\"]'`), and an unknown key, a wrong-type value, an entry with no letters or digits, or an environment value that is not valid JSON makes configuration loading fail.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "As environment variables, each setting is a JSON array, for example `SQLLENS_RESULT_MASKING__EXTRA_WORDS='[\"phone\"]'`. An unknown key, a wrong-type value, an entry with no letters or digits, or an environment value that is not valid JSON makes the configuration fail to load.",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 253,
+    "verify_against": "The pydantic-settings env parsing for nested complex fields",
+    "verify_hint": "Check `ResultMaskingConfig` (`extra=\"forbid\"`) and the settings sources in `src/sqllens/config.py`, plus the env-loading tests in `tests/unit/test_safety_masking.py`",
+    "claim_signature": "data_format_assumption:configuration.md:env-json-array-and-failures:253",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "absolute_claim",
+    "claim": "Separately from RLS, SQL Lens replaces the values of secret-looking columns with `[withheld]` judging by the column name alone, and columns the name rule misses, such as one renamed by an alias, are returned as stored.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- **Rules filter rows, not columns.** Separately from RLS, SQL Lens replaces the values of secret-looking columns (passwords, hashes, tokens, PINs, keys) with `[withheld]`, judging by the column name alone; see [`[result_masking]`](configuration.md#section-result_masking).",
+    "source_file": "docs/external/row-level-security.md",
+    "source_line": 173,
+    "verify_against": "The masking runner's input and the configuration anchor it links to",
+    "verify_hint": "Check `ResultMaskingRunner` in `src/sqllens/safety/masking.py` masks on label only, and that the `#section-result_masking` anchor exists in `docs/external/configuration.md`",
+    "claim_signature": "absolute_claim:row-level-security.md:rls-filters-rows-not-columns:173",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "absolute_claim",
+    "claim": "Call order on every query is `ResultMaskingRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner` with RLS unconfigured, `ResultMaskingRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner` with RLS configured, and `ReadOnlyGuardRunner` drops out of either chain when `cfg.database.read_only = false`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Call order on every query is the reverse of construction. With RLS unconfigured: **ResultMaskingRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. With RLS configured (`cfg.rls` non-empty): **ResultMaskingRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 78,
+    "verify_against": "The runner composition in the agent factory",
+    "verify_hint": "Check the `sql_runner` wrapping order in `build_agent`/`build_sql_runner` in `src/sqllens/agent/factory.py`",
+    "claim_signature": "absolute_claim:factory.md:runner-call-order:78",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "dependency_interaction",
+    "claim": "The DataFrame `RunSqlTool` serializes to CSV has already been masked by `ResultMaskingRunner`, so secret-looking columns hold `[withheld]` in the scratch CSV.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "3. Serializes the DataFrame — already masked by `ResultMaskingRunner`, so secret-looking columns hold `[withheld]` — as CSV and writes it to `query_results_<file_id>.csv` via `self.file_system.write_file(...)`.",
+    "source_file": "docs/internal/agent/tool-scratch-storage.md",
+    "source_line": 11,
+    "verify_against": "The run_sql tool's CSV write path relative to the runner call",
+    "verify_hint": "Check that the CSV serialization in `src/sqllens/agent/tools/run_sql.py` uses the DataFrame returned by the injected `SqlRunner` (wrapped by `ResultMaskingRunner` in `src/sqllens/agent/factory.py`)",
+    "claim_signature": "dependency_interaction:tool-scratch-storage.md:csv-already-masked:11",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "absolute_claim",
+    "claim": "The `result_for_llm` string's optional display line is followed by the masking note when columns were withheld.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "or too large to show (\"...which are too large to show the user as a table.\"), followed by the masking note when columns were withheld; see [mcp-server/tools.md](../mcp-server/tools.md).",
+    "source_file": "docs/internal/agent/tool-scratch-storage.md",
+    "source_line": 12,
+    "verify_against": "The order in which run_sql appends its trailing notes",
+    "verify_hint": "Check where the withheld-columns note is appended relative to the display and row-cap truncation lines in `src/sqllens/agent/tools/run_sql.py`",
+    "claim_signature": "absolute_claim:tool-scratch-storage.md:masking-note-after-display-line:12",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "absolute_claim",
+    "claim": "`RlsGuardRunner` is composed directly beneath `ResultMaskingRunner` in the `SqlRunner` stack.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- `RlsGuardRunner` (composed directly beneath `ResultMaskingRunner` in the `SqlRunner` stack",
+    "source_file": "docs/internal/authentication/overview.md",
+    "source_line": 114,
+    "verify_against": "The runner composition in the agent factory",
+    "verify_hint": "Check the wrapping order around `RlsGuardRunner` in `build_agent` in `src/sqllens/agent/factory.py`",
+    "claim_signature": "absolute_claim:overview.md:rls-beneath-masking:114",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "absolute_claim",
+    "claim": "`ResultMaskingRunner` is composed outermost and replaces every value in a result column whose label matches the secret-word rule with `[withheld]` before `RunSqlTool` builds any output from the DataFrame; it decides from the column label alone, so an aliased column is not masked.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "6. **Secret-column masking** — `ResultMaskingRunner` ([src/sqllens/safety/masking.py](../../../src/sqllens/safety/masking.py)), composed outermost, replaces every value in a result column whose label matches the secret-word rule with `[withheld]` before `RunSqlTool` builds any output from the DataFrame. It decides from the column label alone, so a column renamed by an alias is not masked.",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 16,
+    "verify_against": "The masking runner implementation and factory composition",
+    "verify_hint": "Check `ResultMaskingRunner.run_sql` in `src/sqllens/safety/masking.py` and the outermost wrap in `src/sqllens/agent/factory.py`",
+    "claim_signature": "absolute_claim:read-only-safety.md:masking-outermost-layer:16",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "dependency_interaction",
+    "claim": "The documented wiring snippet matches the factory: `ResultMaskingRunner` is constructed with the inner runner plus `extra_words`, `unmasked_columns` and `unmasked_words` keyword arguments taken from `cfg.result_masking`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "sql_runner = ResultMaskingRunner(\n    sql_runner,\n    extra_words=cfg.result_masking.extra_words,\n    unmasked_columns=cfg.result_masking.unmasked_columns,\n    unmasked_words=cfg.result_masking.unmasked_words,\n)",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 178,
+    "source_line_end": 183,
+    "verify_against": "The real constructor signature and call site",
+    "verify_hint": "Compare against `ResultMaskingRunner.__init__` in `src/sqllens/safety/masking.py` and the construction in `src/sqllens/agent/factory.py`",
+    "claim_signature": "dependency_interaction:read-only-safety.md:masking-runner-ctor-snippet:178",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "absolute_claim",
+    "claim": "With at least one `[[rls]]` rule configured, `RlsGuardRunner` wraps the stack directly beneath `ResultMaskingRunner`, giving call order `ResultMaskingRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "When at least one `[[rls]]` rule is configured (the `cfg.rls` list is non-empty), `RlsGuardRunner` wraps the stack directly beneath `ResultMaskingRunner`, so the call order becomes **ResultMaskingRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**.",
+    "source_file": "docs/internal/database-connectors/read-only-safety.md",
+    "source_line": 192,
+    "verify_against": "The runner composition in the agent factory",
+    "verify_hint": "Check the RLS branch wrapping order in `build_agent` in `src/sqllens/agent/factory.py`",
+    "claim_signature": "absolute_claim:read-only-safety.md:rls-composition-order:192",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "absolute_claim",
+    "claim": "SQL Lens's guard wrappers forward the `require_base_tables=True` requirement from `RlsGuardRunner` to the inner runner.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "SQL Lens's guard wrappers forward that requirement.",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 41,
+    "verify_against": "Each guard wrapper's run_sql signature and forwarding",
+    "verify_hint": "Check that `ResultMaskingRunner.run_sql` in `src/sqllens/safety/masking.py` declares and forwards `require_base_tables`, alongside `ReadOnlyGuardRunner` and `RowCapRunner` in `src/sqllens/safety/readonly.py` and `limits.py`",
+    "claim_signature": "absolute_claim:row-level-security.md:guard-wrappers-forward-require-base-tables:41",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "dependency_interaction",
+    "claim": "`RlsGuardRunner.__init__` looks past exactly the wrapper types that `_relation_check_executor` in `src/sqllens/safety/__init__.py` unwraps when finding the first runner beneath the guards.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`RlsGuardRunner.__init__` looks past SQL Lens's own guard wrappers (the exact types `_relation_check_executor` in [src/sqllens/safety/__init__.py](../../../src/sqllens/safety/__init__.py) unwraps) to the first runner beneath them",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 55,
+    "verify_against": "The unwrap helper and the RLS guard constructor check",
+    "verify_hint": "Check `_relation_check_executor` in `src/sqllens/safety/__init__.py` and the executor lookup in `RlsGuardRunner.__init__` in `src/sqllens/safety/rls.py`",
+    "claim_signature": "dependency_interaction:row-level-security.md:relation-check-executor-unwrap:55",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "absolute_claim",
+    "claim": "The runner call-path diagram is accurate: `ResultMaskingRunner.run_sql` masks secret-looking result columns on the way back, and `ReadOnlyGuardRunner.run_sql` is absent when `database.read_only = false`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "ResultMaskingRunner.run_sql                        (masks secret-looking result columns on the way back)",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 174,
+    "source_line_end": 181,
+    "verify_against": "The factory composition and masking runner behavior",
+    "verify_hint": "Check `src/sqllens/agent/factory.py` composition and that masking happens on the returned DataFrame in `src/sqllens/safety/masking.py`",
+    "claim_signature": "absolute_claim:row-level-security.md:runner-call-diagram:174",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "absolute_claim",
+    "claim": "Each conditional guard drops out when its condition is false, while masking and the row cap are always present in the runner stack.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Each conditional guard drops out when its condition is false; masking and the row cap are always present.",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 205,
+    "verify_against": "The unconditional vs conditional wraps in the factory",
+    "verify_hint": "Check that `RowCapRunner` and `ResultMaskingRunner` are wrapped unconditionally in `build_agent`/`build_sql_runner` in `src/sqllens/agent/factory.py`",
+    "claim_signature": "absolute_claim:row-level-security.md:masking-rowcap-always-present:205",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "test_mock_alignment",
+    "claim": "`TestFactoryComposition` asserts the RLS guard sits beneath the masking guard and ahead of the read-only guard, and is absent when no rules are configured.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- `TestFactoryComposition` — the RLS guard sits beneath the masking guard and ahead of the read-only guard, and is absent when no rules are configured.",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 241,
+    "verify_against": "The named test class",
+    "verify_hint": "Check `TestFactoryComposition` in `tests/unit/test_safety_rls.py` (or `tests/unit/test_factory_wiring.py`) for the masking-beneath assertion",
+    "claim_signature": "test_mock_alignment:row-level-security.md:testfactorycomposition-masking:241",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "absolute_claim",
+    "claim": "The release note's account holds: values of name-matching secret columns are replaced with `[withheld]` before reaching the result table, the model, the server log and the result CSV on disk; the assistant is told which columns were withheld; aliased columns are returned as stored; `unmasked_columns`, `unmasked_words` (token, hash, salt, pin, otp, totp, mfa) and `extra_words` behave as described; and a config containing `[result_masking]` does not load in older releases.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "SQL Lens now hides the values of secret-looking columns in query results by\ndefault. When a result column's name matches a secret word such as password,\nhash, token, PIN, secret or API key, every value in it is replaced with\n`[withheld]` before it reaches the result table, the model, the server log or\nthe result CSV on disk, and the assistant is told which columns were withheld.",
+    "source_file": "changelog.d/354.security.md",
+    "source_line": 1,
+    "source_line_end": 14,
+    "verify_against": "The masking implementation, config model and changelog fragment conventions",
+    "verify_hint": "Check `src/sqllens/safety/masking.py`, `ResultMaskingConfig` in `src/sqllens/config.py`, and that the link target `docs/external/configuration.md#section-result_masking` resolves from the generated changelog location",
+    "claim_signature": "absolute_claim:354.security.md:release-note-masking-claims:1",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "dependency_interaction",
+    "claim": "ResultMaskingRunner.run_sql forwards to the inner runner's run_sql with the (args, context) positional signature and a require_base_tables keyword only when true, matching the SqlRunner protocol every wrapped runner implements.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/masking.py",
+    "source_line": 244,
+    "source_line_end": 248,
+    "verify_against": "The SqlRunner protocol/base and the run_sql signatures of the runners it wraps",
+    "verify_hint": "Check `SqlRunner` and `RunSqlToolArgs` in `src/sqllens/agent/capabilities/sql_runner.py`, and the `run_sql` signatures of `RlsGuardRunner`, `ReadOnlyGuardRunner` and `RowCapRunner` in `src/sqllens/safety/`",
+    "claim_signature": "dependency_interaction:masking.py:inner-run-sql-signature:244",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "dependency_interaction",
+    "claim": "pandas DataFrame.isetitem(i, Series) replaces the column at position i in place on the copy, and assigning to `masked.attrs` after `df.copy()` keeps the remaining attrs the runners beneath set.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/masking.py",
+    "source_line": 216,
+    "source_line_end": 223,
+    "verify_against": "pandas DataFrame API (isetitem, copy, attrs) at the locked pandas version",
+    "verify_hint": "Check the pandas version pinned in `requirements.txt`/`pyproject.toml` and its `DataFrame.isetitem` / `DataFrame.attrs` semantics, especially with duplicate column labels",
+    "claim_signature": "dependency_interaction:masking.py:isetitem-attrs-copy:216",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "data_format_assumption",
+    "claim": "`df.attrs[\"masked_columns\"]` is the agreed carrier between the masking guard and RunSqlTool, holding a list of masked label strings, and does not collide with any other attrs key (MAX_ROWS_ATTR, TRUNCATED_ATTR) or with a key preserved by other runners.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/masking.py",
+    "source_line": 35,
+    "verify_against": "The attrs key constants and their producers/consumers",
+    "verify_hint": "Compare `MASKED_COLUMNS_ATTR` with `MAX_ROWS_ATTR`/`TRUNCATED_ATTR` in `src/sqllens/safety/limits.py` and every reader of `df.attrs` in `src/sqllens/agent/tools/run_sql.py` and `src/sqllens/_table_payload.py`",
+    "claim_signature": "data_format_assumption:masking.py:masked-columns-attrs-key:35",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "data_format_assumption",
+    "claim": "RunSqlTool reads `df.attrs[MASKED_COLUMNS_ATTR]` expecting either a string or an iterable of label-like values, and a falsy/absent value means no column was masked.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 94,
+    "source_line_end": 104,
+    "verify_against": "The only producer of that attr",
+    "verify_hint": "Check `mask_secret_columns` in `src/sqllens/safety/masking.py` for the exact type it writes into `attrs[MASKED_COLUMNS_ATTR]`",
+    "claim_signature": "data_format_assumption:run_sql.py:masked-attr-shape:94",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "api_contract",
+    "claim": "The ResultMaskingError raised on a masking failure reaches the MCP client as structured error signal rather than an unstructured crash or a silent success.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/masking.py",
+    "source_line": 263,
+    "source_line_end": 266,
+    "verify_against": "The error path in RunSqlTool.execute and the MCP tool error contract",
+    "verify_hint": "Check the `except Exception` block at the end of `RunSqlTool.execute` in `src/sqllens/agent/tools/run_sql.py` and the isError mapping in `src/sqllens/tools/`",
+    "claim_signature": "api_contract:masking.py:masking-error-structured-signal:263",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "api_contract",
+    "claim": "`_relation_check_executor` unwrapping exactly the four runner types reaches the engine runner in every composition `build_agent` can produce, so the RLS relation check still runs with masking outermost.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/__init__.py",
+    "source_line": 241,
+    "source_line_end": 244,
+    "verify_against": "The runner composition order in build_agent and the relation-check caller",
+    "verify_hint": "Compare the wrapping order in `build_agent` (`src/sqllens/agent/factory.py` lines 85-109) with the `while type(runner) in (...)` loop and its caller in `src/sqllens/safety/__init__.py`",
+    "claim_signature": "api_contract:__init__.py:relation-check-unwrap-types:241",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "dependency_interaction",
+    "claim": "`cfg.result_masking` exposes `extra_words`, `unmasked_columns` and `unmasked_words` as iterables of str that ResultMaskingRunner accepts unchanged.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 104,
+    "source_line_end": 109,
+    "verify_against": "ResultMaskingConfig field definitions",
+    "verify_hint": "Check `class ResultMaskingConfig` at `src/sqllens/config.py:262` against the keyword parameters of `ResultMaskingRunner.__init__` in `src/sqllens/safety/masking.py`",
+    "claim_signature": "dependency_interaction:factory.py:result-masking-config-fields:104",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "dependency_interaction",
+    "claim": "The `_entries_have_words` / `_entries_are_removable` field validators raise ValueError from `entry_words` / `removable_entry_words`, which pydantic surfaces as a ValidationError naming the offending setting, for TOML and for JSON-valued SQLLENS_RESULT_MASKING__* env values.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 291,
+    "source_line_end": 307,
+    "verify_against": "pydantic v2 field_validator error wrapping and the env-source parsing in Config",
+    "verify_hint": "Check `entry_words`/`removable_entry_words` in `src/sqllens/safety/masking.py` and the settings sources / env parsing in `Config` in `src/sqllens/config.py`",
+    "claim_signature": "dependency_interaction:config.py:masking-validator-error-naming:291",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts that `df` itself is never modified, that a masked-columns record already on `df` is never carried over, and that a frame with no rows or no secret column comes back with values unchanged.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "``df`` itself is never\n    modified. A masked-columns record already on ``df`` is not carried over, so\n    the record names only the columns this call masked. A frame with no rows or\n    no secret column comes back with its values unchanged",
+    "source_file": "src/sqllens/safety/masking.py",
+    "source_line": 200,
+    "source_line_end": 204,
+    "verify_against": "The body of mask_secret_columns and pandas copy/attrs semantics",
+    "verify_hint": "Exercise `mask_secret_columns` in `src/sqllens/safety/masking.py` with a frame whose attrs already hold `masked_columns`, a shallow-copy path (`df.copy(deep=False)`), and duplicate column labels, checking the input frame for mutation",
+    "claim_signature": "absolute_claim:masking.py:df-never-modified:200",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "absolute_claim",
+    "claim": "The comment asserts that every other built-in entry stays in force, so no setting turns masking off.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Every other built-in entry stays in force, so no setting turns\n# masking off.",
+    "source_file": "src/sqllens/safety/masking.py",
+    "source_line": 73,
+    "source_line_end": 74,
+    "verify_against": "SecretColumnMatcher construction and ResultMaskingConfig validation",
+    "verify_hint": "Check whether an `extra_words`/`unmasked_columns` value, or an `unmasked_words` entry that splits to the same words as a non-removable built-in, can empty `self._entries` or exempt an arbitrary label in `SecretColumnMatcher.__init__`",
+    "claim_signature": "absolute_claim:masking.py:no-setting-turns-masking-off:73",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "absolute_claim",
+    "claim": "The module docstring asserts the runner replaces every value in a matching column before the DataFrame reaches RunSqlTool and every sink built from it.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "``ResultMaskingRunner`` replaces every value in a result column whose label\nmatches the secret-word rule with :data:`WITHHELD_PLACEHOLDER`, before the\nDataFrame reaches ``RunSqlTool`` and every sink built from it.",
+    "source_file": "src/sqllens/safety/masking.py",
+    "source_line": 6,
+    "source_line_end": 9,
+    "verify_against": "Every sink RunSqlTool builds from the frame and every runner path reaching the tool",
+    "verify_hint": "Trace the table block, `result_for_llm`, the scratch CSV and `metadata[\"results\"]` in `RunSqlTool.execute` (`src/sqllens/agent/tools/run_sql.py`) and any other `run_sql` caller that bypasses the ResultMaskingRunner (e.g. `build_sql_runner` users in `src/sqllens/eval/`)",
+    "claim_signature": "absolute_claim:masking.py:every-value-every-sink:6",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "absolute_claim",
+    "claim": "The comment asserts that masking wraps every other guard, so each frame a runner beneath returns is masked before RunSqlTool builds any output from it.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Masking wraps every other guard, so each frame a runner beneath returns is\n    # masked before RunSqlTool builds any output from it.",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 102,
+    "source_line_end": 103,
+    "verify_against": "build_agent / build_sql_runner wiring and every RunSqlTool construction site",
+    "verify_hint": "Check every place a `RunSqlTool` is constructed in `src/sqllens/agent/factory.py` and `src/sqllens/eval/` to confirm the runner it receives is the ResultMaskingRunner",
+    "claim_signature": "absolute_claim:factory.py:masking-wraps-every-guard:102",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "absolute_claim",
+    "claim": "The module docstring asserts the safety package composes five orthogonal protections at the factory, and that ResultMaskingRunner is the outermost one.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Five orthogonal protections, composed at the factory:",
+    "source_file": "src/sqllens/safety/__init__.py",
+    "source_line": 6,
+    "verify_against": "The guards the package now contains and the factory's composition",
+    "verify_hint": "Count the runners/guards exported from `src/sqllens/safety/` and the wrapping order in `build_agent` (`src/sqllens/agent/factory.py` lines 85-109)",
+    "claim_signature": "absolute_claim:__init__.py:five-orthogonal-protections:6",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-37",
+    "category": "absolute_claim",
+    "claim": "The docs line asserts that a misspelled key inside a sub-section is accepted-and-dropped unless that sub-section sets its own extra=\"forbid\", and that exactly AuditConfig, ProfilesConfig, ResultMaskingConfig and RlsRule do.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`AuditConfig`, `ProfilesConfig`, `ResultMaskingConfig` and `RlsRule` do.",
+    "source_file": "docs/internal/setup/config-loading.md",
+    "source_line": 35,
+    "verify_against": "Every nested BaseModel in src/sqllens/config.py and its model_config",
+    "verify_hint": "Grep every `model_config = ConfigDict(extra=\"forbid\")` in `src/sqllens/config.py` and compare the set with the four models the doc names",
+    "claim_signature": "absolute_claim:config-loading.md:forbid-model-list:35",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-38",
+    "category": "absolute_claim",
+    "claim": "The docs line asserts that every nested section model is a plain pydantic.BaseModel and only the top-level Config inherits BaseSettings.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Only the top-level `Config` inherits from `pydantic_settings.BaseSettings`. Every nested section model is a plain `pydantic.BaseModel`.",
+    "source_file": "docs/internal/setup/config-loading.md",
+    "source_line": 40,
+    "verify_against": "The class declarations in src/sqllens/config.py",
+    "verify_hint": "Grep `class .*(BaseSettings)` and `class .*(BaseModel)` in `src/sqllens/config.py`",
+    "claim_signature": "absolute_claim:config-loading.md:nested-models-basemodel:40",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-39",
+    "category": "absolute_claim",
+    "claim": "The docs line asserts that an entry with no letters or digits, or an unmasked_words entry outside the seven listed removable built-ins, fails the config load, and that unmasked_columns matches exact labels case-insensitively.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "An entry with no letters or digits, or an `unmasked_words` entry outside that list, fails the load.",
+    "source_file": "docs/internal/setup/config-loading.md",
+    "source_line": 24,
+    "verify_against": "ResultMaskingConfig validators and SecretColumnMatcher",
+    "verify_hint": "Check `_entries_have_words`/`_entries_are_removable` in `src/sqllens/config.py` (lines 291-307) and `entry_words`, `removable_entry_words`, `SecretColumnMatcher.is_secret` in `src/sqllens/safety/masking.py`",
+    "claim_signature": "absolute_claim:config-loading.md:result-masking-load-failures:24",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-40",
+    "category": "absolute_claim",
+    "claim": "The docs sentence asserts that run_sql's CSV preview is of the already row-capped, already masked DataFrame and that the masking note follows the display line.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "its `run_sql` tool result is a CSV preview of at most 1,000 characters of the (already row-capped, already masked) DataFrame",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 10,
+    "verify_against": "The result assembly in RunSqlTool.execute",
+    "verify_hint": "Check the `results_preview` / `result = ...` assembly in `src/sqllens/agent/tools/run_sql.py` lines 140-172 for the order of truncation_note, display_line and masking_note",
+    "claim_signature": "absolute_claim:tools.md:preview-already-masked:10",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-41",
+    "category": "absolute_claim",
+    "claim": "The system prompt line added to the Data Confidentiality section instructs the model never to use SELECT * on data tables and never to select secret-holding columns.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- Select only the columns the question needs. Do not use SELECT * on data tables, and do not select columns that hold secrets, such as passwords, password hashes, tokens, PINs, keys or one-time codes.",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "source_line": 122,
+    "verify_against": "Criterion 5's exact prompt line text and the surrounding Data Confidentiality section",
+    "verify_hint": "Compare the string at `src/sqllens/agent/core/system_prompt/default.py` line 122 character-for-character with the criterion, and check it sits inside the \"Data Confidentiality\" block",
+    "claim_signature": "absolute_claim:default.py:data-confidentiality-select-line:122",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-42",
+    "category": "test_mock_alignment",
+    "claim": "The connector test composes ResultMaskingRunner(RowCapRunner(build_sql_runner(url), max_rows=10)) with no masking keywords and expects the built-in rule alone to mask the driver-labelled `password_hash` column, including the NULL row, matching the production composition in build_agent.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_connectors.py",
+    "source_line": 134,
+    "source_line_end": 155,
+    "verify_against": "The production wiring and ResultMaskingRunner defaults",
+    "verify_hint": "Compare the test's runner stack with `build_agent` in `src/sqllens/agent/factory.py` lines 85-109 and the default keyword values of `ResultMaskingRunner.__init__`",
+    "claim_signature": "test_mock_alignment:test_connectors.py:masking-runner-stack:134",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-43",
+    "category": "dependency_interaction",
+    "claim": "`sqllens.safety` re-exports `MASKED_COLUMNS_ATTR`, `ReadOnlyGuardRunner`, `ResultMaskingRunner`, `RlsGuardRunner`, `RowCapRunner`, `_relation_check_executor` and `mark_truncation` at package level, so this import succeeds.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 33,
+    "source_line_end": 41,
+    "verify_against": "src/sqllens/safety/__init__.py",
+    "verify_hint": "Check the `__all__` / import list in `src/sqllens/safety/__init__.py` for each of these seven names",
+    "claim_signature": "dependency_interaction:test_safety_masking.py:safety-package-exports:33",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-44",
+    "category": "dependency_interaction",
+    "claim": "`sqllens.safety.masking` defines `BUILTIN_SECRET_ENTRIES`, `REMOVABLE_BUILTIN_ENTRIES`, `ResultMaskingError`, `SecretColumnMatcher`, `mask_secret_columns` and `split_label_words` with these exact names.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 42,
+    "source_line_end": 49,
+    "verify_against": "src/sqllens/safety/masking.py",
+    "verify_hint": "Check the module-level definitions in `src/sqllens/safety/masking.py`",
+    "claim_signature": "dependency_interaction:test_safety_masking.py:masking-module-symbols:42",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-45",
+    "category": "dependency_interaction",
+    "claim": "`sqllens.config` exports `ResultMaskingConfig` alongside `AuthConfig`, `Config`, `DatabaseConfig`, `LLMConfig`, `MemoryConfig` and `RlsRule`, and `Config` accepts a `result_masking=` field.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 24,
+    "source_line_end": 32,
+    "verify_against": "src/sqllens/config.py",
+    "verify_hint": "Check `ResultMaskingConfig` and the `Config.result_masking` field in `src/sqllens/config.py`",
+    "claim_signature": "dependency_interaction:test_safety_masking.py:result-masking-config-export:24",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-46",
+    "category": "data_format_assumption",
+    "claim": "`BUILTIN_SECRET_ENTRIES` is a tuple (compared with `==` against a tuple literal) holding these 31 entries in this order.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 60,
+    "source_line_end": 68,
+    "verify_against": "src/sqllens/safety/masking.py",
+    "verify_hint": "Check the `BUILTIN_SECRET_ENTRIES` definition and its type annotation in `src/sqllens/safety/masking.py`",
+    "claim_signature": "data_format_assumption:test_safety_masking.py:builtin-entries-tuple-order:60",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-47",
+    "category": "absolute_claim",
+    "claim": "The comment asserts that an uppercase run plus \"s\" followed by a capital always splits before the run's last capital, and that this is what the issue's rule states.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "        # An uppercase run plus \"s\" followed by a capital splits before the\n        # run's last capital, as the issue's rule states; see NOT_MASKED.",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 81,
+    "source_line_end": 83,
+    "verify_against": "The secret-word rule in issue #346 and `_split_chunk` in src/sqllens/safety/masking.py",
+    "verify_hint": "Compare `_split_chunk` in `src/sqllens/safety/masking.py` and the Desired Behavior rule in the issue file against inputs like `OTPsKey`, `OTPsX`, `IDsKey`",
+    "claim_signature": "absolute_claim:test_safety_masking.py:acronym-plural-split-rule:81",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-48",
+    "category": "absolute_claim",
+    "claim": "The comment asserts `token_count`, `content_hash`, `mfa_enabled` and `password_changed_at` are known over-masks pinned so the heuristic cannot drift silently.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    # Known over-masks, pinned so the heuristic cannot drift silently.",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 98,
+    "source_line_end": 99,
+    "verify_against": "src/sqllens/safety/masking.py and the issue's documented over-masks",
+    "verify_hint": "Check `SecretColumnMatcher.is_secret` behavior for these four labels and the over-mask list recorded in issue #346",
+    "claim_signature": "absolute_claim:test_safety_masking.py:known-over-masks:98",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-49",
+    "category": "absolute_claim",
+    "claim": "The comment asserts run-together words are not split, and that an acronym plural running into the next word splits inside the acronym (so `passwordhash` and `OTPsCount` stay unmasked).",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    # Known under-masks: run-together words are not split, and an acronym\n    # plural running into the next word splits inside the acronym.",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 104,
+    "source_line_end": 106,
+    "verify_against": "`split_label_words` / `_split_chunk` in src/sqllens/safety/masking.py",
+    "verify_hint": "Trace `_split_chunk` in `src/sqllens/safety/masking.py` for `passwordhash` and `OTPsCount`",
+    "claim_signature": "absolute_claim:test_safety_masking.py:known-under-masks:104",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-50",
+    "category": "test_mock_alignment",
+    "claim": "`_FrameRunner.run_sql(args, context, *, require_base_tables=False)` returning a DataFrame matches the real `SqlRunner.run_sql` signature and return type that `ResultMaskingRunner` and `RunSqlTool` call.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 273,
+    "source_line_end": 278,
+    "verify_against": "src/sqllens/agent/capabilities/sql_runner.py",
+    "verify_hint": "Compare with the `SqlRunner.run_sql` abstract signature in `src/sqllens/agent/capabilities/sql_runner.py`",
+    "claim_signature": "test_mock_alignment:test_safety_masking.py:framerunner-run-sql-signature:273",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-51",
+    "category": "data_format_assumption",
+    "claim": "`ToolResult.metadata[\"results\"]` from `RunSqlTool.execute` is a JSON-serializable list of row dicts keyed by column label, so each masked label maps to `[withheld]`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 325,
+    "source_line_end": 334,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check how `metadata[\"results\"]` is built in `RunSqlTool.execute` in `src/sqllens/agent/tools/run_sql.py`",
+    "claim_signature": "data_format_assumption:test_safety_masking.py:metadata-results-row-dicts:325",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-52",
+    "category": "api_contract",
+    "claim": "`components_to_blocks([component])` returns a 5-tuple whose members are (markdown string, error, JSON-serializable blocks list, query info, memory info) in that order.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 321,
+    "verify_against": "src/sqllens/tools/_format.py",
+    "verify_hint": "Check the return signature of `components_to_blocks` in `src/sqllens/tools/_format.py`",
+    "claim_signature": "api_contract:test_safety_masking.py:components-to-blocks-tuple:321",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-53",
+    "category": "data_format_assumption",
+    "claim": "The Markdown produced for a single-row table escapes the placeholder's brackets, so it contains `\\[withheld\\]` rather than `[withheld]`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 337,
+    "source_line_end": 340,
+    "verify_against": "src/sqllens/tools/_format.py Markdown table rendering",
+    "verify_hint": "Check the Markdown escaping path for table cells in `src/sqllens/tools/_format.py` (and why 3 rows take the blocks branch instead)",
+    "claim_signature": "data_format_assumption:test_safety_masking.py:markdown-escaped-placeholder:337",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-54",
+    "category": "api_contract",
+    "claim": "`result_for_llm` for a masked result ends with exactly `SQL Lens withheld the values in these columns: password_hash, session_token, recovery_hash, pin. Tell the user these values are hidden; do not try to retrieve them with another query.`",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "NOTE = (\n    \"SQL Lens withheld the values in these columns: password_hash, session_token, \"\n    \"recovery_hash, pin. Tell the user these values are hidden; do not try to \"\n    \"retrieve them with another query.\"\n)",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 305,
+    "source_line_end": 309,
+    "verify_against": "the withheld-note construction in src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Compare the note string and label joining in `RunSqlTool` in `src/sqllens/agent/tools/run_sql.py`",
+    "claim_signature": "api_contract:test_safety_masking.py:withheld-note-wording:305",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-55",
+    "category": "dependency_interaction",
+    "claim": "`run_sql`'s model text contains `(Results truncated to 1000 characters for preview.)` and `Result truncated at 200 rows.` with these exact wordings before the withheld note.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 351,
+    "source_line_end": 353,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py preview and truncation note strings",
+    "verify_hint": "Check the preview-character limit and truncation-note strings in `src/sqllens/agent/tools/run_sql.py`",
+    "claim_signature": "dependency_interaction:test_safety_masking.py:preview-and-truncation-strings:351",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-56",
+    "category": "dependency_interaction",
+    "claim": "A zero-row result's `result_for_llm` starts with `Query executed successfully. No rows returned.`",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 379,
+    "source_line_end": 381,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py empty-result branch",
+    "verify_hint": "Check the no-rows message in `RunSqlTool.execute` in `src/sqllens/agent/tools/run_sql.py`",
+    "claim_signature": "dependency_interaction:test_safety_masking.py:no-rows-message:379",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-57",
+    "category": "dependency_interaction",
+    "claim": "The masking failure warning is logged on logger `sqllens.safety.masking` at WARNING with the text `result masking guard raised an unexpected RuntimeError` plus formatted traceback frames naming `is_secret`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 409,
+    "source_line_end": 414,
+    "verify_against": "the `logger.warning` call in `ResultMaskingRunner.run_sql`",
+    "verify_hint": "Check the logger name and warning format string in `src/sqllens/safety/masking.py`",
+    "claim_signature": "dependency_interaction:test_safety_masking.py:masking-warning-logger:409",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-58",
+    "category": "api_contract",
+    "claim": "`ResultMaskingError` raised on a guard failure carries the substring `result masking guard errored`, has `__cause__ is None` and `__suppress_context__ is True`, and omits cell values.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 410,
+    "source_line_end": 417,
+    "verify_against": "the `raise ResultMaskingError(...) from None` in src/sqllens/safety/masking.py",
+    "verify_hint": "Check the except block of `ResultMaskingRunner.run_sql` in `src/sqllens/safety/masking.py`",
+    "claim_signature": "api_contract:test_safety_masking.py:masking-error-message-and-cause:410",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-59",
+    "category": "dependency_interaction",
+    "claim": "`_relation_check_executor` unwraps both `ResultMaskingRunner` and `RowCapRunner` to reach the engine runner.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 458,
+    "source_line_end": 461,
+    "verify_against": "`_relation_check_executor` in src/sqllens/safety/relations.py",
+    "verify_hint": "Check which decorator types `_relation_check_executor` unwraps in `src/sqllens/safety/relations.py`",
+    "claim_signature": "dependency_interaction:test_safety_masking.py:relation-check-unwraps-masking:458",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-60",
+    "category": "api_contract",
+    "claim": "`ResultMaskingConfig` rejects an `enabled` key, a string `extra_words`/`unmasked_words`, a non-string list entry and an entry that splits into no words, with a `ValidationError` whose text names the setting.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 473,
+    "source_line_end": 491,
+    "verify_against": "`ResultMaskingConfig` field types and validators in src/sqllens/config.py",
+    "verify_hint": "Check `ResultMaskingConfig`'s `extra=\"forbid\"` setting and each field validator in `src/sqllens/config.py`",
+    "claim_signature": "api_contract:test_safety_masking.py:result-masking-config-validation:473",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-61",
+    "category": "data_format_assumption",
+    "claim": "An unknown `SQLLENS_RESULT_MASKING__<KEY>` environment variable raises a `ValidationError` whose text contains the dotted location `result_masking.<key>`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 562,
+    "source_line_end": 564,
+    "verify_against": "pydantic-settings env nesting and error location formatting used by `Config.load`",
+    "verify_hint": "Check `Config.load` and the settings sources in `src/sqllens/config.py` for how env keys map to field locations",
+    "claim_signature": "data_format_assumption:test_safety_masking.py:env-error-names-dotted-key:562",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-62",
+    "category": "dependency_interaction",
+    "claim": "`RunSqlTool(sql_runner=..., file_system=...)` and `LocalFileSystem(str(path))` are the current constructor signatures.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 214,
+    "source_line_end": 217,
+    "verify_against": "src/sqllens/agent/tools/run_sql.py and src/sqllens/agent/integrations/local.py",
+    "verify_hint": "Check `RunSqlTool.__init__` and `LocalFileSystem.__init__`",
+    "claim_signature": "dependency_interaction:test_safety_masking.py:runsqltool-constructor:214",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-63",
+    "category": "test_mock_alignment",
+    "claim": "`ToolContext(user=..., conversation_id=..., request_id=..., agent_memory=StubAgentMemory())` is a valid construction and `StubAgentMemory` satisfies what `RunSqlTool` calls on `agent_memory`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 294,
+    "source_line_end": 298,
+    "verify_against": "`ToolContext` in src/sqllens/agent/core/tool.py and `StubAgentMemory` in tests/unit/_agent_stubs.py",
+    "verify_hint": "Compare `StubAgentMemory` in `tests/unit/_agent_stubs.py` against the agent-memory protocol used by `RunSqlTool`",
+    "claim_signature": "test_mock_alignment:test_safety_masking.py:stub-agent-memory-context:294",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-64",
+    "category": "dependency_interaction",
+    "claim": "`mark_truncation(df, truncated=True, max_rows=N)` records `attrs[\"truncated\"]` and `attrs[\"max_rows\"]` under exactly those keys, which masking preserves.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 196,
+    "source_line_end": 201,
+    "verify_against": "`mark_truncation` in src/sqllens/safety/limits.py",
+    "verify_hint": "Check `mark_truncation`'s signature and attrs keys in `src/sqllens/safety/limits.py`",
+    "claim_signature": "dependency_interaction:test_safety_masking.py:mark-truncation-attrs:196",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-65",
+    "category": "dependency_interaction",
+    "claim": "`SecretColumnMatcher` is subclassable with an overriding `is_secret`, and `ResultMaskingRunner` holds its matcher in the mutable attribute `_matcher` consulted on every call.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 404,
+    "source_line_end": 408,
+    "verify_against": "`SecretColumnMatcher` and `ResultMaskingRunner` in src/sqllens/safety/masking.py",
+    "verify_hint": "Check that `mask_secret_columns` calls `matcher.is_secret` and that `_matcher` is read per call in `src/sqllens/safety/masking.py`",
+    "claim_signature": "dependency_interaction:test_safety_masking.py:matcher-attribute-injection:404",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-66",
+    "category": "data_format_assumption",
+    "claim": "The run_sql note code reads `attrs[MASKED_COLUMNS_ATTR]` holding a bare string as a single label rather than iterating its characters.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 221,
+    "source_line_end": 225,
+    "verify_against": "the masked-columns reading code in src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check how `RunSqlTool` normalizes `df.attrs[\"masked_columns\"]` in `src/sqllens/agent/tools/run_sql.py`",
+    "claim_signature": "data_format_assumption:test_safety_masking.py:bare-string-masked-record:221",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-67",
+    "category": "dependency_interaction",
+    "claim": "`SqliteRunner(database_path=str(db))` is the current constructor keyword, and SQLite labels `SELECT password_hash AS h` as `h` and `SELECT upper(password_hash)` as `upper(password_hash)` via `cursor.description`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 662,
+    "source_line_end": 682,
+    "verify_against": "`SqliteRunner` in src/sqllens/agent/integrations/sqlite.py and the sqlite3 column-label behavior",
+    "verify_hint": "Check `SqliteRunner.__init__` in `src/sqllens/agent/integrations/sqlite.py` and how it builds DataFrame column labels",
+    "claim_signature": "dependency_interaction:test_safety_masking.py:sqlite-expression-label:662",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-68",
+    "category": "absolute_claim",
+    "claim": "The comment asserts a label may contain spaces including padding, because SQLite returns a quoted alias exactly as written.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    # A label may contain spaces, padding included: an expression label, or a\n    # quoted alias, which SQLite returns exactly as written.",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 244,
+    "source_line_end": 245,
+    "verify_against": "sqlite3 cursor.description behavior for quoted aliases with padding",
+    "verify_hint": "Run a quoted padded alias (`SELECT 1 AS \"token_count \"`) through `SqliteRunner` and check the resulting DataFrame column label",
+    "claim_signature": "absolute_claim:test_safety_masking.py:quoted-alias-padding:244",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-26"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-69",
+    "category": "absolute_claim",
+    "claim": "The comment asserts a label shared by several columns is recorded, and so named in the note, once.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    # A label shared by several columns is recorded, and so named in the note, once.",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 208,
+    "source_line_end": 209,
+    "verify_against": "`mask_secret_columns` dedup and the note builder in run_sql.py",
+    "verify_hint": "Check the `dict.fromkeys` dedup in `mask_secret_columns` and the label join in `src/sqllens/agent/tools/run_sql.py`",
+    "claim_signature": "absolute_claim:test_safety_masking.py:duplicate-label-recorded-once:208",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-27"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-70",
+    "category": "dependency_interaction",
+    "claim": "The wired `run_sql` tool's `sql_runner` is a `ResultMaskingRunner` whose `_inner` is the `ReadOnlyGuardRunner`, i.e. masking is outermost with no `[[rls]]` rules.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 513,
+    "source_line_end": 523,
+    "verify_against": "`build_sql_runner` / `build_agent` composition in src/sqllens/agent/factory.py",
+    "verify_hint": "Check the decorator wrapping order in `build_sql_runner` in `src/sqllens/agent/factory.py`",
+    "claim_signature": "dependency_interaction:test_factory_wiring.py:masking-outermost-inner-attr:513",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-28"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-71",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts that with no `[[rls]]` rules the enabled read-only guard sits directly beneath the masking guard, and that with rules `RlsGuardRunner` sits between them.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    disables the parser guard — this pins the wiring both ways. With no\n    ``[[rls]]`` rules, as here, the enabled guard sits directly beneath the\n    masking guard (parse-time reject before any row-cap / engine work); with\n    rules, ``RlsGuardRunner`` sits between them.",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 532,
+    "source_line_end": 536,
+    "verify_against": "`build_sql_runner` in src/sqllens/agent/factory.py",
+    "verify_hint": "Check the rls-present and rls-absent branches of `build_sql_runner` in `src/sqllens/agent/factory.py`",
+    "claim_signature": "absolute_claim:test_factory_wiring.py:guard-order-docstring:532",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-29"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-72",
+    "category": "dependency_interaction",
+    "claim": "With RLS rules configured the stack is `ResultMaskingRunner` → `RlsGuardRunner` → `ReadOnlyGuardRunner`, reachable through the `_inner` attribute.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rls.py",
+    "source_line": 686,
+    "source_line_end": 693,
+    "verify_against": "`build_sql_runner` RLS branch in src/sqllens/agent/factory.py",
+    "verify_hint": "Check the RLS wrapping order in `build_sql_runner` in `src/sqllens/agent/factory.py`",
+    "claim_signature": "dependency_interaction:test_safety_rls.py:masking-above-rls-guard:686",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-30"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-73",
+    "category": "dependency_interaction",
+    "claim": "The `verify-memory` eval runner's `run_sql` tool (possibly behind `_wrapped_tool`) exposes a `sql_runner` attribute that is a `ResultMaskingRunner`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_eval_runner.py",
+    "source_line": 330,
+    "source_line_end": 333,
+    "verify_against": "the agent build path used by `verify-memory` in src/sqllens/eval/",
+    "verify_hint": "Check which builder `src/sqllens/eval/` uses for its agent and whether it wraps with `ResultMaskingRunner`",
+    "claim_signature": "dependency_interaction:test_eval_runner.py:verify-memory-masking-runner:330",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-31"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-74",
+    "category": "data_format_assumption",
+    "claim": "The system prompt's Data Confidentiality section ends at the first blank line after the `Data Confidentiality:` heading, so splitting on `\\n\\n` captures the whole section containing the new line.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_system_prompt.py",
+    "source_line": 56,
+    "source_line_end": 61,
+    "verify_against": "the Data Confidentiality block in the system prompt builder",
+    "verify_hint": "Check `DefaultSystemPromptBuilder`'s prompt text (search `Data Confidentiality:` under `src/sqllens/agent/`) for blank lines inside the section",
+    "claim_signature": "data_format_assumption:test_system_prompt.py:confidentiality-section-split:56",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-32"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "For a query result holding a column whose label matches the secret-word rule, every value in that column, NULL included, is replaced by the placeholder `[withheld]`, and none of the original values appears, in each of: the block `query_database` returns (table or text, where Markdown output carries the placeholder in its existing escaped form `\\[withheld\\]`), the run_sql text the model reads (which the conversation keeps and the model payload log records), the scratch CSV file, and the run_sql result metadata. The column label itself still appears.",
+    "claim_signature": "issue-acceptance-1",
+    "criteria_file": ".prflow/tmp/review/pr-354/42452660894-1/criteria.json",
+    "source_file": "src/sqllens/safety/masking.py",
+    "source_line": 216,
+    "verify_hint": "Trace the masked frame from `mask_secret_columns` through `results_data`, `csv_content`, `DataFrameComponent.from_records` and `metadata[\"results\"]` in `RunSqlTool.execute` (`src/sqllens/agent/tools/run_sql.py`)",
+    "id": "VC-75",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The built-in entry list is exactly these 31 — complete by construction: `password`, `passwd`, `pwd`, `passcode`, `secret`, `token`, `hash`, `salt`, `pin`, `otp`, `totp`, `mfa`, `credential`, `apikey`, `api key`, `access key`, `private key`, `encryption key`, `signing key`, `auth key`, `recovery key`, `master key`, `session key`, `one time code`, `verification code`, `reset code`, `recovery code`, `security code`, `auth code`, `sms code`, `backup code`.",
+    "claim_signature": "issue-acceptance-2",
+    "criteria_file": ".prflow/tmp/review/pr-354/42452660894-1/criteria.json",
+    "source_file": "src/sqllens/safety/masking.py",
+    "source_line": 37,
+    "verify_hint": "Compare `BUILTIN_SECRET_ENTRIES` in `src/sqllens/safety/masking.py` entry by entry and by count with the criterion's list",
+    "id": "VC-76",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Labels split and match as the Desired Behavior's secret-word rule states. At minimum these labels are masked: `password_hash`, `PasswordHash`, `session_token`, `recovery_hash`, `pin`, `PINs`, `APIKey`, `api_keys`, `OTPSecret`, `password2`, `users.password_hash`, `access_key`, `encryption_key`, `verification_code`, `one_time_code`. At minimum these are not masked: `id`, `name`, `email`, `phone`, `last_login_ip`, `session_expires`, `Key`, `COLUMN_KEY`, `sort_key`, `zip_code`, `author_id`.",
+    "claim_signature": "issue-acceptance-3",
+    "criteria_file": ".prflow/tmp/review/pr-354/42452660894-1/criteria.json",
+    "source_file": "src/sqllens/safety/masking.py",
+    "source_line": 94,
+    "verify_hint": "Run each criterion label through `split_label_words` / `SecretColumnMatcher.is_secret` in `src/sqllens/safety/masking.py`, especially `PINs`, `APIKey`, `OTPSecret`, `password2`, `COLUMN_KEY`, `sort_key`, `zip_code`, `author_id`",
+    "id": "VC-77",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "When a query result has at least one masked column, the run_sql text the model reads ends with `SQL Lens withheld the values in these columns: <labels>. Tell the user these values are hidden; do not try to retrieve them with another query.`, with `<labels>` the masked labels joined by `, `. The line is present in full however long the result's CSV preview is. A result with no masked column carries no such line.",
+    "claim_signature": "issue-acceptance-4",
+    "criteria_file": ".prflow/tmp/review/pr-354/42452660894-1/criteria.json",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 98,
+    "verify_hint": "Compare the `masking_note` text and its placement in the `result = ...` assembly in `src/sqllens/agent/tools/run_sql.py` lines 98-172 with the criterion's exact sentence",
+    "id": "VC-78",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The system prompt's \"Data Confidentiality\" section contains the line `- Select only the columns the question needs. Do not use SELECT * on data tables, and do not select columns that hold secrets, such as passwords, password hashes, tokens, PINs, keys or one-time codes.`",
+    "claim_signature": "issue-acceptance-5",
+    "criteria_file": ".prflow/tmp/review/pr-354/42452660894-1/criteria.json",
+    "source_file": "tests/unit/test_system_prompt.py",
+    "source_line": 57,
+    "verify_hint": "Compare the asserted string character by character with criterion 5's line",
+    "id": "VC-79",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "An entry in `[result_masking].extra_words` masks matching columns in addition to the built-in entries, and is split into words by the same rule as labels: `phone_number` masks a column labelled `PhoneNumber`.",
+    "claim_signature": "issue-acceptance-6",
+    "criteria_file": ".prflow/tmp/review/pr-354/42452660894-1/criteria.json",
+    "source_file": "src/sqllens/safety/masking.py",
+    "source_line": 182,
+    "verify_hint": "Check `self._entries.extend(entry_words(entry) for entry in extra_words)` in `SecretColumnMatcher.__init__` and `split_label_words`'s handling of `PhoneNumber`",
+    "id": "VC-80",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A label listed in `[result_masking].unmasked_columns` is shown unmasked, matched without regard to case: `token_count` exempts `TOKEN_COUNT`. The match is on the whole label, so `token_count` does not exempt the prefixed label MySQL gives a duplicate column (`users.token_count`, or `u.token_count` when the query aliases the table).",
+    "claim_signature": "issue-acceptance-7",
+    "criteria_file": ".prflow/tmp/review/pr-354/42452660894-1/criteria.json",
+    "source_file": "src/sqllens/safety/masking.py",
+    "source_line": 179,
+    "verify_hint": "Check the `removed` set comparison in `SecretColumnMatcher.__init__` and `REMOVABLE_BUILTIN_ENTRIES` / `removable_entry_words` in `src/sqllens/safety/masking.py`, including whether removing `token` also affects multi-word entries like `session key`",
+    "id": "VC-81",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "An entry in `[result_masking].unmasked_words` stops that built-in entry from applying (`token` leaves `SUM(output_tokens)` unmasked) while every other entry, built-in or `extra_words`, still applies. Only `token`, `hash`, `salt`, `pin`, `otp`, `totp` and `mfa` are accepted; any other entry (for example `password`) makes config loading fail with a validation error naming `unmasked_words`.",
+    "claim_signature": "issue-acceptance-8",
+    "criteria_file": ".prflow/tmp/review/pr-354/42452660894-1/criteria.json",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 137,
+    "verify_hint": "Check the `unmasked_words` tests plus the `{\"unmasked_words\": [\"password\"]}` config case names `unmasked_words`",
+    "id": "VC-82",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With `[result_masking]` absent from the config, the built-in entries mask matching columns and no column is exempt. No `[result_masking]` setting turns masking off.",
+    "claim_signature": "issue-acceptance-9",
+    "criteria_file": ".prflow/tmp/review/pr-354/42452660894-1/criteria.json",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 467,
+    "verify_hint": "Check `test_absent_section_uses_builtin_list_with_no_exemptions` and whether any setting can disable masking",
+    "id": "VC-83",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`[result_masking]` with an unknown key, a value of the wrong type, or an entry that splits into no words makes config loading fail with a validation error naming the setting, from TOML and from a JSON-valued `SQLLENS_RESULT_MASKING__*` environment variable. An environment value that is not valid JSON (for example `SQLLENS_RESULT_MASKING__EXTRA_WORDS=phone`) also makes loading fail, with an error that names the `result_masking` section. In every one of these cases `sqllens validate` exits non-zero.",
+    "claim_signature": "issue-acceptance-10",
+    "criteria_file": ".prflow/tmp/review/pr-354/42452660894-1/criteria.json",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 93,
+    "verify_hint": "Check the four branch combinations in `build_agent` (`src/sqllens/agent/factory.py` lines 93-109) against `_relation_check_executor` in `src/sqllens/safety/__init__.py` line 241, and the `verify-memory` runner in `src/sqllens/eval/`",
+    "id": "VC-84",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Masking applies in all four combinations of `database.read_only` (true or false) and `[[rls]]` (rules present or absent), and for answers produced by the `verify-memory` command.",
+    "claim_signature": "issue-acceptance-11",
+    "criteria_file": ".prflow/tmp/review/pr-354/42452660894-1/criteria.json",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 615,
+    "verify_hint": "Check `test_masking_guard_is_outermost`'s parametrization plus the `verify-memory` assertion in `tests/unit/test_eval_runner.py`",
+    "id": "VC-85",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With `[[rls]]` rules configured, the agent still builds, and the RLS relation check still runs on the engine runner.",
+    "claim_signature": "issue-acceptance-12",
+    "criteria_file": ".prflow/tmp/review/pr-354/42452660894-1/criteria.json",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "source_line": 85,
+    "verify_hint": "Check that `mask_secret_columns` preserves `TRUNCATED_ATTR`/`MAX_ROWS_ATTR` in the copied attrs (`src/sqllens/safety/masking.py` lines 209-222) so `row_cap_hit` is still true in `RunSqlTool.execute`",
+    "id": "VC-86",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A result the row cap truncated still carries the \"Result truncated at N rows\" note in the model's text after masking.",
+    "claim_signature": "issue-acceptance-13",
+    "criteria_file": ".prflow/tmp/review/pr-354/42452660894-1/criteria.json",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 352,
+    "verify_hint": "Check `test_note_survives_long_preview_and_follows_truncation_note` and `test_mask_keeps_truncation_attrs`",
+    "id": "VC-87",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The change leaves these cases unmasked: a secret column renamed by an alias, a UNION's first-branch label or a view (for example `password_hash AS h`); an unaliased expression whose result label the database builds without the column's name (SQLite labels `upper(password_hash)` with that text, so the rule masks it; how MySQL and PostgreSQL label each expression is not established); a PostgreSQL whole-row value (`row_to_json(u)`); a label whose words run together (`passwordhash`); a PIN-type or other secret column whose label holds none of the entry words (the label of the reported PIN-type column was not recorded, so whether the built-in list covers it is not established); values a database error message repeats; sampled values that catalog statistics views return. It also leaves contact columns (email, phone, IP, browser) unmasked unless an operator adds them, and leaves the INFO level of the model payload log in `src/sqllens/agent/integrations/anthropic/llm.py` unchanged.",
+    "claim_signature": "issue-acceptance-14",
+    "criteria_file": ".prflow/tmp/review/pr-354/42452660894-1/criteria.json",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "source_line": 654,
+    "verify_hint": "Check `test_labels_without_an_entry_word_stay_unmasked` and `test_sqlite_alias_hides_secret_but_unaliased_expression_is_masked` against the criterion's enumerated cases",
+    "id": "VC-88",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-89",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 1. In `src/sqllens/safety/masking.py` an `unmasked_columns` entry that can never equal a real column label is accepted and then does nothing. The validator only checks that the entry splits into at least one word, while the exemption compares the raw lower-cased string against the label, so `\" token_count\"` with a stray space, or `\"token count\"` with a space instead of an underscore, passes configuration loading and exempts no column. The operator sees `[withheld]` and gets no warning that the exemption never applied. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/masking.py",
+    "verify_against": "The `unmasked_columns` validator in `ResultMaskingConfig` (src/sqllens/config.py) and the exemption comparison in `SecretColumnMatcher.is_secret` (src/sqllens/safety/masking.py)",
+    "verify_hint": "Compare the `unmasked_columns` field_validator in `ResultMaskingConfig` in `src/sqllens/config.py` against how `SecretColumnMatcher` stores and compares `unmasked_columns` in `src/sqllens/safety/masking.py`",
+    "prior_ref": "finding 1 (Suggestion / Minor)",
+    "prior_evidence": "1. In `src/sqllens/safety/masking.py` an `unmasked_columns` entry that can never equal a real column label is accepted and then does nothing. The validator only checks that the entry splits into at least one word, while the exemption compares the raw lower-cased string against the label, so `\" token_count\"` with a stray space, or `\"token count\"` with a space instead of an underscore, passes configuration loading and exempts no column. The operator sees `[withheld]` and gets no warning that the exemption never applied. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:masking.py:unmasked-columns-unmatchable-entry",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-90",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 2. In `src/sqllens/agent/tools/run_sql.py` the list of masked column labels is read out of `df.attrs` without checking its type. Line 94 reads `df.attrs.get(MASKED_COLUMNS_ATTR) or []` and line 99 joins it, assuming a list of strings, while the two neighbouring reads of the same `attrs` contract do coerce their values with `bool(...)` and `int(...)`. A frame whose record is a bare string, which is reachable when `RunSqlTool` is built over a runner stack that does not have the masking runner outermost, would produce a note listing single characters. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/tools/run_sql.py",
+    "verify_against": "The writer of `MASKED_COLUMNS_ATTR` in `mask_secret_columns` (src/sqllens/safety/masking.py) and the neighbouring coerced attrs reads in run_sql.py",
+    "verify_hint": "Check the `df.attrs.get(MASKED_COLUMNS_ATTR)` read and join in `RunSqlTool.execute` in `src/sqllens/agent/tools/run_sql.py` against where `mask_secret_columns` sets that attr in `src/sqllens/safety/masking.py`",
+    "prior_ref": "finding 2 (Suggestion / Minor)",
+    "prior_evidence": "2. In `src/sqllens/agent/tools/run_sql.py` the list of masked column labels is read out of `df.attrs` without checking its type. Line 94 reads `df.attrs.get(MASKED_COLUMNS_ATTR) or []` and line 99 joins it, assuming a list of strings, while the two neighbouring reads of the same `attrs` contract do coerce their values with `bool(...)` and `int(...)`. A frame whose record is a bare string, which is reachable when `RunSqlTool` is built over a runner stack that does not have the masking runner outermost, would produce a note listing single characters. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:run_sql.py:masked-columns-attr-type",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-91",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 3. In `src/sqllens/safety/masking.py` the masking runner builds its `SecretColumnMatcher` inside its own constructor from three raw configuration lists, so the matching policy can neither be passed in nor inspected. The only way to vary or observe it is to reach into the private `_matcher` attribute, which the tests do. Accepting an already-built matcher would make the policy a first-class collaborator, and the matcher itself exposes only `is_secret`, so a caller cannot see which entries are still in force after `unmasked_words` removal. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/masking.py",
+    "verify_against": "`ResultMaskingRunner.__init__` and `SecretColumnMatcher`'s public surface in src/sqllens/safety/masking.py, plus the tests in tests/unit/test_safety_masking.py that assign `guard._matcher`",
+    "verify_hint": "Check `ResultMaskingRunner.__init__` and the `SecretColumnMatcher` class in `src/sqllens/safety/masking.py`, and the `_matcher` assignments in `tests/unit/test_safety_masking.py`",
+    "prior_ref": "finding 3 (Suggestion / Minor)",
+    "prior_evidence": "3. In `src/sqllens/safety/masking.py` the masking runner builds its `SecretColumnMatcher` inside its own constructor from three raw configuration lists, so the matching policy can neither be passed in nor inspected. The only way to vary or observe it is to reach into the private `_matcher` attribute, which the tests do. Accepting an already-built matcher would make the policy a first-class collaborator, and the matcher itself exposes only `is_secret`, so a caller cannot see which entries are still in force after `unmasked_words` removal. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:masking.py:matcher-injection-and-inspection",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-92",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 4. In `src/sqllens/safety/masking.py` the fail-closed error message interpolates the caught exception into the text that becomes the model payload, and no test bounds what that text can contain. The masking step touches cell data through `df.copy()`, `pd.Series(...)` and `isetitem`, so a pandas-raised error is the one plausible way a value could travel out through the path that exists to hide it. The single fail-closed test injects a matcher that raises from `is_secret`, and `is_secret` only ever sees a label, so no value-carrying exception is exercised. This is an untested boundary, not a demonstrated leak. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/masking.py",
+    "verify_against": "The `except` block in `ResultMaskingRunner.run_sql`/`mask_secret_columns` in src/sqllens/safety/masking.py and the fail-closed test in tests/unit/test_safety_masking.py",
+    "verify_hint": "Check the exception interpolation in `ResultMaskingRunner.run_sql` in `src/sqllens/safety/masking.py` and the fail-closed test that injects a raising matcher in `tests/unit/test_safety_masking.py`",
+    "prior_ref": "finding 4 (Suggestion / Minor)",
+    "prior_evidence": "4. In `src/sqllens/safety/masking.py` the fail-closed error message interpolates the caught exception into the text that becomes the model payload, and no test bounds what that text can contain. The masking step touches cell data through `df.copy()`, `pd.Series(...)` and `isetitem`, so a pandas-raised error is the one plausible way a value could travel out through the path that exists to hide it. The single fail-closed test injects a matcher that raises from `is_secret`, and `is_secret` only ever sees a label, so no value-carrying exception is exercised. This is an untested boundary, not a demonstrated leak. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:masking.py:fail-closed-message-value-leak",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-93",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 5. In `src/sqllens/safety/masking.py` the record of masked labels is built one entry per column position, so a result with two columns sharing one secret label produces a note that repeats the label, reading \"…these columns: token, token.\" MySQL is the engine where duplicate labels actually occur. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/masking.py",
+    "verify_against": "The per-position label recording in `mask_secret_columns` (src/sqllens/safety/masking.py) and the note construction in src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check how `mask_secret_columns` appends to the masked-labels list per column position in `src/sqllens/safety/masking.py` and how `RunSqlTool` joins it in `src/sqllens/agent/tools/run_sql.py`",
+    "prior_ref": "finding 5 (Suggestion / Minor)",
+    "prior_evidence": "5. In `src/sqllens/safety/masking.py` the record of masked labels is built one entry per column position, so a result with two columns sharing one secret label produces a note that repeats the label, reading \"…these columns: token, token.\" MySQL is the engine where duplicate labels actually occur. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:masking.py:duplicate-label-note-repeat",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-94",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 6. In `src/sqllens/safety/masking.py` no test pins the note text or the stored record for the duplicate-label case. The one duplicate-label test asserts the row values only, so a change to the label list the note prints would go unnoticed on the engine where that case is real. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "verify_against": "The duplicate-label test in tests/unit/test_safety_masking.py against the note construction in src/sqllens/agent/tools/run_sql.py",
+    "verify_hint": "Check the duplicate-column-label test in `tests/unit/test_safety_masking.py` for assertions on `df.attrs[MASKED_COLUMNS_ATTR]` and the withheld note text",
+    "prior_ref": "finding 6 (Suggestion / Minor)",
+    "prior_evidence": "6. In `src/sqllens/safety/masking.py` no test pins the note text or the stored record for the duplicate-label case. The one duplicate-label test asserts the row values only, so a change to the label list the note prints would go unnoticed on the engine where that case is real. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:test_safety_masking.py:duplicate-label-note-untested",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-95",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 7. In `tests/unit/test_safety_masking.py` the rejection of an unknown `[result_masking]` key is tested only through TOML. The environment-variable tests cover a wrong type, an invalid entry and non-JSON input, but never an unknown nested key such as `SQLLENS_RESULT_MASKING__ENABLE=false`. Whether pydantic-settings forwards such a key into the model, where `extra=\"forbid\"` would reject it, or drops it before validation is not established; a silently dropped misspelling of `EXTRA_WORDS` would leave an operator's intended extra masking inactive after a clean load. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_masking.py",
+    "verify_against": "pydantic-settings nested env-var handling and `ResultMaskingConfig`'s `extra=\"forbid\"` in src/sqllens/config.py",
+    "verify_hint": "Check the `SQLLENS_RESULT_MASKING__*` env tests in `tests/unit/test_safety_masking.py` and `ResultMaskingConfig` model_config in `src/sqllens/config.py`",
+    "prior_ref": "finding 7 (Suggestion / Minor)",
+    "prior_evidence": "7. In `tests/unit/test_safety_masking.py` the rejection of an unknown `[result_masking]` key is tested only through TOML. The environment-variable tests cover a wrong type, an invalid entry and non-JSON input, but never an unknown nested key such as `SQLLENS_RESULT_MASKING__ENABLE=false`. Whether pydantic-settings forwards such a key into the model, where `extra=\"forbid\"` would reject it, or drops it before validation is not established; a silently dropped misspelling of `EXTRA_WORDS` would leave an operator's intended extra masking inactive after a clean load. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:test_safety_masking.py:env-unknown-key-untested",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-96",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 8. In `src/sqllens/safety/masking.py` `mask_secret_columns` removes the stale masked-columns record from the frame it was handed before it decides whether to mask anything, so both early-return paths hand back an object it has already edited while the docstring says the frame is returned unchanged. If the matcher raises on a later column, the removal has already happened on the frame the fail-closed path discards. Doing the removal on the copy would leave the input untouched. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/masking.py",
+    "verify_against": "`mask_secret_columns`'s docstring and body in src/sqllens/safety/masking.py, and its callers in src/sqllens/safety/masking.py",
+    "verify_hint": "Check the order of the `attrs.pop(MASKED_COLUMNS_ATTR)` removal relative to the early returns and `df.copy()` in `mask_secret_columns` in `src/sqllens/safety/masking.py`",
+    "prior_ref": "finding 8 (Suggestion / Minor)",
+    "prior_evidence": "8. In `src/sqllens/safety/masking.py` `mask_secret_columns` removes the stale masked-columns record from the frame it was handed before it decides whether to mask anything, so both early-return paths hand back an object it has already edited while the docstring says the frame is returned unchanged. If the matcher raises on a later column, the removal has already happened on the frame the fail-closed path discards. Doing the removal on the copy would leave the input untouched. (raised by 1/6 agents)",
+    "claim_signature": "api_contract:masking.py:early-return-frame-mutation",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-97",
+    "category": "absolute_claim",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 9. In `docs/external/configuration.md` the bullet listing the cases masking misses reads \"a secret column renamed by an alias (`password_hash AS h`), a view or a UNION branch label\", which a reader can take to mean that a UNION branch label is never masked. A UNION whose first branch selects `password_hash` without an alias is labelled `password_hash` and is masked; only the renaming hides it. The sentence is true under the reading that \"renamed by\" governs all three cases, which is how the acceptance criterion phrases it too, so this is a clarity point. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/external/configuration.md",
+    "verify_against": "The label-matching behaviour in `SecretColumnMatcher.is_secret` / `mask_secret_columns` in src/sqllens/safety/masking.py and the acceptance criterion's wording",
+    "verify_hint": "Check the \"cases masking misses\" bullet in the result masking section of `docs/external/configuration.md` against label matching in `src/sqllens/safety/masking.py`",
+    "prior_ref": "finding 9 (Suggestion / Minor)",
+    "prior_evidence": "9. In `docs/external/configuration.md` the bullet listing the cases masking misses reads \"a secret column renamed by an alias (`password_hash AS h`), a view or a UNION branch label\", which a reader can take to mean that a UNION branch label is never masked. A UNION whose first branch selects `password_hash` without an alias is labelled `password_hash` and is masked; only the renaming hides it. The sentence is true under the reading that \"renamed by\" governs all three cases, which is how the acceptance criterion phrases it too, so this is a clarity point. (raised by 1/6 agents)",
+    "claim_signature": "absolute_claim:configuration.md:union-branch-label-unmasked",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-98",
+    "category": "api_contract",
+    "claim": "The test docstring's assertion about guard order holds for every configuration `build_agent` can produce: when `read_only` is enabled the `ReadOnlyGuardRunner` sits directly beneath the masking guard, including when `[[rls]]` rules add `RlsGuardRunner` between them.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "verify_against": "The runner composition order in `build_agent` in src/sqllens/agent/factory.py",
+    "verify_hint": "Compare the docstring in `TestFactoryComposition` at tests/unit/test_factory_wiring.py:533-535 with the guard composition order in `build_agent` in `src/sqllens/agent/factory.py` (RowCap, ReadOnlyGuardRunner, optional RlsGuardRunner, ResultMaskingRunner)",
+    "prior_ref": "VC-88",
+    "prior_evidence": "The docstring at tests/unit/test_factory_wiring.py:533-535 says that when enabled the read-only guard 'must sit directly beneath the masking guard'. In src/sqllens/agent/factory.py:93-109 the order is RowCap, then ReadOnlyGuardRunner (94), then, if cfg.rls is set, RlsGuardRunner (100-101), then ResultMaskingRunner (104). With RLS configured the stack is masking -> Rls -> ReadOnly, so the guard is not directly beneath masking. The comment at factory.py:95-99 states this is deliberate: RLS rewrites first and the read-only guard validates the rewritten SQL. The test only checks the no-RLS case. The rejections line is about ResultMaskingConfig validators and does not cover this claim.",
+    "claim_signature": "api_contract:test_factory_wiring.py:readonly-directly-beneath-masking",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  }
+]
