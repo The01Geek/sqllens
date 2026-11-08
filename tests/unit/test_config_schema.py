@@ -40,6 +40,7 @@ def _clean_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SQLLENS_AGENT__SHOW_DETAILS", raising=False)
     monkeypatch.delenv("SQLLENS_AGENT__AUDIT__ENABLED", raising=False)
     monkeypatch.delenv("SQLLENS_AGENT__MAX_CONVERSATIONS", raising=False)
+    monkeypatch.delenv("SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER", raising=False)
     monkeypatch.delenv("SQLLENS_MEMORY__SAVE_TEXT_MEMORIES", raising=False)
 
 
@@ -127,6 +128,45 @@ def test_show_details_toml_override(tmp_path: Path) -> None:
         _minimal_toml(tmp_path, "\n[agent]\nshow_details = true\n")
     )
     assert cfg.agent.show_details is True
+
+
+# --- #192: AgentRuntimeConfig.show_conversation_footer -------------------------
+
+
+def test_show_conversation_footer_defaults_true(tmp_path: Path) -> None:
+    assert Config.load(_minimal_toml(tmp_path)).agent.show_conversation_footer is True
+
+
+def test_show_conversation_footer_toml_false(tmp_path: Path) -> None:
+    cfg = Config.load(
+        _minimal_toml(tmp_path, "\n[agent]\nshow_conversation_footer = false\n")
+    )
+    assert cfg.agent.show_conversation_footer is False
+
+
+def test_show_conversation_footer_env_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER", "false")
+    assert Config.load(_minimal_toml(tmp_path)).agent.show_conversation_footer is False
+
+
+def test_show_conversation_footer_env_wins_over_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER", "true")
+    cfg = Config.load(
+        _minimal_toml(tmp_path, "\n[agent]\nshow_conversation_footer = false\n")
+    )
+    assert cfg.agent.show_conversation_footer is True
+
+
+def test_sample_config_documents_show_conversation_footer() -> None:
+    from sqllens.cli import _SAMPLE_CONFIG
+
+    agent_block = _SAMPLE_CONFIG.split("[agent]\n", 1)[1].split("\n[", 1)[0]
+    assert "# show_conversation_footer = true" in agent_block
+    assert "SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER" in agent_block
 
 
 # --- #149: AgentRuntimeConfig.max_conversations --------------------------------

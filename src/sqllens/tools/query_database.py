@@ -60,7 +60,9 @@ class AgentRunError(RuntimeError):
     alongside the message so the server can attach it to the ``isError`` result's
     ``_meta`` when ``agent.show_details`` is on. It is ``None`` when details are
     off — in which case the server re-raises and FastMCP formats the failure
-    exactly as before, with no trace leaked into a details-off deployment.
+    exactly as before, with no trace leaked into a details-off deployment —
+    unless ``agent.show_conversation_footer`` is off, when the server returns an
+    ``isError`` result carrying the conversation id in ``_meta`` instead.
 
     ``query_info`` retains captured SQL for the verification runner, under
     the same resolved ``show_details`` gate as the trace.

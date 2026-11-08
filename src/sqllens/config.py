@@ -453,6 +453,17 @@ class AgentRuntimeConfig(BaseModel):
     # not leak conversations. Conversations are ephemeral and never persisted to
     # disk — they are dropped on restart. Env override: SQLLENS_AGENT__MAX_CONVERSATIONS.
     max_conversations: int = Field(default=1000, ge=1, le=1_000_000)
+    # Server-wide, not a per-request Profile knob. Env override:
+    # SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER.
+    show_conversation_footer: bool = Field(
+        default=True,
+        description=(
+            "Write the conversation id into query_database text: the footer on "
+            "answers and the 'Conversation ID: <id>' line ending agent-run error "
+            "messages. Set false to return the id only in "
+            "_meta['sqllens/conversation']."
+        ),
+    )
     audit: AuditConfig = Field(default_factory=lambda: AuditConfig())
 
 
