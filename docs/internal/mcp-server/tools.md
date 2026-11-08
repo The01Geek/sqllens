@@ -64,7 +64,10 @@ def build_server(cfg: Config) -> FastMCP:
             "model": cfg.llm.model,
             "reasoning_effort": cfg.llm.effort,
         }
-        return _conversation_result(markdown, conversation_id, extra_meta)
+        return _conversation_result(
+            markdown, conversation_id, extra_meta,
+            show_footer=cfg.agent.show_conversation_footer,
+        )
 
     @mcp.tool()
     async def list_data_sources() -> str:
@@ -539,7 +542,7 @@ FastMCP collapses every failure into one `isError: true` result and formats the 
 | Agent cold-start/build failed (`get_agent` raised) | `RuntimeError("internal error; see server logs")` → `isError: true`. Full traceback logged server-side; host/port/db/role never echoed to the client. |
 | `agent.send_message` raised an exception | `RuntimeError("internal error; see server logs")` → `isError: true`. Same sanitization as above. |
 | `components_to_blocks` raised while formatting the stream (e.g. an unexpected sqlglot exception in the introspection classifier) | `RuntimeError("internal error; see server logs")` → `isError: true`, traceback logged server-side. |
-| Agent emitted an error status card, **not** superseded later in the turn | `AgentRunError("SQL execution error: " + <card description>)` (a `RuntimeError` subclass) → `isError: true`. Agent-authored detail passed through (categorized, not sanitized); logged server-side too. When `agent.show_details` is on the raised error carries the step-by-step trace, which `server.py` attaches to the `isError` result's `_meta["sqllens/agent_trace"]`; with it off the trace is `None` and the failure is formatted exactly as before, unless `agent.show_conversation_footer` is off (see [Agent trace channel](#agent-trace-channel--agentshow_details) for that returned result). See [Agent trace channel](#agent-trace-channel--agentshow_details). |
+| Agent emitted an error status card, **not** superseded later in the turn | `AgentRunError("SQL execution error: " + <card description>)` (a `RuntimeError` subclass) → `isError: true`. Agent-authored detail passed through (categorized, not sanitized); logged server-side too. When `agent.show_details` is on the raised error carries the step-by-step trace, which `server.py` attaches to the `isError` result's `_meta["sqllens/agent_trace"]`; with it off the trace is `None` and the failure is formatted exactly as before, unless `agent.show_conversation_footer` is off, which returns an `isError` result instead. See [Agent trace channel](#agent-trace-channel--agentshow_details). |
 | Agent emitted an error status card **then a later data `run_sql` succeeded** (self-correction) | The error is cleared; the recovered answer is returned as a normal `isError: false` result. The clear is scoped to a non-introspection data `run_sql` success and logged `INFO`. See [Agent self-correction supersedes an earlier error](#agent-self-correction-supersedes-an-earlier-error). |
 | `UnsafeSqlError` propagated out of `send_message` | `RuntimeError(str(e))` → `isError: true`, message **verbatim**. Defensive path: the vendored agent's `RunSqlTool.execute` broad `except Exception` in `agent/tools/run_sql.py` currently catches guard violations and feeds them back as a tool result, so in practice a real guard violation arrives via the *error status card* row above; this branch is kept for any future path that lets `UnsafeSqlError` escape. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md). |
 | `RlsError` propagated out of `send_message` | `RuntimeError(str(e))` → `isError: true`, message **verbatim**. Same defensive rationale as the `UnsafeSqlError` row above (`RunSqlTool.execute` currently swallows it into a tool result), kept for any future path that lets `RlsError` escape. See [database-connectors/row-level-security.md](../database-connectors/row-level-security.md). |

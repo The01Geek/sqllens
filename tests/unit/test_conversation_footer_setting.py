@@ -69,6 +69,24 @@ def _failing_real_agent(monkeypatch: pytest.MonkeyPatch) -> Any:
     return agent
 
 
+def _patch_impl(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    returns: str | None = None,
+    raises: Exception | None = None,
+) -> None:
+    """Replace the impl with a stub that returns ``returns`` as the answer or raises."""
+
+    async def fake_impl(
+        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
+    ):
+        if raises is not None:
+            raise raises
+        return returns, [], None, None, None
+
+    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
+
+
 async def _call(cfg: Config, question: str = f"q, {_TOOL_PROMPT}") -> Any:
     return await _query_database_fn(build_server(cfg))(
         question, _StubCtx(), conversation_id=_CONV
@@ -82,12 +100,7 @@ async def _call(cfg: Config, question: str = f"q, {_TOOL_PROMPT}") -> Any:
 async def test_success_footer_follows_setting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, footer: bool
 ) -> None:
-    async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
-    ):
-        return "the answer", [], None, None, None
-
-    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
+    _patch_impl(monkeypatch, returns="the answer")
     cfg = _cfg(tmp_path, footer=footer)
 
     result = await _call(cfg, "rows?")
@@ -106,12 +119,7 @@ async def test_success_footer_off_keeps_ids_the_model_wrote(
 ) -> None:
     answer = f"Your conversation is {_CONV}.{_TAIL}"
 
-    async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
-    ):
-        return answer, [], None, None, None
-
-    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
+    _patch_impl(monkeypatch, returns=answer)
 
     result = await _call(_cfg(tmp_path, footer=False), "rows?")
 
@@ -190,12 +198,7 @@ async def test_footer_off_keeps_id_that_is_not_the_trailing_tail(
 ) -> None:
     message = f"SQL execution error: failed{_TAIL} (see logs)"
 
-    async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
-    ):
-        raise AgentRunError(message, agent_trace=None)
-
-    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
+    _patch_impl(monkeypatch, raises=AgentRunError(message, agent_trace=None))
 
     result = await _call(_cfg(tmp_path, footer=False), "rows?")
 
@@ -206,12 +209,7 @@ async def test_footer_off_keeps_id_that_is_not_the_trailing_tail(
 async def test_footer_off_non_agent_run_error_is_still_raised(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def fake_impl(
-        _cfg, _q, *, metadata=None, conversation_id=None, profile=None, profile_store=None
-    ):
-        raise RuntimeError(qd._INTERNAL_ERROR_MESSAGE)
-
-    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
+    _patch_impl(monkeypatch, raises=RuntimeError(qd._INTERNAL_ERROR_MESSAGE))
 
     with pytest.raises(RuntimeError) as excinfo:
         await _call(_cfg(tmp_path, footer=False), "rows?")
