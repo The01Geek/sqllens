@@ -36,6 +36,7 @@ from sqllens.safety import (
     ResultMaskingRunner,
     RlsGuardRunner,
     RowCapRunner,
+    WholeRowSelectGuardRunner,
     _relation_check_executor,
     mark_truncation,
 )
@@ -596,9 +597,15 @@ def test_validate_exits_non_zero(
 _RULE = RlsRule(table="users", column="id", value=1)
 
 
-def _cfg(tmp_path: Path, *, read_only: bool, rls: bool, **masking) -> Config:  # type: ignore[no-untyped-def]
+def _cfg(  # type: ignore[no-untyped-def]
+    tmp_path: Path, *, read_only: bool, rls: bool, whole_row: bool = True, **masking
+) -> Config:
     return Config(
-        database=DatabaseConfig(url="sqlite:///:memory:", read_only=read_only),
+        database=DatabaseConfig(
+            url="sqlite:///:memory:",
+            read_only=read_only,
+            refuse_whole_row_selects=whole_row,
+        ),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
         memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
         auth=AuthConfig(mode="none"),
@@ -614,10 +621,20 @@ def _runner_of(agent) -> SqlRunner:  # type: ignore[no-untyped-def]
 
 @pytest.mark.parametrize("read_only", [True, False])
 @pytest.mark.parametrize("rls", [True, False])
-def test_masking_guard_is_outermost(tmp_path: Path, read_only: bool, rls: bool) -> None:
-    runner = _runner_of(build_agent(_cfg(tmp_path, read_only=read_only, rls=rls)))
+@pytest.mark.parametrize("whole_row", [True, False])
+def test_masking_guard_is_outermost(
+    tmp_path: Path, read_only: bool, rls: bool, whole_row: bool
+) -> None:
+    runner = _runner_of(
+        build_agent(_cfg(tmp_path, read_only=read_only, rls=rls, whole_row=whole_row))
+    )
     assert type(runner) is ResultMaskingRunner
     inner = runner._inner
+    # The whole-row select guard, when on, sits directly beneath masking; it
+    # only checks SQL, so the runners that rewrite or run SQL follow it.
+    if whole_row:
+        assert type(inner) is WholeRowSelectGuardRunner
+        inner = inner._inner
     expected = RlsGuardRunner if rls else (ReadOnlyGuardRunner if read_only else RowCapRunner)
     assert type(inner) is expected
     chain = []
@@ -626,6 +643,7 @@ def test_masking_guard_is_outermost(tmp_path: Path, read_only: bool, rls: bool) 
         chain.append(type(r))
         r = getattr(r, "_inner", None)
     assert ResultMaskingRunner not in chain
+    assert WholeRowSelectGuardRunner not in chain
     if rls:
         executor = _relation_check_executor(inner._inner)
         assert type(executor).__name__ == "SqliteRunner"

@@ -19,6 +19,13 @@ cfg.database    →  build_sql_runner(url,
                                                           ↓ (if cfg.rls non-empty)
                                                         RlsGuardRunner (sqlglot AST rewrite —
                                                           predicate injection + fail-secure proof)
+                                                          ↓ (if cfg.database.refuse_whole_row_selects,
+                                                             the default)
+                                                        WholeRowSelectGuardRunner (refuses a * or
+                                                          alias.* that expands a table or view)
+                                                          ↓
+                                                        ResultMaskingRunner (outermost; withholds the
+                                                          values of secret-looking result columns)
 cfg.memory      →  ChromaAgentMemory                 →  persists under cfg.memory.persist_dir
                    LocalFileSystem                   →  scratch root = tempfile.gettempdir() / "sqllens"
 cfg.agent       →  BoundedConversationStore          →  in-process LRU, capped at
@@ -75,7 +82,7 @@ The adapter retains the assistant response's content blocks in `provider_content
 
 `EmitTextTool` is the companion seam introduced with the multi-block response (#194): the agent calls `emit_text(text=...)` to place a deliberate prose block at a chosen position in the response stream (a caption between two artifacts, a one-line summary at the end, a brief introduction before a chart). It carries no SQL/FS capability either; it only emits a `RichTextComponent` whose `data` carries the answer marker (`IS_ANSWER_MARKER_KEY = "is_answer"` from [src/sqllens/agent/markers.py](../../../src/sqllens/agent/markers.py)) so the MCP-layer block builder includes the prose in the rendered answer. The agent's terminal answer (final reply) and iteration-limit warning carry the same marker and so converge on one discriminator, but the agent loop yields the final reply only when no `emit_text` call succeeded earlier in the same request; a hidden final reply is still saved to the conversation history. See [mcp-server/tools.md](../mcp-server/tools.md#text-composition-the-emittexttool-seam) and [src/sqllens/agent/tools/emit_text.py](../../../src/sqllens/agent/tools/emit_text.py).
 
-Call order on every query is the reverse of construction. With RLS unconfigured: **ResultMaskingRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. With RLS configured (`cfg.rls` non-empty): **ResultMaskingRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner** — the RLS rewrite runs *first* so the read-only guard validates the *rewritten* SQL. With `cfg.database.read_only = false`, `ReadOnlyGuardRunner` drops out of either chain. The parser rejects before any connection opens; the engine runner streams with `fetchmany(max_rows + 1)` and sets its native statement-timeout primitive; the decorator clamps the result a second time on the way back. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full timeout/cap story and [database-connectors/row-level-security.md](../database-connectors/row-level-security.md) for the RLS rewrite.
+Call order on every query is the reverse of construction. With RLS unconfigured: **ResultMaskingRunner → WholeRowSelectGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. With RLS configured (`cfg.rls` non-empty): **ResultMaskingRunner → WholeRowSelectGuardRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner** — the whole-row select guard checks the SQL the agent wrote, and the RLS rewrite runs before the read-only guard so the read-only guard validates the *rewritten* SQL. With `cfg.database.read_only = false`, `ReadOnlyGuardRunner` drops out of either chain, and with `cfg.database.refuse_whole_row_selects = false`, `WholeRowSelectGuardRunner` does. The parser rejects before any connection opens; the engine runner streams with `fetchmany(max_rows + 1)` and sets its native statement-timeout primitive; the decorator clamps the result a second time on the way back. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full timeout/cap story and [database-connectors/row-level-security.md](../database-connectors/row-level-security.md) for the RLS rewrite.
 
 ## API-key check is here, not in config
 

@@ -55,6 +55,15 @@ class DatabaseConfig(BaseModel):
     )
     name: str = Field(default="primary", description="Display name shown via list_data_sources")
     read_only: bool = Field(default=True, description="Reject non-SELECT statements via SQL parser")
+    refuse_whole_row_selects: bool = Field(
+        default=True,
+        description=(
+            "Refuse, before it runs, SQL whose SELECT * or alias.* expands a table or "
+            "view, so the agent selects only the columns a question needs. COUNT(*), "
+            "a * inside EXISTS, and a * over a CTE, derived table or system catalog "
+            "are allowed."
+        ),
+    )
     statement_timeout_ms: int = Field(
         default=30_000,
         ge=0,
