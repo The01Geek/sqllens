@@ -36,6 +36,7 @@ from sqllens.config import (
 )
 from sqllens.safety import (
     ReadOnlyGuardRunner,
+    ResultMaskingRunner,
     RlsError,
     RlsGuardRunner,
     RowCapRunner,
@@ -128,6 +129,28 @@ async def test_postgres_rls_views(postgres_url, materialized) -> None:
 
 async def test_mysql_rls_views(mysql_url) -> None:
     await _assert_rls_view_blocked(mysql_url, "mysql")
+
+
+@pytest.mark.parametrize("engine", ["postgres", "mysql"])
+async def test_select_star_masks_driver_labelled_secret_column(request, engine: str) -> None:
+    url = request.getfixturevalue(f"{engine}_url")
+    table = f"mask_{uuid.uuid4().hex}"
+    writer = build_sql_runner(url, read_only=False)
+
+    async def execute(sql: str) -> None:
+        await writer.run_sql(RunSqlToolArgs(sql=sql), _ctx())
+
+    await execute(f"CREATE TABLE {table} (id INTEGER, password_hash TEXT)")
+    try:
+        await execute(f"INSERT INTO {table} VALUES (1, 'SENTINEL-HASH'), (2, NULL)")
+        guard = ResultMaskingRunner(RowCapRunner(build_sql_runner(url), max_rows=10))
+        df = await guard.run_sql(
+            RunSqlToolArgs(sql=f"SELECT * FROM {table} ORDER BY id"), _ctx()
+        )
+        assert list(df.columns) == ["id", "password_hash"]
+        assert df["password_hash"].tolist() == ["[withheld]", "[withheld]"]
+    finally:
+        await execute(f"DROP TABLE IF EXISTS {table}")
 
 
 async def test_postgres_rls_keeps_quoted_builtin_function_case(postgres_url) -> None:

@@ -6,7 +6,7 @@ refuses a ``*`` or ``alias.*`` that expands a table or view before the query run
 ``database.refuse_whole_row_selects`` is off, the factory composes it outside every
 protection listed below.
 
-Four orthogonal protections, composed at the factory:
+Five orthogonal protections, composed at the factory:
 
 * ``assert_select_only`` / ``ReadOnlyGuardRunner`` — sqlglot parse rejects
   anything that isn't a single ``SELECT``/``WITH``.
@@ -29,6 +29,8 @@ Four orthogonal protections, composed at the factory:
 * ``RowCapRunner`` — per-runner streaming via ``fetchmany`` stops at
   ``max_rows``; this decorator is the secondary belt-and-suspenders check
   on the returned DataFrame.
+* ``ResultMaskingRunner`` — outermost; replaces every value in a result
+  column whose label matches the secret-word rule with ``[withheld]``.
 """
 
 from __future__ import annotations
@@ -45,6 +47,12 @@ from sqllens.safety.limits import (
     TRUNCATED_ATTR,
     RowCapRunner,
     mark_truncation,
+)
+from sqllens.safety.masking import (
+    MASKED_COLUMNS_ATTR,
+    WITHHELD_PLACEHOLDER,
+    ResultMaskingError,
+    ResultMaskingRunner,
 )
 from sqllens.safety.readonly import (
     UnsafeSqlError,
@@ -69,9 +77,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "MASKED_COLUMNS_ATTR",
     "MAX_ROWS_ATTR",
     "TRUNCATED_ATTR",
+    "WITHHELD_PLACEHOLDER",
     "ReadOnlyGuardRunner",
+    "ResultMaskingError",
+    "ResultMaskingRunner",
     "RlsError",
     "RlsGuardRunner",
     "RowCapRunner",
@@ -237,7 +249,9 @@ def _relation_check_executor(runner: object) -> object:
     honor it is the first one beneath them. Exact types only: a subclass may
     override ``run_sql`` without forwarding, so it is checked itself.
     """
-    while type(runner) in (RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner):
+    while type(runner) in (
+        ResultMaskingRunner, RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner
+    ):
         runner = runner._inner  # type: ignore[attr-defined]
     return runner
 
