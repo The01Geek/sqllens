@@ -48,6 +48,7 @@ from sqllens.safety.limits import (
 from sqllens.safety.masking import (
     MASKED_COLUMNS_ATTR,
     WITHHELD_PLACEHOLDER,
+    ResultMaskingError,
     ResultMaskingRunner,
 )
 from sqllens.safety.readonly import (
@@ -73,6 +74,7 @@ __all__ = [
     "TRUNCATED_ATTR",
     "WITHHELD_PLACEHOLDER",
     "ReadOnlyGuardRunner",
+    "ResultMaskingError",
     "ResultMaskingRunner",
     "RlsError",
     "RlsGuardRunner",
@@ -236,7 +238,9 @@ def _relation_check_executor(runner: object) -> object:
     honor it is the first one beneath them. Exact types only: a subclass may
     override ``run_sql`` without forwarding, so it is checked itself.
     """
-    while type(runner) in (RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner):
+    while type(runner) in (
+        ResultMaskingRunner, RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner
+    ):
         runner = runner._inner  # type: ignore[attr-defined]
     return runner
 

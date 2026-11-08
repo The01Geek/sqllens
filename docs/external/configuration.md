@@ -229,7 +229,7 @@ The built-in entries are: `password`, `passwd`, `pwd`, `passcode`, `secret`, `to
 - a secret column renamed by an alias (`password_hash AS h`), a view or a UNION branch label;
 - an expression over a secret column whose label the database builds without the column's name, such as PostgreSQL's function-name label for `upper(password_hash)`;
 - a PostgreSQL whole-row value (`row_to_json(u)`);
-- a label whose words run together (`passwordhash`);
+- a label whose words run together (`passwordhash`), or whose acronym plural runs into the next word (`OTPsCount` splits as ot, ps, count);
 - a secret column whose label contains none of the entries;
 - values repeated in a database error message;
 - sampled values returned by catalog statistics views, such as PostgreSQL's `pg_stats`.

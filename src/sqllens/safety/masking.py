@@ -11,6 +11,7 @@ heuristic over the column label alone; it never parses SQL text.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING
 
@@ -20,6 +21,13 @@ from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
 
 if TYPE_CHECKING:
     from sqllens.agent.core.tool import ToolContext
+
+
+logger = logging.getLogger(__name__)
+
+
+class ResultMaskingError(Exception):
+    """Raised when the masking guard itself fails; the result is withheld."""
 
 
 WITHHELD_PLACEHOLDER = "[withheld]"
@@ -162,6 +170,7 @@ class SecretColumnMatcher:
 
     def __init__(
         self,
+        *,
         extra_words: Iterable[str] = (),
         unmasked_columns: Iterable[str] = (),
         unmasked_words: Iterable[str] = (),
@@ -187,9 +196,12 @@ def mask_secret_columns(df: pd.DataFrame, matcher: SecretColumnMatcher) -> pd.Da
     """Return ``df`` with every secret column's values replaced by the placeholder.
 
     The masked labels are recorded under ``df.attrs[MASKED_COLUMNS_ATTR]``.
-    A frame with no rows or no secret column is returned unchanged: with no
-    rows there is no value to withhold, so the model gets no withheld note.
+    A record already on ``df`` is dropped first, so the record names only the
+    columns this call masked. A frame with no rows or no secret column is
+    otherwise returned unchanged: with no rows there is no value to withhold,
+    so the model gets no withheld note.
     """
+    df.attrs.pop(MASKED_COLUMNS_ATTR, None)
     if len(df) == 0:
         return df
     positions = [i for i, label in enumerate(df.columns) if matcher.is_secret(label)]
@@ -217,11 +229,30 @@ class ResultMaskingRunner(SqlRunner):
         unmasked_words: Iterable[str] = (),
     ) -> None:
         self._inner = inner
-        self._matcher = SecretColumnMatcher(extra_words, unmasked_columns, unmasked_words)
+        self._matcher = SecretColumnMatcher(
+            extra_words=extra_words,
+            unmasked_columns=unmasked_columns,
+            unmasked_words=unmasked_words,
+        )
 
     async def run_sql(
         self, args: RunSqlToolArgs, context: ToolContext, *, require_base_tables: bool = False
     ) -> pd.DataFrame:
         options = {"require_base_tables": True} if require_base_tables else {}
         df = await self._inner.run_sql(args, context, **options)
-        return mask_secret_columns(df, self._matcher)
+        try:
+            return mask_secret_columns(df, self._matcher)
+        except Exception as e:
+            # Fail closed: an unexpected error in the masking step withholds
+            # the whole result rather than returning the unmasked frame. Log
+            # with a traceback so a guard bug is diagnosable rather than
+            # indistinguishable from a database error.
+            logger.warning(
+                "result masking guard raised an unexpected %s; failing closed",
+                type(e).__name__,
+                exc_info=True,
+            )
+            raise ResultMaskingError(
+                f"refusing to return query result: result masking guard errored "
+                f"({type(e).__name__}: {e})"
+            ) from e

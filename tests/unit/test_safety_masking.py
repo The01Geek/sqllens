@@ -42,6 +42,7 @@ from sqllens.safety import (
 from sqllens.safety.masking import (
     BUILTIN_SECRET_ENTRIES,
     REMOVABLE_BUILTIN_ENTRIES,
+    ResultMaskingError,
     SecretColumnMatcher,
     mask_secret_columns,
     split_label_words,
@@ -76,6 +77,10 @@ def test_builtin_entry_list_is_exactly_the_specified_31() -> None:
         ("password2", ["password", "2"]),
         ("PINs", ["pins"]),
         ("PINs_x", ["pins", "x"]),
+        ("PINs2", ["pins", "2"]),
+        # An uppercase run plus "s" followed by a capital splits before the
+        # run's last capital, as the issue's rule states; see NOT_MASKED.
+        ("OTPsKey", ["ot", "ps", "key"]),
         ("PasswordHash", ["password", "hash"]),
         ("COLUMN_KEY", ["column", "key"]),
         ("", []),
@@ -96,8 +101,9 @@ MASKED = [
 NOT_MASKED = [
     "id", "name", "email", "phone", "last_login_ip", "session_expires", "Key",
     "COLUMN_KEY", "sort_key", "zip_code", "author_id",
-    # Known under-mask: run-together words are not split.
-    "passwordhash",
+    # Known under-masks: run-together words are not split, and an acronym
+    # plural running into the next word splits inside the acronym.
+    "passwordhash", "OTPsCount",
 ]
 
 
@@ -335,6 +341,55 @@ def test_guard_forwards_require_base_tables() -> None:
         guard.run_sql(RunSqlToolArgs(sql="SELECT 1"), _context(), require_base_tables=True)
     )
     assert seen == [False, True]
+
+
+def test_unexpected_masking_error_fails_closed_and_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _Broken(SecretColumnMatcher):
+        def is_secret(self, label: object) -> bool:
+            raise RuntimeError("simulated matcher bug")
+
+    guard = ResultMaskingRunner(_FrameRunner(_user_rows(1)))
+    guard._matcher = _Broken()
+    with caplog.at_level("WARNING", logger="sqllens.safety.masking"):
+        with pytest.raises(ResultMaskingError, match="result masking guard errored"):
+            asyncio.run(guard.run_sql(RunSqlToolArgs(sql="SELECT 1"), _context()))
+    assert "result masking guard raised an unexpected RuntimeError" in caplog.text
+
+
+def test_masking_error_reaches_run_sql_without_values(tmp_path: Path) -> None:
+    class _Broken(SecretColumnMatcher):
+        def is_secret(self, label: object) -> bool:
+            raise RuntimeError("simulated matcher bug")
+
+    guard = ResultMaskingRunner(_FrameRunner(_user_rows(1)))
+    guard._matcher = _Broken()
+    result = _run(RunSqlTool(sql_runner=guard, file_system=LocalFileSystem(str(tmp_path))))
+    assert result.success is False
+    assert "result masking guard errored" in result.result_for_llm
+    assert not any(s in result.result_for_llm for s in SENTINELS.values())
+
+
+def test_stale_masked_record_from_a_runner_beneath_is_dropped(tmp_path: Path) -> None:
+    df = pd.DataFrame({"id": [1]})
+    df.attrs[MASKED_COLUMNS_ATTR] = ["id"]
+    tool = RunSqlTool(
+        sql_runner=ResultMaskingRunner(_FrameRunner(df)),
+        file_system=LocalFileSystem(str(tmp_path)),
+    )
+    assert "withheld" not in _run(tool).result_for_llm
+
+
+def test_matcher_settings_are_keyword_only() -> None:
+    with pytest.raises(TypeError):
+        SecretColumnMatcher(["phone"])  # type: ignore[misc]
+
+
+def test_relation_check_unwraps_the_masking_guard() -> None:
+    engine = _FrameRunner(pd.DataFrame())
+    wrapped = ResultMaskingRunner(RowCapRunner(engine, max_rows=10))
+    assert _relation_check_executor(wrapped) is engine
 
 
 # --- config ----------------------------------------------------------------

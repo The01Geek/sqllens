@@ -99,9 +99,8 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     # stays a zero-overhead passthrough.
     if cfg.rls:
         sql_runner = RlsGuardRunner(sql_runner, cfg.rls, dialect=dialect)
-    # Keep masking outermost: beneath RlsGuardRunner, _relation_check_executor
-    # would stop at this wrapper, so RLS's construction check would inspect its
-    # signature instead of the engine runner's.
+    # Masking wraps every other guard, so each frame a runner beneath returns is
+    # masked before RunSqlTool builds any output from it.
     sql_runner = ResultMaskingRunner(
         sql_runner,
         extra_words=cfg.result_masking.extra_words,

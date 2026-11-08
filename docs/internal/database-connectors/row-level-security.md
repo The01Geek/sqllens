@@ -175,7 +175,8 @@ ResultMaskingRunner.run_sql                        (masks secret-looking result 
   ↓
 RlsGuardRunner.run_sql                             (rewrites args.sql, reading context.metadata)
   ↓
-ReadOnlyGuardRunner.run_sql                        (validates the REWRITTEN sql — see Wiring)
+ReadOnlyGuardRunner.run_sql                        (validates the REWRITTEN sql — see Wiring;
+                                                    absent when database.read_only = false)
   ↓
 RowCapRunner → engine runner
 ```
