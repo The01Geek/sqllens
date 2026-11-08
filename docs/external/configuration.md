@@ -147,7 +147,7 @@ Configures the transport SQL Lens uses to talk to the assistant.
 
 ## Section: `[agent]`
 
-Tunes how the natural-language agent behaves.
+Tunes how the natural-language agent behaves. An unrecognized key in this section, or an unknown `SQLLENS_AGENT__*` environment variable, is rejected at config load, so a misspelled setting fails loudly instead of being ignored. The removed `show_memory_details` setting is the one exception: it is still accepted and ignored, with a warning in the log.
 
 | Field | Type | Description |
 |---|---|---|
@@ -189,7 +189,7 @@ Defines the audit-logging surface. These fields are accepted and validated today
 | `include_response_text` | Boolean | Defaults to `false`. When enabled, audit records will include the full response text. Leave it off unless you specifically need response bodies in your audit trail. |
 | `sanitize_parameters` | Boolean | Defaults to `true`. When enabled, query parameter values are sanitized before being written to the audit trail. |
 
-**Note:** Unlike other sections, an unrecognized key inside `[agent.audit]` is rejected at config load rather than silently ignored. Because this is a privacy-sensitive surface, a misspelled key (for example, `sanitize_paramters`) fails loudly instead of quietly reverting to the safe default.
+**Note:** As in the enclosing `[agent]` section, an unrecognized key inside `[agent.audit]` is rejected at config load rather than silently ignored. Because this is a privacy-sensitive surface, a misspelled key (for example, `sanitize_paramters`) fails loudly instead of quietly reverting to the safe default.
 
 ## Profile names
 

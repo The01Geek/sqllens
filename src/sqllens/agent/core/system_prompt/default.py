@@ -60,7 +60,9 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
                 whitespace-only text adds nothing, so the prompt is unchanged.
 
         Raises:
-            ValueError: ``dialect`` is not ``None`` and not one of the keys above.
+            ValueError: ``dialect`` is not ``None`` and not one of the keys above,
+                or a line of ``standing_instructions``, stripped, equals the
+                section's BEGIN or END line.
         """
         if dialect is not None and dialect not in _ENGINE_NAMES:
             raise ValueError(

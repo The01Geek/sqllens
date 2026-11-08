@@ -628,3 +628,46 @@ def test_standing_instructions_allow_delimiter_text_mid_line() -> None:
 def test_agent_section_rejects_misspelt_key() -> None:
     with pytest.raises(ValidationError, match="standing_instruction"):
         AgentRuntimeConfig.model_validate({"standing_instruction": "Be brief."})
+
+
+def test_minimal_config_still_loads_with_strict_agent_section(tmp_path: Path) -> None:
+    cfg = Config.load(_minimal_toml(tmp_path, "\n[agent]\nmax_tool_iterations = 5\n"))
+    assert cfg.agent.max_tool_iterations == 5
+
+
+def test_misspelt_agent_key_fails_toml_load(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="standing_instruction"):
+        Config.load(_minimal_toml(tmp_path, '\n[agent]\nstanding_instruction = "Be brief."\n'))
+
+
+def test_misspelt_agent_env_var_fails_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SQLLENS_AGENT__STANDING_INSTRUCTION", "Be brief.")
+    with pytest.raises(ValidationError, match="standing_instruction"):
+        Config.load(_minimal_toml(tmp_path))
+
+
+# The #204 release note promised a leftover key is ignored; strictness keeps that.
+# Each source is tested alone: without the drop, extra="forbid" fails the load.
+def test_retired_show_memory_details_in_toml_is_ignored_with_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("WARNING", logger="sqllens.config"):
+        cfg = Config.load(_minimal_toml(tmp_path, "\n[agent]\nshow_memory_details = true\n"))
+    assert cfg.agent.max_tool_iterations == 20
+    assert [r.getMessage() for r in caplog.records] == [
+        "Warning: agent.show_memory_details was removed and is ignored; "
+        "remove it from your configuration."
+    ]
+
+
+def test_retired_show_memory_details_env_var_is_ignored_with_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("SQLLENS_AGENT__SHOW_MEMORY_DETAILS", "true")
+    with caplog.at_level("WARNING", logger="sqllens.config"):
+        cfg = Config.load(_minimal_toml(tmp_path))
+    assert cfg.agent.max_tool_iterations == 20
+    assert len(caplog.records) == 1
+    assert "agent.show_memory_details was removed" in caplog.records[0].getMessage()

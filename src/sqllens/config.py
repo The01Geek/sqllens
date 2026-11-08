@@ -18,11 +18,12 @@ and secrets.
 from __future__ import annotations
 
 import contextvars
+import logging
 import os
 import re
 import shlex
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -38,6 +39,8 @@ from pydantic_settings import (
     SettingsConfigDict,
     TomlConfigSettingsSource,
 )
+
+logger = logging.getLogger(__name__)
 
 # Sub-section models are BaseModel, not BaseSettings: a nested BaseSettings would
 # spin up its own unprefixed env_settings source and silently consume bare env
@@ -436,6 +439,11 @@ STANDING_INSTRUCTIONS_END = "--- END DEPLOYMENT INSTRUCTIONS ---"
 STANDING_INSTRUCTIONS_DELIMITERS = (STANDING_INSTRUCTIONS_BEGIN, STANDING_INSTRUCTIONS_END)
 
 
+#: ``[agent]`` keys removed in earlier releases. The section rejects unknown
+#: keys, but these are accepted and dropped because their removal notes said so.
+_RETIRED_AGENT_KEYS = frozenset({"show_memory_details"})
+
+
 class AgentRuntimeConfig(BaseModel):
     """Agent runtime knobs exposed to deployers.
 
@@ -447,6 +455,24 @@ class AgentRuntimeConfig(BaseModel):
     # misspelt [agent] key (e.g. ``standing_instruction``) would otherwise be
     # dropped silently and its rule would never reach a request.
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_keys(cls, data: Any) -> Any:
+        # Keys removed in earlier releases whose release notes promised they
+        # would be ignored. Strictness must not turn them into a start-up
+        # failure, so they are dropped here with a warning instead.
+        if isinstance(data, dict):
+            retired = [key for key in _RETIRED_AGENT_KEYS if key in data]
+            if retired:
+                data = {k: v for k, v in data.items() if k not in _RETIRED_AGENT_KEYS}
+                for key in retired:
+                    logger.warning(
+                        "Warning: agent.%s was removed and is ignored; remove it from "
+                        "your configuration.",
+                        key,
+                    )
+        return data
 
     # Default raised from the framework's 10 — real-world schema exploration
     # (catalog lookups + memory searches + final query) routinely needs more
