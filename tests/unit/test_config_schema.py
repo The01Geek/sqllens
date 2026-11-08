@@ -42,6 +42,9 @@ def _clean_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SQLLENS_AGENT__AUDIT__ENABLED", raising=False)
     monkeypatch.delenv("SQLLENS_AGENT__MAX_CONVERSATIONS", raising=False)
     monkeypatch.delenv("SQLLENS_AGENT__STANDING_INSTRUCTIONS", raising=False)
+    monkeypatch.delenv("SQLLENS_AGENT__STANDING_INSTRUCTION", raising=False)
+    monkeypatch.delenv("SQLLENS_AGENT__SHOW_MEMORY_DETAILS", raising=False)
+    monkeypatch.delenv("SQLLENS_AGENT__SHOW_SQL", raising=False)
     monkeypatch.delenv("SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER", raising=False)
     monkeypatch.delenv("SQLLENS_MEMORY__SAVE_TEXT_MEMORIES", raising=False)
 
