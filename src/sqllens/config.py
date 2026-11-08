@@ -280,15 +280,30 @@ class ResultMaskingConfig(BaseModel):
             "are never masked."
         ),
     )
+    unmasked_words: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Built-in entries to stop applying. Only token, hash, salt, pin, otp, "
+            "totp and mfa may be removed; every other built-in entry stays in force."
+        ),
+    )
 
-    @field_validator("extra_words")
+    @field_validator("extra_words", "unmasked_columns")
     @classmethod
     def _entries_have_words(cls, value: list[str]) -> list[str]:
-        from sqllens.safety.masking import split_label_words
+        from sqllens.safety.masking import entry_words
 
         for entry in value:
-            if not split_label_words(entry):
-                raise ValueError(f"entry {entry!r} contains no letters or digits")
+            entry_words(entry)
+        return value
+
+    @field_validator("unmasked_words")
+    @classmethod
+    def _entries_are_removable(cls, value: list[str]) -> list[str]:
+        from sqllens.safety.masking import removable_entry_words
+
+        for entry in value:
+            removable_entry_words(entry)
         return value
 
 

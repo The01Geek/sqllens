@@ -201,7 +201,7 @@ if cfg.rls:
 sql_runner = ResultMaskingRunner(sql_runner, ...)
 ```
 
-Resulting call order on every query: **ResultMaskingRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**.
+Resulting call order with rules configured and `read_only = true`: **ResultMaskingRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. Each conditional guard drops out when its condition is false; masking and the row cap are always present.
 
 The order is deliberate:
 
@@ -237,7 +237,7 @@ Unit tests live in [tests/unit/test_safety_rls.py](../../../tests/unit/test_safe
 - `TestApplyRlsDynamicFailSecure` — every dynamic-value sanitization path (present, missing, suspicious string, wrong type, `bool` blocks on both the scalar `=` path (`test_bool_dynamic_value_blocks`) and as an `in`-list element (`test_bool_item_in_dynamic_in_list_blocks`), list-required for `in`, list-form `in`), plus tokenization failures, parse failures and multi-statement input.
 - `TestRlsGuardRunner` — the decorator-level tests (rewritten SQL reaches the inner runner; missing dynamic value blocks before the inner runner sees anything; dynamic value from `ToolContext.metadata`; unexpected error in the rewrite fails closed; static rule works with empty metadata).
 
-- `TestFactoryComposition` — the RLS guard wraps outermost, ahead of the read-only guard, and is absent when no rules are configured.
+- `TestFactoryComposition` — the RLS guard sits beneath the masking guard and ahead of the read-only guard, and is absent when no rules are configured.
 - `TestMetadataPlumbing` — request metadata reaching the request context.
 
 Database relation checks (views blocked while RLS is active, catalog failures closing) are tested in [tests/unit/test_rls_views.py](../../../tests/unit/test_rls_views.py).

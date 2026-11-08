@@ -59,6 +59,20 @@ BUILTIN_SECRET_ENTRIES: tuple[str, ...] = (
     "backup code",
 )
 
+# Built-in entries an operator may remove with ``unmasked_words``. They are the
+# entries that commonly name non-secret data (``token_count``, ``commit_hash``,
+# ``pin_code``). Every other built-in entry stays in force, so no setting turns
+# masking off.
+REMOVABLE_BUILTIN_ENTRIES: tuple[str, ...] = (
+    "token",
+    "hash",
+    "salt",
+    "pin",
+    "otp",
+    "totp",
+    "mfa",
+)
+
 
 def _char_class(ch: str) -> str:
     if ch.isupper():
@@ -112,6 +126,25 @@ def split_label_words(label: str) -> list[str]:
     return [w.lower() for w in words]
 
 
+def entry_words(entry: str) -> tuple[str, ...]:
+    """Split a configured entry or label, rejecting one that holds no letters or digits."""
+    words = split_label_words(entry)
+    if not words:
+        raise ValueError(f"entry {entry!r} contains no letters or digits")
+    return tuple(words)
+
+
+def removable_entry_words(entry: str) -> tuple[str, ...]:
+    """Split an ``unmasked_words`` entry, rejecting one that is not a removable built-in."""
+    words = entry_words(entry)
+    if " ".join(words) not in REMOVABLE_BUILTIN_ENTRIES:
+        raise ValueError(
+            f"entry {entry!r} is not a removable built-in entry; "
+            f"removable entries are: {', '.join(REMOVABLE_BUILTIN_ENTRIES)}"
+        )
+    return words
+
+
 def _word_matches(word: str, entry_word: str) -> bool:
     return word in (entry_word, entry_word + "s", entry_word + "es")
 
@@ -131,13 +164,14 @@ class SecretColumnMatcher:
         self,
         extra_words: Iterable[str] = (),
         unmasked_columns: Iterable[str] = (),
+        unmasked_words: Iterable[str] = (),
     ) -> None:
-        self._entries = []
-        for entry in (*BUILTIN_SECRET_ENTRIES, *extra_words):
-            words = split_label_words(entry)
-            if not words:
-                raise ValueError(f"secret-word entry {entry!r} splits into no words")
-            self._entries.append(words)
+        removed = {removable_entry_words(entry) for entry in unmasked_words}
+        builtin = [entry_words(entry) for entry in BUILTIN_SECRET_ENTRIES]
+        self._entries = [words for words in builtin if words not in removed]
+        self._entries.extend(entry_words(entry) for entry in extra_words)
+        for column in unmasked_columns:
+            entry_words(column)
         self._unmasked = {c.casefold() for c in unmasked_columns}
 
     def is_secret(self, label: object) -> bool:
@@ -152,8 +186,11 @@ def mask_secret_columns(df: pd.DataFrame, matcher: SecretColumnMatcher) -> pd.Da
     """Return ``df`` with every secret column's values replaced by the placeholder.
 
     The masked labels are recorded under ``df.attrs[MASKED_COLUMNS_ATTR]``.
-    A frame with no secret column is returned unchanged.
+    A frame with no rows or no secret column is returned unchanged: with no
+    rows there is no value to withhold, so the model gets no withheld note.
     """
+    if len(df) == 0:
+        return df
     positions = [i for i, label in enumerate(df.columns) if matcher.is_secret(label)]
     if not positions:
         return df
@@ -176,9 +213,10 @@ class ResultMaskingRunner(SqlRunner):
         *,
         extra_words: Iterable[str] = (),
         unmasked_columns: Iterable[str] = (),
+        unmasked_words: Iterable[str] = (),
     ) -> None:
         self._inner = inner
-        self._matcher = SecretColumnMatcher(extra_words, unmasked_columns)
+        self._matcher = SecretColumnMatcher(extra_words, unmasked_columns, unmasked_words)
 
     async def run_sql(
         self, args: RunSqlToolArgs, context: ToolContext, *, require_base_tables: bool = False

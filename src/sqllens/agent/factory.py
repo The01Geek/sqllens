@@ -106,6 +106,7 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
         sql_runner,
         extra_words=cfg.result_masking.extra_words,
         unmasked_columns=cfg.result_masking.unmasked_columns,
+        unmasked_words=cfg.result_masking.unmasked_words,
     )
     memory = ChromaAgentMemory(
         persist_directory=str(cfg.memory.persist_dir),

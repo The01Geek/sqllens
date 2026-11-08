@@ -41,6 +41,7 @@ from sqllens.safety import (
 )
 from sqllens.safety.masking import (
     BUILTIN_SECRET_ENTRIES,
+    REMOVABLE_BUILTIN_ENTRIES,
     SecretColumnMatcher,
     mask_secret_columns,
     split_label_words,
@@ -120,6 +121,36 @@ def test_unmasked_columns_match_whole_label_case_insensitively() -> None:
     assert not matcher.is_secret("TOKEN_COUNT")
     assert matcher.is_secret("users.token_count")
     assert matcher.is_secret("u.token_count")
+
+
+def test_unmasked_words_remove_only_that_builtin_entry() -> None:
+    matcher = SecretColumnMatcher(unmasked_words=["Token"])
+    assert not matcher.is_secret("SUM(output_tokens)")
+    assert not matcher.is_secret("users.token_count")
+    # Other built-in entries still apply, including to labels holding the word.
+    assert matcher.is_secret("password_token")
+    assert matcher.is_secret("api_key")
+
+
+def test_extra_words_still_apply_after_their_builtin_word_is_removed() -> None:
+    matcher = SecretColumnMatcher(unmasked_words=["token"], extra_words=["session token"])
+    assert matcher.is_secret("session_token")
+    assert not matcher.is_secret("token_count")
+
+
+@pytest.mark.parametrize("entry", ["password", "secret", "api key", "tokens", "phone"])
+def test_unmasked_words_reject_protected_or_unknown_entries(entry: str) -> None:
+    with pytest.raises(ValueError, match="not a removable built-in entry"):
+        SecretColumnMatcher(unmasked_words=[entry])
+
+
+def test_removable_entries_are_builtin_entries() -> None:
+    assert set(REMOVABLE_BUILTIN_ENTRIES) < set(BUILTIN_SECRET_ENTRIES)
+    # Removing every removable entry still masks the protected core.
+    matcher = SecretColumnMatcher(unmasked_words=REMOVABLE_BUILTIN_ENTRIES)
+    assert matcher.is_secret("password_hash")
+    assert matcher.is_secret("client_secret")
+    assert not matcher.is_secret("session_token")
 
 
 # --- guard -----------------------------------------------------------------
@@ -272,14 +303,14 @@ def test_no_note_for_empty_result(tmp_path: Path) -> None:
     assert "withheld" not in _run(tool).result_for_llm
 
 
-def test_note_for_zero_row_result_with_masked_column(tmp_path: Path) -> None:
+def test_no_note_for_zero_row_result_with_secret_column(tmp_path: Path) -> None:
     tool = RunSqlTool(
         sql_runner=ResultMaskingRunner(_FrameRunner(_user_rows(1).iloc[0:0])),
         file_system=LocalFileSystem(str(tmp_path)),
     )
     text = _run(tool).result_for_llm
     assert text.startswith("Query executed successfully. No rows returned.")
-    assert text.endswith(NOTE)
+    assert "withheld" not in text
 
 
 def test_guard_forwards_require_base_tables() -> None:
@@ -315,6 +346,11 @@ def test_absent_section_uses_builtin_list_with_no_exemptions() -> None:
         ({"unmasked_columns": [1]}, "unmasked_columns"),
         ({"extra_words": [""]}, "extra_words"),
         ({"extra_words": ["__"]}, "extra_words"),
+        ({"unmasked_columns": [""]}, "unmasked_columns"),
+        ({"unmasked_columns": ["!!!"]}, "unmasked_columns"),
+        ({"unmasked_words": ["password"]}, "unmasked_words"),
+        ({"unmasked_words": [""]}, "unmasked_words"),
+        ({"unmasked_words": "token"}, "unmasked_words"),
     ],
 )
 def test_invalid_section_fails_naming_the_setting(section: dict, needle: str) -> None:
@@ -353,11 +389,36 @@ def test_env_json_array_loads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert cfg.result_masking.extra_words == ["phone"]
 
 
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    [
+        ("EXTRA_WORDS", "3"),
+        ("EXTRA_WORDS", '{"a": "b"}'),
+        ("UNMASKED_COLUMNS", "[1]"),
+        ("UNMASKED_WORDS", '"token"'),
+    ],
+)
 def test_env_wrong_type_fails_naming_setting(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, setting: str, value: str
 ) -> None:
-    monkeypatch.setenv("SQLLENS_RESULT_MASKING__EXTRA_WORDS", '[""]')
-    with pytest.raises(ValidationError, match="extra_words"):
+    monkeypatch.setenv(f"SQLLENS_RESULT_MASKING__{setting}", value)
+    with pytest.raises(ValidationError, match=setting.lower()):
+        Config.load(_write_toml(tmp_path, ""))
+
+
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    [
+        ("EXTRA_WORDS", '[""]'),
+        ("UNMASKED_COLUMNS", '["--"]'),
+        ("UNMASKED_WORDS", '["secret"]'),
+    ],
+)
+def test_env_invalid_entry_fails_naming_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, setting: str, value: str
+) -> None:
+    monkeypatch.setenv(f"SQLLENS_RESULT_MASKING__{setting}", value)
+    with pytest.raises(ValidationError, match=setting.lower()):
         Config.load(_write_toml(tmp_path, ""))
 
 
@@ -435,11 +496,14 @@ def test_config_reaches_the_guard(tmp_path: Path) -> None:
             _cfg(
                 tmp_path, read_only=True, rls=False,
                 extra_words=["phone"], unmasked_columns=["token_count"],
+                unmasked_words=["hash"],
             )
         )
     )
     assert runner._matcher.is_secret("phone")
     assert not runner._matcher.is_secret("token_count")
+    assert not runner._matcher.is_secret("commit_hash")
+    assert runner._matcher.is_secret("password_hash")
 
 
 # --- documented under-masks -------------------------------------------------

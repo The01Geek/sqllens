@@ -179,6 +179,7 @@ sql_runner = ResultMaskingRunner(
     sql_runner,
     extra_words=cfg.result_masking.extra_words,
     unmasked_columns=cfg.result_masking.unmasked_columns,
+    unmasked_words=cfg.result_masking.unmasked_words,
 )
 ```
 

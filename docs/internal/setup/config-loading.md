@@ -38,7 +38,7 @@ Top-level keys (all required to be present in the merged config, though most hav
 
 ### Sub-models are `BaseModel`, not `BaseSettings`
 
-Only the top-level `Config` inherits from `pydantic_settings.BaseSettings`. The six sub-sections (`DatabaseConfig`, `LLMConfig`, `MemoryConfig`, `AuthConfig`, `ServerConfig`, `AgentRuntimeConfig`) are plain `pydantic.BaseModel`.
+Only the top-level `Config` inherits from `pydantic_settings.BaseSettings`. Every nested section model is a plain `pydantic.BaseModel`.
 
 This matters: a nested `BaseSettings` spins up its own env-resolution source independent of the parent. That source has no prefix, so it silently pulls in any process-level env var matching a sub-field name — `MODE`, `HOST`, `PORT`, `TRANSPORT`, `URL`, `NAME`, etc. A stray `MODE=...` in the environment was enough to fail `Config.load` with an `AuthConfig.mode` enum error.
 
