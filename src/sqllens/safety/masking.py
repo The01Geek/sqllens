@@ -143,18 +143,6 @@ def entry_words(entry: str) -> tuple[str, ...]:
     return tuple(words)
 
 
-def unmasked_column_label(entry: str) -> str:
-    """Check an ``unmasked_columns`` entry, rejecting one that can never equal a label.
-
-    A label is compared whole, so an entry with no letters or digits, or with
-    leading or trailing whitespace, would load and silently exempt nothing.
-    """
-    entry_words(entry)
-    if entry != entry.strip():
-        raise ValueError(f"entry {entry!r} has leading or trailing whitespace")
-    return entry
-
-
 def removable_entry_words(entry: str) -> tuple[str, ...]:
     """Split an ``unmasked_words`` entry, rejecting one that is not a removable built-in."""
     words = entry_words(entry)
@@ -192,7 +180,10 @@ class SecretColumnMatcher:
         builtin = [entry_words(entry) for entry in BUILTIN_SECRET_ENTRIES]
         self._entries = [words for words in builtin if words not in removed]
         self._entries.extend(entry_words(entry) for entry in extra_words)
-        self._unmasked = {unmasked_column_label(c).casefold() for c in unmasked_columns}
+        columns = list(unmasked_columns)
+        for column in columns:
+            entry_words(column)
+        self._unmasked = {c.casefold() for c in columns}
 
     def is_secret(self, label: object) -> bool:
         text = str(label)

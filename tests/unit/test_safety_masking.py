@@ -240,18 +240,13 @@ def test_mask_never_modifies_its_input() -> None:
     assert secret["pin"].tolist() == ["1234"]
 
 
-@pytest.mark.parametrize("entry", [" token_count", "token_count ", "\ttoken_count"])
-def test_unmasked_columns_reject_surrounding_whitespace(entry: str) -> None:
-    with pytest.raises(ValueError, match="leading or trailing whitespace"):
-        SecretColumnMatcher(unmasked_columns=[entry])
-    with pytest.raises(ValidationError, match="unmasked_columns"):
-        ResultMaskingConfig(unmasked_columns=[entry])
-
-
-def test_unmasked_columns_accept_inner_spaces() -> None:
-    # A label may contain spaces (a quoted identifier, an expression label).
-    matcher = SecretColumnMatcher(unmasked_columns=["SUM(a + token)"])
+def test_unmasked_columns_match_labels_with_spaces_exactly() -> None:
+    # A label may contain spaces, padding included: an expression label, or a
+    # quoted alias, which SQLite returns exactly as written.
+    matcher = SecretColumnMatcher(unmasked_columns=["SUM(a + token)", "token_count "])
     assert not matcher.is_secret("sum(a + token)")
+    assert not matcher.is_secret("token_count ")
+    assert matcher.is_secret("token_count")
 
 
 # --- run_sql sinks ---------------------------------------------------------
@@ -408,6 +403,7 @@ def test_unexpected_masking_error_fails_closed_and_logs(
     assert SENTINELS["pin"] not in caplog.text
     assert SENTINELS["pin"] not in str(exc.value)
     assert exc.value.__cause__ is None
+    assert exc.value.__suppress_context__ is True
 
 
 def test_masking_error_reaches_run_sql_without_values(tmp_path: Path) -> None:
