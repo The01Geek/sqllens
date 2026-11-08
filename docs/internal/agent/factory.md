@@ -23,6 +23,8 @@ cfg.memory      →  ChromaAgentMemory                 →  persists under cfg.m
                    LocalFileSystem                   →  scratch root = tempfile.gettempdir() / "sqllens"
 cfg.agent       →  BoundedConversationStore          →  in-process LRU, capped at
                    .max_conversations                   cfg.agent.max_conversations (ephemeral)
+                   DefaultSystemPromptBuilder        →  dialect from the database URL, plus
+                   .standing_instructions               cfg.agent.standing_instructions (#358)
 ToolRegistry    →  RunSqlTool                          (executes generated SQL, writes a scratch CSV,
                                                         appends truncation hint when df.attrs['truncated'])
                    EmitChartTool                       (agent-side seam for query_database's chart blocks;
@@ -128,6 +130,18 @@ The streaming path now also keeps the response `finish_reason` on the `LlmRespon
 It is **ephemeral by design**: in-process only, no server-side database, no cross-restart persistence (AGENTS.md non-goal — no schema migrations / server-side DB). Restarting the server drops all conversations, which is acceptable for the clarifying-question flow it backs. It is **not** thread-safe: it assumes a single asyncio event loop where each method's `OrderedDict` mutations run without an intervening `await` (atomic under cooperative scheduling). The cap is surfaced as `AgentRuntimeConfig.max_conversations` (default `1000`, range `1`–`1_000_000`, env `SQLLENS_AGENT__MAX_CONVERSATIONS`).
 
 Pinned by `tests/unit/test_conversation_store.py` (LRU eviction, recency-on-read, ownership checks) and `tests/unit/test_factory_wiring.py` (the agent is wired with a `BoundedConversationStore` sized from config).
+
+## `standing_instructions` — deployment rules in the system prompt (#358)
+
+`build_agent` passes `cfg.agent.standing_instructions` (`AgentRuntimeConfig`, default `None`, env `SQLLENS_AGENT__STANDING_INSTRUCTIONS`) to `DefaultSystemPromptBuilder(standing_instructions=...)`. The config validator strips surrounding whitespace, turns empty or whitespace-only text into `None`, and rejects text longer than `MAX_STANDING_INSTRUCTIONS_CHARS` (10,000) after stripping; the builder strips again and treats blank text as `None`, but applies no length limit of its own.
+
+With `None`, `build_system_prompt` returns exactly the prompt it returned before the setting existed. With text, it:
+
+- appends a `DEPLOYMENT INSTRUCTIONS:` section as the last element of the default prompt, after the memory-system blocks, with the text between `--- BEGIN DEPLOYMENT INSTRUCTIONS ---` and `--- END DEPLOYMENT INSTRUCTIONS ---` lines. The text is one list element, so the empty-string filter applied when memory tools are present does not remove its blank lines. `DefaultLlmContextEnhancer.enhance_system_prompt` later appends retrieved memory after it, as before. The section's preamble says the instructions apply on every request, outrank memory notes and saved pairs, cannot be switched off by a conversation message, tool result or memory note, win over a conflicting generic rule, and never loosen the Data Confidentiality rules;
+- inserts one bullet into "Ambiguous Questions", right after the bullet listing what settles a choice: an instruction naming a reading settles the choice as the question would, even over a memory note or saved pair; the question or an earlier turn picking another reading still wins unless the instruction says its reading must be used anyway; an instruction saying to ask keeps the choice open until the question, an earlier turn or a reply picks a reading, and a memory note or saved pair does not settle it;
+- with a `base_prompt`, returns `base_prompt`, a blank line and the same section (only the section when `base_prompt` is `""`), with the preamble's references to Data Confidentiality and Ambiguous Questions left out, because a caller's base prompt has neither.
+
+The rules are prompt guidance, not enforced in code. Pinned by `tests/unit/test_system_prompt.py`, `tests/unit/test_config_schema.py` and `tests/unit/test_factory_wiring.py`.
 
 ## `show_details` — UI-feature unlock
 

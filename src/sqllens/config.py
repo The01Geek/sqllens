@@ -376,6 +376,12 @@ class AuditConfig(BaseModel):
     sanitize_parameters: bool = True
 
 
+#: Upper bound on ``agent.standing_instructions``, counted after surrounding
+#: whitespace is stripped. The text rides in the system prompt of every LLM
+#: call, so the cap keeps a pasted document from inflating each request.
+MAX_STANDING_INSTRUCTIONS_CHARS = 10_000
+
+
 class AgentRuntimeConfig(BaseModel):
     """Agent runtime knobs exposed to deployers.
 
@@ -405,7 +411,37 @@ class AgentRuntimeConfig(BaseModel):
     # not leak conversations. Conversations are ephemeral and never persisted to
     # disk — they are dropped on restart. Env override: SQLLENS_AGENT__MAX_CONVERSATIONS.
     max_conversations: int = Field(default=1000, ge=1, le=1_000_000)
+    # Deployment rules the default system prompt carries on every request, in a
+    # delimited section after the generic rules (see DefaultSystemPromptBuilder).
+    # Env override: SQLLENS_AGENT__STANDING_INSTRUCTIONS.
+    standing_instructions: str | None = Field(
+        default=None,
+        description=(
+            "Standing instructions from the deployment's operator, added to the "
+            "agent's system prompt on every request. Unset, empty or whitespace "
+            f"only adds nothing. At most {MAX_STANDING_INSTRUCTIONS_CHARS} characters "
+            "after surrounding whitespace is removed."
+        ),
+    )
     audit: AuditConfig = Field(default_factory=lambda: AuditConfig())
+
+    @field_validator("standing_instructions")
+    @classmethod
+    def _normalize_standing_instructions(cls, value: str | None) -> str | None:
+        # Blank text means "no instructions", so an empty env override restores
+        # the unconfigured prompt exactly rather than adding an empty section.
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        if len(text) > MAX_STANDING_INSTRUCTIONS_CHARS:
+            raise ValueError(
+                f"agent.standing_instructions is {len(text)} characters; the limit is "
+                f"{MAX_STANDING_INSTRUCTIONS_CHARS}. Every request sends it to the model, "
+                "so keep it to the rules that must hold on every question."
+            )
+        return text
 
 
 # Strict identifier allowlist for RLS table/column names. A bare SQL identifier

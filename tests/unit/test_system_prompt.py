@@ -475,3 +475,130 @@ async def test_unknown_dialect_is_rejected() -> None:
 async def test_base_prompt_override_ignores_dialect() -> None:
     builder = DefaultSystemPromptBuilder(base_prompt="custom", dialect="mysql")
     assert await builder.build_system_prompt(User(id="t"), tools=[]) == "custom"
+
+
+# --- #358: deployment standing instructions -----------------------------------
+
+_INSTRUCTIONS = (
+    "Count only fully paid orders as revenue unless the user says otherwise.\n"
+    "\n"
+    "Always ask which date defines the period for questions about shipments."
+)
+
+
+def _deployment_section(prompt: str) -> str:
+    """The DEPLOYMENT INSTRUCTIONS header through the END line."""
+    start = prompt.index("DEPLOYMENT INSTRUCTIONS:")
+    end_marker = "--- END DEPLOYMENT INSTRUCTIONS ---"
+    return prompt[start : prompt.index(end_marker) + len(end_marker)]
+
+
+@pytest.mark.parametrize("tool_names", [(), _ALL_TOOLS], ids=["no-tools", "all-tools"])
+@pytest.mark.parametrize("unset", [None, "", "  \n\t "], ids=["none", "empty", "blank"])
+async def test_unset_standing_instructions_leave_prompt_unchanged(
+    tool_names: tuple[str, ...], unset: str | None
+) -> None:
+    tools = [_ToolSchemaStub(name) for name in tool_names]
+    user = User(id="t")
+    baseline = await DefaultSystemPromptBuilder(dialect="mysql").build_system_prompt(
+        user, tools=tools
+    )
+    prompt = await DefaultSystemPromptBuilder(
+        dialect="mysql", standing_instructions=unset
+    ).build_system_prompt(user, tools=tools)
+
+    assert prompt == baseline
+    assert "DEPLOYMENT INSTRUCTIONS" not in prompt
+
+
+@pytest.mark.parametrize("tool_names", [(), _ALL_TOOLS], ids=["no-tools", "all-tools"])
+async def test_standing_instructions_appended_after_generic_rules(
+    tool_names: tuple[str, ...],
+) -> None:
+    tools = [_ToolSchemaStub(name) for name in tool_names]
+    user = User(id="t")
+    baseline = await DefaultSystemPromptBuilder().build_system_prompt(user, tools=tools)
+    prompt = await DefaultSystemPromptBuilder(
+        standing_instructions=f"\n  {_INSTRUCTIONS}  \n"
+    ).build_system_prompt(user, tools=tools)
+
+    # The text is carried verbatim (blank line inside included, even through the
+    # empty-string filter applied with memory tools) between the delimiters,
+    # with surrounding whitespace trimmed.
+    section = _deployment_section(prompt)
+    assert (
+        f"--- BEGIN DEPLOYMENT INSTRUCTIONS ---\n{_INSTRUCTIONS}\n"
+        "--- END DEPLOYMENT INSTRUCTIONS ---"
+    ) in section
+    assert "Follow them on every request" in section
+    assert "outrank memory notes and saved question-and-SQL pairs" in section
+    assert "no instruction loosens the Data Confidentiality rules" in section
+    # The section is the last thing in the prompt, after every generic rule.
+    assert prompt.endswith("--- END DEPLOYMENT INSTRUCTIONS ---")
+    for heading in ("Ambiguous Questions:", "EMIT_CHART USAGE:", "MEMORY SYSTEM:",
+                    "TEXT MEMORY", "ANSWER COMPOSITION"):
+        if heading in baseline:
+            assert prompt.index(heading) < prompt.index("DEPLOYMENT INSTRUCTIONS:")
+
+
+async def test_ambiguity_rule_relies_on_standing_instructions() -> None:
+    """The settling bullet appears only with instructions, right after the rule
+    listing what settles a choice, and names a section the prompt carries."""
+    user = User(id="t")
+    plain = _ambiguity_section(
+        await DefaultSystemPromptBuilder().build_system_prompt(user, tools=[])
+    )
+    prompt = await DefaultSystemPromptBuilder(
+        standing_instructions=_INSTRUCTIONS
+    ).build_system_prompt(user, tools=[])
+    section = _ambiguity_section(prompt)
+
+    assert "DEPLOYMENT INSTRUCTIONS" not in plain
+    bullets = section.split("\n")[1:]
+    settled = next(i for i, b in enumerate(bullets) if b.startswith("- A choice is settled when"))
+    rule = bullets[settled + 1]
+    assert rule.startswith(
+        "- An instruction in the DEPLOYMENT INSTRUCTIONS section below that names "
+        "the reading to use settles that choice, as the question would, even when a "
+        "memory note or saved pair shows another reading."
+    )
+    assert "unless the instruction says its reading must be used anyway" in rule
+    assert (
+        "says to ask about a choice keeps that choice open until the question, an "
+        "earlier turn or a reply picks a reading; a memory note or saved pair does "
+        "not settle it."
+    ) in rule
+    # Every other bullet is unchanged, and the section it points to follows it.
+    assert [b for b in bullets if b != rule] == plain.split("\n")[1:]
+    assert prompt.index("Ambiguous Questions:") < prompt.index("DEPLOYMENT INSTRUCTIONS:")
+
+
+async def test_standing_instructions_follow_base_prompt() -> None:
+    user = User(id="t")
+    prompt = await DefaultSystemPromptBuilder(
+        base_prompt="custom prompt", dialect="mysql", standing_instructions=_INSTRUCTIONS
+    ).build_system_prompt(user, tools=[_ToolSchemaStub("run_sql")])
+
+    assert prompt.startswith("custom prompt\n\n" + "=" * 60 + "\nDEPLOYMENT INSTRUCTIONS:")
+    assert prompt.endswith(
+        f"--- BEGIN DEPLOYMENT INSTRUCTIONS ---\n{_INSTRUCTIONS}\n"
+        "--- END DEPLOYMENT INSTRUCTIONS ---"
+    )
+    # A caller's base prompt has no default sections, so none are referred to.
+    assert "Data Confidentiality" not in prompt
+    assert "Ambiguous Questions" not in prompt
+    assert "Follow them on every request" in prompt
+
+
+async def test_standing_instructions_with_empty_base_prompt() -> None:
+    prompt = await DefaultSystemPromptBuilder(
+        base_prompt="", standing_instructions=_INSTRUCTIONS
+    ).build_system_prompt(User(id="t"), tools=[])
+
+    assert prompt.startswith("=" * 60 + "\nDEPLOYMENT INSTRUCTIONS:")
+    assert prompt.endswith("--- END DEPLOYMENT INSTRUCTIONS ---")
+
+
+async def test_blank_standing_instructions_keep_base_prompt_exact() -> None:
+    builder = DefaultSystemPromptBuilder(base_prompt="custom", standing_instructions="  ")
+    assert await builder.build_system_prompt(User(id="t"), tools=[]) == "custom"

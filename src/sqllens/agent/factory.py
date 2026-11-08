@@ -182,7 +182,10 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
         llm_context_enhancer=context_enhancer,
         # A fresh builder per agent: Agent's constructor default is one instance
         # shared by every Agent, so setting the dialect on it would leak across agents.
-        system_prompt_builder=DefaultSystemPromptBuilder(dialect=dialect),
+        system_prompt_builder=DefaultSystemPromptBuilder(
+            dialect=dialect,
+            standing_instructions=cfg.agent.standing_instructions,
+        ),
         # Bounded LRU store backing multi-turn conversations. The framework
         # default (MemoryConversationStore) is unbounded; this caps in-process
         # memory so a long-running server does not leak conversations. Ephemeral

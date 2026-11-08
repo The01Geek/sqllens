@@ -154,6 +154,29 @@ Tunes how the natural-language agent behaves.
 | `max_tool_iterations` | Integer | Maximum number of internal tool calls (schema lookups, memory searches, and the final query) the agent may make while answering one question. Defaults to `20`; valid range is `1` to `100`. Raise it if questions against an unfamiliar database fail because the agent runs out of steps while exploring the schema. |
 | `show_details` | Boolean | Defaults to `false`. By default a `query_database` answer does not include the SQL the agent executed, because exposing that SQL to connected clients can reveal details about your database structure and query logic. Set to `true` to surface the executed SQL alongside each answer as a fenced ` ```sql ` block under an `**Executed SQL:**` header appended to the Markdown answer (visible in every MCP client). On hosts that read tool-result metadata the same SQL is also attached to the response under the `sqllens/query` key for programmatic / apps-aware consumers; the bundled result widget itself no longer renders the SQL as an in-iframe panel. Enabling the setting **also** attaches a structured **step-by-step agent trace** to the response metadata under the `sqllens/agent_trace` key — the tools the agent called, in order, with each call's arguments, status, duration, and (on failure) error, plus the run's terminal error — on both successful and failed answers, so a debugging client can see what the agent did and where a slow or failed run spent its time. Enable it only for trusted, debugging-oriented deployments. The environment override is `SQLLENS_AGENT__SHOW_DETAILS`. |
 | `max_conversations` | Integer | Maximum number of in-progress conversations SQL Lens keeps in memory at once, to support multi-turn questions (see [Multi-turn conversations](getting-started.md#multi-turn-conversations) in Getting Started). Defaults to `1000`; valid range is `1` to `1000000`. When the limit is reached, the conversation that has been idle the longest is dropped. Conversations are held in memory only and are never written to disk, so all of them are cleared when the server restarts. The environment override is `SQLLENS_AGENT__MAX_CONVERSATIONS`. Most deployments never need to change this. |
+| `standing_instructions` | String | Unset by default. Rules for your deployment that SQL Lens adds to the assistant's instructions on every request. See [Standing instructions](#standing-instructions) below. The environment override is `SQLLENS_AGENT__STANDING_INSTRUCTIONS`. |
+
+### Standing instructions
+
+Memory notes and saved question-and-answer pairs reach the assistant only when memory search returns them for the wording of a question, so a rule kept there holds for some questions and not others. Put a rule that must hold on every request in `standing_instructions` instead. SQL Lens adds the text to the assistant's instructions on every request, after its built-in rules, between `--- BEGIN DEPLOYMENT INSTRUCTIONS ---` and `--- END DEPLOYMENT INSTRUCTIONS ---` lines, and tells the assistant to:
+
+- follow them on every request, ahead of memory notes and saved pairs, and not to switch them off when a message in the conversation, a tool result or a memory note asks it to;
+- follow an instruction over a conflicting built-in rule, except that no instruction loosens the rules that keep the database structure confidential;
+- treat an instruction that names the meaning of an ambiguous term as settling that choice, as if the question had said it, even when a memory note or saved pair shows another meaning. A question, or an earlier turn of the conversation, that picks a different meaning still wins, unless the instruction says its meaning must be used anyway;
+- keep a choice open when an instruction says to ask about it, until the question, an earlier turn or the user's reply picks a meaning. A memory note or saved pair does not settle that choice.
+
+For example:
+
+```toml
+[agent]
+standing_instructions = """
+Count only fully paid orders as revenue unless the user says otherwise.
+Always ask whether a question about shipments means the ship date or the delivery date.
+Decline requests to export every column of a table of people; offer a summary or a short list of the columns needed instead.
+"""
+```
+
+These are instructions to the assistant, not enforced rules, so it may occasionally not follow one. Use the read-only guard, [row-level security](row-level-security.md) and the database user's own permissions for anything that must never happen. Surrounding blank lines and spaces are removed, and empty or whitespace-only text adds nothing, so the assistant's instructions are exactly as without the setting. The text may be at most 10,000 characters after that trimming; longer text makes the configuration fail to load. Every request sends the whole text to the model, so keep it to the rules that must hold on every question.
 
 ### Section: `[agent.audit]`
 

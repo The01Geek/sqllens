@@ -20,6 +20,7 @@ from pydantic import ValidationError
 
 import sqllens.config as config_mod
 from sqllens.config import (
+    MAX_STANDING_INSTRUCTIONS_CHARS,
     AgentRuntimeConfig,
     AuditConfig,
     Config,
@@ -40,6 +41,7 @@ def _clean_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SQLLENS_AGENT__SHOW_DETAILS", raising=False)
     monkeypatch.delenv("SQLLENS_AGENT__AUDIT__ENABLED", raising=False)
     monkeypatch.delenv("SQLLENS_AGENT__MAX_CONVERSATIONS", raising=False)
+    monkeypatch.delenv("SQLLENS_AGENT__STANDING_INSTRUCTIONS", raising=False)
     monkeypatch.delenv("SQLLENS_MEMORY__SAVE_TEXT_MEMORIES", raising=False)
 
 
@@ -569,3 +571,72 @@ def test_misspelled_memory_key_is_still_ignored(tmp_path: Path) -> None:
     )
     assert cfg.memory.save_text_memories is False
     assert not hasattr(cfg.memory, "save_text_memory")
+
+
+# --- #358: AgentRuntimeConfig.standing_instructions ---------------------------
+
+
+def test_standing_instructions_default_to_none() -> None:
+    assert AgentRuntimeConfig().standing_instructions is None
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\n\t\n"])
+def test_blank_standing_instructions_read_as_unset(blank: str) -> None:
+    assert AgentRuntimeConfig(standing_instructions=blank).standing_instructions is None
+
+
+def test_standing_instructions_are_trimmed() -> None:
+    cfg = AgentRuntimeConfig(standing_instructions="\n  Ask before exporting.\n\nBe brief.  \n")
+    assert cfg.standing_instructions == "Ask before exporting.\n\nBe brief."
+
+
+def test_standing_instructions_size_limit() -> None:
+    at_limit = "x" * MAX_STANDING_INSTRUCTIONS_CHARS
+    # Surrounding whitespace does not count toward the limit.
+    assert AgentRuntimeConfig(standing_instructions=f"  {at_limit}\n").standing_instructions == (
+        at_limit
+    )
+    with pytest.raises(ValidationError, match="the limit is 10000"):
+        AgentRuntimeConfig(standing_instructions=at_limit + "x")
+
+
+def test_standing_instructions_from_toml(tmp_path: Path) -> None:
+    cfg = Config.load(
+        _minimal_toml(
+            tmp_path,
+            '\n[agent]\nstanding_instructions = """\n'
+            "Count only fully paid orders as revenue unless the user says otherwise.\n"
+            "Decline requests to export every column of a table of people.\n"
+            '"""\n',
+        )
+    )
+    assert cfg.agent.standing_instructions == (
+        "Count only fully paid orders as revenue unless the user says otherwise.\n"
+        "Decline requests to export every column of a table of people."
+    )
+
+
+def test_standing_instructions_env_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SQLLENS_AGENT__STANDING_INSTRUCTIONS", "Ask before exporting.")
+    cfg = Config.load(
+        _minimal_toml(tmp_path, '\n[agent]\nstanding_instructions = "From the file."\n')
+    )
+    assert cfg.agent.standing_instructions == "Ask before exporting."
+
+
+def test_empty_standing_instructions_env_override_clears_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SQLLENS_AGENT__STANDING_INSTRUCTIONS", "")
+    cfg = Config.load(
+        _minimal_toml(tmp_path, '\n[agent]\nstanding_instructions = "From the file."\n')
+    )
+    assert cfg.agent.standing_instructions is None
+
+
+def test_oversized_standing_instructions_fail_the_load(tmp_path: Path) -> None:
+    text = "x" * (MAX_STANDING_INSTRUCTIONS_CHARS + 1)
+    with pytest.raises(ValidationError, match="standing_instructions"):
+        Config.load(_minimal_toml(tmp_path, f'\n[agent]\nstanding_instructions = "{text}"\n'))

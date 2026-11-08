@@ -604,3 +604,19 @@ def test_allow_memory_writes_false_drops_every_save_tool(tmp_path: Path) -> None
     assert "save_text_memory" not in tools
     assert "search_saved_correct_tool_uses" in tools
     assert "run_sql" in tools
+
+
+async def test_build_agent_passes_standing_instructions_to_prompt(tmp_path: Path) -> None:
+    """Issue #358: ``agent.standing_instructions`` reaches the agent's prompt builder."""
+    text = "Count only fully paid orders as revenue unless the user says otherwise."
+    configured = build_agent(
+        build_test_config(
+            persist_dir=tmp_path / "a",
+            agent=AgentRuntimeConfig(standing_instructions=text),
+        )
+    )
+    prompt = await _prompt_from_agent_tools(configured)
+    assert f"--- BEGIN DEPLOYMENT INSTRUCTIONS ---\n{text}\n" in prompt
+
+    unconfigured = build_agent(build_test_config(persist_dir=tmp_path / "b"))
+    assert "DEPLOYMENT INSTRUCTIONS" not in await _prompt_from_agent_tools(unconfigured)
