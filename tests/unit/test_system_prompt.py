@@ -53,6 +53,12 @@ async def test_data_confidentiality_directive_present() -> None:
     assert "schema" in lowered
     assert "information_schema" in lowered
     assert "decline" in lowered
+    section = prompt.split("Data Confidentiality:", 1)[1].split("\n\n", 1)[0]
+    assert (
+        "- Select only the columns the question needs. Do not use SELECT * on data "
+        "tables, and do not select columns that hold secrets, such as passwords, "
+        "password hashes, tokens, PINs, keys or one-time codes."
+    ) in section
 
 
 async def test_internal_schema_introspection_is_allowed() -> None:

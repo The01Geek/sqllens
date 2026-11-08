@@ -489,12 +489,12 @@ def test_database_timeout_and_cap_flow_through_to_runner(tmp_path: Path) -> None
     constructor (e.g. a future refactor of build_sql_runner) would silently
     disable the safety primitives — this test pins the wiring shape.
 
-    Decorator stack order is also pinned: ReadOnlyGuardRunner must be outermost
-    (parse-time reject), then RowCapRunner (post-execution cap), then the
-    engine-specific runner.
+    Decorator stack order is also pinned: ResultMaskingRunner outermost, then
+    ReadOnlyGuardRunner (parse-time reject), then RowCapRunner (post-execution
+    cap), then the engine-specific runner.
     """
     from sqllens.agent.integrations.sqlite import SqliteRunner
-    from sqllens.safety import ReadOnlyGuardRunner, RowCapRunner
+    from sqllens.safety import ReadOnlyGuardRunner, ResultMaskingRunner, RowCapRunner
 
     cfg = Config(
         database=DatabaseConfig(
@@ -510,7 +510,9 @@ def test_database_timeout_and_cap_flow_through_to_runner(tmp_path: Path) -> None
     agent = build_agent(cfg)
     run_sql_tool = _unwrap(agent.tool_registry._tools["run_sql"])
 
-    outer = run_sql_tool.sql_runner
+    masking = run_sql_tool.sql_runner
+    assert isinstance(masking, ResultMaskingRunner)
+    outer = masking._inner
     assert isinstance(outer, ReadOnlyGuardRunner)
     cap = outer._inner
     assert isinstance(cap, RowCapRunner)
@@ -528,12 +530,13 @@ def test_readonly_guard_wraps_iff_read_only_enabled(
     """``ReadOnlyGuardRunner`` wraps the stack iff ``database.read_only=True``.
 
     A refactor that flips the default or drops the conditional wrap silently
-    disables the parser guard — this pins the wiring both ways. When enabled
-    the guard must be the OUTERMOST decorator (parse-time reject before any
-    row-cap / engine work).
+    disables the parser guard — this pins the wiring both ways. With no
+    ``[[rls]]`` rules, as here, the enabled guard sits directly beneath the
+    masking guard (parse-time reject before any row-cap / engine work); with
+    rules, ``RlsGuardRunner`` sits between them.
     """
     from sqllens.agent.integrations.sqlite import SqliteRunner
-    from sqllens.safety import ReadOnlyGuardRunner
+    from sqllens.safety import ReadOnlyGuardRunner, ResultMaskingRunner
 
     cfg = Config(
         database=DatabaseConfig(url="sqlite:///:memory:", read_only=read_only),
@@ -543,7 +546,9 @@ def test_readonly_guard_wraps_iff_read_only_enabled(
         agent=AgentRuntimeConfig(),
     )
     agent = build_agent(cfg)
-    runner = _unwrap(agent.tool_registry._tools["run_sql"]).sql_runner
+    masking = _unwrap(agent.tool_registry._tools["run_sql"]).sql_runner
+    assert isinstance(masking, ResultMaskingRunner)
+    runner = masking._inner
 
     if read_only:
         assert isinstance(runner, ReadOnlyGuardRunner), (

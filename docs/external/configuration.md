@@ -235,6 +235,46 @@ value_from_metadata = "tenant_id"
 
 See [Row-Level Security](row-level-security.md) for the full guide, including how to supply request metadata from your client application and the list of cases that cause a query to be blocked.
 
+## Section: `[result_masking]`
+
+SQL Lens hides the values of secret-looking columns in every query result. Masking is always on; no setting turns it off. When a result column's label matches a secret word, every value in that column, NULL included, is replaced with `[withheld]` before the result reaches your table, the model, the conversation history, the server log or the result CSV written to the temp directory. The column itself stays in the result, and the model is told which columns were withheld so it can say the values are hidden. Markdown answers show the placeholder in escaped form (`\[withheld\]`), which renders as `[withheld]`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `extra_words` | list of strings | `[]` | Entries added to the built-in list below. For example, add `"phone"` to also hide phone numbers. Each entry must contain at least one letter or digit. |
+| `unmasked_columns` | list of strings | `[]` | Exact column labels, compared without regard to case, that are never masked. Use it for false positives such as `token_count`. The match is on the whole label, so `token_count` does not exempt `users.token_count`. Each entry must contain at least one letter or digit. |
+| `unmasked_words` | list of strings | `[]` | Built-in entries to stop applying, for a database that uses one of them for ordinary data. Only `token`, `hash`, `salt`, `pin`, `otp`, `totp` and `mfa` can be removed; any other entry makes the configuration fail to load. Removing `token` shows every column whose label holds it, including aggregate labels such as `SUM(output_tokens)` and secrets such as `session_token`, so add the secret ones back through `extra_words` (`"session token"`). |
+
+The built-in entries are: `password`, `passwd`, `pwd`, `passcode`, `secret`, `token`, `hash`, `salt`, `pin`, `otp`, `totp`, `mfa`, `credential`, `apikey`, `api key`, `access key`, `private key`, `encryption key`, `signing key`, `auth key`, `recovery key`, `master key`, `session key`, `one time code`, `verification code`, `reset code`, `recovery code`, `security code`, `auth code`, `sms code`, `backup code`.
+
+**How labels match.** SQL Lens splits a column label into words at every character that is not a letter or digit, at lowercase-to-uppercase changes, before the last capital of an uppercase run followed by lowercase letters, and between letters and digits (`password_hash` → password, hash; `APIKey` → api, key; `password2` → password, 2). One exception keeps a plural together: an uppercase run followed by a single lowercase `s` and then a non-letter or the end of the label stays one word (`PINs` → pins). Entries split the same way. A label matches when its words contain all of an entry's words, consecutively and in order; each word may also carry a trailing `s` or `es` (`api_keys`, `PINs`). The rule looks at the label alone, so it masks some non-secret columns (`token_count`, `content_hash`, `mfa_enabled`) and misses others:
+
+- a secret column whose result label is a different name: an alias (`password_hash AS h`), a view's column name, or, in a UNION, the first branch's label for a column a later branch fills;
+- an expression over a secret column whose label the database builds without the column's name, such as PostgreSQL's function-name label for `upper(password_hash)`;
+- a PostgreSQL whole-row value (`row_to_json(u)`);
+- a label whose words run together (`passwordhash`), or whose acronym plural runs into the next word (`OTPsCount` splits as ot, ps, count);
+- a secret column whose label contains none of the entries;
+- values repeated in a database error message;
+- sampled values returned by catalog statistics views, such as PostgreSQL's `pg_stats`.
+
+Contact columns such as email, phone and IP address are not masked unless you add them to `extra_words`. Masking is a safety net, not access control: grant the SQL Lens database user access only to the columns it needs.
+
+```toml
+[result_masking]
+extra_words = ["phone"]
+unmasked_columns = ["token_count"]
+```
+
+For a database that uses `token` for ordinary data, such as token usage counts:
+
+```toml
+[result_masking]
+unmasked_words = ["token"]
+extra_words = ["session token", "access token", "refresh token"]
+```
+
+As environment variables, each setting is a JSON array, for example `SQLLENS_RESULT_MASKING__EXTRA_WORDS='["phone"]'`. An unknown key, a wrong-type value, an entry with no letters or digits, or an environment value that is not valid JSON makes the configuration fail to load. A configuration file containing `[result_masking]` does not load in an older SQL Lens release; remove the section before downgrading.
+
 ## Top-level field: `config_version`
 
 A single top-level integer, `config_version`, defaults to `1`. It is accepted and validated but currently has no effect. It is reserved so future releases can detect and migrate older configuration files. You do not need to set it.

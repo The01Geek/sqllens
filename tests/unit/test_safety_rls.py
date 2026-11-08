@@ -35,6 +35,7 @@ from sqllens.config import (
 )
 from sqllens.safety import (
     ReadOnlyGuardRunner,
+    ResultMaskingRunner,
     RlsError,
     RlsGuardRunner,
     apply_rls,
@@ -682,9 +683,11 @@ def _unwrap(tool: object) -> object:
 
 
 class TestFactoryComposition:
-    def test_rls_guard_outermost_ahead_of_readonly(self, tmp_path: Path) -> None:
+    def test_rls_guard_beneath_masking_ahead_of_readonly(self, tmp_path: Path) -> None:
         agent = build_agent(_cfg(tmp_path, [_rule(value="acme")]))
-        runner = _unwrap(agent.tool_registry._tools["run_sql"]).sql_runner
+        masking = _unwrap(agent.tool_registry._tools["run_sql"]).sql_runner
+        assert isinstance(masking, ResultMaskingRunner)
+        runner = masking._inner
         assert isinstance(runner, RlsGuardRunner)
         # Read-only guard validates the *rewritten* SQL → it sits inside RLS.
         assert isinstance(runner._inner, ReadOnlyGuardRunner)
