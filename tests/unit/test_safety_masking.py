@@ -123,13 +123,21 @@ def test_unmasked_columns_match_whole_label_case_insensitively() -> None:
     assert matcher.is_secret("u.token_count")
 
 
+def test_unmasked_columns_accept_a_one_shot_iterable() -> None:
+    matcher = SecretColumnMatcher(unmasked_columns=iter(["token_count"]))
+    assert not matcher.is_secret("token_count")
+
+
 def test_unmasked_words_remove_only_that_builtin_entry() -> None:
     matcher = SecretColumnMatcher(unmasked_words=["Token"])
     assert not matcher.is_secret("SUM(output_tokens)")
     assert not matcher.is_secret("users.token_count")
-    # Other built-in entries still apply, including to labels holding the word.
+    # Other built-in entries still apply, removable ones included.
     assert matcher.is_secret("password_token")
     assert matcher.is_secret("api_key")
+    assert matcher.is_secret("content_hash")
+    assert matcher.is_secret("pin")
+    assert matcher.is_secret("mfa_enabled")
 
 
 def test_extra_words_still_apply_after_their_builtin_word_is_removed() -> None:
@@ -504,6 +512,7 @@ def test_config_reaches_the_guard(tmp_path: Path) -> None:
     assert not runner._matcher.is_secret("token_count")
     assert not runner._matcher.is_secret("commit_hash")
     assert runner._matcher.is_secret("password_hash")
+    assert runner._matcher.is_secret("session_token")
 
 
 # --- documented under-masks -------------------------------------------------

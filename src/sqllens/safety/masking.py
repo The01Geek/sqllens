@@ -170,9 +170,10 @@ class SecretColumnMatcher:
         builtin = [entry_words(entry) for entry in BUILTIN_SECRET_ENTRIES]
         self._entries = [words for words in builtin if words not in removed]
         self._entries.extend(entry_words(entry) for entry in extra_words)
-        for column in unmasked_columns:
+        columns = list(unmasked_columns)
+        for column in columns:
             entry_words(column)
-        self._unmasked = {c.casefold() for c in unmasked_columns}
+        self._unmasked = {c.casefold() for c in columns}
 
     def is_secret(self, label: object) -> bool:
         text = str(label)
