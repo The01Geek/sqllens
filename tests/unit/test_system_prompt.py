@@ -547,17 +547,19 @@ async def test_standing_instructions_appended_after_generic_rules(
         "the row limit, and on never calling a result full or complete."
     ) in section
     # Every section and rule the carve-out names exists above it: the sections by
-    # heading, and each Response Guidelines case inside that section.
+    # heading, and inside Response Guidelines the duty each named case gives the
+    # answer (not the clause describing the run_sql result that triggers it).
     for heading in ("Response Guidelines:", "Tool Errors:", "Data Confidentiality:"):
         assert prompt.index(heading) < prompt.index("DEPLOYMENT INSTRUCTIONS:")
     guidelines = prompt[prompt.index("Response Guidelines:"):prompt.index("Tool Errors:")]
-    for case in (
-        "may say that the user's table is cut",
-        "the rows are too large to show the user as a table",
-        "the query stopped at the row limit",
+    for duty in (
+        "states how many rows the table shows and how many the query returned",
+        "that answer says how many rows the query returned and that they could not "
+        "be shown as a table",
+        "that answer says the query hit the row limit and more rows exist",
         "Never call a result table or a result full or complete",
     ):
-        assert case in guidelines
+        assert guidelines.count(duty) == 1, duty
     # The section is the last thing in the prompt, after every generic rule.
     assert prompt.endswith("--- END DEPLOYMENT INSTRUCTIONS ---")
     for heading in ("Ambiguous Questions:", "EMIT_CHART USAGE:", "MEMORY SYSTEM:",
