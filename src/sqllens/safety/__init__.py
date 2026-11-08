@@ -1,7 +1,10 @@
 # SPDX-FileCopyrightText: 2026 Daniel Radman
 # SPDX-License-Identifier: Apache-2.0
 
-"""SQL safety guards.
+"""SQL safety guards. ``assert_no_whole_row_select`` / ``WholeRowSelectGuardRunner``
+refuses a ``*`` or ``alias.*`` that expands a table or view before the query runs; unless
+``database.refuse_whole_row_selects`` is off, the factory composes it outside every
+protection listed below.
 
 Four orthogonal protections, composed at the factory:
 
@@ -53,6 +56,11 @@ from sqllens.safety.readonly import (
     sqlglot_dialect_for_url,
 )
 from sqllens.safety.rls import RlsError, apply_rls
+from sqllens.safety.whole_row import (
+    WholeRowSelectError,
+    WholeRowSelectGuardRunner,
+    assert_no_whole_row_select,
+)
 
 if TYPE_CHECKING:
     from sqllens.agent.core.tool import ToolContext
@@ -68,7 +76,10 @@ __all__ = [
     "RlsGuardRunner",
     "RowCapRunner",
     "UnsafeSqlError",
+    "WholeRowSelectError",
+    "WholeRowSelectGuardRunner",
     "apply_rls",
+    "assert_no_whole_row_select",
     "assert_select_only",
     "first_sql_keyword",
     "is_introspection_query",

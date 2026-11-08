@@ -668,7 +668,8 @@ class TestRlsGuardRunner:
 
 def _cfg(tmp_path: Path, rls: list[RlsRule]) -> Config:
     return Config(
-        database=DatabaseConfig(url="sqlite:///:memory:"),
+        # The whole-row select guard wraps RLS; test_safety_whole_row.py pins that.
+        database=DatabaseConfig(url="sqlite:///:memory:", refuse_whole_row_selects=False),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
         memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
         auth=AuthConfig(mode="none"),

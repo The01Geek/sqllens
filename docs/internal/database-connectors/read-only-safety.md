@@ -190,6 +190,36 @@ When at least one `[[rls]]` rule is configured (the `cfg.rls` list is non-empty)
 
 Full reference in [row-level-security.md](row-level-security.md).
 
+## Whole-row select guard
+
+[src/sqllens/safety/whole_row.py](../../../src/sqllens/safety/whole_row.py) refuses SQL whose `*` or `alias.*` expands a table or view, before the query runs. A star over a table returns every column, including columns the question never needed; refusing it makes the agent rewrite the query with a column list. It is a separate decision from the read-only guard: it applies whatever `database.read_only` is, and `database.refuse_whole_row_selects = false` (default `true`) turns it off.
+
+`build_agent` wraps the runner stack in `WholeRowSelectGuardRunner` just before registering `RunSqlTool`, outside every runner that rewrites or runs SQL, so it checks the SQL the agent wrote, before any RLS rewrite: **WholeRowSelectGuardRunner → (RlsGuardRunner →) (ReadOnlyGuardRunner →) RowCapRunner → engine runner**. Because it is never beneath `RlsGuardRunner`, `_relation_check_executor` does not unwrap it.
+
+`assert_no_whole_row_select` parses with `_parse_statements` (the read-only guard's parser, MySQL lexical checks included) and checks every statement, whatever its kind. Each `exp.Star` node, bare or wrapped in an `exp.Column` as `t.*`, is:
+
+| Star | Decision |
+|---|---|
+| The argument of `COUNT` (`COUNT(*)`, `COUNT(t.*)`) | allowed |
+| Anywhere under an `exp.Exists` (`EXISTS`, `NOT EXISTS`) | allowed |
+| `t.*` where `t` resolves (sqlglot scope analysis, after `normalize_identifiers`) to a CTE, derived table, `VALUES`, `UNNEST` or `LATERAL` | allowed |
+| `t.*` where `t` is a table-valued function, or a system catalog (`is_catalog_table`, the rule `is_introspection_query` uses) | allowed |
+| Bare `*` whose `FROM`/`JOIN` sources include no named table or view outside the catalogs | allowed |
+| `t.*` where `t` is a named table or view, or names no source of its `SELECT` | refused |
+| Bare `*` whose sources include a named table or view outside the catalogs | refused |
+| Any other star that expands a table: in a CTE, a derived table, an `IN` or scalar subquery, a set operation, or a function argument such as `row_to_json(t.*)` | refused |
+
+SQL whose leading keyword (`first_sql_keyword`) is `TABLE` is refused too: PostgreSQL's and MySQL's `TABLE t` means `SELECT * FROM t`, and sqlglot does not parse it as a statement.
+
+The refusal raises `WholeRowSelectError`, a subclass of `UnsafeSqlError`, so `query_database`'s defensive `UnsafeSqlError` branch would treat it like the read-only guard's errors if it ever escaped `RunSqlTool`. `RunSqlTool` catches it and returns it to the model as a failed tool result, `Error executing query: refusing to execute query: it selects every column of a table or view (…)`, naming the star (`*`, `u.*`, after identifier normalization) but no table. The default system prompt's Tool Errors rule routes an error containing "selects every column" to a corrected retry, and `WHOLE_ROW_REFUSAL` keeps that phrase.
+
+Failure paths:
+
+- SQL `_parse_statements` cannot parse (a parse or tokenize error, ambiguous MySQL input such as an executable comment) raises `UnsafeSqlError` and is refused, as the read-only guard refuses it.
+- `normalize_identifiers` and `traverse_scope` run only when the statement has a star that is not exempt, so a query without one never depends on them. Any unexpected exception from them, or from the tokenizer behind `first_sql_keyword`, is logged at `WARNING` with a traceback and refuses the query (`whole-row select check errored (…)`), as the read-only guard fails closed.
+
+Not covered: a whole row reached without a star (PostgreSQL's `row_to_json(t)` or a bare `t` as a composite value) and an explicit list of every column. The default system prompt's Data Confidentiality section tells the agent to decline requests to export whole tables whatever this setting is.
+
 ## Dialect handling
 
 `sqlglot_dialect_for_url(url)` in [src/sqllens/safety/readonly.py](../../../src/sqllens/safety/readonly.py) (exported from `sqllens.safety`) maps URL schemes to sqlglot dialect names:

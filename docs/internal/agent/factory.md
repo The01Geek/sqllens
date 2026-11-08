@@ -19,6 +19,11 @@ cfg.database    →  build_sql_runner(url,
                                                           ↓ (if cfg.rls non-empty)
                                                         RlsGuardRunner (sqlglot AST rewrite —
                                                           predicate injection + fail-secure proof)
+                                                          ↓ (if cfg.database.refuse_whole_row_selects,
+                                                             the default; composed just before
+                                                             RunSqlTool, outside the runners above)
+                                                        WholeRowSelectGuardRunner (refuses a * or
+                                                          alias.* that expands a table or view)
 cfg.memory      →  ChromaAgentMemory                 →  persists under cfg.memory.persist_dir
                    LocalFileSystem                   →  scratch root = tempfile.gettempdir() / "sqllens"
 cfg.agent       →  BoundedConversationStore          →  in-process LRU, capped at

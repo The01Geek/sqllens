@@ -41,6 +41,7 @@ from sqllens.safety import (
     ReadOnlyGuardRunner,
     RlsGuardRunner,
     RowCapRunner,
+    WholeRowSelectGuardRunner,
     sqlglot_dialect_for_url,
 )
 
@@ -118,6 +119,12 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     # which is non-writable under some MCP launchers (e.g. Claude Desktop on
     # Windows installs under Program Files / Local\AnthropicClaude).
     scratch_fs = LocalFileSystem(str(Path(tempfile.gettempdir()) / "sqllens"))
+
+    # The whole-row select guard wraps every runner that rewrites or runs SQL,
+    # so it checks the SQL the agent wrote, before any RLS rewrite, and refuses
+    # a SELECT * over a table before a connection opens.
+    if cfg.database.refuse_whole_row_selects:
+        sql_runner = WholeRowSelectGuardRunner(sql_runner, dialect=dialect)
 
     tools = ToolRegistry()
     access = [DEFAULT_USER_GROUP]
