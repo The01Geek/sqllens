@@ -169,8 +169,11 @@ def _agent_error_result(
 
     The text mirrors FastMCP's own tool-error format
     (``Error executing tool query_database: <message>`` — see
-    ``mcp.server.fastmcp.tools.base.Tool.run``) so the client-facing message is
-    byte-for-byte what the re-raise path would produce. ``_meta`` carries the
+    ``mcp.server.fastmcp.tools.base.Tool.run``). When the caller passes the
+    exception message unchanged (``agent.show_conversation_footer`` on), the
+    text is byte-for-byte what the re-raise path would produce; with the
+    setting off the caller strips the conversation-id tail first, so the text
+    differs by that tail. ``_meta`` carries the
     conversation channel, plus the agent trace only when ``agent_trace`` is not
     ``None``.
     """
