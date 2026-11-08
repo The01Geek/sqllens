@@ -288,13 +288,22 @@ class ResultMaskingConfig(BaseModel):
         ),
     )
 
-    @field_validator("extra_words", "unmasked_columns")
+    @field_validator("extra_words")
     @classmethod
     def _entries_have_words(cls, value: list[str]) -> list[str]:
         from sqllens.safety.masking import entry_words
 
         for entry in value:
             entry_words(entry)
+        return value
+
+    @field_validator("unmasked_columns")
+    @classmethod
+    def _labels_can_match(cls, value: list[str]) -> list[str]:
+        from sqllens.safety.masking import unmasked_column_label
+
+        for entry in value:
+            unmasked_column_label(entry)
         return value
 
     @field_validator("unmasked_words")

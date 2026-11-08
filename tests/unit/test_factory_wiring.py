@@ -530,9 +530,10 @@ def test_readonly_guard_wraps_iff_read_only_enabled(
     """``ReadOnlyGuardRunner`` wraps the stack iff ``database.read_only=True``.
 
     A refactor that flips the default or drops the conditional wrap silently
-    disables the parser guard — this pins the wiring both ways. When enabled
-    the guard must sit directly beneath the masking guard (parse-time reject
-    before any row-cap / engine work).
+    disables the parser guard — this pins the wiring both ways. With no
+    ``[[rls]]`` rules, as here, the enabled guard sits directly beneath the
+    masking guard (parse-time reject before any row-cap / engine work); with
+    rules, ``RlsGuardRunner`` sits between them.
     """
     from sqllens.agent.integrations.sqlite import SqliteRunner
     from sqllens.safety import ReadOnlyGuardRunner, ResultMaskingRunner

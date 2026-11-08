@@ -91,7 +91,10 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         "Re-issue with an explicit LIMIT or narrower WHERE clause."
                     )
 
-                masked_columns = df.attrs.get(MASKED_COLUMNS_ATTR) or []
+                raw_masked = df.attrs.get(MASKED_COLUMNS_ATTR) or []
+                masked_columns = (
+                    [raw_masked] if isinstance(raw_masked, str) else [str(c) for c in raw_masked]
+                )
                 masking_note = ""
                 if masked_columns:
                     masking_note = (

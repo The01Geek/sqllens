@@ -12,6 +12,7 @@ heuristic over the column label alone; it never parses SQL text.
 from __future__ import annotations
 
 import logging
+import traceback
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING
 
@@ -142,6 +143,18 @@ def entry_words(entry: str) -> tuple[str, ...]:
     return tuple(words)
 
 
+def unmasked_column_label(entry: str) -> str:
+    """Check an ``unmasked_columns`` entry, rejecting one that can never equal a label.
+
+    A label is compared whole, so an entry with no letters or digits, or with
+    leading or trailing whitespace, would load and silently exempt nothing.
+    """
+    entry_words(entry)
+    if entry != entry.strip():
+        raise ValueError(f"entry {entry!r} has leading or trailing whitespace")
+    return entry
+
+
 def removable_entry_words(entry: str) -> tuple[str, ...]:
     """Split an ``unmasked_words`` entry, rejecting one that is not a removable built-in."""
     words = entry_words(entry)
@@ -179,10 +192,7 @@ class SecretColumnMatcher:
         builtin = [entry_words(entry) for entry in BUILTIN_SECRET_ENTRIES]
         self._entries = [words for words in builtin if words not in removed]
         self._entries.extend(entry_words(entry) for entry in extra_words)
-        columns = list(unmasked_columns)
-        for column in columns:
-            entry_words(column)
-        self._unmasked = {c.casefold() for c in columns}
+        self._unmasked = {unmasked_column_label(c).casefold() for c in unmasked_columns}
 
     def is_secret(self, label: object) -> bool:
         text = str(label)
@@ -195,25 +205,30 @@ class SecretColumnMatcher:
 def mask_secret_columns(df: pd.DataFrame, matcher: SecretColumnMatcher) -> pd.DataFrame:
     """Return ``df`` with every secret column's values replaced by the placeholder.
 
-    The masked labels are recorded under ``df.attrs[MASKED_COLUMNS_ATTR]``.
-    A record already on ``df`` is dropped first, so the record names only the
-    columns this call masked. A frame with no rows or no secret column is
-    otherwise returned unchanged: with no rows there is no value to withhold,
-    so the model gets no withheld note.
+    The masked labels are recorded once each, in column order, under
+    ``attrs[MASKED_COLUMNS_ATTR]`` of the returned frame. ``df`` itself is never
+    modified. A masked-columns record already on ``df`` is not carried over, so
+    the record names only the columns this call masked. A frame with no rows or
+    no secret column comes back with its values unchanged: with no rows there
+    is no value to withhold, so the model gets no withheld note.
     """
-    df.attrs.pop(MASKED_COLUMNS_ATTR, None)
-    if len(df) == 0:
-        return df
-    positions = [i for i, label in enumerate(df.columns) if matcher.is_secret(label)]
+    positions = (
+        [i for i, label in enumerate(df.columns) if matcher.is_secret(label)] if len(df) else []
+    )
+    attrs = {k: v for k, v in df.attrs.items() if k != MASKED_COLUMNS_ATTR}
     if not positions:
-        return df
+        if len(attrs) == len(df.attrs):
+            return df
+        out = df.copy(deep=False)
+        out.attrs = attrs
+        return out
     masked = df.copy()
     for i in positions:
         masked.isetitem(
             i, pd.Series([WITHHELD_PLACEHOLDER] * len(df), index=df.index, dtype=object)
         )
-    masked.attrs = dict(df.attrs)
-    masked.attrs[MASKED_COLUMNS_ATTR] = [str(df.columns[i]) for i in positions]
+    masked.attrs = attrs
+    masked.attrs[MASKED_COLUMNS_ATTR] = list(dict.fromkeys(str(df.columns[i]) for i in positions))
     return masked
 
 
@@ -244,15 +259,17 @@ class ResultMaskingRunner(SqlRunner):
             return mask_secret_columns(df, self._matcher)
         except Exception as e:
             # Fail closed: an unexpected error in the masking step withholds
-            # the whole result rather than returning the unmasked frame. Log
-            # with a traceback so a guard bug is diagnosable rather than
-            # indistinguishable from a database error.
+            # the whole result rather than returning the unmasked frame. The
+            # exception's message can quote a cell value, so neither the log
+            # nor the error the model reads carries it: log the type and the
+            # stack frames so a guard bug stays diagnosable, and drop the
+            # chained cause.
             logger.warning(
-                "result masking guard raised an unexpected %s; failing closed",
+                "result masking guard raised an unexpected %s; failing closed\n%s",
                 type(e).__name__,
-                exc_info=True,
+                "".join(traceback.format_tb(e.__traceback__)),
             )
             raise ResultMaskingError(
-                f"refusing to return query result: result masking guard errored "
-                f"({type(e).__name__}: {e})"
-            ) from e
+                "refusing to return query result: result masking guard errored "
+                f"({type(e).__name__})"
+            ) from None

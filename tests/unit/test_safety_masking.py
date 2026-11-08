@@ -205,6 +205,53 @@ def test_mask_handles_duplicate_labels() -> None:
     df = pd.DataFrame([[1, "a", "b"]], columns=["id", "token", "token"])
     out = mask_secret_columns(df, SecretColumnMatcher())
     assert out.iloc[0].tolist() == [1, W, W]
+    # A label shared by several columns is recorded, and so named in the note, once.
+    assert out.attrs[MASKED_COLUMNS_ATTR] == ["token"]
+
+
+def test_duplicate_label_note_names_the_label_once(tmp_path: Path) -> None:
+    df = pd.DataFrame([[1, "a", "b"]], columns=["id", "token", "token"])
+    tool = RunSqlTool(
+        sql_runner=ResultMaskingRunner(_FrameRunner(df)),
+        file_system=LocalFileSystem(str(tmp_path)),
+    )
+    assert "withheld the values in these columns: token. Tell" in _run(tool).result_for_llm
+
+
+def test_note_reads_a_bare_string_record_as_one_label(tmp_path: Path) -> None:
+    df = pd.DataFrame({"pin": [W]})
+    df.attrs[MASKED_COLUMNS_ATTR] = "pin"
+    tool = RunSqlTool(sql_runner=_FrameRunner(df), file_system=LocalFileSystem(str(tmp_path)))
+    assert "withheld the values in these columns: pin. Tell" in _run(tool).result_for_llm
+
+
+def test_mask_never_modifies_its_input() -> None:
+    plain = pd.DataFrame({"id": [1]})
+    plain.attrs[MASKED_COLUMNS_ATTR] = ["id"]
+    out = mask_secret_columns(plain, SecretColumnMatcher())
+    assert MASKED_COLUMNS_ATTR not in out.attrs
+    assert plain.attrs[MASKED_COLUMNS_ATTR] == ["id"]
+
+    secret = pd.DataFrame({"pin": ["1234"]})
+    secret.attrs[MASKED_COLUMNS_ATTR] = ["id"]
+    out = mask_secret_columns(secret, SecretColumnMatcher())
+    assert out.attrs[MASKED_COLUMNS_ATTR] == ["pin"]
+    assert secret.attrs[MASKED_COLUMNS_ATTR] == ["id"]
+    assert secret["pin"].tolist() == ["1234"]
+
+
+@pytest.mark.parametrize("entry", [" token_count", "token_count ", "\ttoken_count"])
+def test_unmasked_columns_reject_surrounding_whitespace(entry: str) -> None:
+    with pytest.raises(ValueError, match="leading or trailing whitespace"):
+        SecretColumnMatcher(unmasked_columns=[entry])
+    with pytest.raises(ValidationError, match="unmasked_columns"):
+        ResultMaskingConfig(unmasked_columns=[entry])
+
+
+def test_unmasked_columns_accept_inner_spaces() -> None:
+    # A label may contain spaces (a quoted identifier, an expression label).
+    matcher = SecretColumnMatcher(unmasked_columns=["SUM(a + token)"])
+    assert not matcher.is_secret("sum(a + token)")
 
 
 # --- run_sql sinks ---------------------------------------------------------
@@ -348,14 +395,19 @@ def test_unexpected_masking_error_fails_closed_and_logs(
 ) -> None:
     class _Broken(SecretColumnMatcher):
         def is_secret(self, label: object) -> bool:
-            raise RuntimeError("simulated matcher bug")
+            # An error message can quote a cell value; it must travel nowhere.
+            raise RuntimeError(f"simulated matcher bug near {SENTINELS['pin']}")
 
     guard = ResultMaskingRunner(_FrameRunner(_user_rows(1)))
     guard._matcher = _Broken()
     with caplog.at_level("WARNING", logger="sqllens.safety.masking"):
-        with pytest.raises(ResultMaskingError, match="result masking guard errored"):
+        with pytest.raises(ResultMaskingError, match="result masking guard errored") as exc:
             asyncio.run(guard.run_sql(RunSqlToolArgs(sql="SELECT 1"), _context()))
     assert "result masking guard raised an unexpected RuntimeError" in caplog.text
+    assert "is_secret" in caplog.text  # the stack frames are logged
+    assert SENTINELS["pin"] not in caplog.text
+    assert SENTINELS["pin"] not in str(exc.value)
+    assert exc.value.__cause__ is None
 
 
 def test_masking_error_reaches_run_sql_without_values(tmp_path: Path) -> None:
@@ -492,6 +544,15 @@ def test_env_invalid_entry_fails_naming_setting(
 ) -> None:
     monkeypatch.setenv(f"SQLLENS_RESULT_MASKING__{setting}", value)
     with pytest.raises(ValidationError, match=setting.lower()):
+        Config.load(_write_toml(tmp_path, ""))
+
+
+@pytest.mark.parametrize("setting", ["ENABLE", "EXTRA_WORD", "UNMASKED_COLUMN"])
+def test_env_unknown_key_fails_naming_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, setting: str
+) -> None:
+    monkeypatch.setenv(f"SQLLENS_RESULT_MASKING__{setting}", '["x"]')
+    with pytest.raises(ValidationError, match=f"result_masking.{setting.lower()}"):
         Config.load(_write_toml(tmp_path, ""))
 
 
