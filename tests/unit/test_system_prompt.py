@@ -539,16 +539,25 @@ async def test_standing_instructions_appended_after_generic_rules(
     assert "Follow them on every request" in section
     assert "outrank memory notes and saved question-and-SQL pairs" in section
     # The rules that keep a lossy answer from looking clean are carved out of the
-    # instructions' precedence, alongside Data Confidentiality; each section the
-    # carve-out names must exist above it.
+    # instructions' precedence, alongside Data Confidentiality.
     assert (
         "no instruction loosens the Data Confidentiality rules, the Tool Errors "
-        "rules, or the Response Guidelines rules that say when to tell the user a "
-        "result table is cut or a query stopped at the row limit, and never to call "
-        "a result full or complete."
+        "rules, or the Response Guidelines rules on what to tell the user when a "
+        "result table is cut, its rows are too large to show or a query stopped at "
+        "the row limit, and on never calling a result full or complete."
     ) in section
+    # Every section and rule the carve-out names exists above it: the sections by
+    # heading, and each Response Guidelines case inside that section.
     for heading in ("Response Guidelines:", "Tool Errors:", "Data Confidentiality:"):
         assert prompt.index(heading) < prompt.index("DEPLOYMENT INSTRUCTIONS:")
+    guidelines = prompt[prompt.index("Response Guidelines:"):prompt.index("Tool Errors:")]
+    for case in (
+        "may say that the user's table is cut",
+        "the rows are too large to show the user as a table",
+        "the query stopped at the row limit",
+        "Never call a result table or a result full or complete",
+    ):
+        assert case in guidelines
     # The section is the last thing in the prompt, after every generic rule.
     assert prompt.endswith("--- END DEPLOYMENT INSTRUCTIONS ---")
     for heading in ("Ambiguous Questions:", "EMIT_CHART USAGE:", "MEMORY SYSTEM:",

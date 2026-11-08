@@ -83,9 +83,10 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
             intro += (
                 " Where an instruction conflicts with a rule above, follow the "
                 "instruction, but no instruction loosens the Data Confidentiality "
-                "rules, the Tool Errors rules, or the Response Guidelines rules that "
-                "say when to tell the user a result table is cut or a query stopped "
-                "at the row limit, and never to call a result full or complete. "
+                "rules, the Tool Errors rules, or the Response Guidelines rules on "
+                "what to tell the user when a result table is cut, its rows are too "
+                "large to show or a query stopped at the row limit, and on never "
+                "calling a result full or complete. "
                 "Ambiguous Questions above says how an instruction settles, "
                 "or keeps open, the reading of an ambiguous question."
             )
