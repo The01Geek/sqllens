@@ -1,0 +1,670 @@
+[
+  {
+    "id": "VC-1",
+    "category": "dependency_interaction",
+    "claim": "The fence constants `_SECTION_BEGIN`/`_SECTION_END` in default.py are byte-identical to the fence-line constants defined in `sqllens.config`, which rejects the same lines at config load.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "source_line": 13,
+    "source_line_end": 16,
+    "verify_against": "The fence-line constants and their validator in src/sqllens/config.py (around lines 427-510)",
+    "verify_hint": "Compare `_SECTION_BEGIN`/`_SECTION_END` in default.py with the fence constants near `MAX_STANDING_INSTRUCTIONS_CHARS` and `_normalize_standing_instructions` in src/sqllens/config.py",
+    "claim_signature": "dependency_interaction:default.py:fence-constants-match-config:13",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "absolute_claim",
+    "claim": "A unit test keeps the two copies of the fence lines (default.py and sqllens.config) equal.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The lines that fence the operator's standing instructions. sqllens.config\n# rejects the same lines at load; a unit test keeps the two copies equal.",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "source_line": 13,
+    "source_line_end": 14,
+    "verify_against": "The unit tests for the system prompt and config schema",
+    "verify_hint": "Look for a test in tests/unit/test_system_prompt.py or tests/unit/test_config_schema.py that asserts default.py's `_SECTION_BEGIN`/`_SECTION_END` equal the config module's fence constants; absence of such a test falsifies the comment",
+    "claim_signature": "absolute_claim:default.py:unit-test-keeps-copies-equal:13",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "absolute_claim",
+    "claim": "`None`, empty or whitespace-only `standing_instructions` adds nothing, so the prompt is unchanged.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "``None``, empty or\n                whitespace-only text adds nothing, so the prompt is unchanged.",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "source_line": 57,
+    "source_line_end": 60,
+    "verify_against": "The normalization at default.py:71 and every `self.standing_instructions is not None` branch in build_system_prompt",
+    "verify_hint": "Falsify with a whitespace-only value such as \"\\n \\t\" passed to DefaultSystemPromptBuilder, comparing build_system_prompt output against the unset build, with and without memory tools registered",
+    "claim_signature": "absolute_claim:default.py:blank-leaves-prompt-unchanged:57",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "data_format_assumption",
+    "claim": "Placing the section's blank separators inside the strings rather than as `\"\"` list elements means the empty-string filter applied when memory tools are present cannot remove the section's blank lines, including blank lines inside the operator's own text.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "source_line": 106,
+    "source_line_end": 116,
+    "verify_against": "The filter `prompt_parts = [part for part in prompt_parts if part != \"\"]` at default.py:366-368",
+    "verify_hint": "Check whether any element returned by `_standing_instructions_section` can equal the empty string and whether the filter at default.py:368 would drop it",
+    "claim_signature": "data_format_assumption:default.py:section-survives-empty-filter:106",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "api_contract",
+    "claim": "On the `base_prompt` path, the builder returns `base_prompt`, a blank line and the section, and returns only the section (no leading blank line) when `base_prompt` is the empty string.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "source_line": 136,
+    "source_line_end": 142,
+    "verify_against": "Callers that pass `base_prompt` to DefaultSystemPromptBuilder and the documented behavior in docs/internal/agent/factory.md",
+    "verify_hint": "Check the `base_prompt` branch of `build_system_prompt` in src/sqllens/agent/core/system_prompt/default.py against the bullet in docs/internal/agent/factory.md's `standing_instructions` section and the base_prompt tests in tests/unit/test_system_prompt.py",
+    "claim_signature": "api_contract:default.py:base-prompt-section-append:136",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "data_format_assumption",
+    "claim": "The ambiguity bullet added at default.py:171-173 refers to a \"DEPLOYMENT INSTRUCTIONS section below\" that is in fact emitted later in the same prompt (default.py:361-364) whenever the bullet is emitted.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "source_line": 168,
+    "source_line_end": 173,
+    "verify_against": "The section-append branch at default.py:359-364 and the ordering of prompt_parts",
+    "verify_hint": "Confirm both branches are gated on the same `self.standing_instructions is not None` condition and that the section is appended after the Ambiguous Questions bullets in `build_system_prompt`",
+    "claim_signature": "data_format_assumption:default.py:ambiguity-bullet-points-forward:168",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "absolute_claim",
+    "claim": "The DEPLOYMENT INSTRUCTIONS section is appended last, after every generic rule, and the memory-context enhancer appends retrieved notes and pairs after it when it runs.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Last, after every generic rule. The memory-context enhancer appends\n        # retrieved notes and pairs after this when it runs.",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "source_line": 359,
+    "source_line_end": 364,
+    "verify_against": "`DefaultLlmContextEnhancer.enhance_system_prompt` in the agent's context-enhancer module",
+    "verify_hint": "Check `DefaultLlmContextEnhancer.enhance_system_prompt` (the memory context enhancer under src/sqllens/agent/) to confirm it appends retrieved memory after the prompt string rather than prepending or inserting it",
+    "claim_signature": "absolute_claim:default.py:section-last-enhancer-after:359",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "absolute_claim",
+    "claim": "The configuration reference states that the standing-instructions text may not contain either fence line and that the configuration is rejected at load if it does.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "(the text itself may not contain either line; the configuration is rejected at load if it does)",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 26,
+    "verify_against": "`_normalize_standing_instructions` in src/sqllens/config.py",
+    "verify_hint": "Falsify with a value containing an indented or trailing-whitespace fence line, and one differing in case or dash count, against the line check in `_normalize_standing_instructions` (src/sqllens/config.py ~503-508)",
+    "claim_signature": "absolute_claim:configuration.md:fence-line-rejected-at-load:26",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "absolute_claim",
+    "claim": "Surrounding blank lines and spaces are removed, empty or whitespace-only text adds nothing so the assistant's instructions are exactly as without the setting, and the text may be at most 10,000 characters after trimming with longer text failing the configuration load.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Surrounding blank lines and spaces are removed, and empty or whitespace-only text adds nothing, so the assistant's instructions are exactly as without the setting. The text may be at most 10,000 characters after that trimming; longer text makes the configuration fail to load.",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 44,
+    "verify_against": "`MAX_STANDING_INSTRUCTIONS_CHARS` and `_normalize_standing_instructions` in src/sqllens/config.py",
+    "verify_hint": "Falsify with values of exactly 10,000 and 10,001 characters after stripping, and a whitespace-only value, against src/sqllens/config.py lines 427-510",
+    "claim_signature": "absolute_claim:configuration.md:trim-and-10000-limit:44",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "absolute_claim",
+    "claim": "The prompt tells the assistant that no instruction loosens the data confidentiality rules (keeping the database structure confidential, never using `SELECT *` on data tables, and never selecting secret columns), the rules for a failed query or tool error, or the rules about cut tables, oversized rows, the row limit and never calling a result complete.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "follow an instruction over a conflicting built-in rule, except that no instruction loosens the data confidentiality rules (keeping the database structure confidential, never using `SELECT *` on data tables, and never selecting columns that hold secrets such as passwords, tokens, PINs or keys), the rules for handling a failed query or tool error, or the rules that make the assistant say when a result table is cut short, its rows are too large to show or a query hit the row limit, and never call a result complete;",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 29,
+    "verify_against": "The `intro` text built in `_standing_instructions_section` (src/sqllens/agent/core/system_prompt/default.py:89-105)",
+    "verify_hint": "Compare each carve-out named in this doc bullet with the `default_rules` branch of `intro` in `_standing_instructions_section`, noting that the carve-outs are omitted on the `base_prompt` path",
+    "claim_signature": "absolute_claim:configuration.md:carve-outs-match-prompt:29",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "absolute_claim",
+    "claim": "The changelog fragment claims SQL Lens adds the instructions on every request, that an instruction naming an ambiguous term's meaning settles the choice ahead of memory notes and saved pairs, that an instruction to ask keeps the choice open until the user picks a meaning, that unset or blank text changes nothing, and that text over 10,000 characters fails the configuration load.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "An instruction that names the meaning of an\nambiguous term settles that choice ahead of memory notes and saved pairs, and\nan instruction to ask about a choice keeps it open until the user picks a\nmeaning. Unset or blank text changes nothing; text over 10,000 characters fails\nthe configuration load.",
+    "source_file": "changelog.d/360.added.md",
+    "source_line": 3,
+    "source_line_end": 7,
+    "verify_against": "The ambiguity bullet in src/sqllens/agent/core/system_prompt/default.py:171-173 and `_normalize_standing_instructions` in src/sqllens/config.py",
+    "verify_hint": "Check that the prompt bullet in default.py states the settle/ask semantics as worded and that the 10,000-character failure is enforced in `_normalize_standing_instructions`; falsify \"on every request\" by checking whether every request path (including the `base_prompt` path and the verify-memory runner) builds through DefaultSystemPromptBuilder",
+    "claim_signature": "absolute_claim:360.added.md:changelog-behavior-claims:3",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "absolute_claim",
+    "claim": "The internal factory doc claims that with `None` instructions `build_system_prompt` returns exactly the prompt it returned before the setting existed, and that the config validator strips, nulls blank text and rejects text over 10,000 characters while the builder strips again, treats blank as `None` and applies no length limit of its own.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The config validator strips surrounding whitespace, turns empty or whitespace-only text into `None`, and rejects text longer than `MAX_STANDING_INSTRUCTIONS_CHARS` (10,000) after stripping; the builder strips again and treats blank text as `None`, but applies no length limit of its own.",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 80,
+    "source_line_end": 82,
+    "verify_against": "src/sqllens/config.py `_normalize_standing_instructions` and src/sqllens/agent/core/system_prompt/default.py:71-79",
+    "verify_hint": "Compare the doc's division of responsibility with `_normalize_standing_instructions` in src/sqllens/config.py and the `__init__` normalization in default.py — note the builder also raises ValueError on fence lines, which this doc sentence does not mention",
+    "claim_signature": "absolute_claim:factory.md:validator-vs-builder-normalization:80",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "api_contract",
+    "claim": "`build_agent` passes `cfg.agent.standing_instructions` to `DefaultSystemPromptBuilder(standing_instructions=...)`, as the internal factory doc and the factory diagram entry state.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/agent/factory.md",
+    "source_line": 69,
+    "source_line_end": 70,
+    "verify_against": "`build_agent` in src/sqllens/agent/factory.py (around line 196) and `AgentRuntimeConfig` in src/sqllens/config.py",
+    "verify_hint": "Check the `DefaultSystemPromptBuilder(...)` construction in `build_agent` (src/sqllens/agent/factory.py ~190-200) and the `standing_instructions` field on `AgentRuntimeConfig` in src/sqllens/config.py:476",
+    "claim_signature": "api_contract:factory.md:build-agent-passes-instructions:69",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "api_contract",
+    "claim": "The cross-document links resolve: managing-memory.md links to the `#standing-instructions` anchor in configuration.md, and memory.md links to factory.md's `#standing_instructions--deployment-rules-in-the-system-prompt-358` anchor.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/external/managing-memory.md",
+    "source_line": 56,
+    "verify_against": "The `### Standing instructions` heading in docs/external/configuration.md and the `standing_instructions — deployment rules in the system prompt (#358)` heading in docs/internal/agent/factory.md",
+    "verify_hint": "Check that the heading in docs/external/configuration.md line 24 slugifies to `standing-instructions` and the factory.md heading at line 78 slugifies to the anchor used in docs/internal/agent/memory.md line 102",
+    "claim_signature": "api_contract:repo:doc-anchor-links",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "absolute_claim",
+    "claim": "The config-loading reference states `standing_instructions` defaults to `None`, is stripped of surrounding whitespace with blank text read as `None`, fails the load over `MAX_STANDING_INSTRUCTIONS_CHARS` (10,000), and is handed by `build_agent` to the default system prompt builder.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`standing_instructions` defaults to `None` (env var `SQLLENS_AGENT__STANDING_INSTRUCTIONS`): text stripped of surrounding whitespace, with empty or whitespace-only text read as `None` and text over `MAX_STANDING_INSTRUCTIONS_CHARS` (10,000) failing the load; `build_agent` hands it to the default system prompt builder",
+    "source_file": "docs/internal/setup/config-loading.md",
+    "source_line": 115,
+    "verify_against": "`AgentRuntimeConfig.standing_instructions` and `MAX_STANDING_INSTRUCTIONS_CHARS` in src/sqllens/config.py",
+    "verify_hint": "Check the field default and validator in src/sqllens/config.py lines 427-510 and the env-var resolution for `SQLLENS_AGENT__STANDING_INSTRUCTIONS`; the row also omits the fence-line rejection the validator performs",
+    "claim_signature": "absolute_claim:config-loading.md:standing-instructions-row:115",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "absolute_claim",
+    "claim": "docs/internal/agent/memory.md states that a deployment rule in `agent.standing_instructions` is carried by the prompt on every request and outranks notes and pairs when it settles a choice or requires asking about one.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "A deployment rule that must hold for every wording belongs in `agent.standing_instructions` instead, which the prompt carries on every request and which outranks notes and pairs when it settles a choice or requires asking about one",
+    "source_file": "docs/internal/agent/memory.md",
+    "source_line": 102,
+    "verify_against": "The ambiguity bullet and section intro in src/sqllens/agent/core/system_prompt/default.py",
+    "verify_hint": "Falsify \"on every request\" by checking whether the caller-supplied `base_prompt` path (default.py:136-142) and the sibling `verify-memory` runner both carry the section, and whether anything other than prompt wording enforces the outranking",
+    "claim_signature": "absolute_claim:memory.md:standing-instructions-outrank-memory:102",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "dependency_interaction",
+    "claim": "DefaultSystemPromptBuilder's constructor accepts a keyword argument named `standing_instructions` of type `str | None` alongside `dialect`, and handles a `None` value as 'no instructions'.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 194,
+    "source_line_end": 197,
+    "verify_against": "The DefaultSystemPromptBuilder `__init__` signature",
+    "verify_hint": "Check `DefaultSystemPromptBuilder.__init__` in `src/sqllens/agent/core/system_prompt/default.py`",
+    "claim_signature": "dependency_interaction:factory.py:prompt-builder-standing-instructions-kwarg:194",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "api_contract",
+    "claim": "Adding `model_config = ConfigDict(extra=\"forbid\")` to `AgentRuntimeConfig` breaks no existing caller or configuration path: no code, test fixture, example `sqllens.toml`, docs sample or profile overlay passes an `[agent]`/AgentRuntimeConfig key that is not a declared field.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 449,
+    "verify_against": "Every construction site of AgentRuntimeConfig and every [agent] table shipped in the repo",
+    "verify_hint": "Grep for `AgentRuntimeConfig(` and `[agent]` across `src/sqllens/` (notably `profiles.py`, `runtime.py`, `cli.py` init templates), `tests/`, `docs/` and any packaged TOML templates",
+    "claim_signature": "api_contract:config.py:agent-section-extra-forbid:449",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "api_contract",
+    "claim": "The request-local profile/override layer that rebuilds effective agent settings constructs `AgentRuntimeConfig` only from declared field names, so a profile overlay cannot now raise a validation error where it previously dropped an unknown key.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 446,
+    "source_line_end": 449,
+    "verify_against": "The profile/runtime override construction of agent settings",
+    "verify_hint": "Check how `src/sqllens/profiles.py` and `src/sqllens/runtime.py` build the effective agent config (model_copy/model_validate of AgentRuntimeConfig)",
+    "claim_signature": "api_contract:config.py:profile-overlay-agent-extra-keys:446",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "data_format_assumption",
+    "claim": "The delimiter constants `STANDING_INSTRUCTIONS_BEGIN`/`STANDING_INSTRUCTIONS_END` in config.py are the exact strings the prompt builder emits around the instructions text, so the config-level rejection of a bare delimiter line matches what would actually terminate the section.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 434,
+    "source_line_end": 436,
+    "verify_against": "The section fence constants used by the prompt builder",
+    "verify_hint": "Check `_SECTION_BEGIN` and `_SECTION_END` and the section-rendering code in `src/sqllens/agent/core/system_prompt/default.py`",
+    "claim_signature": "data_format_assumption:config.py:delimiter-constants-match-builder:434",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "absolute_claim",
+    "claim": "The authored field description asserts the standing instructions are added to the agent's system prompt on every request, and that unset, empty or whitespace-only text adds nothing, with a cap of 10000 characters measured after surrounding whitespace is removed.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"Standing instructions from the deployment's operator, added to the \"\n            \"agent's system prompt on every request. Unset, empty or whitespace \"\n            f\"only adds nothing. At most {MAX_STANDING_INSTRUCTIONS_CHARS} characters \"\n            \"after surrounding whitespace is removed.\"",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 478,
+    "source_line_end": 483,
+    "verify_against": "Every surface that builds a system prompt",
+    "verify_hint": "Check whether all prompt-building paths carry the section — `DefaultSystemPromptBuilder.build_system_prompt` in `src/sqllens/agent/core/system_prompt/default.py` plus any other system_prompt_builder or `base_prompt` caller (including `verify-memory`'s runner and `build_agent` in `src/sqllens/agent/factory.py`); the falsifying input is a request served by a prompt builder constructed without the setting",
+    "claim_signature": "absolute_claim:config.py:every-request-prompt:478",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "absolute_claim",
+    "claim": "The authored module comment asserts the standing-instructions text may not contain either fence line on a line of its own.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "#: The lines that fence ``agent.standing_instructions`` in the system prompt.\n#: The text may not contain either one on a line of its own.",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 432,
+    "source_line_end": 433,
+    "verify_against": "The validator's line-matching predicate versus other ways a fence line can be produced",
+    "verify_hint": "Check `_normalize_standing_instructions` in `src/sqllens/config.py` against the builder's emission in `default.py`; falsifying inputs are a fence line differing only by non-space Unicode whitespace or interior spacing, and a value that reaches the builder without passing through config validation",
+    "claim_signature": "absolute_claim:config.py:fence-line-prohibition:432",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "absolute_claim",
+    "claim": "The authored comment asserts that without extra=\"forbid\" on AgentRuntimeConfig a misspelt [agent] key such as `standing_instruction` would be dropped silently and its rule would never reach a request.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The top-level Config's extra=\"forbid\" does not reach nested models, so a\n    # misspelt [agent] key (e.g. ``standing_instruction``) would otherwise be\n    # dropped silently and its rule would never reach a request.",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 446,
+    "source_line_end": 448,
+    "verify_against": "pydantic's extra-key inheritance and the top-level Config model_config",
+    "verify_hint": "Check the top-level `Config` class `model_config` / `SettingsConfigDict` in `src/sqllens/config.py` and whether nested models inherit extra=\"forbid\"; the falsifying input is a misspelt key supplied via the SQLLENS_AGENT__ env path rather than TOML",
+    "claim_signature": "absolute_claim:config.py:nested-extra-forbid-inheritance:446",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "absolute_claim",
+    "claim": "The authored comment asserts that treating blank text as 'no instructions' makes an empty env override restore the unconfigured prompt exactly.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Blank text means \"no instructions\", so an empty env override restores\n        # the unconfigured prompt exactly rather than adding an empty section.",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 490,
+    "source_line_end": 491,
+    "verify_against": "The prompt builder's behavior for a None value",
+    "verify_hint": "Check the standing-instructions branch of `build_system_prompt` in `src/sqllens/agent/core/system_prompt/default.py` for byte-identical output when the value is None, including the Ambiguous Questions bullet",
+    "claim_signature": "absolute_claim:config.py:blank-restores-prompt-exactly:490",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "data_format_assumption",
+    "claim": "pydantic-settings resolves `SQLLENS_AGENT__STANDING_INSTRUCTIONS=\"\"` to an empty string reaching the field validator (rather than being treated as unset and falling back to the TOML value), and a TOML multi-line basic string is delivered with its trailing newline for the validator to strip.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 487,
+    "source_line_end": 496,
+    "verify_against": "The settings sources and env/TOML merge order in Config",
+    "verify_hint": "Check `Config.load`, `settings_customise_sources` and the TOML source in `src/sqllens/config.py` for how an empty env string merges over a TOML table value",
+    "claim_signature": "data_format_assumption:config.py:empty-env-clears-toml:487",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "test_mock_alignment",
+    "claim": "`build_test_config` accepts an `agent=AgentRuntimeConfig(...)` keyword and the helper `_prompt_from_agent_tools` returns the built agent's full system prompt, so the assertion on the DEPLOYMENT INSTRUCTIONS fence exercises the real builder output.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 612,
+    "source_line_end": 627,
+    "verify_against": "The test module's own helpers and config builder",
+    "verify_hint": "Check `build_test_config` and `_prompt_from_agent_tools` definitions in `tests/unit/test_factory_wiring.py` (or its conftest) and that `AgentRuntimeConfig` is imported there",
+    "claim_signature": "test_mock_alignment:test_factory_wiring.py:build-test-config-agent-kwarg:612",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "test_mock_alignment",
+    "claim": "The new prompt tests rely on module helpers `_ALL_TOOLS`, `_ambiguity_section` and `_ToolSchemaStub` existing with the shapes used, and on `default._SECTION_BEGIN`/`default._SECTION_END` being importable private names equal to the config delimiters tuple.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_system_prompt.py",
+    "source_line": 573,
+    "source_line_end": 619,
+    "verify_against": "Helper definitions in the test module and the private names in the builder module",
+    "verify_hint": "Check `_ALL_TOOLS`, `_ambiguity_section`, `_ToolSchemaStub` in `tests/unit/test_system_prompt.py` and `_SECTION_BEGIN`/`_SECTION_END` in `src/sqllens/agent/core/system_prompt/default.py`",
+    "claim_signature": "test_mock_alignment:test_system_prompt.py:helpers-and-private-delimiters:573",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "test_mock_alignment",
+    "claim": "`DefaultSystemPromptBuilder.__init__` raises a `ValueError` whose message contains \"may not contain\" when the standing instructions hold a bare fence line, mirroring the config validator's independent rejection.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_system_prompt.py",
+    "source_line": 610,
+    "source_line_end": 612,
+    "verify_against": "The builder's constructor validation message",
+    "verify_hint": "Check the fence-line guard and its error text in `DefaultSystemPromptBuilder.__init__` in `src/sqllens/agent/core/system_prompt/default.py`",
+    "claim_signature": "test_mock_alignment:test_system_prompt.py:builder-fence-line-valueerror:610",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "dependency_interaction",
+    "claim": "`ConfigDict` and `field_validator` are imported in config.py and `field_validator` without `mode=` runs as an after-validator receiving the already-coerced `str | None` value, so a non-string TOML value (e.g. an integer) is rejected by pydantic before the validator dereferences `.strip()`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 487,
+    "source_line_end": 489,
+    "verify_against": "pydantic v2 field_validator semantics and config.py's import block",
+    "verify_hint": "Check the pydantic imports at the top of `src/sqllens/config.py` and compare with the other `field_validator` uses in the same module",
+    "claim_signature": "dependency_interaction:config.py:field-validator-mode-and-imports:487",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "data_format_assumption",
+    "claim": "AgentRuntimeConfig in src/sqllens/config.py must reject an unknown key under [agent] (e.g. a misspelt `standing_instruction`) at load, so the key is not silently dropped and `sqllens validate` does not report success.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/config.py",
+    "verify_against": "The AgentRuntimeConfig model_config in src/sqllens/config.py and its sibling sections (ProfilesConfig, ResultMaskingConfig, AuditConfig)",
+    "verify_hint": "Check `class AgentRuntimeConfig` in `src/sqllens/config.py` for `model_config = ConfigDict(extra=\"forbid\")` and a test loading a misspelt [agent] key",
+    "prior_ref": "VC-42",
+    "prior_evidence": "The finding still holds at head. AgentRuntimeConfig (src/sqllens/config.py:433-492) has no model_config; it is a plain BaseModel, so unknown keys are ignored. Sibling sections ProfilesConfig (247), ResultMaskingConfig (267) and AuditConfig (419) set extra=\"forbid\". The comment at config.py:417 says the top-level Config(extra=\"forbid\") does not propagate into nested models and that a silent revert from a typo'd key is the worst outcome. So a misspelt [agent] standing_instruction key is dropped at load, the new rule (standing_instructions, line 465, added by this PR) never reaches the prompt, and validation passes. I searched config.py and src/sqllens for extra/forbid and found no other unknown-key check. No defect does not apply, because the failing reader is the operator, who loses a deployment rule silently. No disputed, rejection or criteria exemption was applied.",
+    "claim_signature": "data_format_assumption:config.py:agent-section-extra-forbid",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "data_format_assumption",
+    "claim": "The blank separator lines the DEPLOYMENT INSTRUCTIONS section contributes must survive on the memory-tool path, so the rendered section layout (header, preamble sentence, BEGIN line) is the same whether or not a memory tool is registered, and the layout is pinned by a test.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "verify_against": "`_standing_instructions_section` and the empty-part filter in `build_system_prompt`, plus tests/unit/test_system_prompt.py",
+    "verify_hint": "Check `_standing_instructions_section` in `src/sqllens/agent/core/system_prompt/default.py` against the `[part for part in prompt_parts if part != \"\"]` filter in `build_system_prompt`, and look for a layout test in `tests/unit/test_system_prompt.py`",
+    "prior_ref": "VC-38",
+    "prior_evidence": "Still holds at head. default.py:93-103 `_standing_instructions_section` returns \"\" separator elements at lines 97 and 99 (after the header rule and after the intro). default.py:348-350 applies `[part for part in prompt_parts if part != \"\"]` whenever has_search/has_save/has_text_memory, after the section was added at 343-346, so with a memory tool the header, preamble and BEGIN line run together, whereas the no-memory path joins them with blank lines. Layout therefore differs by memory-tool registration. Tests (test_system_prompt.py:495-499 helper, 520-548) assert only the inner BEGIN/instructions/END block and phrases via `in section`; lines 609 and 626 pin only the prefix with the header. No test pins header/preamble/BEGIN separation. I searched the head view for authored text promising the separators and found none (no criteria_file supplied, so the No defect reason is unavailable). The section builder's own returned elements show blank separators were intended. Impact is cosmetic prompt layout.",
+    "claim_signature": "data_format_assumption:default.py:section-blank-separators",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "api_contract",
+    "claim": "Operator text containing a literal `--- END DEPLOYMENT INSTRUCTIONS ---` line must be rejected or escaped so it cannot close the delimited section early, in the config validator `_normalize_standing_instructions` and in the section builder that interpolates the text.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/config.py",
+    "verify_against": "`_normalize_standing_instructions` in src/sqllens/config.py and `_standing_instructions_section` in src/sqllens/agent/core/system_prompt/default.py",
+    "verify_hint": "Check the `_normalize_standing_instructions` field validator in `src/sqllens/config.py` for a delimiter-line check and compare the fence constants with `_SECTION_BEGIN`/`_SECTION_END` in `default.py`",
+    "prior_ref": "VC-39",
+    "prior_evidence": "Prior behavior still holds at head. config.py:476-492 _normalize_standing_instructions only strips, blank-checks and length-checks; no delimiter check. default.py:100-102 interpolates self.standing_instructions verbatim between the BEGIN and END lines with no escaping, and the intro (default.py:76-81) tells the model the operator's instructions sit between those lines. Text containing a line '--- END DEPLOYMENT INSTRUCTIONS ---' therefore ends the block early, contradicting that contract. I searched the readers of the field: the validator and the section builder are the only code consuming it. No criteria_file is present, so the 'No defect' reason is unavailable; no disclosed or rejections entry covers it. Impact is narrow: the text comes from the trusted operator and is bounded by the length limit, so only the operator's own text is mis-delimited.",
+    "claim_signature": "api_contract:config.py:standing-instructions-delimiter-rejection",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "data_format_assumption",
+    "claim": "The `build_system_prompt` docstring must describe what the method now returns, including the appended DEPLOYMENT INSTRUCTIONS section and that the `base_prompt` path no longer returns `base_prompt` verbatim.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "verify_against": "The `build_system_prompt` docstring and body in src/sqllens/agent/core/system_prompt/default.py",
+    "verify_hint": "Check the docstring of `build_system_prompt` in `src/sqllens/agent/core/system_prompt/default.py` against its return statements on both the base_prompt and default paths",
+    "prior_ref": "VC-40",
+    "prior_evidence": "At head, default.py:108-117 build_system_prompt docstring is still 'Build a system prompt with memory workflow instructions.' / 'Returns: System prompt string with memory workflow instructions if applicable'. The body at 118-124 returns base_prompt plus an appended DEPLOYMENT INSTRUCTIONS section (not verbatim) when standing_instructions is set, and the default path also appends it plus the ambiguity rule (150-155). The docstring mentions none of this; only __init__ (52-55) documents it. No criteria_file supplied, so 'No defect' is unavailable. Prior finding holds. Clarity-only.",
+    "claim_signature": "data_format_assumption:default.py:build-system-prompt-docstring",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "api_contract",
+    "claim": "The section builder must not emit operator text between the BEGIN and END delimiter lines without checking that the text contains neither of those lines, so a value holding an END line cannot close the fenced region early unreported.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "verify_against": "`DefaultSystemPromptBuilder.__init__` and `_standing_instructions_section` in src/sqllens/agent/core/system_prompt/default.py",
+    "verify_hint": "Check `DefaultSystemPromptBuilder.__init__` and `_standing_instructions_section` in `src/sqllens/agent/core/system_prompt/default.py` for a delimiter-line guard on `standing_instructions`",
+    "prior_ref": "VC-41",
+    "prior_evidence": "The prior finding still holds at head. default.py:100-102 emits standing_instructions verbatim between the BEGIN and END lines. default.py:66 only strips it. The config validator config.py:476-492 only strips whitespace, maps blank to None and enforces the 10000-char cap. Neither place checks for a delimiter line, so a value with a '--- END DEPLOYMENT INSTRUCTIONS ---' line closes the region early and nothing is reported. I searched src/sqllens for 'DEPLOYMENT INSTRUCTIONS' and 'standing_instructions'. The only readers are factory.py:196, the builder, and the config validator. None of them filters delimiters. The No defect route is unavailable because the item has no criteria_file. The impact is small, since the text comes from a trusted operator, so severity is suggestion.",
+    "claim_signature": "api_contract:default.py:builder-delimiter-guard",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "api_contract",
+    "claim": "docs/external/configuration.md must describe the same carve-out scope the prompt applies, which covers the whole Data Confidentiality section (including the rule forbidding `SELECT *` on data tables and selecting secret-bearing columns) and not only the database-structure confidentiality rules.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/external/configuration.md",
+    "verify_against": "The intro carve-out sentence in `_standing_instructions_section` and the Data Confidentiality section of src/sqllens/agent/core/system_prompt/default.py",
+    "verify_hint": "Compare the standing-instructions carve-out sentence in `docs/external/configuration.md` with the carve-out text in `_standing_instructions_section` and the Data Confidentiality bullets in `src/sqllens/agent/core/system_prompt/default.py`",
+    "prior_ref": "VC-43",
+    "prior_evidence": "The finding still holds at head. docs/external/configuration.md:164 says no instruction loosens 'the rules that keep the database structure confidential'. default.py:84-89 (_standing_instructions_section) says 'no instruction loosens the Data Confidentiality rules', and the Data Confidentiality section (default.py:176-180) also contains the bullet at line 180 forbidding SELECT * on data tables and selecting secret-bearing columns (passwords, tokens, PINs, keys). The doc therefore describes a narrower carve-out than the prompt applies, so an operator reading it would think an instruction can relax the SELECT * and secret-column rules. The doc is published to readers outside the repository, so the 'No defect' route does not apply. The sentence is an authored statement that is untrue at head. No criteria_file was supplied.",
+    "claim_signature": "api_contract:configuration.md:carve-out-scope",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "test_mock_alignment",
+    "claim": "A test must exercise operator text that itself carries the section delimiter lines, so the delimiter contract the documentation states is pinned under that input.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "verify_against": "tests/unit/test_system_prompt.py and tests/unit/test_config_schema.py cases passing delimiter-bearing standing_instructions",
+    "verify_hint": "Search `tests/unit/test_system_prompt.py` and `tests/unit/test_config_schema.py` for a case whose `standing_instructions` value contains a `--- BEGIN/END DEPLOYMENT INSTRUCTIONS ---` line",
+    "prior_ref": "VC-45",
+    "prior_evidence": "The finding still holds at head. Searched tests/ for 'DEPLOYMENT INSTRUCTIONS ---': test_system_prompt.py (lines 498, 537, 564, 612, 627) and test_factory_wiring.py:624 only use the delimiters as expected output markers. No case passes text containing '--- END DEPLOYMENT INSTRUCTIONS ---' or the BEGIN line as standing_instructions. default.py:100-102 inserts self.standing_instructions verbatim between the markers, and docs/external/configuration.md:161 documents the delimiter lines, so that input is unpinned. No criteria_file was supplied, so the 'No defect' route is unavailable. Low blast radius since the operator is trusted, hence suggestion.",
+    "claim_signature": "test_mock_alignment:test_system_prompt.py:delimiter-input-coverage",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-37",
+    "category": "data_format_assumption",
+    "claim": "The section's blank-line separators must not be emitted as `\"\"` list elements that the `part != \"\"` filter drops when a memory tool is registered, so the rendered layout in production matches the one the no-tools test reads.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "verify_against": "The elements returned by `_standing_instructions_section` and the empty-part filter in `build_system_prompt`",
+    "verify_hint": "Check the list returned by `_standing_instructions_section` in `src/sqllens/agent/core/system_prompt/default.py` for `\"\"` elements and the filter applied when has_search/has_save/has_text_memory is true",
+    "prior_ref": "VC-46",
+    "prior_evidence": "The behavior recorded by the prior finding is still at head. default.py:97 and :99 return \"\" elements from _standing_instructions_section, and default.py:348-350 filters `part != \"\"` whenever has_search/has_save/has_text_memory, so with a memory tool registered the two blank separators are dropped and the intro abuts the '=' rule and the BEGIN line. Only the leading \"\\n\" in the first element (line 94) survives. Without memory tools the blanks are kept, so the layout does differ from the no-tools test. I searched the head view for readers of the rendered section: tests/unit/test_system_prompt.py:531-536 and 609-611 read it. Docs mention it but I did not trace them. No fix is present. The 'operator text abuts the preamble' wording is overstated, because the operator text follows the BEGIN line and not the intro. The layout inconsistency remains, though. No criteria_file was supplied, so the 'No defect' reason cannot apply. The defect is cosmetic.",
+    "claim_signature": "data_format_assumption:default.py:empty-string-spacer-elements",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-38",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 1. `src/sqllens/agent/core/system_prompt/default.py:95-99` and `:181-191` — when any memory tool is registered, `build_system_prompt` drops the two empty-string spacer elements the new section contributes, so the `=====` rule, the introduction sentence and the `--- BEGIN DEPLOYMENT INSTRUCTIONS ---` line end up on consecutive lines. The delimiters and the operator text survive intact, so this is prompt readability rather than behavior, but it happens in exactly the configuration real deployments run, and no test pins the rendered shape. (raised by 2/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "verify_against": "`_standing_instructions_section` and the memory-tool branch of `build_system_prompt`, plus tests/unit/test_system_prompt.py",
+    "verify_hint": "Check `_standing_instructions_section` and the memory-tool branch of `build_system_prompt` in `src/sqllens/agent/core/system_prompt/default.py`, and whether `tests/unit/test_system_prompt.py` asserts the rendered section shape with memory tools present",
+    "prior_ref": "finding 1 (suggestion)",
+    "prior_evidence": "1. `src/sqllens/agent/core/system_prompt/default.py:95-99` and `:181-191` — when any memory tool is registered, `build_system_prompt` drops the two empty-string spacer elements the new section contributes, so the `=====` rule, the introduction sentence and the `--- BEGIN DEPLOYMENT INSTRUCTIONS ---` line end up on consecutive lines. The delimiters and the operator text survive intact, so this is prompt readability rather than behavior, but it happens in exactly the configuration real deployments run, and no test pins the rendered shape. (raised by 2/5 agents)",
+    "claim_signature": "data_format_assumption:default.py:memory-path-spacer-drop",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-39",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 2. `src/sqllens/agent/core/system_prompt/default.py:101` — `self.standing_instructions or \"\"` is a fallback that nothing can reach today, because both call sites are guarded by `if self.standing_instructions is not None` and the constructor already turns blank text into `None`. If someone later sets the attribute directly, this would emit a header, a preamble and an empty pair of BEGIN/END delimiters: a prompt telling the model to follow instructions that are not there. Reading the attribute plainly would make the invariant load-bearing. (raised by 1/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "verify_against": "`_standing_instructions_section` and its guarded call sites in src/sqllens/agent/core/system_prompt/default.py",
+    "verify_hint": "Check how `_standing_instructions_section` in `src/sqllens/agent/core/system_prompt/default.py` reads `self.standing_instructions` and the `if self.standing_instructions is not None` guards at both call sites",
+    "prior_ref": "finding 2 (suggestion)",
+    "prior_evidence": "2. `src/sqllens/agent/core/system_prompt/default.py:101` — `self.standing_instructions or \"\"` is a fallback that nothing can reach today, because both call sites are guarded by `if self.standing_instructions is not None` and the constructor already turns blank text into `None`. If someone later sets the attribute directly, this would emit a header, a preamble and an empty pair of BEGIN/END delimiters: a prompt telling the model to follow instructions that are not there. Reading the attribute plainly would make the invariant load-bearing. (raised by 1/5 agents)",
+    "claim_signature": "data_format_assumption:default.py:unreachable-or-empty-fallback",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-40",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 3. `src/sqllens/agent/core/system_prompt/default.py:100-102` — the new `--- BEGIN/END DEPLOYMENT INSTRUCTIONS ---` lines are presented to the model as the marker for text that a conversation message, a tool result or a memory note cannot switch off, but a stored memory note can carry the same literal lines. The context enhancer appends retrieved memory after the finished prompt and escapes only `<`, `>` and `&`, so the delimiter lines pass through unchanged. The change is prompt guidance rather than an enforced guard, and the enhancer's own comment already says the framing is not an injection guarantee, so this is a hardening and coverage gap: no test pins what happens when instruction text or a retrieved note contains the delimiter lines. (raised by 1/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "verify_against": "`DefaultLlmContextEnhancer.enhance_system_prompt` escaping behavior and tests covering delimiter lines in retrieved memory",
+    "verify_hint": "Check `enhance_system_prompt` in the default LLM context enhancer under `src/sqllens/agent/` for its escaping set, and search the tests for a retrieved-memory value containing the delimiter lines",
+    "prior_ref": "finding 3 (suggestion)",
+    "prior_evidence": "3. `src/sqllens/agent/core/system_prompt/default.py:100-102` — the new `--- BEGIN/END DEPLOYMENT INSTRUCTIONS ---` lines are presented to the model as the marker for text that a conversation message, a tool result or a memory note cannot switch off, but a stored memory note can carry the same literal lines. The context enhancer appends retrieved memory after the finished prompt and escapes only `<`, `>` and `&`, so the delimiter lines pass through unchanged. The change is prompt guidance rather than an enforced guard, and the enhancer's own comment already says the framing is not an injection guarantee, so this is a hardening and coverage gap: no test pins what happens when instruction text or a retrieved note contains the delimiter lines. (raised by 1/5 agents)",
+    "claim_signature": "api_contract:default.py:memory-note-delimiter-injection",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-41",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 4. `src/sqllens/agent/core/system_prompt/default.py:343-345` — the test asserts that the builder's output ends with `--- END DEPLOYMENT INSTRUCTIONS ---`, but the documented claim is about the prompt the model actually receives, after the context enhancer has appended retrieved memory. No test runs builder output through `enhance_system_prompt`, so a future enhancer change that puts retrieved notes ahead of the deployment section would break the documented precedence story with every added test still green. (raised by 1/5 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "verify_against": "tests/unit/test_system_prompt.py assertions and `enhance_system_prompt` in the default LLM context enhancer",
+    "verify_hint": "Check the ending-marker assertion in `tests/unit/test_system_prompt.py` and search the tests for any case passing builder output through `enhance_system_prompt`",
+    "prior_ref": "finding 4 (suggestion)",
+    "prior_evidence": "4. `src/sqllens/agent/core/system_prompt/default.py:343-345` — the test asserts that the builder's output ends with `--- END DEPLOYMENT INSTRUCTIONS ---`, but the documented claim is about the prompt the model actually receives, after the context enhancer has appended retrieved memory. No test runs builder output through `enhance_system_prompt`, so a future enhancer change that puts retrieved notes ahead of the deployment section would break the documented precedence story with every added test still green. (raised by 1/5 agents)",
+    "claim_signature": "test_mock_alignment:test_system_prompt.py:enhancer-precedence-coverage",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  }
+]
