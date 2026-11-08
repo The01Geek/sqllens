@@ -538,7 +538,17 @@ async def test_standing_instructions_appended_after_generic_rules(
     ) in section
     assert "Follow them on every request" in section
     assert "outrank memory notes and saved question-and-SQL pairs" in section
-    assert "no instruction loosens the Data Confidentiality rules" in section
+    # The rules that keep a lossy answer from looking clean are carved out of the
+    # instructions' precedence, alongside Data Confidentiality; each section the
+    # carve-out names must exist above it.
+    assert (
+        "no instruction loosens the Data Confidentiality rules, the Tool Errors "
+        "rules, or the Response Guidelines rules that say when to tell the user a "
+        "result table is cut or a query stopped at the row limit, and never to call "
+        "a result full or complete."
+    ) in section
+    for heading in ("Response Guidelines:", "Tool Errors:", "Data Confidentiality:"):
+        assert prompt.index(heading) < prompt.index("DEPLOYMENT INSTRUCTIONS:")
     # The section is the last thing in the prompt, after every generic rule.
     assert prompt.endswith("--- END DEPLOYMENT INSTRUCTIONS ---")
     for heading in ("Ambiguous Questions:", "EMIT_CHART USAGE:", "MEMORY SYSTEM:",
@@ -591,8 +601,9 @@ async def test_standing_instructions_follow_base_prompt() -> None:
         "--- END DEPLOYMENT INSTRUCTIONS ---"
     )
     # A caller's base prompt has no default sections, so none are referred to.
-    assert "Data Confidentiality" not in prompt
-    assert "Ambiguous Questions" not in prompt
+    for heading in ("Response Guidelines", "Tool Errors", "Data Confidentiality",
+                    "Ambiguous Questions"):
+        assert heading not in prompt
     assert "Follow them on every request" in prompt
 
 

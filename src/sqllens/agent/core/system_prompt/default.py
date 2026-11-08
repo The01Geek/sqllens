@@ -69,8 +69,9 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
         """The delimited section that carries the deployment's instructions.
 
         ``default_rules`` is True when the section follows the default prompt,
-        whose Data Confidentiality and Ambiguous Questions sections it refers
-        to; a caller's ``base_prompt`` has neither, so those sentences are left out.
+        whose Response Guidelines, Tool Errors, Data Confidentiality and Ambiguous
+        Questions sections it refers to; a caller's ``base_prompt`` has none of
+        them, so those sentences are left out.
         """
         intro = (
             "The operator of this SQL Lens deployment wrote the instructions between "
@@ -82,7 +83,10 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
             intro += (
                 " Where an instruction conflicts with a rule above, follow the "
                 "instruction, but no instruction loosens the Data Confidentiality "
-                "rules. Ambiguous Questions above says how an instruction settles, "
+                "rules, the Tool Errors rules, or the Response Guidelines rules that "
+                "say when to tell the user a result table is cut or a query stopped "
+                "at the row limit, and never to call a result full or complete. "
+                "Ambiguous Questions above says how an instruction settles, "
                 "or keeps open, the reading of an ambiguous question."
             )
         return [
