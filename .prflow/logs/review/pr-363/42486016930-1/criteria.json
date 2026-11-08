@@ -1,0 +1,34 @@
+[
+  {
+    "criterion": 1,
+    "text": "`AgentRuntimeConfig` has a boolean field `show_conversation_footer` whose default is `true`. A config without the field loads with `true`; `[agent] show_conversation_footer = false` in TOML and `SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER=false` in the environment each load it as `false`; the environment value wins over the TOML value. The `[agent]` block of the `sqllens init` config template (`_SAMPLE_CONFIG` in `src/sqllens/cli.py`) carries a commented `show_conversation_footer` line naming its default and the env override."
+  },
+  {
+    "criterion": 2,
+    "text": "With the setting `true`, every `query_database` result kind in the Desired Behavior table (success, agent-run failure with a trace, agent-run failure with no trace, any other failure) has the same text, `isError` value and `_meta` as before this change, byte for byte, and an agent-run failure with no trace is still raised rather than returned."
+  },
+  {
+    "criterion": 3,
+    "text": "With the setting `false`, a successful `query_database` result's text is the answer with no conversation-ID footer, and its `_meta` holds the same keys and values it holds with the setting `true`, including `_meta[\"sqllens/conversation\"][\"conversation_id\"]`."
+  },
+  {
+    "criterion": 4,
+    "text": "With the setting `false`, every `AgentRunError` that `query_database_impl_with_widgets` raises, with or without a trace, comes back as a returned `isError` result whose text is `Error executing tool query_database: ` followed by the error message with the conversation-ID tail (`\"\\n\\nConversation ID: \" + <the request's conversation id>`) removed from its end, and whose `_meta` holds `sqllens/conversation` with that conversation id, plus `sqllens/agent_trace` only when the error carries a trace. A message that does not end with that tail, such as the memory-store-unavailable message or a `Tool failed: …` message from a SQL statement a guard blocked, keeps its text unchanged."
+  },
+  {
+    "criterion": 5,
+    "text": "With the setting `false`, no `query_database` response text, success or error, contains conversation-ID text that SQL Lens adds: neither the footer nor the conversation-ID tail. Text the model writes into its answer is not filtered, so an answer that quotes an ID keeps it."
+  },
+  {
+    "criterion": 6,
+    "text": "The change leaves the failures not raised as `AgentRunError` (for example the internal-error `RuntimeError` or an invalid profile name) as they are today, raised with no conversation ID in text or `_meta`, whatever the setting. It leaves the rest of the error wording unchanged (the `Error executing tool query_database:` prefix, the `SQL execution error:` prefix and the error card's sentence) and leaves the vendored `src/sqllens/agent/core/agent/agent.py` unchanged."
+  },
+  {
+    "criterion": 7,
+    "text": "The `query_database` tool description no longer says the conversation ID is always in a plain-text footer: it says the ID is returned in `_meta[\"sqllens/conversation\"]` and also as a text footer unless the server's `show_conversation_footer` setting is off."
+  },
+  {
+    "criterion": 8,
+    "text": "Tests cover both setting values on the success path and on agent-run failures with and without a trace, and assert the result text and `_meta` for each. The agent-run failure tests run the real vendored `Agent` so that its catch-all handler in `src/sqllens/agent/core/agent/agent.py` produces the error card and its conversation-ID tail; a stub that copies the card's text, or a hand-built `AgentRunError`, does not meet this criterion on its own."
+  }
+]

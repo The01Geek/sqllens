@@ -1,0 +1,707 @@
+[
+  {
+    "id": "VC-1",
+    "category": "data_format_assumption",
+    "claim": "The `[agent]` setting is named `show_conversation_footer`, is a boolean, defaults to `true`, and its environment override is `SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "| `show_conversation_footer` | Boolean | Defaults to `true`. By default every `query_database` answer ends with a short note giving the conversation ID, and an error from the agent run ends with a `Conversation ID: <id>` line.",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 157,
+    "verify_against": "The `AgentRuntimeConfig` field definition and env-prefix/nested-delimiter settings in `src/sqllens/config.py`",
+    "verify_hint": "Check `AgentRuntimeConfig` in `src/sqllens/config.py` for a `show_conversation_footer: bool = True` field and the `SQLLENS_` env prefix with `__` nesting",
+    "claim_signature": "data_format_assumption:configuration.md:show-conversation-footer-default:157",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "absolute_claim",
+    "claim": "The conversation ID is returned in response metadata under `sqllens/conversation` on every answer, and with the setting off on every agent-run error; with the setting off a text-only client can no longer see the ID anywhere in the text.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The ID is still returned in the response metadata under the `sqllens/conversation` key, on every answer and, with the setting off, on every agent-run error. With the setting off, your assistant or host must read the ID from that metadata (or pass back an ID it chose itself) to continue a conversation; a text-only client can no longer see it.",
+    "source_file": "docs/external/configuration.md",
+    "source_line": 157,
+    "verify_against": "The `except AgentRunError` branch and `_agent_error_result` / `_conversation_result` helpers in `src/sqllens/server.py`",
+    "verify_hint": "In `src/sqllens/server.py`, check whether every `AgentRunError` path with the setting off returns `_agent_error_result` carrying `sqllens/conversation`, and whether any other failure path (e.g. a `Tool failed:` message, or an error message whose tail is not exactly `\\n\\nConversation ID: <id>`) can still leave the ID in the text",
+    "claim_signature": "absolute_claim:configuration.md:conversation-meta-every-error:157",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "absolute_claim",
+    "claim": "With the setting `false`, answers no longer end with the conversation-ID note and agent-run error messages no longer end with a `Conversation ID: <id>` line, and the ID is returned in `sqllens/conversation` metadata on every agent-run error.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "out of `query_database` text when set to `false`: answers no longer end with the\nconversation-ID note, and agent-run error messages no longer end with a\n`Conversation ID: <id>` line. The ID is still returned in the\n`sqllens/conversation` response metadata, and with the setting off it is also\nreturned there on every agent-run error, so a\nhost that reads it can continue the conversation.",
+    "source_file": "changelog.d/363.added.md",
+    "source_line": 3,
+    "source_line_end": 8,
+    "verify_against": "The `except AgentRunError` branch in `src/sqllens/server.py` and `append_conversation_footer` in `src/sqllens/tools/_format.py`",
+    "verify_hint": "Check the `removesuffix` call in the `except AgentRunError` branch of `src/sqllens/server.py` against the exact tail the vendored agent's catch-all card appends in `src/sqllens/agent/core/agent/agent.py`, including a trailing-newline or differing-id case",
+    "claim_signature": "absolute_claim:363.added.md:footer-and-tail-removed:3",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "api_contract",
+    "claim": "The relative link `docs/external/configuration.md#section-agent` in the changelog fragment resolves to the `[agent]` section heading once the fragment is rendered into the generated changelog / release notes.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "[Configuration reference](docs/external/configuration.md#section-agent).",
+    "source_file": "changelog.d/363.added.md",
+    "source_line": 9,
+    "verify_against": "Link conventions in existing `changelog.d/*.md` fragments and the heading `## Section: \\`[agent]\\`` in `docs/external/configuration.md`",
+    "verify_hint": "Compare the link path form against other fragments in `changelog.d/` and the output of `python scripts/changelog.py prepare` destination (`CHANGELOG.md` at repo root)",
+    "claim_signature": "api_contract:363.added.md:configuration-anchor-link:9",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "data_format_assumption",
+    "claim": "The `except AgentRunError` branch in `server.py` is exactly as quoted: with the setting off it computes `str(exc).removesuffix(f\"\\n\\nConversation ID: {conversation_id}\")` and returns `_agent_error_result(message, conversation_id, exc.agent_trace)`, and with it on it re-raises when `exc.agent_trace is None`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "            if not cfg.agent.show_conversation_footer:\n                message = str(exc).removesuffix(f\"\\n\\nConversation ID: {conversation_id}\")\n                return _agent_error_result(message, conversation_id, exc.agent_trace)",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 44,
+    "source_line_end": 53,
+    "verify_against": "The `query_database` tool body in `src/sqllens/server.py`",
+    "verify_hint": "Diff the quoted snippet against the actual `except AgentRunError` block in `build_server`'s `query_database` in `src/sqllens/server.py`",
+    "claim_signature": "data_format_assumption:tools.md:except-agentrunerror-snippet:44",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "api_contract",
+    "claim": "`_conversation_result` accepts the markdown, conversation id and extra_meta positionally plus a keyword-only `show_footer`, and `server.py` passes `show_footer=cfg.agent.show_conversation_footer`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The tool builds its result through the shared `_conversation_result(markdown, conversation_id, extra_meta, show_footer=...)` helper in [src/sqllens/server.py](../../../src/sqllens/server.py).",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 189,
+    "verify_against": "The `_conversation_result` signature in `src/sqllens/server.py`",
+    "verify_hint": "Check the `def _conversation_result(...)` signature and its call sites in `src/sqllens/server.py`",
+    "claim_signature": "api_contract:tools.md:conversation-result-signature:189",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "dependency_interaction",
+    "claim": "The vendored agent's catch-all error card ends its message with `\"\\n\\nConversation ID: \" + <id>`, which the setting-off path in `server.py` strips, leaving a message without that tail unchanged.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "the vendored agent's catch-all error card ends its message with `\"\\n\\nConversation ID: \" + <id>`, and with the setting off `server.py` strips that tail and returns the id in `_meta` on every `AgentRunError`",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 192,
+    "verify_against": "The catch-all exception handler that builds the error card in `src/sqllens/agent/core/agent/agent.py`",
+    "verify_hint": "Find the handler in `src/sqllens/agent/core/agent/agent.py` that appends the conversation id to the error card description and confirm the exact separator and prefix text",
+    "claim_signature": "dependency_interaction:tools.md:vendored-card-id-tail:192",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "data_format_assumption",
+    "claim": "With `show_conversation_footer` off, `server.py` always returns the `_agent_error_result` isError result whose `_meta` carries `sqllens/conversation` plus `sqllens/agent_trace` only when the error carries a trace; with it on, behavior (return with trace / re-raise without) is as before.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "With `agent.show_conversation_footer` off it always returns the `_agent_error_result` `isError` result: the message has the exact `\"\\n\\nConversation ID: \" + <id>` tail the vendored agent's catch-all error card appends removed from its end (a message without that tail is unchanged), and `_meta` carries `sqllens/conversation` plus `sqllens/agent_trace` only when the error carries a trace.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 376,
+    "verify_against": "`_agent_error_result` and the `except AgentRunError` branch in `src/sqllens/server.py`",
+    "verify_hint": "Check `_agent_error_result` in `src/sqllens/server.py` for conditional insertion of the `sqllens/agent_trace` key when the trace argument is `None`",
+    "claim_signature": "data_format_assumption:tools.md:agent-error-result-meta-keys:376",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "data_format_assumption",
+    "claim": "`_agent_error_result` attaches only the conversation and (when present) agent-trace channels, so a failed turn carries no `sqllens/model_info`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "- **Success only.** The `isError` result is built by `_agent_error_result`, which attaches only the conversation and (when present) agent-trace channels, so a failed turn carries no `sqllens/model_info`.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 416,
+    "verify_against": "`_agent_error_result` in `src/sqllens/server.py`",
+    "verify_hint": "Read the `_meta` dict construction inside `_agent_error_result` in `src/sqllens/server.py`",
+    "claim_signature": "data_format_assumption:tools.md:error-result-no-model-info:416",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "test_mock_alignment",
+    "claim": "`tests/unit/test_conversation_footer_setting.py` exists and pins both `show_conversation_footer` values on the success path and on agent-run failures driven through the real vendored `Agent`, including the setting-off isError result with the tail stripped, the trace key only with details on, an untailed message left unchanged, and a non-`AgentRunError` failure still raised.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "and `tests/unit/test_conversation_footer_setting.py` (the setting-off `isError` result with the conversation-ID tail stripped, trace key only with details on, unchanged text for a message without the tail, and a non-`AgentRunError` failure still raised).",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 378,
+    "verify_against": "`tests/unit/test_conversation_footer_setting.py`",
+    "verify_hint": "Check the test functions in `tests/unit/test_conversation_footer_setting.py` cover each listed case and build a real `Agent` rather than a stub or hand-built `AgentRunError`",
+    "claim_signature": "test_mock_alignment:tools.md:footer-setting-tests-pinned:378",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "dependency_interaction",
+    "claim": "The vendored agent's catch-all handler yields an error card whose text is exactly `\"An unexpected error occurred while processing your message. Please try again.\"` plus `\"\\n\\nConversation ID: <id>\"`, so run-loop exceptions (e.g. a model API error) surface as an `AgentRunError` rather than the sanitized `RuntimeError(\"internal error; see server logs\")` row.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "This row does **not** cover exceptions raised inside the agent's run loop (for example a model API error): the vendored agent's catch-all handler catches those and yields an error card, `\"An unexpected error occurred while processing your message. Please try again.\"` plus `\"\\n\\nConversation ID: <id>\"`, so they surface through the error-status-card row below as an `AgentRunError`.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 543,
+    "verify_against": "The catch-all `except` in `send_message` in `src/sqllens/agent/core/agent/agent.py`",
+    "verify_hint": "Grep `src/sqllens/agent/core/agent/agent.py` for the 'An unexpected error occurred while processing your message' string and confirm the card text and id suffix verbatim",
+    "claim_signature": "dependency_interaction:tools.md:catchall-card-message-text:543",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "data_format_assumption",
+    "claim": "On the error-status-card path with `show_details` off, the failure is formatted exactly as before unless `agent.show_conversation_footer` is off, in which case an isError result is returned instead.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "with it off the trace is `None` and the failure is formatted exactly as before, unless `agent.show_conversation_footer` is off, which returns an `isError` result instead.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "source_line": 545,
+    "verify_against": "The ordering of the `show_conversation_footer` check versus the `exc.agent_trace is None` re-raise in `src/sqllens/server.py`",
+    "verify_hint": "Confirm in `src/sqllens/server.py` that the `show_conversation_footer` check precedes the `if exc.agent_trace is None: raise` so the setting-off case never re-raises",
+    "claim_signature": "data_format_assumption:tools.md:details-off-footer-off-precedence:545",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "absolute_claim",
+    "claim": "An operator can turn off the conversation-ID note in the text with the `show_conversation_footer` setting, and the ID is then returned only as structured data.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The operator can turn off the note in the text with the `show_conversation_footer` setting (see the [Configuration reference](configuration.md#section-agent)); the ID is then returned only as structured data.",
+    "source_file": "docs/external/getting-started.md",
+    "source_line": 86,
+    "verify_against": "The success and error result construction in `src/sqllens/server.py` and `append_conversation_footer` in `src/sqllens/tools/_format.py`",
+    "verify_hint": "Check whether any `query_database` text path in `src/sqllens/server.py` can still contain SQL Lens-added conversation-ID text with the setting off (e.g. an error message whose tail does not match the stripped suffix exactly)",
+    "claim_signature": "absolute_claim:getting-started.md:id-only-structured-data:86",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "data_format_assumption",
+    "claim": "The `config-loading.md` description of `show_conversation_footer` matches the field's name, type, default and env override as implemented.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/setup/config-loading.md",
+    "source_line": 33,
+    "verify_against": "`AgentRuntimeConfig` in `src/sqllens/config.py`",
+    "verify_hint": "Compare the `[agent]` field list on line 33 of `docs/internal/setup/config-loading.md` with `AgentRuntimeConfig` in `src/sqllens/config.py`",
+    "claim_signature": "data_format_assumption:config-loading.md:agent-field-list:33",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "dependency_interaction",
+    "claim": "The literal suffix the vendored agent appends to an error-card message is exactly \"\\n\\nConversation ID: <conversation_id>\" at the very end of the message, so `str.removesuffix` with that string removes it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 387,
+    "verify_against": "the vendored agent's catch-all error handler that builds the error description",
+    "verify_hint": "Check where `error_description` gets the `\\n\\nConversation ID: {conversation_id}` append in `src/sqllens/agent/core/agent/agent.py` (around line 215), and confirm nothing is appended after it before the AgentRunError message is built in `src/sqllens/tools/query_database.py`.",
+    "claim_signature": "dependency_interaction:server.py:conversation-id-tail-suffix:387",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "dependency_interaction",
+    "claim": "The conversation id the server mints/receives is the same string the vendored agent interpolates into the error-card tail, so the removesuffix target matches the actual tail for both caller-supplied and server-minted ids.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 370,
+    "source_line_end": 388,
+    "verify_against": "the conversation id threading from server.query_database into the agent run",
+    "verify_hint": "Check how `conversation_id` is passed through `query_database_impl_with_widgets` in `src/sqllens/tools/query_database.py` into `Agent.send_message`, and whether the agent can substitute a different id (e.g. its own uuid4) into the error tail.",
+    "claim_signature": "dependency_interaction:server.py:minted-id-matches-tail:370",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "api_contract",
+    "claim": "With `show_conversation_footer` off, an `AgentRunError` carrying no trace is returned as an `isError` result rather than raised, and FastMCP accepts a `CallToolResult` with `isError=True` from a tool declared `structured_output=False` returning `str | CallToolResult`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 383,
+    "source_line_end": 393,
+    "verify_against": "FastMCP tool return handling",
+    "verify_hint": "Check `mcp.server.fastmcp.tools.base.Tool.run` and the FastMCP tool-result conversion for how a returned `CallToolResult` with `isError=True` and `_meta` is forwarded to the client.",
+    "claim_signature": "api_contract:server.py:iserror-result-returned:383",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "data_format_assumption",
+    "claim": "`AgentRunError.agent_trace` is `None` exactly when no trace is available, so `_agent_error_result` omitting `sqllens/agent_trace` on `None` yields the documented `_meta` key set.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 180,
+    "source_line_end": 182,
+    "verify_against": "the AgentRunError construction sites",
+    "verify_hint": "Check how `agent_trace` is set when `AgentRunError` is raised in `src/sqllens/tools/query_database.py` (including whether it can be an empty dict rather than `None` with details on).",
+    "claim_signature": "data_format_assumption:server.py:agent-trace-none-gate:180",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "absolute_claim",
+    "claim": "The docstring asserts that when the caller passes the exception message unchanged (setting on), the error text is byte-for-byte what the re-raise path would produce.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "When the caller passes the\n    exception message unchanged (``agent.show_conversation_footer`` on), the\n    text is byte-for-byte what the re-raise path would produce;",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 172,
+    "source_line_end": 175,
+    "verify_against": "FastMCP's own tool-error text formatting",
+    "verify_hint": "Compare the f-string `Error executing tool query_database: {message}` against the exception formatting in `mcp.server.fastmcp.tools.base.Tool.run` / FastMCP's error handler, including any `ToolError` wrapping or exception-class prefix.",
+    "claim_signature": "absolute_claim:server.py:byte-for-byte-error-text:172",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "absolute_claim",
+    "claim": "The comment asserts the conversation channel rides on every `isError` result built by `_agent_error_result` and that the footer appears in text unless `agent.show_conversation_footer` is off.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# every successful turn and on every ``isError`` result built by\n# ``_agent_error_result``. Structured here for apps-aware hosts, and — unless\n# ``agent.show_conversation_footer`` is off — as a plain-Markdown footer in the",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 113,
+    "source_line_end": 115,
+    "verify_against": "all isError return paths in server.query_database",
+    "verify_hint": "Check every error exit of `query_database` in `src/sqllens/server.py` (the re-raise branch, `_json_error_result`, non-AgentRunError raises) for whether an isError result without the conversation channel can reach the client.",
+    "claim_signature": "absolute_claim:server.py:conversation-channel-every-error:113",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "api_contract",
+    "claim": "The `query_database` tool docstring's statement about where the conversation id is returned matches the implemented behavior: `_meta[\"sqllens/conversation\"]` always, plus a text footer unless the server setting is off.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "An answer returns the\n        conversation id in ``_meta[\"sqllens/conversation\"]``, and also as a\n        text footer unless the server's ``show_conversation_footer`` setting\n        is off.",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 323,
+    "source_line_end": 326,
+    "verify_against": "the `_conversation_result` implementation and `append_conversation_footer`",
+    "verify_hint": "Check `_conversation_result` in `src/sqllens/server.py` and `append_conversation_footer` in the tools/formatting module for the footer text and `_meta` seeding.",
+    "claim_signature": "api_contract:server.py:tool-description-footer-wording:323",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "data_format_assumption",
+    "claim": "`AgentRuntimeConfig.show_conversation_footer` is loadable from TOML key `show_conversation_footer` under `[agent]` and from env `SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER`, with env winning, and the model does not forbid extra keys.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 458,
+    "source_line_end": 467,
+    "verify_against": "the pydantic-settings source/precedence wiring in config.py",
+    "verify_hint": "Check `Config.load` and the settings-sources/`model_config` setup in `src/sqllens/config.py`, plus whether `AgentRuntimeConfig` sets `extra` (the doc claims unknown keys are silently dropped).",
+    "claim_signature": "data_format_assumption:config.py:show-conversation-footer-loading:458",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "api_contract",
+    "claim": "The `[agent]` block of `_SAMPLE_CONFIG` contains the commented line `# show_conversation_footer = true` and the env-var name, in a form that stays inside the `[agent]` section and remains valid TOML when uncommented.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# show_conversation_footer = true   # set false to keep the conversation id",
+    "source_file": "src/sqllens/cli.py",
+    "source_line": 776,
+    "source_line_end": 780,
+    "verify_against": "the `_SAMPLE_CONFIG` template and the `sqllens init` output test expectations",
+    "verify_hint": "Check `_SAMPLE_CONFIG` in `src/sqllens/cli.py` around the `[agent]` block, and the init/sample-config assertions in `tests/unit/test_config_schema.py` and any `tests/unit/test_cli*.py` that parse the template.",
+    "claim_signature": "api_contract:cli.py:sample-config-footer-line:776",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "test_mock_alignment",
+    "claim": "The test's `fake_impl` replacing `query_database_impl_with_widgets` has the real function's signature and returns its real 5-tuple shape `(markdown, blocks, query_info, memory_info, agent_trace)`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_conversation_footer_setting.py",
+    "source_line": 80,
+    "source_line_end": 87,
+    "verify_against": "the real `query_database_impl_with_widgets`",
+    "verify_hint": "Check the signature and return tuple of `query_database_impl_with_widgets` in `src/sqllens/tools/query_database.py`.",
+    "claim_signature": "test_mock_alignment:test_conversation_footer_setting.py:fake-impl-signature:80",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "test_mock_alignment",
+    "claim": "The test's expected `_FOOTER` string reproduces exactly the footer text `append_conversation_footer` produces for the given conversation id.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "_FOOTER = (\n    f\"\\n\\n_Conversation ID: `{_CONV}` — pass it back as the \"\n    f\"`conversation_id` argument to continue this conversation._\"\n)",
+    "source_file": "tests/unit/test_conversation_footer_setting.py",
+    "source_line": 33,
+    "source_line_end": 36,
+    "verify_against": "`append_conversation_footer`",
+    "verify_hint": "Check the footer template in `append_conversation_footer` (imported by `src/sqllens/server.py`, likely `src/sqllens/tools/_format.py`).",
+    "claim_signature": "test_mock_alignment:test_conversation_footer_setting.py:footer-literal:33",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "test_mock_alignment",
+    "claim": "The test's `_CARD` literal and `_PREFIX` (`Error executing tool query_database: SQL execution error: `) match the error-card sentence the real vendored Agent emits and the prefix the tool layer adds.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "_CARD = \"An unexpected error occurred while processing your message. Please try again.\"\n_PREFIX = \"Error executing tool query_database: SQL execution error: \"",
+    "source_file": "tests/unit/test_conversation_footer_setting.py",
+    "source_line": 38,
+    "source_line_end": 39,
+    "verify_against": "the vendored agent's catch-all error card and the `SQL execution error:` prefix site",
+    "verify_hint": "Check the error-card text built in `src/sqllens/agent/core/agent/agent.py` (near line 215) and where `SQL execution error: ` is prefixed in `src/sqllens/tools/query_database.py`.",
+    "claim_signature": "test_mock_alignment:test_conversation_footer_setting.py:card-and-prefix-literals:38",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "test_mock_alignment",
+    "claim": "Monkeypatching `agent.tool_registry.execute` with a raising function drives the real vendored `Agent` into its catch-all handler that appends the conversation-id tail (rather than a narrower per-tool error path that does not).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_conversation_footer_setting.py",
+    "source_line": 60,
+    "source_line_end": 69,
+    "verify_against": "the vendored Agent's tool-execution and exception handling",
+    "verify_hint": "Check how `tool_registry.execute` exceptions propagate in `src/sqllens/agent/core/agent/agent.py` — whether they reach the `send_message` catch-all that appends `\\n\\nConversation ID:` or are caught per-tool-call first.",
+    "claim_signature": "test_mock_alignment:test_conversation_footer_setting.py:raising-execute-reaches-catchall:60",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "test_mock_alignment",
+    "claim": "The imported test helpers `_TOOL_PROMPT`, `_agent`, `_GatedRunSql`, `_model_info`, `_query_database_fn` and `_StubCtx` exist with the signatures/return shapes used here, and `_agent(...)` returns a 3-tuple whose first element is a real `Agent` with `tool_registry` and `agent_memory` attributes.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_conversation_footer_setting.py",
+    "source_line": 26,
+    "source_line_end": 28,
+    "verify_against": "the helper definitions in the sibling test modules",
+    "verify_hint": "Check `_agent`, `_GatedRunSql`, `_TOOL_PROMPT` in `tests/unit/test_query_database_tool_history.py` and `_model_info`, `_query_database_fn`, `_StubCtx` in `tests/unit/test_server.py`; also `build_test_config`'s `agent=` kwarg in `tests/unit/_config_builders.py`.",
+    "claim_signature": "test_mock_alignment:test_conversation_footer_setting.py:imported-helpers:26",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "test_mock_alignment",
+    "claim": "Setting `agent.agent_memory.open_error` on the real agent is the mechanism that makes the tool layer produce `qd._MEMORY_UNAVAILABLE_MESSAGE`, and that message does not end with the conversation-id tail.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_conversation_footer_setting.py",
+    "source_line": 178,
+    "source_line_end": 193,
+    "verify_against": "the memory-store-unavailable path",
+    "verify_hint": "Check `_MEMORY_UNAVAILABLE_MESSAGE` and the `open_error` check in `src/sqllens/tools/query_database.py`, and the stub memory class used by `_agent` in `tests/unit/test_query_database_tool_history.py`.",
+    "claim_signature": "test_mock_alignment:test_conversation_footer_setting.py:memory-open-error-path:178",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "data_format_assumption",
+    "claim": "`result.meta` is the attribute exposing the `_meta` dict on `mcp.types.CallToolResult`, and `result.isError is False` holds for a success result built without passing `isError`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_conversation_footer_setting.py",
+    "source_line": 109,
+    "source_line_end": 114,
+    "verify_against": "`mcp.types.CallToolResult`",
+    "verify_hint": "Check the `CallToolResult` model in the `mcp` package for the `_meta` alias/`meta` field and the `isError` default.",
+    "claim_signature": "data_format_assumption:test_conversation_footer_setting.py:calltoolresult-meta-attr:109",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "test_mock_alignment",
+    "claim": "`qd._CONVERSATION_QUEUES` and `qd._INTERNAL_ERROR_MESSAGE` exist as module-level names in the tool module with the shapes the fixture and test use (a clearable mapping; an error-message string).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_conversation_footer_setting.py",
+    "source_line": 43,
+    "source_line_end": 46,
+    "verify_against": "`src/sqllens/tools/query_database.py` module globals",
+    "verify_hint": "Check for `_CONVERSATION_QUEUES` and `_INTERNAL_ERROR_MESSAGE` in `src/sqllens/tools/query_database.py`.",
+    "claim_signature": "test_mock_alignment:test_conversation_footer_setting.py:tool-module-globals:43",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "data_format_assumption",
+    "claim": "The config-schema tests' `_minimal_toml(tmp_path, extra)` helper appends the extra TOML such that a second `[agent]` block does not conflict with any `[agent]` section the minimal template already writes.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_config_schema.py",
+    "source_line": 248,
+    "verify_against": "the `_minimal_toml` helper in the same test module",
+    "verify_hint": "Check `_minimal_toml` in `tests/unit/test_config_schema.py` for whether its base TOML already contains an `[agent]` table (duplicate tables are a TOML parse error).",
+    "claim_signature": "data_format_assumption:test_config_schema.py:minimal-toml-agent-block:248",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "api_contract",
+    "claim": "The sample-config test's parsing (`split(\"[agent]\\n\",1)[1].split(\"\\n[\",1)[0]`) isolates the `[agent]` block of `_SAMPLE_CONFIG` and so actually asserts the commented line lives inside that block.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_config_schema.py",
+    "source_line": 274,
+    "source_line_end": 276,
+    "verify_against": "`_SAMPLE_CONFIG` layout in cli.py",
+    "verify_hint": "Check the ordering of `[agent]`, `[agent.audit]` and `[auth]` in `_SAMPLE_CONFIG` in `src/sqllens/cli.py` to confirm the split boundary.",
+    "claim_signature": "api_contract:test_config_schema.py:sample-config-block-split:274",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "api_contract",
+    "claim": "The config-loading doc's description of `show_conversation_footer` — default `true`, that env var name, server-wide and read from `cfg.agent` in `server.py`, not a per-request profile field, errors always returned as `isError` with the conversation `_meta`, and unknown keys silently dropped — matches the code.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`show_conversation_footer` defaults to `true` (env var `SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER`); it is server-wide, read from `cfg.agent` in `server.py`, not a per-request profile field.",
+    "source_file": "docs/internal/setup/config-loading.md",
+    "source_line": 33,
+    "verify_against": "`AgentRuntimeConfig` in config.py, `Profile` in profiles.py, and the `except AgentRunError` branch in server.py",
+    "verify_hint": "Check `show_conversation_footer` in `src/sqllens/config.py`, that `Profile`/`runtime.py` carries no such field, and the footer-off branch in `src/sqllens/server.py` (lines 383-393); also whether `AgentRuntimeConfig` sets `extra = \"forbid\"`.",
+    "claim_signature": "api_contract:config-loading.md:footer-setting-doc:33",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "api_contract",
+    "claim": "The `AgentRunError` docstring's claim that with `show_conversation_footer` off the server returns an `isError` result carrying the conversation id in `_meta` instead of re-raising holds for the trace-is-`None` case it describes.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "unless ``agent.show_conversation_footer`` is off, when the server returns an\n    ``isError`` result carrying the conversation id in ``_meta`` instead.",
+    "source_file": "src/sqllens/tools/query_database.py",
+    "source_line": 64,
+    "source_line_end": 65,
+    "verify_against": "the `except AgentRunError` branch in server.py",
+    "verify_hint": "Check lines 382-393 of `src/sqllens/server.py` for the footer-off return path and `_agent_error_result`'s `_meta`.",
+    "claim_signature": "api_contract:query_database.py:agentrunerror-docstring-footer-off:64",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`AgentRuntimeConfig` has a boolean field `show_conversation_footer` whose default is `true`. A config without the field loads with `true`; `[agent] show_conversation_footer = false` in TOML and `SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER=false` in the environment each load it as `false`; the environment value wins over the TOML value. The `[agent]` block of the `sqllens init` config template (`_SAMPLE_CONFIG` in `src/sqllens/cli.py`) carries a commented `show_conversation_footer` line naming its default and the env override.",
+    "claim_signature": "issue-acceptance-1",
+    "criteria_file": ".prflow/tmp/review/pr-363/42486016930-1/criteria.json",
+    "source_file": "src/sqllens/config.py",
+    "source_line": 458,
+    "verify_hint": "Check `show_conversation_footer` in `src/sqllens/config.py` and the `[agent]` block of `_SAMPLE_CONFIG` in `src/sqllens/cli.py` (line 776).",
+    "id": "VC-36",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With the setting `true`, every `query_database` result kind in the Desired Behavior table (success, agent-run failure with a trace, agent-run failure with no trace, any other failure) has the same text, `isError` value and `_meta` as before this change, byte for byte, and an agent-run failure with no trace is still raised rather than returned.",
+    "claim_signature": "issue-acceptance-2",
+    "criteria_file": ".prflow/tmp/review/pr-363/42486016930-1/criteria.json",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 389,
+    "verify_hint": "Compare the footer-on branch in `src/sqllens/server.py` (lines 389-393) and `_agent_error_result`'s `_meta` against the base revision's `_trace_error_result`.",
+    "id": "VC-37",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With the setting `false`, a successful `query_database` result's text is the answer with no conversation-ID footer, and its `_meta` holds the same keys and values it holds with the setting `true`, including `_meta[\"sqllens/conversation\"][\"conversation_id\"]`.",
+    "claim_signature": "issue-acceptance-3",
+    "criteria_file": ".prflow/tmp/review/pr-363/42486016930-1/criteria.json",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 156,
+    "verify_hint": "Check `_conversation_result` in `src/sqllens/server.py` (lines 143-162) for the `_meta` seeding being independent of `show_footer`.",
+    "id": "VC-38",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With the setting `false`, every `AgentRunError` that `query_database_impl_with_widgets` raises, with or without a trace, comes back as a returned `isError` result whose text is `Error executing tool query_database: ` followed by the error message with the conversation-ID tail (`\"\\n\\nConversation ID: \" + <the request's conversation id>`) removed from its end, and whose `_meta` holds `sqllens/conversation` with that conversation id, plus `sqllens/agent_trace` only when the error carries a trace. A message that does not end with that tail, such as the memory-store-unavailable message or a `Tool failed: …` message from a SQL statement a guard blocked, keeps its text unchanged.",
+    "claim_signature": "issue-acceptance-4",
+    "criteria_file": ".prflow/tmp/review/pr-363/42486016930-1/criteria.json",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 383,
+    "verify_hint": "Check the footer-off branch in `src/sqllens/server.py` (lines 383-388) and `_agent_error_result` (lines 165-192).",
+    "id": "VC-39",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With the setting `false`, no `query_database` response text, success or error, contains conversation-ID text that SQL Lens adds: neither the footer nor the conversation-ID tail. Text the model writes into its answer is not filtered, so an answer that quotes an ID keeps it.",
+    "claim_signature": "issue-acceptance-5",
+    "criteria_file": ".prflow/tmp/review/pr-363/42486016930-1/criteria.json",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 158,
+    "verify_hint": "Check every text-producing path of `query_database` in `src/sqllens/server.py` (`_conversation_result` line 158, `_agent_error_result` line 187) and any other place `conversation_id` is interpolated into text in `src/sqllens/tools/`.",
+    "id": "VC-40",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The change leaves the failures not raised as `AgentRunError` (for example the internal-error `RuntimeError` or an invalid profile name) as they are today, raised with no conversation ID in text or `_meta`, whatever the setting. It leaves the rest of the error wording unchanged (the `Error executing tool query_database:` prefix, the `SQL execution error:` prefix and the error card's sentence) and leaves the vendored `src/sqllens/agent/core/agent/agent.py` unchanged.",
+    "claim_signature": "issue-acceptance-6",
+    "criteria_file": ".prflow/tmp/review/pr-363/42486016930-1/criteria.json",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 382,
+    "verify_hint": "Check that only `AgentRunError` is caught at line 382 of `src/sqllens/server.py`, and confirm the diff touches no file under `src/sqllens/agent/`.",
+    "id": "VC-41",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The `query_database` tool description no longer says the conversation ID is always in a plain-text footer: it says the ID is returned in `_meta[\"sqllens/conversation\"]` and also as a text footer unless the server's `show_conversation_footer` setting is off.",
+    "claim_signature": "issue-acceptance-7",
+    "criteria_file": ".prflow/tmp/review/pr-363/42486016930-1/criteria.json",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 323,
+    "verify_hint": "Check the `query_database` docstring in `src/sqllens/server.py` lines 312-365 for any remaining unconditional footer wording.",
+    "id": "VC-42",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Tests cover both setting values on the success path and on agent-run failures with and without a trace, and assert the result text and `_meta` for each. The agent-run failure tests run the real vendored `Agent` so that its catch-all handler in `src/sqllens/agent/core/agent/agent.py` produces the error card and its conversation-ID tail; a stub that copies the card's text, or a hand-built `AgentRunError`, does not meet this criterion on its own.",
+    "claim_signature": "issue-acceptance-8",
+    "criteria_file": ".prflow/tmp/review/pr-363/42486016930-1/criteria.json",
+    "source_file": "tests/unit/test_conversation_footer_setting.py",
+    "source_line": 132,
+    "verify_hint": "Check `tests/unit/test_conversation_footer_setting.py` lines 96-219 and the `_agent` helper in `tests/unit/test_query_database_tool_history.py` for whether a real vendored `Agent` produces the card.",
+    "id": "VC-43",
+    "reused_from_iter_prev": false
+  }
+]
