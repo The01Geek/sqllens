@@ -1,12 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Daniel Radman
 # SPDX-License-Identifier: Apache-2.0
 
-"""SQL safety guards. ``assert_no_whole_row_select`` / ``WholeRowSelectGuardRunner``
-refuses a ``*`` or ``alias.*`` that expands a table or view before the query runs; unless
-``database.refuse_whole_row_selects`` is off, the factory composes it outside every
-protection listed below.
+"""SQL safety guards.
 
-Five orthogonal protections, composed at the factory:
+Six orthogonal protections, composed at the factory:
 
 * ``assert_select_only`` / ``ReadOnlyGuardRunner`` — sqlglot parse rejects
   anything that isn't a single ``SELECT``/``WITH``.
@@ -29,6 +26,10 @@ Five orthogonal protections, composed at the factory:
 * ``RowCapRunner`` — per-runner streaming via ``fetchmany`` stops at
   ``max_rows``; this decorator is the secondary belt-and-suspenders check
   on the returned DataFrame.
+* ``assert_no_whole_row_select`` / ``WholeRowSelectGuardRunner`` — refuses a
+  ``*`` or ``alias.*`` that expands a table or view before the query runs;
+  composed directly beneath ``ResultMaskingRunner`` and outside every other
+  runner, unless ``database.refuse_whole_row_selects`` is off.
 * ``ResultMaskingRunner`` — outermost; replaces every value in a result
   column whose label matches the secret-word rule with ``[withheld]``.
 """
@@ -250,7 +251,11 @@ def _relation_check_executor(runner: object) -> object:
     override ``run_sql`` without forwarding, so it is checked itself.
     """
     while type(runner) in (
-        ResultMaskingRunner, RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner
+        ResultMaskingRunner,
+        WholeRowSelectGuardRunner,
+        RlsGuardRunner,
+        ReadOnlyGuardRunner,
+        RowCapRunner,
     ):
         runner = runner._inner  # type: ignore[attr-defined]
     return runner

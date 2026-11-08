@@ -501,7 +501,7 @@ def test_database_timeout_and_cap_flow_through_to_runner(tmp_path: Path) -> None
             url="sqlite:///:memory:",
             statement_timeout_ms=1234,
             max_rows=77,
-            # Pinned outermost by test_safety_whole_row.py.
+            # Pinned directly beneath masking by test_safety_whole_row.py.
             refuse_whole_row_selects=False,
         ),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
@@ -544,7 +544,7 @@ def test_readonly_guard_wraps_iff_read_only_enabled(
         database=DatabaseConfig(
             url="sqlite:///:memory:",
             read_only=read_only,
-            # Pinned outermost by test_safety_whole_row.py.
+            # Pinned directly beneath masking by test_safety_whole_row.py.
             refuse_whole_row_selects=False,
         ),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test")),

@@ -6,14 +6,15 @@ Why the agent can't accidentally `DROP TABLE`, can't hang the server on `SELECT 
 
 ## The safety layers
 
-AGENTS.md says: *"Read-only by default, enforced by a `sqlglot` parser guard."* That covers the *kind* of SQL that may run. Further orthogonal guards bound *how much work* an accepted SELECT may do, add redundant mutation barriers, hide the values of secret-looking columns, and — when configured — narrow *which rows* a SELECT may see:
+AGENTS.md says: *"Read-only by default, enforced by a `sqlglot` parser guard."* That covers the *kind* of SQL that may run. Further orthogonal guards bound *how much work* an accepted SELECT may do, add redundant mutation barriers, refuse a `*` that returns every column of a table, hide the values of secret-looking columns, and — when configured — narrow *which rows* a SELECT may see:
 
 1. **Parser guard** — `assert_select_only` / `ReadOnlyGuardRunner` rejects anything that isn't a single `SELECT` / `WITH` (plus an allowlist of structural read-only `SHOW` schema-discovery commands), rejects nested DML/DDL, rejects `SELECT … INTO`, and rejects a per-dialect denylist of side-effecting / DoS / RCE functions (e.g. `load_extension`, `pg_sleep`, `sleep`, `generate_series`). See [What the guard does](#what-the-guard-does).
 2. **Driver-level read-only** — when `database.read_only = true` (the default), each connector enforces read-only at the session/connection layer before any user SQL runs: SQLite opens via the `mode=ro` URI and sets `PRAGMA query_only=ON`; Postgres calls psycopg2's `conn.set_session(readonly=True)` right after connect; MySQL executes `SET SESSION TRANSACTION READ ONLY`. Defence-in-depth backstop so a parser-guard miss still cannot mutate. See [Driver-level read-only enforcement](#driver-level-read-only-enforcement).
 3. **Per-query timeout** — each runner sets its native statement-timeout primitive before executing user SQL. See [Statement timeout](#statement-timeout).
 4. **Row cap** — each runner streams via `cursor.fetchmany(max_rows + 1)` and stops at `max_rows`; `RowCapRunner` re-applies the cap on the returned DataFrame as a second-line check. See [Row cap and truncation surface](#row-cap-and-truncation-surface).
-5. **Row-Level Security (opt-in)** — when one or more `[[rls]]` rules are configured, `RlsGuardRunner` rewrites the agent's SQL via a `sqlglot` AST rewrite so every reference to a protected table is filtered by a configured `WHERE` predicate, AND-combined with whatever filter the agent already produced. A query that cannot be safely scoped is blocked (`RlsError`), never run unfiltered. Composed directly beneath the masking guard — see [Composition with RLS](#composition-with-rls) — so the read-only guard validates the *rewritten* SQL. Full reference in [row-level-security.md](row-level-security.md).
+5. **Row-Level Security (opt-in)** — when one or more `[[rls]]` rules are configured, `RlsGuardRunner` rewrites the agent's SQL via a `sqlglot` AST rewrite so every reference to a protected table is filtered by a configured `WHERE` predicate, AND-combined with whatever filter the agent already produced. A query that cannot be safely scoped is blocked (`RlsError`), never run unfiltered. Composed beneath the masking guard and the whole-row select guard — see [Composition with RLS](#composition-with-rls) — so the read-only guard validates the *rewritten* SQL. Full reference in [row-level-security.md](row-level-security.md).
 6. **Secret-column masking** — `ResultMaskingRunner` ([src/sqllens/safety/masking.py](../../../src/sqllens/safety/masking.py)), composed outermost, replaces every value in a result column whose label matches the secret-word rule with `[withheld]` before `RunSqlTool` builds any output from the DataFrame. It decides from the column label alone, so a column renamed by an alias is not masked.
+7. **Whole-row select guard** — `WholeRowSelectGuardRunner`, composed directly beneath the masking guard while `database.refuse_whole_row_selects` is on (the default), refuses a `*` or `alias.*` that expands a table or view before the query runs. See [Whole-row select guard](#whole-row-select-guard).
 
 These are *defence in depth*, not a single line of defence. You should also:
 1. Use a database role with no DML/DDL privileges (the operator's job, not the code's).
@@ -175,6 +176,8 @@ if cfg.database.read_only:
     sql_runner = ReadOnlyGuardRunner(sql_runner, dialect=dialect)
 if cfg.rls:
     sql_runner = RlsGuardRunner(sql_runner, cfg.rls, dialect=dialect)
+if cfg.database.refuse_whole_row_selects:
+    sql_runner = WholeRowSelectGuardRunner(sql_runner, dialect=dialect)
 sql_runner = ResultMaskingRunner(
     sql_runner,
     extra_words=cfg.result_masking.extra_words,
@@ -183,13 +186,13 @@ sql_runner = ResultMaskingRunner(
 )
 ```
 
-Resulting call order on every query when RLS is unconfigured: **ResultMaskingRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner** (`ReadOnlyGuardRunner` only when `database.read_only = true`). `ResultMaskingRunner` replaces the values of secret-looking result columns with `[withheld]` on the way back out. The parser rejects unsafe SQL (including denylisted functions) before any connection opens; the engine runner enforces driver-level read-only, streams, and applies its native timeout; the decorator clamps the result on the way back out.
+Resulting call order on every query when RLS is unconfigured: **ResultMaskingRunner → WholeRowSelectGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner** (`WholeRowSelectGuardRunner` only when `database.refuse_whole_row_selects = true`, `ReadOnlyGuardRunner` only when `database.read_only = true`). `ResultMaskingRunner` replaces the values of secret-looking result columns with `[withheld]` on the way back out. The parser rejects unsafe SQL (including denylisted functions) before any connection opens; the engine runner enforces driver-level read-only, streams, and applies its native timeout; the decorator clamps the result on the way back out.
 
 The composition pattern is deliberate: none of these wrappers touch the lifted agent code, so re-syncing from upstream won't disturb them. See [agent/factory.md](../agent/factory.md).
 
 ### Composition with RLS
 
-When at least one `[[rls]]` rule is configured (the `cfg.rls` list is non-empty), `RlsGuardRunner` wraps the stack directly beneath `ResultMaskingRunner`, so the call order becomes **ResultMaskingRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. This is deliberate:
+When at least one `[[rls]]` rule is configured (the `cfg.rls` list is non-empty), `RlsGuardRunner` wraps the stack beneath `ResultMaskingRunner` and `WholeRowSelectGuardRunner`, so the call order becomes **ResultMaskingRunner → WholeRowSelectGuardRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. This is deliberate:
 
 - The RLS rewrite runs *before* the read-only guard, so the read-only guard validates the **rewritten** SQL — meaning its full-tree DML/DDL deny-walk and denied-function check apply to the injected predicates too.
 - The decorator is only wrapped when `cfg.rls` is non-empty — the no-RLS path stays a zero-overhead passthrough.
@@ -201,31 +204,32 @@ Full reference in [row-level-security.md](row-level-security.md).
 
 [src/sqllens/safety/whole_row.py](../../../src/sqllens/safety/whole_row.py) refuses SQL whose `*` or `alias.*` expands a table or view, before the query runs. A star over a table returns every column, including columns the question never needed; refusing it makes the agent rewrite the query with a column list. It is a separate decision from the read-only guard: it applies whatever `database.read_only` is, and `database.refuse_whole_row_selects = false` (default `true`) turns it off.
 
-`build_agent` wraps the runner stack in `WholeRowSelectGuardRunner` just before registering `RunSqlTool`, outside every runner that rewrites or runs SQL, so it checks the SQL the agent wrote, before any RLS rewrite: **WholeRowSelectGuardRunner → (RlsGuardRunner →) (ReadOnlyGuardRunner →) RowCapRunner → engine runner**. Because it is never beneath `RlsGuardRunner`, `_relation_check_executor` does not unwrap it.
+`build_agent` composes `WholeRowSelectGuardRunner` directly beneath `ResultMaskingRunner` and outside every runner that rewrites or runs SQL, so it checks the SQL the agent wrote, before any RLS rewrite: **ResultMaskingRunner → WholeRowSelectGuardRunner → (RlsGuardRunner →) (ReadOnlyGuardRunner →) RowCapRunner → engine runner**. It only forwards `require_base_tables`, so `_relation_check_executor` unwraps it like the other SQL Lens wrappers.
 
-`assert_no_whole_row_select` parses with `_parse_statements` (the read-only guard's parser, MySQL lexical checks included) and checks every statement, whatever its kind. Each `exp.Star` node, bare or wrapped in an `exp.Column` as `t.*`, is:
+`assert_no_whole_row_select` parses with `_parse_statements` (the read-only guard's parser, MySQL lexical checks included) and checks every statement, whatever its kind; an empty statement (`SELECT 1;;`) raises `UnsafeSqlError` (`empty parse tree`), as it does in the read-only guard. Each `exp.Star` node, bare or wrapped in an `exp.Column` as `t.*`, is:
 
 | Star | Decision |
 |---|---|
 | The argument of `COUNT` (`COUNT(*)`, `COUNT(t.*)`) | allowed |
 | Anywhere under an `exp.Exists` (`EXISTS`, `NOT EXISTS`) | allowed |
-| `t.*` where `t` resolves (sqlglot scope analysis, after `normalize_identifiers`) to a CTE, derived table, `VALUES`, `UNNEST` or `LATERAL` | allowed |
+| `t.*` where `t` resolves (sqlglot scope analysis, after `normalize_identifiers`) to a CTE or derived table that is a query, or to `VALUES`, `UNNEST` or `LATERAL` | allowed |
 | `t.*` where `t` is a table-valued function, or a system catalog (`is_catalog_table`, the rule `is_introspection_query` uses) | allowed |
-| Bare `*` whose `FROM`/`JOIN` sources include no named table or view outside the catalogs | allowed |
+| Bare `*` whose `FROM`/`JOIN` sources include no named table or view outside the catalogs and no parenthesized table or join | allowed |
 | `t.*` where `t` is a named table or view, or names no source of its `SELECT` | refused |
 | Bare `*` whose sources include a named table or view outside the catalogs | refused |
+| A star over a parenthesized table or join, such as `(t) x` or `(a JOIN b ON …) x`, which sqlglot scopes like a derived table but whose columns are the table's | refused |
 | Any other star that expands a table: in a CTE, a derived table, an `IN` or scalar subquery, a set operation, or a function argument such as `row_to_json(t.*)` | refused |
 
-SQL whose leading keyword (`first_sql_keyword`) is `TABLE` is refused too: PostgreSQL's and MySQL's `TABLE t` means `SELECT * FROM t`, and sqlglot does not parse it as a statement.
+`TABLE t` is refused too, in any statement or subquery: PostgreSQL's and MySQL's `TABLE t` means `SELECT * FROM t`, and sqlglot parses it as a column or table named `TABLE` (`SELECT 1; TABLE t`, `(TABLE t) x`). The guard refuses an unquoted, unqualified column or table of that name, which a real column or table can only be when quoted.
 
-The refusal raises `WholeRowSelectError`, a subclass of `UnsafeSqlError`, so `query_database`'s defensive `UnsafeSqlError` branch would treat it like the read-only guard's errors if it ever escaped `RunSqlTool`. `RunSqlTool` catches it and returns it to the model as a failed tool result, `Error executing query: refusing to execute query: it selects every column of a table or view (…)`, naming the star (`*`, `u.*`, after identifier normalization) but no table. The default system prompt's Tool Errors rule routes an error containing "selects every column" to a corrected retry, and `WHOLE_ROW_REFUSAL` keeps that phrase.
+The refusal raises `WholeRowSelectError`, a subclass of `UnsafeSqlError`, so `query_database`'s defensive `UnsafeSqlError` branch would treat it like the read-only guard's errors if it ever escaped `RunSqlTool`. `RunSqlTool` catches it and returns it to the model as a failed tool result, `Error executing query: refusing to execute query: it selects every column of a table or view with a *, an alias.* or a TABLE statement. …`. It names no star, because a star's qualifier can be a table or schema name and the error can reach the user. The default system prompt's Tool Errors rule routes an error containing "selects every column" to a corrected retry, and `WHOLE_ROW_REFUSAL` keeps that phrase.
 
 Failure paths:
 
-- SQL `_parse_statements` cannot parse (a parse or tokenize error, ambiguous MySQL input such as an executable comment) raises `UnsafeSqlError` and is refused, as the read-only guard refuses it.
-- `normalize_identifiers` and `traverse_scope` run only when the statement has a star that is not exempt, so a query without one never depends on them. Any unexpected exception from them, or from the tokenizer behind `first_sql_keyword`, is logged at `WARNING` with a traceback and refuses the query (`whole-row select check errored (…)`), as the read-only guard fails closed.
+- SQL `_parse_statements` cannot parse (a parse or tokenize error, ambiguous MySQL input such as an executable comment), and SQL with an empty statement, raise `UnsafeSqlError` and are refused, as the read-only guard refuses them. With `database.read_only = false` and no RLS rules, this guard is the only parser in the stack, so turning it on refuses such SQL where it used to run.
+- `normalize_identifiers` and `traverse_scope` run only when the statement has a star that is not exempt, so a query without one never depends on them. Any unexpected exception from them is logged at `WARNING` with a traceback and refuses the query (`whole-row select check errored (…)`), as the read-only guard fails closed.
 
-Not covered: a whole row reached without a star (PostgreSQL's `row_to_json(t)` or a bare `t` as a composite value) and an explicit list of every column. The default system prompt's Data Confidentiality section tells the agent to decline requests to export whole tables whatever this setting is.
+Not covered: a whole row reached without a star (PostgreSQL's `row_to_json(t)` or a bare `t` as a composite value) and an explicit list of every column. A table whose name `is_catalog_table` takes for a catalog, such as a PostgreSQL table named with the `pg_` prefix, counts as one. The default system prompt's Data Confidentiality section tells the agent to decline requests to export whole tables whatever this setting is.
 
 ## Dialect handling
 

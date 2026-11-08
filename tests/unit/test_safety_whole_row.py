@@ -34,18 +34,20 @@ from sqllens.config import (
 )
 from sqllens.safety import (
     ReadOnlyGuardRunner,
+    ResultMaskingRunner,
     RlsGuardRunner,
     RowCapRunner,
     UnsafeSqlError,
     WholeRowSelectError,
     WholeRowSelectGuardRunner,
+    _relation_check_executor,
     assert_no_whole_row_select,
     whole_row,
 )
 
 DIALECTS = ["postgres", "mysql", "sqlite", None]
 
-# (sql, star text named in the refusal)
+# (sql, the star the guard refuses; the refusal itself names none)
 REFUSED = [
     ("SELECT * FROM users", "*"),
     ("SELECT u.* FROM users AS u", "u.*"),
@@ -66,6 +68,12 @@ REFUSED = [
     ("SELECT * FROM users UNION SELECT id, name FROM admins", "*"),
     ("SELECT id FROM orders WHERE user_id IN (SELECT * FROM banned)", "*"),
     ("SELECT (SELECT * FROM settings LIMIT 1) AS s", "*"),
+    # A parenthesized table or join gets a scope of its own in sqlglot, as a
+    # derived table does, but its columns are the table's.
+    ("SELECT * FROM (orders) o", "*"),
+    ("SELECT * FROM ((orders)) o", "*"),
+    ("SELECT x.* FROM (orders) x", "x.*"),
+    ("SELECT * FROM (users JOIN orders ON orders.user_id = users.id) x", "*"),
     # A star as a function argument other than COUNT.
     ("SELECT row_to_json(u.*) FROM users u", "u.*"),
     # A qualifier that names no source of its SELECT cannot be shown safe.
@@ -94,6 +102,12 @@ ALLOWED = [
     "SELECT * FROM (SELECT id FROM users) a JOIN (SELECT user_id FROM orders) b"
     " ON a.id = b.user_id",
     "SELECT * FROM information_schema.columns WHERE table_name = 'users'",
+    "SELECT * FROM (SELECT id FROM users UNION SELECT id FROM admins) d",
+    "SELECT v.* FROM (VALUES (1), (2)) AS v(x)",
+    "SELECT u.id, l.* FROM (SELECT 1 AS id) u CROSS JOIN LATERAL (SELECT u.id AS n) l",
+    # A quoted column named table is a column, not the TABLE shorthand.
+    'SELECT "table" FROM t',
+    'SELECT t."table" FROM t',
     "SELECT 1",
 ]
 
@@ -101,9 +115,9 @@ ALLOWED = [
 @pytest.mark.parametrize("dialect", DIALECTS)
 @pytest.mark.parametrize(("sql", "star"), REFUSED)
 def test_refused_shapes(sql: str, star: str, dialect: str | None) -> None:
-    with pytest.raises(WholeRowSelectError) as excinfo:
+    with pytest.raises(WholeRowSelectError):
         assert_no_whole_row_select(sql, dialect=dialect)
-    assert f"({star})" in str(excinfo.value)
+    assert whole_row._whole_row_reference(sql, dialect) == star
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
@@ -116,6 +130,7 @@ def test_allowed_shapes(sql: str, dialect: str | None) -> None:
     ("sql", "dialect"),
     [
         ("SELECT COUNT(u.*) FROM users u", "postgres"),
+        ("SELECT t.* FROM UNNEST(ARRAY[1, 2]) AS t(x)", "postgres"),
         ("SELECT * FROM generate_series(1, 3)", "postgres"),
         ("SELECT * FROM (VALUES (1), (2)) AS v(x)", "postgres"),
         ("SELECT * FROM UNNEST(ARRAY[1, 2]) AS t(x)", "postgres"),
@@ -126,9 +141,15 @@ def test_allowed_shapes(sql: str, dialect: str | None) -> None:
         ("SELECT * FROM performance_schema.threads", "mysql"),
         ("SELECT * FROM sqlite_master", "sqlite"),
         ("SELECT * FROM pragma_table_info('users')", "sqlite"),
+        ("SELECT `table` FROM t", "mysql"),
+        # Documented limit: a table whose name has the dialect's catalog
+        # prefix counts as a catalog, and with no dialect every prefix counts.
+        ("SELECT * FROM pg_payments", "postgres"),
+        ("SELECT * FROM pg_payments", None),
+        ("SELECT * FROM sqlite_stuff", None),
     ],
 )
-def test_allowed_dialect_specific_shapes(sql: str, dialect: str) -> None:
+def test_allowed_dialect_specific_shapes(sql: str, dialect: str | None) -> None:
     assert_no_whole_row_select(sql, dialect=dialect)
 
 
@@ -147,23 +168,45 @@ def test_refused_dialect_specific_shapes(sql: str, dialect: str) -> None:
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
-@pytest.mark.parametrize("sql", ["TABLE users", "/* note */ table users"])
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "TABLE users",
+        "/* note */ table users",
+        "SELECT 1; TABLE users",
+        "SELECT id FROM users; TABLE users",
+        "SELECT * FROM (TABLE orders) sub",
+        "WITH x AS (TABLE users) SELECT id FROM x",
+    ],
+)
 def test_table_statement_is_refused(sql: str, dialect: str | None) -> None:
-    """``TABLE t`` means ``SELECT * FROM t``; sqlglot does not parse it as one."""
-    with pytest.raises(WholeRowSelectError, match=r"\(TABLE\)"):
+    """``TABLE t`` means ``SELECT * FROM t``; sqlglot reads it as a name ``TABLE``."""
+    with pytest.raises(WholeRowSelectError):
         assert_no_whole_row_select(sql, dialect=dialect)
+    assert whole_row._whole_row_reference(sql, dialect) == "TABLE"
 
 
-def test_refusal_message_is_actionable() -> None:
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM users",
+        "SELECT users.* FROM users",
+        "SELECT public.users.* FROM public.users",
+        "TABLE users",
+    ],
+)
+def test_refusal_message_is_actionable(sql: str) -> None:
     with pytest.raises(WholeRowSelectError) as excinfo:
-        assert_no_whole_row_select("SELECT * FROM users", dialect="mysql")
+        assert_no_whole_row_select(sql, dialect="postgres")
     message = str(excinfo.value)
     # The prompt's Tool Errors rule routes on this phrase.
     assert "selects every column" in message
     assert "Name only the columns the question needs" in message
     assert "run the query again" in message
-    # The table name is not echoed: the error is shown to the user too.
+    # No table or schema name is echoed, even as a star's qualifier: the
+    # error can reach the user.
     assert "users" not in message
+    assert "public" not in message
 
 
 @pytest.mark.parametrize(
@@ -176,6 +219,14 @@ def test_refusal_message_is_actionable() -> None:
 )
 def test_unparseable_sql_is_refused_as_unsafe(sql: str, dialect: str) -> None:
     with pytest.raises(UnsafeSqlError) as excinfo:
+        assert_no_whole_row_select(sql, dialect=dialect)
+    assert not isinstance(excinfo.value, WholeRowSelectError)
+
+
+@pytest.mark.parametrize("dialect", DIALECTS)
+@pytest.mark.parametrize("sql", ["SELECT 1;;", "SELECT 1; ; SELECT * FROM users", "/* note */"])
+def test_empty_statement_is_refused_as_unsafe(sql: str, dialect: str | None) -> None:
+    with pytest.raises(UnsafeSqlError, match="empty parse tree") as excinfo:
         assert_no_whole_row_select(sql, dialect=dialect)
     assert not isinstance(excinfo.value, WholeRowSelectError)
 
@@ -320,8 +371,10 @@ _SQL_RUNNERS = (RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner, SqliteRunner)
 
 
 def _guard_position(stack: list[type]) -> int:
+    """The guard's position: directly beneath the outermost masking guard."""
     assert stack.count(WholeRowSelectGuardRunner) == 1
     position = stack.index(WholeRowSelectGuardRunner)
+    assert stack[:position] == [ResultMaskingRunner]
     assert not any(issubclass(t, _SQL_RUNNERS) for t in stack[:position])
     return position
 
@@ -351,6 +404,12 @@ def test_guard_wraps_row_level_security(tmp_path: Path) -> None:
     stack = _stack(_run_sql_runner(cfg))
     beneath = [t for t in stack[_guard_position(stack) + 1 :] if issubclass(t, _SQL_RUNNERS)]
     assert beneath[0] is RlsGuardRunner
+
+
+def test_relation_check_unwraps_the_guard() -> None:
+    engine = SqliteRunner(":memory:")
+    wrapped = WholeRowSelectGuardRunner(RowCapRunner(engine, max_rows=10))
+    assert _relation_check_executor(wrapped) is engine
 
 
 def test_guard_is_absent_when_turned_off(tmp_path: Path) -> None:
