@@ -3,7 +3,7 @@
 
 """SQL safety guards.
 
-Five orthogonal protections, composed at the factory:
+Six orthogonal protections, composed at the factory:
 
 * ``assert_select_only`` / ``ReadOnlyGuardRunner`` — sqlglot parse rejects
   anything that isn't a single ``SELECT``/``WITH``.
@@ -26,6 +26,10 @@ Five orthogonal protections, composed at the factory:
 * ``RowCapRunner`` — per-runner streaming via ``fetchmany`` stops at
   ``max_rows``; this decorator is the secondary belt-and-suspenders check
   on the returned DataFrame.
+* ``assert_no_whole_row_select`` / ``WholeRowSelectGuardRunner`` — refuses a
+  ``*`` or ``alias.*`` that expands a table or view before the query runs;
+  composed directly beneath ``ResultMaskingRunner`` and outside every other
+  runner, unless ``database.refuse_whole_row_selects`` is off.
 * ``ResultMaskingRunner`` — outermost; replaces every value in a result
   column whose label matches the secret-word rule with ``[withheld]``.
 """
@@ -61,6 +65,11 @@ from sqllens.safety.readonly import (
     sqlglot_dialect_for_url,
 )
 from sqllens.safety.rls import RlsError, apply_rls
+from sqllens.safety.whole_row import (
+    WholeRowSelectError,
+    WholeRowSelectGuardRunner,
+    assert_no_whole_row_select,
+)
 
 if TYPE_CHECKING:
     from sqllens.agent.core.tool import ToolContext
@@ -80,7 +89,10 @@ __all__ = [
     "RlsGuardRunner",
     "RowCapRunner",
     "UnsafeSqlError",
+    "WholeRowSelectError",
+    "WholeRowSelectGuardRunner",
     "apply_rls",
+    "assert_no_whole_row_select",
     "assert_select_only",
     "first_sql_keyword",
     "is_introspection_query",
@@ -239,7 +251,11 @@ def _relation_check_executor(runner: object) -> object:
     override ``run_sql`` without forwarding, so it is checked itself.
     """
     while type(runner) in (
-        ResultMaskingRunner, RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner
+        ResultMaskingRunner,
+        WholeRowSelectGuardRunner,
+        RlsGuardRunner,
+        ReadOnlyGuardRunner,
+        RowCapRunner,
     ):
         runner = runner._inner  # type: ignore[attr-defined]
     return runner

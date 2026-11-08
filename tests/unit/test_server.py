@@ -573,7 +573,7 @@ async def test_query_database_model_info_present_when_show_details_off(
 async def test_query_database_error_result_carries_no_model_info(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The trace-carrying isError result is built by _trace_error_result, which
+    # The trace-carrying isError result is built by _agent_error_result, which
     # attaches only the conversation and trace channels — no model_info.
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)

@@ -173,6 +173,9 @@ RunSqlTool → SqlRunner.run_sql(args, context)
   ↓
 ResultMaskingRunner.run_sql                        (masks secret-looking result columns on the way back)
   ↓
+WholeRowSelectGuardRunner.run_sql                  (refuses a whole-row star in the agent's sql;
+                                                    absent when database.refuse_whole_row_selects = false)
+  ↓
 RlsGuardRunner.run_sql                             (rewrites args.sql, reading context.metadata)
   ↓
 ReadOnlyGuardRunner.run_sql                        (validates the REWRITTEN sql — see Wiring;
@@ -199,10 +202,12 @@ if cfg.database.read_only:
     sql_runner = ReadOnlyGuardRunner(sql_runner, dialect=dialect)
 if cfg.rls:
     sql_runner = RlsGuardRunner(sql_runner, cfg.rls, dialect=dialect)
+if cfg.database.refuse_whole_row_selects:
+    sql_runner = WholeRowSelectGuardRunner(sql_runner, dialect=dialect)
 sql_runner = ResultMaskingRunner(sql_runner, ...)
 ```
 
-Resulting call order with rules configured and `read_only = true`: **ResultMaskingRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. Each conditional guard drops out when its condition is false; masking and the row cap are always present.
+Resulting call order with rules configured, `read_only = true` and `refuse_whole_row_selects = true`: **ResultMaskingRunner → WholeRowSelectGuardRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. Each conditional guard drops out when its condition is false; masking and the row cap are always present.
 
 The order is deliberate:
 

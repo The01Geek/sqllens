@@ -58,6 +58,15 @@ class DatabaseConfig(BaseModel):
     )
     name: str = Field(default="primary", description="Display name shown via list_data_sources")
     read_only: bool = Field(default=True, description="Reject non-SELECT statements via SQL parser")
+    refuse_whole_row_selects: bool = Field(
+        default=True,
+        description=(
+            "Refuse, before it runs, SQL whose SELECT * or alias.* expands a table or "
+            "view, so the agent selects only the columns a question needs. COUNT(*), "
+            "a * inside EXISTS, and a * over a CTE, derived table or system catalog "
+            "are allowed."
+        ),
+    )
     statement_timeout_ms: int = Field(
         default=30_000,
         ge=0,
@@ -506,6 +515,17 @@ class AgentRuntimeConfig(BaseModel):
             "agent's system prompt on every request. Unset, empty or whitespace "
             f"only adds nothing. At most {MAX_STANDING_INSTRUCTIONS_CHARS} characters "
             "after surrounding whitespace is removed."
+        ),
+    )
+    # Server-wide, not a per-request Profile knob. Env override:
+    # SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER.
+    show_conversation_footer: bool = Field(
+        default=True,
+        description=(
+            "Write the conversation id into query_database text: the footer on "
+            "answers and the 'Conversation ID: <id>' line ending agent-run error "
+            "messages. Set false to return the id only in "
+            "_meta['sqllens/conversation']."
         ),
     )
     audit: AuditConfig = Field(default_factory=lambda: AuditConfig())
