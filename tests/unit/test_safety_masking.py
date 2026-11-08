@@ -249,6 +249,17 @@ def test_unmasked_columns_match_labels_with_spaces_exactly() -> None:
     assert matcher.is_secret("token_count")
 
 
+def test_config_keeps_padded_unmasked_columns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert ResultMaskingConfig(unmasked_columns=["token_count "]).unmasked_columns == [
+        "token_count "
+    ]
+    monkeypatch.setenv("SQLLENS_RESULT_MASKING__UNMASKED_COLUMNS", '[" api key"]')
+    cfg = Config.load(_write_toml(tmp_path, ""))
+    assert cfg.result_masking.unmasked_columns == [" api key"]
+
+
 # --- run_sql sinks ---------------------------------------------------------
 
 SENTINELS = {
