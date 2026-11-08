@@ -317,9 +317,10 @@ def build_server(cfg: Config) -> FastMCP:
         For multi-turn conversations (e.g. the agent asks a clarifying
         question), pass the ``conversation_id`` returned by the previous turn
         back in as the ``conversation_id`` argument so the agent retains
-        context. Omit it to start a fresh conversation. The conversation id is
-        returned in ``_meta["sqllens/conversation"]``, and also as a text
-        footer unless the server's ``show_conversation_footer`` setting is off.
+        context. Omit it to start a fresh conversation. An answer returns the
+        conversation id in ``_meta["sqllens/conversation"]``, and also as a
+        text footer unless the server's ``show_conversation_footer`` setting
+        is off.
         When a result is a clarifying question rather than an answer, ask the
         user that question, or use the answer the user's earlier messages
         already give; then call ``query_database`` again with that answer as
