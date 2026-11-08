@@ -773,6 +773,11 @@ similarity_threshold = 0.7
 # show_details = false   # set true to append the generated SQL to query
                          # answers. OFF by default: exposing the SQL to MCP
                          # clients can leak schema details and query logic.
+# show_conversation_footer = true   # set false to keep the conversation id
+                         # out of query_database text (answer footer and
+                         # error-message tail); hosts then read it from
+                         # _meta["sqllens/conversation"]. Env override:
+                         # SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER.
 
 [auth]
 mode = "none"            # one of: none, bearer (jwt is not implemented yet)
