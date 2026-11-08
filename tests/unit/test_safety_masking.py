@@ -378,7 +378,17 @@ def test_stale_masked_record_from_a_runner_beneath_is_dropped(tmp_path: Path) ->
         sql_runner=ResultMaskingRunner(_FrameRunner(df)),
         file_system=LocalFileSystem(str(tmp_path)),
     )
-    assert "withheld" not in _run(tool).result_for_llm
+    result = _run(tool)
+    assert result.success is True
+    assert "withheld" not in result.result_for_llm
+    # Control: the same frame with a real secret column still gets the note.
+    secret = pd.DataFrame({"id": [1], "pin": ["1234"]})
+    secret.attrs[MASKED_COLUMNS_ATTR] = ["id"]
+    tool = RunSqlTool(
+        sql_runner=ResultMaskingRunner(_FrameRunner(secret)),
+        file_system=LocalFileSystem(str(tmp_path)),
+    )
+    assert "withheld the values in these columns: pin." in _run(tool).result_for_llm
 
 
 def test_matcher_settings_are_keyword_only() -> None:
