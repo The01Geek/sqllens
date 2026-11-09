@@ -39,6 +39,8 @@ When a question can be read more than one way and the readings would count diffe
 - **Stop the question with a note** that names the meaning to use. For example: "When someone asks about revenue, use net revenue: exclude shipping and tax."
 - **Stop the question with a saved question-and-answer pair** for that question. For example, the question "What was revenue last month?" saved with SQL that sums order totals minus shipping and tax. When the assistant's memory search finds the pair, it is instructed to use the reading that the pair's SQL uses.
 
+A rule that must hold for every wording of a question belongs in the [`standing_instructions`](configuration.md#standing-instructions) setting rather than in memory: it reaches the assistant on every request, settles a choice even when a note or saved pair shows another meaning, and can also require the assistant to ask about a choice that a note or saved pair would otherwise settle.
+
 A note reaches the assistant only on a turn whose message the automatic background context retrieves it for (see [Near-Match Background Context](#near-match-background-context)). A note that does not match the current message closely enough neither marks nor settles the choice on that turn. The assistant's memory search uses its own wording of the question, so it can miss a saved pair that would have settled the choice and ask anyway.
 
 ## The Bundle File Format

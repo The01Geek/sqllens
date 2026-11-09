@@ -18,11 +18,12 @@ and secrets.
 from __future__ import annotations
 
 import contextvars
+import logging
 import os
 import re
 import shlex
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -38,6 +39,8 @@ from pydantic_settings import (
     SettingsConfigDict,
     TomlConfigSettingsSource,
 )
+
+logger = logging.getLogger(__name__)
 
 # Sub-section models are BaseModel, not BaseSettings: a nested BaseSettings would
 # spin up its own unprefixed env_settings source and silently consume bare env
@@ -433,12 +436,52 @@ class AuditConfig(BaseModel):
     sanitize_parameters: bool = True
 
 
+#: Upper bound on ``agent.standing_instructions``, counted after surrounding
+#: whitespace is stripped. The text rides in the system prompt of every LLM
+#: call, so the cap keeps a pasted document from inflating each request.
+MAX_STANDING_INSTRUCTIONS_CHARS = 10_000
+
+#: The lines that fence ``agent.standing_instructions`` in the system prompt.
+#: The text may not contain either one on a line of its own.
+STANDING_INSTRUCTIONS_BEGIN = "--- BEGIN DEPLOYMENT INSTRUCTIONS ---"
+STANDING_INSTRUCTIONS_END = "--- END DEPLOYMENT INSTRUCTIONS ---"
+STANDING_INSTRUCTIONS_DELIMITERS = (STANDING_INSTRUCTIONS_BEGIN, STANDING_INSTRUCTIONS_END)
+
+
+#: ``[agent]`` keys removed in earlier releases. The section rejects unknown
+#: keys, but these are accepted and dropped because their removal notes said so.
+_RETIRED_AGENT_KEYS = frozenset({"show_memory_details", "show_sql"})
+
+
 class AgentRuntimeConfig(BaseModel):
     """Agent runtime knobs exposed to deployers.
 
     Only fields that operators legitimately tune per deployment live here;
     the rest of the framework's ``AgentConfig`` keeps its built-in defaults.
     """
+
+    # The top-level Config's extra="forbid" does not reach nested models, so a
+    # misspelt [agent] key (e.g. ``standing_instruction``) would otherwise be
+    # dropped silently and its rule would never reach a request.
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_keys(cls, data: Any) -> Any:
+        # Keys removed in earlier releases whose release notes promised they
+        # would be ignored. Strictness must not turn them into a start-up
+        # failure, so they are dropped here with a warning instead.
+        if isinstance(data, dict):
+            retired = [key for key in _RETIRED_AGENT_KEYS if key in data]
+            if retired:
+                data = {k: v for k, v in data.items() if k not in _RETIRED_AGENT_KEYS}
+                for key in sorted(retired):
+                    logger.warning(
+                        "agent.%s was removed and is ignored; remove it from "
+                        "your configuration.",
+                        key,
+                    )
+        return data
 
     # Default raised from the framework's 10 — real-world schema exploration
     # (catalog lookups + memory searches + final query) routinely needs more
@@ -462,6 +505,18 @@ class AgentRuntimeConfig(BaseModel):
     # not leak conversations. Conversations are ephemeral and never persisted to
     # disk — they are dropped on restart. Env override: SQLLENS_AGENT__MAX_CONVERSATIONS.
     max_conversations: int = Field(default=1000, ge=1, le=1_000_000)
+    # Deployment rules the default system prompt carries on every request, in a
+    # delimited section after the generic rules (see DefaultSystemPromptBuilder).
+    # Env override: SQLLENS_AGENT__STANDING_INSTRUCTIONS.
+    standing_instructions: str | None = Field(
+        default=None,
+        description=(
+            "Standing instructions from the deployment's operator, added to the "
+            "agent's system prompt on every request. Unset, empty or whitespace "
+            f"only adds nothing. At most {MAX_STANDING_INSTRUCTIONS_CHARS} characters "
+            "after surrounding whitespace is removed."
+        ),
+    )
     # Server-wide, not a per-request Profile knob. Env override:
     # SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER.
     show_conversation_footer: bool = Field(
@@ -474,6 +529,31 @@ class AgentRuntimeConfig(BaseModel):
         ),
     )
     audit: AuditConfig = Field(default_factory=lambda: AuditConfig())
+
+    @field_validator("standing_instructions")
+    @classmethod
+    def _normalize_standing_instructions(cls, value: str | None) -> str | None:
+        # Blank text means "no instructions", so an empty env override restores
+        # the unconfigured prompt exactly rather than adding an empty section.
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        if len(text) > MAX_STANDING_INSTRUCTIONS_CHARS:
+            raise ValueError(
+                f"agent.standing_instructions is {len(text)} characters; the limit is "
+                f"{MAX_STANDING_INSTRUCTIONS_CHARS}. Every request sends it to the model, "
+                "so keep it to the rules that must hold on every question."
+            )
+        for line in text.splitlines():
+            if line.strip() in STANDING_INSTRUCTIONS_DELIMITERS:
+                raise ValueError(
+                    f"agent.standing_instructions contains the line {line.strip()!r}; "
+                    "SQL Lens wraps the text in that line itself, so it would end or "
+                    "restart the instructions section early. Remove that line."
+                )
+        return text
 
 
 # Strict identifier allowlist for RLS table/column names. A bare SQL identifier
