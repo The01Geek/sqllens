@@ -283,18 +283,70 @@ def test_show_details_on_grants_static_user_access_to_tool_arguments(
 
 
 async def _prompt_from_agent_tools(agent: Agent) -> str:
-    """Build the default system prompt from the agent's own tool list.
+    """Build the system prompt with the agent's own builder and tool list.
 
-    ``build_agent`` passes no prompt builder, so the live agent uses
-    ``DefaultSystemPromptBuilder``; going through ``get_available_tools``
-    is what makes the prompt assertions below reflect the registry the
-    factory actually produced rather than a hand-written tool list.
+    A fresh ``DefaultSystemPromptBuilder()`` here would not see the dialect
+    ``build_agent`` gives the agent's builder, so the prompt assertions would
+    miss the ``Database:`` section.
     """
     user = User(id="anyone", group_memberships=["default"])
     tools = await agent.get_available_tools(user)
-    prompt = await DefaultSystemPromptBuilder().build_system_prompt(user, tools)
+    assert isinstance(agent.system_prompt_builder, DefaultSystemPromptBuilder)
+    prompt = await agent.system_prompt_builder.build_system_prompt(user, tools)
     assert prompt is not None
     return prompt
+
+
+@pytest.mark.parametrize(
+    ("url", "driver", "database_lines"),
+    [
+        (
+            "mysql+pymysql://u:p@db.internal:3306/shop",
+            "pymysql",
+            [
+                "- The connected database is MySQL. Write every query, catalog lookups"
+                " included, in MySQL's SQL dialect.",
+                "- MySQL has no ILIKE operator. For a case-insensitive match, use"
+                " LOWER(column) LIKE LOWER('pattern').",
+            ],
+        ),
+        (
+            "sqlite:///:memory:",
+            None,
+            [
+                "- The connected database is SQLite. Write every query, catalog lookups"
+                " included, in SQLite's SQL dialect.",
+                "- SQLite has no ILIKE operator. For a case-insensitive match, use"
+                " LOWER(column) LIKE LOWER('pattern').",
+            ],
+        ),
+        (
+            "postgresql://u:p@db.internal:5432/shop",
+            "psycopg2",
+            [
+                "- The connected database is PostgreSQL. Write every query, catalog lookups"
+                " included, in PostgreSQL's SQL dialect.",
+            ],
+        ),
+    ],
+)
+async def test_build_agent_prompt_names_the_database_engine(
+    tmp_path: Path, url: str, driver: str | None, database_lines: list[str]
+) -> None:
+    """Issue #343: ``build_agent`` hands its dialect to the agent's prompt builder."""
+    if driver:
+        pytest.importorskip(driver)
+    cfg = Config(
+        database=DatabaseConfig(url=url),
+        llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
+        memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
+        auth=AuthConfig(mode="none"),
+        agent=AgentRuntimeConfig(),
+    )
+    lines = (await _prompt_from_agent_tools(build_agent(cfg))).splitlines()
+    start = lines.index("Database:") + 1
+    assert lines[start : start + len(database_lines)] == database_lines
+    assert lines[start + len(database_lines)] == "Tool Errors:"
 
 
 async def test_save_text_memory_tool_omitted_when_field_unset(
@@ -437,18 +489,24 @@ def test_database_timeout_and_cap_flow_through_to_runner(tmp_path: Path) -> None
     constructor (e.g. a future refactor of build_sql_runner) would silently
     disable the safety primitives — this test pins the wiring shape.
 
-    Decorator stack order is also pinned: ReadOnlyGuardRunner must be outermost
-    (parse-time reject), then RowCapRunner (post-execution cap), then the
-    engine-specific runner.
+    Decorator stack order is also pinned, with refuse_whole_row_selects off:
+    ResultMaskingRunner outermost, then ReadOnlyGuardRunner (parse-time
+    reject), then RowCapRunner (post-execution cap), then the engine-specific
+    runner. With the setting on (the default), WholeRowSelectGuardRunner sits
+    between masking and the read-only guard.
     """
     from sqllens.agent.integrations.sqlite import SqliteRunner
-    from sqllens.safety import ReadOnlyGuardRunner, RowCapRunner
+    from sqllens.safety import ReadOnlyGuardRunner, ResultMaskingRunner, RowCapRunner
 
     cfg = Config(
         database=DatabaseConfig(
             url="sqlite:///:memory:",
             statement_timeout_ms=1234,
             max_rows=77,
+            # Off so the stack below asserts the shape without the whole-row
+            # guard, which test_safety_whole_row.py pins directly beneath
+            # masking when it is on (the default).
+            refuse_whole_row_selects=False,
         ),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
         memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
@@ -458,7 +516,9 @@ def test_database_timeout_and_cap_flow_through_to_runner(tmp_path: Path) -> None
     agent = build_agent(cfg)
     run_sql_tool = _unwrap(agent.tool_registry._tools["run_sql"])
 
-    outer = run_sql_tool.sql_runner
+    masking = run_sql_tool.sql_runner
+    assert isinstance(masking, ResultMaskingRunner)
+    outer = masking._inner
     assert isinstance(outer, ReadOnlyGuardRunner)
     cap = outer._inner
     assert isinstance(cap, RowCapRunner)
@@ -476,22 +536,34 @@ def test_readonly_guard_wraps_iff_read_only_enabled(
     """``ReadOnlyGuardRunner`` wraps the stack iff ``database.read_only=True``.
 
     A refactor that flips the default or drops the conditional wrap silently
-    disables the parser guard — this pins the wiring both ways. When enabled
-    the guard must be the OUTERMOST decorator (parse-time reject before any
-    row-cap / engine work).
+    disables the parser guard — this pins the wiring both ways. With no
+    ``[[rls]]`` rules and ``refuse_whole_row_selects`` off, as here, the
+    enabled guard sits directly beneath the masking guard (parse-time reject
+    before any row-cap / engine work); with rules, ``RlsGuardRunner`` sits
+    between them, and with the whole-row setting on (the default),
+    ``WholeRowSelectGuardRunner`` sits beneath masking.
     """
     from sqllens.agent.integrations.sqlite import SqliteRunner
-    from sqllens.safety import ReadOnlyGuardRunner
+    from sqllens.safety import ReadOnlyGuardRunner, ResultMaskingRunner
 
     cfg = Config(
-        database=DatabaseConfig(url="sqlite:///:memory:", read_only=read_only),
+        database=DatabaseConfig(
+            url="sqlite:///:memory:",
+            read_only=read_only,
+            # Off so the stack below asserts the shape without the whole-row
+            # guard, which test_safety_whole_row.py pins directly beneath
+            # masking when it is on (the default).
+            refuse_whole_row_selects=False,
+        ),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
         memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
         auth=AuthConfig(mode="none"),
         agent=AgentRuntimeConfig(),
     )
     agent = build_agent(cfg)
-    runner = _unwrap(agent.tool_registry._tools["run_sql"]).sql_runner
+    masking = _unwrap(agent.tool_registry._tools["run_sql"]).sql_runner
+    assert isinstance(masking, ResultMaskingRunner)
+    runner = masking._inner
 
     if read_only:
         assert isinstance(runner, ReadOnlyGuardRunner), (
@@ -552,3 +624,19 @@ def test_allow_memory_writes_false_drops_every_save_tool(tmp_path: Path) -> None
     assert "save_text_memory" not in tools
     assert "search_saved_correct_tool_uses" in tools
     assert "run_sql" in tools
+
+
+async def test_build_agent_passes_standing_instructions_to_prompt(tmp_path: Path) -> None:
+    """Issue #358: ``agent.standing_instructions`` reaches the agent's prompt builder."""
+    text = "Count only fully paid orders as revenue unless the user says otherwise."
+    configured = build_agent(
+        build_test_config(
+            persist_dir=tmp_path / "a",
+            agent=AgentRuntimeConfig(standing_instructions=text),
+        )
+    )
+    prompt = await _prompt_from_agent_tools(configured)
+    assert f"--- BEGIN DEPLOYMENT INSTRUCTIONS ---\n{text}\n" in prompt
+
+    unconfigured = build_agent(build_test_config(persist_dir=tmp_path / "b"))
+    assert "DEPLOYMENT INSTRUCTIONS" not in await _prompt_from_agent_tools(unconfigured)

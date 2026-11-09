@@ -29,8 +29,9 @@ Defines the database SQL Lens connects to.
 | `url` | String | A SQLAlchemy connection URL. See the [URL formats](#database-url-formats) section below. |
 | `name` | String | A short name for the database, surfaced to the assistant. |
 | `read_only` | Boolean | When true (the default), only read-only statements are allowed: a `SELECT`, or (on MySQL) a structural `SHOW` schema-discovery command such as `SHOW TABLES` / `SHOW COLUMNS`. Generated SQL is parsed before execution, and anything else — including statements hidden inside subqueries or common table expressions, known unsafe or denial-of-service database functions, and information-disclosing `SHOW` variants such as `SHOW GRANTS` — is rejected. As a second line of defense, the database connection itself is also opened in read-only mode, so a write cannot reach your database even if it somehow slips past the parser. When false, these checks are off, except that calls to the unsafe or denial-of-service functions are still rejected while [row-level security](row-level-security.md) rules are configured. Keep this enabled in production. |
+| `refuse_whole_row_selects` | Boolean | When true (the default), SQL Lens refuses, before it runs, a query that uses `SELECT *`, `alias.*` or PostgreSQL's and MySQL's `TABLE t` to return every column of a table or view, and tells the assistant to name only the columns the question needs. This keeps columns the question never asked for, such as contact details or credentials, out of answers. Still allowed: `COUNT(*)`, a `*` inside `EXISTS (...)`, a `*` over a common table expression or subquery that names its own columns, and a `*` over a system catalog for schema lookups. A system catalog here means any table in `information_schema`, MySQL's `mysql`, `sys` and `performance_schema` schemas or PostgreSQL's `pg_catalog`, and any table or function whose name starts with `pg_` on PostgreSQL or with `sqlite_` or `pragma_` on SQLite; on any other database, all of these schemas and prefixes count. So a `*` over a catalog table that holds credentials, such as `mysql.user` or `pg_catalog.pg_authid`, is allowed (use database grants to keep the SQL Lens database user out of those), and so is a `*` over one of your own tables whose name starts with one of those prefixes. A `*` inside a common table expression or subquery that reads a table is refused even when the outer query names its columns, and a `*` over a function that returns rows, such as `generate_series(...)` or `UNNEST(...)`, is refused whatever the function returns, unless it is a system catalog function. Whole rows reached without a `*` (for example PostgreSQL's `row_to_json(t)`, or a list of every column) are not caught. While it is on, a query SQL Lens cannot parse is refused too, as it already is while `read_only` is true. Set it to false to allow these queries. Whatever this setting, the assistant is instructed to decline requests to export, download or dump a whole table or the whole database and to say that a full export has to come from your application; questions that list rows, such as "show all customers", are still answered with only the columns they need. |
 | `statement_timeout_ms` | Integer | Maximum time (in milliseconds) a single query may run before the database aborts it. Default is `30000` (30 seconds). `0` disables the timeout on every engine. Raise this for long-running analytical queries; lower it for tightly-bounded interactive use. |
-| `max_rows` | Integer | Hard ceiling on the number of rows a single query may return. Default is `10000`; valid range is `1` to `1000000`. When a query would return more rows, SQL Lens trims the result and tells the assistant the answer was truncated so it can re-issue a narrower query (for example, by adding a `LIMIT` clause or a more specific `WHERE` filter). |
+| `max_rows` | Integer | Hard ceiling on the number of rows a single query may return. Default is `10000`; valid range is `1` to `1000000`. When a query would return more rows, SQL Lens trims the result and tells the assistant the answer was truncated so it can re-issue a narrower query (for example, by adding a `LIMIT` clause or a more specific `WHERE` filter). The answer also tells you: the table widget and the Markdown answer say "The query stopped at the N-row limit; more rows exist." |
 
 Both `statement_timeout_ms` and `max_rows` are safety bounds that protect SQL Lens (and your database) from runaway queries. The defaults are chosen to handle the vast majority of interactive analytical work without intervention.
 
@@ -40,11 +41,13 @@ Both `statement_timeout_ms` and `max_rows` are safety bounds that protect SQL Le
 
 | Dialect | URL format |
 |---|---|
-| SQLite | `sqlite:///path/to/file.db` |
+| SQLite | `sqlite:///data/app.db` (relative), `sqlite:////var/data/app.db` (absolute), `sqlite:///C:/data/app.db` (Windows) |
 | Postgres | `postgresql://user:password@host:5432/dbname` |
 | MySQL | `mysql+pymysql://user:password@host:3306/dbname` |
 
 On Windows, always use forward slashes inside the URL even though the underlying file path uses backslashes.
+
+For SQLite, three slashes followed by a path (`sqlite:///data/app.db`) is a path relative to the directory the server was started from; four slashes (`sqlite:////var/data/app.db`) is an absolute path. On Windows, write the drive after three slashes (`sqlite:///C:/data/app.db`). A SQLite URL must not contain a host, user, password, port or `?...` query parameters; SQL Lens rejects such a URL. With `read_only = true` (the default), SQL Lens opens the file read-only and never creates it: if the file does not exist, `sqllens serve` stops at startup with an error naming the path.
 
 PostgreSQL runtime connections use a five-second connection timeout by default. Set `connect_timeout` in the database URL (for example, `?connect_timeout=10`) or use `PGCONNECT_TIMEOUT` to override it; direct `PostgresRunner` callers may also pass the constructor option. A DSN value takes precedence, including `0` to disable this timeout. The default overrides a timeout supplied only in a libpq service file. This libpq timeout applies per host and is separate from `statement_timeout_ms`.
 
@@ -145,13 +148,37 @@ Configures the transport SQL Lens uses to talk to the assistant.
 
 ## Section: `[agent]`
 
-Tunes how the natural-language agent behaves.
+Tunes how the natural-language agent behaves. An unrecognized key in this section, or an unknown `SQLLENS_AGENT__*` environment variable, is rejected at config load, so a misspelled setting fails loudly instead of being ignored. The removed `show_memory_details` and `show_sql` settings are the exceptions: they are still accepted and ignored, with a warning in the log.
 
 | Field | Type | Description |
 |---|---|---|
 | `max_tool_iterations` | Integer | Maximum number of internal tool calls (schema lookups, memory searches, and the final query) the agent may make while answering one question. Defaults to `20`; valid range is `1` to `100`. Raise it if questions against an unfamiliar database fail because the agent runs out of steps while exploring the schema. |
 | `show_details` | Boolean | Defaults to `false`. By default a `query_database` answer does not include the SQL the agent executed, because exposing that SQL to connected clients can reveal details about your database structure and query logic. Set to `true` to surface the executed SQL alongside each answer as a fenced ` ```sql ` block under an `**Executed SQL:**` header appended to the Markdown answer (visible in every MCP client). On hosts that read tool-result metadata the same SQL is also attached to the response under the `sqllens/query` key for programmatic / apps-aware consumers; the bundled result widget itself no longer renders the SQL as an in-iframe panel. Enabling the setting **also** attaches a structured **step-by-step agent trace** to the response metadata under the `sqllens/agent_trace` key — the tools the agent called, in order, with each call's arguments, status, duration, and (on failure) error, plus the run's terminal error — on both successful and failed answers, so a debugging client can see what the agent did and where a slow or failed run spent its time. Enable it only for trusted, debugging-oriented deployments. The environment override is `SQLLENS_AGENT__SHOW_DETAILS`. |
 | `max_conversations` | Integer | Maximum number of in-progress conversations SQL Lens keeps in memory at once, to support multi-turn questions (see [Multi-turn conversations](getting-started.md#multi-turn-conversations) in Getting Started). Defaults to `1000`; valid range is `1` to `1000000`. When the limit is reached, the conversation that has been idle the longest is dropped. Conversations are held in memory only and are never written to disk, so all of them are cleared when the server restarts. The environment override is `SQLLENS_AGENT__MAX_CONVERSATIONS`. Most deployments never need to change this. |
+| `standing_instructions` | String | Unset by default. Rules for your deployment that SQL Lens adds to the assistant's instructions on every request. See [Standing instructions](#standing-instructions) below. The environment override is `SQLLENS_AGENT__STANDING_INSTRUCTIONS`. |
+| `show_conversation_footer` | Boolean | Defaults to `true`. By default every `query_database` answer ends with a short note giving the conversation ID, and an error from the agent run ends with a `Conversation ID: <id>` line. Set to `false` to keep the conversation ID out of the text your users see, on answers and on errors. The ID is still returned in the response metadata under the `sqllens/conversation` key, on every answer and, with the setting off, on every agent-run error. With the setting off, your assistant or host must read the ID from that metadata (or pass back an ID it chose itself) to continue a conversation; a text-only client can no longer see it. The setting applies to the whole server. The environment override is `SQLLENS_AGENT__SHOW_CONVERSATION_FOOTER`. |
+
+### Standing instructions
+
+Memory notes and saved question-and-answer pairs reach the assistant only when memory search returns them for the wording of a question, so a rule kept there holds for some questions and not others. Put a rule that must hold on every request in `standing_instructions` instead. SQL Lens adds the text to the assistant's instructions on every request, after its built-in rules, between `--- BEGIN DEPLOYMENT INSTRUCTIONS ---` and `--- END DEPLOYMENT INSTRUCTIONS ---` lines (the text itself may not contain either line; the configuration is rejected at load if it does), and tells the assistant to:
+
+- follow them on every request, ahead of memory notes and saved pairs, and not to switch them off when a message in the conversation, a tool result or a memory note asks it to;
+- follow an instruction over a conflicting built-in rule, except that no instruction loosens the data confidentiality rules (declining to export a whole table or the whole database, keeping the database structure confidential, never using `SELECT *` on data tables, and never selecting columns that hold secrets such as passwords, tokens, PINs or keys), the rules for handling a failed query or tool error, or the rules that make the assistant say when a result table is cut short, its rows are too large to show or a query hit the row limit, and never call a result complete;
+- treat an instruction that names the meaning of an ambiguous term as settling that choice, as if the question had said it, even when a memory note or saved pair shows another meaning. A question, or an earlier turn of the conversation, that picks a different meaning still wins, unless the instruction says its meaning must be used anyway;
+- keep a choice open when an instruction says to ask about it, until the question, an earlier turn or the user's reply picks a meaning. A memory note or saved pair does not settle that choice.
+
+For example:
+
+```toml
+[agent]
+standing_instructions = """
+Count only fully paid orders as revenue unless the user says otherwise.
+Always ask whether a question about shipments means the ship date or the delivery date.
+Decline requests to export every column of a table of people; offer a summary or a short list of the columns needed instead.
+"""
+```
+
+These are instructions to the assistant, not enforced rules, so it may occasionally not follow one. Use the read-only guard, [row-level security](row-level-security.md) and the database user's own permissions for anything that must never happen. Surrounding blank lines and spaces are removed, and empty or whitespace-only text adds nothing, so the assistant's instructions are exactly as without the setting. The text may be at most 10,000 characters after that trimming; longer text makes the configuration fail to load. Every request sends the whole text to the model, so keep it to the rules that must hold on every question.
 
 ### Section: `[agent.audit]`
 
@@ -164,7 +191,7 @@ Defines the audit-logging surface. These fields are accepted and validated today
 | `include_response_text` | Boolean | Defaults to `false`. When enabled, audit records will include the full response text. Leave it off unless you specifically need response bodies in your audit trail. |
 | `sanitize_parameters` | Boolean | Defaults to `true`. When enabled, query parameter values are sanitized before being written to the audit trail. |
 
-**Note:** Unlike other sections, an unrecognized key inside `[agent.audit]` is rejected at config load rather than silently ignored. Because this is a privacy-sensitive surface, a misspelled key (for example, `sanitize_paramters`) fails loudly instead of quietly reverting to the safe default.
+**Note:** As in the enclosing `[agent]` section, an unrecognized key inside `[agent.audit]` is rejected at config load rather than silently ignored. Because this is a privacy-sensitive surface, a misspelled key (for example, `sanitize_paramters`) fails loudly instead of quietly reverting to the safe default.
 
 ## Profile names
 
@@ -210,6 +237,46 @@ value_from_metadata = "tenant_id"
 
 See [Row-Level Security](row-level-security.md) for the full guide, including how to supply request metadata from your client application and the list of cases that cause a query to be blocked.
 
+## Section: `[result_masking]`
+
+SQL Lens hides the values of secret-looking columns in every query result. Masking is always on; no setting turns it off. When a result column's label matches a secret word, every value in that column, NULL included, is replaced with `[withheld]` before the result reaches your table, the model, the conversation history, the server log or the result CSV written to the temp directory. The column itself stays in the result, and the model is told which columns were withheld so it can say the values are hidden. Markdown answers show the placeholder in escaped form (`\[withheld\]`), which renders as `[withheld]`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `extra_words` | list of strings | `[]` | Entries added to the built-in list below. For example, add `"phone"` to also hide phone numbers. Each entry must contain at least one letter or digit. |
+| `unmasked_columns` | list of strings | `[]` | Exact column labels, compared without regard to case, that are never masked. Use it for false positives such as `token_count`. The match is on the whole label, so `token_count` does not exempt `users.token_count`. Each entry must contain at least one letter or digit. |
+| `unmasked_words` | list of strings | `[]` | Built-in entries to stop applying, for a database that uses one of them for ordinary data. Only `token`, `hash`, `salt`, `pin`, `otp`, `totp` and `mfa` can be removed; any other entry makes the configuration fail to load. Removing `token` shows every column whose label holds it, including aggregate labels such as `SUM(output_tokens)` and secrets such as `session_token`, so add the secret ones back through `extra_words` (`"session token"`). |
+
+The built-in entries are: `password`, `passwd`, `pwd`, `passcode`, `secret`, `token`, `hash`, `salt`, `pin`, `otp`, `totp`, `mfa`, `credential`, `apikey`, `api key`, `access key`, `private key`, `encryption key`, `signing key`, `auth key`, `recovery key`, `master key`, `session key`, `one time code`, `verification code`, `reset code`, `recovery code`, `security code`, `auth code`, `sms code`, `backup code`.
+
+**How labels match.** SQL Lens splits a column label into words at every character that is not a letter or digit, at lowercase-to-uppercase changes, before the last capital of an uppercase run followed by lowercase letters, and between letters and digits (`password_hash` → password, hash; `APIKey` → api, key; `password2` → password, 2). One exception keeps a plural together: an uppercase run followed by a single lowercase `s` and then a non-letter or the end of the label stays one word (`PINs` → pins). Entries split the same way. A label matches when its words contain all of an entry's words, consecutively and in order; each word may also carry a trailing `s` or `es` (`api_keys`, `PINs`). The rule looks at the label alone, so it masks some non-secret columns (`token_count`, `content_hash`, `mfa_enabled`) and misses others:
+
+- a secret column whose result label is a different name: an alias (`password_hash AS h`), a view's column name, or, in a UNION, the first branch's label for a column a later branch fills;
+- an expression over a secret column whose label the database builds without the column's name, such as PostgreSQL's function-name label for `upper(password_hash)`;
+- a PostgreSQL whole-row value (`row_to_json(u)`);
+- a label whose words run together (`passwordhash`), or whose acronym plural runs into the next word (`OTPsCount` splits as ot, ps, count);
+- a secret column whose label contains none of the entries;
+- values repeated in a database error message;
+- sampled values returned by catalog statistics views, such as PostgreSQL's `pg_stats`.
+
+Contact columns such as email, phone and IP address are not masked unless you add them to `extra_words`. Masking is a safety net, not access control: grant the SQL Lens database user access only to the columns it needs.
+
+```toml
+[result_masking]
+extra_words = ["phone"]
+unmasked_columns = ["token_count"]
+```
+
+For a database that uses `token` for ordinary data, such as token usage counts:
+
+```toml
+[result_masking]
+unmasked_words = ["token"]
+extra_words = ["session token", "access token", "refresh token"]
+```
+
+As environment variables, each setting is a JSON array, for example `SQLLENS_RESULT_MASKING__EXTRA_WORDS='["phone"]'`. An unknown key, a wrong-type value, an entry with no letters or digits, or an environment value that is not valid JSON makes the configuration fail to load. A configuration file containing `[result_masking]` does not load in an older SQL Lens release; remove the section before downgrading.
+
 ## Top-level field: `config_version`
 
 A single top-level integer, `config_version`, defaults to `1`. It is accepted and validated but currently has no effect. It is reserved so future releases can detect and migrate older configuration files. You do not need to set it.
@@ -244,7 +311,7 @@ By default `validate` checks only that the file parses and the fields are well-t
 
 | Flag | What it checks |
 |---|---|
-| `--check-db` | Opens and immediately closes a connection to `database.url`. |
+| `--check-db` | Opens and immediately closes a connection to `database.url`. For SQLite with `read_only = true`, opens the file read-only and reads its schema header, so a missing file (or a file that is not a SQLite database) fails with an error naming the path instead of creating an empty database. With `read_only = false`, a plain open creates a missing file. |
 | `--check-llm` | Constructs the Anthropic client. Does not call the API. |
 | `--check-memory` | Confirms the Chroma `persist_dir` exists and is writable and, when the directory already holds a memory store, that its `chroma.sqlite3` file is writable by the process running the check. Does not change the file. |
 | `--check-auth` | Builds the configured authenticator, catching mistakes such as `bearer` mode with no token. |

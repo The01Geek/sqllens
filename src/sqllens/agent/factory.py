@@ -17,6 +17,7 @@ from sqllens.agent import Agent, RequestContext, ToolRegistry, User, UserResolve
 from sqllens.agent.capabilities.sql_runner import SqlRunner
 from sqllens.agent.core import AgentConfig, DefaultLlmContextEnhancer
 from sqllens.agent.core.agent.config import UiFeature, UiFeatures
+from sqllens.agent.core.system_prompt import DefaultSystemPromptBuilder
 from sqllens.agent.integrations import (
     AnthropicLlmService,
     ChromaAgentMemory,
@@ -25,6 +26,7 @@ from sqllens.agent.integrations import (
 )
 from sqllens.agent.integrations.local import LocalFileSystem
 from sqllens.agent.integrations.mysql import MySQLRunner
+from sqllens.agent.integrations.sqlite.sql_runner import sqlite_path_from_url
 from sqllens.agent.tools import (
     EmitChartTool,
     EmitTextTool,
@@ -37,8 +39,10 @@ from sqllens.config import API_KEY_MISSING_MESSAGE, Config
 from sqllens.conversation_store import BoundedConversationStore
 from sqllens.safety import (
     ReadOnlyGuardRunner,
+    ResultMaskingRunner,
     RlsGuardRunner,
     RowCapRunner,
+    WholeRowSelectGuardRunner,
     sqlglot_dialect_for_url,
 )
 
@@ -89,13 +93,26 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     dialect = sqlglot_dialect_for_url(cfg.database.url)
     if cfg.database.read_only:
         sql_runner = ReadOnlyGuardRunner(sql_runner, dialect=dialect)
-    # RLS is composed *outermost* (ahead of the read-only guard) so it rewrites
-    # the SQL first and the read-only guard then validates the *rewritten*
-    # statement — its full-tree walk rejects nested DML/DDL and denied
-    # functions on the injected predicates too. Only wrapped when rules exist
-    # so the no-RLS path stays a zero-overhead passthrough.
+    # RLS is composed ahead of the read-only guard so it rewrites the SQL first
+    # and the read-only guard then validates the *rewritten* statement — its
+    # full-tree walk rejects nested DML/DDL and denied functions on the
+    # injected predicates too. Only wrapped when rules exist so the no-RLS path
+    # stays a zero-overhead passthrough.
     if cfg.rls:
         sql_runner = RlsGuardRunner(sql_runner, cfg.rls, dialect=dialect)
+    # The whole-row select guard wraps every runner that rewrites or runs SQL,
+    # so it checks the SQL the agent wrote, before any RLS rewrite, and refuses
+    # a SELECT * over a table before a connection opens.
+    if cfg.database.refuse_whole_row_selects:
+        sql_runner = WholeRowSelectGuardRunner(sql_runner, dialect=dialect)
+    # Masking wraps every other guard, so each frame a runner beneath returns is
+    # masked before RunSqlTool builds any output from it.
+    sql_runner = ResultMaskingRunner(
+        sql_runner,
+        extra_words=cfg.result_masking.extra_words,
+        unmasked_columns=cfg.result_masking.unmasked_columns,
+        unmasked_words=cfg.result_masking.unmasked_words,
+    )
     memory = ChromaAgentMemory(
         persist_directory=str(cfg.memory.persist_dir),
         collection_name=cfg.memory.collection,
@@ -127,9 +144,7 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     # the aggregated rows to this tool, which only validates the chart DSL.
     tools.register_local_tool(EmitChartTool(), access_groups=access)
     # EmitTextTool emits answer-marked prose so the agent can deliberately
-    # interleave text between artifacts (chart → text → table → ...). Non-
-    # emit_text assistant text is treated as hidden reasoning by the MCP-layer
-    # block builder.
+    # interleave text between artifacts (chart → text → table → ...).
     tools.register_local_tool(EmitTextTool(), access_groups=access)
     # save_question_tool_args lets the agent write question -> SQL pairs into
     # memory. Gated by memory.save_queries (OFF by default); the default system
@@ -180,6 +195,12 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
         user_resolver=_StaticUserResolver(),
         agent_memory=memory,
         llm_context_enhancer=context_enhancer,
+        # A fresh builder per agent: Agent's constructor default is one instance
+        # shared by every Agent, so setting the dialect on it would leak across agents.
+        system_prompt_builder=DefaultSystemPromptBuilder(
+            dialect=dialect,
+            standing_instructions=cfg.agent.standing_instructions,
+        ),
         # Bounded LRU store backing multi-turn conversations. The framework
         # default (MemoryConversationStore) is unbounded; this caps in-process
         # memory so a long-running server does not leak conversations. Ephemeral
@@ -219,12 +240,10 @@ def build_sql_runner(
     """
     scheme = url.split("://", 1)[0].lower()
     if scheme.startswith("sqlite"):
-        # sqlite:///abs/path.db → /abs/path.db ; sqlite://:memory: stays as-is
-        path = url.split("://", 1)[1]
-        if path.startswith("/"):
-            path = path[1:] if not path.startswith("//") else path
+        # sqlite:///rel.db is relative to the working directory; sqlite:////abs.db
+        # is absolute. Do not parse here: preflight must resolve the same file.
         return SqliteRunner(
-            database_path=path or ":memory:",
+            database_path=sqlite_path_from_url(url),
             statement_timeout_ms=statement_timeout_ms,
             max_rows=max_rows,
             read_only=read_only,

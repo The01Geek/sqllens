@@ -118,6 +118,8 @@ SQL Lens rewrites it to:
 SELECT id, total FROM orders WHERE status = 'paid' AND orders.tenant_id = 'acme'
 ```
 
+SQL Lens prints the whole rewritten statement again with its SQL parser. The name of a function the parser does not recognise keeps the case and quotes it was written in. Functions the parser recognises are printed in its standard form, which can differ in case or spelling: for example `count(*)` is printed as `COUNT(*)` and `strpos(a, 'x')` as `POSITION('x' IN a)`.
+
 The same predicate is added in every place the protected table is read — joins, subqueries, and the body of common table expressions. A common table expression that *references* a same-named protected table is correctly left alone, because its rows already came from the filtered body.
 
 ## What gets blocked
@@ -168,6 +170,7 @@ If any `[[rls]]` block is malformed, validation fails with a clear message namin
 - **No schema-qualified table names.** `table = "orders"` is supported; `table = "public.orders"` is not.
 - **Dynamic rules require caller-supplied metadata.** Both HTTP and stdio carry MCP metadata, but the calling application must supply the required keys.
 - **Identity comes from your application, not from SQL Lens authentication.** SQL Lens does not currently derive the predicate value from an authenticated principal's claims. Wire your embedding application to assert the identity you want to enforce.
+- **Rules filter rows, not columns.** Separately from RLS, SQL Lens replaces the values of secret-looking columns (passwords, hashes, tokens, PINs, keys) with `[withheld]`, judging by the column name alone; see [`[result_masking]`](configuration.md#section-result_masking). Columns the name rule misses, such as one renamed by an alias, are returned as stored. To keep a column from the assistant, connect SQL Lens with a least-privilege database role whose column grants exclude it.
 - **Read-only scope.** Row-Level Security narrows what the assistant can read. Combined with the default `database.read_only = true` setting, the assistant cannot write at all; Row-Level Security narrows the reads further.
 
 ## See also

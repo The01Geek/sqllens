@@ -232,18 +232,28 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
         )
         return False
     cte_references = _cte_reference_ids(parsed, dialect)
-    schemas, prefixes = _catalog_names(dialect)
     for table in parsed.find_all(exp.Table):
         if id(table) in cte_references:
             continue
-        schema = (table.db or "").lower()
-        if schema in schemas:
-            return True
-        source = table.this
-        name = source.name if isinstance(source, exp.Anonymous) else table.name
-        if (name or "").lower().startswith(prefixes):
+        if is_catalog_table(table, dialect=dialect):
             return True
     return False
+
+
+def is_catalog_table(table: exp.Table, *, dialect: str | None) -> bool:
+    """True if ``table`` names one of ``dialect``'s system catalogs.
+
+    The catalog rule :func:`is_introspection_query` documents: a catalog
+    schema, or a name prefix matched in any casing against the table name or
+    the name of a table-valued function called in ``FROM``. The caller decides
+    whether the reference is a CTE; this looks only at the name.
+    """
+    schemas, prefixes = _catalog_names(dialect)
+    if (table.db or "").lower() in schemas:
+        return True
+    source = table.this
+    name = source.name if isinstance(source, exp.Anonymous) else table.name
+    return (name or "").lower().startswith(prefixes)
 
 
 _ALLOWED_ROOT_TYPES: tuple[type[exp.Expression], ...] = (

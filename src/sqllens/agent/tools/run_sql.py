@@ -13,7 +13,10 @@ from sqllens.agent.components import (
 from sqllens.agent.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
 from sqllens.agent.capabilities.file_system import FileSystem
 from sqllens.agent.integrations.local import LocalFileSystem
+from sqllens._table_payload import run_sql_display_line
+from sqllens.agent.markers import row_cap_marker_data
 from sqllens.safety.limits import MAX_ROWS_ATTR, TRUNCATED_ATTR
+from sqllens.safety.masking import MASKED_COLUMNS_ATTR
 from sqllens.safety.readonly import first_sql_keyword, is_read_shaped
 
 
@@ -88,9 +91,22 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         "Re-issue with an explicit LIMIT or narrower WHERE clause."
                     )
 
+                raw_masked = df.attrs.get(MASKED_COLUMNS_ATTR) or []
+                masked_columns = (
+                    [raw_masked] if isinstance(raw_masked, str) else [str(c) for c in raw_masked]
+                )
+                masking_note = ""
+                if masked_columns:
+                    masking_note = (
+                        "\n\nSQL Lens withheld the values in these columns: "
+                        f"{', '.join(masked_columns)}. Tell the user these values "
+                        "are hidden; do not try to retrieve them with another query."
+                    )
+
                 if df.empty:
                     result = (
-                        f"Query executed successfully. No rows returned.{truncation_note}"
+                        "Query executed successfully. No rows returned."
+                        f"{truncation_note}{masking_note}"
                     )
                     description = "No rows returned"
                     if row_cap_hit:
@@ -133,12 +149,6 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                             + "\n(Results truncated to 1000 characters for preview.)"
                         )
 
-                    result = (
-                        f"{results_preview}\n\nResults saved to file: {filename}"
-                        f"{truncation_note}"
-                    )
-
-
                     description = (
                         f"SQL query returned {row_count} rows with {len(columns)} columns"
                     )
@@ -148,6 +158,17 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         records=cast(List[Dict[str, Any]], results_data),
                         title="Query Results",
                         description=description,
+                        data=row_cap_marker_data(cap_size) if row_cap_hit else {},
+                    )
+
+                    display_line = run_sql_display_line(
+                        dataframe_component, args.sql, self.dialect
+                    )
+                    if display_line:
+                        display_line = "\n\n" + display_line
+                    result = (
+                        f"{results_preview}\n\nResults saved to file: {filename}"
+                        f"{truncation_note}{display_line}{masking_note}"
                     )
 
                     ui_component = UiComponent(

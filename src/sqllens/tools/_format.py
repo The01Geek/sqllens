@@ -17,18 +17,24 @@ collapses that stream:
 
 from __future__ import annotations
 
-import json
 import logging
 import math
-import re
 from collections.abc import Iterable
 from datetime import datetime
 from decimal import Decimal
 
 from sqllens._bounded_json import JsonBoundsError, copy_bounded_json
+from sqllens._table_payload import (
+    _MAX_TABLE_PAYLOAD_BYTES,
+    _coerce_cell,
+    _columns_and_rows,
+    _compute_table_payload,
+    _humanize_label,
+    _serialized_len,
+)
 from sqllens.agent.core.components import UiComponent
 from sqllens.agent.core.rich_component import ComponentType
-from sqllens.agent.markers import IS_ANSWER_MARKER_KEY
+from sqllens.agent.markers import is_answer_marked, row_cap_of
 from sqllens.safety import first_sql_keyword, is_introspection_query
 
 logger = logging.getLogger("sqllens.tools._format")
@@ -38,11 +44,6 @@ logger = logging.getLogger("sqllens.tools._format")
 # Markdown table when max_rows is raised above the rendering budget.
 _MAX_ROWS_RENDERED = 500
 
-# Serialized-size budget for one structured table block. The host pushes the
-# whole CallToolResult into a sandboxed iframe; a multi-MB ``_meta`` blob is
-# the only thing that actually breaks rendering, so size — not row count — is
-# the cap. Measured against ``json.dumps(payload, separators=(",", ":"))``.
-_MAX_TABLE_PAYLOAD_BYTES = 130 * 1024
 # A one-row result with at most this many columns renders as a text block (a
 # ``**column:** value`` line, or a one-row Markdown table for 2+ columns)
 # instead of a table block (issue #257).
@@ -69,44 +70,6 @@ _MAX_TRACE_PAYLOAD_BYTES = _MAX_TABLE_PAYLOAD_BYTES
 # per-block cap so a handful of full-budget blocks fit comfortably.
 _MAX_BLOCKS_TOTAL_BYTES = 512 * 1024
 
-
-# Words humanization fully upper-cases instead of title-casing. The issue's
-# acceptance criteria fix a minimum set (id/url/api/db/sql/ip/uuid); ``usd`` is
-# added because the same issue's worked example requires
-# ``total_amount_usd`` → "Total Amount USD". Compared lowercase, so a word
-# matches regardless of the identifier's (always-lowercase) casing.
-_ACRONYMS = frozenset({"id", "url", "api", "db", "sql", "ip", "uuid", "usd"})
-
-# A lowercase snake_case identifier: only lowercase ASCII letters and digits,
-# single underscores *between* words, no leading/trailing/doubled underscore.
-# Anything else (an uppercase letter, a space, punctuation, a non-ASCII
-# character, `_id`, `id_`, `a__b`) fails to match and is returned verbatim.
-_SNAKE_CASE_IDENTIFIER = re.compile(r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
-
-
-def _humanize_label(name: str) -> str:
-    """Turn a lowercase snake_case identifier into a readable display label.
-
-    ``customer_id`` → "Customer ID", ``total_amount_usd`` → "Total Amount USD",
-    ``q1_2024`` → "Q1 2024". Splits on underscores, capitalizes each word, and
-    fully upper-cases a word in :data:`_ACRONYMS`.
-
-    Any string that is *not* a lowercase snake_case identifier — one already
-    carrying a space or an uppercase letter (a SQL alias like ``Total Revenue``
-    or a deliberately-set chart label), or any other shape (``count(*)``, a
-    non-ASCII name, a leading/trailing/doubled underscore) — is returned
-    unchanged and never re-processed. That passthrough makes the transform
-    idempotent: a humanized label either contains a space or an uppercase
-    letter (so the passthrough branch returns it as-is) or maps to itself
-    under the transform (e.g. a pure-digit word like ``2024``), so feeding
-    it back returns it unchanged.
-    """
-    if not _SNAKE_CASE_IDENTIFIER.match(name):
-        return name
-    words = name.split("_")
-    return " ".join(
-        word.upper() if word in _ACRONYMS else word.capitalize() for word in words
-    )
 
 
 def _query_info_from_sql(sql: str, row_count: int | None, dialect: str | None) -> dict:
@@ -223,30 +186,6 @@ def render_interactive(components: Iterable[UiComponent]) -> str:
     return "\n\n".join(pieces)
 
 
-def _text_is_answer_marked(rich) -> bool:  # type: ignore[no-untyped-def]
-    """True iff this TEXT component is deliberate prose, not reasoning chatter.
-
-    The agent emits two distinct kinds of TEXT, and only one sets the marker:
-
-    - **Intermediate reasoning** that accompanies a tool call
-      (``agent/core/agent/agent.py``: ``RichTextComponent(content=response.
-      content, ...)`` inside the LLM loop, gated on
-      ``UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT``). This branch does
-      **NOT** set the marker — that is the discriminator.
-    - The **terminal answer** and **iteration-limit warning** at end-of-turn,
-      both of which DO set the
-      :data:`~sqllens.agent.markers.IS_ANSWER_MARKER_KEY` flag in ``data``.
-
-    The ``EmitTextTool`` sets the same flag on deliberate interleaved prose.
-    So a marked TEXT is something the user should see; an unmarked TEXT is
-    reasoning chatter. The check is strict-identity (``is True``) so a
-    producer drift that stuffs a non-bool value under the marker key (string
-    "yes", truthy list) does not silently flip the discrimination.
-    """
-    data = getattr(rich, "data", None)
-    return isinstance(data, dict) and data.get(IS_ANSWER_MARKER_KEY) is True
-
-
 def components_to_blocks(
     components: Iterable[UiComponent],
     *,
@@ -274,7 +213,9 @@ def components_to_blocks(
     - Every ``CHART`` becomes a ``{"type": "chart", ...chart payload...}``
       block at its stream position.
     - Every **answer-marked** ``TEXT`` (deliberate prose: ``EmitTextTool``
-      output and the agent's terminal answer / iteration-limit warning) becomes
+      output and the agent's terminal answer / iteration-limit warning; the
+      agent yields no terminal answer once an ``emit_text`` call succeeded in
+      the request) becomes
       a ``{"type": "text", "text": ...}`` block at its stream position.
       Intermediate-reasoning ``TEXT`` (the assistant prose that accompanies a
       tool call when ``UI_FEATURE_SHOW_TOOL_INVOCATION_MESSAGE_IN_CHAT`` is on)
@@ -376,7 +317,7 @@ def components_to_blocks(
             content = (getattr(rich, "content", "") or "").strip()
             if not content:
                 continue
-            is_marked = _text_is_answer_marked(rich)
+            is_marked = is_answer_marked(rich)
             if is_marked:
                 any_marked_text = True
             candidates.append(
@@ -417,6 +358,15 @@ def components_to_blocks(
                 # returned N > 0 rows.
                 raw_rows = getattr(rich, "rows", None) or []
                 last_sql_row_count = len(raw_rows)
+                if raw_rows and not last_sql_is_introspection:
+                    candidates.append(
+                        {
+                            "type": "result_text",
+                            "text": _undisplayable_result_text(
+                                len(raw_rows), row_cap_of(rich)
+                            ),
+                        }
+                    )
         elif ctype == ComponentType.CHART:
             payload = _build_chart_payload(rich)
             if payload is not None:
@@ -875,77 +825,6 @@ def append_conversation_footer(markdown: str, conversation_id: str | None) -> st
     )
 
 
-def _coerce_cell(value: object) -> str:
-    # Coercion contract shared by the widget payload and the Markdown table
-    # (None->"None", Decimal("1.50")->"1.50", datetime->"2026-01-02 03:04:05").
-    return str(value)
-
-
-# Cell strings the widget treats as "no value" — excluded from numeric sniffing
-# so an all-NULL or partially-empty column still types correctly on its real
-# values. Mirrors how `_coerce_cell` stringifies SQL NULLs.
-_EMPTY_CELLS = frozenset({"", "None", "none", "null", "NULL", "NaN", "nan"})
-
-
-def _looks_numeric(text: str) -> bool:
-    # A cell counts as numeric only if it parses to a *finite* float. Bare
-    # "inf"/"nan" parse via float() but must not type a column "number" (the
-    # widget right-aligns and sorts numerically on that flag).
-    try:
-        return math.isfinite(float(text))
-    except (ValueError, OverflowError):
-        return False
-
-
-def _infer_column_types(
-    columns: list[str], coerced_rows: list[list[str]]
-) -> dict[str, str]:
-    # The vendored DataFrameComponent producers never populate `column_types`
-    # (`from_records` hard-codes `{}`), so without this every column would sort
-    # lexicographically in the widget. Sniff each column from its coerced cell
-    # values: a column whose every non-empty cell parses as a finite number is
-    # typed "number"; everything else is left untyped (widget → string sort).
-    inferred: dict[str, str] = {}
-    for ci, col in enumerate(columns):
-        seen_value = False
-        all_numeric = True
-        for row in coerced_rows:
-            cell = row[ci] if ci < len(row) else ""
-            if cell in _EMPTY_CELLS:
-                continue
-            seen_value = True
-            if not _looks_numeric(cell):
-                all_numeric = False
-                break
-        if seen_value and all_numeric:
-            inferred[col] = "number"
-    return inferred
-
-
-def _safe_column_types(rich) -> dict[str, str]:  # type: ignore[no-untyped-def]
-    # Explicit `column_types` is a non-essential hint. A producer handing back a
-    # non-mapping (or one whose items() raises) must degrade to "no explicit
-    # types" — never take down the whole widget payload via the broad handler
-    # in `_build_table_payload`.
-    try:
-        raw_types = getattr(rich, "column_types", {}) or {}
-        return {_coerce_cell(k): _coerce_cell(v) for k, v in dict(raw_types).items()}
-    except Exception:
-        logger.warning(
-            "column_types on DataFrame component was not a usable mapping; "
-            "falling back to inferred types only",
-            exc_info=True,
-        )
-        return {}
-
-
-def _columns_and_rows(rich) -> tuple[list[str], list[dict]]:  # type: ignore[no-untyped-def]
-    columns: list[str] = list(getattr(rich, "columns", []) or [])
-    rows: list[dict] = list(getattr(rich, "rows", []) or [])
-    if not columns and rows:
-        columns = list(rows[0].keys())
-    return columns, rows
-
 
 def _build_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
     # The widget is best-effort: if anything in payload construction raises
@@ -967,87 +846,6 @@ def _build_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
         )
         return None
 
-
-def _compute_table_payload(rich) -> dict | None:  # type: ignore[no-untyped-def]
-    # Returns the table payload WITHOUT the ``"type": "table"`` discriminator —
-    # ``components_to_blocks`` wraps it with the discriminator before appending
-    # to the blocks list. This keeps the size-budget binary search ignorant of
-    # the discriminator while still bounding the per-block size to
-    # ``_MAX_TABLE_PAYLOAD_BYTES`` (the discriminator key adds < 20 bytes).
-    columns, rows = _columns_and_rows(rich)
-    if not columns and not rows:
-        return None
-
-    # Stringify column labels and column_types too, not just cells, so a non-str
-    # label or type value cannot make json.dumps raise inside _serialized_len.
-    str_columns = [_coerce_cell(c) for c in columns]
-    coerced_rows = [[_coerce_cell(row.get(c, "")) for c in columns] for row in rows]
-
-    # column_types must be keyed by the same strings as columns for the widget's
-    # typed sort to engage; a mismatch silently degrades to string sort, never
-    # errors. Production producers (`DataFrameComponent.from_records`) never set
-    # `column_types`, so infer "number" from the data first, then let any
-    # explicit producer-supplied type override the inferred value.
-    column_types = _infer_column_types(str_columns, coerced_rows)
-    column_types.update(_safe_column_types(rich))
-
-    # Additive, display-only labels parallel to ``columns`` (issue #259). The
-    # raw ``columns`` strings stay the payload's identity keys — ``column_types``
-    # and the widget's typed sort both key off them — so humanization NEVER
-    # rewrites ``columns``; it rides alongside as a separate list the renderers
-    # read for header text and fall back off when it is absent.
-    column_labels = [_humanize_label(c) for c in str_columns]
-
-    payload: dict = {
-        "columns": str_columns,
-        "column_labels": column_labels,
-        "rows": coerced_rows,
-        "column_types": column_types,
-        "row_count": len(coerced_rows),
-        "truncated": 0,
-    }
-
-    if _serialized_len(payload) <= _MAX_TABLE_PAYLOAD_BYTES:
-        return payload
-
-    # Over budget: keep the largest *contiguous prefix* of rows that fits, so
-    # the widget's row_count + truncated == total invariant holds. ``truncated``
-    # reports how many tail rows were dropped.
-    total = len(coerced_rows)
-    payload["rows"] = []
-    if _serialized_len(payload) > _MAX_TABLE_PAYLOAD_BYTES:
-        # Header-only form alone exceeds the budget — nothing useful to send.
-        return None
-
-    lo, hi = 0, total
-    while lo < hi:
-        mid = (lo + hi + 1) // 2
-        # Measure the candidate with the row_count/truncated values it will
-        # ACTUALLY carry — their digit widths change with the kept-row count, so
-        # measuring the pre-trim shape (row_count=total, truncated=0) could let
-        # the returned block sit a couple of bytes over the ceiling.
-        payload["rows"] = coerced_rows[:mid]
-        payload["row_count"] = mid
-        payload["truncated"] = total - mid
-        if _serialized_len(payload) <= _MAX_TABLE_PAYLOAD_BYTES:
-            lo = mid
-        else:
-            hi = mid - 1
-
-    payload["rows"] = coerced_rows[:lo]
-    payload["row_count"] = lo
-    payload["truncated"] = total - lo
-    return payload
-
-
-def _serialized_len(payload: dict | list) -> int:
-    # json.dumps defaults to ensure_ascii=True, so the result is pure ASCII and
-    # len(str) == the serialized byte size the host actually receives — non-ASCII
-    # cells escape to \uXXXX rather than inflating bytes past this measure.
-    # Accepts both dicts (individual payloads) and lists (the whole ``blocks``
-    # array) so the per-block cap and the blocks-total cap measure size the
-    # same way and cannot drift apart.
-    return len(json.dumps(payload, separators=(",", ":")))
 
 
 def _coerce_chart_value(value: object) -> object:
@@ -1328,14 +1126,19 @@ def _small_result_to_markdown(payload: dict) -> str | None:
     names = [_escape_small_result_text(str(col)) for col in labels]
     values = [_escape_small_result_text(val) for val in rows[0]]
     if len(names) == 1:
-        return f"**{names[0]}:** {values[0]}"
-    return "\n".join(
-        [
-            "| " + " | ".join(names) + " |",
-            "|" + " --- |" * len(names),
-            "| " + " | ".join(values) + " |",
-        ]
-    )
+        text = f"**{names[0]}:** {values[0]}"
+    else:
+        text = "\n".join(
+            [
+                "| " + " | ".join(names) + " |",
+                "|" + " --- |" * len(names),
+                "| " + " | ".join(values) + " |",
+            ]
+        )
+    cap = payload.get("row_cap")
+    if cap is not None:
+        text += "\n\n" + _row_cap_sentence(cap)
+    return text
 
 
 def _display_labels(payload: dict, columns: list) -> list:
@@ -1367,13 +1170,38 @@ def _table_block_to_markdown(block: dict) -> str:
     for row in rows[:_MAX_ROWS_RENDERED]:
         cells = [_escape_small_result_text(str(c)) for c in row]
         body_rows.append("| " + " | ".join(cells) + " |")
-    note = ""
-    # row_count is the kept prefix after the per-block size cap; truncated is
-    # the dropped tail. The "true" total served by the SQL is their sum.
-    total = block.get("row_count", len(rows)) + block.get("truncated", 0)
-    if total > _MAX_ROWS_RENDERED:
-        note = f"\n\n_Showing first {_MAX_ROWS_RENDERED} of {total} rows._"
+    sentences: list[str] = []
+    kept = block.get("row_count", len(rows))
+    dropped = block.get("truncated", 0)
+    total = kept + dropped
+    if dropped > 0:
+        shown = min(kept, _MAX_ROWS_RENDERED)
+        sentences.append(
+            f"Showing the first {shown:,} of {total:,} rows. The other {dropped:,} "
+            "rows were left out to fit the display size limit."
+        )
+        if shown < kept:
+            sentences.append(
+                f"This Markdown table lists at most {_MAX_ROWS_RENDERED:,} rows."
+            )
+    elif total > _MAX_ROWS_RENDERED:
+        sentences.append(f"Showing first {_MAX_ROWS_RENDERED:,} of {total:,} rows.")
+    cap = block.get("row_cap")
+    if cap is not None:
+        sentences.append(_row_cap_sentence(cap))
+    note = "\n\n_" + " ".join(sentences) + "_" if sentences else ""
     return "\n".join([header, separator, *body_rows]) + note
+
+
+def _row_cap_sentence(cap: int) -> str:
+    return f"The query stopped at the {cap:,}-row limit; more rows exist."
+
+
+def _undisplayable_result_text(row_count: int, cap: int | None) -> str:
+    text = f"The query returned {row_count:,} rows that could not be displayed."
+    if cap is not None:
+        text += " " + _row_cap_sentence(cap)
+    return text
 
 
 def _render_dataframe(rich) -> str:  # type: ignore[no-untyped-def]

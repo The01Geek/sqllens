@@ -327,6 +327,10 @@ def test_production_driver_agent_has_no_memory_write_tools(
     assert "save_question_tool_args" not in tools
     assert "save_text_memory" not in tools
     assert "run_sql" in tools
+    from sqllens.safety import ResultMaskingRunner
+
+    run_sql = tools["run_sql"]
+    assert isinstance(getattr(run_sql, "_wrapped_tool", run_sql).sql_runner, ResultMaskingRunner)
     assert used_cfg.memory.save_queries is False
     assert used_cfg.memory.save_text_memories is False
     assert used_cfg.agent.show_details is True

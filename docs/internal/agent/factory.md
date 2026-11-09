@@ -19,10 +19,19 @@ cfg.database    →  build_sql_runner(url,
                                                           ↓ (if cfg.rls non-empty)
                                                         RlsGuardRunner (sqlglot AST rewrite —
                                                           predicate injection + fail-secure proof)
+                                                          ↓ (if cfg.database.refuse_whole_row_selects,
+                                                             the default)
+                                                        WholeRowSelectGuardRunner (refuses a * or
+                                                          alias.* that expands a table or view)
+                                                          ↓
+                                                        ResultMaskingRunner (outermost; withholds the
+                                                          values of secret-looking result columns)
 cfg.memory      →  ChromaAgentMemory                 →  persists under cfg.memory.persist_dir
                    LocalFileSystem                   →  scratch root = tempfile.gettempdir() / "sqllens"
 cfg.agent       →  BoundedConversationStore          →  in-process LRU, capped at
                    .max_conversations                   cfg.agent.max_conversations (ephemeral)
+                   DefaultSystemPromptBuilder        →  dialect from the database URL, plus
+                   .standing_instructions               cfg.agent.standing_instructions (#358)
 ToolRegistry    →  RunSqlTool                          (executes generated SQL, writes a scratch CSV,
                                                         appends truncation hint when df.attrs['truncated'])
                    EmitChartTool                       (agent-side seam for query_database's chart blocks;
@@ -34,7 +43,7 @@ ToolRegistry    →  RunSqlTool                          (executes generated SQL
                                                         no SQL/FS; emits an answer-marked RichTextComponent
                                                         so the MCP-layer block builder lifts the prose into
                                                         a {"type":"text",...} block at this stream position —
-                                                        non-emit_text assistant text is hidden reasoning)
+                                                        a successful call hides that request's final reply)
                    SaveQuestionToolArgsTool            (memory write — tool-arg recordings;
                                                         registered only when cfg.memory.save_queries
                                                         and allow_memory_writes)
@@ -73,9 +82,9 @@ The adapter retains the assistant response's content blocks in `provider_content
 
 `EmitChartTool` carries no SQL runner or file-system capability — the agent runs `run_sql` first to get aggregated rows, then hands them to `emit_chart`, which only validates the DSL (`bar | line | area | scatter | pie | heatmap`, ≤ 200 rows, pie/heatmap series-shape rules) and wraps the result in a `ChartComponent`. The MCP-layer `query_database` tool reads that component off the agent stream and surfaces it as a `{"type": "chart", ...}` block in the ordered `_meta["sqllens/blocks"]` array; the widget draws each chart block in stream order, alongside any sibling table or text blocks (no chart-vs-table precedence). `emit_chart` may be called more than once per request (#194) when the answer warrants multiple distinct charts. See [mcp-server/tools.md](../mcp-server/tools.md#chart-blocks-the-emitcharttool-seam) for the wider picture and [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py) for the DSL source.
 
-`EmitTextTool` is the companion seam introduced with the multi-block response (#194): the agent calls `emit_text(text=...)` to place a deliberate prose block at a chosen position in the response stream (a caption between two artifacts, a one-line summary at the end, a brief introduction before a chart). It carries no SQL/FS capability either; it only emits a `RichTextComponent` whose `data` carries the answer marker (`IS_ANSWER_MARKER_KEY = "is_answer"` from [src/sqllens/agent/markers.py](../../../src/sqllens/agent/markers.py)) so the MCP-layer block builder includes the prose in the rendered answer. **Non-`emit_text` assistant text is treated as hidden reasoning and excluded from the rendered answer** — the agent's terminal answer yield and iteration-limit warning carry the same marker and so converge on one discriminator. See [mcp-server/tools.md](../mcp-server/tools.md#text-composition-the-emittexttool-seam) and [src/sqllens/agent/tools/emit_text.py](../../../src/sqllens/agent/tools/emit_text.py).
+`EmitTextTool` is the companion seam introduced with the multi-block response (#194): the agent calls `emit_text(text=...)` to place a deliberate prose block at a chosen position in the response stream (a caption between two artifacts, a one-line summary at the end, a brief introduction before a chart). It carries no SQL/FS capability either; it only emits a `RichTextComponent` whose `data` carries the answer marker (`IS_ANSWER_MARKER_KEY = "is_answer"` from [src/sqllens/agent/markers.py](../../../src/sqllens/agent/markers.py)) so the MCP-layer block builder includes the prose in the rendered answer. The agent's terminal answer (final reply) and iteration-limit warning carry the same marker and so converge on one discriminator, but the agent loop yields the final reply only when no `emit_text` call succeeded earlier in the same request; a hidden final reply is still saved to the conversation history. See [mcp-server/tools.md](../mcp-server/tools.md#text-composition-the-emittexttool-seam) and [src/sqllens/agent/tools/emit_text.py](../../../src/sqllens/agent/tools/emit_text.py).
 
-Call order on every query is the reverse of construction. With RLS unconfigured: **ReadOnlyGuardRunner → RowCapRunner → engine runner**. With RLS configured (`cfg.rls` non-empty): **RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner** — the RLS rewrite runs *first* so the read-only guard validates the *rewritten* SQL. The parser rejects before any connection opens; the engine runner streams with `fetchmany(max_rows + 1)` and sets its native statement-timeout primitive; the decorator clamps the result a second time on the way back. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full timeout/cap story and [database-connectors/row-level-security.md](../database-connectors/row-level-security.md) for the RLS rewrite.
+Call order on every query is the reverse of construction. With RLS unconfigured: **ResultMaskingRunner → WholeRowSelectGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. With RLS configured (`cfg.rls` non-empty): **ResultMaskingRunner → WholeRowSelectGuardRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner** — the whole-row select guard checks the SQL the agent wrote, and the RLS rewrite runs before the read-only guard so the read-only guard validates the *rewritten* SQL. With `cfg.database.read_only = false`, `ReadOnlyGuardRunner` drops out of either chain, and with `cfg.database.refuse_whole_row_selects = false`, `WholeRowSelectGuardRunner` does. The parser rejects before any connection opens; the engine runner streams with `fetchmany(max_rows + 1)` and sets its native statement-timeout primitive; the decorator clamps the result a second time on the way back. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full timeout/cap story and [database-connectors/row-level-security.md](../database-connectors/row-level-security.md) for the RLS rewrite.
 
 ## API-key check is here, not in config
 
@@ -129,6 +138,18 @@ It is **ephemeral by design**: in-process only, no server-side database, no cros
 
 Pinned by `tests/unit/test_conversation_store.py` (LRU eviction, recency-on-read, ownership checks) and `tests/unit/test_factory_wiring.py` (the agent is wired with a `BoundedConversationStore` sized from config).
 
+## `standing_instructions` — deployment rules in the system prompt (#358)
+
+`build_agent` passes `cfg.agent.standing_instructions` (`AgentRuntimeConfig`, default `None`, env `SQLLENS_AGENT__STANDING_INSTRUCTIONS`) to `DefaultSystemPromptBuilder(standing_instructions=...)`. The config validator strips surrounding whitespace, turns empty or whitespace-only text into `None`, and rejects text longer than `MAX_STANDING_INSTRUCTIONS_CHARS` (10,000) after stripping; the builder strips again and treats blank text as `None`, but applies no length limit of its own.
+
+With `None`, `build_system_prompt` returns exactly the prompt it returned before the setting existed. With text, it:
+
+- appends a `DEPLOYMENT INSTRUCTIONS:` section as the last element of the default prompt, after the memory-system blocks, with the text between `--- BEGIN DEPLOYMENT INSTRUCTIONS ---` and `--- END DEPLOYMENT INSTRUCTIONS ---` lines. The text is one list element, so the empty-string filter applied when memory tools are present does not remove its blank lines. `DefaultLlmContextEnhancer.enhance_system_prompt` later appends retrieved memory after it, as before. The section's preamble says the instructions apply on every request, outrank memory notes and saved pairs, cannot be switched off by a conversation message, tool result or memory note, win over a conflicting generic rule, and never loosen the Data Confidentiality rules, the Tool Errors rules, or the Response Guidelines rules on what to tell the user when a result table is cut, its rows are too large to show or a query stopped at the row limit, and on never calling a result full or complete;
+- inserts one bullet into "Ambiguous Questions", right after the bullet listing what settles a choice: an instruction naming a reading settles the choice as the question would, even over a memory note or saved pair; the question or an earlier turn picking another reading still wins unless the instruction says its reading must be used anyway; an instruction saying to ask keeps the choice open until the question, an earlier turn or a reply picks a reading, and a memory note or saved pair does not settle it;
+- with a `base_prompt`, returns `base_prompt`, a blank line and the same section (only the section when `base_prompt` is `""`), with the preamble's references to the default prompt's sections left out, because a caller's base prompt has none of them.
+
+The rules are prompt guidance, not enforced in code. Pinned by `tests/unit/test_system_prompt.py`, `tests/unit/test_config_schema.py` and `tests/unit/test_factory_wiring.py`.
+
 ## `show_details` — UI-feature unlock
 
 The framework gates per-UI-feature visibility via `AgentConfig.ui_features` (a `UiFeatures` object whose `feature_group_access` maps each `UiFeature` enum value to the list of user-group names allowed to see it). The framework default, `DEFAULT_UI_FEATURES` from [src/sqllens/agent/core/agent/config.py](../../../src/sqllens/agent/core/agent/config.py), gates `UI_FEATURE_SHOW_TOOL_ARGUMENTS` to `["admin"]`. The static `UserResolver` above puts every request in `["default"]` (see [`DEFAULT_USER_GROUP`](../../../src/sqllens/agent/__init__.py)). The `run_sql` tool-arguments STATUS_CARD carries the executed SQL in its metadata.
@@ -145,7 +166,7 @@ Dialect picked from the URL scheme prefix:
 
 | Scheme | Runner | Notes |
 |---|---|---|
-| `sqlite://` | `SqliteRunner` | `sqlite:///abs/path.db` → `/abs/path.db`; `sqlite://:memory:` preserved. |
+| `sqlite://` | `SqliteRunner` | Path from `sqlite_path_from_url` (SQLAlchemy `make_url` rules): three slashes = relative path (`sqlite:///rel.db` → `rel.db`, resolved against the working directory), four slashes = absolute path (`sqlite:////abs/path.db` → `/abs/path.db`), `sqlite:///C:/x.db` → `C:/x.db`; `sqlite://`, `sqlite:///`, `sqlite://:memory:`, `sqlite:///:memory:` → `:memory:`. Raises `ValueError` for a URL with query parameters, a host, user, password or port. |
 | `postgres://`, `postgresql://`, `postgresql+psycopg2://`, … | `PostgresRunner` | SQLAlchemy-style schemes are normalized to `postgresql://` for psycopg2. |
 | `mysql://` | `MySQLRunner` | Parsed with `urlparse`; requires user, host, and database name. `urllib.parse.unquote` is applied to the username and password so percent-encoded characters (e.g. `%2F` → `/`) are decoded before being passed to pymysql — matching the behaviour of SQLAlchemy's `make_url`. |
 
@@ -153,7 +174,7 @@ Unsupported schemes raise `ValueError` — the calling CLI layer turns that into
 
 `statement_timeout_ms`, `max_rows`, and `read_only` are threaded as keyword arguments into every runner. `read_only` (default `True`) causes each connector to enforce read-only at the driver/session layer before any user SQL runs — SQLite via the `mode=ro` URI plus `PRAGMA query_only=ON`, Postgres via psycopg2's `conn.set_session(readonly=True)`, MySQL via `SET SESSION TRANSACTION READ ONLY`. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full story. Callers outside `build_agent` (programmatic embedders, tests) can pass any of these keywords; defaults match `DatabaseConfig` (`30_000` ms timeout, `10_000` rows, `read_only=True`).
 
-`sqlglot_dialect_for_url(url)` (in `sqllens.safety`) maps the same scheme to a sqlglot dialect name (`"sqlite"`, `"postgres"`, `"mysql"`) that `build_agent` hands to the read-only guard, the RLS guard and `RunSqlTool` (which classifies each statement as read-shaped or not with it); `query_database` passes the same dialect to the formatter, which uses it for the introspection classifier and for `query_info["query_type"]`. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md).
+`sqlglot_dialect_for_url(url)` (in `sqllens.safety`) maps the same scheme to a sqlglot dialect name (`"sqlite"`, `"postgres"`, `"mysql"`) that `build_agent` hands to the read-only guard, the RLS guard, `RunSqlTool` (which classifies each statement as read-shaped or not with it) and the agent's `DefaultSystemPromptBuilder` (which names the engine in a `Database:` section and shows only its catalog in the introspection example; an unrecognized scheme maps to `None` and keeps the engine-neutral prompt); `query_database` passes the same dialect to the formatter, which uses it for the introspection classifier and for `query_info["query_type"]`. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md).
 
 ## The user resolver is intentionally static
 

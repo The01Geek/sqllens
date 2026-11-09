@@ -38,7 +38,7 @@ The rewrite is **proven-clean**: rather than filtering only the SQL shapes it re
 
 ## Database relation checks
 
-The AST rewrite cannot see stored view definitions. When rules are active, `RlsGuardRunner` also requires `run_sql(..., require_base_tables=True)` from the inner runner. `ReadOnlyGuardRunner` and `RowCapRunner` forward that requirement. The SQLite, PostgreSQL, and MySQL connectors call `verify_base_tables` in [relations.py](../../../src/sqllens/safety/relations.py) on their execution connection before running the rewritten query. SQLite opens a read transaction before checking its catalog. No catalog result is cached across queries.
+The AST rewrite cannot see stored view definitions. When rules are active, `RlsGuardRunner` also requires `run_sql(..., require_base_tables=True)` from the inner runner. SQL Lens's guard wrappers forward that requirement. The SQLite, PostgreSQL, and MySQL connectors call `verify_base_tables` in [relations.py](../../../src/sqllens/safety/relations.py) on their execution connection before running the rewritten query. SQLite opens a read transaction before checking its catalog. No catalog result is cached across queries.
 
 Scope analysis distinguishes real database relations from CTE/derived aliases. Catalog lookups resolve PostgreSQL search paths with `to_regclass`, use SQLite schema lookup order, and respect MySQL's identifier case policy. Views (including PostgreSQL materialized views), unknown relation kinds, unsupported reference shapes, and catalog lookup failures raise `RlsError`. This deliberately rejects user views while RLS is active, including views over unprotected tables; it does not attempt to expand their definitions. Unprotected base-table queries still work, except on PostgreSQL child tables (below).
 
@@ -52,7 +52,7 @@ The one exception is `_METADATA_VIEWS`: a fixed allowlist of metadata-only syste
 
 Rules key on relation names, not the rows behind them; the child and routine checks close two paths with that root cause. The routine check only sees names written as calls: PostgreSQL attribute notation (`SELECT o.fn FROM orders o`, which runs `fn(o)` when no column is named `fn`) still calls a function without one, and SQL Lens does not inspect other ways the database can run stored code. These remain documented limitations.
 
-Custom `SqlRunner` implementations used beneath `RlsGuardRunner` must declare the `require_base_tables` keyword and enforce the same checks on their execution connection — the view and relation-kind checks, and the PostgreSQL child-table and PostgreSQL/MySQL routine checks. When rules are configured, `RlsGuardRunner.__init__` looks past the `RlsGuardRunner`, `ReadOnlyGuardRunner` and `RowCapRunner` wrappers to the first runner beneath them and raises `TypeError` unless its `run_sql` names a `require_base_tables` parameter; a bare `**kwargs` does not qualify. A custom wrapper is checked as that runner, not looked past. A runner that declares the keyword but ignores it cannot be detected. Calling the standalone `apply_rls` function only rewrites SQL; it cannot verify stored relations without a database connection.
+Custom `SqlRunner` implementations used beneath `RlsGuardRunner` must declare the `require_base_tables` keyword and enforce the same checks on their execution connection — the view and relation-kind checks, and the PostgreSQL child-table and PostgreSQL/MySQL routine checks. When rules are configured, `RlsGuardRunner.__init__` looks past SQL Lens's own guard wrappers (the exact types `_relation_check_executor` in [src/sqllens/safety/__init__.py](../../../src/sqllens/safety/__init__.py) unwraps) to the first runner beneath them and raises `TypeError` unless its `run_sql` names a `require_base_tables` parameter; a bare `**kwargs` does not qualify. A custom wrapper is checked as that runner, not looked past. A runner that declares the keyword but ignores it cannot be detected. Calling the standalone `apply_rls` function only rewrites SQL; it cannot verify stored relations without a database connection.
 
 SQLite uses `pragma_table_list` (SQLite 3.37+), which distinguishes ordinary tables from virtual tables and their shadow tables. Virtual and shadow tables are refused while RLS is active; an unavailable catalog function also blocks the query. PostgreSQL unquoted ASCII identifiers are lowercased before both scope analysis and relation lookup so quoted CTE names do not hide distinct database relations. Unquoted non-ASCII PostgreSQL identifiers are rejected because their folding depends on server encoding and locale; quote these identifiers explicitly.
 
@@ -103,6 +103,8 @@ and a caller-supplied request `_meta` of `{"tenant_id": "acme"}`, the agent's `S
 ```sql
 SELECT id, total FROM orders WHERE status = 'paid' AND orders.tenant_id = 'acme'
 ```
+
+The whole statement is printed again by sqlglot (`tree.sql(dialect=..., normalize_functions=False)` in `apply_rls`), not patched in place. Function names sqlglot does not recognise keep their written case and quotes, so a PostgreSQL call such as `"quote_ident"(name)` still resolves. Built-in functions sqlglot recognises are printed in sqlglot's canonical form, for example `count(*)` as `COUNT(*)` and PostgreSQL `strpos(a, 'x')` as `POSITION('x' IN a)`.
 
 The same predicate is injected in every SELECT scope where `orders` appears as a real base table — top-level query, subquery, CTE *body*, joined sub-select. A same-named CTE/derived-table *reference* is correctly left alone: its rows already came from the filtered body, so filtering again would be redundant (and worse, would compose AND with a possibly-different alias-qualified column reference).
 
@@ -169,9 +171,15 @@ Agent.send_message → ToolContext(metadata=...)     (caller-supplied keys sprea
   ↓
 RunSqlTool → SqlRunner.run_sql(args, context)
   ↓
+ResultMaskingRunner.run_sql                        (masks secret-looking result columns on the way back)
+  ↓
+WholeRowSelectGuardRunner.run_sql                  (refuses a whole-row star in the agent's sql;
+                                                    absent when database.refuse_whole_row_selects = false)
+  ↓
 RlsGuardRunner.run_sql                             (rewrites args.sql, reading context.metadata)
   ↓
-ReadOnlyGuardRunner.run_sql                        (validates the REWRITTEN sql — see Wiring)
+ReadOnlyGuardRunner.run_sql                        (validates the REWRITTEN sql — see Wiring;
+                                                    absent when database.read_only = false)
   ↓
 RowCapRunner → engine runner
 ```
@@ -194,13 +202,16 @@ if cfg.database.read_only:
     sql_runner = ReadOnlyGuardRunner(sql_runner, dialect=dialect)
 if cfg.rls:
     sql_runner = RlsGuardRunner(sql_runner, cfg.rls, dialect=dialect)
+if cfg.database.refuse_whole_row_selects:
+    sql_runner = WholeRowSelectGuardRunner(sql_runner, dialect=dialect)
+sql_runner = ResultMaskingRunner(sql_runner, ...)
 ```
 
-Resulting call order on every query: **RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**.
+Resulting call order with rules configured, `read_only = true` and `refuse_whole_row_selects = true`: **ResultMaskingRunner → WholeRowSelectGuardRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. Each conditional guard drops out when its condition is false; masking and the row cap are always present.
 
 The order is deliberate:
 
-- **RLS is outermost** so the rewrite happens *before* the read-only guard runs. The read-only guard's full-tree walk then validates the *rewritten* SQL — meaning the same DML/DDL deny-walk and denied-function check applies to the injected predicates too. A rule whose composition somehow produced a denied function would be caught.
+- **RLS sits ahead of the read-only guard** so the rewrite happens *before* the read-only guard runs. The read-only guard's full-tree walk then validates the *rewritten* SQL — meaning the same DML/DDL deny-walk and denied-function check applies to the injected predicates too. A rule whose composition somehow produced a denied function would be caught.
 - **The decorator is only wrapped when `cfg.rls` is non-empty.** The no-RLS path adds no RLS rewrite or catalog checks.
 
 When `cfg.database.read_only = false` (disabled — don't), the read-only guard is skipped *and* RLS still wraps if rules are configured. `RlsGuardRunner` then still applies the read-only guard's function denylist to the rewritten SQL (`assert_no_denied_functions`, raising `UnsafeSqlError`) — only the denylist, not the SELECT-only statement checks — and the engine runner still verifies the referenced relations and called routines before executing it. `RlsGuardRunner` runs that denylist check whenever it has rules, so with `read_only = true` it runs ahead of the read-only guard's own copy.
@@ -227,11 +238,15 @@ Unit tests live in [tests/unit/test_safety_rls.py](../../../tests/unit/test_safe
 
 - `TestRlsRuleValidation` — every well-formed-or-rejected case at the config-model layer (bad identifiers, unsupported operators, both/neither of `value`/`value_from_metadata`, empty-list `in`, bad metadata key, `extra="forbid"`).
 - The end-to-end "misconfigured rule fails config load" case proves `sqllens validate` rejects a typo before the server starts.
-- `TestApplyRls` — the positive rewrites (single table, AND-combined `WHERE`, qualified join predicate, subquery filtered, CTE body filtered + CTE reference left alone, sibling tables ignored, `IN` and numeric forms).
-- `TestApplyRlsScopeEdgeCases` — the scope-walker edges (CTE/derived alias colliding with a protected table name; recursive CTE same name; `WHERE … IN (SELECT …)`; comma joins; schema-qualified or parenthesized table sources still filter; unprovable shape blocks; `TABLE` statement blocks).
-- `TestApplyRlsDynamicFailSecure` — every dynamic-value sanitization path (present, missing, suspicious string, wrong type, `bool` blocks on both the scalar `=` path (`test_bool_dynamic_value_blocks`) and as an `in`-list element (`test_bool_item_in_dynamic_in_list_blocks`), list-required for `in`, list-form `in`).
-- `TestApplyRlsParseFailures` — parse failures and multi-statement input.
-- The decorator-level tests in the same file (rewritten SQL reaches the inner runner; missing dynamic value blocks before the inner runner sees anything; dynamic value from `ToolContext.metadata`; unexpected error in the rewrite fails closed; static rule works with empty metadata).
+- `TestApplyRlsStatic` — the positive rewrites (single table, AND-combined `WHERE`, qualified join predicate, subquery filtered, CTE body filtered + CTE reference left alone, sibling tables ignored, unrecognised function names keeping their written case, `IN` and numeric forms).
+- `TestApplyRlsScopeCoverage` — the scope-walker edges (CTE/derived alias colliding with a protected table name; recursive CTE same name; `WHERE … IN (SELECT …)`; comma joins; schema-qualified or parenthesized table sources still filter; unprovable shape blocks; `TABLE` statement blocks).
+- `TestApplyRlsDynamicFailSecure` — every dynamic-value sanitization path (present, missing, suspicious string, wrong type, `bool` blocks on both the scalar `=` path (`test_bool_dynamic_value_blocks`) and as an `in`-list element (`test_bool_item_in_dynamic_in_list_blocks`), list-required for `in`, list-form `in`), plus tokenization failures, parse failures and multi-statement input.
+- `TestRlsGuardRunner` — the decorator-level tests (rewritten SQL reaches the inner runner; missing dynamic value blocks before the inner runner sees anything; dynamic value from `ToolContext.metadata`; unexpected error in the rewrite fails closed; static rule works with empty metadata).
+
+- `TestFactoryComposition` — the RLS guard sits beneath the masking guard and ahead of the read-only guard, and is absent when no rules are configured.
+- `TestMetadataPlumbing` — request metadata reaching the request context.
+
+Database relation checks (views blocked while RLS is active, catalog failures closing) are tested in [tests/unit/test_rls_views.py](../../../tests/unit/test_rls_views.py).
 
 The metadata plumbing through FastMCP `Context` → `_request_metadata` → tool impl is pinned in [tests/unit/test_server.py](../../../tests/unit/test_server.py).
 

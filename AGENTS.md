@@ -43,8 +43,10 @@ src/sqllens/
 ├── connectors/              # Reserved for SQLAlchemy-backed adapters (Phase 4+)
 ├── auth/                    # base (Authenticator protocol) + none | bearer | jwt; policy.py bind policy
 └── safety/                  # readonly.py SQL parser; rls.py row scoping; relations.py RLS
-                             #   relation verification; limits.py row cap;
-                             #   ReadOnlyGuardRunner / RlsGuardRunner / RowCapRunner decorators
+                             #   relation verification; limits.py row cap; masking.py
+                             #   secret-column masking; whole_row.py whole-row select guard;
+                             #   ReadOnlyGuardRunner / RlsGuardRunner / RowCapRunner /
+                             #   ResultMaskingRunner / WholeRowSelectGuardRunner decorators
 ```
 
 Underscore-prefixed top-level modules (`_atomic.py`, `_bounded_json.py`, `_errors.py`, `_memory_consistency.py`) are private shared helpers.

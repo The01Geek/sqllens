@@ -35,6 +35,7 @@ from sqllens.config import (
 )
 from sqllens.safety import (
     ReadOnlyGuardRunner,
+    ResultMaskingRunner,
     RlsError,
     RlsGuardRunner,
     apply_rls,
@@ -209,6 +210,48 @@ class TestApplyRlsStatic:
         )
         assert out.count("tenant_id") == 2
         _assert_filtered_and_readonly(out)
+
+    @pytest.mark.parametrize(("dialect", "sql", "expected"), [
+        (
+            "postgres",
+            'SELECT "quote_ident"(name) FROM orders',
+            "SELECT \"quote_ident\"(name) FROM orders WHERE orders.tenant_id = 'acme'",
+        ),
+        (
+            "postgres",
+            'SELECT "MyFunc"(name) FROM orders',
+            "SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'",
+        ),
+        (
+            "postgres",
+            'SELECT public."MyFunc"(name) FROM orders',
+            "SELECT public.\"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'",
+        ),
+        (
+            "mysql",
+            "SELECT `MyFunc`(name) FROM orders",
+            "SELECT `MyFunc`(name) FROM orders WHERE orders.tenant_id = 'acme'",
+        ),
+        (
+            "sqlite",
+            'SELECT "MyFunc"(name) FROM orders',
+            "SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'",
+        ),
+        (
+            # SQLite names an unaliased result column after the call's text.
+            "sqlite",
+            "SELECT printf('%s', name) FROM orders",
+            "SELECT printf('%s', name) FROM orders WHERE orders.tenant_id = 'acme'",
+        ),
+    ])
+    def test_unrecognised_function_keeps_written_case(
+        self, dialect: str, sql: str, expected: str
+    ) -> None:
+        assert apply_rls(sql, [_rule(value="acme")], dialect=dialect) == expected
+
+    def test_unrecognised_function_on_unprotected_table_is_unchanged(self) -> None:
+        sql = 'SELECT "quote_ident"(name) FROM customers'
+        assert apply_rls(sql, [_rule(value="acme")], dialect="postgres") == sql
 
     def test_unrelated_table_untouched(self) -> None:
         out = apply_rls(
@@ -626,7 +669,8 @@ class TestRlsGuardRunner:
 
 def _cfg(tmp_path: Path, rls: list[RlsRule]) -> Config:
     return Config(
-        database=DatabaseConfig(url="sqlite:///:memory:"),
+        # The whole-row select guard wraps RLS; test_safety_whole_row.py pins that.
+        database=DatabaseConfig(url="sqlite:///:memory:", refuse_whole_row_selects=False),
         llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
         memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
         auth=AuthConfig(mode="none"),
@@ -640,9 +684,11 @@ def _unwrap(tool: object) -> object:
 
 
 class TestFactoryComposition:
-    def test_rls_guard_outermost_ahead_of_readonly(self, tmp_path: Path) -> None:
+    def test_rls_guard_beneath_masking_ahead_of_readonly(self, tmp_path: Path) -> None:
         agent = build_agent(_cfg(tmp_path, [_rule(value="acme")]))
-        runner = _unwrap(agent.tool_registry._tools["run_sql"]).sql_runner
+        masking = _unwrap(agent.tool_registry._tools["run_sql"]).sql_runner
+        assert isinstance(masking, ResultMaskingRunner)
+        runner = masking._inner
         assert isinstance(runner, RlsGuardRunner)
         # Read-only guard validates the *rewritten* SQL → it sits inside RLS.
         assert isinstance(runner._inner, ReadOnlyGuardRunner)

@@ -5,8 +5,8 @@
 
 Pins ``EmitTextParams`` validation (non-empty text), ``EmitTextTool.execute``'s
 happy path (an answer-marked ``RichTextComponent`` that the MCP-layer block
-builder includes as a deliberate prose block — see ``_text_is_answer_marked``
-in ``sqllens.tools._format``), and the structured-error path.
+builder includes as a deliberate prose block — see ``is_answer_marked``
+in ``sqllens.agent.markers``), and the structured-error path.
 """
 
 from __future__ import annotations
@@ -103,3 +103,15 @@ async def test_execute_error_path_returns_structured_failure(
     assert any(
         "emit_text execute failed" in r.getMessage() for r in caplog.records
     ), "expected a logger.exception call on the broad-except path"
+
+
+def test_description_states_when_the_final_reply_is_shown() -> None:
+    description = EmitTextTool().description
+    assert "alongside a tool call may not be shown to the user" in description
+    assert "Once an emit_text call succeeds in a request, your final reply is NOT shown" in (
+        description
+    )
+    assert "when no emit_text call succeeds in the request, the final reply is shown" in (
+        description
+    )
+    assert "hidden reasoning" not in description

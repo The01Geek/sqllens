@@ -3,7 +3,7 @@
 
 """SQL safety guards.
 
-Four orthogonal protections, composed at the factory:
+Six orthogonal protections, composed at the factory:
 
 * ``assert_select_only`` / ``ReadOnlyGuardRunner`` — sqlglot parse rejects
   anything that isn't a single ``SELECT``/``WITH``.
@@ -26,6 +26,12 @@ Four orthogonal protections, composed at the factory:
 * ``RowCapRunner`` — per-runner streaming via ``fetchmany`` stops at
   ``max_rows``; this decorator is the secondary belt-and-suspenders check
   on the returned DataFrame.
+* ``assert_no_whole_row_select`` / ``WholeRowSelectGuardRunner`` — refuses a
+  ``*`` or ``alias.*`` that expands a table or view before the query runs;
+  composed directly beneath ``ResultMaskingRunner`` and outside every other
+  runner, unless ``database.refuse_whole_row_selects`` is off.
+* ``ResultMaskingRunner`` — outermost; replaces every value in a result
+  column whose label matches the secret-word rule with ``[withheld]``.
 """
 
 from __future__ import annotations
@@ -43,6 +49,12 @@ from sqllens.safety.limits import (
     RowCapRunner,
     mark_truncation,
 )
+from sqllens.safety.masking import (
+    MASKED_COLUMNS_ATTR,
+    WITHHELD_PLACEHOLDER,
+    ResultMaskingError,
+    ResultMaskingRunner,
+)
 from sqllens.safety.readonly import (
     UnsafeSqlError,
     assert_no_denied_functions,
@@ -53,6 +65,11 @@ from sqllens.safety.readonly import (
     sqlglot_dialect_for_url,
 )
 from sqllens.safety.rls import RlsError, apply_rls
+from sqllens.safety.whole_row import (
+    WholeRowSelectError,
+    WholeRowSelectGuardRunner,
+    assert_no_whole_row_select,
+)
 
 if TYPE_CHECKING:
     from sqllens.agent.core.tool import ToolContext
@@ -61,14 +78,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "MASKED_COLUMNS_ATTR",
     "MAX_ROWS_ATTR",
     "TRUNCATED_ATTR",
+    "WITHHELD_PLACEHOLDER",
     "ReadOnlyGuardRunner",
+    "ResultMaskingError",
+    "ResultMaskingRunner",
     "RlsError",
     "RlsGuardRunner",
     "RowCapRunner",
     "UnsafeSqlError",
+    "WholeRowSelectError",
+    "WholeRowSelectGuardRunner",
     "apply_rls",
+    "assert_no_whole_row_select",
     "assert_select_only",
     "first_sql_keyword",
     "is_introspection_query",
@@ -226,7 +250,13 @@ def _relation_check_executor(runner: object) -> object:
     honor it is the first one beneath them. Exact types only: a subclass may
     override ``run_sql`` without forwarding, so it is checked itself.
     """
-    while type(runner) in (RlsGuardRunner, ReadOnlyGuardRunner, RowCapRunner):
+    while type(runner) in (
+        ResultMaskingRunner,
+        WholeRowSelectGuardRunner,
+        RlsGuardRunner,
+        ReadOnlyGuardRunner,
+        RowCapRunner,
+    ):
         runner = runner._inner  # type: ignore[attr-defined]
     return runner
 
