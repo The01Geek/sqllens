@@ -168,10 +168,11 @@ PyPI versions are immutable after publish — you can yank but not re-upload the
 
 ## Repo conventions
 
-- **`main` is protected** by one ruleset (`main-protected`, ID 15633058; classic branch protection is disabled). It has two rules: `deletion` (the branch cannot be deleted) and `required_status_checks`, which rejects any update to `main` — a direct push, a force push, or a merge — whose commit has not passed these checks:
+- **`main` is protected** by one ruleset (`main-protected`, ID 15633058; classic branch protection is disabled). It has four rules: `deletion` (the branch cannot be deleted), `non_fast_forward` (no force pushes), `pull_request` (every change lands through a PR; no approvals required) and `required_status_checks` (strict, so the PR branch must be up to date with `main`), which rejects any merge whose commit has not passed these checks:
   - `Lint + unit + transport (py3.11)`
   - `Lint + unit + transport (py3.12)`
-  - `Lint + unit + transport (py3.13)`, `Lint + unit + transport (py3.14)` and `Connector tests (Postgres + MySQL)` run on every PR but are **not** currently in the ruleset's required set. Treat them as must-pass by convention; promoting them to required is a separate ruleset change.
+  - `Lint + unit + transport (py3.14)`, the Python the Docker image runs. When the image's base moves to another Python, add that version's check to the required set as well.
+  - `Lint + unit + transport (py3.13)` and `Connector tests (Postgres + MySQL)` run on every PR but are **not** currently in the ruleset's required set. Treat them as must-pass by convention; promoting them to required is a separate ruleset change.
 - **Bypass is PR-only.** The ruleset's one bypass actor is the repository Admin role in `pull_request` mode: an admin can merge a PR past failing checks, but cannot bypass them with a direct push. Use a feature branch + PR every time:
   ```bash
   git checkout -b fix/short-description

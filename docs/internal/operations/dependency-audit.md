@@ -2,7 +2,7 @@
 
 `requirements.txt` records the core runtime closure with Python/platform markers, generated from the existing major-version bounds in `pyproject.toml`. Regenerate it as a whole using the command in its header. CI installs with this file as constraints for its Python 3.11–3.14 unit jobs and database connector job, then runs `pip check` and the normal tests. Optional database drivers are pinned separately in `docker/requirements-drivers.txt`; both files constrain CI and the image install. Developer tools remain outside these runtime constraints.
 
-The separate Dependency audit workflow runs pinned `pip-audit` on the core closure plus pinned database drivers for Linux/Python 3.11 and 3.12 on PRs, main pushes, and manual dispatch. Markers for other platforms are not audited by these jobs. The audit is advisory: findings or scanner failures produce a warning and retain their step output; they do not block a merge. An unavailable scan is not a clean result. No issues are opened automatically. This does not change the weekly source-code security audit's reporting destination.
+The separate Dependency audit workflow runs pinned `pip-audit` on the core closure plus pinned database drivers for Linux/Python 3.11, 3.12 and 3.14 (the image's Python) on PRs, main pushes, and manual dispatch. Markers for other platforms are not audited by these jobs. The audit is advisory: findings or scanner failures produce a warning and retain their step output; they do not block a merge. An unavailable scan is not a clean result. No issues are opened automatically. This does not change the weekly source-code security audit's reporting destination.
 
 Four explicit exclusions apply only to the current embedded Chroma integration:
 
@@ -17,8 +17,13 @@ Evidence: `src/sqllens/memory/store.py` and `src/sqllens/agent/integrations/chro
 
 ## Image inputs
 
-Both Docker stages use the same immutable Python image-index digest, covering
-Linux amd64 and arm64. Dependabot checks `/docker` weekly for base updates.
+Both Docker stages use the same immutable Python 3.14 image-index digest,
+covering Linux amd64 and arm64. Dependabot checks `/docker` weekly for base
+updates. A unit test fails unless the image's Python version is in both the CI
+unit matrix and the advisory-scan matrix, so a base bump to a newer Python must
+add it to both. Before accepting one, confirm every pinned package publishes
+wheels for that Python on Linux amd64 and arm64: `onnxruntime`, which Chroma
+requires, ships wheels only and no source package.
 The install combines core and driver constraints for the complete `.[all]`
 runtime dependency closure. Refresh the core closure first, then resolve the
 extras under both files for Linux amd64/arm64 and run CI plus the advisory scan.
