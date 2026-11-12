@@ -36,10 +36,10 @@ columns are the table's. A star over an expression, such as PostgreSQL's
 ``t.*`` whose qualifier does not resolve to a source of its ``SELECT`` is
 refused, because the guard cannot show it is safe. ``TABLE t``, PostgreSQL's
 and MySQL's shorthand for ``SELECT * FROM t``, is refused in any statement or
-subquery: sqlglot parses it as a column or table named ``TABLE``, unquoted and
-unqualified, which a real column or table can only be when quoted; a
-schema-qualified ``TABLE s.t`` does not parse, so it is refused as
-unparseable SQL.
+subquery. It is found with sqlglot's tokenizer (``uses_table_shorthand``),
+because sqlglot parses it differently across versions (a name ``TABLE``
+before 30.30, ``SELECT * FROM t`` from 30.30). A ``TABLE s.t`` that does not
+parse is refused as unparseable SQL.
 
 Not covered: a whole row reached without a star, such as PostgreSQL's
 ``row_to_json(t)``, a bare ``t`` as a composite value, or a function that
@@ -79,6 +79,7 @@ from sqllens.safety.readonly import (
     UnsafeSqlError,
     _parse_statements,
     is_catalog_table,
+    uses_table_shorthand,
 )
 
 if TYPE_CHECKING:
@@ -117,30 +118,16 @@ def assert_no_whole_row_select(sql: str, *, dialect: str | None = None) -> None:
 
 def _whole_row_reference(sql: str, dialect: str | None) -> str | None:
     """The SQL text of the first star, or ``TABLE``, in ``sql`` that the guard refuses."""
-    for statement in _parse_statements(sql, dialect):
-        if statement is None:
-            raise UnsafeSqlError("empty parse tree")
-        if _uses_table_shorthand(statement):
-            return "TABLE"
+    statements = _parse_statements(sql, dialect)
+    if any(statement is None for statement in statements):
+        raise UnsafeSqlError("empty parse tree")
+    if uses_table_shorthand(sql, dialect):
+        return "TABLE"
+    for statement in statements:
         star = _whole_row_star(statement, dialect)
         if star is not None:
             return star
     return None
-
-
-def _uses_table_shorthand(statement: exp.Expression) -> bool:
-    """True if ``statement`` holds ``TABLE t``, which sqlglot reads as a name ``TABLE``."""
-    for identifier in statement.find_all(exp.Identifier):
-        if identifier.quoted or identifier.name.upper() != "TABLE":
-            continue
-        parent = identifier.parent
-        if parent is None or parent.args.get("this") is not identifier:
-            continue
-        if isinstance(parent, exp.Column) and not parent.table:
-            return True
-        if isinstance(parent, exp.Table) and not parent.db:
-            return True
-    return False
 
 
 def _whole_row_star(statement: exp.Expression, dialect: str | None) -> str | None:

@@ -42,6 +42,60 @@ _READ_SHAPED_KEYWORDS: frozenset[str] = frozenset(
 )
 
 
+# Tokens after which an unquoted ``TABLE`` keyword begins a ``TABLE t`` query
+# (PostgreSQL's and MySQL's shorthand for ``SELECT * FROM t``): the start of a
+# statement, an opening parenthesis (a subquery or CTE body), or a set operator.
+_TABLE_SHORTHAND_PREDECESSORS: frozenset[TokenType] = frozenset(
+    {
+        TokenType.SEMICOLON,
+        TokenType.L_PAREN,
+        TokenType.UNION,
+        TokenType.INTERSECT,
+        TokenType.EXCEPT,
+        TokenType.ALL,
+        TokenType.DISTINCT,
+    }
+)
+
+
+def uses_table_shorthand(sql: str, dialect: str | None = None) -> bool:
+    """True if ``sql`` holds a ``TABLE t`` query, in any statement or subquery.
+
+    Detected with sqlglot's tokenizer, not the parse tree, because sqlglot
+    parses ``TABLE t`` differently across the supported range: before 30.30 as
+    a column or table named ``TABLE``, from 30.30 as ``SELECT * FROM t``. The
+    guards that refuse it must refuse it on every version.
+
+    A ``TABLE`` keyword token (an unquoted ``table`` in any case; a quoted
+    identifier is not one) counts when it starts the SQL or follows ``;``,
+    ``(``, ``UNION``, ``INTERSECT``, ``EXCEPT``, ``ALL`` or ``DISTINCT``. A
+    dialect name sqlglot does not know is logged at ``WARNING`` and treated as
+    no dialect. SQL the tokenizer rejects (``TokenError``) gives ``False``:
+    every caller then parses the SQL, and that parse fails closed. Any other
+    tokenizer exception propagates.
+    """
+    try:
+        resolved = sqlglot.Dialect.get_or_raise(dialect)
+    except ValueError:
+        logger.warning(
+            "uses_table_shorthand: unknown sqlglot dialect %r; tokenizing with no dialect",
+            dialect,
+        )
+        resolved = sqlglot.Dialect.get_or_raise(None)
+    try:
+        tokens = resolved.tokenize(sql)
+    except sqlglot.errors.TokenError:
+        return False
+    previous: TokenType | None = None
+    for token in tokens:
+        if token.token_type is TokenType.TABLE and (
+            previous is None or previous in _TABLE_SHORTHAND_PREDECESSORS
+        ):
+            return True
+        previous = token.token_type
+    return False
+
+
 def first_sql_keyword(sql: str, dialect: str | None = None) -> str:
     """Return ``sql``'s leading keyword uppercased, or ``""`` if none.
 

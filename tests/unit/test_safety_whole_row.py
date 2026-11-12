@@ -241,9 +241,6 @@ def test_refusal_message_is_actionable(sql: str) -> None:
         ("SELECT * FROM", "postgres"),
         ("SELECT 'unterminated FROM users", "postgres"),
         ("SELECT id /*! , users.* */ FROM users", "mysql"),
-        # A schema-qualified TABLE statement does not parse.
-        ("TABLE public.users", "postgres"),
-        ("TABLE app.users", "mysql"),
     ],
 )
 def test_unparseable_sql_is_refused_as_unsafe(sql: str, dialect: str) -> None:

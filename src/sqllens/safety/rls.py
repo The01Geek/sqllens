@@ -41,6 +41,7 @@ from sqlglot import expressions as exp
 from sqlglot.optimizer.scope import traverse_scope
 
 from sqllens.config import RlsRule
+from sqllens.safety.readonly import uses_table_shorthand
 
 # Upper bound on a dynamic string value's length. A value far longer than any
 # realistic identifier/tenant/region token is treated as suspicious and blocks
@@ -220,6 +221,16 @@ def apply_rls(
         return sql
     meta: Mapping[str, Any] = metadata or {}
 
+    # ``TABLE orders`` (PostgreSQL/MySQL shorthand for ``SELECT * FROM orders``)
+    # is refused in any statement or subquery whatever the sqlglot version:
+    # before 30.30 it parses to a shape the scope walk cannot see, from 30.30
+    # to a SELECT. Found with the tokenizer so both parses are refused alike.
+    if uses_table_shorthand(sql, dialect):
+        raise RlsError(
+            "row-level security can only scope SELECT-shaped reads; refusing "
+            "a TABLE statement"
+        )
+
     try:
         statements = sqlglot.parse(sql, dialect=dialect)
     except (sqlglot.errors.ParseError, sqlglot.errors.TokenError) as e:
@@ -234,10 +245,8 @@ def apply_rls(
     normalize_rls_identifiers(tree, dialect)
 
     # Fail-secure on non-query shapes. Scope analysis can only reason about
-    # SELECT/UNION-shaped reads; statements like Postgres ``TABLE orders``
-    # parse to a non-Query root (an Alias) that exposes no ``exp.Table`` node,
-    # so the scope walk and the backstop below would never see the protected
-    # read and would silently pass it through. The agent emits SELECT reads;
+    # SELECT/UNION-shaped reads (``TABLE orders`` was refused above). The
+    # agent emits SELECT reads;
     # anything that is not a query is something we cannot prove scoped — block
     # it rather than guess.
     if not isinstance(tree, exp.Query):
@@ -306,12 +315,10 @@ def apply_rls(
                 reference_ids.add(id(table))
 
     for table in tree.find_all(exp.Table):
-        # Check both the .name and .alias slots. A protected name appearing as
-        # the alias of a phantom keyword-as-identifier table (Postgres
-        # ``SELECT * FROM (TABLE orders) sub`` parses to a Table named
-        # ``TABLE`` with alias ``orders``) would be invisible to a .name-only
-        # check; the protected reference is then neither scoped by the walk
-        # above nor caught here unless we look at both slots.
+        # Check both the .name and .alias slots: a protected name can land in
+        # the alias of a keyword-as-identifier table (before sqlglot 30.30,
+        # ``(TABLE orders) sub`` parsed that way; it is now refused up front,
+        # and the alias check stays as a backstop for similar misparses).
         name = table.name.lower()
         alias = (table.alias or "").lower()
         match = (
