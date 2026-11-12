@@ -42,18 +42,30 @@ _READ_SHAPED_KEYWORDS: frozenset[str] = frozenset(
 )
 
 
-# Tokens after which an unquoted ``TABLE`` keyword begins a ``TABLE t`` query
-# (PostgreSQL's and MySQL's shorthand for ``SELECT * FROM t``): the start of a
-# statement, an opening parenthesis (a subquery or CTE body), or a set operator.
-_TABLE_SHORTHAND_PREDECESSORS: frozenset[TokenType] = frozenset(
+# Uppercased text of a token after which an unquoted ``TABLE`` keyword names an
+# object kind in a command (``CREATE TABLE``, ``SHOW CREATE TABLE``, MySQL's
+# ``CHECK TABLE``), not a ``TABLE t`` query. ``.`` makes it part of a
+# qualified name (``t.table``).
+_TABLE_KEYWORD_NOT_SHORTHAND_AFTER: frozenset[str] = frozenset(
     {
-        TokenType.SEMICOLON,
-        TokenType.L_PAREN,
-        TokenType.UNION,
-        TokenType.INTERSECT,
-        TokenType.EXCEPT,
-        TokenType.ALL,
-        TokenType.DISTINCT,
+        ".",
+        "CREATE",
+        "DROP",
+        "ALTER",
+        "TRUNCATE",
+        "LOCK",
+        "RENAME",
+        "DESCRIBE",
+        "DESC",
+        "TEMPORARY",
+        "TEMP",
+        "UNLOGGED",
+        "VIRTUAL",
+        "ANALYZE",
+        "CHECK",
+        "CHECKSUM",
+        "OPTIMIZE",
+        "REPAIR",
     }
 )
 
@@ -66,13 +78,17 @@ def uses_table_shorthand(sql: str, dialect: str | None = None) -> bool:
     a column or table named ``TABLE``, from 30.30 as ``SELECT * FROM t``. The
     guards that refuse it must refuse it on every version.
 
-    A ``TABLE`` keyword token (an unquoted ``table`` in any case; a quoted
-    identifier is not one) counts when it starts the SQL or follows ``;``,
-    ``(``, ``UNION``, ``INTERSECT``, ``EXCEPT``, ``ALL`` or ``DISTINCT``. A
-    dialect name sqlglot does not know is logged at ``WARNING`` and treated as
-    no dialect. SQL the tokenizer rejects (``TokenError``) gives ``False``:
-    every caller then parses the SQL, and that parse fails closed. Any other
-    tokenizer exception propagates.
+    Every ``TABLE`` keyword token (an unquoted ``table`` in any case; a quoted
+    identifier is not one) counts, wherever it appears (after ``WITH ...``,
+    ``;``, ``(``, a set operator or anything else), except one directly after
+    a token in ``_TABLE_KEYWORD_NOT_SHORTHAND_AFTER``: ``.`` (``t.table``) or
+    a command keyword such as ``CREATE`` or ``DROP``. This errs toward
+    ``True``: SQL that uses ``TABLE`` any other way, such as an unquoted alias
+    or a ``TABLE(...)`` function call, is reported too, so the callers refuse
+    it. A dialect name sqlglot does not know is logged at
+    ``WARNING`` and treated as no dialect. SQL the tokenizer rejects
+    (``TokenError``) gives ``False``: every caller then parses the SQL, and
+    that parse fails closed. Any other tokenizer exception propagates.
     """
     try:
         resolved = sqlglot.Dialect.get_or_raise(dialect)
@@ -86,13 +102,14 @@ def uses_table_shorthand(sql: str, dialect: str | None = None) -> bool:
         tokens = resolved.tokenize(sql)
     except sqlglot.errors.TokenError:
         return False
-    previous: TokenType | None = None
+    previous = ""
     for token in tokens:
-        if token.token_type is TokenType.TABLE and (
-            previous is None or previous in _TABLE_SHORTHAND_PREDECESSORS
+        if (
+            token.token_type is TokenType.TABLE
+            and previous not in _TABLE_KEYWORD_NOT_SHORTHAND_AFTER
         ):
             return True
-        previous = token.token_type
+        previous = token.text.upper()
     return False
 
 

@@ -31,6 +31,13 @@ DIALECTS = ["postgres", "mysql", "sqlite", None]
         "SELECT id FROM a UNION DISTINCT TABLE users",
         "SELECT id FROM a INTERSECT TABLE users",
         "SELECT id FROM a EXCEPT TABLE users",
+        "WITH x AS (SELECT 1 AS id) TABLE orders",
+        "WITH RECURSIVE x AS (SELECT 1 AS id) TABLE orders",
+        "INSERT INTO t TABLE users",
+        "CREATE TABLE copy AS TABLE users",
+        # Not shorthand, but refused: the check errs toward True.
+        "SELECT * FROM TABLE(f())",
+        "SELECT id FROM t AS table",
     ],
 )
 def test_table_shorthand_is_found(sql: str, dialect: str | None) -> None:
@@ -46,6 +53,12 @@ def test_table_shorthand_is_found(sql: str, dialect: str | None) -> None:
         'SELECT * FROM "table"',
         "SELECT 'TABLE users'",
         "SELECT id FROM t -- TABLE users",
+        "SELECT t.table FROM t",
+        "SHOW CREATE TABLE users",
+        "CREATE TABLE copy AS SELECT * FROM users",
+        "CREATE TEMPORARY TABLE x (a INT)",
+        "DROP TABLE users",
+        "SELECT id FROM information_schema.tables",
         "",
     ],
 )

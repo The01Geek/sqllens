@@ -380,6 +380,7 @@ class TestApplyRlsScopeCoverage:
             "SELECT * FROM (TABLE orders) sub",
             "SELECT * FROM LATERAL (TABLE orders) sub",
             "SELECT id FROM a UNION TABLE orders",
+            "WITH x AS (SELECT 1 AS id) TABLE orders",
         ):
             with pytest.raises(RlsError, match="refusing a TABLE statement"):
                 apply_rls(stmt, [_rule(value="acme")], dialect=dialect)
