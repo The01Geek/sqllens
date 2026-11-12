@@ -363,26 +363,26 @@ class TestApplyRlsScopeCoverage:
             )
 
     def test_table_command_blocks_fail_secure(self) -> None:
-        # Postgres `TABLE orders` is semantically `SELECT * FROM orders` but
-        # parses to a non-Query root with no exp.Table node — the scope walk
-        # and backstop would never see the protected read. Fail-secure: block.
+        # Postgres `TABLE orders` is semantically `SELECT * FROM orders`; it is
+        # refused on every sqlglot version, whatever its parse. Fail-secure.
         # Case folding of the keyword and the alternate orientation behave the
         # same way through this gate.
         for stmt in ("TABLE orders", "table orders"):
-            with pytest.raises(RlsError, match="SELECT-shaped"):
+            with pytest.raises(RlsError, match="unquoted TABLE keyword"):
                 apply_rls(stmt, [_rule(value="acme")], dialect="postgres")
 
     @pytest.mark.parametrize("dialect", ["postgres", "sqlite", "mysql"])
-    def test_table_subquery_misparse_blocks_fail_secure(self, dialect: str) -> None:
-        # `(TABLE orders) sub` is misparsed by sqlglot for every supported
-        # dialect: the keyword ``TABLE`` becomes the table name and the
-        # protected name ``orders`` lands in the .alias slot. A .name-only
-        # backstop misses it; the alias check must catch it and block.
+    def test_table_subquery_blocks_fail_secure(self, dialect: str) -> None:
+        # `(TABLE orders) sub` parses differently across sqlglot versions
+        # (a Table named ``TABLE`` before 30.30, a SELECT from 30.30); the
+        # tokenizer check refuses it before either parse is relied on.
         for stmt in (
             "SELECT * FROM (TABLE orders) sub",
             "SELECT * FROM LATERAL (TABLE orders) sub",
+            "SELECT id FROM a UNION TABLE orders",
+            "WITH x AS (SELECT 1 AS id) TABLE orders",
         ):
-            with pytest.raises(RlsError, match="could not prove"):
+            with pytest.raises(RlsError, match="unquoted TABLE keyword"):
                 apply_rls(stmt, [_rule(value="acme")], dialect=dialect)
 
     def test_recursive_cte_named_like_table_does_not_read_base_table(

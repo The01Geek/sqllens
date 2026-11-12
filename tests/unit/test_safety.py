@@ -842,6 +842,22 @@ class TestShowIsReadShaped:
     def test_show_is_read_shaped(self, sql: str) -> None:
         assert is_read_shaped(sql) is True
 
+    @pytest.mark.parametrize("dialect", ["postgres", "mysql", None])
+    def test_table_shorthand_is_read_shaped(self, dialect: str | None) -> None:
+        # With read_only off, ``TABLE t`` reaches the runner and returns rows.
+        assert is_read_shaped("TABLE orders", dialect) is True
+
+
+@pytest.mark.parametrize("dialect", ["postgres", "mysql", "sqlite", None])
+@pytest.mark.parametrize(
+    "sql",
+    ["TABLE users", "SELECT id FROM a UNION TABLE users", "WITH x AS (SELECT 1) TABLE users"],
+)
+def test_assert_select_only_refuses_table_shorthand(sql: str, dialect: str | None) -> None:
+    # sqlglot 30.30+ parses these as SELECTs; they are refused on every version.
+    with pytest.raises(UnsafeSqlError):
+        assert_select_only(sql, dialect=dialect)
+
 
 class TestIsIntrospectionQuery:
     """Distinguish schema-introspection reads from data-answering queries.

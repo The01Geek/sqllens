@@ -206,7 +206,7 @@ def test_refused_dialect_specific_shapes(sql: str, dialect: str) -> None:
     ],
 )
 def test_table_statement_is_refused(sql: str, dialect: str | None) -> None:
-    """``TABLE t`` means ``SELECT * FROM t``; sqlglot reads it as a name ``TABLE``."""
+    """``TABLE t`` means ``SELECT * FROM t``; it is refused on any sqlglot parse."""
     with pytest.raises(WholeRowSelectError):
         assert_no_whole_row_select(sql, dialect=dialect)
     assert whole_row._whole_row_reference(sql, dialect) == "TABLE"
@@ -237,13 +237,22 @@ def test_refusal_message_is_actionable(sql: str) -> None:
 
 @pytest.mark.parametrize(
     ("sql", "dialect"),
+    [("TABLE public.users", "postgres"), ("TABLE app.users", "mysql")],
+)
+def test_schema_qualified_table_statement_is_refused(sql: str, dialect: str) -> None:
+    # sqlglot before 30.30 cannot parse it (UnsafeSqlError); from 30.30 it is a
+    # SELECT and the shorthand check refuses it (WholeRowSelectError, a
+    # subclass). Either way the query does not run.
+    with pytest.raises(UnsafeSqlError):
+        assert_no_whole_row_select(sql, dialect=dialect)
+
+
+@pytest.mark.parametrize(
+    ("sql", "dialect"),
     [
         ("SELECT * FROM", "postgres"),
         ("SELECT 'unterminated FROM users", "postgres"),
         ("SELECT id /*! , users.* */ FROM users", "mysql"),
-        # A schema-qualified TABLE statement does not parse.
-        ("TABLE public.users", "postgres"),
-        ("TABLE app.users", "mysql"),
     ],
 )
 def test_unparseable_sql_is_refused_as_unsafe(sql: str, dialect: str) -> None:

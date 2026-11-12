@@ -27,7 +27,8 @@ RLS is opt-in: an empty `rls` list disables the guard wholly (no decorator is wr
 The rewrite is **proven-clean**: rather than filtering only the SQL shapes it recognizes and silently passing the rest, the rewrite tracks every protected-table node it injected a predicate into *or* resolved as a CTE/derived reference, then re-walks the tree. Any reference to a protected table that cannot be accounted for blocks the query (`RlsError`). The decorator never returns SQL it could not prove fully scoped — `RlsGuardRunner` turns that into a blocked query, never an unfiltered execution. The same fail-secure backstop catches:
 
 - A parse failure (the SQL would not parse against the dialect).
-- A non-query statement (RLS only scopes SELECT-shaped reads — a Postgres `TABLE orders` parses to a non-`exp.Query` root that exposes no `exp.Table` node, so the scope walk would never see the protected read; we reject up front instead of guessing).
+- A `TABLE orders` query, in any statement or subquery (PostgreSQL/MySQL shorthand for `SELECT * FROM orders`). sqlglot parses it differently before and from 30.30, so `apply_rls` finds it with the tokenizer (`uses_table_shorthand`) before parsing and refuses it on every version.
+- A non-query statement (RLS only scopes SELECT-shaped reads; anything that is not an `exp.Query` is rejected up front instead of guessed at).
 - More than one statement in the input.
 - A scope-analysis failure (sqlglot raised on `traverse_scope`).
 - A dynamic value that is missing from request metadata, of the wrong type (including a `bool` — see [How dynamic values are resolved](#how-dynamic-values-are-resolved)), or "suspicious" (empty string, very long string, control characters — classic injection-probe shapes).
@@ -129,7 +130,7 @@ The rewrite therefore uses `sqlglot.optimizer.scope.traverse_scope` to enumerate
 
 Tables in the scope's `FROM`/`JOIN`s that are *not* base-table sources resolve to a sibling CTE/derived scope; those are recorded as references and deliberately not filtered.
 
-The final backstop is a full-tree walk: every `exp.Table` whose `.name` *or* `.alias` matches a protected table must either be in the injected set or in the references set. The `.alias` half catches a phantom keyword-as-identifier shape — e.g. Postgres `SELECT * FROM (TABLE orders) sub` can parse to a `Table` named `TABLE` with alias `orders`, which a `.name`-only check would miss. Anything left over fails the proof and blocks the query.
+The final backstop is a full-tree walk: every `exp.Table` whose `.name` *or* `.alias` matches a protected table must either be in the injected set or in the references set. The `.alias` half catches a phantom keyword-as-identifier shape — e.g. before sqlglot 30.30, `SELECT * FROM (TABLE orders) sub` parsed to a `Table` named `TABLE` with alias `orders`, which a `.name`-only check would miss (that statement is now refused earlier by the tokenizer check; the alias check stays as a backstop). Anything left over fails the proof and blocks the query.
 
 ## How dynamic values are resolved
 
