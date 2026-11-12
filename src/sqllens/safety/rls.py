@@ -228,7 +228,7 @@ def apply_rls(
     if uses_table_shorthand(sql, dialect):
         raise RlsError(
             "row-level security can only scope SELECT-shaped reads; refusing "
-            "a TABLE statement"
+            "SQL with an unquoted TABLE keyword (a TABLE statement)"
         )
 
     try:
@@ -246,9 +246,8 @@ def apply_rls(
 
     # Fail-secure on non-query shapes. Scope analysis can only reason about
     # SELECT/UNION-shaped reads (``TABLE orders`` was refused above). The
-    # agent emits SELECT reads;
-    # anything that is not a query is something we cannot prove scoped — block
-    # it rather than guess.
+    # agent emits SELECT reads; anything that is not a query is something we
+    # cannot prove scoped — block it rather than guess.
     if not isinstance(tree, exp.Query):
         raise RlsError(
             "row-level security can only scope SELECT-shaped reads; refusing "

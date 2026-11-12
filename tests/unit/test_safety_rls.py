@@ -368,7 +368,7 @@ class TestApplyRlsScopeCoverage:
         # Case folding of the keyword and the alternate orientation behave the
         # same way through this gate.
         for stmt in ("TABLE orders", "table orders"):
-            with pytest.raises(RlsError, match="refusing a TABLE statement"):
+            with pytest.raises(RlsError, match="unquoted TABLE keyword"):
                 apply_rls(stmt, [_rule(value="acme")], dialect="postgres")
 
     @pytest.mark.parametrize("dialect", ["postgres", "sqlite", "mysql"])
@@ -382,7 +382,7 @@ class TestApplyRlsScopeCoverage:
             "SELECT id FROM a UNION TABLE orders",
             "WITH x AS (SELECT 1 AS id) TABLE orders",
         ):
-            with pytest.raises(RlsError, match="refusing a TABLE statement"):
+            with pytest.raises(RlsError, match="unquoted TABLE keyword"):
                 apply_rls(stmt, [_rule(value="acme")], dialect=dialect)
 
     def test_recursive_cte_named_like_table_does_not_read_base_table(

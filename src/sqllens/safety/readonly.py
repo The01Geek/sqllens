@@ -33,19 +33,23 @@ class UnsafeSqlError(Exception):
 # First-keyword set used by per-runner adapters to decide whether to route a
 # query through the streaming/row-capped row-returning branch. Mirrors the SQL
 # forms the readonly guard accepts (a SELECT, a CTE or set operation that
-# ultimately yields rows, or a structural ``SHOW`` schema-discovery command —
+# ultimately yields rows, a ``TABLE t`` query, which sqlglot 30.30+ parses as
+# ``SELECT * FROM t``, or a structural ``SHOW`` schema-discovery command —
 # all of which return a result set rather than a rows-affected count). A
 # first-token check is sufficient here because the readonly guard has already
 # parsed and validated the statement upstream.
 _READ_SHAPED_KEYWORDS: frozenset[str] = frozenset(
-    {"SELECT", "WITH", "UNION", "INTERSECT", "EXCEPT", "SHOW"}
+    {"SELECT", "WITH", "UNION", "INTERSECT", "EXCEPT", "SHOW", "TABLE"}
 )
 
 
-# Uppercased text of a token after which an unquoted ``TABLE`` keyword names an
-# object kind in a command (``CREATE TABLE``, ``SHOW CREATE TABLE``, MySQL's
-# ``CHECK TABLE``), not a ``TABLE t`` query. ``.`` makes it part of a
-# qualified name (``t.table``).
+# Uppercased text of the unquoted token after which an unquoted ``TABLE``
+# keyword is not read as a ``TABLE t`` query: ``.`` (a qualified name,
+# ``t.table``) and the command keywords listed here (``CREATE TABLE``,
+# ``SHOW CREATE TABLE``, MySQL's ``CHECK TABLE``). Any command form not listed
+# is read as shorthand. ``EXPLAIN`` and ``ANALYZE`` are listed because those
+# statements return a plan, not the table's rows, even when the ``TABLE`` that
+# follows them is shorthand (``EXPLAIN ANALYZE TABLE orders``).
 _TABLE_KEYWORD_NOT_SHORTHAND_AFTER: frozenset[str] = frozenset(
     {
         ".",
@@ -66,6 +70,8 @@ _TABLE_KEYWORD_NOT_SHORTHAND_AFTER: frozenset[str] = frozenset(
         "CHECKSUM",
         "OPTIMIZE",
         "REPAIR",
+        "SHOW",
+        "EXPLAIN",
     }
 )
 
@@ -81,13 +87,13 @@ def uses_table_shorthand(sql: str, dialect: str | None = None) -> bool:
     Every ``TABLE`` keyword token (an unquoted ``table`` in any case; a quoted
     identifier is not one) counts, wherever it appears (after ``WITH ...``,
     ``;``, ``(``, a set operator or anything else), except one directly after
-    a token in ``_TABLE_KEYWORD_NOT_SHORTHAND_AFTER``: ``.`` (``t.table``) or
-    a command keyword such as ``CREATE`` or ``DROP``. This errs toward
+    an unquoted token listed in ``_TABLE_KEYWORD_NOT_SHORTHAND_AFTER``. This
+    errs toward
     ``True``: SQL that uses ``TABLE`` any other way, such as an unquoted alias
     or a ``TABLE(...)`` function call, is reported too, so the callers refuse
     it. A dialect name sqlglot does not know is logged at
     ``WARNING`` and treated as no dialect. SQL the tokenizer rejects
-    (``TokenError``) gives ``False``: every caller then parses the SQL, and
+    (``TokenError``) gives ``False``: both callers also parse the SQL, and
     that parse fails closed. Any other tokenizer exception propagates.
     """
     try:
@@ -109,7 +115,9 @@ def uses_table_shorthand(sql: str, dialect: str | None = None) -> bool:
             and previous not in _TABLE_KEYWORD_NOT_SHORTHAND_AFTER
         ):
             return True
-        previous = token.text.upper()
+        # A quoted identifier or a string is never a command keyword.
+        quoted = token.token_type in (TokenType.IDENTIFIER, TokenType.STRING)
+        previous = "" if quoted else token.text.upper()
     return False
 
 
@@ -689,9 +697,16 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
     """Raise ``UnsafeSqlError`` if ``sql`` contains anything other than reads.
 
     Multiple statements are not allowed. Parse failures are treated as unsafe —
-    we'd rather block a query we can't understand than execute it.
+    we'd rather block a query we can't understand than execute it. A
+    ``TABLE t`` query is refused on every sqlglot version
+    (``uses_table_shorthand``): before 30.30 sqlglot parses it as an alias,
+    from 30.30 as ``SELECT * FROM t``.
     """
     statements = _parse_statements(sql, dialect)
+    if uses_table_shorthand(sql, dialect):
+        raise UnsafeSqlError(
+            "TABLE statements are not allowed; write SELECT <columns> FROM <table>"
+        )
 
     if len(statements) != 1:
         raise UnsafeSqlError(

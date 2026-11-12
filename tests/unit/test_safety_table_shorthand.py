@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 
 import pytest
+import sqlglot
 
 from sqllens.safety.readonly import uses_table_shorthand
 
@@ -35,6 +36,8 @@ DIALECTS = ["postgres", "mysql", "sqlite", None]
         "WITH RECURSIVE x AS (SELECT 1 AS id) TABLE orders",
         "INSERT INTO t TABLE users",
         "CREATE TABLE copy AS TABLE users",
+        # A quoted identifier spelled like a command keyword exempts nothing.
+        'SELECT * FROM "create" TABLE users',
         # Not shorthand, but refused: the check errs toward True.
         "SELECT * FROM TABLE(f())",
         "SELECT id FROM t AS table",
@@ -58,6 +61,9 @@ def test_table_shorthand_is_found(sql: str, dialect: str | None) -> None:
         "CREATE TABLE copy AS SELECT * FROM users",
         "CREATE TEMPORARY TABLE x (a INT)",
         "DROP TABLE users",
+        "SHOW TABLE STATUS",
+        "EXPLAIN TABLE users",
+        "EXPLAIN ANALYZE TABLE users",
         "SELECT id FROM information_schema.tables",
         "",
     ],
@@ -75,3 +81,12 @@ def test_unknown_dialect_warns_and_uses_no_dialect(caplog: pytest.LogCaptureFixt
     with caplog.at_level(logging.WARNING, logger="sqllens.safety.readonly"):
         assert uses_table_shorthand("TABLE users", "no-such-dialect")
     assert "unknown sqlglot dialect" in caplog.text
+
+
+def test_other_tokenizer_errors_propagate(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(self: object, sql: str) -> list[object]:
+        raise RuntimeError("tokenizer bug")
+
+    monkeypatch.setattr(sqlglot.dialects.postgres.Postgres, "tokenize", boom)
+    with pytest.raises(RuntimeError, match="tokenizer bug"):
+        uses_table_shorthand("TABLE users", "postgres")

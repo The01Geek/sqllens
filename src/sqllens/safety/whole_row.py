@@ -38,8 +38,9 @@ refused, because the guard cannot show it is safe. ``TABLE t``, PostgreSQL's
 and MySQL's shorthand for ``SELECT * FROM t``, is refused in any statement or
 subquery. It is found with sqlglot's tokenizer (``uses_table_shorthand``),
 because sqlglot parses it differently across versions (a name ``TABLE``
-before 30.30, ``SELECT * FROM t`` from 30.30). A ``TABLE s.t`` that does not
-parse is refused as unparseable SQL.
+before 30.30, ``SELECT * FROM t`` from 30.30). The check errs toward
+refusal: an unquoted ``table`` alias or a ``TABLE(...)`` call is refused too.
+A ``TABLE s.t`` that does not parse is refused as unparseable SQL.
 
 Not covered: a whole row reached without a star, such as PostgreSQL's
 ``row_to_json(t)``, a bare ``t`` as a composite value, or a function that
