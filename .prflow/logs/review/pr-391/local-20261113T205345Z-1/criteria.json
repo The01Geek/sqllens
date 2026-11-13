@@ -1,0 +1,62 @@
+[
+  {
+    "criterion": 1,
+    "text": "`pyproject.toml` declares `mcp>=2.3.0,<3`, and its comment no longer says to keep the FastMCP 1.x API. `requirements.txt` is regenerated with the command in its header and locks an mcp release at 2.3.0 or later and below 3."
+  },
+  {
+    "criterion": 2,
+    "text": "No file under `src/` or `tests/` imports `mcp.server.fastmcp`."
+  },
+  {
+    "criterion": 3,
+    "text": "`build_server` returns an `mcp.server.mcpserver.MCPServer`. It registers exactly these tools, under these switches, complete by construction: - always: `query_database` and `list_data_sources` - with `memory.allow_import`: `import_memory` - with `memory.allow_admin_tools`: `list_memories`, `get_memory`, `delete_memory`, `clear_memories`, `add_memories`, `export_memories` and `get_memory_stats` - with `profiles.allow_admin_tools`: `list_profiles`, `get_profile`, `upsert_profile` and `delete_profile`"
+  },
+  {
+    "criterion": 4,
+    "text": "Each tool keeps its name, its argument names and its `_meta`; `query_database` keeps `_meta.ui.resourceUri` set to the query-results widget URI. The three `ui://` widget resources (query results, memory admin, config admin) are listed and read with MIME type `text/html;profile=mcp-app` and `_meta.ui.prefersBorder` set to `true`."
+  },
+  {
+    "criterion": 5,
+    "text": "When a tool's function raises an `Exception` other than the SDK's `ToolError` or `MCPError`, the client receives `isError: true` with the text `Error executing tool <name>: <message>`, where `<message>` is `str()` of the raised exception. When it raises a `BaseException` that is not an `Exception`, such as `asyncio.CancelledError`, that exception leaves the wrapper unchanged; a unit test pins this for `CancelledError`. Tests assert the error text through the real 2.x SDK, at minimum for these cases: - `query_database` with an invalid profile name (`ProfileNameError`) - `query_database` re-raising an `AgentRunError` with the conversation footer on and no agent trace - `import_memory` refused on an unauthenticated endpoint - one memory-admin tool raising `RuntimeError`"
+  },
+  {
+    "criterion": 6,
+    "text": "When the function behind a `ui://` widget resource raises an `Exception` other than the SDK's `ResourceError` or `MCPError`, a client's `resources/read` gets an error whose message is `Error reading resource <uri>: <message>`, where `<message>` is `str()` of the raised exception. A test asserts this through a real 2.x client for a widget whose asset is unavailable."
+  },
+  {
+    "criterion": 7,
+    "text": "With the conversation footer on and no agent trace, the `query_database` error result carries no `sqllens/*` key in `_meta`."
+  },
+  {
+    "criterion": 8,
+    "text": "With the conversation footer off, or with an agent trace present, the `query_database` error result keeps the text `_agent_error_result` builds today, and its `_meta` carries `sqllens/conversation`."
+  },
+  {
+    "criterion": 9,
+    "text": "A successful `query_database` result carries the same `sqllens/*` `_meta` channels as on 1.30.0: `sqllens/conversation`, `sqllens/blocks`, `sqllens/query`, `sqllens/memory_info`, `sqllens/agent_trace` (when `agent.show_details` is on) and `sqllens/model_info`."
+  },
+  {
+    "criterion": 10,
+    "text": "On both stdio and Streamable HTTP, `_request_metadata` forwards every request `_meta` key except the progress-token key (`progressToken` or `progress_token`) and keys starting with `io.modelcontextprotocol/`. An SDK-managed key outside that prefix, other than the progress token, is forwarded. It returns `{}` in each of these cases: - the forwarded keys exceed 64 keys, 16 KiB of compact ASCII-escaped JSON, 1024 nodes or 8 nesting levels below the root - the request carries no `_meta` - no request is active Tests drive real 2.x clients and assert: - `{\"tenant\": \"alpha\"}` arrives as `{\"tenant\": \"alpha\"}` - a request that also carries a progress token arrives as `{\"tenant\": \"alpha\"}` - the existing oversized-payload case arrives as `{}` - over Streamable HTTP, a request with `{\"tenant\": \"alpha\"}` from a client session that negotiated the 2026-07-28 protocol arrives as `{\"tenant\": \"alpha\"}`. That session's SDK stamps `io.modelcontextprotocol/protocolVersion`, `clientInfo` and `clientCapabilities` into the request's `_meta`."
+  },
+  {
+    "criterion": 11,
+    "text": "Over Streamable HTTP with the server bound to `0.0.0.0` and an auth mode the bind policy accepts, a request to `/mcp/` that passes SQL Lens's auth check and carries a non-loopback `Host` header gets HTTP 421 from the SDK's Host check. A test pins this."
+  },
+  {
+    "criterion": 12,
+    "text": "Streamable HTTP still serves the MCP endpoint at both `/mcp` and `/mcp/`, answers `/healthz` and `/readyz`, applies the configured auth mode, and starts and stops the session manager in the ASGI lifespan. The existing tests in `tests/integration/test_http_transport.py` and `tests/unit/test_transport_http.py` pass after porting to the 2.x client API."
+  },
+  {
+    "criterion": 13,
+    "text": "`sqllens serve` over stdio answers `list_tools` and `call_tool` from a 2.x `stdio_client`."
+  },
+  {
+    "criterion": 14,
+    "text": "After the change, these files describe `MCPServer` and mcp 2.x wherever they describe the SDK's current behavior, including the error format and how the `ToolError` conversion produces it: `AGENTS.md`, `docs/internal/mcp-server/transport.md`, `docs/internal/mcp-server/tools.md`, `docs/internal/architecture/overview.md`, `docs/internal/authentication/overview.md`, `docs/internal/database-connectors/row-level-security.md` and `docs/internal/setup/config-loading.md`. The docstrings and comments in `src/sqllens/server.py`, `src/sqllens/transport/http.py`, `src/sqllens/tools/query_database.py`, `src/sqllens/tools/_agent.py`, `src/sqllens/ui/__init__.py` and `src/sqllens/ui/memory_admin.html` do the same. AGENTS.md's gotcha about non-loopback `Host` headers names the loopback default of `MCPServer`'s `streamable_http_app()` as the source of the 421. `docs/internal/production-readiness-v0.1.0.md` and `docs/external/release-notes.md` stay unchanged as historical records."
+  },
+  {
+    "criterion": 15,
+    "text": "The change leaves these as they are: - `mcpb/build.sh`'s install without `-c requirements.txt`, so an MCPB bundle ships the newest mcp 2.x on PyPI at build time, which can be newer than the release CI tested. - The SDK's INFO log line for each tool failure. It now fires for every converted tool error and includes the client message, which can contain SQL text. - The SDK's `io.modelcontextprotocol/serverInfo` key on results of 2026-07-28 protocol sessions, including the footer-on, no-trace error result. - Errors that 2.x raises outside the tool's function, such as argument validation and output conversion. They keep the 2.x SDK's own text. - The JSON-RPC error code of a failed resource read, which the 2.x SDK sets. - The 2.x SDK's parsing of request `_meta`. It drops a caller key spelled `progress_token` before `_request_metadata` runs, so a dynamic RLS rule reading `progress_token` (forwarded on 1.30.0) blocks its queries on 2.x. A caller key starting with `io.modelcontextprotocol/`, also forwarded on 1.30.0, is excluded by the forwarding rule above. - The SDK's handling of 2026-07-28 protocol requests. They carry no session id, so the session manager's idle timeout and session cap do not bound them."
+  }
+]

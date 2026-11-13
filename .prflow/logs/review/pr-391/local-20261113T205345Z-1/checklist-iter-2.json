@@ -1,0 +1,1143 @@
+[
+  {
+    "id": "VC-1",
+    "category": "dependency_interaction",
+    "claim": "AGENTS.md gotcha asserts transport/http.py calls MCPServer.streamable_http_app() with no host= or transport_security=, and the SDK's loopback default (host=\"127.0.0.1\") enables a DNS-rebinding Host check that answers a non-loopback Host with 421.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`transport/http.py` calls `MCPServer.streamable_http_app()` with no `host=` or `transport_security=`, so the SDK keeps its loopback default (`host=\"127.0.0.1\"`) and turns on its DNS-rebinding Host check",
+    "source_file": "AGENTS.md",
+    "verify_against": "src/sqllens/transport/http.py and the installed mcp 2.x MCPServer.streamable_http_app",
+    "verify_hint": "Check the streamable_http_app call in build_asgi_app in transport/http.py and the default host/transport_security handling in mcp/server/mcpserver/server.py",
+    "claim_signature": "dependency_interaction:AGENTS.md:sdk-loopback-host-421",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "api_contract",
+    "claim": "Changelog fragment asserts tools, widget resources and stdio/HTTP endpoints are unchanged, a caller key progress_token is dropped by the SDK, protocol keys never reach RLS rules, and mcp 2.x Python clients must raise max_sse_event_size above a 1 MiB default to read the query-results or memory-admin widget over Streamable HTTP.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Python clients built on mcp 2.x must raise `max_sse_event_size` above its 1 MiB default to read the query-results or memory-admin widget over Streamable HTTP.",
+    "source_file": "changelog.d/391.changed.md",
+    "source_line": 1,
+    "verify_against": "installed mcp 2.x streamable HTTP client and packaged widget HTML sizes in src/sqllens/ui/",
+    "verify_hint": "Check the max_sse_event_size default in mcp/client/streamable_http.py and the size of load_widget_html output for query_results.html and memory_admin.html (config admin not named)",
+    "claim_signature": "api_contract:391.changed.md:max-sse-event-size",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "dependency_interaction",
+    "claim": "Docs claim the mcp 2.x SDK drops a caller _meta key spelled progress_token while parsing, before _request_metadata runs.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "On mcp 2.x the SDK drops a caller key spelled `progress_token` while parsing `_meta`, before `_request_metadata` runs",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "verify_against": "mcp 2.x RequestParamsMeta parsing in mcp/types",
+    "verify_hint": "Check RequestParamsMeta / request params parsing in the installed mcp types module for progress_token aliasing",
+    "claim_signature": "dependency_interaction:row-level-security.md:sdk-drops-progress-token",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "data_format_assumption",
+    "claim": "Auth doc asserts the 2.x SDK exposes _meta as a plain dict (RequestParamsMeta) on ctx.request_context.meta, and _request_metadata returns {} when no request is active, no _meta, _meta not a dict, bounds exceeded (64 keys, 16 KiB, 1024 nodes, 8 levels), or any other failure.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "It yields `{}` when no request is active, when the request carries no `_meta`, when `_meta` is not a dict or cannot be read, when the forwarded keys exceed the bounds (64 keys, 16 KiB, 1024 nodes, 8 levels), and on any other failure reading the request context or bounding the metadata",
+    "source_file": "docs/internal/authentication/overview.md",
+    "verify_against": "src/sqllens/server.py _request_metadata and mcp 2.x Context.request_context",
+    "verify_hint": "Check _request_metadata in server.py, its except clauses and bounds helper, and the RequestParamsMeta type in mcp types",
+    "claim_signature": "data_format_assumption:overview.md:request-metadata-fail-secure",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "api_contract",
+    "claim": "External RLS doc asserts progressToken, progress_token and any io.modelcontextprotocol/ key never reach RLS rules.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The MCP protocol's own keys never reach your rules either: the progress token (`progressToken`, and a key spelled `progress_token`) and any key starting with `io.modelcontextprotocol/`.",
+    "source_file": "docs/external/row-level-security.md",
+    "verify_against": "src/sqllens/server.py _request_metadata",
+    "verify_hint": "Trace a request _meta of {\"progressToken\":1,\"io.modelcontextprotocol/x\":1,\"tenant\":\"a\"} through _request_metadata in server.py",
+    "claim_signature": "api_contract:row-level-security.md:protocol-keys-excluded",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "dependency_interaction",
+    "claim": "tools.md asserts that on mcp 2.x MCPServer keeps an exception message only for ToolError/ResourceError, a bare other exception yields 'Error executing tool <name>', and MCPError becomes a JSON-RPC error.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "On mcp 2.x, `MCPServer` keeps an exception's message only for the SDK's own `ToolError` (or `ResourceError`); any other exception a tool raises reaches the client as the bare `Error executing tool <name>`, and an `MCPError` becomes a JSON-RPC error.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "installed mcp 2.x mcpserver tool and resource managers",
+    "verify_hint": "Check Tool.run / call_tool exception handling in mcp/server/mcpserver",
+    "claim_signature": "dependency_interaction:tools.md:sdk-tool-error-handling",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "api_contract",
+    "claim": "tools.md asserts _tool_errors re-raises any Exception other than ToolError/MCPError as ToolError(str(exc)) chained from the original, does not catch non-Exception BaseException, and uses functools.wraps.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "an `Exception` other than `ToolError` or `MCPError` is re-raised as `ToolError(str(exc))`, chained from the original",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/server.py _tool_errors",
+    "verify_hint": "Check _tool_errors in server.py, both sync and async branches",
+    "claim_signature": "api_contract:tools.md:tool-errors-wrapper",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "api_contract",
+    "claim": "tools.md asserts _resource_errors(uri) re-raises non-ResourceError/MCPError Exceptions as ResourceError(f\"Error reading resource {uri}: {exc}\") and that it wraps all three ui:// widget resources.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The three `ui://` widget resources get the matching `_resource_errors(uri)` wrapper",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/server.py _resource_errors and _resource registrations",
+    "verify_hint": "Check _resource_errors and each _resource(...) registration in build_server",
+    "claim_signature": "api_contract:tools.md:resource-errors-wrapper",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "absolute_claim",
+    "claim": "tools.md asserts every tool and widget resource is registered through _tool/_resource helpers.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Every tool and widget resource is registered through two local helpers, `_tool(...)` and `_resource(uri, ...)`",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/server.py build_server",
+    "verify_hint": "Falsifying input: any @mcp.tool or @mcp.resource decorator used directly in build_server (e.g. in the profile-admin block)",
+    "claim_signature": "absolute_claim:tools.md:all-registered-via-helpers",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "test_mock_alignment",
+    "claim": "tools.md asserts tests/unit/test_mcp_sdk_contract.py pins the error text through a real 2.x client.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`tests/unit/test_mcp_sdk_contract.py` pins the error text through a real 2.x client.",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "tests/unit/test_mcp_sdk_contract.py",
+    "verify_hint": "Check that test file uses an in-memory or real mcp 2.x Client rather than calling the wrapper directly",
+    "claim_signature": "test_mock_alignment:tools.md:sdk-contract-test-real-client",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "dependency_interaction",
+    "claim": "tools.md asserts mcp 2.x MCPServer.tool and MCPServer.resource keep the meta= keyword.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "whose `MCPServer.tool` and `MCPServer.resource` keep the `meta=` keyword",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "installed mcp 2.x MCPServer",
+    "verify_hint": "Check the tool() and resource() signatures in mcp/server/mcpserver/server.py",
+    "claim_signature": "dependency_interaction:tools.md:meta-keyword",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "dependency_interaction",
+    "claim": "tools.md asserts structured_output=False stops MCPServer from deriving an outputSchema.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "installed mcp 2.x MCPServer.tool",
+    "verify_hint": "Check structured_output handling in MCPServer.tool / Tool.from_function",
+    "claim_signature": "dependency_interaction:tools.md:structured-output-false",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "api_contract",
+    "claim": "tools.md asserts with footer on and agent_trace None server.py re-raises AgentRunError so MCPServer formats it 'exactly as before', relying on _tool_errors to produce the 1.x text.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "it re-raises so MCPServer formats the failure exactly as before, no `_meta`",
+    "source_file": "docs/internal/mcp-server/tools.md",
+    "verify_against": "src/sqllens/server.py query_database AgentRunError handling",
+    "verify_hint": "Check the except AgentRunError branch in query_database in server.py and the _tool_errors wrapping",
+    "claim_signature": "api_contract:tools.md:footer-on-reraise",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "test_mock_alignment",
+    "claim": "row-level-security.md asserts tests/unit/test_metadata_bounds.py, tests/integration/test_metadata_stdio.py and test_http_transport.py (including a 2026-07-28 session) pin the forwarding rule.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "verify_against": "the named test files",
+    "verify_hint": "Check those test files exist and include a 2026-07-28 protocol session case",
+    "claim_signature": "test_mock_alignment:row-level-security.md:cited-tests",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "dependency_interaction",
+    "claim": "mcp 2.x exports MCPServer and Context from mcp.server.mcpserver, ToolError/ResourceError from mcp.server.mcpserver.exceptions, MCPError from mcp.shared.exceptions, and CallToolResult/TextContent from mcp.types",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "verify_against": "installed mcp 2.3.0 package",
+    "verify_hint": "Check mcp/server/mcpserver/__init__.py, mcp/server/mcpserver/exceptions.py, mcp/shared/exceptions.py and mcp/types (or mcp-types package) for these names",
+    "claim_signature": "dependency_interaction:server.py:mcp2 import paths",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "dependency_interaction",
+    "claim": "In mcp 2.x Tool.run, a ToolError raised by the tool function becomes isError text 'Error executing tool <name>: <message>', while other Exceptions yield only 'Error executing tool <name>'; MCPError is re-raised unchanged by the wrapper",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 204,
+    "verify_against": "mcp 2.x mcp/server/mcpserver/tools/base.py",
+    "verify_hint": "Check Tool.run exception handling in mcp.server.mcpserver.tools.base and how the server converts ToolError to CallToolResult",
+    "claim_signature": "dependency_interaction:server.py:toolerror text format:204",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "dependency_interaction",
+    "claim": "functools.wraps on the async wrapper preserves what the 2.x SDK uses to derive tool name, description, input schema and Context parameter detection (it follows __wrapped__/signature), and the wrapper is still detected as async",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 204,
+    "verify_against": "mcp 2.x tool registration",
+    "verify_hint": "Check Tool.from_function / func_metadata and find_context_parameter in mcp.server.mcpserver.tools and utilities for inspect.signature / get_type_hints use",
+    "claim_signature": "dependency_interaction:server.py:wraps preserves schema:204",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "dependency_interaction",
+    "claim": "In mcp 2.x, a ResourceError raised from a resource function reaches the client's resources/read with its message intact, while other exceptions are replaced by 'Error reading resource <uri>'; the wrapped sync function is still treated as a static/function resource with no parameters",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 230,
+    "source_line_end": 246,
+    "verify_against": "mcp 2.x resource read path",
+    "verify_hint": "Check FunctionResource.read in mcp.server.mcpserver.resources.types and MCPServer.read_resource for exception handling and message propagation",
+    "claim_signature": "dependency_interaction:server.py:resourceerror message kept:246",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "absolute_claim",
+    "claim": "Every tool and widget resource must be registered via _tool/_resource; a direct @mcp.tool/@mcp.resource registration loses the error-text wrapper",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Register tools and widget resources only through these two helpers, never\n    # ``@mcp.tool``/``@mcp.resource`` directly: a bypassing registration loses\n    # the error-text wrapper and its client sees a bare \"Error executing tool\".",
+    "source_file": "src/sqllens/server.py",
+    "verify_against": "build_server in src/sqllens/server.py",
+    "verify_hint": "Trace an input: any remaining @mcp.tool( or @mcp.resource( decorator in build_server would falsify completeness",
+    "claim_signature": "absolute_claim:server.py:only helpers register",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "data_format_assumption",
+    "claim": "In mcp 2.x ctx.request_context.meta is a plain dict (or None) holding all request _meta keys including progressToken and io.modelcontextprotocol/* keys; non-dict values are treated as invalid and return {}",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 282,
+    "verify_against": "mcp 2.x RequestContext and request params Meta type",
+    "verify_hint": "Check RequestContext.meta in mcp.server context/shared modules and the RequestParams meta definition in mcp-types",
+    "claim_signature": "data_format_assumption:server.py:request meta dict:282",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "data_format_assumption",
+    "claim": "The 64-key limit applies to the forwarded keys after excluding progress-token and io.modelcontextprotocol/ keys, and copy_bounded_json enforces the 16 KiB, 1024-node and 8-level limits on that dict",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 318,
+    "verify_against": "copy_bounded_json in src/sqllens/_bounded_json.py",
+    "verify_hint": "Check copy_bounded_json limits and that _request_metadata passes the filtered dict",
+    "claim_signature": "data_format_assumption:server.py:metadata bounds forwarded:318",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "api_contract",
+    "claim": "With footer on and no agent trace, query_database re-raises AgentRunError so _tool_errors converts it to ToolError and the result has no sqllens/* _meta, with text identical to _agent_error_result's",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 478,
+    "verify_against": "_agent_error_result and _tool_errors in server.py, SDK Tool.run",
+    "verify_hint": "Compare _agent_error_result text with the SDK's ToolError formatting in mcp.server.mcpserver.tools.base",
+    "criterion": 7,
+    "claim_signature": "api_contract:server.py:footer no-trace reraise:478",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "dependency_interaction",
+    "claim": "MCPServer.streamable_http_app() with no host/transport_security args defaults to host 127.0.0.1 and enables DNS-rebinding protection, rejecting non-loopback Host headers with 421",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`_build_asgi_app_bare` calls `MCPServer.streamable_http_app()` with no `host=` or `transport_security=` argument, so the SDK keeps its `host=\"127.0.0.1\"` default and, with `transport_security` left `None`, turns on DNS-rebinding protection for that loopback host.",
+    "source_file": "docs/internal/mcp-server/transport.md",
+    "verify_against": "mcp 2.x MCPServer.streamable_http_app and src/sqllens/transport/http.py",
+    "verify_hint": "Check streamable_http_app signature in mcp.server.mcpserver.server and the TransportSecurity setup; check the call in _build_asgi_app_bare",
+    "claim_signature": "dependency_interaction:transport.md:sdk 421 default",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "dependency_interaction",
+    "claim": "The mcp 2.x Python streamable_http_client has a max_sse_event_size parameter defaulting to 1 MiB, the query-results and memory-admin widgets exceed it, and the named test passes a larger value",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The mcp 2.x Python client's `streamable_http_client` refuses a single SSE event over `max_sse_event_size` (1 MiB by default).",
+    "source_file": "docs/internal/mcp-server/transport.md",
+    "verify_against": "mcp 2.x mcp/client/streamable_http.py; tests/integration/test_http_transport.py",
+    "verify_hint": "Check streamable_http_client parameters; check TestNoAuth::test_widget_resource_read_through_auth; check widget HTML sizes under src/sqllens/ui/",
+    "claim_signature": "dependency_interaction:transport.md:max sse event size",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "api_contract",
+    "claim": "tests/integration/test_http_transport.py contains TestTrustedHost::test_wildcard_bind_non_loopback_host_gets_sdk_421 pinning a 421 for an allowed non-loopback host on a 0.0.0.0 bind after auth",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/mcp-server/transport.md",
+    "verify_against": "tests/integration/test_http_transport.py",
+    "verify_hint": "Check class TestTrustedHost for that test and its assertions",
+    "criterion": 11,
+    "claim_signature": "api_contract:transport.md:421 test pinned",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "api_contract",
+    "claim": "The RuntimeError message raised when session_manager is missing reads 'MCPServer no longer exposes a session_manager attribute; ...' and MCPServer exposes a public session_manager property",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "on miss it raises `RuntimeError(\"MCPServer no longer exposes a session_manager attribute; the mcp SDK likely renamed or removed it. …\")`",
+    "source_file": "docs/internal/mcp-server/transport.md",
+    "verify_against": "build_asgi_app in src/sqllens/transport/http.py; mcp 2.x MCPServer",
+    "verify_hint": "Check the except AttributeError branch in build_asgi_app and MCPServer.session_manager",
+    "claim_signature": "api_contract:transport.md:session manager error text",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "dependency_interaction",
+    "claim": "MCPServer registers its Streamable HTTP endpoint at bare /mcp and the 'Task group is not initialized. Make sure to use run().' assertion text still exists in the 2.x session manager",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docs/internal/mcp-server/transport.md",
+    "verify_against": "mcp 2.x streamable_http_app and StreamableHTTPSessionManager",
+    "verify_hint": "Check streamable_http_path default in mcp.server.mcpserver settings and the task group error in mcp.server.streamable_http_manager",
+    "claim_signature": "dependency_interaction:transport.md:endpoint path and taskgroup",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "dependency_interaction",
+    "claim": "requirements.txt lock is consistent with mcp 2.3.0's dependencies: httpx-sse removed and mcp-types==2.3.0 added",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "requirements.txt",
+    "verify_against": "mcp 2.3.0 package metadata",
+    "verify_hint": "Check Requires-Dist in the installed mcp-2.3.0 dist-info METADATA",
+    "claim_signature": "dependency_interaction:requirements.txt:mcp2 transitive deps",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "dependency_interaction",
+    "claim": "mcp 2.x exports `streamable_http_client` from `mcp.client.streamable_http`, yielding a 2-tuple (read, write), accepting `http_client=` and `max_sse_event_size=` keyword arguments",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_http_transport.py",
+    "verify_against": "installed mcp 2.x package",
+    "verify_hint": "Check `streamable_http_client` signature and yielded value in `mcp/client/streamable_http.py`",
+    "claim_signature": "dependency_interaction:test_http_transport.py:streamable-http-client-signature",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "dependency_interaction",
+    "claim": "The mcp 2.x client uses an `httpx2.AsyncClient` (not `httpx.AsyncClient`) for `http_client=`, and `httpx2` is a declared dependency available to tests",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_memory_import_auth.py",
+    "verify_against": "mcp 2.x streamable_http client and pyproject.toml / requirements.txt",
+    "verify_hint": "Check the type of `http_client` in `mcp/client/streamable_http.py` and whether httpx2 is locked in requirements.txt",
+    "claim_signature": "dependency_interaction:test_memory_import_auth.py:httpx2-client",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "data_format_assumption",
+    "claim": "mcp 2.x result/type models expose snake_case attributes `is_error`, `structured_content`, `mime_type`, `input_schema`, and `meta`",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_memory_bounds.py",
+    "verify_against": "mcp 2.x `mcp/types` models",
+    "verify_hint": "Check `CallToolResult`, `Tool`, `TextResourceContents` field names in mcp 2.x types",
+    "claim_signature": "data_format_assumption:test_memory_bounds.py:snake-case-result-fields",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "dependency_interaction",
+    "claim": "`ClientSession.discover()` exists in mcp 2.x, returns an object with `supported_versions`, and leaves the session negotiated on the 2026-07-28 protocol so call_tool works without `initialize()`",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_http_transport.py",
+    "verify_against": "mcp 2.x ClientSession",
+    "verify_hint": "Check `ClientSession.discover` in `mcp/client/session.py`",
+    "claim_signature": "dependency_interaction:test_http_transport.py:session-discover",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "dependency_interaction",
+    "claim": "In mcp 2.x, `ctx.request_context.meta` holds the raw request _meta including SDK-stamped `io.modelcontextprotocol/protocolVersion`, `clientInfo` and `clientCapabilities` for 2026-07-28 sessions, and the spy on `server._request_metadata` is invoked because server.py looks the function up at call time",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_http_transport.py",
+    "verify_against": "mcp 2.x Context/RequestContext and src/sqllens/server.py",
+    "verify_hint": "Check `RequestContext.meta` in mcp 2.x and how `_request_metadata` is referenced in `server.py`",
+    "claim_signature": "dependency_interaction:test_http_transport.py:request-context-meta",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "api_contract",
+    "claim": "On a 0.0.0.0 bind with auth none+insecure, a POST to /mcp/ with Host host.docker.internal:9999 passes TrustedHostMiddleware and auth and reaches the SDK, which returns 421",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_http_transport.py",
+    "verify_against": "src/sqllens/transport/http.py and mcp 2.x transport security",
+    "verify_hint": "Check the TrustedHost allowlist for wildcard binds in `_build_asgi_app_bare` and MCPServer.streamable_http_app's default transport_security",
+    "claim_signature": "api_contract:test_http_transport.py:wildcard-bind-421",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "absolute_claim",
+    "claim": "Passing no host= or transport_security= keeps the 127.0.0.1 default and the SDK's Host check answering non-loopback Host with 421",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Pass no host= / transport_security=: the 127.0.0.1 default keeps the\n    # SDK's own Host check, which answers a non-loopback Host with 421 behind\n    # our allowlist and auth. Changing either silently changes that check.",
+    "source_file": "src/sqllens/transport/http.py",
+    "verify_against": "mcp 2.x MCPServer constructor and streamable_http_app",
+    "verify_hint": "Check MCPServer defaults for host and transport_security and how build_server constructs MCPServer in server.py; falsifying input: a build_server that passes host='0.0.0.0'",
+    "claim_signature": "absolute_claim:http.py:default-host-421",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "dependency_interaction",
+    "claim": "MCPServer in mcp 2.x exposes a `session_manager` attribute and `streamable_http_app()` registering its route at `/mcp`",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/transport/http.py",
+    "verify_against": "mcp 2.x `mcp/server/mcpserver`",
+    "verify_hint": "Check `MCPServer.session_manager` and `streamable_http_app` path default",
+    "claim_signature": "dependency_interaction:http.py:session-manager-route",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-37",
+    "category": "api_contract",
+    "claim": "server.py's `_resource_errors` carries the widget asset error message past the SDK's generic resource error",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Surface an actionable message (server.py's\n        # _resource_errors carries it past the SDK's generic resource error)",
+    "source_file": "src/sqllens/ui/__init__.py",
+    "verify_against": "src/sqllens/server.py",
+    "verify_hint": "Check `_resource_errors` in server.py and its use on the ui:// resource functions",
+    "claim_signature": "api_contract:__init__.py:resource-errors-carries-message",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-38",
+    "category": "api_contract",
+    "claim": "server.py's `_tool_errors` wrapper converts any exception from query_database to ToolError, which the SDK maps to isError with text `Error executing tool query_database: <message>`",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Its ``_tool_errors`` wrapper converts\nany exception from this module to the SDK's ``ToolError``, which the SDK maps\nto an ``isError: true`` result whose client text is\n``Error executing tool query_database: <message>``.",
+    "source_file": "src/sqllens/tools/query_database.py",
+    "verify_against": "src/sqllens/server.py and mcp 2.x tool error handling",
+    "verify_hint": "Check `_tool_errors` in server.py (exception breadth, BaseException passthrough) and ToolError handling in mcp 2.x MCPServer.call_tool",
+    "claim_signature": "api_contract:query_database.py:tool-errors-conversion",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-39",
+    "category": "api_contract",
+    "claim": "A RuntimeError from a memory-admin tool reaches the widget as non-JSON text formatted `Error executing tool <name>: <msg>`",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "// Tool returned a non-JSON message (RuntimeError → server's ToolError\n    // conversion; MCPServer formats it as \"Error executing tool <name>: <msg>\").",
+    "source_file": "src/sqllens/ui/memory_admin.html",
+    "verify_against": "src/sqllens/server.py",
+    "verify_hint": "Check `_tool_errors` in server.py applied to memory admin tools",
+    "claim_signature": "api_contract:memory_admin.html:tool-error-text",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-40",
+    "category": "api_contract",
+    "claim": "With details off, the server re-raises AgentRunError and the SDK formats it as before, unless the conversation footer is off",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "off — in which case the server re-raises and the SDK formats the failure\n    exactly as before",
+    "source_file": "src/sqllens/tools/query_database.py",
+    "verify_against": "src/sqllens/server.py query_database tool",
+    "verify_hint": "Check the AgentRunError handling branch in server.py's query_database wrapper",
+    "claim_signature": "api_contract:query_database.py:agent-run-error-reraise",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-41",
+    "category": "dependency_interaction",
+    "claim": "Passing `progress_callback=` to `ClientSession.call_tool` in mcp 2.x makes the client send a progressToken in _meta",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# A progress callback makes the session send a progressToken in _meta.",
+    "source_file": "tests/integration/test_metadata_stdio.py",
+    "verify_against": "mcp 2.x ClientSession.call_tool",
+    "verify_hint": "Check `call_tool`/`send_request` progress token handling in `mcp/client/session.py`",
+    "claim_signature": "dependency_interaction:test_metadata_stdio.py:progress-callback-token",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-42",
+    "category": "dependency_interaction",
+    "claim": "`mcp.server.mcpserver` exports `Context` and `MCPServer`, with `@server.tool()` and `server.run(transport='stdio')`",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_metadata_stdio.py",
+    "verify_against": "mcp 2.x `mcp/server/mcpserver/__init__.py`",
+    "verify_hint": "Check exports of `mcp.server.mcpserver`",
+    "claim_signature": "dependency_interaction:test_metadata_stdio.py:mcpserver-exports",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-43",
+    "category": "absolute_claim",
+    "claim": "The ~1.5 MB widget exceeds the 2.x client's 1 MiB default SSE event cap",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The ~1.5 MB widget exceeds the 2.x Python client's 1 MiB default\n        # SSE event cap; a smaller cap here fails the read client-side.",
+    "source_file": "tests/integration/test_http_transport.py",
+    "verify_against": "mcp 2.x streamable_http client default max_sse_event_size and src/sqllens/ui widget assets",
+    "verify_hint": "Check the default of `max_sse_event_size` in `mcp/client/streamable_http.py` and the query-results widget size",
+    "claim_signature": "absolute_claim:test_http_transport.py:sse-event-cap",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-44",
+    "category": "data_format_assumption",
+    "claim": "`sqllens serve --no-preflight` over stdio with env-only config registers exactly query_database and list_data_sources, and list_data_sources text contains `(mysql+pymysql, read-only)` without connecting",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_stdio_serve.py",
+    "verify_against": "src/sqllens/cli.py serve and src/sqllens/tools list_data_sources",
+    "verify_hint": "Check `--no-preflight` option in cli.py and the list_data_sources formatting",
+    "claim_signature": "data_format_assumption:test_stdio_serve.py:list-data-sources-text",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-45",
+    "category": "api_contract",
+    "claim": "The unauthenticated import_memory refusal message equals the asserted text exactly",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/integration/test_memory_import_auth.py",
+    "verify_against": "src/sqllens/server.py import_memory guard",
+    "verify_hint": "Check the refusal message string in server.py or memory tools",
+    "claim_signature": "api_contract:test_memory_import_auth.py:refusal-text",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch3:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-46",
+    "category": "test_mock_alignment",
+    "claim": "The test helper hands `_request_metadata` a plain dict as `ctx.request_context.meta`, matching the type mcp 2.x's request context exposes for request `_meta`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_metadata_bounds.py",
+    "source_line": 18,
+    "source_line_end": 20,
+    "verify_against": "mcp 2.x SDK request context type and `_request_metadata` in src/sqllens/server.py",
+    "verify_hint": "Check the `meta` field type of the 2.x `RequestContext` in the installed mcp package and how `_request_metadata` in `src/sqllens/server.py` reads it",
+    "claim_signature": "test_mock_alignment:test_metadata_bounds.py:meta-plain-dict:18",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-47",
+    "category": "test_mock_alignment",
+    "claim": "The `NoRequest` stand-in raises `ValueError` from `request_context`, matching what mcp 2.x's `Context.request_context` raises when no request is active.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_metadata_bounds.py",
+    "source_line": 87,
+    "source_line_end": 92,
+    "verify_against": "mcp.server.mcpserver Context.request_context in the installed SDK; `_request_metadata` exception handling in src/sqllens/server.py",
+    "verify_hint": "Check `Context.request_context` property in mcp/server/mcpserver (context module) and the except clause in `_request_metadata`",
+    "claim_signature": "test_mock_alignment:test_metadata_bounds.py:no-request-valueerror:87",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-48",
+    "category": "source_authored",
+    "claim": "The comment asserts that a root dict plus key plus list plus 1021 items counts as exactly 1024 nodes under the metadata node limit.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Root dict + key + list + items: 1024 nodes at 1021 items.",
+    "source_file": "tests/unit/test_metadata_bounds.py",
+    "source_line": 104,
+    "verify_against": "node counting in the bounded JSON helper used by `_request_metadata`",
+    "verify_hint": "Check node counting in `src/sqllens/_bounded_json.py` (whether keys count as nodes) as called from `_request_metadata` in `src/sqllens/server.py`",
+    "claim_signature": "absolute_claim:test_metadata_bounds.py:node-count-arithmetic:104",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-49",
+    "category": "data_format_assumption",
+    "claim": "The nesting test assumes a depth-8 chain of dicts below the root is accepted and depth 9 is rejected, matching the '8 nesting levels below the root' limit as implemented.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_metadata_bounds.py",
+    "source_line": 95,
+    "source_line_end": 100,
+    "verify_against": "depth counting in src/sqllens/_bounded_json.py",
+    "verify_hint": "Check how depth is counted (root level, leaf scalars) in `src/sqllens/_bounded_json.py`",
+    "claim_signature": "data_format_assumption:test_metadata_bounds.py:nesting-depth-boundary:95",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-50",
+    "category": "test_mock_alignment",
+    "claim": "`BrokenMeta(dict)` overriding `items()` exercises the accessor-failure path, which requires `_request_metadata` to call `.items()` (not iterate or copy the dict another way) inside its guarded block, logging 'failed to read request metadata; returning empty metadata'.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_metadata_bounds.py",
+    "source_line": 119,
+    "source_line_end": 123,
+    "verify_against": "`_request_metadata` in src/sqllens/server.py",
+    "verify_hint": "Check how `_request_metadata` reads the meta dict and the log message text in its except branch",
+    "claim_signature": "test_mock_alignment:test_metadata_bounds.py:brokenmeta-items-path:119",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-51",
+    "category": "dependency_interaction",
+    "claim": "`mcp.Client(server)` accepts an `MCPServer` instance directly (in-memory transport) and its results expose snake_case `is_error`, `input_schema`, `mime_type` and `meta` attributes.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mcp_sdk_contract.py",
+    "verify_against": "installed mcp 2.x package",
+    "verify_hint": "Check `mcp.Client` constructor and `mcp.types` `Tool`, `Resource`, `CallToolResult`, `TextResourceContents` field names",
+    "claim_signature": "dependency_interaction:test_mcp_sdk_contract.py:client-inmemory-api",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-52",
+    "category": "source_authored",
+    "claim": "The module docstring asserts the client uses `mode=\"auto\"` so the session negotiates the 2026-07-28 protocol.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "transport, ``mode=\"auto\"`` so the session negotiates the 2026-07-28 protocol)",
+    "source_file": "tests/unit/test_mcp_sdk_contract.py",
+    "verify_against": "Client construction in the test and mcp 2.x Client defaults",
+    "verify_hint": "Check whether `Client(mcp)` calls in test_mcp_sdk_contract.py pass a mode, and the default `mode` of `mcp.Client`",
+    "claim_signature": "absolute_claim:test_mcp_sdk_contract.py:mode-auto-negotiation",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-53",
+    "category": "dependency_interaction",
+    "claim": "A failed `client.read_resource` raises `mcp.shared.exceptions.MCPError` whose `.error.message` carries the server's error message.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mcp_sdk_contract.py",
+    "source_line": 256,
+    "source_line_end": 259,
+    "verify_against": "mcp.shared.exceptions.MCPError in installed SDK",
+    "verify_hint": "Check `MCPError` attributes (`error`, `code`, `message`) and Client.read_resource error handling",
+    "claim_signature": "dependency_interaction:test_mcp_sdk_contract.py:mcperror-error-message:256",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-54",
+    "category": "test_mock_alignment",
+    "claim": "Patching `ui_module._read_text` and clearing `load_widget_html`'s cache makes the query-results resource read fail with the same RuntimeError text the loader raises, i.e. the resource function calls `load_widget_html` (not a captured string from build time).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mcp_sdk_contract.py",
+    "source_line": 249,
+    "source_line_end": 255,
+    "verify_against": "src/sqllens/ui/__init__.py and resource registration in src/sqllens/server.py",
+    "verify_hint": "Check `_read_text`, `load_widget_html` and whether `build_server`'s widget resource reads HTML lazily",
+    "claim_signature": "test_mock_alignment:test_mcp_sdk_contract.py:widget-read-patch:249",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-55",
+    "category": "data_format_assumption",
+    "claim": "The `_ARGUMENTS` map lists each tool's argument names as registered in `build_server` (e.g. query_database: question, conversation_id, profile; list_memories: data_source_id, memory_type, limit, include_embedding_preview); the ctx parameter is excluded from the input schema.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mcp_sdk_contract.py",
+    "verify_against": "tool function signatures in src/sqllens/server.py and base revision",
+    "verify_hint": "Compare tool closure signatures in `build_server` (head and base views) with `_ARGUMENTS`",
+    "claim_signature": "api_contract:test_mcp_sdk_contract.py:tool-argument-names",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-56",
+    "category": "test_mock_alignment",
+    "claim": "The `fake_impl` replacing `query_database_impl_with_widgets` returns a 5-tuple (text, blocks, query, memory_info, trace) matching the real function's return shape and accepts `(cfg, question, **kwargs)`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mcp_sdk_contract.py",
+    "verify_against": "query_database_impl_with_widgets in src/sqllens/tools/query_database.py and its call in server.py",
+    "verify_hint": "Check the signature and return tuple of `query_database_impl_with_widgets` and how `build_server`'s query_database unpacks it",
+    "claim_signature": "test_mock_alignment:test_mcp_sdk_contract.py:fake-impl-shape",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-57",
+    "category": "data_format_assumption",
+    "claim": "The invalid-profile test expects message 'profile name must be 1-64 characters from [A-Za-z0-9_.-]' for 'bad name!', and the export test expects \"Unknown export format 'xml'; expected 'json' or 'csv'.\"; and import refusal text matches the server's constant.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mcp_sdk_contract.py",
+    "verify_against": "ProfileNameError message in src/sqllens/profiles.py; export/import error strings in server.py or memory module",
+    "verify_hint": "Check `ProfileNameError` text, the export format error in the memory admin export tool, and the unauthenticated-mutation message",
+    "claim_signature": "data_format_assumption:test_mcp_sdk_contract.py:expected-error-strings",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-58",
+    "category": "test_mock_alignment",
+    "claim": "`build_test_config` accepts keyword switches `allow_import`, `allow_admin_tools`, `profiles_allow_admin_tools`, `agent` and `auth`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_mcp_sdk_contract.py",
+    "verify_against": "tests/unit/_config_builders.py",
+    "verify_hint": "Check `build_test_config` parameters in tests/unit/_config_builders.py",
+    "claim_signature": "test_mock_alignment:test_mcp_sdk_contract.py:config-builder-kwargs",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-59",
+    "category": "dependency_interaction",
+    "claim": "`mcp._tool_manager.get_tool(name).fn` still exists on MCPServer 2.x and returns the registered (wrapped) callable.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_server.py",
+    "verify_against": "mcp.server.mcpserver MCPServer and ToolManager in installed SDK",
+    "verify_hint": "Check `MCPServer._tool_manager` and `ToolManager.get_tool`/`Tool.fn` in the installed mcp package",
+    "claim_signature": "dependency_interaction:test_server.py:tool-manager-fn",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-60",
+    "category": "dependency_interaction",
+    "claim": "`MCPServer.list_resources()` returns objects with `mime_type`, and `MCPServer.session_manager` is a property that can be monkeypatched on the class.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_transport_http.py",
+    "verify_against": "mcp.server.mcpserver.MCPServer",
+    "verify_hint": "Check `session_manager` definition on MCPServer and the guard message 'MCPServer no longer exposes' in src/sqllens/transport/http.py",
+    "claim_signature": "dependency_interaction:test_transport_http.py:session-manager-property",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-61",
+    "category": "test_mock_alignment",
+    "claim": "The `_tool_errors` wrapper chains the original exception as `__cause__` of the ToolError and keeps the message as `str(exc)`, which tests across files rely on (`excinfo.value.__cause__`).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_conversation_footer_setting.py",
+    "verify_against": "_tool_errors in src/sqllens/server.py",
+    "verify_hint": "Check `_tool_errors` uses `raise ToolError(str(exc)) from exc`",
+    "claim_signature": "test_mock_alignment:test_conversation_footer_setting.py:toolerror-cause-chain",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch4:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`pyproject.toml` declares `mcp>=2.3.0,<3`, and its comment no longer says to keep the FastMCP 1.x API. `requirements.txt` is regenerated with the command in its header and locks an mcp release at 2.3.0 or later and below 3.",
+    "claim_signature": "issue-acceptance-1",
+    "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/criteria.json",
+    "source_file": "pyproject.toml",
+    "verify_hint": "Check the mcp dependency line in pyproject.toml and mcp== in requirements.txt and its header command",
+    "id": "VC-62",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "No file under `src/` or `tests/` imports `mcp.server.fastmcp`.",
+    "claim_signature": "issue-acceptance-2",
+    "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: No file under `src/` or `tests/` imports `mcp.server.fastmcp`.",
+    "id": "VC-63",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`build_server` returns an `mcp.server.mcpserver.MCPServer`. It registers exactly these tools, under these switches, complete by construction: - always: `query_database` and `list_data_sources` - with `memory.allow_import`: `import_memory` - with `memory.allow_admin_tools`: `list_memories`, `get_memory`, `delete_memory`, `clear_memories`, `add_memories`, `export_memories` and `get_memory_stats` - with `profiles.allow_admin_tools`: `list_profiles`, `get_profile`, `upsert_profile` and `delete_profile`",
+    "claim_signature": "issue-acceptance-3",
+    "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 333,
+    "verify_hint": "Check build_server registrations and their gating flags",
+    "id": "VC-64",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Each tool keeps its name, its argument names and its `_meta`; `query_database` keeps `_meta.ui.resourceUri` set to the query-results widget URI. The three `ui://` widget resources (query results, memory admin, config admin) are listed and read with MIME type `text/html;profile=mcp-app` and `_meta.ui.prefersBorder` set to `true`.",
+    "claim_signature": "issue-acceptance-4",
+    "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: Each tool keeps its name, its argument names and its `_meta`; `query_database` keeps `_meta.ui.resourceUri` set to the query-results widget URI. The three `ui://` widget resources (query results, memory admin, config admin) are listed and read with MIME type `text/html;profile=mcp-app` and `_meta.ui.prefersBorder` set to `true`.",
+    "id": "VC-65",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "When a tool's function raises an `Exception` other than the SDK's `ToolError` or `MCPError`, the client receives `isError: true` with the text `Error executing tool <name>: <message>`, where `<message>` is `str()` of the raised exception. When it raises a `BaseException` that is not an `Exception`, such as `asyncio.CancelledError`, that exception leaves the wrapper unchanged; a unit test pins this for `CancelledError`. Tests assert the error text through the real 2.x SDK, at minimum for these cases: - `query_database` with an invalid profile name (`ProfileNameError`) - `query_database` re-raising an `AgentRunError` with the conversation footer on and no agent trace - `import_memory` refused on an unauthenticated endpoint - one memory-admin tool raising `RuntimeError`",
+    "claim_signature": "issue-acceptance-5",
+    "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 204,
+    "verify_hint": "Check _tool_errors and the tests for CancelledError and the four named error cases",
+    "id": "VC-66",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "When the function behind a `ui://` widget resource raises an `Exception` other than the SDK's `ResourceError` or `MCPError`, a client's `resources/read` gets an error whose message is `Error reading resource <uri>: <message>`, where `<message>` is `str()` of the raised exception. A test asserts this through a real 2.x client for a widget whose asset is unavailable.",
+    "claim_signature": "issue-acceptance-6",
+    "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/criteria.json",
+    "source_file": "src/sqllens/server.py",
+    "source_line": 246,
+    "verify_hint": "Check _resource_errors and a client test for an unavailable widget asset",
+    "id": "VC-67",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With the conversation footer on and no agent trace, the `query_database` error result carries no `sqllens/*` key in `_meta`.",
+    "claim_signature": "issue-acceptance-7",
+    "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: With the conversation footer on and no agent trace, the `query_database` error result carries no `sqllens/*` key in `_meta`.",
+    "id": "VC-68",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With the conversation footer off, or with an agent trace present, the `query_database` error result keeps the text `_agent_error_result` builds today, and its `_meta` carries `sqllens/conversation`.",
+    "claim_signature": "issue-acceptance-8",
+    "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: With the conversation footer off, or with an agent trace present, the `query_database` error result keeps the text `_agent_error_result` builds today, and its `_meta` carries `sqllens/conversation`.",
+    "id": "VC-69",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A successful `query_database` result carries the same `sqllens/*` `_meta` channels as on 1.30.0: `sqllens/conversation`, `sqllens/blocks`, `sqllens/query`, `sqllens/memory_info`, `sqllens/agent_trace` (when `agent.show_details` is on) and `sqllens/model_info`.",
+    "claim_signature": "issue-acceptance-9",
+    "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/criteria.json",
+    "source_file": "tests/unit/test_mcp_sdk_contract.py",
+    "source_line": 234,
+    "verify_hint": "Check `test_successful_answer_carries_sqllens_channels`",
+    "id": "VC-70",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "On both stdio and Streamable HTTP, `_request_metadata` forwards every request `_meta` key except the progress-token key (`progressToken` or `progress_token`) and keys starting with `io.modelcontextprotocol/`. An SDK-managed key outside that prefix, other than the progress token, is forwarded. It returns `{}` in each of these cases: - the forwarded keys exceed 64 keys, 16 KiB of compact ASCII-escaped JSON, 1024 nodes or 8 nesting levels below the root - the request carries no `_meta` - no request is active Tests drive real 2.x clients and assert: - `{\"tenant\": \"alpha\"}` arrives as `{\"tenant\": \"alpha\"}` - a request that also carries a progress token arrives as `{\"tenant\": \"alpha\"}` - the existing oversized-payload case arrives as `{}` - over Streamable HTTP, a request with `{\"tenant\": \"alpha\"}` from a client session that negotiated the 2026-07-28 protocol arrives as `{\"tenant\": \"alpha\"}`. That session's SDK stamps `io.modelcontextprotocol/protocolVersion`, `clientInfo` and `clientCapabilities` into the request's `_meta`.",
+    "claim_signature": "issue-acceptance-10",
+    "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/criteria.json",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "verify_hint": "Check _request_metadata and the 2026-07-28 session test in test_http_transport.py",
+    "id": "VC-71",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Over Streamable HTTP with the server bound to `0.0.0.0` and an auth mode the bind policy accepts, a request to `/mcp/` that passes SQL Lens's auth check and carries a non-loopback `Host` header gets HTTP 421 from the SDK's Host check. A test pins this.",
+    "claim_signature": "issue-acceptance-11",
+    "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/criteria.json",
+    "source_file": "tests/integration/test_http_transport.py",
+    "verify_hint": "Check `test_wildcard_bind_non_loopback_host_gets_sdk_421`",
+    "id": "VC-72",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Streamable HTTP still serves the MCP endpoint at both `/mcp` and `/mcp/`, answers `/healthz` and `/readyz`, applies the configured auth mode, and starts and stops the session manager in the ASGI lifespan. The existing tests in `tests/integration/test_http_transport.py` and `tests/unit/test_transport_http.py` pass after porting to the 2.x client API.",
+    "claim_signature": "issue-acceptance-12",
+    "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: Streamable HTTP still serves the MCP endpoint at both `/mcp` and `/mcp/`, answers `/healthz` and `/readyz`, applies the configured auth mode, and starts and stops the session manager in the ASGI lifespan. The existing tests in `tests/integration/test_http_transport.py` and `tests/unit/test_transport_http.py` pass after porting to the 2.x client API.",
+    "id": "VC-73",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`sqllens serve` over stdio answers `list_tools` and `call_tool` from a 2.x `stdio_client`.",
+    "claim_signature": "issue-acceptance-13",
+    "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/criteria.json",
+    "source_file": "tests/integration/test_stdio_serve.py",
+    "verify_hint": "Check `test_serve_over_stdio_lists_and_calls_tools`",
+    "id": "VC-74",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "After the change, these files describe `MCPServer` and mcp 2.x wherever they describe the SDK's current behavior, including the error format and how the `ToolError` conversion produces it: `AGENTS.md`, `docs/internal/mcp-server/transport.md`, `docs/internal/mcp-server/tools.md`, `docs/internal/architecture/overview.md`, `docs/internal/authentication/overview.md`, `docs/internal/database-connectors/row-level-security.md` and `docs/internal/setup/config-loading.md`. The docstrings and comments in `src/sqllens/server.py`, `src/sqllens/transport/http.py`, `src/sqllens/tools/query_database.py`, `src/sqllens/tools/_agent.py`, `src/sqllens/ui/__init__.py` and `src/sqllens/ui/memory_admin.html` do the same. AGENTS.md's gotcha about non-loopback `Host` headers names the loopback default of `MCPServer`'s `streamable_http_app()` as the source of the 421. `docs/internal/production-readiness-v0.1.0.md` and `docs/external/release-notes.md` stay unchanged as historical records.",
+    "claim_signature": "issue-acceptance-14",
+    "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/criteria.json",
+    "source_file": "AGENTS.md",
+    "verify_hint": "Check the 'The MCP SDK rejects non-loopback Host headers' bullet in AGENTS.md",
+    "id": "VC-75",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The change leaves these as they are: - `mcpb/build.sh`'s install without `-c requirements.txt`, so an MCPB bundle ships the newest mcp 2.x on PyPI at build time, which can be newer than the release CI tested. - The SDK's INFO log line for each tool failure. It now fires for every converted tool error and includes the client message, which can contain SQL text. - The SDK's `io.modelcontextprotocol/serverInfo` key on results of 2026-07-28 protocol sessions, including the footer-on, no-trace error result. - Errors that 2.x raises outside the tool's function, such as argument validation and output conversion. They keep the 2.x SDK's own text. - The JSON-RPC error code of a failed resource read, which the 2.x SDK sets. - The 2.x SDK's parsing of request `_meta`. It drops a caller key spelled `progress_token` before `_request_metadata` runs, so a dynamic RLS rule reading `progress_token` (forwarded on 1.30.0) blocks its queries on 2.x. A caller key starting with `io.modelcontextprotocol/`, also forwarded on 1.30.0, is excluded by the forwarding rule above. - The SDK's handling of 2026-07-28 protocol requests. They carry no session id, so the session manager's idle timeout and session cap do not bound them.",
+    "claim_signature": "issue-acceptance-15",
+    "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-391/local-20261113T205345Z-1-shadow/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: The change leaves these as they are: - `mcpb/build.sh`'s install without `-c requirements.txt`, so an MCPB bundle ships the newest mcp 2.x on PyPI at build time, which can be newer than the release CI tested. - The SDK's INFO log line for each tool failure. It now fires for every converted tool error and includes the client message, which can contain SQL text. - The SDK's `io.modelcontextprotocol/serverInfo` key on results of 2026-07-28 protocol sessions, including the footer-on, no-trace error result. - Errors that 2.x raises outside the tool's function, such as argument validation and output conversion. They keep the 2.x SDK's own text. - The JSON-RPC error code of a failed resource read, which the 2.x SDK sets. - The 2.x SDK's parsing of request `_meta`. It drops a caller key spelled `progress_token` before `_request_metadata` runs, so a dynamic RLS rule reading `progress_token` (forwarded on 1.30.0) blocks its queries on 2.x. A caller key starting with `io.modelcontextprotocol/`, also forwarded on 1.30.0, is excluded by the forwarding rule above. - The SDK's handling of 2026-07-28 protocol requests. They carry no session id, so the session manager's idle timeout and session cap do not bound them.",
+    "id": "VC-76",
+    "reused_from_iter_prev": false
+  }
+]

@@ -1,0 +1,1119 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "verdict": "APPROVE with notes",
+ "phase3_dispatched": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [
+  {
+   "agent": "prflow:code-reviewer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 2 (>= 2)"
+  },
+  {
+   "agent": "prflow:pr-test-analyzer",
+   "reason": "iterations=first-only: excluded on primary fix-loop iteration 2 (>= 2)"
+  }
+ ],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "checklist_skipped": null
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "phase3_findings": [
+  {
+   "agent": "prflow:requesting-code-review",
+   "severity": "suggestion",
+   "description": "_tool_errors docstring says 2.x keeps the message for ToolError/ResourceError/MCPError, but the wrapper passes only ToolError and MCPError through unchanged and converts a ResourceError raised in a tool to ToolError; client text is the same.",
+   "defect_signature": {
+    "file": "src/sqllens/server.py",
+    "line_range": [
+     204,
+     217
+    ],
+    "kind": "comment_drift"
+   }
+  }
+ ],
+ "report": "## Verdict: APPROVE with notes (only Suggestion-level findings and inconclusive checklist items remain)\n\nThe PR is ready to merge on correctness: no finding at or above Important remains, and the Suggestions below are optional cleanups.\nRule applied: rule 6 — a finding or checklist FAIL below the threshold, or an INCONCLUSIVE item → APPROVE with notes\n\n## Code Review Findings\n\n### 🟡 Suggestion / Minor (2)\n\n<details><summary>2 items</summary>\n\n1. `src/sqllens/server.py` lines 204-217: the `_tool_errors` docstring says 2.x keeps the message for `ToolError`/`ResourceError`/`MCPError`, but the wrapper passes only `ToolError` and `MCPError` through unchanged and converts a `ResourceError` raised inside a tool into a `ToolError`; the client text is the same (raised by 1/4 agents)\n\n- VC-10: FAIL (suggestion) — The architecture overview's diagram line says server.py registers the two tools; build_server also conditionally registers import, memory-admin and profile-admin tools. [docs/internal/architecture/overview.md]\n\n  <details><summary>Evidence</summary>\n\n  overview.md:21 says server.py 'registers the two tools'. build_server (server.py:331) registers two unconditional tools (@_tool at 391, 505), then more under cfg.memory.allow_import (512; tool at 523), cfg.memory.allow_admin_tools (588; tools at 632,666,686,714,738,784,829) and cfg.profiles.allow_admin_tools (852; tools at 895,931,965,1017). So 'the two tools' is inaccurate as a description of all registrations; it is only true of the always-on tools.\n\n  </details>\n\n</details>\n\n### ℹ️ Informational — Deferred\n\n- VC-1: INCONCLUSIVE (suggestion) — mcp 2.x Python clients have a max_sse_event_size setting defaulting to 1 MiB, and the query-results and memory-admin widgets exceed it over Streamable HTTP. [changelog.d/391.changed.md:1]\n\n  <details><summary>Evidence</summary>\n\n  The item has no dependency_sources. A grep of the head view for max_sse_event_size finds only repo-authored mentions: docs/internal/mcp-server/transport.md:171, changelog.d/391.changed.md:1, and tests/integration/test_http_transport.py:144 (which passes 8 MiB). No mcp client source is in the views, so the 1 MiB default in mcp/client/streamable_http.py cannot be read from the views. Copies of mcp exist elsewhere on the filesystem, but they are outside the permitted sources and their version is unknown. I did not measure the inlined widget sizes either.\n\n  </details>\n\n- VC-3: INCONCLUSIVE (suggestion) — In mcp 2.x, MCPServer.tool and MCPServer.resource accept a meta= keyword. [docs/internal/mcp-server/tools.md:303]\n\n  <details><summary>Evidence</summary>\n\n  The mcp 2.x source was not available. The item has no dependency_sources, the head view's inventory.json has no mcpserver entry, and a Glob of the repo for mcp/server/mcpserver/server.py and for site-packages/mcp/server/**/server.py found nothing. The claim's text at docs/internal/mcp-server/tools.md:303 says MCPServer.tool and MCPServer.resource keep the meta= keyword, but that is a doc line and not the library's implementation. Missing evidence: installed mcp>=2.3.0 mcp/server/mcpserver/server.py signatures for tool and resource.\n\n  </details>\n\n- VC-5: INCONCLUSIVE (suggestion) — The mcp 2.x SDK logs every converted tool error at INFO with the message included. [docs/internal/mcp-server/tools.md:539]\n\n  <details><summary>Evidence</summary>\n\n  The claim (docs/internal/mcp-server/tools.md:539) concerns how the third-party mcp 2.x SDK logs ToolError. The item has no dependency_sources, and the head view holds no copy of mcp/server/mcpserver (Glob of the view found none). Copies of the SDK exist elsewhere on the machine, outside the views and not supplied as dependency_sources, so I did not rely on them. Without the SDK's Tool.run and _handle_call_tool source, the log level and message content cannot be verified. Command not run: read mcp/server/mcpserver/tools/base.py and server.py from a supplied dependency directory.\n\n  </details>\n\n- VC-13: INCONCLUSIVE (suggestion) — mcp 2.x's Python client streamable_http_client refuses a single SSE event larger than max_sse_event_size, whose default is 1 MiB, and accepts a larger max_sse_event_size argument; the query-results and memory-admin widgets are each larger than 1 MiB; the named test passes a larger value. [docs/internal/mcp-server/transport.md]\n\n  <details><summary>Evidence</summary>\n\n  The claim depends on mcp 2.x client behaviour (streamable_http_client signature and the 1 MiB default of max_sse_event_size). The item has no dependency_sources, and the mcp client source is not in the head view. Grep of the head view finds max_sse_event_size only in tests/integration/test_http_transport.py:144 (passes 8 MiB), docs/internal/mcp-server/transport.md:171 and a changelog entry. Locating the library source elsewhere on the filesystem would fall outside the views and the allowed dependency directories, so I did not rely on it. The library behaviour and the widget sizes are unverified from the permitted sources.\n\n  </details>\n\n- VC-15: INCONCLUSIVE (important) — MCPServer.streamable_http_app() called with no host= or transport_security= keeps a host default of 127.0.0.1 and, with transport_security None, enables DNS-rebinding protection for loopback hosts, which answers a non-loopback Host with 421. [docs/internal/mcp-server/transport.md]\n\n  <details><summary>Evidence</summary>\n\n  Call site confirmed: src/sqllens/transport/http.py:236 calls mcp.streamable_http_app() with no host= or transport_security= (comment at 233-235). The claim depends on mcp 2.x library behavior (default host 127.0.0.1, transport_security None enabling DNS-rebinding protection for loopback, 421 on bad Host). The item has no dependency_sources, and the mcp library source is not in the head view (no mcpserver/server.py in inventory.json). I did not read library source from outside the supplied views and dependency directories, so the SDK behavior is unverified.\n\n  </details>\n\n- VC-18: INCONCLUSIVE (important) — server.py imports Context and MCPServer from mcp.server.mcpserver, ToolError and ResourceError from mcp.server.mcpserver.exceptions, and MCPError from mcp.shared.exceptions; each exists at those paths in mcp 2.3.0. [src/sqllens/server.py]\n\n  <details><summary>Evidence</summary>\n\n  server.py:26-28 does import Context, MCPServer from mcp.server.mcpserver, ResourceError/ToolError from mcp.server.mcpserver.exceptions, MCPError from mcp.shared.exceptions. But the item supplies no dependency_sources and the views contain no mcp 2.3.0 source (inventory.json has no mcp/ entries). Copies of mcp found elsewhere on the filesystem (scratchpad venv, uv cache, another project's venv) are outside the permitted sources and their versions were not established, so they were not relied on. Missing evidence: mcp 2.3.0 source for mcp/server/mcpserver/__init__.py, exceptions.py and mcp/shared/exceptions.py.\n\n  </details>\n\n- VC-21: INCONCLUSIVE (important) — In mcp 2.x, ctx.request_context.meta is a plain dict (or None when the request has no _meta) holding the request's _meta keys, so _request_metadata's isinstance(meta, dict) check passes for real requests. [src/sqllens/server.py]\n\n  <details><summary>Evidence</summary>\n\n  The claim depends on mcp 2.x RequestContext.meta type. The item has no dependency_sources, and the mcp library source is not in the head view (inventory.json has no mcp/shared/context entry). server.py:260-306 reads ctx.request_context.meta, maps None to {}, and treats non-dict as invalid with a warning and {}. That code is fail-secure, but whether real 2.x requests give a dict was not verifiable from the views. Missing evidence: mcp 2.x RequestContext.meta definition and how it is populated from params _meta.\n\n  </details>\n\n- VC-22: INCONCLUSIVE (suggestion) — MCPServer's resource registration accepts a synchronous zero-argument function wrapped by _resource_errors and treats it as a static (non-template) resource at that uri, calling it at read time. [src/sqllens/server.py:230]\n\n  <details><summary>Evidence</summary>\n\n  The claim depends on mcp 2.x MCPServer.resource template detection and FunctionResource.read. The item has no dependency_sources, and a Grep of the head view for 'class FunctionResource' found no vendored mcp source, so the library behavior cannot be settled from the views. I read src/sqllens/server.py:230-250: _resource_errors(uri) returns a decorator that wraps a sync zero-arg Callable[[], str] in a sync zero-arg wrapper (functools.wraps) that re-raises ResourceError/MCPError and converts other Exceptions to ResourceError. That much is correct. Not verified: whether MCPServer.resource treats a uri with no {params} and a zero-arg function as a static resource, and whether FunctionResource.read calls sync functions. I did not read the mcp library source. The only copies on disk are outside the permitted dependency_sources, in an unrelated venv, a uv cache and a scratchpad venv.\n\n  </details>\n\n- VC-23: INCONCLUSIVE (suggestion) — Calling MCPServer.streamable_http_app() with no host= or transport_security= leaves the SDK's 127.0.0.1 default in force, which enables the SDK's Host check that answers a non-loopback Host with 421; changing either argument changes that check. [src/sqllens/transport/http.py:233]\n\n  <details><summary>Evidence</summary>\n\n  The claim depends on mcp 2.x MCPServer internals (default host 127.0.0.1, TransportSecuritySettings derivation, 421 response). No dependency_sources were supplied, and the head view has no vendored mcp source (grep of the view for transport_security/421 found only http.py:233-236 comments and tests/integration/test_http_transport.py:355-390, which assert a 421 but are not the SDK implementation). Repo-side code at http.py:232-236 does call mcp.streamable_http_app() with no host= or transport_security=, matching the claim's call shape. I did not read mcp/server/mcpserver/server.py from a supplied dependency directory, so the SDK behavior is unverified.\n\n  </details>\n\n- VC-25: INCONCLUSIVE (important) — mcp 2.x streamable_http_client accepts a max_sse_event_size keyword and yields a (read, write) 2-tuple. [tests/integration/test_http_transport.py:144]\n\n  <details><summary>Evidence</summary>\n\n  The test calls streamable_http_client(handle.mcp_url, max_sse_event_size=8*1024*1024) and unpacks (read, write) at tests/integration/test_http_transport.py:143-145. The claim is about the installed mcp 2.x library, but the item has no dependency_sources, and a Glob for **/mcp/client/streamable_http.py under the review directory found nothing. I could not read the signature or the yield of streamable_http_client. I did not run the test.\n\n  </details>\n\n- VC-27: INCONCLUSIVE (suggestion) — The 2.x Python client's default SSE event size cap is 1 MiB, the query-results widget is about 1.5 MB, and a cap below it fails the resource read client-side. [tests/integration/test_http_transport.py]\n\n  <details><summary>Evidence</summary>\n\n  The claim depends on the mcp 2.x client's default max_sse_event_size. The item has no dependency_sources, and view-head has no vendored mcp source. Grep of view-head found only the test (tests/integration/test_http_transport.py:141-144, which passes max_sse_event_size=8*1024*1024) and docs/internal/mcp-server/transport.md:171, which repeat the 1 MiB claim without defining it. I did not read the library's streamable_http.py or measure the widget HTML size via load_widget_html, so I cannot confirm the 1 MiB default or the ~1.5 MB widget size.\n\n  </details>\n\n- VC-28: INCONCLUSIVE (suggestion) — streamable_http_client takes an http_client keyword and sends that httpx2.AsyncClient's default headers (Authorization) on its requests, replacing the 1.x headers= argument. [tests/integration/test_http_transport.py:171]\n\n  <details><summary>Evidence</summary>\n\n  The test at tests/integration/test_http_transport.py:169-172 builds httpx2.AsyncClient(headers=Authorization) and passes it as streamable_http_client(url, http_client=...). The claim depends on mcp 2.x library behavior. The item gives no dependency_sources, and the head view holds no mcp/client/streamable_http.py (grep of the review dir found none). Copies of mcp found elsewhere on the machine (other venvs) are not designated sources, so I did not rely on them. I did not read the library's http_client handling.\n\n  </details>\n\n- VC-29: INCONCLUSIVE (suggestion) — streamable_http_client with an httpx2.AsyncClient carrying a Bearer header authenticates import_memory calls in bearer mode. [tests/integration/test_memory_import_auth.py:38]\n\n  <details><summary>Evidence</summary>\n\n  The test at tests/integration/test_memory_import_auth.py:36-39 builds httpx2.AsyncClient(headers=Bearer) and passes it to streamable_http_client(http_client=...). Whether mcp 2.x sends requests through that client depends on mcp/client/streamable_http.py. The item has no dependency_sources, and a Glob of the head view for **/mcp/client/streamable_http.py found nothing. I could not read the library implementation, so the claim is unverified.\n\n  </details>\n\n- VC-30: INCONCLUSIVE (suggestion) — ClientSession.discover() exists in mcp 2.x, returns an object with supported_versions, and leaves the session on the 2026-07-28 protocol, whose requests the SDK stamps with io.modelcontextprotocol/protocolVersion, clientInfo and clientCapabilities in _meta. [tests/integration/test_http_transport.py:71]\n\n  <details><summary>Evidence</summary>\n\n  The test at tests/integration/test_http_transport.py:71-84 calls session.discover(), asserts '2026-07-28' in discovered.supported_versions, and expects the three reserved io.modelcontextprotocol/* keys in request meta. Whether ClientSession.discover exists in mcp 2.x and how it stamps _meta depends on the third-party mcp library. The item has no dependency_sources, and a Glob for mcp/client/session.py under the review directory found no vendored copy. I could not read the library implementation, so the claim is unsettled. Missing evidence: mcp 2.x mcp/client/session.py (discover and the request _meta stamping).\n\n  </details>\n\n- VC-31: INCONCLUSIVE (suggestion) — Passing progress_callback to ClientSession.call_tool makes the 2.x session add a progressToken to the request _meta alongside caller meta, and the callback signature (progress, total, message) matches the SDK's expected type. [tests/integration/test_metadata_stdio.py:36]\n\n  <details><summary>Evidence</summary>\n\n  The test at tests/integration/test_metadata_stdio.py:31-37 defines on_progress(progress, total, message) and passes it as progress_callback to session.call_tool with meta={'tenant': 'alpha'}. The claim depends on mcp 2.x mcp/client/session.py (call_tool, ProgressFnT). The item has no dependency_sources, and a Glob for **/mcp/client/session.py under the repository and its views found no file. The library source is therefore unavailable and I could not check the meta merge or the callback type. The test comment says 'A progress callback makes the session send a progressToken in _meta', but a comment is not evidence.\n\n  </details>\n\n- VC-33: INCONCLUSIVE (suggestion) — MCPServer accepts its name as the first positional argument and Context is importable from mcp.server.mcpserver. [tests/integration/test_metadata_stdio.py:17]\n\n  <details><summary>Evidence</summary>\n\n  tests/integration/test_metadata_stdio.py:15,17 does `from mcp.server.mcpserver import Context, MCPServer` and `MCPServer('metadata-test')`. The claim depends on installed mcp 2.x library behavior. The item has no dependency_sources, and the head view's inventory.json lists no mcp/server/mcpserver source (no vendored copy). I did not read library source from outside the views and dependency_sources, so the constructor signature and package exports are unverified. Missing evidence: mcp 2.x mcp/server/mcpserver/__init__.py and server.py.\n\n  </details>\n\n- VC-34: INCONCLUSIVE (suggestion) — mcp 2.x result models expose snake_case attributes is_error, structured_content, mime_type and input_schema in place of the 1.x camelCase names. [tests/integration/test_memory_bounds.py]\n\n  <details><summary>Evidence</summary>\n\n  The item has no dependency_sources. The views pin mcp==2.3.0 and mcp-types==2.3.0 (requirements.txt:60-61) but do not contain their source. Glob for mcp_types/**/*.py and site-packages/mcp_types* under the repo found nothing. tests/integration/test_memory_bounds.py:35,43,54,73,76 use tool.input_schema, result.is_error and result.structured_content, which is consistent with the claim. Those are the tests' own usage, not the library's definitions, so the library field names are unverified.\n\n  </details>\n\n- VC-35: INCONCLUSIVE (suggestion) — StdioServerParameters accepts env and cwd, and stdio_client launches the child with exactly that env (so SQLLENS_ variables outside the dict are absent). [tests/integration/test_stdio_serve.py:700]\n\n  <details><summary>Evidence</summary>\n\n  The test (tests/integration/test_stdio_serve.py:26-32) passes env=env and cwd=str(tmp_path) to StdioServerParameters and calls stdio_client. The claim depends on mcp 2.x mcp/client/stdio.py, in particular whether stdio_client merges a default environment (get_default_environment) with the given env. The item has no dependency_sources, and grep of the head view finds no mcp client source or get_default_environment. The library source is therefore unread, and I did not run the library.\n\n  </details>\n\n- VC-36: INCONCLUSIVE (suggestion) — The docstring states the in-memory mcp 2.x Client runs in mode=\"auto\" so the session negotiates the 2026-07-28 protocol; the tests construct Client(mcp) with no mode argument, so this holds only if the Client default is auto and auto negotiates 2026-07-28 in-memory. [tests/unit/test_mcp_sdk_contract.py:6]\n\n  <details><summary>Evidence</summary>\n\n  The docstring at tests/unit/test_mcp_sdk_contract.py:6-7 does say the in-memory Client runs in mode=\"auto\" so the session negotiates 2026-07-28, and the tests construct Client(mcp) with no mode argument. Whether that holds depends on the mcp 2.x Client default for `mode` and on what auto negotiates in-memory. The item has no dependency_sources, and the head view does not hold the mcp library. I did not read any mcp library source for this verdict. A search of the filesystem found mcp/client/client.py copies outside the review's views, but they are not supplied dependency sources and I cannot tie them to the version the PR pins. Missing evidence: mcp.Client.__init__ `mode` default and the auto-negotiation code for the in-memory transport, from the mcp 2.x version the PR targets.\n\n  </details>\n\n- VC-38: INCONCLUSIVE (important) — In mcp 2.x, list_tools() Tool objects expose `input_schema` (dict with `properties`) and `meta` carrying the tool's _meta, and query_database's meta equals {\"ui\": {\"resourceUri\": \"ui://sqllens/query-results.html\"}}. [tests/unit/test_mcp_sdk_contract.py:102]\n\n  <details><summary>Evidence</summary>\n\n  Repo side verified: src/sqllens/server.py:391 registers query_database with @_tool(meta={\"ui\": {\"resourceUri\": _WIDGET_URI}}, structured_output=False); test at tests/unit/test_mcp_sdk_contract.py:102-105 asserts tool.input_schema and query.meta == {\"ui\": {\"resourceUri\": _QUERY_WIDGET}}. I did not confirm _WIDGET_URI/_QUERY_WIDGET equal ui://sqllens/query-results.html. Not settled: the mcp 2.x Tool model (input_schema snake_case field, meta alias _meta). No dependency_sources were supplied, and the only installed mcp found (sqllens/.venv and .prflow/tmp/venv) is 1.30.0, where types.Tool uses camelCase inputSchema and meta=Field(alias='_meta'). No 2.x/mcp_types source found (Glob of uv cache and venv site-packages). Missing evidence: mcp 2.x installed source or running the test under mcp 2.x.\n\n  </details>\n\n- VC-39: INCONCLUSIVE (suggestion) — MCPError is constructible as MCPError(code=..., message=...) and a client-side failed resources/read raises MCPError whose `.error.message` holds the server's error message. [tests/unit/test_mcp_sdk_contract.py:257]\n\n  <details><summary>Evidence</summary>\n\n  The test at tests/unit/test_mcp_sdk_contract.py:256-261 uses MCPError(code=..., message=...) (also line 281) and reads excinfo.value.error.message. The claim depends on mcp 2.x's mcp/shared/exceptions.py and the client session's error handling. The item has no dependency_sources. A Glob for **/mcp/shared/exceptions.py under the review directory and the repository root found nothing. The library source is not in the views, so the MCPError.__init__ signature and its `error` attribute could not be read. Not run: inspecting an installed mcp 2.x package or running the test.\n\n  </details>\n\n- VC-40: INCONCLUSIVE (important) — The MCPServer test helpers reach the registered function via the private `mcp._tool_manager.get_tool(name).fn`, assuming mcp 2.x MCPServer keeps a `_tool_manager` attribute whose get_tool returns an object with `.fn` set to the (error-wrapped) registered function. [tests/unit/test_memory_admin_tools.py:59]\n\n  <details><summary>Evidence</summary>\n\n  tests/unit/test_memory_admin_tools.py:57-59 defines _fn(mcp, name) returning mcp._tool_manager.get_tool(name).fn, so the claim describes the test code. Whether mcp 2.x MCPServer keeps _tool_manager, and whether get_tool returns a Tool with .fn, depends on the installed library. The item has no dependency_sources, and a Glob for **/mcpserver/** in the head view found no mcp library source. Missing evidence: mcp/server/mcpserver/server.py and tools/tool_manager.py from mcp 2.x.\n\n  </details>\n\n- VC-43: INCONCLUSIVE (suggestion) — In mcp 2.x, CallToolResult exposes `is_error` and `meta` (alias _meta) attributes, and list_resources() Resource exposes `mime_type`, replacing the 1.x camelCase names. [tests/unit/test_server.py]\n\n  <details><summary>Evidence</summary>\n\n  The claim depends on the field names in the installed mcp 2.x CallToolResult and Resource models (mcp_types/_types.py). The item has no dependency_sources. A Glob for **/mcp_types/_types.py and **/_types.py in the head view found nothing, so the library source is not in the views. tests/unit/test_server.py uses result.is_error, result.meta and resource.mime_type (lines 78, 86, 147, 417, 458), but that only shows what the tests assume, not what the library defines. I did not run the tests or inspect an installed mcp package.\n\n  </details>\n\n- VC-56: INCONCLUSIVE (critical) — When the function behind a `ui://` widget resource raises an `Exception` other than the SDK's `ResourceError` or `MCPError`, a client's `resources/read` gets an error whose message is `Error reading resource <uri>: <message>`, where `<message>` is `str()` of the raised exception. A test asserts this through a real 2.x client for a widget whose asset is unavailable. [src/sqllens/server.py:230-250]\n\n  <details><summary>Evidence</summary>\n\n  Graded with criteria.json (criterion 6 present, matches claim). Repo side is correct: src/sqllens/server.py:230-250 `_resource_errors(uri)` catches `Exception` (not ResourceError/MCPError, which re-raise) and raises `ResourceError(f\"Error reading resource {uri}: {exc}\")`; `_resource` helper (server.py:344-346) applies it, and all three widget resources use it (server.py:350, 597, 856). Test tests/unit/test_mcp_sdk_contract.py:246-261 makes the asset loader raise (FileNotFoundError -> RuntimeError from load_widget_html), reads the resource through a real `Client(build_server(...))`, and asserts `excinfo.value.error.message == f\"Error reading resource {uri}: {loader_error.value}\"`. Trigger split: `except (ResourceError, MCPError)` -> outside the trigger (the criterion excludes these); `except Exception` -> the claimed path; BaseException not caught (outside trigger, not an Exception). What I could not settle: that the mcp 2.x SDK forwards a raised ResourceError's message verbatim to the client without re-wrapping or altering it. No dependency_sources were supplied and no mcp source is in the views or under the repo (Glob found none), and I did not run the test. So the end-to-end result depends on unread SDK behavior; the test would show it if run (e.g. pytest tests/unit/test_mcp_sdk_contract.py::test_unavailable_widget_asset_error_text).\n\n  </details>\n\n- VC-61: INCONCLUSIVE (critical) — Over Streamable HTTP with the server bound to `0.0.0.0` and an auth mode the bind policy accepts, a request to `/mcp/` that passes SQL Lens's auth check and carries a non-loopback `Host` header gets HTTP 421 from the SDK's Host check. A test pins this. [src/sqllens/transport/http.py:233]\n\n  <details><summary>Evidence</summary>\n\n  Criteria file read and counts (criterion 11 present). Code side confirmed: src/sqllens/transport/http.py:124-125 _allowed_hosts returns ['*'] for 0.0.0.0/::, so TrustedHostMiddleware (http.py:242) passes any Host. http.py:229-231 lets auth.insecure=True with mode none bind 0.0.0.0. http.py:233-236 calls mcp.streamable_http_app() with no host= or transport_security=. The test test_wildcard_bind_non_loopback_host_gets_sdk_421 (tests/integration/test_http_transport.py:372-390) binds 0.0.0.0 with Host host.docker.internal:9999, posts to /mcp/ (conftest.py:87) and asserts 421. But the claim rests on the mcp 2.x MCPServer.streamable_http_app() default host check returning 421. No mcp 2.x source is in the views, no dependency_sources were supplied, and I found no installed copy (searched the repo for mcp/server/mcpserver/server.py and .venv transport_security.py). I did not run the test. So I could not verify that the SDK actually yields 421 here, or that the auth-bypass path reaches it.\n\n  </details>\n\n- VC-74: INCONCLUSIVE (critical) — Streamable HTTP still serves the MCP endpoint at both `/mcp` and `/mcp/`, answers `/healthz` and `/readyz`, applies the configured auth mode, and starts and stops the session manager in the ASGI lifespan. The existing tests in `tests/integration/test_http_transport.py` and `tests/unit/test_transport_http.py` pass after porting to the 2.x client API. [src/sqllens/transport/http.py:322-342]\n\n  <details><summary>Evidence</summary>\n\n  Graded with criteria.json (criterion 12 present and valid). The diff to src/sqllens/transport/http.py only renames FastMCP to MCPServer in imports, docstrings and messages, and adds a comment. The behavior code is unchanged in the head view. That code is _PathNormalizer (http.py:322-342, which handles /healthz, /readyz, / and the /mcp/ to /mcp rewrite), _AuthMiddleware (357-372), and _SessionManagerLifespan, which starts and stops mcp.session_manager.run() (475-477, 602). The tests in tests/integration/test_http_transport.py and tests/unit/test_transport_http.py were ported to streamable_http_client, httpx2, is_error and mime_type. Nothing in the PR changes the code paths that serve /mcp, /mcp/, /healthz and /readyz, apply the auth mode, or drive the lifespan. The claim also depends on the 2.x SDK's real behavior: MCPServer.streamable_http_app() registers the route at /mcp, exposes a session_manager property, and the 2.x client API matches the ported tests. No dependency_sources were supplied and no mcp/server/mcpserver source exists in the views or repo (Glob found none). The claim that the tests pass cannot be settled by reading, and I did not run pytest. Missing evidence: the mcp 2.x SDK source and the result of running tests/integration/test_http_transport.py and tests/unit/test_transport_http.py.\n\n  </details>\n\n## Issue Compliance\nReviewed against issue #371 — criteria from the workpad; scope narrowed: 0 deferred, 1 rewritten, 0 not in the workpad. Requirement-based checklist items are listed under `## Code Review Findings` and `## Run details`.\nCriteria came from the `/prflow:implement` workpad comment — this run's authoritative set, possibly narrowed from the issue.\n- Rewritten by this run: `pyproject.toml` declares `mcp>=2.3.0,<3`, and its comment no longer says to keep the FastMCP 1.x API. `requirements.txt` is regenerated with the command in its header, still applies the `sqlglot<30.30` constraint, and locks an mcp release at 2.3.0 or later and below 3. → `pyproject.toml` declares `mcp>=2.3.0,<3`, and its comment no longer says to keep the FastMCP 1.x API. `requirements.txt` is regenerated with the command in its header and locks an mcp release at 2.3.0 or later and below 3.\nConfirm the narrowed work was filed as a follow-up issue before merging.\n\n## Run details\n\n<details><summary>Run details</summary>\n\n- Diff profile: has_new_types + test_relevant, 37 changed files.\n- Phase 0 working tree: skipped (pr mode with head override).\n- Review prompt extension: content-present. requesting-code-review extension: content-present.\n- CI evidence for the reviewed head: none held in this context.\n- Normalized (wording-only): 0\n- Re-verification: none.\n- prior-report: none\n- Phase 3 roster: code-reviewer and pr-test-analyzer excluded on iteration 2 (iterations=first-only). Reviewers re-confirmed the nine iteration-1 Suggestions without new evidence and did not re-raise them.\n- Engine run inline after the dispatched review engine stopped on a missing `.prflow/tmp/command-shapes.md` (expected absent on the local tier).\n- Finding rejected lines not counted (no Finding rejected line)\n\n- Checklist: 50 passed, 1 failed, 26 inconclusive\n- <details><summary>✅ Passed items (50 of 77)</summary>\n\n  - VC-2: The mcp>=2.3.0,<3 pin means SQL Lens no longer installs alongside mcp 1.x, and build_server returns an MCPServer instead of a FastMCP. [changelog.d/391.changed.md:1]\n  - VC-7: SQL Lens's tools report failures by raising RuntimeError, AgentRunError or ProfileNameError. [docs/internal/mcp-server/tools.md:535]\n  - VC-20: MCPServer.tool() accepts meta= and structured_output= keyword arguments and MCPServer.resource(uri, ...) accepts mime_type= and meta=, as build_server's _tool/_resource helpers pass them. [src/sqllens/server.py:338]\n  - VC-41: The comment states that without a trace the server re-raises and the SDK adds the same 'Error executing tool query_database: ' prefix the details-on branch builds. [tests/unit/test_memory_unavailable.py:252]\n  - VC-44: `pyproject.toml` declares `mcp>=2.3.0,<3`, and its comment no longer says to keep the FastMCP 1.x API. `requirements.txt` is regenerated with the command in its header and locks an mcp release at 2.3.0 or later and below 3. [pyproject.toml]\n  - VC-46: No file under `src/` or `tests/` imports `mcp.server.fastmcp`. [src]\n  - VC-48: `build_server` returns an `mcp.server.mcpserver.MCPServer`. It registers exactly these tools, under these switches, complete by construction: - always: `query_database` and `list_data_sources` - with `memory.allow_import`: `import_memory` - with `memory.allow_admin_tools`: `list_memories`, `get_memory`, `delete_memory`, `clear_memories`, `add_memories`, `export_memories` and `get_memory_stats` - with `profiles.allow_admin_tools`: `list_profiles`, `get_profile`, `upsert_profile` and `delete_profile` [tests/unit/test_mcp_sdk_contract.py:94]\n  - VC-53: Each tool keeps its name, its argument names and its `_meta`; `query_database` keeps `_meta.ui.resourceUri` set to the query-results widget URI. The three `ui://` widget resources (query results, memory admin, config admin) are listed and read with MIME type `text/html;profile=mcp-app` and `_meta.ui.prefersBorder` set to `true`. [src/sqllens/server.py:338-360]\n  - VC-54: When a tool's function raises an `Exception` other than the SDK's `ToolError` or `MCPError`, the client receives `isError: true` with the text `Error executing tool <name>: <message>`, where `<message>` is `str()` of the raised exception. When it raises a `BaseException` that is not an `Exception`, such as `asyncio.CancelledError`, that exception leaves the wrapper unchanged; a unit test pins this for `CancelledError`. Tests assert the error text through the real 2.x SDK, at minimum for these cases: - `query_database` with an invalid profile name (`ProfileNameError`) - `query_database` re-raising an `AgentRunError` with the conversation footer on and no agent trace - `import_memory` refused on an unauthenticated endpoint - one memory-admin tool raising `RuntimeError` [tests/unit/test_mcp_sdk_contract.py:279]\n  - VC-57: With the conversation footer on and no agent trace, the `query_database` error result carries no `sqllens/*` key in `_meta`. [tests/unit/test_mcp_sdk_contract.py:146]\n  - VC-58: With the conversation footer off, or with an agent trace present, the `query_database` error result keeps the text `_agent_error_result` builds today, and its `_meta` carries `sqllens/conversation`. [tests/unit/test_mcp_sdk_contract.py:161]\n  - VC-59: A successful `query_database` result carries the same `sqllens/*` `_meta` channels as on 1.30.0: `sqllens/conversation`, `sqllens/blocks`, `sqllens/query`, `sqllens/memory_info`, `sqllens/agent_trace` (when `agent.show_details` is on) and `sqllens/model_info`. [tests/unit/test_mcp_sdk_contract.py:217]\n  - VC-60: On both stdio and Streamable HTTP, `_request_metadata` forwards every request `_meta` key except the progress-token key (`progressToken` or `progress_token`) and keys starting with `io.modelcontextprotocol/`. An SDK-managed key outside that prefix, other than the progress token, is forwarded. It returns `{}` in each of these cases: - the forwarded keys exceed 64 keys, 16 KiB of compact ASCII-escaped JSON, 1024 nodes or 8 nesting levels below the root - the request carries no `_meta` - no request is active Tests drive real 2.x clients and assert: - `{\"tenant\": \"alpha\"}` arrives as `{\"tenant\": \"alpha\"}` - a request that also carries a progress token arrives as `{\"tenant\": \"alpha\"}` - the existing oversized-payload case arrives as `{}` - over Streamable HTTP, a request with `{\"tenant\": \"alpha\"}` from a client session that negotiated the 2026-07-28 protocol arrives as `{\"tenant\": \"alpha\"}`. That session's SDK stamps `io.modelcontextprotocol/protocolVersion`, `clientInfo` and `clientCapabilities` into the request's `_meta`. [src/sqllens/server.py]\n  - VC-75: `sqllens serve` over stdio answers `list_tools` and `call_tool` from a 2.x `stdio_client`. [src/sqllens/server.py:1066-1070]\n  - VC-76: After the change, these files describe `MCPServer` and mcp 2.x wherever they describe the SDK's current behavior, including the error format and how the `ToolError` conversion produces it: `AGENTS.md`, `docs/internal/mcp-server/transport.md`, `docs/internal/mcp-server/tools.md`, `docs/internal/architecture/overview.md`, `docs/internal/authentication/overview.md`, `docs/internal/database-connectors/row-level-security.md` and `docs/internal/setup/config-loading.md`. The docstrings and comments in `src/sqllens/server.py`, `src/sqllens/transport/http.py`, `src/sqllens/tools/query_database.py`, `src/sqllens/tools/_agent.py`, `src/sqllens/ui/__init__.py` and `src/sqllens/ui/memory_admin.html` do the same. AGENTS.md's gotcha about non-loopback `Host` headers names the loopback default of `MCPServer`'s `streamable_http_app()` as the source of the 421. `docs/internal/production-readiness-v0.1.0.md` and `docs/external/release-notes.md` stay unchanged as historical records. [AGENTS.md:212]\n  - VC-77: The change leaves these as they are: - `mcpb/build.sh`'s install without `-c requirements.txt`, so an MCPB bundle ships the newest mcp 2.x on PyPI at build time, which can be newer than the release CI tested. - The SDK's INFO log line for each tool failure. It now fires for every converted tool error and includes the client message, which can contain SQL text. - The SDK's `io.modelcontextprotocol/serverInfo` key on results of 2026-07-28 protocol sessions, including the footer-on, no-trace error result. - Errors that 2.x raises outside the tool's function, such as argument validation and output conversion. They keep the 2.x SDK's own text. - The JSON-RPC error code of a failed resource read, which the 2.x SDK sets. - The 2.x SDK's parsing of request `_meta`. It drops a caller key spelled `progress_token` before `_request_metadata` runs, so a dynamic RLS rule reading `progress_token` (forwarded on 1.30.0) blocks its queries on 2.x. A caller key starting with `io.modelcontextprotocol/`, also forwarded on 1.30.0, is excluded by the forwarding rule above. - The SDK's handling of 2026-07-28 protocol requests. They carry no session id, so the session manager's idle timeout and session cap do not bound them. [mcpb/build.sh:54-59]\n  - VC-4: Release note and external RLS doc state that RLS metadata never includes progressToken, a caller key progress_token, or io.modelcontextprotocol/ keys. [docs/external/row-level-security.md:103]\n  - VC-6: _request_metadata returns {} when no request is active, no _meta, _meta not a dict or unreadable, bounds exceeded (64 keys, 16 KiB, 1024 nodes, 8 levels), and on any other failure reading context or bounding metadata; it forwards other SDK-managed keys. [docs/internal/authentication/overview.md]\n  - VC-8: The listed test files exist and pin metadata forwarding: tests/unit/test_metadata_bounds.py, tests/integration/test_metadata_stdio.py and tests/integration/test_http_transport.py (including a 2026-07-28 session). [docs/internal/database-connectors/row-level-security.md]\n  - VC-9: build_server registers every tool and widget resource through _tool(...) and _resource(uri, ...) helpers wrapping functions in _tool_errors / _resource_errors(uri); memory admin tools use @_tool(structured_output=False), never @mcp.tool directly. [docs/internal/mcp-server/tools.md]\n  - VC-11: _tool_errors re-raises any Exception other than ToolError/MCPError as ToolError(str(exc)) chained from the original, does not catch non-Exception BaseExceptions, and uses functools.wraps. [docs/internal/mcp-server/tools.md]\n  - VC-12: _resource_errors(uri) re-raises any Exception other than ResourceError/MCPError as ResourceError(f\"Error reading resource {uri}: {exc}\"), and on 2.x an unwrapped exception reaches the client as only 'Error reading resource <uri>'. [docs/internal/mcp-server/tools.md]\n  - VC-14: tests/unit/test_mcp_sdk_contract.py pins the tool error text through a real 2.x client. [docs/internal/mcp-server/tools.md]\n  - VC-16: With footer on and agent_trace None, server.py re-raises AgentRunError so MCPServer formats the failure (via _tool_errors) with no _meta, matching the _agent_error_result text format. [docs/internal/mcp-server/tools.md]\n  - VC-17: Architecture doc says Streamable HTTP is multiplexed via the MCPServer session manager and stdio skips middleware with MCPServer handling framing. [docs/internal/architecture/overview.md]\n  - VC-19: In mcp 2.x Tool.run, a ToolError raised by the tool function becomes an isError result with text 'Error executing tool <name>: <message>', while other Exceptions yield only 'Error executing tool <name>'; MCPError is re-raised [src/sqllens/server.py:204]\n  - VC-24: Footer on with no agent trace: the re-raised AgentRunError passes through _tool_errors as ToolError(str(exc)), so the client text equals what _agent_error_result builds ('Error executing tool query_database: <message>') with no sqllens/* _meta [src/sqllens/server.py:478]\n  - VC-26: Doc names tests/integration/test_http_transport.py::TestTrustedHost::test_wildcard_bind_non_loopback_host_gets_sdk_421 as pinning the 421 on a 0.0.0.0 bind where the allowlist is * [docs/internal/mcp-server/transport.md:167]\n  - VC-32: requirements.txt locks mcp==2.3.0 with mcp-types==2.3.0 and drops httpx-sse, consistent with mcp 2.3.0's declared dependencies, and the header's uv version matches the generator used [requirements.txt]\n  - VC-37: fake `query_database_impl_with_widgets` returns a 5-tuple and receives `metadata` in kwargs, matching how server.py calls and unpacks the real function [tests/integration/test_http_transport.py]\n  - VC-42: An unauthenticated import_memory call yields exactly `Error executing tool import_memory: <ProfileError text>` matching the message raised in the server's import guard [tests/integration/test_memory_import_auth.py]\n  - VC-45: `sqllens serve --no-preflight` over stdio with the given SQLLENS_ env registers only query_database and list_data_sources, and list_data_sources text contains `(mysql+pymysql, read-only)` without connecting [tests/integration/test_stdio_serve.py]\n  - VC-47: server.py has a `_resource_errors` wrapper that carries the widget read error message past the SDK's generic resource error [src/sqllens/ui/__init__.py]\n  - VC-49: When details are off the server re-raises AgentRunError and the SDK formats it (via ToolError) exactly as before, unless the footer is off [src/sqllens/tools/query_database.py]\n  - VC-50: memory_admin.html's comment: a RuntimeError reaches the client as `Error executing tool <name>: <msg>` via the server's ToolError conversion [src/sqllens/ui/memory_admin.html]\n  - VC-51: Docstring says TrustedHostMiddleware fronts MCPServer so the SDK's 421 is unreachable for a non-loopback Host on a loopback bind (400 instead) [tests/integration/test_http_transport.py]\n  - VC-52: `server.py` builds the MCPServer tools once, closing over a single Config instance passed to every get_agent call [src/sqllens/tools/_agent.py]\n  - VC-55: list_resources() resources and read_resource() contents expose mime_type and meta attributes carrying the resource's _meta. [tests/unit/test_mcp_sdk_contract.py:119]\n  - VC-62: Outside a request, accessing Context.request_context raises ValueError, which _request_metadata maps to {}. [tests/unit/test_metadata_bounds.py]\n  - VC-63: The comment says the root dict, key, list and items total 1024 nodes at 1021 items, so 1021 items is within and 1022 exceeds the node bound. [tests/unit/test_metadata_bounds.py]\n  - VC-64: BrokenMeta (a dict subclass raising from items()) exercises the same accessor _request_metadata uses, and its failure logs exactly 'failed to read request metadata; returning empty metadata'. [tests/unit/test_metadata_bounds.py]\n  - VC-65: _ARGUMENTS lists each tool's argument names as server.py registers them (e.g. query_database: question, conversation_id, profile; upsert_profile: name, knobs). [tests/unit/test_mcp_sdk_contract.py:43]\n  - VC-66: export_memories with format 'xml' raises with the message \"Unknown export format 'xml'; expected 'json' or 'csv'.\" [tests/unit/test_mcp_sdk_contract.py:194]\n  - VC-67: import_memory on auth mode none without insecure raises the exact unauthenticated-endpoint message the test spells out. [tests/unit/test_mcp_sdk_contract.py:210]\n  - VC-68: An invalid profile name yields ProfileNameError with message 'profile name must be 1-64 characters from [A-Za-z0-9_.-]'. [tests/unit/test_mcp_sdk_contract.py:140]\n  - VC-69: fake_impl's return tuple (text, blocks, query, memory_info, trace) and memory dict keys match what query_database_impl_with_widgets really returns. [tests/unit/test_mcp_sdk_contract.py:220]\n  - VC-70: Patching sqllens.ui._read_text to raise makes load_widget_html raise RuntimeError and the query-results resource read hit the same failure, so the resource error message embeds str() of that RuntimeError. [tests/unit/test_mcp_sdk_contract.py:246]\n  - VC-71: build_test_config accepts allow_import, allow_admin_tools, profiles_allow_admin_tools, agent and auth keyword arguments and maps them to memory/profiles/agent/auth config. [tests/unit/test_mcp_sdk_contract.py:61]\n  - VC-72: build_asgi_app's session_manager guard raises RuntimeError whose message contains 'MCPServer no longer exposes'. [tests/unit/test_transport_http.py]\n  - VC-73: _tool_errors re-raises the original exception as ToolError(str(exc)) from exc, so str(ToolError) equals the original message and __cause__ is the original (e.g. AgentRunError, RuntimeError). [tests/unit/test_conversation_footer_setting.py]\n\n  </details>\n\n</details>\n",
+ "acceptance_criteria": "- [ ] `pyproject.toml` declares `mcp>=2.3.0,<3`, and its comment no longer says to keep the FastMCP 1.x API. `requirements.txt` is regenerated with the command in its header and locks an mcp release at 2.3.0 or later and below 3.\n- [ ] No file under `src/` or `tests/` imports `mcp.server.fastmcp`.\n- [ ] `build_server` returns an `mcp.server.mcpserver.MCPServer`. It registers exactly these tools, under these switches, complete by construction: - always: `query_database` and `list_data_sources` - with `memory.allow_import`: `import_memory` - with `memory.allow_admin_tools`: `list_memories`, `get_memory`, `delete_memory`, `clear_memories`, `add_memories`, `export_memories` and `get_memory_stats` - with `profiles.allow_admin_tools`: `list_profiles`, `get_profile`, `upsert_profile` and `delete_profile`\n- [ ] Each tool keeps its name, its argument names and its `_meta`; `query_database` keeps `_meta.ui.resourceUri` set to the query-results widget URI. The three `ui://` widget resources (query results, memory admin, config admin) are listed and read with MIME type `text/html;profile=mcp-app` and `_meta.ui.prefersBorder` set to `true`.\n- [ ] When a tool's function raises an `Exception` other than the SDK's `ToolError` or `MCPError`, the client receives `isError: true` with the text `Error executing tool <name>: <message>`, where `<message>` is `str()` of the raised exception. When it raises a `BaseException` that is not an `Exception`, such as `asyncio.CancelledError`, that exception leaves the wrapper unchanged; a unit test pins this for `CancelledError`. Tests assert the error text through the real 2.x SDK, at minimum for these cases: - `query_database` with an invalid profile name (`ProfileNameError`) - `query_database` re-raising an `AgentRunError` with the conversation footer on and no agent trace - `import_memory` refused on an unauthenticated endpoint - one memory-admin tool raising `RuntimeError`\n- [ ] When the function behind a `ui://` widget resource raises an `Exception` other than the SDK's `ResourceError` or `MCPError`, a client's `resources/read` gets an error whose message is `Error reading resource <uri>: <message>`, where `<message>` is `str()` of the raised exception. A test asserts this through a real 2.x client for a widget whose asset is unavailable.\n- [ ] With the conversation footer on and no agent trace, the `query_database` error result carries no `sqllens/*` key in `_meta`.\n- [ ] With the conversation footer off, or with an agent trace present, the `query_database` error result keeps the text `_agent_error_result` builds today, and its `_meta` carries `sqllens/conversation`.\n- [ ] A successful `query_database` result carries the same `sqllens/*` `_meta` channels as on 1.30.0: `sqllens/conversation`, `sqllens/blocks`, `sqllens/query`, `sqllens/memory_info`, `sqllens/agent_trace` (when `agent.show_details` is on) and `sqllens/model_info`.\n- [ ] On both stdio and Streamable HTTP, `_request_metadata` forwards every request `_meta` key except the progress-token key (`progressToken` or `progress_token`) and keys starting with `io.modelcontextprotocol/`. An SDK-managed key outside that prefix, other than the progress token, is forwarded. It returns `{}` in each of these cases: - the forwarded keys exceed 64 keys, 16 KiB of compact ASCII-escaped JSON, 1024 nodes or 8 nesting levels below the root - the request carries no `_meta` - no request is active Tests drive real 2.x clients and assert: - `{\"tenant\": \"alpha\"}` arrives as `{\"tenant\": \"alpha\"}` - a request that also carries a progress token arrives as `{\"tenant\": \"alpha\"}` - the existing oversized-payload case arrives as `{}` - over Streamable HTTP, a request with `{\"tenant\": \"alpha\"}` from a client session that negotiated the 2026-07-28 protocol arrives as `{\"tenant\": \"alpha\"}`. That session's SDK stamps `io.modelcontextprotocol/protocolVersion`, `clientInfo` and `clientCapabilities` into the request's `_meta`.\n- [ ] Over Streamable HTTP with the server bound to `0.0.0.0` and an auth mode the bind policy accepts, a request to `/mcp/` that passes SQL Lens's auth check and carries a non-loopback `Host` header gets HTTP 421 from the SDK's Host check. A test pins this.\n- [ ] Streamable HTTP still serves the MCP endpoint at both `/mcp` and `/mcp/`, answers `/healthz` and `/readyz`, applies the configured auth mode, and starts and stops the session manager in the ASGI lifespan. The existing tests in `tests/integration/test_http_transport.py` and `tests/unit/test_transport_http.py` pass after porting to the 2.x client API.\n- [ ] `sqllens serve` over stdio answers `list_tools` and `call_tool` from a 2.x `stdio_client`.\n- [ ] After the change, these files describe `MCPServer` and mcp 2.x wherever they describe the SDK's current behavior, including the error format and how the `ToolError` conversion produces it: `AGENTS.md`, `docs/internal/mcp-server/transport.md`, `docs/internal/mcp-server/tools.md`, `docs/internal/architecture/overview.md`, `docs/internal/authentication/overview.md`, `docs/internal/database-connectors/row-level-security.md` and `docs/internal/setup/config-loading.md`. The docstrings and comments in `src/sqllens/server.py`, `src/sqllens/transport/http.py`, `src/sqllens/tools/query_database.py`, `src/sqllens/tools/_agent.py`, `src/sqllens/ui/__init__.py` and `src/sqllens/ui/memory_admin.html` do the same. AGENTS.md's gotcha about non-loopback `Host` headers names the loopback default of `MCPServer`'s `streamable_http_app()` as the source of the 421. `docs/internal/production-readiness-v0.1.0.md` and `docs/external/release-notes.md` stay unchanged as historical records.\n- [ ] The change leaves these as they are: - `mcpb/build.sh`'s install without `-c requirements.txt`, so an MCPB bundle ships the newest mcp 2.x on PyPI at build time, which can be newer than the release CI tested. - The SDK's INFO log line for each tool failure. It now fires for every converted tool error and includes the client message, which can contain SQL text. - The SDK's `io.modelcontextprotocol/serverInfo` key on results of 2026-07-28 protocol sessions, including the footer-on, no-trace error result. - Errors that 2.x raises outside the tool's function, such as argument validation and output conversion. They keep the 2.x SDK's own text. - The JSON-RPC error code of a failed resource read, which the 2.x SDK sets. - The 2.x SDK's parsing of request `_meta`. It drops a caller key spelled `progress_token` before `_request_metadata` runs, so a dynamic RLS rule reading `progress_token` (forwarded on 1.30.0) blocks its queries on 2.x. A caller key starting with `io.modelcontextprotocol/`, also forwarded on 1.30.0, is excluded by the forwarding rule above. - The SDK's handling of 2026-07-28 protocol requests. They carry no session id, so the session manager's idle timeout and session cap do not bound them.",
+ "diff_produced_at_head": "47a3ea73a23771577d8e55d074670275dfb1f45d",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "category": "dependency_interaction",
+   "claim": "mcp 2.x Python clients have a max_sse_event_size setting defaulting to 1 MiB, and the query-results and memory-admin widgets exceed it over Streamable HTTP.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "Python clients built on mcp 2.x must raise `max_sse_event_size` above its 1 MiB default to read the query-results or memory-admin widget over Streamable HTTP.",
+   "source_file": "changelog.d/391.changed.md",
+   "source_line": 1,
+   "verify_against": "mcp 2.x client streamable HTTP transport; src/sqllens/ui widget assets",
+   "verify_hint": "Check the max_sse_event_size default in mcp/client/streamable_http.py and the inlined sizes of query_results.html and memory_admin.html produced by load_widget_html in src/sqllens/ui/__init__.py",
+   "claim_signature": "dependency_interaction:391.changed.md:max-sse-event-size",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-2"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The item has no dependency_sources. A grep of the head view for max_sse_event_size finds only repo-authored mentions: docs/internal/mcp-server/transport.md:171, changelog.d/391.changed.md:1, and tests/integration/test_http_transport.py:144 (which passes 8 MiB). No mcp client source is in the views, so the 1 MiB default in mcp/client/streamable_http.py cannot be read from the views. Copies of mcp exist elsewhere on the filesystem, but they are outside the permitted sources and their version is unknown. I did not measure the inlined widget sizes either.",
+   "file_checked": "changelog.d/391.changed.md:1",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "dependency_interaction:391.changed.md:mcp2-pin-mcpserver",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "category": "dependency_interaction",
+   "claim": "In mcp 2.x, MCPServer.tool and MCPServer.resource accept a meta= keyword.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "docs/internal/mcp-server/tools.md",
+   "source_line": 303,
+   "verify_against": "mcp 2.x mcp/server/mcpserver/server.py",
+   "verify_hint": "Check the signatures of MCPServer.tool and MCPServer.resource for a meta parameter",
+   "claim_signature": "dependency_interaction:tools.md:meta-keyword-2x",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-4"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The mcp 2.x source was not available. The item has no dependency_sources, the head view's inventory.json has no mcpserver entry, and a Glob of the repo for mcp/server/mcpserver/server.py and for site-packages/mcp/server/**/server.py found nothing. The claim's text at docs/internal/mcp-server/tools.md:303 says MCPServer.tool and MCPServer.resource keep the meta= keyword, but that is a doc line and not the library's implementation. Missing evidence: installed mcp>=2.3.0 mcp/server/mcpserver/server.py signatures for tool and resource.",
+   "file_checked": "docs/internal/mcp-server/tools.md:303",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "category": "absolute_claim",
+   "claim": "The mcp 2.x SDK logs every converted tool error at INFO with the message included.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "The SDK logs every converted tool error at INFO, message included.",
+   "source_file": "docs/internal/mcp-server/tools.md",
+   "source_line": 539,
+   "verify_against": "mcp 2.x Tool.run and the call_tool handler logging",
+   "verify_hint": "Check logger calls on the ToolError path in mcp/server/mcpserver/tools/base.py and server.py _handle_call_tool; falsifying input: a ToolError path that logs at another level or omits the message",
+   "claim_signature": "absolute_claim:tools.md:sdk-info-log-every-error",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-5"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The claim (docs/internal/mcp-server/tools.md:539) concerns how the third-party mcp 2.x SDK logs ToolError. The item has no dependency_sources, and the head view holds no copy of mcp/server/mcpserver (Glob of the view found none). Copies of the SDK exist elsewhere on the machine, outside the views and not supplied as dependency_sources, so I did not rely on them. Without the SDK's Tool.run and _handle_call_tool source, the log level and message content cannot be verified. Command not run: read mcp/server/mcpserver/tools/base.py and server.py from a supplied dependency directory.",
+   "file_checked": "docs/internal/mcp-server/tools.md:539",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "api_contract:tools.md:tool-failure-exception-types",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "category": "api_contract",
+   "claim": "The architecture overview's diagram line says server.py registers the two tools; build_server also conditionally registers import, memory-admin and profile-admin tools.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "server.py         →  MCPServer factory, registers the two tools, picks transport",
+   "source_file": "docs/internal/architecture/overview.md",
+   "verify_against": "src/sqllens/server.py build_server registrations",
+   "verify_hint": "Count @_tool registrations and their gating blocks in build_server",
+   "claim_signature": "api_contract:overview.md:registers-two-tools",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch1:VC-7"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "FAIL",
+   "raw_verdict": "FAIL",
+   "normalized": false,
+   "evidence": "overview.md:21 says server.py 'registers the two tools'. build_server (server.py:331) registers two unconditional tools (@_tool at 391, 505), then more under cfg.memory.allow_import (512; tool at 523), cfg.memory.allow_admin_tools (588; tools at 632,666,686,714,738,784,829) and cfg.profiles.allow_admin_tools (852; tools at 895,931,965,1017). So 'the two tools' is inaccurate as a description of all registrations; it is only true of the always-on tools.",
+   "file_checked": "docs/internal/architecture/overview.md:21",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "category": "dependency_interaction",
+   "claim": "mcp 2.x's Python client streamable_http_client refuses a single SSE event larger than max_sse_event_size, whose default is 1 MiB, and accepts a larger max_sse_event_size argument; the query-results and memory-admin widgets are each larger than 1 MiB; the named test passes a larger value.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "The mcp 2.x Python client's `streamable_http_client` refuses a single SSE event over `max_sse_event_size` (1 MiB by default). The query-results and memory-admin widgets inline their JavaScript and are each larger than that, so a Python 2.x client reading them over Streamable HTTP must pass a larger `max_sse_event_size`, as `tests/integration/test_http_transport.py::TestNoAuth::test_widget_resource_read_through_auth` does.",
+   "source_file": "docs/internal/mcp-server/transport.md",
+   "verify_against": "mcp 2.x mcp/client/streamable_http.py; src/sqllens/ui/ widget HTML sizes; tests/integration/test_http_transport.py",
+   "verify_hint": "Check the streamable_http_client signature and max_sse_event_size default in the mcp 2.x client, the byte size of the built query-results and memory-admin widget HTML in src/sqllens/ui/__init__.py, and TestNoAuth.test_widget_resource_read_through_auth",
+   "claim_signature": "dependency_interaction:transport.md:sse-event-size-limit",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-1"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The claim depends on mcp 2.x client behaviour (streamable_http_client signature and the 1 MiB default of max_sse_event_size). The item has no dependency_sources, and the mcp client source is not in the head view. Grep of the head view finds max_sse_event_size only in tests/integration/test_http_transport.py:144 (passes 8 MiB), docs/internal/mcp-server/transport.md:171 and a changelog entry. Locating the library source elsewhere on the filesystem would fall outside the views and the allowed dependency directories, so I did not rely on it. The library behaviour and the widget sizes are unverified from the permitted sources.",
+   "file_checked": "tests/integration/test_http_transport.py:144",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "category": "dependency_interaction",
+   "claim": "MCPServer.streamable_http_app() called with no host= or transport_security= keeps a host default of 127.0.0.1 and, with transport_security None, enables DNS-rebinding protection for loopback hosts, which answers a non-loopback Host with 421.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "`_build_asgi_app_bare` calls `MCPServer.streamable_http_app()` with no `host=` or `transport_security=` argument, so the SDK keeps its `host=\"127.0.0.1\"` default and, with `transport_security` left `None`, turns on DNS-rebinding protection for that loopback host.",
+   "source_file": "docs/internal/mcp-server/transport.md",
+   "verify_against": "mcp 2.x mcp/server/mcpserver/server.py streamable_http_app and transport security middleware; src/sqllens/transport/http.py _build_asgi_app_bare",
+   "verify_hint": "Check MCPServer.streamable_http_app's parameters and defaults, how it builds TransportSecuritySettings when transport_security is None, and the call site in _build_asgi_app_bare",
+   "claim_signature": "dependency_interaction:transport.md:loopback-host-default",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-2"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Call site confirmed: src/sqllens/transport/http.py:236 calls mcp.streamable_http_app() with no host= or transport_security= (comment at 233-235). The claim depends on mcp 2.x library behavior (default host 127.0.0.1, transport_security None enabling DNS-rebinding protection for loopback, 421 on bad Host). The item has no dependency_sources, and the mcp library source is not in the head view (no mcpserver/server.py in inventory.json). I did not read library source from outside the supplied views and dependency directories, so the SDK behavior is unverified.",
+   "file_checked": "src/sqllens/transport/http.py:236",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-18",
+   "category": "dependency_interaction",
+   "claim": "server.py imports Context and MCPServer from mcp.server.mcpserver, ToolError and ResourceError from mcp.server.mcpserver.exceptions, and MCPError from mcp.shared.exceptions; each exists at those paths in mcp 2.3.0.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/server.py",
+   "verify_against": "mcp 2.3.0 package modules",
+   "verify_hint": "Check mcp/server/mcpserver/__init__.py, mcp/server/mcpserver/exceptions.py and mcp/shared/exceptions.py in mcp 2.3.0",
+   "claim_signature": "dependency_interaction:server.py:mcp2-import-paths",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-3"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "server.py:26-28 does import Context, MCPServer from mcp.server.mcpserver, ResourceError/ToolError from mcp.server.mcpserver.exceptions, MCPError from mcp.shared.exceptions. But the item supplies no dependency_sources and the views contain no mcp 2.3.0 source (inventory.json has no mcp/ entries). Copies of mcp found elsewhere on the filesystem (scratchpad venv, uv cache, another project's venv) are outside the permitted sources and their versions were not established, so they were not relied on. Missing evidence: mcp 2.3.0 source for mcp/server/mcpserver/__init__.py, exceptions.py and mcp/shared/exceptions.py.",
+   "file_checked": "src/sqllens/server.py:26-28",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "dependency_interaction:server.py:decorator-kwargs",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-21",
+   "category": "data_format_assumption",
+   "claim": "In mcp 2.x, ctx.request_context.meta is a plain dict (or None when the request has no _meta) holding the request's _meta keys, so _request_metadata's isinstance(meta, dict) check passes for real requests.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/server.py",
+   "verify_against": "mcp 2.x RequestContext.meta and the request params meta type in mcp_types",
+   "verify_hint": "Check the type of RequestContext.meta in mcp 2.x (mcp/shared/context.py or mcp/server) and how the server populates it from request params _meta",
+   "claim_signature": "data_format_assumption:server.py:request-meta-dict",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-6"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The claim depends on mcp 2.x RequestContext.meta type. The item has no dependency_sources, and the mcp library source is not in the head view (inventory.json has no mcp/shared/context entry). server.py:260-306 reads ctx.request_context.meta, maps None to {}, and treats non-dict as invalid with a warning and {}. That code is fail-secure, but whether real 2.x requests give a dict was not verifiable from the views. Missing evidence: mcp 2.x RequestContext.meta definition and how it is populated from params _meta.",
+   "file_checked": "src/sqllens/server.py:260-306",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-22",
+   "category": "dependency_interaction",
+   "claim": "MCPServer's resource registration accepts a synchronous zero-argument function wrapped by _resource_errors and treats it as a static (non-template) resource at that uri, calling it at read time.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "src/sqllens/server.py",
+   "source_line": 230,
+   "source_line_end": 250,
+   "verify_against": "mcp 2.x MCPServer.resource and FunctionResource",
+   "verify_hint": "Check MCPServer.resource's template detection (uri params vs function params) and FunctionResource.read for sync functions",
+   "claim_signature": "dependency_interaction:server.py:sync-resource-wrapper",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch2:VC-7"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The claim depends on mcp 2.x MCPServer.resource template detection and FunctionResource.read. The item has no dependency_sources, and a Grep of the head view for 'class FunctionResource' found no vendored mcp source, so the library behavior cannot be settled from the views. I read src/sqllens/server.py:230-250: _resource_errors(uri) returns a decorator that wraps a sync zero-arg Callable[[], str] in a sync zero-arg wrapper (functools.wraps) that re-raises ResourceError/MCPError and converts other Exceptions to ResourceError. That much is correct. Not verified: whether MCPServer.resource treats a uri with no {params} and a zero-arg function as a static resource, and whether FunctionResource.read calls sync functions. I did not read the mcp library source. The only copies on disk are outside the permitted dependency_sources, in an unrelated venv, a uv cache and a scratchpad venv.",
+   "file_checked": "src/sqllens/server.py:230-250",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-23",
+   "category": "dependency_interaction",
+   "claim": "Calling MCPServer.streamable_http_app() with no host= or transport_security= leaves the SDK's 127.0.0.1 default in force, which enables the SDK's Host check that answers a non-loopback Host with 421; changing either argument changes that check.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "# Pass no host= / transport_security=: the 127.0.0.1 default keeps the\n    # SDK's own Host check, which answers a non-loopback Host with 421 behind\n    # our allowlist and auth. Changing either silently changes that check.",
+   "source_file": "src/sqllens/transport/http.py",
+   "source_line": 233,
+   "source_line_end": 235,
+   "verify_against": "mcp 2.x mcp/server/mcpserver/server.py MCPServer.__init__ / streamable_http_app and transport security settings",
+   "verify_hint": "Check MCPServer's default host and how streamable_http_app derives TransportSecuritySettings (allowed_hosts, enable_dns_rebinding_protection) and its 421 response",
+   "claim_signature": "dependency_interaction:http.py:sdk-loopback-host-default:233",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-1"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The claim depends on mcp 2.x MCPServer internals (default host 127.0.0.1, TransportSecuritySettings derivation, 421 response). No dependency_sources were supplied, and the head view has no vendored mcp source (grep of the view for transport_security/421 found only http.py:233-236 comments and tests/integration/test_http_transport.py:355-390, which assert a 421 but are not the SDK implementation). Repo-side code at http.py:232-236 does call mcp.streamable_http_app() with no host= or transport_security=, matching the claim's call shape. I did not read mcp/server/mcpserver/server.py from a supplied dependency directory, so the SDK behavior is unverified.",
+   "file_checked": "src/sqllens/transport/http.py:233-236",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-25",
+   "category": "dependency_interaction",
+   "claim": "mcp 2.x streamable_http_client accepts a max_sse_event_size keyword and yields a (read, write) 2-tuple.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/integration/test_http_transport.py",
+   "source_line": 144,
+   "verify_against": "mcp 2.x mcp/client/streamable_http.py",
+   "verify_hint": "Check the signature and yield of streamable_http_client in mcp.client.streamable_http",
+   "claim_signature": "dependency_interaction:test_http_transport.py:client-sse-cap-kwarg:144",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-2"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The test calls streamable_http_client(handle.mcp_url, max_sse_event_size=8*1024*1024) and unpacks (read, write) at tests/integration/test_http_transport.py:143-145. The claim is about the installed mcp 2.x library, but the item has no dependency_sources, and a Glob for **/mcp/client/streamable_http.py under the review directory found nothing. I could not read the signature or the yield of streamable_http_client. I did not run the test.",
+   "file_checked": "tests/integration/test_http_transport.py:144",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-27",
+   "category": "data_format_assumption",
+   "claim": "The 2.x Python client's default SSE event size cap is 1 MiB, the query-results widget is about 1.5 MB, and a cap below it fails the resource read client-side.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "# The ~1.5 MB widget exceeds the 2.x Python client's 1 MiB default\n        # SSE event cap; a smaller cap here fails the read client-side.",
+   "source_file": "tests/integration/test_http_transport.py",
+   "verify_against": "mcp 2.x streamable_http client default for max_sse_event_size; packaged widget HTML size in src/sqllens/ui",
+   "verify_hint": "Check the default of max_sse_event_size in mcp.client.streamable_http and the size of the inlined query-results widget built by load_widget_html",
+   "claim_signature": "data_format_assumption:test_http_transport.py:sse-event-cap-size",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-3"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The claim depends on the mcp 2.x client's default max_sse_event_size. The item has no dependency_sources, and view-head has no vendored mcp source. Grep of view-head found only the test (tests/integration/test_http_transport.py:141-144, which passes max_sse_event_size=8*1024*1024) and docs/internal/mcp-server/transport.md:171, which repeat the 1 MiB claim without defining it. I did not read the library's streamable_http.py or measure the widget HTML size via load_widget_html, so I cannot confirm the 1 MiB default or the ~1.5 MB widget size.",
+   "file_checked": "tests/integration/test_http_transport.py:141",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-28",
+   "category": "dependency_interaction",
+   "claim": "streamable_http_client takes an http_client keyword and sends that httpx2.AsyncClient's default headers (Authorization) on its requests, replacing the 1.x headers= argument.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/integration/test_http_transport.py",
+   "source_line": 171,
+   "verify_against": "mcp 2.x mcp/client/streamable_http.py and the httpx2 package",
+   "verify_hint": "Check streamable_http_client's http_client parameter and whether it uses the passed client's headers",
+   "claim_signature": "dependency_interaction:test_http_transport.py:httpx2-client-headers:171",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-4"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The test at tests/integration/test_http_transport.py:169-172 builds httpx2.AsyncClient(headers=Authorization) and passes it as streamable_http_client(url, http_client=...). The claim depends on mcp 2.x library behavior. The item gives no dependency_sources, and the head view holds no mcp/client/streamable_http.py (grep of the review dir found none). Copies of mcp found elsewhere on the machine (other venvs) are not designated sources, so I did not rely on them. I did not read the library's http_client handling.",
+   "file_checked": "tests/integration/test_http_transport.py:171",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-29",
+   "category": "dependency_interaction",
+   "claim": "streamable_http_client with an httpx2.AsyncClient carrying a Bearer header authenticates import_memory calls in bearer mode.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/integration/test_memory_import_auth.py",
+   "source_line": 38,
+   "verify_against": "mcp 2.x mcp/client/streamable_http.py",
+   "verify_hint": "Check how streamable_http_client issues requests through the supplied http_client",
+   "claim_signature": "dependency_interaction:test_memory_import_auth.py:httpx2-client-headers:38",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-5"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The test at tests/integration/test_memory_import_auth.py:36-39 builds httpx2.AsyncClient(headers=Bearer) and passes it to streamable_http_client(http_client=...). Whether mcp 2.x sends requests through that client depends on mcp/client/streamable_http.py. The item has no dependency_sources, and a Glob of the head view for **/mcp/client/streamable_http.py found nothing. I could not read the library implementation, so the claim is unverified.",
+   "file_checked": "tests/integration/test_memory_import_auth.py:38",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-30",
+   "category": "dependency_interaction",
+   "claim": "ClientSession.discover() exists in mcp 2.x, returns an object with supported_versions, and leaves the session on the 2026-07-28 protocol, whose requests the SDK stamps with io.modelcontextprotocol/protocolVersion, clientInfo and clientCapabilities in _meta.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/integration/test_http_transport.py",
+   "source_line": 71,
+   "verify_against": "mcp 2.x mcp/client/session.py",
+   "verify_hint": "Check ClientSession.discover and how call_tool builds request _meta on a 2026-07-28 session",
+   "criterion": 10,
+   "claim_signature": "issue_acceptance:test_http_transport.py:discover-2026-session:71",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-6"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The test at tests/integration/test_http_transport.py:71-84 calls session.discover(), asserts '2026-07-28' in discovered.supported_versions, and expects the three reserved io.modelcontextprotocol/* keys in request meta. Whether ClientSession.discover exists in mcp 2.x and how it stamps _meta depends on the third-party mcp library. The item has no dependency_sources, and a Glob for mcp/client/session.py under the review directory found no vendored copy. I could not read the library implementation, so the claim is unsettled. Missing evidence: mcp 2.x mcp/client/session.py (discover and the request _meta stamping).",
+   "file_checked": "tests/integration/test_http_transport.py:71",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-31",
+   "category": "dependency_interaction",
+   "claim": "Passing progress_callback to ClientSession.call_tool makes the 2.x session add a progressToken to the request _meta alongside caller meta, and the callback signature (progress, total, message) matches the SDK's expected type.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/integration/test_metadata_stdio.py",
+   "source_line": 36,
+   "verify_against": "mcp 2.x mcp/client/session.py call_tool and ProgressFnT",
+   "verify_hint": "Check call_tool's handling of progress_callback and meta merge in mcp.client.session",
+   "criterion": 10,
+   "claim_signature": "issue_acceptance:test_metadata_stdio.py:progress-token-meta:36",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-7"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The test at tests/integration/test_metadata_stdio.py:31-37 defines on_progress(progress, total, message) and passes it as progress_callback to session.call_tool with meta={'tenant': 'alpha'}. The claim depends on mcp 2.x mcp/client/session.py (call_tool, ProgressFnT). The item has no dependency_sources, and a Glob for **/mcp/client/session.py under the repository and its views found no file. The library source is therefore unavailable and I could not check the meta merge or the callback type. The test comment says 'A progress callback makes the session send a progressToken in _meta', but a comment is not evidence.",
+   "file_checked": "tests/integration/test_metadata_stdio.py:31-37",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-33",
+   "category": "dependency_interaction",
+   "claim": "MCPServer accepts its name as the first positional argument and Context is importable from mcp.server.mcpserver.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/integration/test_metadata_stdio.py",
+   "source_line": 17,
+   "verify_against": "mcp 2.x mcp/server/mcpserver/__init__.py",
+   "verify_hint": "Check the MCPServer constructor signature and the package exports",
+   "claim_signature": "dependency_interaction:test_metadata_stdio.py:mcpserver-ctor-name:17",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-8"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "tests/integration/test_metadata_stdio.py:15,17 does `from mcp.server.mcpserver import Context, MCPServer` and `MCPServer('metadata-test')`. The claim depends on installed mcp 2.x library behavior. The item has no dependency_sources, and the head view's inventory.json lists no mcp/server/mcpserver source (no vendored copy). I did not read library source from outside the views and dependency_sources, so the constructor signature and package exports are unverified. Missing evidence: mcp 2.x mcp/server/mcpserver/__init__.py and server.py.",
+   "file_checked": "tests/integration/test_metadata_stdio.py:17",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-34",
+   "category": "dependency_interaction",
+   "claim": "mcp 2.x result models expose snake_case attributes is_error, structured_content, mime_type and input_schema in place of the 1.x camelCase names.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/integration/test_memory_bounds.py",
+   "verify_against": "mcp 2.x mcp_types CallToolResult, Tool, TextResourceContents",
+   "verify_hint": "Check field names in mcp_types for CallToolResult.is_error/structured_content and Tool.input_schema",
+   "claim_signature": "dependency_interaction:test_memory_bounds.py:snake-case-fields",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-9"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The item has no dependency_sources. The views pin mcp==2.3.0 and mcp-types==2.3.0 (requirements.txt:60-61) but do not contain their source. Glob for mcp_types/**/*.py and site-packages/mcp_types* under the repo found nothing. tests/integration/test_memory_bounds.py:35,43,54,73,76 use tool.input_schema, result.is_error and result.structured_content, which is consistent with the claim. Those are the tests' own usage, not the library's definitions, so the library field names are unverified.",
+   "file_checked": "tests/integration/test_memory_bounds.py:35-76",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-35",
+   "category": "dependency_interaction",
+   "claim": "StdioServerParameters accepts env and cwd, and stdio_client launches the child with exactly that env (so SQLLENS_ variables outside the dict are absent).",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/integration/test_stdio_serve.py",
+   "source_line": 700,
+   "verify_against": "mcp 2.x mcp/client/stdio.py",
+   "verify_hint": "Check StdioServerParameters fields and whether stdio_client merges a default environment with the given env",
+   "claim_signature": "dependency_interaction:test_stdio_serve.py:stdio-params-env",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch3:VC-10"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The test (tests/integration/test_stdio_serve.py:26-32) passes env=env and cwd=str(tmp_path) to StdioServerParameters and calls stdio_client. The claim depends on mcp 2.x mcp/client/stdio.py, in particular whether stdio_client merges a default environment (get_default_environment) with the given env. The item has no dependency_sources, and grep of the head view finds no mcp client source or get_default_environment. The library source is therefore unread, and I did not run the library.",
+   "file_checked": "tests/integration/test_stdio_serve.py:26-32",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-36",
+   "category": "dependency_interaction",
+   "claim": "The docstring states the in-memory mcp 2.x Client runs in mode=\"auto\" so the session negotiates the 2026-07-28 protocol; the tests construct Client(mcp) with no mode argument, so this holds only if the Client default is auto and auto negotiates 2026-07-28 in-memory.",
+   "claim_provenance": "source_authored",
+   "source_excerpt": "transport, ``mode=\"auto\"`` so the session negotiates the 2026-07-28 protocol)",
+   "source_file": "tests/unit/test_mcp_sdk_contract.py",
+   "source_line": 6,
+   "source_line_end": 7,
+   "verify_against": "mcp 2.x mcp.Client constructor defaults and in-memory protocol negotiation",
+   "verify_hint": "Check the `mode` parameter default of `mcp.Client.__init__` and which protocol version an in-memory session negotiates under it",
+   "claim_signature": "dependency_interaction:test_mcp_sdk_contract.py:client-mode-auto:6",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch4:VC-1"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The docstring at tests/unit/test_mcp_sdk_contract.py:6-7 does say the in-memory Client runs in mode=\"auto\" so the session negotiates 2026-07-28, and the tests construct Client(mcp) with no mode argument. Whether that holds depends on the mcp 2.x Client default for `mode` and on what auto negotiates in-memory. The item has no dependency_sources, and the head view does not hold the mcp library. I did not read any mcp library source for this verdict. A search of the filesystem found mcp/client/client.py copies outside the review's views, but they are not supplied dependency sources and I cannot tie them to the version the PR pins. Missing evidence: mcp.Client.__init__ `mode` default and the auto-negotiation code for the in-memory transport, from the mcp 2.x version the PR targets.",
+   "file_checked": "tests/unit/test_mcp_sdk_contract.py:6-7",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-38",
+   "category": "dependency_interaction",
+   "claim": "In mcp 2.x, list_tools() Tool objects expose `input_schema` (dict with `properties`) and `meta` carrying the tool's _meta, and query_database's meta equals {\"ui\": {\"resourceUri\": \"ui://sqllens/query-results.html\"}}.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_mcp_sdk_contract.py",
+   "source_line": 102,
+   "source_line_end": 105,
+   "verify_against": "mcp_types Tool model and the query_database registration in src/sqllens/server.py",
+   "verify_hint": "Check the Tool class field names (input_schema, meta alias _meta) in mcp_types and the meta= passed to the query_database @_tool in build_server",
+   "criterion": 4,
+   "claim_signature": "issue_acceptance:test_mcp_sdk_contract.py:tool-meta-resource-uri:102",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch4:VC-2"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Repo side verified: src/sqllens/server.py:391 registers query_database with @_tool(meta={\"ui\": {\"resourceUri\": _WIDGET_URI}}, structured_output=False); test at tests/unit/test_mcp_sdk_contract.py:102-105 asserts tool.input_schema and query.meta == {\"ui\": {\"resourceUri\": _QUERY_WIDGET}}. I did not confirm _WIDGET_URI/_QUERY_WIDGET equal ui://sqllens/query-results.html. Not settled: the mcp 2.x Tool model (input_schema snake_case field, meta alias _meta). No dependency_sources were supplied, and the only installed mcp found (sqllens/.venv and .prflow/tmp/venv) is 1.30.0, where types.Tool uses camelCase inputSchema and meta=Field(alias='_meta'). No 2.x/mcp_types source found (Glob of uv cache and venv site-packages). Missing evidence: mcp 2.x installed source or running the test under mcp 2.x.",
+   "file_checked": "src/sqllens/server.py:391",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-39",
+   "category": "dependency_interaction",
+   "claim": "MCPError is constructible as MCPError(code=..., message=...) and a client-side failed resources/read raises MCPError whose `.error.message` holds the server's error message.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_mcp_sdk_contract.py",
+   "source_line": 257,
+   "source_line_end": 261,
+   "verify_against": "mcp.shared.exceptions.MCPError in mcp 2.x",
+   "verify_hint": "Check MCPError.__init__ signature and its `error` attribute in mcp/shared/exceptions.py, and how the client session raises on a JSON-RPC error response",
+   "claim_signature": "dependency_interaction:test_mcp_sdk_contract.py:mcperror-shape:257",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch4:VC-3"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The test at tests/unit/test_mcp_sdk_contract.py:256-261 uses MCPError(code=..., message=...) (also line 281) and reads excinfo.value.error.message. The claim depends on mcp 2.x's mcp/shared/exceptions.py and the client session's error handling. The item has no dependency_sources. A Glob for **/mcp/shared/exceptions.py under the review directory and the repository root found nothing. The library source is not in the views, so the MCPError.__init__ signature and its `error` attribute could not be read. Not run: inspecting an installed mcp 2.x package or running the test.",
+   "file_checked": "tests/unit/test_mcp_sdk_contract.py:257",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-40",
+   "category": "test_mock_alignment",
+   "claim": "The MCPServer test helpers reach the registered function via the private `mcp._tool_manager.get_tool(name).fn`, assuming mcp 2.x MCPServer keeps a `_tool_manager` attribute whose get_tool returns an object with `.fn` set to the (error-wrapped) registered function.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_memory_admin_tools.py",
+   "source_line": 59,
+   "verify_against": "mcp 2.x mcp/server/mcpserver/server.py and tools/tool_manager.py",
+   "verify_hint": "Check MCPServer.__init__ for `_tool_manager`, ToolManager.get_tool, and Tool.fn in mcp.server.mcpserver.tools",
+   "claim_signature": "test_mock_alignment:test_memory_admin_tools.py:tool-manager-fn",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch4:VC-10"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "tests/unit/test_memory_admin_tools.py:57-59 defines _fn(mcp, name) returning mcp._tool_manager.get_tool(name).fn, so the claim describes the test code. Whether mcp 2.x MCPServer keeps _tool_manager, and whether get_tool returns a Tool with .fn, depends on the installed library. The item has no dependency_sources, and a Glob for **/mcpserver/** in the head view found no mcp library source. Missing evidence: mcp/server/mcpserver/server.py and tools/tool_manager.py from mcp 2.x.",
+   "file_checked": "tests/unit/test_memory_admin_tools.py:59",
+   "normalization_ineligible": null,
+   "severity": "important"
+  },
+  {
+   "id": "VC-41",
+   "claim_signature": "api_contract:test_memory_unavailable.py:sdk-same-prefix:252",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-43",
+   "category": "dependency_interaction",
+   "claim": "In mcp 2.x, CallToolResult exposes `is_error` and `meta` (alias _meta) attributes, and list_resources() Resource exposes `mime_type`, replacing the 1.x camelCase names.",
+   "claim_provenance": "generated_paraphrase",
+   "source_file": "tests/unit/test_server.py",
+   "verify_against": "mcp_types CallToolResult and Resource models",
+   "verify_hint": "Check field names of CallToolResult and Resource in mcp_types/_types.py",
+   "claim_signature": "dependency_interaction:test_server.py:snake-case-fields",
+   "verification_mode": "agent",
+   "merged_from": [
+    "batch4:VC-12"
+   ],
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "The claim depends on the field names in the installed mcp 2.x CallToolResult and Resource models (mcp_types/_types.py). The item has no dependency_sources. A Glob for **/mcp_types/_types.py and **/_types.py in the head view found nothing, so the library source is not in the views. tests/unit/test_server.py uses result.is_error, result.meta and resource.mime_type (lines 78, 86, 147, 417, 458), but that only shows what the tests assume, not what the library defines. I did not run the tests or inspect an installed mcp package.",
+   "file_checked": "tests/unit/test_server.py:78",
+   "normalization_ineligible": null,
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-44",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-46",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-48",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-53",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-54",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "When the function behind a `ui://` widget resource raises an `Exception` other than the SDK's `ResourceError` or `MCPError`, a client's `resources/read` gets an error whose message is `Error reading resource <uri>: <message>`, where `<message>` is `str()` of the raised exception. A test asserts this through a real 2.x client for a widget whose asset is unavailable.",
+   "claim_signature": "issue-acceptance-6",
+   "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-391/local-20261113T205345Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: When the function behind a `ui://` widget resource raises an `Exception` other than the SDK's `ResourceError` or `MCPError`, a client's `resources/read` gets an error whose message is `Error reading resource <uri>: <message>`, where `<message>` is `str()` of the raised exception. A test asserts this through a real 2.x client for a widget whose asset is unavailable.",
+   "id": "VC-56",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Graded with criteria.json (criterion 6 present, matches claim). Repo side is correct: src/sqllens/server.py:230-250 `_resource_errors(uri)` catches `Exception` (not ResourceError/MCPError, which re-raise) and raises `ResourceError(f\"Error reading resource {uri}: {exc}\")`; `_resource` helper (server.py:344-346) applies it, and all three widget resources use it (server.py:350, 597, 856). Test tests/unit/test_mcp_sdk_contract.py:246-261 makes the asset loader raise (FileNotFoundError -> RuntimeError from load_widget_html), reads the resource through a real `Client(build_server(...))`, and asserts `excinfo.value.error.message == f\"Error reading resource {uri}: {loader_error.value}\"`. Trigger split: `except (ResourceError, MCPError)` -> outside the trigger (the criterion excludes these); `except Exception` -> the claimed path; BaseException not caught (outside trigger, not an Exception). What I could not settle: that the mcp 2.x SDK forwards a raised ResourceError's message verbatim to the client without re-wrapping or altering it. No dependency_sources were supplied and no mcp source is in the views or under the repo (Glob found none), and I did not run the test. So the end-to-end result depends on unread SDK behavior; the test would show it if run (e.g. pytest tests/unit/test_mcp_sdk_contract.py::test_unavailable_widget_asset_error_text).",
+   "file_checked": "src/sqllens/server.py:230-250",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-57",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-58",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-59",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-10",
+   "id": "VC-60",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "Over Streamable HTTP with the server bound to `0.0.0.0` and an auth mode the bind policy accepts, a request to `/mcp/` that passes SQL Lens's auth check and carries a non-loopback `Host` header gets HTTP 421 from the SDK's Host check. A test pins this.",
+   "claim_signature": "issue-acceptance-11",
+   "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1/criteria.json",
+   "source_file": "src/sqllens/transport/http.py",
+   "source_line": 233,
+   "verify_hint": "Check _allowed_hosts for wildcard binds and the streamable_http_app() call without host override",
+   "id": "VC-61",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Criteria file read and counts (criterion 11 present). Code side confirmed: src/sqllens/transport/http.py:124-125 _allowed_hosts returns ['*'] for 0.0.0.0/::, so TrustedHostMiddleware (http.py:242) passes any Host. http.py:229-231 lets auth.insecure=True with mode none bind 0.0.0.0. http.py:233-236 calls mcp.streamable_http_app() with no host= or transport_security=. The test test_wildcard_bind_non_loopback_host_gets_sdk_421 (tests/integration/test_http_transport.py:372-390) binds 0.0.0.0 with Host host.docker.internal:9999, posts to /mcp/ (conftest.py:87) and asserts 421. But the claim rests on the mcp 2.x MCPServer.streamable_http_app() default host check returning 421. No mcp 2.x source is in the views, no dependency_sources were supplied, and I found no installed copy (searched the repo for mcp/server/mcpserver/server.py and .venv transport_security.py). I did not run the test. So I could not verify that the SDK actually yields 421 here, or that the auth-bypass path reaches it.",
+   "file_checked": "src/sqllens/transport/http.py:233-236",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "category": "issue_acceptance",
+   "verification_mode": "agent",
+   "claim_provenance": "generated_paraphrase",
+   "claim": "Streamable HTTP still serves the MCP endpoint at both `/mcp` and `/mcp/`, answers `/healthz` and `/readyz`, applies the configured auth mode, and starts and stops the session manager in the ASGI lifespan. The existing tests in `tests/integration/test_http_transport.py` and `tests/unit/test_transport_http.py` pass after porting to the 2.x client API.",
+   "claim_signature": "issue-acceptance-12",
+   "criteria_file": ".prflow/tmp/review/pr-391/local-20261113T205345Z-1/criteria.json",
+   "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-391/local-20261113T205345Z-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: Streamable HTTP still serves the MCP endpoint at both `/mcp` and `/mcp/`, answers `/healthz` and `/readyz`, applies the configured auth mode, and starts and stops the session manager in the ASGI lifespan. The existing tests in `tests/integration/test_http_transport.py` and `tests/unit/test_transport_http.py` pass after porting to the 2.x client API.",
+   "id": "VC-74",
+   "reused_from_iter_prev": false,
+   "verdict": "INCONCLUSIVE",
+   "raw_verdict": "INCONCLUSIVE",
+   "normalized": false,
+   "evidence": "Graded with criteria.json (criterion 12 present and valid). The diff to src/sqllens/transport/http.py only renames FastMCP to MCPServer in imports, docstrings and messages, and adds a comment. The behavior code is unchanged in the head view. That code is _PathNormalizer (http.py:322-342, which handles /healthz, /readyz, / and the /mcp/ to /mcp rewrite), _AuthMiddleware (357-372), and _SessionManagerLifespan, which starts and stops mcp.session_manager.run() (475-477, 602). The tests in tests/integration/test_http_transport.py and tests/unit/test_transport_http.py were ported to streamable_http_client, httpx2, is_error and mime_type. Nothing in the PR changes the code paths that serve /mcp, /mcp/, /healthz and /readyz, apply the auth mode, or drive the lifespan. The claim also depends on the 2.x SDK's real behavior: MCPServer.streamable_http_app() registers the route at /mcp, exposes a session_manager property, and the 2.x client API matches the ported tests. No dependency_sources were supplied and no mcp/server/mcpserver source exists in the views or repo (Glob found none). The claim that the tests pass cannot be settled by reading, and I did not run pytest. Missing evidence: the mcp 2.x SDK source and the result of running tests/integration/test_http_transport.py and tests/unit/test_transport_http.py.",
+   "file_checked": "src/sqllens/transport/http.py:322-342",
+   "normalization_ineligible": null,
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-13",
+   "id": "VC-75",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-14",
+   "id": "VC-76",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-15",
+   "id": "VC-77",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "data_format_assumption:row-level-security.md:protocol-keys-excluded",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "api_contract:overview.md:request-metadata-fail-secure",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "api_contract:row-level-security.md:metadata-test-references",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "api_contract:tools.md:tool-resource-helpers",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "api_contract:tools.md:tool-errors-wrapper",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "api_contract:tools.md:resource-errors-wrapper",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "api_contract:tools.md:sdk-contract-test-ref",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "api_contract:tools.md:agent-error-reraise",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "api_contract:overview.md:session-manager-stdio",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "dependency_interaction:server.py:toolerror-text-format",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-24",
+   "claim_signature": "api_contract:server.py:footer-on-reraise-text",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-26",
+   "claim_signature": "api_contract:transport.md:wildcard-421-test-ref",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-32",
+   "claim_signature": "data_format_assumption:requirements.txt:mcp2-lock-deps",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-37",
+   "claim_signature": "test_mock_alignment:test_http_transport.py:fake-query-shape",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-42",
+   "claim_signature": "issue_acceptance:test_memory_import_auth.py:import-refusal-text",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-45",
+   "claim_signature": "issue_acceptance:test_stdio_serve.py:stdio-serve",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-47",
+   "claim_signature": "issue_acceptance:__init__.py:resource-errors",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-49",
+   "claim_signature": "api_contract:query_database.py:agent-run-error-reraise",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-50",
+   "claim_signature": "api_contract:memory_admin.html:tool-error-format",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-51",
+   "claim_signature": "api_contract:test_http_transport.py:trustedhost-400",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-52",
+   "claim_signature": "api_contract:_agent.py:single-config-closure",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-55",
+   "claim_signature": "dependency_interaction:test_mcp_sdk_contract.py:resource-mime-meta-fields:119",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-62",
+   "claim_signature": "test_mock_alignment:test_metadata_bounds.py:no-request-valueerror",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-63",
+   "claim_signature": "data_format_assumption:test_metadata_bounds.py:node-count-1021",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-64",
+   "claim_signature": "test_mock_alignment:test_metadata_bounds.py:broken-meta-items-log",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-65",
+   "claim_signature": "api_contract:test_mcp_sdk_contract.py:tool-argument-names:43",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-66",
+   "claim_signature": "api_contract:test_mcp_sdk_contract.py:export-format-error-text:194",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-67",
+   "claim_signature": "api_contract:test_mcp_sdk_contract.py:import-refusal-text:210",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-68",
+   "claim_signature": "api_contract:test_mcp_sdk_contract.py:profile-name-error-text:140",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-69",
+   "claim_signature": "test_mock_alignment:test_mcp_sdk_contract.py:impl-return-tuple:220",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-70",
+   "claim_signature": "test_mock_alignment:test_mcp_sdk_contract.py:widget-read-text-patch:246",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-71",
+   "claim_signature": "dependency_interaction:test_mcp_sdk_contract.py:build-test-config-kwargs:61",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-72",
+   "claim_signature": "api_contract:test_transport_http.py:session-manager-guard-text",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  },
+  {
+   "id": "VC-73",
+   "claim_signature": "dependency_interaction:test_conversation_footer_setting.py:toolerror-cause-chain",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": true,
+   "verdict": "PASS",
+   "severity": "suggestion",
+   "reused_from_iter": 1
+  }
+ ]
+}
