@@ -201,7 +201,7 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
     declared field and is excluded). This is the dynamic-value source the
     row-level-security guard reads.
 
-    Forward at most 64 extra keys, 16 KiB of compact ASCII-escaped JSON,
+    Forward at most 64 ``_meta`` keys, 16 KiB of compact ASCII-escaped JSON,
     1024 nodes (including keys), and eight nesting levels below the root.
     Invalid or oversized trees are discarded as a whole. These bounds apply
     after the MCP transport has parsed the request, not to HTTP body parsing.
@@ -237,14 +237,21 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
     # faults: exception messages and tracebacks can contain metadata values.
     try:
         extra = getattr(meta, "model_extra", None)
+        # The key limit counts every key the caller sent in ``_meta``, not only
+        # the extras: ``progressToken`` is a declared field, so counting extras
+        # alone would admit 64 extras beside it.
+        sent = getattr(meta, "model_fields_set", None)
     except Exception:
         logger.warning("failed to read request metadata extras; returning empty metadata")
         return {}
     if extra is None:
         logger.debug("request _meta exposes no model_extra; returning empty metadata")
         return {}
+    if sent is None:
+        logger.debug("request _meta exposes no model_fields_set; returning empty metadata")
+        return {}
     try:
-        if type(extra) is not dict or len(extra) > 64:
+        if type(extra) is not dict or len(sent) > 64:
             raise JsonBoundsError("request metadata key limit or shape")
         bounded, _ = copy_bounded_json(extra)
         return bounded

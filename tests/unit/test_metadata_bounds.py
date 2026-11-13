@@ -15,9 +15,16 @@ from sqllens.server import _request_metadata
 from sqllens.tools._format import build_agent_trace
 
 
-def metadata(value):
+def metadata(value, fields_set=None):
+    # The real ``RequestParams.Meta`` reports every key the caller sent in
+    # ``_meta`` through ``model_fields_set``, declared fields included, and only
+    # the undeclared ones through ``model_extra``.
+    if fields_set is None:
+        fields_set = set(value) if isinstance(value, dict) else set()
     return _request_metadata(SimpleNamespace(
-        request_context=SimpleNamespace(meta=SimpleNamespace(model_extra=value))
+        request_context=SimpleNamespace(meta=SimpleNamespace(
+            model_extra=value, model_fields_set=fields_set
+        ))
     ))
 
 
@@ -42,6 +49,27 @@ def test_oversized_metadata_is_discarded_and_dynamic_rls_fails_closed(extras):
         apply_rls("SELECT * FROM orders", [RlsRule(
             table="orders", column="tenant_id", value_from_metadata="tenant"
         )], metadata=result, dialect="sqlite")
+
+
+def test_metadata_key_limit_counts_every_meta_key_not_only_the_extras():
+    extras = {str(i): i for i in range(64)}
+    assert metadata(extras) == extras
+    # 64 extras beside the declared ``progressToken`` is 65 keys in ``_meta``.
+    assert metadata(extras, fields_set=set(extras) | {"progressToken"}) == {}
+
+
+def test_metadata_without_model_fields_set_is_discarded():
+    assert _request_metadata(SimpleNamespace(
+        request_context=SimpleNamespace(meta=SimpleNamespace(model_extra={"tenant": "alpha"}))
+    )) == {}
+
+
+def test_sdk_meta_reports_declared_keys_in_fields_set_but_not_in_extras():
+    from mcp.types import RequestParams
+
+    meta = RequestParams.Meta.model_validate({"progressToken": "p", "tenant": "alpha"})
+    assert meta.model_fields_set == {"progressToken", "tenant"}
+    assert set(meta.model_extra) == {"tenant"}
 
 
 def test_metadata_ordinary_values_and_exact_byte_boundary():

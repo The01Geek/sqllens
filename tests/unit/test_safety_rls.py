@@ -770,6 +770,9 @@ class TestMetadataPlumbing:
 
         class _Meta:
             model_extra: dict = {"tenant_id": "acme"}  # noqa: RUF012
+            # The real ``RequestParams.Meta`` also reports every key the caller
+            # sent in ``_meta`` through ``model_fields_set``.
+            model_fields_set: set = {"tenant_id"}  # noqa: RUF012
 
         class _RC:
             meta = _Meta()
