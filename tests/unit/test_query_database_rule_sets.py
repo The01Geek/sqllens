@@ -142,7 +142,11 @@ def test_over_limit_meta_is_refused_as_key_missing(tmp_path: Path) -> None:
 
     extras = {f"k{i}": i for i in range(65)} | OWNER
     meta = _request_metadata(
-        SimpleNamespace(request_context=SimpleNamespace(meta=SimpleNamespace(model_extra=extras)))
+        SimpleNamespace(
+            request_context=SimpleNamespace(
+                meta=SimpleNamespace(model_extra=extras, model_fields_set=set(extras))
+            )
+        )
     )
     loaded = rule_set_config(tmp_path).rule_sets.loaded
     assert loaded is not None
