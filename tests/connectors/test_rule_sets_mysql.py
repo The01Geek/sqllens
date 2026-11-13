@@ -5,7 +5,8 @@
 
 Needs ``SQLLENS_TEST_MYSQL_URL`` (a user that can create tables, views and
 stored functions). Tables carry an ``rs_`` prefix; the example set lists
-``rs_customers`` (``id``, ``name``; predicate column ``rep_id``) and
+``rs_customers`` (``id``, ``name``; individual tests add the predicate column
+``rep_id``) and
 ``rs_orders`` (``id``, ``customer_id``, ``total``), on tables that also have
 ``email``, ``discount`` and ``account_id`` columns, plus an ``rs_salaries``
 table, an ``rs_customer_view`` view and an ``rs_shout`` stored function.

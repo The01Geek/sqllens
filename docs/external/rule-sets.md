@@ -96,7 +96,7 @@ The messages name only what class of problem occurred. They never name a table, 
 - **Nothing is saved to memory.** The assistant saves no questions and no notes while a rule-set file is configured, whatever your `[memory]` settings say, because memory is shared by every rule set. Loading memory with `sqllens import-memory`, and the memory administration tools, are not affected.
 - **A conversation belongs to one identity.** When a follow-up question carries a conversation identifier, the rule set, account and user must be the same ones that started the conversation. A follow-up under a different identity is refused.
 - **`sqllens verify-memory` is not available.** It prints `sqllens verify-memory does not support rule sets yet; run it against a config without [rule_sets] file` and stops. Run it against a configuration that has no `[rule_sets] file`.
-- **Unconfirmed sets warn at startup.** `sqllens serve` and `sqllens validate` print a warning for each set whose `confirmed_against_production` is not `true`. Requests selecting such a set are refused.
+- **Unconfirmed sets warn at startup.** `sqllens validate` prints a `Warning:` line for each set whose `confirmed_against_production` is not `true`, and `sqllens serve` logs the same warning, so where it appears depends on how you have the server's logging set up. Requests selecting such a set are refused.
 
 ## When a Query Is Refused
 
@@ -122,11 +122,7 @@ Columns are handled differently: a column the set does not list is simply not vi
 
 **`Request refused: account not bound`**
 
-The account identifier in the request is not in the file. Check `binding.account_ids`, remembering that every identifier is a decimal string, so `"5"` and `5` are written the same way but `"05"` is a different value.
-
-```bash
-sqllens validate -c sqllens.toml
-```
+The account identifier in the request is not in the file. Check `binding.account_ids`, remembering that in the file every identifier is written as a quoted decimal string: `"5"` loads and a bare `5` does not, and `"05"` is rejected for its leading zero. In a request either form is accepted and read as the same account, so the number `5` and the string `"5"` both match `"5"` in the file.
 
 **`Request refused: rule set not confirmed`**
 
@@ -134,15 +130,15 @@ The selected set has `confirmed_against_production = false`. Check the set again
 
 **Startup fails with a list of tables or columns that do not exist**
 
-A name in the file does not match the database, often only in letter case. Compare the file against the database and fix the spelling:
+A name in the file does not match the database, often only in letter case. Fix the spelling, then check the file against the database again. Plain `sqllens validate` only loads the file; add `--check-db` to repeat the check that blocked startup:
 
 ```bash
-sqllens validate -c sqllens.toml
+sqllens validate -c sqllens.toml --check-db
 ```
 
 **Every request is refused and the log mentions the catalog**
 
-SQL Lens could not confirm the file against the database — usually because the database user cannot read `information_schema`. Grant that access and restart the server; SQL Lens retries the check on the next request.
+SQL Lens could not confirm the file against the database — usually because the database user cannot read `information_schema`. Grant that access; SQL Lens retries the check on the next request, so no restart is needed.
 
 **The configuration does not load and the error mentions `row_rule`**
 

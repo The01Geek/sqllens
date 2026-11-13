@@ -165,6 +165,7 @@ def _loopback_policy_violated(cfg: Config) -> bool:
     """
     return cfg.server.transport == "http" and unauthenticated_non_loopback(cfg)
 
+
 def _unconfirmed_rule_sets(cfg: Config) -> list[str]:
     loaded = cfg.rule_sets.loaded
     return [] if loaded is None else loaded.unconfirmed

@@ -58,10 +58,12 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
                 delimited DEPLOYMENT INSTRUCTIONS section on every build, after
                 ``base_prompt`` when one is given. ``None``, empty or
                 whitespace-only text adds nothing, so the prompt is unchanged.
-            rule_sets: True while a rule-set file is configured. Adds a
-                database rule to qualify every column and a Tool Errors rule
-                for ``Refused by the rule set:`` errors; False leaves the
-                prompt unchanged.
+            rule_sets: True while a rule-set file is configured. Adds a Tool
+                Errors rule for ``Refused by the rule set:`` errors, and, when
+                a dialect resolves, a database rule to qualify every column;
+                a caller-supplied ``base_prompt`` is returned as given, so
+                neither rule is added to it. False leaves the prompt
+                unchanged.
 
         Raises:
             ValueError: ``dialect`` is not ``None`` and not one of the keys above,

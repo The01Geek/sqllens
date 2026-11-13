@@ -182,13 +182,13 @@ sql_runner = ResultMaskingRunner(
 )
 ```
 
-Resulting call order on every query when RLS is unconfigured: **ResultMaskingRunner → WholeRowSelectGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner** (`WholeRowSelectGuardRunner` only when `database.refuse_whole_row_selects = true`, `ReadOnlyGuardRunner` only when `database.read_only = true`). `ResultMaskingRunner` replaces the values of secret-looking result columns with `[withheld]` on the way back out. The parser rejects unsafe SQL (including denylisted functions) before any connection opens; the engine runner enforces driver-level read-only, streams, and applies its native timeout; the decorator clamps the result on the way back out.
+Resulting call order on every query when RLS is unconfigured and no rule-set file is configured: **ResultMaskingRunner → WholeRowSelectGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner** (`WholeRowSelectGuardRunner` only when `database.refuse_whole_row_selects = true`, `ReadOnlyGuardRunner` only when `database.read_only = true`). With a rule-set file, `RefusalRedactingRunner` and `RuleSetGuardRunner` join the chain as "Composition with rule sets" below describes. `ResultMaskingRunner` replaces the values of secret-looking result columns with `[withheld]` on the way back out. The parser rejects unsafe SQL (including denylisted functions) before any connection opens; the engine runner enforces driver-level read-only, streams, and applies its native timeout; the decorator clamps the result on the way back out.
 
 The composition pattern is deliberate: none of these wrappers touch the lifted agent code, so re-syncing from upstream won't disturb them. See [agent/factory.md](../agent/factory.md).
 
 ### Composition with RLS
 
-When at least one `[[rls]]` rule is configured (the `cfg.rls` list is non-empty), `RlsGuardRunner` wraps the stack beneath `ResultMaskingRunner` and `WholeRowSelectGuardRunner`, so the call order becomes **ResultMaskingRunner → WholeRowSelectGuardRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**. This is deliberate:
+When at least one `[[rls]]` rule is configured (the `cfg.rls` list is non-empty), `RlsGuardRunner` wraps the stack beneath `ResultMaskingRunner` and `WholeRowSelectGuardRunner`, so the call order becomes **ResultMaskingRunner → WholeRowSelectGuardRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**, again without a rule-set file. This is deliberate:
 
 - The RLS rewrite runs *before* the read-only guard, so the read-only guard validates the **rewritten** SQL — meaning its full-tree DML/DDL deny-walk and denied-function check apply to the injected predicates too.
 - The decorator is only wrapped when `cfg.rls` is non-empty — the no-RLS path stays a zero-overhead passthrough.

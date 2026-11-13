@@ -231,7 +231,7 @@ operator = "="
 value_from_metadata = "tenant_id"
 ```
 
-**Note:** Unlike other sections, an unrecognized key inside a `[[rls]]` block is rejected at config load rather than silently ignored. A dropped Row-Level Security predicate is an unfiltered query, which is exactly what Row-Level Security exists to prevent, so a misspelled key fails loudly at startup. The reserved metadata keys `starter_ui_request` and `ui_features_available` cannot be used as `value_from_metadata` values.
+**Note:** An unrecognized key inside a `[[rls]]` block is rejected at config load rather than silently ignored, as it is in `[result_masking]` and `[rule_sets]`. A dropped Row-Level Security predicate is an unfiltered query, which is exactly what Row-Level Security exists to prevent, so a misspelled key fails loudly at startup. The reserved metadata keys `starter_ui_request` and `ui_features_available` cannot be used as `value_from_metadata` values.
 
 See [Row-Level Security](row-level-security.md) for the full guide, including how to supply request metadata from your client application and the list of cases that cause a query to be blocked.
 

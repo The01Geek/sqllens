@@ -1,6 +1,6 @@
 # Per-role rule sets
 
-<!-- verified-against: ad1aef9 2026-11-14 -->
+<!-- verified-against: 97783a1 2026-11-14 -->
 
 How a rule-set file limits each `query_database` request to one application role's tables and columns: loading and validating the file, selecting a set per request, the catalog existence check, and the SQL guard that enforces the selected set. Read it before changing `src/sqllens/rule_sets.py`, `src/sqllens/safety/rule_sets.py`, or anything they wire into. For row predicates from `[[rls]]`, read [row-level-security.md](row-level-security.md) instead. MySQL only.
 
@@ -54,7 +54,7 @@ Inside the conversation turn lock, two more checks run before the agent:
 - Uses `_RuleSetUserResolver`, which gives each rule set, account ID and user ID its own user id (from `RuleSetSelection.user_key`), so conversations do not cross identities.
 - Behaves as `allow_memory_writes=False`: registers neither memory save tool, whatever `memory.save_queries` and `memory.save_text_memories` say, and builds `ChromaAgentMemory(track_usage=False)`, because memory is shared by every rule set.
 - Removes `HIGH_NOT_PRECEDENCE` and `NO_BACKSLASH_ESCAPES` from each query connection's session `sql_mode` (`RULE_SET_REMOVED_SQL_MODES`, applied by the MySQL runner's `remove_sql_modes`); a failure to read or set the mode fails the query.
-- Passes `rule_sets=True` to `DefaultSystemPromptBuilder`, which adds a rule to qualify every column with its table name or alias and a rule to correct and rerun a query refused with `Refused by the rule set:`.
+- Passes `rule_sets=True` to `DefaultSystemPromptBuilder`, which adds a rule to correct and rerun a query refused with `Refused by the rule set:`, and, when a dialect resolves, a rule to qualify every column with its table name or alias. A caller-supplied `base_prompt` is returned as given, so neither rule reaches it.
 - Wraps `RuleSetGuardRunner` outside the RLS guard and inside the whole-row guard, then `RefusalRedactingRunner` outside every guard and inside result masking. Call order: **ResultMaskingRunner → RefusalRedactingRunner → WholeRowSelectGuardRunner → RuleSetGuardRunner → RlsGuardRunner → ReadOnlyGuardRunner → RowCapRunner → engine runner**, each optional guard present only when its own setting enables it.
 
 ## The SQL guard
