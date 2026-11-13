@@ -14,7 +14,6 @@ import inspect
 import json
 import textwrap
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import httpx2
@@ -93,17 +92,12 @@ async def test_real_sdk_sends_effort_as_output_config_and_no_temperature() -> No
         assert "temperature" not in body
 
 
-async def test_real_sdk_unset_effort_sends_no_output_config() -> None:
+async def test_real_sdk_unset_effort_sends_no_output_config_and_bearer_key() -> None:
     captured = await _captured_bodies(LlmRequest(messages=[], user=_USER))
     assert len(captured) == 2
-    for body, _ in captured:
+    for body, headers in captured:
         assert "output_config" not in body
         assert "temperature" not in body
-
-
-async def test_real_sdk_keeps_bearer_api_key_header() -> None:
-    captured = await _captured_bodies(LlmRequest(messages=[], user=_USER))
-    for _, headers in captured:
         assert headers["authorization"] == "Bearer sk-ant-test"
 
 
@@ -271,7 +265,6 @@ async def test_judge_request_payload_has_no_temperature() -> None:
     result = AgentResult(test_case_id="t", components=[], execution_time_ms=1.0)
     await LLMAsJudgeEvaluator(llm, "criteria").evaluate(test_case, result)  # type: ignore[arg-type]
     svc = AnthropicLlmService(model="m", api_key="sk-ant-test")
-    svc._client = SimpleNamespace()
     assert "temperature" not in svc._build_payload(llm.requests[0])
 
 
