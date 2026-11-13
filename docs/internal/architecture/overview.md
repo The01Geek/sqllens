@@ -89,7 +89,7 @@ We aggressively pruned during the lift: ~110 of 283 upstream files kept, framewo
 What was kept:
 - `agent/core/` — `Agent`, `RequestContext`, `ToolRegistry`, `UiComponent`, etc.
 - `agent/capabilities/` — `SqlRunner`, `FileSystem`, `AgentMemory` abstractions.
-- `agent/integrations/` — `anthropic`, `chromadb`, `local`, `sqlite`, `postgres`, `mysql`.
+- `agent/integrations/` — `anthropic`, `chromadb`, `local`, `sqlite`, `mysql`.
 - `agent/tools/` — `RunSqlTool`, `EmitChartTool` (the agent-side seam for `query_database`'s chart blocks — first-party, not lifted; see [src/sqllens/agent/tools/emit_chart.py](../../../src/sqllens/agent/tools/emit_chart.py)), `EmitTextTool` (the agent-side seam for deliberate prose blocks in the multi-block response — first-party, see [src/sqllens/agent/tools/emit_text.py](../../../src/sqllens/agent/tools/emit_text.py)), and the three `agent_memory` tools (`SaveQuestionToolArgsTool`, registered only when `cfg.memory.save_queries` is true; `SearchSavedCorrectToolUsesTool`, always registered; and `SaveTextMemoryTool`, registered only when `cfg.memory.save_text_memories` is true).
 - `agent/components/` — Rich-component rendering (we only ever use the markdown conversion).
 

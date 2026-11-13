@@ -21,7 +21,6 @@ from sqllens.agent.core.system_prompt import DefaultSystemPromptBuilder
 from sqllens.agent.integrations import (
     AnthropicLlmService,
     ChromaAgentMemory,
-    PostgresRunner,
     SqliteRunner,
 )
 from sqllens.agent.integrations.local import LocalFileSystem
@@ -231,11 +230,11 @@ def build_sql_runner(
     """Pick the right SQL runner from the database URL prefix.
 
     ``statement_timeout_ms`` and ``max_rows`` are threaded through so the
-    per-engine timeout (SET statement_timeout / MAX_EXECUTION_TIME / progress
-    handler) and ``fetchmany(max_rows + 1)`` stream cap run inside the runner.
+    per-engine timeout (MAX_EXECUTION_TIME / progress handler) and
+    ``fetchmany(max_rows + 1)`` stream cap run inside the runner.
 
     ``read_only`` is threaded through so the connector enforces read-only at
-    the driver/session layer (SQLite ``mode=ro`` URI, Postgres/MySQL read-only
+    the driver/session layer (SQLite ``mode=ro`` URI, MySQL read-only
     transaction) — defence-in-depth so a parser-guard miss still cannot mutate.
     """
     scheme = url.split("://", 1)[0].lower()
@@ -244,16 +243,6 @@ def build_sql_runner(
         # is absolute. Do not parse here: preflight must resolve the same file.
         return SqliteRunner(
             database_path=sqlite_path_from_url(url),
-            statement_timeout_ms=statement_timeout_ms,
-            max_rows=max_rows,
-            read_only=read_only,
-        )
-    if scheme.startswith("postgres"):
-        # SQLAlchemy-style scheme like "postgresql+psycopg2" needs to be normalized
-        # for psycopg2 connection strings, which only accept "postgresql://".
-        normalized = "postgresql://" + url.split("://", 1)[1]
-        return PostgresRunner(
-            connection_string=normalized,
             statement_timeout_ms=statement_timeout_ms,
             max_rows=max_rows,
             read_only=read_only,
@@ -274,4 +263,4 @@ def build_sql_runner(
             max_rows=max_rows,
             read_only=read_only,
         )
-    raise ValueError(f"unsupported database scheme: {scheme!r} (expected sqlite/postgres/mysql)")
+    raise ValueError(f"unsupported database scheme: {scheme!r} (expected sqlite/mysql)")

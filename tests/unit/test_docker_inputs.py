@@ -46,7 +46,7 @@ def test_optional_database_drivers_have_exact_constraints() -> None:
             (version,) = req.specifier
             assert version.operator == "==" and "*" not in version.version
             pins[canonicalize_name(req.name)] = version.version
-    required = [Requirement(item) for extra in ("postgres", "mysql") for item in extras[extra]]
+    required = [Requirement(item) for item in extras["mysql"]]
     assert set(pins) == {canonicalize_name(req.name) for req in required}
     assert all(pins[canonicalize_name(req.name)] in req.specifier for req in required)
 

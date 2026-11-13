@@ -213,19 +213,9 @@ class TestApplyRlsStatic:
 
     @pytest.mark.parametrize(("dialect", "sql", "expected"), [
         (
-            "postgres",
-            'SELECT "quote_ident"(name) FROM orders',
-            "SELECT \"quote_ident\"(name) FROM orders WHERE orders.tenant_id = 'acme'",
-        ),
-        (
-            "postgres",
-            'SELECT "MyFunc"(name) FROM orders',
-            "SELECT \"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'",
-        ),
-        (
-            "postgres",
-            'SELECT public."MyFunc"(name) FROM orders',
-            "SELECT public.\"MyFunc\"(name) FROM orders WHERE orders.tenant_id = 'acme'",
+            "mysql",
+            "SELECT shop.`MyFunc`(name) FROM orders",
+            "SELECT shop.`MyFunc`(name) FROM orders WHERE orders.tenant_id = 'acme'",
         ),
         (
             "mysql",
@@ -250,8 +240,8 @@ class TestApplyRlsStatic:
         assert apply_rls(sql, [_rule(value="acme")], dialect=dialect) == expected
 
     def test_unrecognised_function_on_unprotected_table_is_unchanged(self) -> None:
-        sql = 'SELECT "quote_ident"(name) FROM customers'
-        assert apply_rls(sql, [_rule(value="acme")], dialect="postgres") == sql
+        sql = "SELECT `quote_ident`(name) FROM customers"
+        assert apply_rls(sql, [_rule(value="acme")], dialect="mysql") == sql
 
     def test_unrelated_table_untouched(self) -> None:
         out = apply_rls(
@@ -363,15 +353,15 @@ class TestApplyRlsScopeCoverage:
             )
 
     def test_table_command_blocks_fail_secure(self) -> None:
-        # Postgres `TABLE orders` is semantically `SELECT * FROM orders`; it is
+        # MySQL `TABLE orders` is semantically `SELECT * FROM orders`; it is
         # refused on every sqlglot version, whatever its parse. Fail-secure.
         # Case folding of the keyword and the alternate orientation behave the
         # same way through this gate.
         for stmt in ("TABLE orders", "table orders"):
             with pytest.raises(RlsError, match="unquoted TABLE keyword"):
-                apply_rls(stmt, [_rule(value="acme")], dialect="postgres")
+                apply_rls(stmt, [_rule(value="acme")], dialect="mysql")
 
-    @pytest.mark.parametrize("dialect", ["postgres", "sqlite", "mysql"])
+    @pytest.mark.parametrize("dialect", ["sqlite", "mysql"])
     def test_table_subquery_blocks_fail_secure(self, dialect: str) -> None:
         # `(TABLE orders) sub` parses differently across sqlglot versions
         # (a Table named ``TABLE`` before 30.30, a SELECT from 30.30); the
@@ -553,7 +543,6 @@ class TestApplyRlsDynamicFailSecure:
 
     @pytest.mark.parametrize(("sql", "dialect"), [
         ("SELECT 'unterminated", "sqlite"),
-        ("SELECT 'unterminated", "postgres"),
         ("SELECT 'unterminated", "mysql"),
         ("SELECT 'unterminated", None),
         ("SELECT `unterminated", "mysql"),

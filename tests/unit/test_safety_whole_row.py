@@ -46,7 +46,7 @@ from sqllens.safety import (
     whole_row,
 )
 
-DIALECTS = ["postgres", "mysql", "sqlite", None]
+DIALECTS = ["mysql", "sqlite", None]
 
 # (sql, the star the guard refuses; the refusal itself names none)
 REFUSED = [
@@ -78,7 +78,7 @@ REFUSED = [
     # A star as a function argument other than COUNT.
     ("SELECT row_to_json(u.*) FROM users u", "u.*"),
     # A star over a table-valued function, which can return a table's whole
-    # rows (a PostgreSQL function declared RETURNS SETOF users does).
+    # rows.
     ("SELECT * FROM list_users()", "*"),
     ("SELECT t.* FROM list_users() t", "t.*"),
     ("SELECT * FROM public.list_users()", "*"),
@@ -146,14 +146,9 @@ def test_allowed_shapes(sql: str, dialect: str | None) -> None:
 @pytest.mark.parametrize(
     ("sql", "dialect"),
     [
-        ("SELECT COUNT(u.*) FROM users u", "postgres"),
-        ("SELECT * FROM (VALUES (1), (2)) AS v(x)", "postgres"),
-        ("SELECT * FROM pg_catalog.pg_tables", "postgres"),
-        ("SELECT * FROM pg_get_keywords()", "postgres"),
-        ("SELECT x FROM list_users() AS t(x)", "postgres"),
-        # Unquoted names fold to one case on PostgreSQL, so the qualifier
-        # resolves to the CTE whatever its letter case.
-        ("WITH Recent AS (SELECT id FROM users) SELECT recent.* FROM RECENT", "postgres"),
+        ("SELECT COUNT(u.*) FROM users u", "mysql"),
+        ("SELECT * FROM (VALUES (1), (2)) AS v(x)", "mysql"),
+        ("SELECT x FROM list_users() AS t(x)", "mysql"),
         ("SELECT * FROM performance_schema.threads", "mysql"),
         ("SELECT * FROM sqlite_master", "sqlite"),
         ("SELECT * FROM pragma_table_info('users')", "sqlite"),
@@ -165,8 +160,6 @@ def test_allowed_shapes(sql: str, dialect: str | None) -> None:
         ("SHOW CREATE TABLE users", "mysql"),
         # Documented limit: a table whose name has the dialect's catalog
         # prefix counts as a catalog, and with no dialect every prefix counts.
-        ("SELECT * FROM pg_payments", "postgres"),
-        ("SELECT * FROM pg_payments", None),
         ("SELECT * FROM sqlite_stuff", None),
     ],
 )
@@ -179,13 +172,14 @@ def test_allowed_dialect_specific_shapes(sql: str, dialect: str | None) -> None:
     [
         ("SELECT * FROM `users`", "mysql"),
         ("SELECT `u`.* FROM `users` AS `u`", "mysql"),
-        ("SELECT * FROM public.users", "postgres"),
-        ("SELECT * FROM pg_users_backup", "mysql"),  # pg_ is a catalog prefix only on postgres
+        ("SELECT * FROM shop.users", "mysql"),
+        # Under mysql, sqlite_ is not a catalog prefix.
+        ("SELECT * FROM sqlite_users_backup", "mysql"),
         # UNNEST is a table-valued function too, whatever its argument.
-        ("SELECT * FROM UNNEST(ARRAY[1, 2]) AS t(x)", "postgres"),
-        ("SELECT t.* FROM UNNEST(ARRAY[1, 2]) AS t(x)", "postgres"),
-        ("SELECT * FROM generate_series(1, 3)", "postgres"),
-        ("SELECT t.* FROM orders o CROSS JOIN LATERAL UNNEST(o.tags) t", "postgres"),
+        ("SELECT * FROM UNNEST(ARRAY[1, 2]) AS t(x)", "mysql"),
+        ("SELECT t.* FROM UNNEST(ARRAY[1, 2]) AS t(x)", "mysql"),
+        ("SELECT * FROM generate_series(1, 3)", "mysql"),
+        ("SELECT t.* FROM orders o CROSS JOIN LATERAL UNNEST(o.tags) t", "mysql"),
     ],
 )
 def test_refused_dialect_specific_shapes(sql: str, dialect: str) -> None:
@@ -223,7 +217,7 @@ def test_table_statement_is_refused(sql: str, dialect: str | None) -> None:
 )
 def test_refusal_message_is_actionable(sql: str) -> None:
     with pytest.raises(WholeRowSelectError) as excinfo:
-        assert_no_whole_row_select(sql, dialect="postgres")
+        assert_no_whole_row_select(sql, dialect="mysql")
     message = str(excinfo.value)
     # The prompt's Tool Errors rule routes on this phrase.
     assert "selects every column" in message
@@ -237,7 +231,7 @@ def test_refusal_message_is_actionable(sql: str) -> None:
 
 @pytest.mark.parametrize(
     ("sql", "dialect"),
-    [("TABLE public.users", "postgres"), ("TABLE app.users", "mysql")],
+    [("TABLE app.users", "mysql")],
 )
 def test_schema_qualified_table_statement_is_refused(sql: str, dialect: str) -> None:
     # sqlglot before 30.30 cannot parse it (UnsafeSqlError); from 30.30 it is a
@@ -250,8 +244,8 @@ def test_schema_qualified_table_statement_is_refused(sql: str, dialect: str) -> 
 @pytest.mark.parametrize(
     ("sql", "dialect"),
     [
-        ("SELECT * FROM", "postgres"),
-        ("SELECT 'unterminated FROM users", "postgres"),
+        ("SELECT * FROM", "mysql"),
+        ("SELECT 'unterminated FROM users", "mysql"),
         ("SELECT id /*! , users.* */ FROM users", "mysql"),
     ],
 )
@@ -274,10 +268,10 @@ def test_scope_analysis_runs_only_for_a_star_that_is_not_exempt(monkeypatch) -> 
         raise RuntimeError("scope analysis failed")
 
     monkeypatch.setattr(whole_row, "traverse_scope", _boom)
-    assert_no_whole_row_select("SELECT id FROM users", dialect="postgres")
-    assert_no_whole_row_select("SELECT COUNT(*) FROM users", dialect="postgres")
+    assert_no_whole_row_select("SELECT id FROM users", dialect="mysql")
+    assert_no_whole_row_select("SELECT COUNT(*) FROM users", dialect="mysql")
     with pytest.raises(RuntimeError):
-        assert_no_whole_row_select("SELECT * FROM users", dialect="postgres")
+        assert_no_whole_row_select("SELECT * FROM users", dialect="mysql")
 
 
 # --- WholeRowSelectGuardRunner ---------------------------------------------
@@ -308,7 +302,7 @@ class _RecordingRunner(SqlRunner):
 
 async def test_runner_refuses_before_the_inner_runner() -> None:
     inner = _RecordingRunner()
-    runner = WholeRowSelectGuardRunner(inner, dialect="postgres")
+    runner = WholeRowSelectGuardRunner(inner, dialect="mysql")
     with pytest.raises(WholeRowSelectError, match=r"^refusing to execute query: it selects"):
         await runner.run_sql(RunSqlToolArgs(sql="SELECT * FROM users"), _ctx())
     assert inner.calls == []
@@ -316,7 +310,7 @@ async def test_runner_refuses_before_the_inner_runner() -> None:
 
 async def test_runner_passes_allowed_sql_through_unchanged() -> None:
     inner = _RecordingRunner()
-    runner = WholeRowSelectGuardRunner(inner, dialect="postgres")
+    runner = WholeRowSelectGuardRunner(inner, dialect="mysql")
     sql = "SELECT COUNT(*) FROM users"
     out = await runner.run_sql(RunSqlToolArgs(sql=sql), _ctx(), require_base_tables=True)
     assert list(out["id"]) == [1]
@@ -325,7 +319,7 @@ async def test_runner_passes_allowed_sql_through_unchanged() -> None:
 
 async def test_runner_refuses_unparseable_sql_as_unsafe() -> None:
     inner = _RecordingRunner()
-    runner = WholeRowSelectGuardRunner(inner, dialect="postgres")
+    runner = WholeRowSelectGuardRunner(inner, dialect="mysql")
     with pytest.raises(UnsafeSqlError, match=r"^refusing to execute query: could not parse SQL"):
         await runner.run_sql(RunSqlToolArgs(sql="SELECT * FROM"), _ctx())
     assert inner.calls == []
@@ -337,7 +331,7 @@ async def test_runner_fails_closed_on_an_unexpected_error(monkeypatch, caplog) -
 
     monkeypatch.setattr(whole_row, "traverse_scope", _boom)
     inner = _RecordingRunner()
-    runner = WholeRowSelectGuardRunner(inner, dialect="postgres")
+    runner = WholeRowSelectGuardRunner(inner, dialect="mysql")
     with pytest.raises(WholeRowSelectError, match="whole-row select check errored") as info:
         await runner.run_sql(RunSqlToolArgs(sql="SELECT * FROM users"), _ctx())
     assert inner.calls == []
@@ -353,7 +347,6 @@ async def test_runner_fails_closed_on_an_unexpected_error(monkeypatch, caplog) -
     ("sql", "dialect"),
     [
         ("SELECT * FROM mysql.user", "mysql"),
-        ("SELECT * FROM pg_catalog.pg_authid", "postgres"),
     ],
 )
 def test_star_over_a_credential_catalog_is_allowed(sql: str, dialect: str) -> None:

@@ -198,7 +198,7 @@ class TestFirstSqlKeyword:
 
         assert first_sql_keyword(sql) == expected
 
-    @pytest.mark.parametrize("dialect", [None, "sqlite", "postgres", "mysql"])
+    @pytest.mark.parametrize("dialect", [None, "sqlite", "mysql"])
     @pytest.mark.parametrize("keyword", ["SELECT", "WITH"])
     @pytest.mark.parametrize(
         "prefix",
@@ -212,7 +212,7 @@ class TestFirstSqlKeyword:
         body = "SELECT 1" if keyword == "SELECT" else "WITH x AS (SELECT 1) SELECT * FROM x"
         assert first_sql_keyword(prefix + body, dialect) == keyword
 
-    @pytest.mark.parametrize("dialect", [None, "sqlite", "postgres", "mysql"])
+    @pytest.mark.parametrize("dialect", [None, "sqlite", "mysql"])
     @pytest.mark.parametrize("sql", ["SELECT*FROM t", "SELECT/* c */1", "select*from t"])
     def test_keyword_touching_symbol(self, sql: str, dialect: str | None) -> None:
         from sqllens.safety import first_sql_keyword
@@ -221,7 +221,7 @@ class TestFirstSqlKeyword:
 
     @pytest.mark.parametrize(
         ("dialect", "expected"),
-        [("postgres", "SELECT"), ("mysql", "C"), ("sqlite", "C")],
+        [("mysql", "C"), ("sqlite", "C")],
     )
     def test_nested_block_comment_follows_engine(self, dialect: str, expected: str) -> None:
         from sqllens.safety import first_sql_keyword
@@ -230,7 +230,7 @@ class TestFirstSqlKeyword:
 
     @pytest.mark.parametrize(
         ("dialect", "expected"),
-        [("mysql", "SELECT"), ("postgres", ""), ("sqlite", ""), (None, "")],
+        [("mysql", "SELECT"), ("sqlite", ""), (None, "")],
     )
     def test_hash_comment_only_on_mysql(self, dialect: str | None, expected: str) -> None:
         from sqllens.safety import first_sql_keyword
@@ -241,12 +241,12 @@ class TestFirstSqlKeyword:
     def test_non_keyword_first_token_is_empty(self, sql: str) -> None:
         from sqllens.safety import first_sql_keyword
 
-        assert first_sql_keyword(sql, "postgres") == ""
+        assert first_sql_keyword(sql, "mysql") == ""
 
     def test_unquoted_identifier_is_returned(self) -> None:
         from sqllens.safety import first_sql_keyword
 
-        assert first_sql_keyword("foo bar", "postgres") == "FOO"
+        assert first_sql_keyword("foo bar", "mysql") == "FOO"
 
     @pytest.mark.parametrize(
         "sql",
@@ -275,7 +275,7 @@ class TestFirstSqlKeyword:
             assert first_sql_keyword(sql, "no-such-dialect") == first_sql_keyword(sql)
         assert "unknown sqlglot dialect 'no-such-dialect'" in caplog.text
 
-    @pytest.mark.parametrize("dialect", [None, "sqlite", "postgres", "mysql"])
+    @pytest.mark.parametrize("dialect", [None, "sqlite", "mysql"])
     @pytest.mark.parametrize("sql", ["-- c\nSELECT 'x", "/* unterminated SELECT 1"])
     def test_untokenizable_sql_is_empty(self, sql: str, dialect: str | None) -> None:
         from sqllens.safety import first_sql_keyword
@@ -290,7 +290,7 @@ class TestFirstSqlKeyword:
 
         monkeypatch.setattr(readonly_mod.sqlglot.Dialect, "tokenize", boom)
         with pytest.raises(RecursionError):
-            readonly_mod.first_sql_keyword("SELECT 1", "postgres")
+            readonly_mod.first_sql_keyword("SELECT 1", "mysql")
 
     def test_mysql_carriage_return_in_line_comment(self) -> None:
         # Needs sqlglot>=30.22: older MySQL tokenizers end the comment at the
@@ -305,15 +305,14 @@ class TestFirstSqlKeyword:
         ("sql", "dialect", "expected"),
         [
             ("-- c\nSELECT n FROM t", "sqlite", True),
-            ("/* c */ WITH x AS (SELECT 1) SELECT * FROM x", "postgres", True),
+            ("/* c */ WITH x AS (SELECT 1) SELECT * FROM x", "mysql", True),
             ("/* c */ SHOW TABLES", "mysql", True),
             ("SELECT*FROM t", "sqlite", True),
             ("# c\nSELECT 1", "mysql", True),
-            ("/* a /* b */ c */ SELECT 1", "postgres", True),
             ("SELECT n FROM widgets /* note", "sqlite", False),
             ("SHOW 'abc", "mysql", False),
             ("/* c */ SHOW 'abc", "mysql", False),
-            ("EXPLAIN SELECT 1", "postgres", False),
+            ("EXPLAIN SELECT 1", "mysql", False),
             ("VALUES (1)", "sqlite", False),
         ],
     )
@@ -568,7 +567,6 @@ class TestRunSqlToolReadShapedResults:
     @pytest.mark.parametrize(
         ("sql", "dialect", "query_type"),
         [
-            ("(SELECT n FROM a) UNION (SELECT n FROM b)", "postgres", "SELECT"),
             ("(SELECT n FROM a) UNION (SELECT n FROM b)", "mysql", "SELECT"),
             ("SHOW TABLES", "mysql", "SHOW"),
             ("# note\nSELECT n FROM widgets", "mysql", "SELECT"),
@@ -638,7 +636,7 @@ class TestRunSqlToolReadShapedResults:
         assert "results" not in out.metadata
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("dialect", [None, "postgres", "sqlite"])
+    @pytest.mark.parametrize("dialect", [None, "sqlite"])
     async def test_tool_dialect_alone_decides_the_output(self, dialect: str | None) -> None:
         # Under these dialects ``#`` is no comment, so the statement is not
         # read-shaped: it gets the row-count notification even when the runner
@@ -679,7 +677,7 @@ class TestRunnerNegativeTimeoutRejection:
     ``statement_timeout_ms`` is a configuration error (most likely a unit-confusion
     typo), not a request to disable the guard. Disabling uses 0.
 
-    All three runners (SQLite / Postgres / MySQL) carry the same guard; each
+    Both runners (SQLite / MySQL) carry the same guard; each
     must reject negatives independently of the pydantic ``ge=0`` constraint on
     ``DatabaseConfig`` so programmatic embedders and tests that construct a
     runner directly (bypassing config validation) still get the check.
@@ -692,17 +690,6 @@ class TestRunnerNegativeTimeoutRejection:
     def test_sqlite_zero_timeout_accepted(self, tmp_path: Path) -> None:
         # The disable path stays a valid configuration.
         SqliteRunner(database_path=str(tmp_path / "x.db"), statement_timeout_ms=0)
-
-    def test_postgres_rejects_negative_timeout(self) -> None:
-        psycopg2 = pytest.importorskip("psycopg2")
-        del psycopg2  # only needed to skip when the driver is unavailable
-        from sqllens.agent.integrations.postgres import PostgresRunner
-
-        with pytest.raises(ValueError, match="statement_timeout_ms must be"):
-            PostgresRunner(
-                connection_string="postgresql://u:p@h:5432/db",
-                statement_timeout_ms=-1,
-            )
 
     def test_mysql_rejects_negative_timeout(self) -> None:
         pymysql = pytest.importorskip("pymysql")

@@ -21,7 +21,7 @@ Four responsibilities:
    as ``Agent.send_message`` for several canned scenarios; its companion
    ``default_stub_rows`` exposes the default scenario's rows.
 
-3. ``collect_ignore`` keeps ``tests/connectors/`` (live Postgres/MySQL tests)
+3. ``collect_ignore`` keeps ``tests/connectors/`` (live MySQL tests)
    out of a default run. Naming the directory on the command line still runs
    it: ``pytest -q tests/connectors``.
 

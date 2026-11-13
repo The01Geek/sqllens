@@ -320,14 +320,6 @@ async def _prompt_from_agent_tools(agent: Agent) -> str:
                 " LOWER(column) LIKE LOWER('pattern').",
             ],
         ),
-        (
-            "postgresql://u:p@db.internal:5432/shop",
-            "psycopg2",
-            [
-                "- The connected database is PostgreSQL. Write every query, catalog lookups"
-                " included, in PostgreSQL's SQL dialect.",
-            ],
-        ),
     ],
 )
 async def test_build_agent_prompt_names_the_database_engine(
@@ -608,6 +600,25 @@ def test_build_sql_runner_mysql_percent_decodes_credentials() -> None:
     assert isinstance(runner, MySQLRunner)
     assert runner.user == "user@corp"
     assert runner.password == "p/w:s"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "postgresql://u:p@h:5432/db",
+        "postgres://u:p@h:5432/db",
+        "postgresql+psycopg2://u:p@h:5432/db",
+    ],
+)
+def test_build_sql_runner_refuses_postgresql_url(url: str) -> None:
+    """Called directly, bypassing config validation, a PostgreSQL URL is an
+    unsupported scheme: a ``ValueError``, never an import or driver error."""
+    from sqllens.agent.factory import build_sql_runner
+
+    with pytest.raises(
+        ValueError, match=r"unsupported database scheme: .* \(expected sqlite/mysql\)"
+    ):
+        build_sql_runner(url)
 
 
 def test_allow_memory_writes_false_drops_every_save_tool(tmp_path: Path) -> None:

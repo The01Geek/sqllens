@@ -74,24 +74,10 @@ jobs:
       - run: pytest -q
 
   connectors:
-    name: Connector tests (Postgres + MySQL)
+    name: Connector tests (MySQL)
     runs-on: ubuntu-latest
 
     services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: sqllens
-          POSTGRES_PASSWORD: sqllens
-          POSTGRES_DB: sqllens
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U sqllens"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-
       mysql:
         image: mysql:8.0
         env:
@@ -108,7 +94,6 @@ jobs:
           --health-retries 20
 
     env:
-      SQLLENS_TEST_POSTGRES_URL: postgresql://sqllens:sqllens@127.0.0.1:5432/sqllens
       SQLLENS_TEST_MYSQL_URL: mysql+pymysql://sqllens:sqllens@127.0.0.1:3306/sqllens
 
     steps:
@@ -124,15 +109,14 @@ jobs:
       - run: pip install -c requirements.txt -c docker/requirements-drivers.txt -e ".[dev,all]"
       - run: pip check
 
-      # Wait for both DBs to accept ``SELECT 1``. Service-container health
-      # checks usually catch this, but MySQL on first boot is slow.
+      # Wait for MySQL to accept a connection. The service-container health
+      # check usually catches this, but MySQL on first boot is slow.
       - name: Wait for databases
         run: |
           ready=0
           for i in $(seq 1 30); do
             if python <<'PY'
-          import psycopg2, pymysql, os
-          psycopg2.connect(os.environ['SQLLENS_TEST_POSTGRES_URL']).close()
+          import pymysql
           pymysql.connect(host='127.0.0.1', user='sqllens', password='sqllens', database='sqllens').close()
           print('ready')
           PY
@@ -140,7 +124,7 @@ jobs:
             sleep 2
           done
           if [ "$ready" != 1 ]; then
-            echo "::error::Postgres/MySQL service containers never accepted connections after 30 attempts (~60s)"
+            echo "::error::MySQL service container never accepted connections after 30 attempts (~60s)"
             exit 1
           fi
 

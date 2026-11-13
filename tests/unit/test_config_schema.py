@@ -73,13 +73,12 @@ def _minimal_toml(tmp_path: Path, extra: str = "") -> Path:
     ("url", "expected"),
     [
         ("sqlite:///demo.db", "sqlite"),
-        ("postgresql://u:p@h/db", "postgresql"),
-        ("postgresql+psycopg://u:p@h/db", "postgresql"),
+        ("mysql://u:p@h/db", "mysql"),
         ("mysql+pymysql://u:p@h/db", "mysql"),
         # Pins current (case-sensitive, no normalization) behavior — a future
         # consumer comparing dialect against lowercase literals must lowercase
         # itself rather than expecting this property to normalize.
-        ("POSTGRESQL://u:p@h/db", "POSTGRESQL"),
+        ("MYSQL+PyMySQL://u:p@h/db", "MYSQL"),
     ],
 )
 def test_dialect_strips_driver_suffix(url: str, expected: str) -> None:
@@ -87,11 +86,80 @@ def test_dialect_strips_driver_suffix(url: str, expected: str) -> None:
 
 
 def test_dialect_returns_whole_string_when_no_scheme_separator() -> None:
-    # Pins current (intentionally permissive) behavior: DatabaseConfig.url has
-    # no format validator, so a malformed DSN with no "://" yields the whole
-    # string rather than raising. A future consumer that wires `dialect` into
-    # runner selection should add url validation, not change this property.
-    assert DatabaseConfig(url="not-a-dsn").dialect == "not-a-dsn"
+    # The url validator refuses this at load; the property itself still yields
+    # the whole string for a caller that builds the model without validation.
+    assert DatabaseConfig.model_construct(url="not-a-dsn").dialect == "not-a-dsn"
+
+
+# --- DatabaseConfig.url scheme rule -----------------------------------------
+
+_SCHEME_MESSAGE = (
+    "unsupported database URL scheme; use a mysql:// or mysql+pymysql:// URL (MySQL 8.0+)"
+)
+
+_ACCEPTED_URLS = [
+    "mysql://u:p@h/db",
+    "mysql+pymysql://u:p@h/db",
+    "mysql+mysqldb://u:p@h/db",
+    "mysql+mysqlconnector://u:p@h/db",
+    "MYSQL+PyMySQL://u:p@h/db",
+    "mysql+pymysql://app:p%2Fw@db.internal:3306/shop",
+    "sqlite:///:memory:",
+    "sqlite+pysqlite:///x.db",
+]
+
+@pytest.mark.parametrize("url", _ACCEPTED_URLS)
+def test_url_scheme_accepted(url: str) -> None:
+    assert DatabaseConfig(url=url).url == url
+
+
+@pytest.mark.parametrize("source", ["model", "toml", "env"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "postgresql://u:SECRET-PW@h/db",
+        "postgres://u:SECRET-PW@h/db",
+        "postgresql+psycopg2://u:SECRET-PW@h/db",
+        "mysqlx://u:SECRET-PW@h/db",
+        "mariadb://u:SECRET-PW@h/db",
+        "",
+        "no-separator-SECRET-PW",
+    ],
+)
+def test_url_scheme_refused_with_fixed_message(
+    url: str, source: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PostgreSQL, mysqlx and other unsupported URLs are refused at load."""
+    with pytest.raises(ValidationError) as exc_info:
+        if source == "model":
+            DatabaseConfig(url=url)
+        elif source == "toml":
+            cfg_path = tmp_path / "sqllens.toml"
+            cfg_path.write_text(f'[database]\nurl = "{url}"\n', encoding="utf-8")
+            Config.load(cfg_path)
+        else:
+            monkeypatch.setenv("SQLLENS_DATABASE__URL", url)
+            Config.load(_minimal_toml(tmp_path))
+    (error,) = exc_info.value.errors()
+    assert error["loc"][-1] == "url"
+    assert error["msg"] == f"Value error, {_SCHEME_MESSAGE}"
+    assert "SECRET-PW" not in str(exc_info.value.errors(include_input=False))
+
+
+@pytest.mark.parametrize("url", _ACCEPTED_URLS)
+def test_url_scheme_accepted_from_toml_and_env(
+    url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg_path = tmp_path / "sqllens.toml"
+    cfg_path.write_text(f'[database]\nurl = "{url}"\n', encoding="utf-8")
+    assert Config.load(cfg_path).database.url == url
+
+    monkeypatch.setenv("SQLLENS_DATABASE__URL", url)
+    assert Config.load(_minimal_toml(tmp_path)).database.url == url
+
+
+def test_url_scheme_message_matches_module_constant() -> None:
+    assert config_mod.UNSUPPORTED_DATABASE_URL_MESSAGE == _SCHEME_MESSAGE
 
 
 # --- O-1: ServerConfig.log_level -------------------------------------------

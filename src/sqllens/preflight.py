@@ -87,10 +87,11 @@ def _probe_sqlite(url: str, *, read_only: bool) -> None:
 def probe_database(cfg: Config) -> None:
     """Open and immediately close a connection to the configured database.
 
-    Does **not** run a query against PG/MySQL — that would burn round-trips and
+    Runs no SQL of its own against MySQL (the driver's connect still sends its
+    own session setup statements) — a query would burn round-trips and
     could trigger permission checks unrelated to reachability. A read-only
     SQLite probe does read the schema header (``PRAGMA schema_version``) so a
-    directory or a non-empty non-database file fails here. For PG/MySQL the connect
+    directory or a non-empty non-database file fails here. For MySQL the connect
     timeout is bounded by ``_DB_CONNECT_TIMEOUT_SECONDS`` so a wedged host
     can't extend startup indefinitely; SQLite has no connect-timeout knob
     (the underlying ``open()`` is unbounded on a wedged remote mount but
@@ -106,34 +107,10 @@ def probe_database(cfg: Config) -> None:
         raise PreflightError(
             "database", "database.url is missing the '://' separator"
         )
-    scheme, rest = url.split("://", 1)
-    scheme = scheme.lower()
+    scheme = url.split("://", 1)[0].lower()
 
     if scheme.startswith("sqlite"):
         _probe_sqlite(url, read_only=cfg.database.read_only)
-        return
-
-    if scheme.startswith("postgres"):
-        try:
-            import psycopg2
-        except ImportError as exc:
-            raise PreflightError(
-                "database",
-                "postgres driver not installed — run: pip install 'sqllens[postgres]'",
-            ) from exc
-
-        # psycopg2 only accepts ``postgresql://`` — collapse the legacy
-        # ``postgres://`` and SQLAlchemy-style ``postgresql+psycopg2://`` forms.
-        normalized = "postgresql://" + rest
-        try:
-            with contextlib.closing(
-                psycopg2.connect(normalized, connect_timeout=_DB_CONNECT_TIMEOUT_SECONDS)
-            ):
-                pass
-        except psycopg2.Error as exc:
-            raise PreflightError(
-                "database", f"{type(exc).__name__}: connection failed; check connection settings."
-            ) from exc
         return
 
     if scheme.startswith("mysql"):
@@ -179,7 +156,7 @@ def probe_database(cfg: Config) -> None:
 
     raise PreflightError(
         "database",
-        "unsupported database scheme (expected sqlite/postgres/mysql)",
+        "unsupported database scheme (expected sqlite/mysql)",
     )
 
 

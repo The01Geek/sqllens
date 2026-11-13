@@ -11,11 +11,10 @@ ENV PIP_NO_CACHE_DIR=1 \
 
 WORKDIR /build
 
-# System libs needed to build native dependencies (psycopg2 source, etc).
+# Build toolchain for any dependency that compiles from source.
 # Removed from final image.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
-        libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md LICENSE CHANGELOG.md requirements.txt ./
@@ -40,10 +39,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SQLLENS_BUILD_TIME=${BUILD_TIME} \
     PATH=/home/sqllens/.local/bin:$PATH
 
-# libpq5 is the only system runtime dep (postgres driver). MySQL driver
-# (PyMySQL) is pure Python, SQLite is in stdlib.
+# The MySQL driver (PyMySQL) is pure Python and SQLite is in the stdlib, so
+# no database client library is installed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libpq5 \
         ca-certificates \
         tini \
     && rm -rf /var/lib/apt/lists/* \

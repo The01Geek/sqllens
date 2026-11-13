@@ -11,13 +11,13 @@ Guidance for AI coding assistants (Claude Code, Codex, and others) working in th
 
 One database per running instance. Read-only by default, enforced by a `sqlglot` parser guard. Anthropic-only LLM in v1; the LLM interface is pluggable for future providers.
 
-**MySQL is the only supported database engine.** All known deployments run MySQL. Anything in the repository that still names or serves PostgreSQL or SQLite as a query engine is legacy, inherited from the code SQL Lens was extracted from, and awaits removal (#382 for PostgreSQL, #383 for SQLite). That covers code (`agent/integrations/postgres/`, `agent/integrations/sqlite/`, per-dialect branches in `safety/`, `preflight.py`), tests, CI, and user-facing surfaces: the README's database-URL table and SQLite quick start, `docs/external/`, the MCPB DSN examples and the `sqllens init` default URL (`sqlite:///./demo.db`). Those surfaces are known to be out of date, not a statement of support; update them in the removal changes, not piecemeal. See the engine rule below.
+**MySQL is the only supported database engine.** All known deployments run MySQL. PostgreSQL support was removed (#382). Anything in the repository that still names or serves SQLite as a query engine is legacy, inherited from the code SQL Lens was extracted from, and awaits removal (#383). That covers code (`agent/integrations/sqlite/`, the SQLite branches in `safety/` and `preflight.py`), tests, CI (the release workflow's SQLite demo validate step), and user-facing surfaces: the README's SQLite rows and quick start, the SQLite text in `docs/external/`, the MCPB SQLite DSN example and the `sqllens init` default URL (`sqlite:///./demo.db`). Those surfaces are known to be out of date, not a statement of support; update them in the removal change, not piecemeal. See the engine rule below.
 
 ### Database engine rule: MySQL only
 
-- **Supported scope: MySQL 8.0+ (including Aurora MySQL 3), reached through a `mysql://` or `mysql+pymysql://` URL.** MariaDB and MySQL 5.7 are not supported; do not add compatibility branches for them. This is policy, not enforcement: the code does not yet check the server version or reject other URL schemes.
+- **Supported scope: MySQL 8.0+ (including Aurora MySQL 3), reached through a `mysql://` or `mysql+<driver>://` URL (such as `mysql+pymysql://`).** MariaDB and MySQL 5.7 are not supported; do not add compatibility branches for them. Config loading refuses every other URL scheme, `mysqlx://` included, and a URL with no `://` (the `DatabaseConfig.url` validator in `config.py`; SQLite URLs, meaning any scheme that starts with `sqlite`, are still accepted until #383). The server version is not checked.
 - **Do not design for, test against, or extend PostgreSQL or SQLite query-engine paths.** New guards, prompts, fixes and tests target MySQL only. A test that only parses SQL (no live database) uses the MySQL dialect (`"mysql"` in sqlglot, a `mysql+pymysql://` URL where a URL is needed).
-- **Leave the legacy engine code working, but add nothing to it.** The existing Postgres and SQLite code, the bundled SQLite demo and the SQLite-backed unit tests stay until they are removed in a later change; keep their existing tests passing (CI's connector job still runs the Postgres cases), and do not add new branches, cases, prompts or tests for them.
+- **Leave the legacy engine code working, but add nothing to it.** The existing SQLite code, the bundled SQLite demo and the SQLite-backed unit tests stay until #383 removes them; keep their existing tests passing, and do not add new branches, cases, prompts or tests for them.
 - **ChromaDB is not affected.** `chroma.sqlite3` is ChromaDB's own storage file for memory records, not a query engine. ChromaDB, its `chroma.sqlite3`, and the preflight writability check on it in `src/sqllens/preflight.py` stay.
 - Specs, plans and issue designs follow the same rule: do not scope work, acceptance criteria or test matrices across engines.
 
@@ -90,9 +90,7 @@ pip install -c requirements.txt -c docker/requirements-drivers.txt -e ".[dev,all
 ruff check .
 pytest -q
 
-# Connector tests (need SQLLENS_TEST_POSTGRES_URL + SQLLENS_TEST_MYSQL_URL).
-# The Postgres cases are legacy (see the MySQL-only engine rule): keep them
-# passing, but add new connector tests for MySQL only.
+# Connector tests (need SQLLENS_TEST_MYSQL_URL, a live MySQL 8.0+ database).
 pytest -q tests/connectors
 
 # Run the server (after `sqllens init` writes a sqllens.toml)
@@ -184,7 +182,7 @@ PyPI versions are immutable after publish — you can yank but not re-upload the
   - `Lint + unit + transport (py3.11)`
   - `Lint + unit + transport (py3.12)`
   - `Lint + unit + transport (py3.14)`, the Python the Docker image runs. When the image's base moves to another Python, add that version's check to the required set as well.
-  - `Lint + unit + transport (py3.13)` and `Connector tests (Postgres + MySQL)` run on every PR but are **not** currently in the ruleset's required set. Treat them as must-pass by convention; promoting them to required is a separate ruleset change.
+  - `Lint + unit + transport (py3.13)` and `Connector tests (MySQL)` run on every PR but are **not** currently in the ruleset's required set. Treat them as must-pass by convention; promoting them to required is a separate ruleset change.
 - **Bypass is PR-only.** The ruleset's one bypass actor is the repository Admin role in `pull_request` mode: an admin can merge a PR past failing checks, but cannot bypass them with a direct push. Use a feature branch + PR every time:
   ```bash
   git checkout -b fix/short-description

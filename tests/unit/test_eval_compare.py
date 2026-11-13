@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from sqllens.eval.compare import Status, compare, normalize_sql
+from sqllens.eval.compare import Status, compare, compare_sql, normalize_sql
 
 
 def test_normalize_collapses_whitespace_and_casing() -> None:
@@ -59,28 +59,20 @@ def test_dialect_none_still_classifies() -> None:
     assert compare("SELECT 1", "select 1", dialect=None) is Status.PASS
 
 
-def test_quoted_identifiers_under_postgres_dialect() -> None:
-    expected = 'SELECT "id" FROM "users"'
+def test_quoted_identifiers_under_mysql_dialect() -> None:
+    expected = "SELECT `id` FROM `users`"
     actual = "SELECT id FROM users"
-    # Postgres lowercases unquoted identifiers; quoted ones preserve case.
     # Both renderings refer to the same column/table here, but they are
     # *structurally* different — CHANGED is the correct verdict, not PASS.
-    assert compare(expected, actual, dialect="postgres") is Status.CHANGED
+    assert compare(expected, actual, dialect="mysql") is Status.CHANGED
 
 
-def test_sqlalchemy_dialect_name_postgresql_normalises() -> None:
-    """`DatabaseConfig.dialect` returns 'postgresql' from a postgresql:// URL.
-
-    Without dialect-name mapping, sqlglot raises ``Unknown dialect 'postgresql'``
-    and comparison cannot proceed.
-    """
-    # PASS path — the mapping must be applied.
-    assert compare("SELECT 1", "select 1", dialect="postgresql") is Status.PASS
-    # CHANGED path — the mapping must still apply.
-    assert (
-        compare("SELECT id FROM users", "SELECT id FROM accounts", dialect="postgresql")
-        is Status.CHANGED
-    )
+@pytest.mark.parametrize("compare_fn", [compare, compare_sql])
+def test_postgresql_dialect_name_is_unknown(compare_fn) -> None:
+    """``postgresql`` maps to no sqlglot dialect, so sqlglot's unknown-dialect
+    ``ValueError`` propagates and the eval case reports an error."""
+    with pytest.raises(ValueError, match="Unknown dialect 'postgresql'"):
+        compare_fn("SELECT 1", "select 1", dialect="postgresql")
 
 
 def test_sqlalchemy_dialect_name_mssql_normalises() -> None:
@@ -90,8 +82,8 @@ def test_sqlalchemy_dialect_name_mssql_normalises() -> None:
 
 def test_sqlalchemy_dialect_name_mariadb_normalises() -> None:
     """`DatabaseConfig.dialect` returns 'mariadb' from mariadb:// — sqlglot
-    has no mariadb dialect, so the map translates to 'mysql'. Pins all three
-    explicit entries of ``_SQLGLOT_DIALECT_MAP``.
+    has no mariadb dialect, so the map translates to 'mysql'. With the mssql
+    test above, pins every explicit entry of ``_SQLGLOT_DIALECT_MAP``.
     """
     assert compare("SELECT 1", "select 1", dialect="mariadb") is Status.PASS
 
@@ -104,7 +96,7 @@ def test_unmapped_dialect_passes_through() -> None:
 
 def test_dialect_lookup_is_case_insensitive() -> None:
     """The SQLAlchemy-to-sqlglot lookup is case-insensitive."""
-    assert compare("SELECT 1", "select 1", dialect="PostgreSQL") is Status.PASS
+    assert compare("SELECT 1", "select 1", dialect="MariaDB") is Status.PASS
     assert compare("SELECT 1", "select 1", dialect="MSSQL") is Status.PASS
 
 

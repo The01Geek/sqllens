@@ -12,7 +12,7 @@ from sqllens.agent.core.tool import ToolContext
 from sqllens.agent.integrations.sql_threads import run_blocking_sql
 # Minimal documented dependency on sqllens.safety so a per-request profile
 # can narrow the streaming row cap without rebuilding the agent. The
-# integration runners (mysql/postgres/sqlite) each call this shared helper
+# integration runners (mysql/sqlite) each call this shared helper
 # in their fetchmany path — keeping the per-request policy in one place.
 from sqllens.safety.limits import effective_row_cap, rows_to_capped_df
 from sqllens.safety.readonly import is_read_shaped

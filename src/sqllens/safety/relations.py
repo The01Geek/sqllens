@@ -14,23 +14,15 @@ from sqlglot import expressions as exp
 from sqlglot.optimizer.scope import traverse_scope
 from sqlglot.tokens import TokenType
 
-from sqllens.safety.rls import RlsError, normalize_rls_identifiers
+from sqllens.safety.rls import RlsError
 
 logger = logging.getLogger(__name__)
 
 # Metadata-only system views the agent's schema introspection relies on. They
 # describe structure, not stored rows. Statistics views that expose sampled
-# column values (PostgreSQL ``pg_stats``, MySQL ``COLUMN_STATISTICS``) are
-# deliberately absent and stay blocked like any other view.
+# column values (MySQL ``COLUMN_STATISTICS``) are deliberately absent and stay
+# blocked like any other view.
 _METADATA_VIEWS: dict[str, frozenset[tuple[str, str]]] = {
-    "postgres": frozenset(
-        [("information_schema", name) for name in (
-            "schemata", "tables", "columns", "views", "table_constraints",
-            "key_column_usage", "referential_constraints", "constraint_column_usage",
-            "check_constraints",
-        )]
-        + [("pg_catalog", name) for name in ("pg_tables", "pg_views", "pg_indexes")]
-    ),
     "mysql": frozenset(
         ("information_schema", name) for name in (
             "schemata", "tables", "columns", "views", "statistics", "table_constraints",
@@ -40,16 +32,14 @@ _METADATA_VIEWS: dict[str, frozenset[tuple[str, str]]] = {
 }
 
 # Relation kinds in each dialect's own catalog vocabulary: SQLite
-# ``pragma_table_list.type``, PostgreSQL ``pg_class.relkind`` and MySQL
-# ``information_schema.TABLES.TABLE_TYPE``. Anything outside both sets is refused.
+# ``pragma_table_list.type`` and MySQL ``information_schema.TABLES.TABLE_TYPE``.
+# Anything outside both sets is refused.
 _VIEW_KINDS: dict[str, frozenset[str]] = {
     "sqlite": frozenset({"view"}),
-    "postgres": frozenset({"v", "m"}),
     "mysql": frozenset({"VIEW", "SYSTEM VIEW"}),
 }
 _BASE_TABLE_KINDS: dict[str, frozenset[str]] = {
     "sqlite": frozenset({"table"}),
-    "postgres": frozenset({"r", "p"}),
     "mysql": frozenset({"BASE TABLE"}),
 }
 
@@ -60,7 +50,6 @@ _SQLITE_SCHEMA_TABLES = frozenset(
 
 def _relations(sql: str, dialect: str) -> list[exp.Table]:
     tree = sqlglot.parse_one(sql, dialect=dialect)
-    normalize_rls_identifiers(tree, dialect)
     sources: dict[str, exp.Table] = {}
     accounted: set[int] = set()
     for scope in traverse_scope(tree):
@@ -85,11 +74,10 @@ def _called_names(sql: str, dialect: str) -> list[str]:
     """Names written in call position (``name(`` or ``schema.name(``) in ``sql``.
 
     Read from tokens rather than typed function nodes: sqlglot renames many
-    built-ins (``strpos`` parses to ``StrPosition``), and a keyword such as
+    built-ins (``locate`` parses to ``StrPosition``), and a keyword such as
     ``replace`` is a call name too. Keyword and type names before ``(``
     (``IN (``, ``DECIMAL(``) are collected as well. Each name is returned as
-    written, lower-cased and ASCII-lower-cased, since PostgreSQL's folding of
-    non-ASCII letters in unquoted names depends on the server encoding.
+    written, lower-cased and ASCII-lower-cased.
     """
     parser_dialect = sqlglot.Dialect.get_or_raise(dialect)
     keywords = type(parser_dialect).tokenizer_class.KEYWORDS
@@ -108,21 +96,20 @@ def _called_names(sql: str, dialect: str) -> list[str]:
 
 
 def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
-    """Refuse views, child tables, database routines and failed lookups under RLS.
+    """Refuse views, database routines and failed lookups under RLS.
 
     The caller supplies its live execution connection. No catalog result is
     cached across queries; CTE names are resolved by SQL scope analysis.
     Metadata-only system views in ``_METADATA_VIEWS`` remain readable so
-    schema introspection keeps working; every other view is refused. On
-    PostgreSQL a relation recorded as a child in ``pg_inherits`` (a partition
-    or an inheritance child) is refused. A name in call position that matches,
-    ignoring case, a PostgreSQL function outside ``pg_catalog`` and
-    ``information_schema`` or a MySQL stored function is refused, whether or
-    not the statement references a relation.
+    schema introspection keeps working; every other view is refused. Under
+    dialect ``mysql`` a name in call position that matches, ignoring case, a
+    MySQL stored function is refused, whether or not the statement references
+    a relation. A dialect with no entry here refuses, for example, any
+    statement that references a relation, before querying the connection.
     """
     try:
         relations = _relations(sql, dialect)
-        called = _called_names(sql, dialect) if dialect in ("postgres", "mysql") else []
+        called = _called_names(sql, dialect) if dialect == "mysql" else []
         if not relations and not called:
             return
         cursor = connection.cursor()
@@ -130,7 +117,7 @@ def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
             if relations:
                 _verify_relations(cursor, relations, dialect)
             if called:
-                _refuse_database_routines(cursor, called, dialect)
+                _refuse_database_routines(cursor, called)
         finally:
             cursor.close()
     except RlsError:
@@ -139,11 +126,7 @@ def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
         # The client sees only the sanitized message; log the cause so a guard
         # bug, a revoked catalog grant and a lost connection stay distinguishable.
         # SQLite runs no function-call check, so its message names relations only.
-        checked = (
-            "relation types or function calls"
-            if dialect in ("postgres", "mysql")
-            else "relation types"
-        )
+        checked = "relation types or function calls" if dialect == "mysql" else "relation types"
         logger.warning(
             "row-level-security check of %s raised an unexpected %s; failing closed",
             checked,
@@ -158,9 +141,8 @@ def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
 def _verify_relations(cursor: Any, relations: list[exp.Table], dialect: str) -> None:
     """Raise ``RlsError`` for a relation that is not a verified base table.
 
-    A lookup that raises, or a non-boolean child flag, propagates as another
-    exception, which the caller, ``verify_base_tables``, logs before refusing the
-    query.
+    A lookup that raises propagates as another exception, which the caller,
+    ``verify_base_tables``, logs before refusing the query.
     """
     mysql_fold = False
     if dialect == "mysql":
@@ -174,35 +156,6 @@ def _verify_relations(cursor: Any, relations: list[exp.Table], dialect: str) -> 
             raise RlsError("row-level security cannot verify catalog-qualified relations")
         if dialect == "sqlite":
             kind = _sqlite_kind(cursor, relation)
-        elif dialect == "postgres":
-            # Match the allowlist on the namespace the connection
-            # resolved, so an unqualified name shadowed via search_path
-            # cannot borrow a system view's exemption.
-            cursor.execute(
-                "SELECT c.relkind, n.nspname, c.relname, EXISTS ("
-                "SELECT 1 FROM pg_catalog.pg_inherits i WHERE i.inhrelid = c.oid) "
-                "FROM pg_catalog.pg_class c "
-                "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
-                "WHERE c.oid = pg_catalog.to_regclass(%s)",
-                (relation.sql(dialect="postgres"),),
-            )
-            row = cursor.fetchone()
-            kind = row[0] if row else None
-            if kind == "v" and tuple(row[1:3]) in _METADATA_VIEWS["postgres"]:
-                continue
-            if kind in _BASE_TABLE_KINDS["postgres"]:
-                is_child = row[3]
-                if not isinstance(is_child, bool):
-                    # Raised as an unexpected error so the caller logs it and
-                    # refuses with the sanitized lookup-failure message.
-                    raise TypeError(
-                        f"pg_inherits child flag is {type(is_child).__name__}, not bool"
-                    )
-                if is_child:
-                    raise RlsError(
-                        "partition and inheritance child tables are not supported while "
-                        "row-level security is active; query the top-level table"
-                    )
         elif dialect == "mysql":
             # information_schema cannot hold user objects and its names
             # are case-insensitive, so a qualified name identifies it.
@@ -235,32 +188,21 @@ def _verify_relations(cursor: Any, relations: list[exp.Table], dialect: str) -> 
             )
 
 
-def _refuse_database_routines(cursor: Any, names: list[str], dialect: str) -> None:
-    """Refuse a call whose name matches a routine defined in the database.
+def _refuse_database_routines(cursor: Any, names: list[str]) -> None:
+    """Refuse a call whose name matches a MySQL stored function.
 
-    PostgreSQL checks ``pg_proc`` outside ``pg_catalog`` and
-    ``information_schema``; MySQL checks stored functions in
-    ``information_schema.ROUTINES``. Matching is by name alone across schemas
-    and argument signatures, so a built-in call is refused too when such a
+    MySQL only: the caller runs it only under dialect ``mysql``. Checks stored
+    functions in ``information_schema.ROUTINES``. Matching is by
+    name alone across schemas, so a built-in call is refused too when such a
     routine shares its name.
     """
-    if dialect == "postgres":
-        cursor.execute(
-            "SELECT p.proname FROM pg_catalog.pg_proc p "
-            "JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace "
-            "WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') "
-            "AND (p.proname::text = ANY(%s) OR lower(p.proname::text) = ANY(%s)) "
-            "LIMIT 1",
-            (names, names),
-        )
-    else:
-        placeholders = ", ".join(["%s"] * len(names))
-        cursor.execute(
-            "SELECT ROUTINE_NAME FROM information_schema.ROUTINES "
-            "WHERE ROUTINE_TYPE = 'FUNCTION' "
-            f"AND LOWER(ROUTINE_NAME) IN ({placeholders}) LIMIT 1",
-            tuple(names),
-        )
+    placeholders = ", ".join(["%s"] * len(names))
+    cursor.execute(
+        "SELECT ROUTINE_NAME FROM information_schema.ROUTINES "
+        "WHERE ROUTINE_TYPE = 'FUNCTION' "
+        f"AND LOWER(ROUTINE_NAME) IN ({placeholders}) LIMIT 1",
+        tuple(names),
+    )
     row = cursor.fetchone()
     if row is not None:
         raise RlsError(

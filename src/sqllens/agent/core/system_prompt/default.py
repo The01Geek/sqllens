@@ -20,13 +20,12 @@ if TYPE_CHECKING:
     from ..user.models import User
 
 # Keyed by the dialects sqlglot_dialect_for_url (sqllens.safety.readonly) returns.
-_ENGINE_NAMES = {"postgres": "PostgreSQL", "mysql": "MySQL", "sqlite": "SQLite"}
+_ENGINE_NAMES = {"mysql": "MySQL", "sqlite": "SQLite"}
 _CATALOG_EXAMPLES = {
-    "postgres": "(e.g. information_schema.columns or pg_catalog)",
     "mysql": "(e.g. information_schema.columns)",
     "sqlite": "(e.g. sqlite_master)",
 }
-_NEUTRAL_CATALOG_EXAMPLE = "(e.g. information_schema.columns, sqlite_master, or pg_catalog)"
+_NEUTRAL_CATALOG_EXAMPLE = "(e.g. information_schema.columns or sqlite_master)"
 _NO_ILIKE_DIALECTS = frozenset({"mysql", "sqlite"})
 
 
@@ -50,7 +49,7 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
         Args:
             base_prompt: Optional base system prompt. If not provided, uses a default.
             dialect: The sqlglot dialect key of the connected database
-                (``"postgres"``, ``"mysql"`` or ``"sqlite"``, as returned by
+                (``"mysql"`` or ``"sqlite"``, as returned by
                 ``sqlglot_dialect_for_url``). With one, the prompt names the
                 engine and shows only its catalog; ``None`` keeps the
                 engine-neutral prompt.

@@ -31,7 +31,7 @@ New to the codebase? Start with [architecture/overview.md](architecture/overview
 |---|---|---|
 | [database-connectors/read-only-safety.md](database-connectors/read-only-safety.md) | The SQL safety guards: the read-only parser guard, the whole-row select guard, statement timeouts, and row limits. | Anyone changing what SQL the agent is allowed to run. |
 | [database-connectors/row-level-security.md](database-connectors/row-level-security.md) | Per-request row scoping from `[[rls]]` rules, and why a query that cannot be safely scoped is blocked instead of run unfiltered. | Anyone changing the RLS guard or its configuration model. |
-| [database-connectors/cleanup-error-handling.md](database-connectors/cleanup-error-handling.md) | Why the MySQL and Postgres `SqlRunner` implementations swallow secondary exceptions during close, and what they log when they do. | Anyone changing connector teardown. |
+| [database-connectors/cleanup-error-handling.md](database-connectors/cleanup-error-handling.md) | Why the MySQL `SqlRunner` implementation swallows secondary exceptions during close, and what they log when they do. | Anyone changing connector teardown. |
 
 ## Authentication
 

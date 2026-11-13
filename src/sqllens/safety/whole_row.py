@@ -23,32 +23,31 @@ A star is allowed when it cannot return a table's columns:
 
 Every other star that expands a table or view is refused wherever it
 appears: in the outer projection, a CTE, a derived table, an ``IN`` or scalar
-subquery, or a function argument such as PostgreSQL's ``row_to_json(t.*)``.
+subquery, or a function argument such as ``f(t.*)``.
 A bare ``*`` is refused when any source it expands is not one of the above.
-A star over a table-valued function, such as ``generate_series(...)``,
-``UNNEST(...)`` or a PostgreSQL function declared ``RETURNS SETOF t``, is
-refused whatever the function returns, directly or through ``LATERAL``: the
+A star over a table-valued function, such as ``generate_series(...)`` or
+``UNNEST(...)``, is refused whatever the function returns, directly or through ``LATERAL``: the
 query does not name its columns, and a function can return a table's whole
 rows. So is a star over a parenthesized table or join, such as ``(t) x``:
 sqlglot gives it a scope of its own, as it does a derived table, but its
-columns are the table's. A star over an expression, such as PostgreSQL's
+columns are the table's. A star over an expression, such as
 ``(f()).*``, is refused, because the expression can be a function's row. A
 ``t.*`` whose qualifier does not resolve to a source of its ``SELECT`` is
-refused, because the guard cannot show it is safe. ``TABLE t``, PostgreSQL's
-and MySQL's shorthand for ``SELECT * FROM t``, is refused in any statement or
+refused, because the guard cannot show it is safe. ``TABLE t``,
+MySQL's shorthand for ``SELECT * FROM t``, is refused in any statement or
 subquery. It is found with sqlglot's tokenizer (``uses_table_shorthand``),
 because sqlglot parses it differently across versions (a name ``TABLE``
 before 30.30, ``SELECT * FROM t`` from 30.30). The check errs toward
 refusal: an unquoted ``table`` alias or a ``TABLE(...)`` call is refused too.
 A ``TABLE s.t`` that does not parse is refused as unparseable SQL.
 
-Not covered: a whole row reached without a star, such as PostgreSQL's
-``row_to_json(t)``, a bare ``t`` as a composite value, or a function that
+Not covered: a whole row reached without a star, such as a bare ``t`` as a
+composite value, or a function that
 returns rows called outside ``FROM``, and an explicit list of every column.
 A table or function whose name ``is_catalog_table`` takes for a catalog, such
-as a PostgreSQL table named with the ``pg_`` prefix, counts as one. A catalog
-table that holds credentials, such as MySQL's ``mysql.user`` or PostgreSQL's
-``pg_catalog.pg_authid``, is a catalog too, so a star over it is allowed;
+as a SQLite table named with the ``sqlite_`` prefix, counts as one. A catalog
+table that holds credentials, such as MySQL's ``mysql.user``, is a catalog
+too, so a star over it is allowed;
 database grants, not this guard, keep it out of reach. A statement sqlglot
 keeps as opaque text (an ``exp.Command``, such as MySQL's
 ``PREPARE s FROM '...'``) has no star node, so a star inside it is not seen;

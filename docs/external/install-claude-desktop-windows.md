@@ -70,7 +70,7 @@ The expected answer is 2 albums.
 Re-run the installer with the new connection URL:
 
 ```powershell
-sqllens claude-desktop install --db "postgresql://user:password@host:5432/dbname" --name analytics
+sqllens claude-desktop install --db "mysql+pymysql://user:password@host:3306/dbname" --name analytics
 ```
 
 Running with the same `--name` overwrites that one entry in place. Running with a different `--name` adds another sibling server alongside the existing one. After the command finishes, quit and relaunch Claude Desktop.
@@ -79,9 +79,8 @@ Keep the default `--read-only` unless you specifically need to allow writes.
 
 | Dialect | URL format |
 |---|---|
+| MySQL 8.0+ | `mysql+pymysql://user:password@host:3306/dbname` |
 | SQLite | `sqlite:///C:/path/to/file.db` (forward slashes) |
-| Postgres | `postgresql://user:password@host:5432/dbname` |
-| MySQL | `mysql+pymysql://user:password@host:3306/dbname` |
 
 ## Troubleshooting
 

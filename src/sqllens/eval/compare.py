@@ -12,7 +12,6 @@ import sqlglot.errors
 
 # Translate SQLAlchemy URL schemes to sqlglot dialect names.
 _SQLGLOT_DIALECT_MAP: dict[str, str] = {
-    "postgresql": "postgres",
     "mssql": "tsql",
     "mariadb": "mysql",
 }

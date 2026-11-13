@@ -195,6 +195,39 @@ def test_serve_preflight_blocks_on_bad_database(tmp_path: Path) -> None:
     mock_run.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    ("command", "prefix"), [("validate", "Invalid:"), ("serve", "Config error:")]
+)
+def test_postgresql_url_refused_at_config_load_without_echoing_password(
+    tmp_path: Path, command: str, prefix: str
+) -> None:
+    """A PostgreSQL URL fails config loading with the fixed scheme message,
+    before any preflight runs, and the URL's password never reaches output."""
+    cfg_path = _write_config(
+        tmp_path / "sqllens.toml",
+        db_url="postgresql://u:CANARY-PW@h/db",
+        memory_dir=str(tmp_path / "chroma"),
+    )
+
+    with (
+        patch("sqllens.preflight.run_preflight") as mock_preflight,
+        patch("sqllens.server.run") as mock_run,
+    ):
+        result = runner.invoke(app, [command, "--config", str(cfg_path)])
+
+    assert result.exit_code == 2
+    stderr = " ".join(result.stderr.split())
+    assert prefix in stderr
+    assert (
+        "unsupported database URL scheme; use a mysql:// or mysql+pymysql:// URL (MySQL 8.0+)"
+        in stderr
+    )
+    assert "CANARY-PW" not in result.stderr
+    assert "CANARY-PW" not in result.stdout
+    mock_preflight.assert_not_called()
+    mock_run.assert_not_called()
+
+
 def test_serve_no_preflight_flag_skips_probes(tmp_path: Path) -> None:
     # Same broken DB as above, but --no-preflight should skip and let run() execute.
     cfg_path = _write_config(
@@ -1015,7 +1048,7 @@ def test_format_config_error_redacts_plain_str_input() -> None:
             raise ValueError("dsn is malformed")
 
     try:
-        _M(dsn=f"postgresql://u:{secret}@h/db")
+        _M(dsn=f"mysql+pymysql://u:{secret}@h/db")
     except ValidationError as e:
         rendered = _format_config_error(e)
         assert secret not in rendered
@@ -1175,8 +1208,8 @@ def test_format_config_error_passes_through_importerror() -> None:
     # extra) — allowlisted and actionable, no config value.
     from sqllens.cli import _format_config_error
 
-    rendered = _format_config_error(ImportError("No module named 'psycopg'"))
-    assert rendered == "No module named 'psycopg'"
+    rendered = _format_config_error(ImportError("No module named 'pymysql'"))
+    assert rendered == "No module named 'pymysql'"
 
 
 def test_format_config_error_passes_through_oserror() -> None:
@@ -1204,7 +1237,7 @@ def test_bom_config_with_secret_scrubbed_end_to_end(
     cfg = tmp_path / "sqllens.toml"
     cfg.write_bytes(
         b"\xef\xbb\xbf"
-        b'[database]\nurl = "postgresql://u:DSN-CANARY-PW@h/db"\n'
+        b'[database]\nurl = "mysql+pymysql://u:DSN-CANARY-PW@h/db"\n'
         b'[llm]\napi_key = "sk-ant-API-CANARY"\n'
     )
     try:
@@ -1235,7 +1268,7 @@ def test_real_settingserror_with_secret_scrubbed(
     from sqllens.config import Config
 
     monkeypatch.delenv("SQLLENS_CONFIG", raising=False)
-    monkeypatch.setenv("SQLLENS_DATABASE", '{"url": "postgresql://u:ENV-CANARY-PW@h')
+    monkeypatch.setenv("SQLLENS_DATABASE", '{"url": "mysql+pymysql://u:ENV-CANARY-PW@h')
     try:
         Config.load()
     except Exception as exc:

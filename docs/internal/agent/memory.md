@@ -275,7 +275,7 @@ The verifier uses the persisted `default` profile's similarity threshold and lim
 - **All-non-PASS run, regardless of threshold** — when `report.passed == 0`, the run exits 1 **even with `--fail-under 0`**, which would otherwise score `0% >= 0%` as a green result on a fully-broken agent. This guard sits *before* the percentage compare so an explicitly-permissive threshold cannot mask a fully-failed verification.
 - **Below-threshold PASS rate** — with `--fail-under PCT` and at least one PASS, exits 1 when `passed / total * 100 < PCT`.
 
-**Dialect.** Normalisation uses `cfg.database.dialect`, translating SQLAlchemy schemes through `_SQLGLOT_DIALECT_MAP` (`postgresql → postgres`, `mssql → tsql`, `mariadb → mysql`). Other names pass through. `normalize=True` normalizes unquoted identifiers; quoting remains significant to string comparison.
+**Dialect.** Normalisation uses `cfg.database.dialect`, translating SQLAlchemy schemes through `_SQLGLOT_DIALECT_MAP` (`mssql → tsql`, `mariadb → mysql`). Other names pass through, so a name sqlglot does not know raises its unknown-dialect `ValueError`. `normalize=True` normalizes unquoted identifiers; quoting remains significant to string comparison.
 
 **Parse-error scope.** `compare_sql` catches `sqlglot.errors.SqlglotError`, including grammar and tokenization errors, and raises `SqlComparisonError` identifying the failing side. Unknown-dialect errors propagate unchanged. The runner captures either as a per-case diagnostic; the status-only `compare` wrapper maps `SqlComparisonError` to ERROR.
 

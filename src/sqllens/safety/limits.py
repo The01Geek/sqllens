@@ -45,8 +45,8 @@ def effective_row_cap(constructor_cap: int) -> int:
     settings are bound (boot warmup, CLI, tests), the constructor cap
     stands.
 
-    Centralizing this avoids three identical copies inside the sqlite,
-    mysql, and postgres runners — see ``effective_row_cap`` calls there.
+    Centralizing this avoids identical copies inside the sqlite and mysql
+    runners — see ``effective_row_cap`` calls there.
     """
     effective = get_effective_settings()
     if effective is None:

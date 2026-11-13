@@ -17,7 +17,7 @@ from sqllens.preflight import PreflightError, probe_database
 from .test_cli_claude_desktop import _fixed_now
 from .test_cli_claude_desktop import base_options as base_options
 from .test_cli_claude_desktop import fake_config_json as fake_config_json
-from .test_preflight import _cfg
+from .test_preflight import _cfg, _cfg_unvalidated_url
 
 
 def _install(options):
@@ -144,7 +144,7 @@ def test_config_load_key_override_preserves_other_sources(tmp_path, monkeypatch)
 )
 def test_database_url_diagnostics_withhold_values(url: str) -> None:
     with pytest.raises(PreflightError) as error:
-        probe_database(_cfg(db_url=url))
+        probe_database(_cfg_unvalidated_url(url))
     assert "private_canary" not in str(error.value).lower()
 
 
@@ -152,7 +152,6 @@ def test_database_url_diagnostics_withhold_values(url: str) -> None:
     "module,url,error_name",
     [
         ("sqlite3", "sqlite:///:memory:", "OperationalError"),
-        ("psycopg2", "postgresql://user:pw@localhost/db", "OperationalError"),
         ("pymysql", "mysql://user:pw@localhost/db", "MySQLError"),
     ],
 )
@@ -173,7 +172,7 @@ def test_database_driver_diagnostics_withhold_values(monkeypatch, module, url, e
 def test_installer_invalid_port_diagnostic_withholds_value(base_options) -> None:
     with pytest.raises(installer.InstallError) as error:
         installer.resolve_options(
-            db_url="postgresql://synthetic:pw@localhost:PRIVATE_CANARY/db",
+            db_url="mysql+pymysql://synthetic:pw@localhost:PRIVATE_CANARY/db",
             api_key=base_options.api_key,
             name="test",
             model=base_options.model,

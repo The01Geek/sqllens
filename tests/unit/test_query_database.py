@@ -1142,12 +1142,7 @@ async def test_with_widgets_injected_agent_bypasses_singleton(
             "mysql+pymysql://u:p@db.example/shop",
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_schema = DATABASE()",
-            "SELECT id FROM pg_widgets",
-        ),
-        (
-            "postgresql+psycopg://u:p@db.example/shop",
-            "SELECT tablename FROM pg_catalog.pg_tables",
-            "SELECT id FROM sys.widgets",
+            "SELECT id FROM sqlite_widgets",
         ),
     ],
 )
