@@ -5,9 +5,10 @@
 
 from unittest.mock import AsyncMock, Mock
 
+import httpx2
 import pytest
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 from pydantic import SecretStr
 
 from sqllens.config import AuthConfig
@@ -33,7 +34,10 @@ async def test_import_write_auth(make_server, monkeypatch, mode, insecure, allow
     monkeypatch.setattr("sqllens.memory.import_bundle", importer)
     handle = make_server(auth, allow_import=True)
     headers = {"Authorization": f"Bearer {token}"} if mode == "bearer" else None
-    async with streamablehttp_client(handle.mcp_url, headers=headers) as (read, write, _):
+    async with (
+        httpx2.AsyncClient(headers=headers) as http_client,
+        streamable_http_client(handle.mcp_url, http_client=http_client) as (read, write),
+    ):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool(
@@ -41,12 +45,16 @@ async def test_import_write_auth(make_server, monkeypatch, mode, insecure, allow
             )
 
     text = "".join(getattr(block, "text", "") for block in result.content)
-    assert result.isError is not allowed
+    assert result.is_error is not allowed
     if allowed:
         assert "| saved | 1 |" in text
         parse.assert_called_once()
         importer.assert_awaited_once()
     else:
-        assert "disabled on an unauthenticated endpoint" in text
+        assert text == (
+            "Error executing tool import_memory: This tool mutates the memory store "
+            "and is disabled on an unauthenticated endpoint. Set auth.mode='bearer' "
+            "(or auth.insecure=true on a closed network) to enable it."
+        )
         parse.assert_not_called()
         importer.assert_not_awaited()

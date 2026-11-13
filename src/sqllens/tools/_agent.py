@@ -53,7 +53,7 @@ async def get_agent(cfg: Config) -> Agent:
     silently honoring a config it is not using.
 
     The mismatch test is by object identity, not value: ``server.py`` builds
-    the FastMCP tools once and closes over a single ``Config`` instance that is
+    the MCPServer tools once and closes over a single ``Config`` instance that is
     passed to every call, so identity is stable for a correctly-run server and
     a *different* object genuinely means a second config was introduced. Do
     not "fix" this to ``!=`` — value-equality would false-warn on a benign

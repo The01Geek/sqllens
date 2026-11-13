@@ -6,7 +6,7 @@
 from unittest.mock import AsyncMock
 
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from sqllens.config import AuthConfig
 from sqllens.tools import query_database
@@ -23,7 +23,7 @@ async def test_profile_name_boundaries_on_the_wire(make_server, monkeypatch):
     agent = AsyncMock(side_effect=AssertionError("unexpected backend call"))
     monkeypatch.setattr(query_database, "get_agent", agent)
     handle = make_server(AuthConfig(mode="none", insecure=True))
-    async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+    async with streamable_http_client(handle.mcp_url) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             for tool in ["get_profile", "upsert_profile", "delete_profile"]:
@@ -32,7 +32,7 @@ async def test_profile_name_boundaries_on_the_wire(make_server, monkeypatch):
                     args["knobs"] = {}
                 result = await session.call_tool(tool, args)
                 text = "".join(getattr(item, "text", "") for item in result.content)
-                assert result.isError
+                assert result.is_error
                 assert "profile name must" in text
                 assert "synthetic-canary" not in text
                 assert len(text) < 200
@@ -43,7 +43,7 @@ async def test_profile_name_boundaries_on_the_wire(make_server, monkeypatch):
                     "profile": "invalid/profile",
                 },
             )
-            assert result.isError
+            assert result.is_error
             assert "profile name must" in "".join(
                 getattr(item, "text", "") for item in result.content
             )

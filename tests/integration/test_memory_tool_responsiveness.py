@@ -16,7 +16,7 @@ import threading
 import httpx
 import pytest
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from sqllens.config import AuthConfig
 from sqllens.memory.store import MemoryStore
@@ -40,7 +40,7 @@ async def test_health_answers_while_a_memory_store_call_is_held(
     monkeypatch.setattr(MemoryStore, "iter_all", held_iter_all)
     handle = make_server(AuthConfig(mode="none", insecure=True), allow_import=True)
 
-    async with streamablehttp_client(handle.mcp_url) as (read, write, _), \
+    async with streamable_http_client(handle.mcp_url) as (read, write), \
             ClientSession(read, write) as session:
         await session.initialize()
         run = asyncio.create_task(
@@ -62,5 +62,5 @@ async def test_health_answers_while_a_memory_store_call_is_held(
         result = await asyncio.wait_for(run, HOLD_LIMIT_S)
 
     text = "".join(getattr(block, "text", "") for block in result.content)
-    assert not result.isError, text
+    assert not result.is_error, text
     assert "| saved | 1 |" in text

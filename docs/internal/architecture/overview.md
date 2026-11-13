@@ -18,7 +18,7 @@ One database per running instance. Read-only by default. Anthropic-only LLM in v
 ```
 cli.py            →  Typer parse + dispatch
   │
-server.py         →  FastMCP factory, registers the two tools, picks transport
+server.py         →  MCPServer factory, registers the two tools, picks transport
   │
 tools/            →  Thin wrappers: parse args → call agent → format result
   │
@@ -31,7 +31,7 @@ Cross-cutting modules can be imported from anywhere:
 
 - [src/sqllens/auth/](../../../src/sqllens/auth/) — `Authenticator` protocol + `none`/`bearer`/`jwt` strategies.
 - [src/sqllens/safety/](../../../src/sqllens/safety/) — `assert_select_only` sqlglot parser + `ReadOnlyGuardRunner` decorator (parse-time gate); `RowCapRunner` + `rows_to_capped_df` helpers (row-cap belt-and-suspenders alongside the per-runner `fetchmany` stream + native statement-timeout primitives); `apply_rls` sqlglot AST rewrite + `RlsGuardRunner` decorator (opt-in row-level scoping that fails secure if it cannot prove a query is fully scoped). See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) and [database-connectors/row-level-security.md](../database-connectors/row-level-security.md).
-- [src/sqllens/transport/](../../../src/sqllens/transport/) — ASGI wrapper around FastMCP's HTTP app (auth middleware + path normalizer).
+- [src/sqllens/transport/](../../../src/sqllens/transport/) — ASGI wrapper around MCPServer's HTTP app (auth middleware + path normalizer).
 
 ## Key source files
 
@@ -59,12 +59,12 @@ client POST /mcp/
 TrustedHostMiddleware  — rejects a disallowed Host with 400 (DNS-rebinding defense);
                           fronts everything below including the probe short-circuits
   ↓
-_PathNormalizer        — rewrites scope.path "/mcp/" → "/mcp" so FastMCP matches;
+_PathNormalizer        — rewrites scope.path "/mcp/" → "/mcp" so MCPServer matches;
                           short-circuits /healthz + /readyz (post-host-check, pre-auth)
   ↓
 _AuthMiddleware        — runs the configured Authenticator; 401 on AuthError
   ↓
-FastMCP                — dispatches to the registered tool
+MCPServer              — dispatches to the registered tool
   ↓
 query_database(...)    — tools/query_database.py
                           fetches the shared singleton via tools/_agent.py::get_agent
@@ -78,7 +78,7 @@ components_to_blocks    — collapses the stream to a single Markdown string + a
 client receives the tool result
 ```
 
-The stdio transport skips the middleware layers — FastMCP handles framing directly.
+The stdio transport skips the middleware layers — MCPServer handles framing directly.
 
 ## Lifted code (`sqllens.agent.*`)
 
@@ -101,7 +101,7 @@ What was dropped, and why we might regret it:
 ## Process boundaries
 
 - **One database per process.** Multi-tenancy is explicitly out of scope (see [AGENTS.md](../../../AGENTS.md) "What not to add"). If you need many, run many servers.
-- **Two transports:** stdio (default; one client per process) and HTTP (Streamable HTTP, multiplexed via FastMCP session manager).
+- **Two transports:** stdio (default; one client per process) and HTTP (Streamable HTTP, multiplexed via MCPServer session manager).
 - **State that survives restarts:** the ChromaDB collection on disk (default `./chroma/`). Everything else is recomputed.
 - **State that does *not* survive restarts:** the agent singleton in `tools/_agent.py` — first call rebuilds it, which pays for the embedding model download on first run if no `chroma/` exists yet.
 

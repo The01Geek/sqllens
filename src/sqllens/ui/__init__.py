@@ -159,9 +159,9 @@ def _read_widget_html(filename: str) -> str:
     except (FileNotFoundError, OSError, UnicodeDecodeError, ModuleNotFoundError) as e:
         # A missing asset almost always means the wheel's hatch include globs
         # (see pyproject.toml [tool.hatch.build.targets.wheel].include) dropped
-        # one of the files. Surface an actionable message instead of FastMCP's
-        # generic resource error, and log server-side so "the widget never
-        # renders" is debuggable.
+        # one of the files. Surface an actionable message (server.py's
+        # _resource_errors carries it past the SDK's generic resource error),
+        # and log server-side so "the widget never renders" is debuggable.
         logger.error(
             "widget asset (%s or one of its vendored bundles) could not be "
             "loaded; the installed wheel is likely missing it — apps-aware "

@@ -28,7 +28,7 @@ from typing import Any
 import httpx
 import pytest
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 from mcp.types import TextContent
 
 from sqllens.config import AuthConfig
@@ -138,7 +138,7 @@ async def test_health_and_list_data_sources_answer_during_slow_agent_runs(
 ) -> None:
     handle = make_server(AuthConfig(mode="none"))
 
-    async with streamablehttp_client(handle.mcp_url) as (read, write, _), \
+    async with streamable_http_client(handle.mcp_url) as (read, write), \
             ClientSession(read, write) as session:
         await session.initialize()
         # No conversation_id, so each run starts its own conversation.
@@ -158,11 +158,11 @@ async def test_health_and_list_data_sources_answer_during_slow_agent_runs(
             assert resp.status_code == 200
 
             async def list_sources() -> str:
-                async with streamablehttp_client(handle.mcp_url) as (r, w, _), \
+                async with streamable_http_client(handle.mcp_url) as (r, w), \
                         ClientSession(r, w) as quick:
                     await quick.initialize()
                     result = await quick.call_tool("list_data_sources", {})
-                    assert not result.isError
+                    assert not result.is_error
                     content = result.content[0]
                     assert isinstance(content, TextContent)
                     return content.text
@@ -187,7 +187,7 @@ async def test_health_and_list_data_sources_answer_during_slow_agent_runs(
 
         slow_model.release.set()
         results = await asyncio.wait_for(asyncio.gather(*held), HOLD_LIMIT_S)
-        assert not any(result.isError for result in results)
+        assert not any(result.is_error for result in results)
         conversations = {
             (result.meta or {})["sqllens/conversation"]["conversation_id"] for result in results
         }

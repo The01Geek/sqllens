@@ -16,9 +16,8 @@ from sqllens.tools._format import build_agent_trace
 
 
 def metadata(value):
-    return _request_metadata(SimpleNamespace(
-        request_context=SimpleNamespace(meta=SimpleNamespace(model_extra=value))
-    ))
+    # mcp 2.x hands the request ``_meta`` over as a plain dict.
+    return _request_metadata(SimpleNamespace(request_context=SimpleNamespace(meta=value)))
 
 
 def trace(value):
@@ -53,6 +52,60 @@ def test_metadata_ordinary_values_and_exact_byte_boundary():
     assert metadata({"a": "x" * 16377}) == {}
 
 
+@pytest.mark.parametrize("meta,expected", [
+    ({"tenant": "alpha"}, {"tenant": "alpha"}),
+    ({"tenant": "alpha", "progressToken": 7}, {"tenant": "alpha"}),
+    ({"tenant": "alpha", "progress_token": 7}, {"tenant": "alpha"}),
+    (
+        {
+            "tenant": "alpha",
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {"name": "c", "version": "1"},
+            "io.modelcontextprotocol/clientCapabilities": {},
+        },
+        {"tenant": "alpha"},
+    ),
+    # Fails open: an SDK-managed key outside the reserved prefix is forwarded.
+    ({"tenant": "alpha", "sdkManaged": "x"}, {"tenant": "alpha", "sdkManaged": "x"}),
+    ({"io.modelcontextprotocol.notreserved": 1}, {"io.modelcontextprotocol.notreserved": 1}),
+    ({}, {}),
+])
+def test_metadata_forwarding_rule(meta, expected):
+    assert metadata(meta) == expected
+
+
+def test_metadata_key_limit_counts_forwarded_keys_only():
+    caller = {str(i): i for i in range(64)}
+    assert metadata({**caller, "progressToken": 1,
+                     "io.modelcontextprotocol/protocolVersion": "2026-07-28"}) == caller
+    assert metadata({**caller, "one-more": 1}) == {}
+
+
+def test_metadata_absent_meta_and_no_active_request():
+    assert metadata(None) == {}
+
+    class NoRequest:
+        @property
+        def request_context(self):
+            raise ValueError("Context is not available outside of a request")
+
+    assert _request_metadata(NoRequest()) == {}
+
+
+@pytest.mark.parametrize("depth,expected_empty", [(8, False), (9, True)])
+def test_metadata_nesting_limit(depth, expected_empty):
+    value: object = "leaf"
+    for _ in range(depth - 1):
+        value = {"k": value}
+    assert (metadata({"v": value}) == {}) is expected_empty
+
+
+def test_metadata_node_limit():
+    # Root dict + key + list + items: 1024 nodes at 1021 items.
+    assert metadata({"v": list(range(1021))}) != {}
+    assert metadata({"v": list(range(1022))}) == {}
+
+
 def test_metadata_deep_and_cyclic_values_are_discarded():
     nested = []
     for _ in range(100):
@@ -65,15 +118,14 @@ def test_metadata_deep_and_cyclic_values_are_discarded():
 
 @pytest.mark.parametrize("failure", [RuntimeError, JsonBoundsError])
 def test_metadata_accessor_failure_is_distinct_and_content_free(failure, caplog):
-    class BrokenMeta:
-        @property
-        def model_extra(self):
+    class BrokenMeta(dict):
+        def items(self):
             raise failure("synthetic-private-detail")
 
     context = SimpleNamespace(request_context=SimpleNamespace(meta=BrokenMeta()))
     assert _request_metadata(context) == {}
     assert caplog.messages == [
-        "failed to read request metadata extras; returning empty metadata"
+        "failed to read request metadata; returning empty metadata"
     ]
     assert all(record.exc_info is None and record.stack_info is None for record in caplog.records)
     assert "synthetic-private-detail" not in caplog.text

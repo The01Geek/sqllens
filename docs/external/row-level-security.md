@@ -100,7 +100,7 @@ When your application calls the MCP `tools/call` method for `query_database`, in
 
 Most MCP client libraries provide a way to attach `_meta` to a tool call. Consult your client library's documentation for the exact pattern.
 
-A few reserved keys are stripped at the boundary and cannot be used as RLS metadata keys: `starter_ui_request` and `ui_features_available` are reserved for SQL Lens's own internal use. Pick any other key name.
+A few reserved keys are stripped at the boundary and cannot be used as RLS metadata keys: `starter_ui_request` and `ui_features_available` are reserved for SQL Lens's own internal use. The MCP protocol's own keys never reach your rules either: the progress token (`progressToken`, and a key spelled `progress_token`) and any key starting with `io.modelcontextprotocol/`. Pick any other key name.
 
 Request metadata extras must fit within 64 top-level keys, 16 KiB of compact ASCII-escaped JSON, 1,024 nodes including object keys, and eight nesting levels below the root. Invalid or oversized metadata is discarded completely, so dynamic RLS queries fail on missing values. These limits apply after the MCP request has been parsed.
 

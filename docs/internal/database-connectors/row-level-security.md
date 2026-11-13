@@ -151,11 +151,13 @@ MCP client
   ↓  HTTP POST /mcp/   (carries _meta in the JSON-RPC params)
 TrustedHostMiddleware / _AuthMiddleware            (transport-layer concerns)
   ↓
-FastMCP                                            (parses _meta onto RequestParams.Meta)
+MCPServer (mcp 2.x)                                (parses _meta into a plain dict)
   ↓
 query_database(question, ctx: Context)             (src/sqllens/server.py)
   ↓
-_request_metadata(ctx)                             (extracts ctx.request_context.meta.model_extra)
+_request_metadata(ctx)                             (forwards ctx.request_context.meta keys except
+                                                    progressToken / progress_token and
+                                                    io.modelcontextprotocol/* keys)
   ↓
 query_database_impl_with_widgets(cfg, question, metadata=…)
   ↓
@@ -247,7 +249,9 @@ Unit tests live in [tests/unit/test_safety_rls.py](../../../tests/unit/test_safe
 
 Database relation checks (views blocked while RLS is active, catalog failures closing) are tested in [tests/unit/test_rls_views.py](../../../tests/unit/test_rls_views.py).
 
-The metadata plumbing through FastMCP `Context` → `_request_metadata` → tool impl is pinned in [tests/unit/test_server.py](../../../tests/unit/test_server.py).
+The metadata plumbing through MCPServer `Context` → `_request_metadata` → tool impl is pinned in [tests/unit/test_server.py](../../../tests/unit/test_server.py); the forwarding rule and bounds in [tests/unit/test_metadata_bounds.py](../../../tests/unit/test_metadata_bounds.py), and through real 2.x clients in [tests/integration/test_metadata_stdio.py](../../../tests/integration/test_metadata_stdio.py) and [tests/integration/test_http_transport.py](../../../tests/integration/test_http_transport.py) (including a 2026-07-28 session, whose SDK stamps `io.modelcontextprotocol/*` keys into the request `_meta`).
+
+On mcp 2.x the SDK drops a caller key spelled `progress_token` while parsing `_meta`, before `_request_metadata` runs, so a dynamic rule reading `progress_token` (forwarded on mcp 1.30.0) sees it missing and blocks its queries; a caller key starting with `io.modelcontextprotocol/` is excluded by the forwarding rule.
 
 When extending RLS, add tests for:
 

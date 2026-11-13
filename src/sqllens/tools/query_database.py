@@ -3,10 +3,10 @@
 
 """``query_database`` MCP tool implementation.
 
-The FastMCP tool wrapper (``mcp.server.fastmcp`` — the official MCP SDK, not
-the separately-distributed standalone ``fastmcp`` package) in ``server.py``
-re-raises any exception from this module and maps it to an ``isError: true``
-result, currently formatting the client text as
+``server.py`` registers the tool on the MCP SDK's ``MCPServer``
+(``mcp.server.mcpserver``, mcp 2.x). Its ``_tool_errors`` wrapper converts
+any exception from this module to the SDK's ``ToolError``, which the SDK maps
+to an ``isError: true`` result whose client text is
 ``Error executing tool query_database: <message>``. Our contract is therefore
 the *raised message* (the categorized text below), which the client receives
 as the suffix after that wrapper prefix — the category split stays observable
@@ -55,11 +55,11 @@ class AgentRunError(RuntimeError):
     """An agent-reported query failure that may carry a step-by-step trace.
 
     Subclasses ``RuntimeError`` so the established error taxonomy is unchanged:
-    callers (and the FastMCP wrapper) that only catch ``RuntimeError`` and read
+    callers that only catch ``RuntimeError`` and read
     the message keep working byte-for-byte. The extra ``agent_trace`` rides
     alongside the message so the server can attach it to the ``isError`` result's
     ``_meta`` when ``agent.show_details`` is on. It is ``None`` when details are
-    off — in which case the server re-raises and FastMCP formats the failure
+    off — in which case the server re-raises and the SDK formats the failure
     exactly as before, with no trace leaked into a details-off deployment —
     unless ``agent.show_conversation_footer`` is off, when the server returns an
     ``isError`` result carrying the conversation id in ``_meta`` instead.

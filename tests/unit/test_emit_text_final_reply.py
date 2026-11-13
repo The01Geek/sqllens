@@ -109,7 +109,7 @@ def _query_database(
 def _texts(result: CallToolResult) -> tuple[list[str], str]:
     """The result's text blocks and its Markdown text content."""
     assert isinstance(result, CallToolResult)
-    assert result.isError is False
+    assert result.is_error is False
     blocks = result.meta["sqllens/blocks"]
     text_blocks = [b["text"] for b in blocks if b["type"] == "text"]
     markdown = "\n".join(c.text for c in result.content if c.type == "text")

@@ -6,7 +6,7 @@
 from unittest.mock import AsyncMock, Mock
 
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from sqllens._memory_consistency import MemoryChangedError
 from sqllens.config import AuthConfig
@@ -27,12 +27,12 @@ async def test_memory_limits_on_the_wire(make_server, monkeypatch):
     monkeypatch.setattr(admin, "import_bundle", importer)
     monkeypatch.setattr(admin, "list_memories", reader)
     handle = make_server(AuthConfig(mode="none", insecure=True))
-    async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+    async with streamable_http_client(handle.mcp_url) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = (await session.list_tools()).tools
             tool = next(tool for tool in tools if tool.name == "list_memories")
-            assert tool.inputSchema["properties"]["limit"]["maximum"] == 1000
+            assert tool.input_schema["properties"]["limit"]["maximum"] == 1000
             result = await session.call_tool(
                 "list_memories",
                 {
@@ -40,7 +40,7 @@ async def test_memory_limits_on_the_wire(make_server, monkeypatch):
                     "limit": 1001,
                 },
             )
-            assert result.isError
+            assert result.is_error
             assert "1000" in "".join(getattr(item, "text", "") for item in result.content)
             reader.assert_not_called()
 
@@ -51,7 +51,7 @@ async def test_memory_limits_on_the_wire(make_server, monkeypatch):
                     "sql_pairs": [{"question": "test", "sql": "SELECT 1"}] * (MAX_BUNDLE_ITEMS + 1),
                 },
             )
-            assert result.isError
+            assert result.is_error
             assert "item cap" in "".join(getattr(item, "text", "") for item in result.content)
             importer.assert_not_called()
 
@@ -66,12 +66,12 @@ async def test_overlapping_memory_write_returns_retry_error_on_the_wire(make_ser
     monkeypatch.setitem(make_server.__globals__, "build_asgi_app", with_memory_admin)
     monkeypatch.setattr(admin, "list_memories", Mock(side_effect=MemoryChangedError))
     handle = make_server(AuthConfig(mode="none", insecure=True))
-    async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+    async with streamable_http_client(handle.mcp_url) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool("list_memories", {"data_source_id": "test"})
-            assert result.isError is True
+            assert result.is_error is True
             message = result.content[0].text
             assert "Memory store changed during listing; retry the request." in message
-            assert result.structuredContent is None
+            assert result.structured_content is None
             assert '\"memories\":' not in message

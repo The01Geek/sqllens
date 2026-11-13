@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult
 
 from sqllens.agent.integrations.chromadb import agent_memory as chroma_memory
@@ -244,13 +245,14 @@ async def test_mcp_result_is_error_with_memory_unavailable_text(
     if show_details:
         result = await query_database("q", _StubCtx())
         assert isinstance(result, CallToolResult)
-        assert result.isError is True
+        assert result.is_error is True
         assert result.content[0].text == f"Error executing tool query_database: {EXPECTED_MESSAGE}"
         assert "sqllens/agent_trace" in (result.meta or {})
     else:
-        # Without a trace the server re-raises; FastMCP adds the same prefix.
-        with pytest.raises(AgentRunError, match=r"^Memory store unavailable: "):
+        # Without a trace the server re-raises; the SDK adds the same prefix.
+        with pytest.raises(ToolError, match=r"^Memory store unavailable: ") as excinfo:
             await query_database("q", _StubCtx())
+        assert isinstance(excinfo.value.__cause__, AgentRunError)
     assert len(llm.requests) == 1
 
 

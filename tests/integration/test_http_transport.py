@@ -12,9 +12,10 @@ for the auth and path-normalization edge cases.
 from __future__ import annotations
 
 import httpx
+import httpx2
 import pytest
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 from pydantic import SecretStr
 
 from sqllens.config import AuthConfig
@@ -34,15 +35,53 @@ async def test_query_metadata_limits_over_mcp_http(make_server, monkeypatch) -> 
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_query)
     handle = make_server(AuthConfig(mode="none"))
-    async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+    async with streamable_http_client(handle.mcp_url) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             for meta in ({"tenant": "alpha"}, {"tenant": "alpha", "padding": "x" * 20000}):
                 result = await session.call_tool(
                     "query_database", {"question": "synthetic metadata check"}, meta=meta
                 )
-                assert result.isError is False
+                assert result.is_error is False
     assert seen == [{"tenant": "alpha"}, {}]
+
+
+async def test_reserved_meta_keys_of_2026_session_are_not_forwarded(
+    make_server, monkeypatch
+) -> None:
+    from sqllens import server as server_module
+
+    seen = []
+    raw_keys = []
+    real_request_metadata = server_module._request_metadata
+
+    def spy(ctx):
+        raw_keys.append(set(ctx.request_context.meta or {}))
+        return real_request_metadata(ctx)
+
+    async def fake_query(cfg, question, **kwargs):
+        seen.append(kwargs["metadata"])
+        return "ok", [], None, None, None
+
+    monkeypatch.setattr(server_module, "_request_metadata", spy)
+    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_query)
+    handle = make_server(AuthConfig(mode="none"))
+    async with streamable_http_client(handle.mcp_url) as (read, write):
+        async with ClientSession(read, write) as session:
+            discovered = await session.discover()
+            assert "2026-07-28" in discovered.supported_versions
+            result = await session.call_tool(
+                "query_database", {"question": "synthetic metadata check"},
+                meta={"tenant": "alpha"},
+            )
+            assert result.is_error is False
+    # The SDK stamped the reserved keys onto the request; none was forwarded.
+    assert {
+        "io.modelcontextprotocol/protocolVersion",
+        "io.modelcontextprotocol/clientInfo",
+        "io.modelcontextprotocol/clientCapabilities",
+    } <= raw_keys[0]
+    assert seen == [{"tenant": "alpha"}]
 
 
 async def test_insecure_posture_and_json_headers_on_real_http(make_server) -> None:
@@ -70,7 +109,7 @@ async def test_bearer_refusal_json_header_on_real_http(make_server) -> None:
 class TestNoAuth:
     async def test_tools_list_returns_core_tools(self, make_server) -> None:
         handle = make_server(AuthConfig(mode="none"))
-        async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+        async with streamable_http_client(handle.mcp_url) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.list_tools()
@@ -82,11 +121,11 @@ class TestNoAuth:
 
     async def test_list_data_sources_returns_chinook(self, make_server) -> None:
         handle = make_server(AuthConfig(mode="none"))
-        async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+        async with streamable_http_client(handle.mcp_url) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool("list_data_sources", {})
-                assert result.isError is False
+                assert result.is_error is False
                 # Tool returns a single text block — the configured DB summary.
                 body = "".join(
                     getattr(block, "text", "") for block in result.content
@@ -99,7 +138,11 @@ class TestNoAuth:
         # The MCP App widget must be reachable as a ui:// resource through the
         # full HTTP + auth-middleware stack, not just via build_server().
         handle = make_server(AuthConfig(mode="none"))
-        async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+        # The ~1.5 MB widget exceeds the 2.x Python client's 1 MiB default
+        # SSE event cap; a smaller cap here fails the read client-side.
+        async with streamable_http_client(
+            handle.mcp_url, max_sse_event_size=8 * 1024 * 1024
+        ) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 listed = await session.list_resources()
@@ -111,7 +154,7 @@ class TestNoAuth:
                 )
                 contents = result.contents
                 assert len(contents) == 1
-                assert contents[0].mimeType == "text/html;profile=mcp-app"
+                assert contents[0].mime_type == "text/html;profile=mcp-app"
                 assert "app-with-deps.js" in contents[0].text
 
 
@@ -124,10 +167,9 @@ class TestBearerAuth:
             AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789-padding-xx"))
         )
         headers = {"Authorization": "Bearer good-token-0123456789-padding-xx"}
-        async with streamablehttp_client(handle.mcp_url, headers=headers) as (
-            read,
-            write,
-            _,
+        async with (
+            httpx2.AsyncClient(headers=headers) as http_client,
+            streamable_http_client(handle.mcp_url, http_client=http_client) as (read, write),
         ):
             async with ClientSession(read, write) as session:
                 await session.initialize()
@@ -239,7 +281,7 @@ class TestPathNormalization:
     async def test_trailing_slash_mcp_path_works(self, make_server) -> None:
         """Companion to ``test_bare_mcp_path_works``: ``POST /mcp/`` (the
         canonical trailing-slash form most IDE clients use) is rewritten to
-        the FastMCP route and reaches the handler.
+        the MCPServer route and reaches the handler.
         """
         handle = make_server(AuthConfig(mode="none"))
         url = handle.base_url + "/mcp/"
@@ -263,11 +305,11 @@ class TestPathNormalization:
 
     async def test_options_preflight_on_mcp_path(self, make_server) -> None:
         """An OPTIONS preflight against the MCP path traverses the full stack
-        (path-normalizer → host check → auth=none → FastMCP) without a 5xx.
+        (path-normalizer → host check → auth=none → MCPServer) without a 5xx.
 
         Pins current behavior so a regression in the middleware chain (e.g. a
         short-circuit swallowing OPTIONS, or auth 401'ing a preflight) is
-        caught. The exact status is whatever FastMCP's Starlette route
+        caught. The exact status is whatever MCPServer's Starlette route
         negotiates for OPTIONS; we assert it is a handled client response,
         never a server error.
         """
@@ -310,10 +352,10 @@ class TestTrustedHost:
     async def test_non_loopback_host_header_rejected(self, make_server) -> None:
         """AGENTS.md gotcha: a non-loopback ``Host`` is rejected. Post-S-8
         the rejection is deterministically ``TrustedHostMiddleware``'s 400 —
-        it now fronts FastMCP, so FastMCP's own 421 ``Misdirected Request``
+        it now fronts MCPServer, so the SDK's own 421 ``Misdirected Request``
         is no longer reachable for this input. Asserting the exact 400 makes
         this test catch an S-8 regression (a reverted TrustedHost would let
-        FastMCP's 421 resurface and a loose ``in (400, 421)`` would miss it).
+        the SDK's 421 resurface and a loose ``in (400, 421)`` would miss it).
         """
         handle = make_server(AuthConfig(mode="none"))
         async with httpx.AsyncClient() as client:
@@ -326,6 +368,26 @@ class TestTrustedHost:
                 },
             )
         assert r.status_code == 400
+
+    async def test_wildcard_bind_non_loopback_host_gets_sdk_421(self, make_server) -> None:
+        """On a 0.0.0.0 bind our allowlist accepts any ``Host`` and auth passes,
+        so the request reaches MCPServer, whose ``streamable_http_app()``
+        loopback default answers a non-loopback ``Host`` with 421.
+        """
+        handle = make_server(
+            AuthConfig(mode="none", insecure=True), configured_host="0.0.0.0"
+        )
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                handle.mcp_url,
+                json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                headers={
+                    "Host": "host.docker.internal:9999",
+                    "Accept": "application/json, text/event-stream",
+                    "Content-Type": "application/json",
+                },
+            )
+        assert r.status_code == 421
 
     async def test_probe_with_allowed_host_still_200(self, make_server) -> None:
         """Regression for the S-8 ordering gotcha: an allowed-Host probe must
@@ -446,13 +508,13 @@ class TestAgentFailure:
         monkeypatch.setattr(agent_module, "build_agent", _boom)
 
         handle = make_server(AuthConfig(mode="none"))
-        async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+        async with streamable_http_client(handle.mcp_url) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(
                     "query_database", {"question": "how many tracks?"}
                 )
-        assert result.isError is True
+        assert result.is_error is True
         body = "".join(getattr(block, "text", "") for block in result.content)
         assert "internal error" in body.lower()
         # Not an LLM apology masquerading as a result.
