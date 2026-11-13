@@ -74,7 +74,7 @@ def _called_names(sql: str, dialect: str) -> list[str]:
     """Names written in call position (``name(`` or ``schema.name(``) in ``sql``.
 
     Read from tokens rather than typed function nodes: sqlglot renames many
-    built-ins (``strpos`` parses to ``StrPosition``), and a keyword such as
+    built-ins (``locate`` parses to ``StrPosition``), and a keyword such as
     ``replace`` is a call name too. Keyword and type names before ``(``
     (``IN (``, ``DECIMAL(``) are collected as well. Each name is returned as
     written, lower-cased and ASCII-lower-cased, so a lookup matches whether or

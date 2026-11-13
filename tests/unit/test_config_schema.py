@@ -129,7 +129,7 @@ def test_url_scheme_accepted(url: str) -> None:
 def test_url_scheme_refused_with_fixed_message(
     url: str, source: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """PostgreSQL, mysqlx and every other non-MySQL URL is refused at load."""
+    """PostgreSQL, mysqlx and every other non-MySQL, non-SQLite URL is refused at load."""
     with pytest.raises(ValidationError) as exc_info:
         if source == "model":
             DatabaseConfig(url=url)

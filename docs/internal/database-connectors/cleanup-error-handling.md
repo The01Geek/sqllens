@@ -6,14 +6,14 @@ Why the MySQL `SqlRunner` implementation swallows secondary exceptions raised du
 
 A SELECT can raise mid-execution for a wide range of reasons that have nothing to do with the SQL the agent generated:
 
-- MySQL `max_statement_time` fires.
+- MySQL's `MAX_EXECUTION_TIME` limit fires.
 - The DB-side connection is killed, the network drops, or the server restarts.
 
 When the primary `cursor.execute(...)` raises, Python's `try / finally` still runs the cleanup calls. They touch a cursor or connection in an indeterminate state, and **they can raise a secondary exception** — typically `InterfaceError`, `BrokenPipeError`, or `OperationalError`.
 
 Python's exception-chaining rules say that an exception raised inside a `finally:` block **replaces** the exception that was propagating (the original is preserved on `__context__`, but the *type* and *message* the caller sees are the secondary one). For the agent that means:
 
-- The LLM receives "broken pipe on close" instead of "max_statement_time exceeded".
+- The LLM receives "broken pipe on close" instead of the timeout error.
 - It can't re-plan with a tighter `WHERE` / `LIMIT`, because it doesn't know the query timed out.
 - The MCP client sees a generic transport error instead of a recoverable signal.
 

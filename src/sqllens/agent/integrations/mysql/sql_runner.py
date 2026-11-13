@@ -170,7 +170,7 @@ class MySQLRunner(SqlRunner):
 
         finally:
             # Log-and-swallow secondary exceptions during connection teardown so
-            # the primary query error (e.g. max_statement_time / lost-connection)
+            # the primary query error (e.g. MAX_EXECUTION_TIME / lost-connection)
             # reaches the LLM intact rather than being masked by a secondary
             # error (InterfaceError, BrokenPipeError) from closing a connection
             # in an indeterminate state. This is also the SELECT cleanup path:

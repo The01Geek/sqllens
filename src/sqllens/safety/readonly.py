@@ -635,7 +635,7 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
         # set rather than as ``exp.Create``, so the DML/DDL deny-walk above
         # misses it. Covers root-level, CTE-nested and set-operation occurrences.
         if isinstance(sub, exp.Select) and sub.args.get("into"):
-            raise UnsafeSqlError("SELECT ... INTO is not allowed (creates a table)")
+            raise UnsafeSqlError("SELECT ... INTO is not allowed")
         # Side-effecting / DoS / RCE function calls. A valid SELECT can still
         # call e.g. ``load_extension`` (SQLite RCE) or ``load_file`` (MySQL
         # data exfiltration); the root-type/DML walk above does not see these.

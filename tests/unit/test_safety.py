@@ -938,7 +938,7 @@ class TestIsIntrospectionQueryPerDialect:
         assert is_introspection_query("SELECT id FROM widgets", dialect="postgresql") is False
 
     def test_hash_is_not_a_comment_outside_mysql(self) -> None:
-        # "#" opens a line comment only in MySQL; elsewhere this is not a SHOW.
+        # "#" opens a line comment in MySQL but not in SQLite, so this is not a SHOW.
         assert is_introspection_query("#x\nSHOW 'abc", dialect="sqlite") is False
 
     @pytest.mark.parametrize(

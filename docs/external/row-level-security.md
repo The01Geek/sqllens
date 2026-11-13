@@ -118,7 +118,7 @@ SQL Lens rewrites it to:
 SELECT id, total FROM orders WHERE status = 'paid' AND orders.tenant_id = 'acme'
 ```
 
-SQL Lens prints the whole rewritten statement again with its SQL parser. The name of a function the parser does not recognise keeps the case and quotes it was written in. Functions the parser recognises are printed in its standard form, which can differ in case or spelling: for example `count(*)` is printed as `COUNT(*)` and `strpos(a, 'x')` as `POSITION('x' IN a)`.
+SQL Lens prints the whole rewritten statement again with its SQL parser. The name of a function the parser does not recognise keeps the case and quotes it was written in. Functions the parser recognises are printed in its standard form, which can differ in case or spelling: for example `count(*)` is printed as `COUNT(*)` and `ifnull(a, 0)` as `COALESCE(a, 0)`.
 
 The same predicate is added in every place the protected table is read — joins, subqueries, and the body of common table expressions. A common table expression that *references* a same-named protected table is correctly left alone, because its rows already came from the filtered body.
 

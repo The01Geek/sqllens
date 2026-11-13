@@ -64,7 +64,8 @@ class DatabaseConfig(BaseModel):
         description=(
             "SQLAlchemy-style DSN: mysql://... or mysql+<driver>://..., e.g. "
             "mysql+pymysql://u:p@h:3306/db. Any other scheme, or a value with no "
-            "'://', is refused at load (sqlite:// is still accepted until its removal)."
+            "'://', is refused at load (a scheme starting with sqlite is still accepted "
+            "until SQLite's removal)."
         ),
     )
     name: str = Field(default="primary", description="Display name shown via list_data_sources")
@@ -90,7 +91,7 @@ class DatabaseConfig(BaseModel):
         description=(
             "Server-side statement timeout in milliseconds. Applied via "
             "SET SESSION MAX_EXECUTION_TIME (MySQL) "
-            "or a progress-handler deadline (SQLite). 0 disables (MySQL only). "
+            "or a progress-handler deadline (SQLite). 0 disables. "
             "Upper bound is 24h (86_400_000) to catch unit-confusion typos."
         ),
     )
