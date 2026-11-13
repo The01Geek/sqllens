@@ -239,6 +239,13 @@ def test_probe_llm_constructs_anthropic_service_without_round_trip() -> None:
     assert "model" in kwargs
 
 
+def test_probe_llm_builds_real_sdk_client() -> None:
+    import anthropic
+
+    assert anthropic.__version__.startswith("2.")
+    probe_llm(_cfg(api_key="sk-ant-real-test"))
+
+
 def test_probe_llm_constructor_anthropic_error_becomes_preflight_error() -> None:
     # When AnthropicLlmService's constructor raises an anthropic.AnthropicError
     # (e.g. a malformed base_url or client-side validation), the probe must
