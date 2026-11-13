@@ -273,6 +273,23 @@ extra_words = ["session token", "access token", "refresh token"]
 
 As environment variables, each setting is a JSON array, for example `SQLLENS_RESULT_MASKING__EXTRA_WORDS='["phone"]'`. An unknown key, a wrong-type value, an entry with no letters or digits, or an environment value that is not valid JSON makes the configuration fail to load. A configuration file containing `[result_masking]` does not load in an older SQL Lens release; remove the section before downgrading.
 
+## Section: `[rule_sets]`
+
+Per-role rule sets limit each question to the tables and columns one application role may read. They are available on MySQL only and are off unless you set `file`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `file` | path | unset | Path of the rule-set file to load. SQL Lens reads and validates it every time the configuration loads, so a bad file makes `sqllens validate` and `sqllens serve` fail with a message naming the problem. A change takes effect after a restart. |
+
+```toml
+[rule_sets]
+file = "rule-sets.toml"
+```
+
+As an environment variable: `SQLLENS_RULE_SETS__FILE=rule-sets.toml`. An unknown key inside `[rule_sets]` makes the configuration fail to load.
+
+While a rule-set file is configured, every `query_database` request must name a rule set, an account and a user, the assistant saves nothing to memory, and `sqllens verify-memory` is not available. For the file format, the request fields and the refusal messages, see [Per-role rule sets](rule-sets.md).
+
 ## Top-level field: `config_version`
 
 A single top-level integer, `config_version`, defaults to `1`. It is accepted and validated but currently has no effect. It is reserved so future releases can detect and migrate older configuration files. You do not need to set it.

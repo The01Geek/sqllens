@@ -1,6 +1,6 @@
 # Per-role rule sets
 
-<!-- verified-against: 537f0a4 2026-11-13 -->
+<!-- verified-against: ad1aef9 2026-11-14 -->
 
 How a rule-set file limits each `query_database` request to one application role's tables and columns: loading and validating the file, selecting a set per request, the catalog existence check, and the SQL guard that enforces the selected set. Read it before changing `src/sqllens/rule_sets.py`, `src/sqllens/safety/rule_sets.py`, or anything they wire into. For row predicates from `[[rls]]`, read [row-level-security.md](row-level-security.md) instead. MySQL only.
 
@@ -23,7 +23,7 @@ How a rule-set file limits each `query_database` request to one application role
 ## Startup signals
 
 - `sqllens serve` and `sqllens validate` warn once for each set whose `source.confirmed_against_production` is not `true`; requests that select it are refused.
-- `sqllens verify-memory` refuses to run while a rule-set file is configured, printing `VERIFY_MEMORY_UNSUPPORTED_MESSAGE` (exit 1 when the configuration loads, exit 2 beside the configuration error when it does not), and `run_verification` raises `ValueError` with `VERIFY_MEMORY_UNSUPPORTED_MESSAGE` before any case runs.
+- `sqllens verify-memory` refuses to run while a rule-set file is configured, printing `VERIFY_MEMORY_UNSUPPORTED_MESSAGE`, and `run_verification` raises `ValueError` with the same message before any case runs. When the configuration loads, the command checks `cfg.rule_sets.loaded` before the `--format` and API-key checks, so a configured rule-set file always draws this message rather than an unrelated one, and exits 1. When the configuration fails to load, it prints the configuration error and exits 2, adding this message when the failure came from the rule-set file (`_is_rule_set_file_error`) or when the environment or the TOML file names a rule-set file (`_rule_set_file_configured`, which reads the TOML without validation and answers `False` for a file it cannot read or parse).
 - `probe_database` runs `check_catalog` on its MySQL connection. See [setup/preflight.md](../setup/preflight.md). <!-- canonical: setup/preflight.md -->
 
 ## Per-request selection
@@ -61,4 +61,4 @@ Inside the conversation turn lock, two more checks run before the agent:
 
 `RuleSetGuardRunner` (`src/sqllens/safety/rule_sets.py`) parses each statement with sqlglot under the MySQL dialect and refuses anything it cannot carry through: no selection, an unparseable statement, anything other than one `SELECT` (including `SELECT ... INTO`), a table the set does not list, a schema- or database-qualified table, a catalog schema, a table function, `JSON_TABLE` or `DUAL`, a `PARTITION` list or index hint, column aliases on a table, and a denied function. Otherwise it rewrites each listed table reference into a derived table selecting exactly that table's listed `columns`, so MySQL rejects any other column as unknown. It regenerates MySQL SQL without comments or optimizer hints, re-parses and re-checks that output, and passes it inward with `require_base_tables=True`; the inner runners and MySQL never see the model's text. The function denylist and relation check apply whatever `[[rls]]` and `database.read_only` say.
 
-Every refusal is a `RuleSetRefusal` (an `UnsafeSqlError`) whose text is `Refused by the rule set: ` plus the kind of refusal; the full reason is logged at WARNING. `RefusalRedactingRunner` replaces the text of every other guard's `UnsafeSqlError` or `RlsError` with its kind, keeping the exception type, so no table, column or function name reaches the model or client. Database errors pass through unchanged.
+Every refusal is a `RuleSetRefusal` (an `UnsafeSqlError`) whose text is `Refused by the rule set: ` plus the kind of refusal; the full reason is logged at WARNING. `RefusalRedactingRunner` replaces the text of every other guard's `UnsafeSqlError` or `RlsError` with its kind, keeping the exception type, so no table, column or function name reaches the model or client. A refusal a guard raised from an unexpected internal exception — recognized by `_logged_by_guard`, which looks for a `__cause__` that is neither an `UnsafeSqlError` nor an `RlsError` — is redacted to `REDACTED_GUARD_ERROR` (`KIND_UNCHECKED`) rather than to a statement-refusal kind, because the statement itself may be fine, and it is not logged twice: the guard already logged it with its traceback. Database errors pass through unchanged.
