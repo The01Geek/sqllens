@@ -413,6 +413,19 @@ def test_catalog_check_names_each_mismatch(
     assert expected in str(info.value)
 
 
+def test_catalog_check_covers_a_table_listed_again_by_a_later_set(tmp_path: Path) -> None:
+    """Each set's columns are checked, not only the first set listing a table."""
+    from sqllens.rule_sets import RuleSetCatalogError, check_catalog
+
+    document = example_document()
+    document["rule_sets"][1]["tables"][0]["columns"] = ["id", "nosuch"]
+    loaded = _load(tmp_path, document)
+    with pytest.raises(RuleSetCatalogError) as info:
+        check_catalog(_Connection(_Cursor(_GOOD_TABLES, _GOOD_COLUMNS)), loaded)
+    assert "column orders.nosuch does not exist" in str(info.value)
+    assert str(info.value).count("orders") == 1
+
+
 def test_preflight_runs_the_catalog_check_and_confirms(tmp_path: Path, monkeypatch) -> None:
     pymysql = pytest.importorskip("pymysql")
     from sqllens.preflight import PreflightError, probe_database

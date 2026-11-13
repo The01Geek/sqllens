@@ -36,7 +36,6 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import pandas as pd
-import sqlglot.errors
 from sqlglot import expressions as exp
 from sqlglot.errors import ErrorLevel
 from sqlglot.optimizer.scope import traverse_scope
@@ -430,14 +429,12 @@ def _logged_by_guard(exc: Exception) -> bool:
     """Whether a guard already logged this refusal at WARNING, with its cause.
 
     Each guard's fail-closed path for an unexpected exception logs it with a
-    traceback and raises its refusal from that exception; every other refusal
-    either has no cause or is raised from another guard refusal or a parse error.
+    traceback and raises its refusal from that exception. Every other refusal
+    reaching the redactor has no cause or is a guard runner's re-raise of an
+    inner refusal (an ``UnsafeSqlError`` or ``RlsError``), so it is logged here.
     """
     cause = exc.__cause__
-    return cause is not None and not isinstance(
-        cause,
-        UnsafeSqlError | RlsError | sqlglot.errors.ParseError | sqlglot.errors.TokenError,
-    )
+    return cause is not None and not isinstance(cause, UnsafeSqlError | RlsError)
 
 
 class RefusalRedactingRunner(SqlRunner):

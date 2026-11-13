@@ -583,8 +583,8 @@ def verify_memory(
     except Exception as e:
         err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
         raise typer.Exit(code=2) from e
-    # Checked before every other argument and config check, so a configured
-    # rule-set file always gets this message rather than an unrelated one.
+    # Checked before the --format and API-key checks, so a rule-set file that
+    # loads gets this message rather than an unrelated one.
     if cfg.rule_sets.loaded is not None:
         from sqllens.rule_sets import VERIFY_MEMORY_UNSUPPORTED_MESSAGE
 

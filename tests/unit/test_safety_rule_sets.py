@@ -591,6 +591,17 @@ async def test_guard_logged_unexpected_error_writes_one_warning(monkeypatch, cap
     assert "customers.email" in str(warnings[0].exc_info[1])
 
 
+@pytest.mark.asyncio
+async def test_relation_check_parse_failure_is_not_logged_twice(caplog) -> None:
+    """The relation check logs its own ParseError fail-closed path; the redactor adds nothing."""
+    error = RlsError("row-level security could not verify relation types; query blocked")
+    error.__cause__ = sqlglot.errors.ParseError("bad")
+    with caplog.at_level(logging.WARNING, logger="sqllens.safety.rule_sets"):
+        with pytest.raises(RlsError):
+            await _run(RefusalRedactingRunner(_Raises(error)), "SELECT 1")
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+
+
 @pytest.mark.parametrize(
     "sql",
     [

@@ -463,14 +463,18 @@ def check_catalog(connection: Any, loaded: LoadedRuleSets) -> None:
         cursor.close()
 
     problems: list[str] = []
-    checked: set[str] = set()
+    # A table may be listed by several sets with different columns, so each
+    # (table, column) pair is checked, and each table's own problem once.
+    checked_tables: set[str] = set()
+    checked_columns: set[tuple[str, str]] = set()
     for rule_set in loaded.file.rule_sets:
         for table in rule_set.tables:
-            if table.name in checked:
-                continue
-            checked.add(table.name)
+            first_listing = table.name not in checked_tables
+            checked_tables.add(table.name)
             kind = kinds.get(table.name)
             if kind is None:
+                if not first_listing:
+                    continue
                 folded = [name for name in kinds if name.lower() == table.name.lower()]
                 if folded:
                     problems.append(
@@ -481,12 +485,16 @@ def check_catalog(connection: Any, loaded: LoadedRuleSets) -> None:
                     problems.append(f"table {table.name!r} does not exist")
                 continue
             if kind != "BASE TABLE":
-                problems.append(f"table {table.name!r} is a {kind.lower()}, not a base table")
+                if first_listing:
+                    problems.append(
+                        f"table {table.name!r} is a {kind.lower()}, not a base table"
+                    )
                 continue
             present = columns.get(table.name, set())
             for column in [*table.columns, *table.predicate_columns]:
-                if column in present:
+                if column in present or (table.name, column) in checked_columns:
                     continue
+                checked_columns.add((table.name, column))
                 folded = [name for name in present if name.lower() == column.lower()]
                 if folded:
                     problems.append(
