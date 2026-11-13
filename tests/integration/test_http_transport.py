@@ -12,9 +12,10 @@ for the auth and path-normalization edge cases.
 from __future__ import annotations
 
 import httpx
+import httpx2
 import pytest
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 from pydantic import SecretStr
 
 from sqllens.config import AuthConfig
@@ -34,15 +35,53 @@ async def test_query_metadata_limits_over_mcp_http(make_server, monkeypatch) -> 
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_query)
     handle = make_server(AuthConfig(mode="none"))
-    async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+    async with streamable_http_client(handle.mcp_url) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             for meta in ({"tenant": "alpha"}, {"tenant": "alpha", "padding": "x" * 20000}):
                 result = await session.call_tool(
                     "query_database", {"question": "synthetic metadata check"}, meta=meta
                 )
-                assert result.isError is False
+                assert result.is_error is False
     assert seen == [{"tenant": "alpha"}, {}]
+
+
+async def test_reserved_meta_keys_of_2026_session_are_not_forwarded(
+    make_server, monkeypatch
+) -> None:
+    from sqllens import server as server_module
+
+    seen = []
+    raw_keys = []
+    real_request_metadata = server_module._request_metadata
+
+    def spy(ctx):
+        raw_keys.append(set(ctx.request_context.meta or {}))
+        return real_request_metadata(ctx)
+
+    async def fake_query(cfg, question, **kwargs):
+        seen.append(kwargs["metadata"])
+        return "ok", [], None, None, None
+
+    monkeypatch.setattr(server_module, "_request_metadata", spy)
+    monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_query)
+    handle = make_server(AuthConfig(mode="none"))
+    async with streamable_http_client(handle.mcp_url) as (read, write):
+        async with ClientSession(read, write) as session:
+            discovered = await session.discover()
+            assert "2026-07-28" in discovered.supported_versions
+            result = await session.call_tool(
+                "query_database", {"question": "synthetic metadata check"},
+                meta={"tenant": "alpha"},
+            )
+            assert result.is_error is False
+    # The SDK stamped the reserved keys onto the request; none was forwarded.
+    assert {
+        "io.modelcontextprotocol/protocolVersion",
+        "io.modelcontextprotocol/clientInfo",
+        "io.modelcontextprotocol/clientCapabilities",
+    } <= raw_keys[0]
+    assert seen == [{"tenant": "alpha"}]
 
 
 async def test_insecure_posture_and_json_headers_on_real_http(make_server) -> None:
@@ -70,7 +109,7 @@ async def test_bearer_refusal_json_header_on_real_http(make_server) -> None:
 class TestNoAuth:
     async def test_tools_list_returns_core_tools(self, make_server) -> None:
         handle = make_server(AuthConfig(mode="none"))
-        async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+        async with streamable_http_client(handle.mcp_url) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.list_tools()
@@ -82,11 +121,11 @@ class TestNoAuth:
 
     async def test_list_data_sources_returns_chinook(self, make_server) -> None:
         handle = make_server(AuthConfig(mode="none"))
-        async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+        async with streamable_http_client(handle.mcp_url) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool("list_data_sources", {})
-                assert result.isError is False
+                assert result.is_error is False
                 # Tool returns a single text block — the configured DB summary.
                 body = "".join(
                     getattr(block, "text", "") for block in result.content
@@ -99,7 +138,11 @@ class TestNoAuth:
         # The MCP App widget must be reachable as a ui:// resource through the
         # full HTTP + auth-middleware stack, not just via build_server().
         handle = make_server(AuthConfig(mode="none"))
-        async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+        # The ~1.5 MB widget exceeds the 2.x Python client's 1 MiB default
+        # SSE event cap; a smaller cap here fails the read client-side.
+        async with streamable_http_client(
+            handle.mcp_url, max_sse_event_size=8 * 1024 * 1024
+        ) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 listed = await session.list_resources()
@@ -111,7 +154,7 @@ class TestNoAuth:
                 )
                 contents = result.contents
                 assert len(contents) == 1
-                assert contents[0].mimeType == "text/html;profile=mcp-app"
+                assert contents[0].mime_type == "text/html;profile=mcp-app"
                 assert "app-with-deps.js" in contents[0].text
 
 
@@ -124,10 +167,9 @@ class TestBearerAuth:
             AuthConfig(mode="bearer", bearer_token=SecretStr("good-token-0123456789-padding-xx"))
         )
         headers = {"Authorization": "Bearer good-token-0123456789-padding-xx"}
-        async with streamablehttp_client(handle.mcp_url, headers=headers) as (
-            read,
-            write,
-            _,
+        async with (
+            httpx2.AsyncClient(headers=headers) as http_client,
+            streamable_http_client(handle.mcp_url, http_client=http_client) as (read, write),
         ):
             async with ClientSession(read, write) as session:
                 await session.initialize()
@@ -446,13 +488,13 @@ class TestAgentFailure:
         monkeypatch.setattr(agent_module, "build_agent", _boom)
 
         handle = make_server(AuthConfig(mode="none"))
-        async with streamablehttp_client(handle.mcp_url) as (read, write, _):
+        async with streamable_http_client(handle.mcp_url) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(
                     "query_database", {"question": "how many tracks?"}
                 )
-        assert result.isError is True
+        assert result.is_error is True
         body = "".join(getattr(block, "text", "") for block in result.content)
         assert "internal error" in body.lower()
         # Not an LLM apology masquerading as a result.

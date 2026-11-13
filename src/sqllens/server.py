@@ -301,15 +301,20 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
         return {}
     # Keep metadata diagnostics content-free, including unexpected SDK/helper
     # faults: exception messages and tracebacks can contain metadata values.
+    if not isinstance(meta, dict):
+        logger.warning("invalid or oversized request metadata; returning empty metadata")
+        return {}
     try:
-        if not isinstance(meta, dict):
-            raise JsonBoundsError("request metadata shape")
         forwarded = {
             key: value
             for key, value in meta.items()
             if key not in _PROGRESS_TOKEN_KEYS
             and not (isinstance(key, str) and key.startswith(_RESERVED_META_PREFIX))
         }
+    except Exception:
+        logger.warning("failed to read request metadata; returning empty metadata")
+        return {}
+    try:
         if len(forwarded) > 64:
             raise JsonBoundsError("request metadata key limit")
         bounded, _ = copy_bounded_json(forwarded)

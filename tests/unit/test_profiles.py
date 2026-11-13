@@ -28,6 +28,7 @@ import json
 from pathlib import Path
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult
 from pydantic import ValidationError
 
@@ -318,7 +319,7 @@ async def test_get_unknown_profile_is_iserror(tmp_path: Path) -> None:
     mcp = build_server(cfg)
     result = await _fn(mcp, "get_profile")("ghost")
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
     body = _parse(result)
     assert body["error"] == "profile not found"
 
@@ -332,7 +333,7 @@ async def test_delete_unknown_profile_is_iserror(tmp_path: Path) -> None:
     mcp = build_server(cfg)
     result = await _fn(mcp, "delete_profile")("ghost")
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
 
 
 async def test_delete_default_is_iserror(tmp_path: Path) -> None:
@@ -344,7 +345,7 @@ async def test_delete_default_is_iserror(tmp_path: Path) -> None:
     mcp = build_server(cfg)
     result = await _fn(mcp, "delete_profile")(DEFAULT_PROFILE_NAME)
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
     body = _parse(result)
     assert "default" in body["error"]
 
@@ -361,7 +362,7 @@ async def test_upsert_out_of_bounds_is_iserror(tmp_path: Path) -> None:
         "bad", {"max_rows": 10_000_000}
     )
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
 
 
 async def test_upsert_unknown_field_is_iserror(tmp_path: Path) -> None:
@@ -373,7 +374,7 @@ async def test_upsert_unknown_field_is_iserror(tmp_path: Path) -> None:
     mcp = build_server(cfg)
     result = await _fn(mcp, "upsert_profile")("bad", {"maxrows": 100})
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
 
 
 async def test_write_tools_blocked_without_auth(tmp_path: Path) -> None:
@@ -388,7 +389,7 @@ async def test_write_tools_blocked_without_auth(tmp_path: Path) -> None:
         ("upsert_profile", ("x", {"max_rows": 100})),
         ("delete_profile", ("x",)),
     ):
-        with pytest.raises(RuntimeError, match="unauthenticated"):
+        with pytest.raises(ToolError, match="unauthenticated"):
             await _fn(mcp, tool_name)(*args)
 
 
@@ -515,7 +516,7 @@ async def test_list_profiles_iserror_when_store_is_corrupt(tmp_path: Path) -> No
     mcp = await _build_server_with_corrupt_store(tmp_path)
     result = await _fn(mcp, "list_profiles")()
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
     body = _parse(result)
     assert "warning" in body
     assert "Warning" in body["warning"]
@@ -526,7 +527,7 @@ async def test_get_profile_surfaces_corrupt_store(tmp_path: Path) -> None:
     mcp = await _build_server_with_corrupt_store(tmp_path)
     result = await _fn(mcp, "get_profile")("analysts")
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
     body = _parse(result)
     assert body["error"] == "profile store is in a degraded state"
     assert "Warning" in body["warning"]
@@ -537,7 +538,7 @@ async def test_delete_profile_surfaces_corrupt_store(tmp_path: Path) -> None:
     mcp = await _build_server_with_corrupt_store(tmp_path)
     result = await _fn(mcp, "delete_profile")("analysts")
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
     body = _parse(result)
     assert body["error"] == "profile store is in a degraded state"
 

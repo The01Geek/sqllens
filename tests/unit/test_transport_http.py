@@ -99,14 +99,14 @@ def test_build_asgi_app_bare_returns_app_without_lifespan(tmp_path: Path) -> Non
     bypass ``_AuthMiddleware``, so orchestrator probes from an allowed host
     need no ``Authorization`` header.
     """
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
     bare, mcp = _build_asgi_app_bare(_cfg(tmp_path), _Readiness())
     assert isinstance(bare, TrustedHostMiddleware)
     # Starlette's TrustedHostMiddleware stores the wrapped app as ``.app``.
     assert isinstance(bare.app, _PathNormalizer)
     assert isinstance(bare.app.inner, _AuthMiddleware)
-    assert isinstance(mcp, FastMCP)
+    assert isinstance(mcp, MCPServer)
 
 
 def test_build_asgi_app_raises_runtimeerror_when_session_manager_missing(
@@ -115,20 +115,20 @@ def test_build_asgi_app_raises_runtimeerror_when_session_manager_missing(
     """The AttributeError guard fires when the SDK removes ``session_manager``.
 
     Simulates a hypothetical future mcp SDK upgrade by patching the
-    ``session_manager`` property on ``FastMCP`` itself to raise
+    ``session_manager`` property on ``MCPServer`` itself to raise
     ``AttributeError``. Without the guard, this would surface as an opaque
     ``AttributeError`` at the property-access line with no hint that an mcp
     SDK upgrade is the cause; the guard converts it to a ``RuntimeError``
     whose message names the file to update.
     """
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
-    def raise_attribute_error(self: FastMCP) -> None:
+    def raise_attribute_error(self: MCPServer) -> None:
         raise AttributeError("session_manager")
 
-    monkeypatch.setattr(FastMCP, "session_manager", property(raise_attribute_error))
+    monkeypatch.setattr(MCPServer, "session_manager", property(raise_attribute_error))
 
-    with pytest.raises(RuntimeError, match="FastMCP no longer exposes"):
+    with pytest.raises(RuntimeError, match="MCPServer no longer exposes"):
         build_asgi_app(_cfg(tmp_path))
 
 

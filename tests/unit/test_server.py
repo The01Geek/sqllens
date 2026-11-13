@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult
 from pydantic import SecretStr
 
@@ -34,17 +35,17 @@ _CHART_WIDGET_URI = "ui://sqllens/chart-results.html"
 
 
 def _query_database_fn(mcp):
-    """The raw async closure FastMCP registered, before result conversion.
+    """The (error-wrapped) async closure MCPServer registered, before result conversion.
 
-    Calling it directly is the only way to assert the str-vs-CallToolResult
-    branch and the exact ``_meta`` key — FastMCP.call_tool converts the return
-    into content blocks and drops the structured wrapper.
+    Calling it directly asserts the str-vs-CallToolResult branch and the exact
+    ``_meta`` key without a client round trip. A raised failure arrives as the
+    SDK's ``ToolError`` from server.py's ``_tool_errors`` wrapper.
     """
     return mcp._tool_manager.get_tool("query_database").fn
 
 
 class _StubCtx:
-    """Minimal FastMCP ``Context`` stand-in with no per-request metadata.
+    """Minimal MCPServer ``Context`` stand-in with no per-request metadata.
 
     ``_request_metadata`` reads ``ctx.request_context.meta``; a ``None`` meta
     is the no-extras case and yields ``{}`` (the no-`_meta` behaviour).
@@ -74,7 +75,7 @@ async def test_widget_resource_registered(tmp_path: Path) -> None:
     resources = await mcp.list_resources()
     matching = [r for r in resources if str(r.uri) == _WIDGET_URI]
     assert len(matching) == 1
-    assert matching[0].mimeType == "text/html;profile=mcp-app"
+    assert matching[0].mime_type == "text/html;profile=mcp-app"
 
 
 async def test_query_database_advertises_ui_meta(tmp_path: Path) -> None:
@@ -413,7 +414,7 @@ async def test_query_database_meta_carries_agent_trace_when_present(
 
     result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
     assert isinstance(result, CallToolResult)
-    assert result.isError in (False, None)
+    assert result.is_error in (False, None)
     assert result.meta == {
         "sqllens/agent_trace": _AGENT_TRACE,
         "sqllens/conversation": {"conversation_id": "c-1"},
@@ -454,7 +455,7 @@ async def test_query_database_attaches_trace_on_error_result(
 
     result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
     assert result.meta == {
         "sqllens/agent_trace": error_trace,
         "sqllens/conversation": {"conversation_id": "c-1"},
@@ -468,7 +469,7 @@ async def test_query_database_reraises_error_without_trace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # show_details off: AgentRunError carries no trace, so the server re-raises
-    # and lets FastMCP format the failure exactly as before — no isError result
+    # and lets the SDK format the failure exactly as before — no isError result
     # built here, no _meta, behavior byte-for-byte unchanged.
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
@@ -480,8 +481,9 @@ async def test_query_database_reraises_error_without_trace(
 
     monkeypatch.setattr(server_module, "query_database_impl_with_widgets", fake_impl)
 
-    with pytest.raises(AgentRunError, match="SQL execution error: boom"):
+    with pytest.raises(ToolError, match="SQL execution error: boom") as excinfo:
         await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
+    assert isinstance(excinfo.value.__cause__, AgentRunError)
 
 
 async def test_query_database_meta_carries_configured_model_info(
@@ -587,7 +589,7 @@ async def test_query_database_error_result_carries_no_model_info(
 
     result = await _query_database_fn(mcp)("rows?", _StubCtx(), conversation_id="c-1")
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
     assert "sqllens/model_info" not in result.meta
 
 
@@ -643,14 +645,14 @@ async def test_clarifying_question_round_trip_through_query_database(
 
     first = await query_database(original, _StubCtx())
     assert isinstance(first, CallToolResult)
-    assert first.isError is False
+    assert first.is_error is False
     assert first.content[0].text.startswith(clarifying)
     conversation_id = first.meta["sqllens/conversation"]["conversation_id"]
     assert conversation_id
 
     second = await query_database(reply, _StubCtx(), conversation_id=conversation_id)
     assert isinstance(second, CallToolResult)
-    assert second.isError is False
+    assert second.is_error is False
 
     assert len(llm.requests) == 2
     contents = [m.content for m in llm.requests[1].messages]

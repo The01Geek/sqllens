@@ -6,9 +6,10 @@
 These tools (list/get/delete/clear/add/export/stats) curate the training set.
 The destructive subset additionally refuses to run on an unauthenticated
 endpoint. The tool closures are invoked directly via the tool manager's ``.fn``
-(the established pattern in test_server.py): FastMCP.call_tool collapses the
-return into content blocks, but here we assert the structured JSON / isError
-branch the closure produces.
+(the established pattern in test_server.py): MCPServer.call_tool converts the
+return to a CallToolResult, but here we assert the structured JSON / isError
+branch the closure produces. A raised failure arrives as the SDK's ``ToolError``
+(server.py's ``_tool_errors`` wrapper) carrying the tool's message.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import io
 import json
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult
 
 from sqllens.agent.core.tool import ToolContext
@@ -53,7 +55,7 @@ def _cfg(tmp_path, *, allow_admin_tools: bool, auth: AuthConfig | None = None) -
 
 
 def _fn(mcp, name: str):
-    """The raw async closure FastMCP registered for ``name``."""
+    """The (error-wrapped) async closure MCPServer registered for ``name``."""
     return mcp._tool_manager.get_tool(name).fn
 
 
@@ -103,7 +105,7 @@ async def test_memory_admin_widget_listed_when_admin_tools_on(tmp_path) -> None:
     resources = await mcp.list_resources()
     matching = [r for r in resources if str(r.uri) == _MEMORY_WIDGET_URI]
     assert len(matching) == 1
-    assert matching[0].mimeType == "text/html;profile=mcp-app"
+    assert matching[0].mime_type == "text/html;profile=mcp-app"
 
 
 async def test_memory_admin_widget_serves_self_contained_html(tmp_path) -> None:
@@ -178,7 +180,7 @@ async def test_list_filters_by_type(tmp_path, monkeypatch) -> None:
 async def test_list_rejects_bad_memory_type(tmp_path, monkeypatch) -> None:
     patch_fake_embeddings(monkeypatch)
     mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))
-    with pytest.raises(RuntimeError) as excinfo:
+    with pytest.raises(ToolError) as excinfo:
         await _fn(mcp, "list_memories")(data_source_id=_DSID, memory_type="bogus")
     assert "Unknown memory_type" in str(excinfo.value)
 
@@ -196,7 +198,7 @@ async def test_add_partial_failure_is_error(tmp_path, monkeypatch) -> None:
         ],
     )
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
     payload = _parse(result)
     assert payload["saved_count"] == 1
     assert len(payload["errors"]) == 1
@@ -230,7 +232,7 @@ async def test_add_non_dict_item_is_clean_row_error(tmp_path, monkeypatch) -> No
         data_source_id=_DSID, sql_pairs=["not a dict"]
     )
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
     payload = _parse(result)
     assert payload["saved_count"] == 0
     assert len(payload["errors"]) == 1
@@ -255,7 +257,7 @@ async def test_clear_all_reports_total_and_empties_store(tmp_path, monkeypatch) 
 async def test_export_rejects_unknown_format(tmp_path, monkeypatch) -> None:
     patch_fake_embeddings(monkeypatch)
     mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))
-    with pytest.raises(RuntimeError) as excinfo:
+    with pytest.raises(ToolError) as excinfo:
         await _fn(mcp, "export_memories")(data_source_id=_DSID, format="xml")
     assert "Unknown export format" in str(excinfo.value)
 
@@ -271,7 +273,7 @@ async def test_export_corrupt_store_fails_loudly(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr("sqllens.memory.store.MemoryStore.iter_all", boom)
     mcp = build_server(_cfg(tmp_path, allow_admin_tools=True))
-    with pytest.raises(RuntimeError) as excinfo:
+    with pytest.raises(ToolError) as excinfo:
         await _fn(mcp, "export_memories")(data_source_id=_DSID, format="json")
     assert "corrupt" in str(excinfo.value).lower()
 
@@ -322,7 +324,7 @@ async def test_get_memory_and_not_found(tmp_path, monkeypatch) -> None:
 
     missing = await _fn(mcp, "get_memory")(data_source_id=_DSID, memory_id="nope")
     assert isinstance(missing, CallToolResult)
-    assert missing.isError is True
+    assert missing.is_error is True
     assert _parse(missing)["error"] == "memory not found"
 
 
@@ -342,7 +344,7 @@ async def test_delete_memory(tmp_path, monkeypatch) -> None:
 
     again = await _fn(mcp, "delete_memory")(data_source_id=_DSID, memory_id=memory_id)
     assert isinstance(again, CallToolResult)
-    assert again.isError is True
+    assert again.is_error is True
     assert _parse(again)["deleted"] is False
 
 
@@ -418,7 +420,7 @@ async def test_export_csv_dropping_schema_docs_is_lossy(tmp_path, monkeypatch) -
     )
     result = await _fn(mcp, "export_memories")(data_source_id=_DSID, format="csv")
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
     payload = _parse(result)
     assert payload["lossy"] is True
     assert any("schema doc" in w for w in payload["warnings"])
@@ -533,7 +535,7 @@ async def test_destructive_tools_blocked_without_auth(tmp_path, monkeypatch) -> 
         ("delete_memory", {"memory_id": "x"}),
         ("clear_memories", {}),
     ):
-        with pytest.raises(RuntimeError) as excinfo:
+        with pytest.raises(ToolError) as excinfo:
             await _fn(mcp, name)(data_source_id=_DSID, **kwargs)
         assert "unauthenticated endpoint" in str(excinfo.value)
 
