@@ -281,7 +281,7 @@ class TestPathNormalization:
     async def test_trailing_slash_mcp_path_works(self, make_server) -> None:
         """Companion to ``test_bare_mcp_path_works``: ``POST /mcp/`` (the
         canonical trailing-slash form most IDE clients use) is rewritten to
-        the FastMCP route and reaches the handler.
+        the MCPServer route and reaches the handler.
         """
         handle = make_server(AuthConfig(mode="none"))
         url = handle.base_url + "/mcp/"
@@ -305,11 +305,11 @@ class TestPathNormalization:
 
     async def test_options_preflight_on_mcp_path(self, make_server) -> None:
         """An OPTIONS preflight against the MCP path traverses the full stack
-        (path-normalizer → host check → auth=none → FastMCP) without a 5xx.
+        (path-normalizer → host check → auth=none → MCPServer) without a 5xx.
 
         Pins current behavior so a regression in the middleware chain (e.g. a
         short-circuit swallowing OPTIONS, or auth 401'ing a preflight) is
-        caught. The exact status is whatever FastMCP's Starlette route
+        caught. The exact status is whatever MCPServer's Starlette route
         negotiates for OPTIONS; we assert it is a handled client response,
         never a server error.
         """
@@ -352,10 +352,10 @@ class TestTrustedHost:
     async def test_non_loopback_host_header_rejected(self, make_server) -> None:
         """AGENTS.md gotcha: a non-loopback ``Host`` is rejected. Post-S-8
         the rejection is deterministically ``TrustedHostMiddleware``'s 400 —
-        it now fronts FastMCP, so FastMCP's own 421 ``Misdirected Request``
+        it now fronts MCPServer, so the SDK's own 421 ``Misdirected Request``
         is no longer reachable for this input. Asserting the exact 400 makes
         this test catch an S-8 regression (a reverted TrustedHost would let
-        FastMCP's 421 resurface and a loose ``in (400, 421)`` would miss it).
+        the SDK's 421 resurface and a loose ``in (400, 421)`` would miss it).
         """
         handle = make_server(AuthConfig(mode="none"))
         async with httpx.AsyncClient() as client:
@@ -368,6 +368,26 @@ class TestTrustedHost:
                 },
             )
         assert r.status_code == 400
+
+    async def test_wildcard_bind_non_loopback_host_gets_sdk_421(self, make_server) -> None:
+        """On a 0.0.0.0 bind our allowlist accepts any ``Host`` and auth passes,
+        so the request reaches MCPServer, whose ``streamable_http_app()``
+        loopback default answers a non-loopback ``Host`` with 421.
+        """
+        handle = make_server(
+            AuthConfig(mode="none", insecure=True), configured_host="0.0.0.0"
+        )
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                handle.mcp_url,
+                json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                headers={
+                    "Host": "host.docker.internal:9999",
+                    "Accept": "application/json, text/event-stream",
+                    "Content-Type": "application/json",
+                },
+            )
+        assert r.status_code == 421
 
     async def test_probe_with_allowed_host_still_200(self, make_server) -> None:
         """Regression for the S-8 ordering gotcha: an allowed-Host probe must
