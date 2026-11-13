@@ -11,14 +11,13 @@ Guidance for AI coding assistants (Claude Code, Codex, and others) working in th
 
 One database per running instance. Read-only by default, enforced by a `sqlglot` parser guard. Anthropic-only LLM in v1; the LLM interface is pluggable for future providers.
 
-**MySQL is the only supported database engine.** All known deployments run MySQL. The code still carries PostgreSQL and SQLite query-engine paths inherited from the code SQL Lens was extracted from (`agent/integrations/postgres/` and `agent/integrations/sqlite/`, per-dialect branches in `safety/`, the SQLite branch in `preflight.py`, the bundled SQLite demo, the SQLite-backed unit tests and the Postgres connector tests). That code is legacy awaiting removal, not a supported target; see the engine rule below.
+**MySQL is the only supported database engine.** All known deployments run MySQL. Anything in the repository that still names or serves PostgreSQL or SQLite as a query engine is legacy, inherited from the code SQL Lens was extracted from, and awaits removal (#382 for PostgreSQL, #383 for SQLite). That covers code (`agent/integrations/postgres/`, `agent/integrations/sqlite/`, per-dialect branches in `safety/`, `preflight.py`), tests, CI, and user-facing surfaces: the README's database-URL table and SQLite quick start, `docs/external/`, the MCPB DSN examples and the `sqllens init` default URL (`sqlite:///./demo.db`). Those surfaces are known to be out of date, not a statement of support; update them in the removal changes, not piecemeal. See the engine rule below.
 
 ### Database engine rule: MySQL only
 
 - **Supported scope: MySQL 8.0+ (including Aurora MySQL 3), reached through a `mysql://` or `mysql+pymysql://` URL.** MariaDB and MySQL 5.7 are not supported; do not add compatibility branches for them. This is policy, not enforcement: the code does not yet check the server version or reject other URL schemes.
 - **Do not design for, test against, or extend PostgreSQL or SQLite query-engine paths.** New guards, prompts, fixes and tests target MySQL only. A test that only parses SQL (no live database) uses the MySQL dialect (`"mysql"` in sqlglot, a `mysql+pymysql://` URL where a URL is needed).
-- **Leave the legacy engine code working, but add nothing to it.** The existing Postgres and SQLite code, the bundled SQLite demo and the SQLite-backed unit tests stay until they are removed in a later change; do not break them, and do not add new branches, cases, prompts or tests for them.
-- **When a fix touches code with per-engine branches, change the MySQL branch only.** Do not port the fix to the Postgres or SQLite branch, and do not add an engine-neutral abstraction just to cover them.
+- **Leave the legacy engine code working, but add nothing to it.** The existing Postgres and SQLite code, the bundled SQLite demo and the SQLite-backed unit tests stay until they are removed in a later change; keep their existing tests passing (CI's connector job still runs the Postgres cases), and do not add new branches, cases, prompts or tests for them.
 - **ChromaDB is not affected.** `chroma.sqlite3` is ChromaDB's own storage file for memory records, not a query engine. ChromaDB, its `chroma.sqlite3`, and the preflight writability check on it in `src/sqllens/preflight.py` stay.
 - Specs, plans and issue designs follow the same rule: do not scope work, acceptance criteria or test matrices across engines.
 
@@ -216,7 +215,7 @@ PyPI versions are immutable after publish — you can yank but not re-upload the
 
 ## Debugging checklist
 
-1. Reproduce against the bundled SQLite demo first. If it fails there, the issue is local; if not, the user's database/config is involved. The demo is legacy and only isolates engine-independent behavior (agent loop, memory, transport); reproduce anything engine-specific against MySQL, and land the fix in the MySQL path, never in the SQLite one.
+1. Reproduce against MySQL. Only when the bug clearly does not depend on the engine (agent loop, memory, transport) may you reproduce against the bundled SQLite demo first, which is legacy: if it fails there, the issue is local; if not, the user's database/config is involved. Land any fix in the MySQL path, never in the SQLite one.
 2. If the agent runs out of tool iterations exploring schema (especially against an untrained DB), the configured `max_tool_iterations` may be too low — or the agent has no memory yet. ChromaDB needs time to build, and the first query downloads ~80 MB of embedding model.
 3. If the answer is wrong, look at memory hits — `SQLLENS_MEMORY__SIMILARITY_THRESHOLD` may be too high or too low.
 4. If a tool errors out in an unfamiliar way, **diff our agent file against the upstream source** to see if we missed a code path during the lift.
