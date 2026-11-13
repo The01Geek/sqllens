@@ -1,0 +1,24 @@
+{
+  "root_completeness": "established",
+  "verdict": "REJECT",
+  "phase3_findings": [
+    {"finding_id": "F-1", "agent": "prflow:requesting-code-review", "severity": "important", "file": "README.md", "line_range": [58, 61], "kind": "documented_falsehood", "description": "README.md's Database URLs section says any URL scheme other than the listed mysql+pymysql:// and mysql:// fails at config load, but the validator accepts every mysql+<driver>:// URL (for example mysql+mysqldb://, mysql+mysqlconnector://).", "corroboration": 1},
+    {"finding_id": "F-2", "agent": "prflow:requesting-code-review", "severity": "important", "file": "docs/external/getting-started.md", "line_range": [98, 101], "kind": "documented_falsehood", "description": "docs/external/getting-started.md says any URL scheme other than the listed mysql+pymysql:// and mysql:// fails at config load, but the validator accepts every mysql+<driver>:// URL.", "corroboration": 1},
+    {"finding_id": "F-3", "agent": "prflow:type-design-analyzer", "severity": "suggestion", "file": "src/sqllens/config.py", "line_range": [111, 116], "kind": "type_design", "description": "The supported-scheme rule is stated in four places that disagree; factory, preflight and sqlglot_dialect_for_url still accept a bare mysql prefix such as mysqlx:// when config validation is skipped.", "corroboration": 1},
+    {"finding_id": "F-4", "agent": "prflow:type-design-analyzer", "severity": "suggestion", "file": "src/sqllens/config.py", "line_range": [118, 125], "kind": "type_design", "description": "DatabaseConfig.dialect returns the scheme's raw case and any sqlite-prefixed text, leaving normalization to callers.", "corroboration": 1},
+    {"finding_id": "F-5", "agent": "prflow:silent-failure-hunter", "severity": "suggestion", "file": "src/sqllens/installers/claude_desktop.py", "line_range": [380, 390], "kind": "logic_error", "description": "claude-desktop install --dry-run returns a clean plan for a database URL the new scheme check refuses, because the dry run returns before validate_toml.", "corroboration": 1},
+    {"finding_id": "F-6", "agent": "prflow:pr-test-analyzer", "severity": "suggestion", "file": "tests/unit/test_sql_runner_cleanup.py", "line_range": [119, 135], "kind": "test_gap", "description": "The ported cursor-allocation test fails at the read-only setup cursor, so a query-cursor allocation failure in MySQLRunner is never tested.", "corroboration": 1},
+    {"finding_id": "F-7", "agent": "prflow:pr-test-analyzer", "severity": "suggestion", "file": "tests/unit/test_safety.py", "line_range": [1175, 1185], "kind": "test_gap", "description": "The new mysql row in test_call_after_nested_comment_markers_is_checked is refused by the nested-comment check before any function lookup, duplicating existing rows.", "corroboration": 1},
+    {"finding_id": "F-8", "agent": "prflow:comment-analyzer", "severity": "suggestion", "file": "docs/internal/agent/factory.md", "line_range": [170, 170], "kind": "documented_falsehood", "description": "The MySQL row says the URL requires a database name, but build_sql_runner checks only hostname and username.", "corroboration": 1}
+  ],
+  "phase3_dispatched": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "expected_reviewers": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "plan_eligible": ["prflow:code-reviewer", "prflow:silent-failure-hunter", "prflow:comment-analyzer", "prflow:requesting-code-review", "prflow:type-design-analyzer", "prflow:pr-test-analyzer"],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {"small_diff": false, "config_only": false, "has_new_types": true, "test_relevant": true, "detect_all_audit": false, "checklist_skipped": null, "file_count": 67, "changed_lines": 2677},
+  "cap_drops": {"count": 70, "by_category": {"api_contract": 30, "data_format_assumption": 16, "test_mock_alignment": 21, "dependency_interaction": 3}},
+  "phase4_demoted": [],
+  "reject_drivers": ["F-1", "F-2"],
+  "criterion_exempt": []
+}

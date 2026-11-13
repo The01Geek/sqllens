@@ -1,0 +1,101 @@
+{
+  "root_completeness": "established",
+  "verdict": "REJECT",
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "corroboration": 1,
+      "defect_signature": {"file": "src/sqllens/config.py", "line_range": [109, 116], "kind": "type_design"},
+      "description": "The DatabaseConfig.url validator accepts only mysql, mysql+<driver> or sqlite schemes, but build_sql_runner (factory.py:250), probe_database (preflight.py:115) and sqlglot_dialect_for_url (readonly.py:187) still accept any scheme starting with mysql, so an unvalidated Config or a direct call with mysqlx:// reaches MySQLRunner or pymysql instead of the unsupported-scheme refusal."
+    },
+    {
+      "finding_id": "F-2",
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "suggestion",
+      "corroboration": 1,
+      "defect_signature": {"file": "src/sqllens/config.py", "line_range": [111, 116], "kind": "other"},
+      "description": "Same scheme mismatch as an error-handling risk: a programmatic caller that skips config validation with mysqlx:// fails later with a driver error rather than the structured unsupported-scheme error; no CLI path reaches it."
+    },
+    {
+      "finding_id": "F-3",
+      "agent": "prflow:requesting-code-review",
+      "severity": "important",
+      "corroboration": 1,
+      "defect_signature": {"file": "tests/unit/test_safety.py", "line_range": [222, 238], "kind": "test_gap"},
+      "description": "The four _BYPASS_CORPUS entries that put a MERGE inside a CTE (base lines 216-231, dialect postgres) were deleted, not moved to mysql; only the root-level MERGE at line 55 remains, which the root-type check refuses first, so the exp.Merge entry in the nested-write walk (readonly.py:377) has no test."
+    },
+    {
+      "finding_id": "F-4",
+      "agent": "prflow:requesting-code-review",
+      "severity": "suggestion",
+      "corroboration": 1,
+      "defect_signature": {"file": "tests/unit/test_safety.py", "line_range": [1175, 1185], "kind": "test_gap"},
+      "description": "In test_call_after_nested_comment_markers_is_checked the row moved to ('mysql', 'sleep(0)', 'Nested MySQL comments') is refused by the nested-comment check before any function is examined, so it does not test what the test name claims."
+    },
+    {
+      "finding_id": "F-5",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "corroboration": 1,
+      "defect_signature": {"file": "tests/unit/test_safety_whole_row.py", "line_range": [176, 176], "kind": "documented_falsehood"},
+      "description": "The added comment 'sqlite_ is a catalog prefix only on sqlite.' is too broad: with no dialect or an unknown dialect every prefix counts, as the comment at line 162 says. Capped at Suggestion by the behavior-inert prose cap."
+    },
+    {
+      "finding_id": "F-6",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "corroboration": 1,
+      "defect_signature": {"file": "tests/unit/test_sql_runner_cleanup.py", "line_range": [6, 30], "kind": "comment_drift"},
+      "description": "Untouched docstrings still name MariaDB's max_statement_time (line 30) and list 'aborted transaction' (lines 6-7), a PostgreSQL cause the diff removed from cleanup-error-handling.md. Capped at Suggestion by the behavior-inert prose cap."
+    }
+  ],
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "plan_eligible": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": true,
+    "test_relevant": true,
+    "detect_all_audit": false,
+    "checklist_skipped": null,
+    "file_count": 67
+  },
+  "cap_drops": {
+    "count": 75,
+    "by_category": {
+      "api_contract": 26,
+      "data_format_assumption": 23,
+      "test_mock_alignment": 16,
+      "dependency_interaction": 10
+    }
+  },
+  "phase4_demoted": [],
+  "reject_drivers": ["F-3"],
+  "criterion_exempt": []
+}
