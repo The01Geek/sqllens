@@ -387,6 +387,22 @@ REDACTED_RELATION = "refusing to execute query: the query's relations could not 
 REDACTED_RLS = "refusing to execute query: row-level security could not be applied"
 
 
+# Text of the read-only guard's parse refusals (``readonly._parse_statements``
+# and ``_mysql_parse_sql``); any other UnsafeSqlError is a statement-type refusal.
+_PARSE_REFUSAL_MARKERS = (
+    "could not parse SQL",
+    "empty SQL",
+    "empty parse tree",
+    "could not resolve SQL dialect",
+    "MySQL backslash-escaped quotes",
+    "MySQL executable comments",
+    "Unterminated MySQL comment",
+    "Nested MySQL comments",
+    "Ambiguous MySQL double-dash",
+    "Ambiguous line-comment",
+)
+
+
 def redacted_refusal_text(exc: Exception) -> str:
     """The client-facing text for a guard refusal: its kind, naming nothing in the database."""
     if isinstance(exc, RuleSetRefusal):
@@ -404,7 +420,7 @@ def redacted_refusal_text(exc: Exception) -> str:
         return REDACTED_RLS
     if "side-effecting / DoS / RCE" in message:
         return REDACTED_FUNCTION
-    if "could not parse SQL" in message or "empty" in message:
+    if any(marker in message for marker in _PARSE_REFUSAL_MARKERS):
         return REDACTED_PARSE
     return REDACTED_READ_ONLY
 

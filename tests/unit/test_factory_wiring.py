@@ -651,3 +651,118 @@ async def test_build_agent_passes_standing_instructions_to_prompt(tmp_path: Path
 
     unconfigured = build_agent(build_test_config(persist_dir=tmp_path / "b"))
     assert "DEPLOYMENT INSTRUCTIONS" not in await _prompt_from_agent_tools(unconfigured)
+
+
+# --- #374: per-role rule sets ---------------------------------------------------
+
+
+def _rule_set_cfg(tmp_path: Path, **kwargs: object) -> Config:
+    pytest.importorskip("pymysql")
+    from ._rule_set_fixtures import rule_set_config
+
+    return rule_set_config(tmp_path, **kwargs)  # type: ignore[arg-type]
+
+
+def test_rule_sets_drop_both_save_tools_even_when_enabled(tmp_path: Path) -> None:
+    cfg = _rule_set_cfg(
+        tmp_path,
+        memory=MemoryConfig(
+            persist_dir=tmp_path / "chroma", save_queries=True, save_text_memories=True
+        ),
+    )
+    agent = build_agent(cfg)
+    assert "save_question_tool_args" not in agent.tool_registry._tools
+    assert "save_text_memory" not in agent.tool_registry._tools
+    assert "search_saved_correct_tool_uses" in agent.tool_registry._tools
+
+
+def test_runner_chain_with_rule_sets(tmp_path: Path) -> None:
+    from sqllens.agent.factory import RULE_SET_REMOVED_SQL_MODES
+    from sqllens.agent.integrations.mysql import MySQLRunner
+    from sqllens.safety import ReadOnlyGuardRunner, ResultMaskingRunner, RowCapRunner
+    from sqllens.safety.rule_sets import RefusalRedactingRunner, RuleSetGuardRunner
+    from sqllens.safety.whole_row import WholeRowSelectGuardRunner
+
+    runner = _unwrap(build_agent(_rule_set_cfg(tmp_path)).tool_registry._tools["run_sql"])
+    chain = []
+    node = runner.sql_runner  # type: ignore[attr-defined]
+    while node is not None:
+        chain.append(type(node))
+        node = getattr(node, "_inner", None)
+    assert chain == [
+        ResultMaskingRunner,
+        RefusalRedactingRunner,
+        WholeRowSelectGuardRunner,
+        RuleSetGuardRunner,
+        ReadOnlyGuardRunner,
+        RowCapRunner,
+        MySQLRunner,
+    ]
+    engine = runner.sql_runner
+    while not isinstance(engine, MySQLRunner):
+        engine = engine._inner  # type: ignore[attr-defined]
+    assert engine._remove_sql_modes == RULE_SET_REMOVED_SQL_MODES == frozenset(
+        {"HIGH_NOT_PRECEDENCE", "NO_BACKSLASH_ESCAPES"}
+    )
+
+
+def test_runner_chain_without_rule_sets_has_no_rule_set_runners(tmp_path: Path) -> None:
+    pytest.importorskip("pymysql")
+    from sqllens.agent.integrations.mysql import MySQLRunner
+    from sqllens.safety.rule_sets import RefusalRedactingRunner, RuleSetGuardRunner
+
+    cfg = Config(
+        database=DatabaseConfig(url="mysql+pymysql://u:p@db.internal:3306/shop"),
+        llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
+        memory=MemoryConfig(persist_dir=tmp_path / "chroma"),
+        auth=AuthConfig(mode="none"),
+        agent=AgentRuntimeConfig(),
+    )
+    node = _unwrap(build_agent(cfg).tool_registry._tools["run_sql"]).sql_runner  # type: ignore[attr-defined]
+    while not isinstance(node, MySQLRunner):
+        assert not isinstance(node, (RefusalRedactingRunner, RuleSetGuardRunner))
+        node = node._inner
+    assert node._remove_sql_modes == frozenset()
+
+
+async def test_rule_set_user_resolver_keys_by_identity_and_keeps_default_group(
+    tmp_path: Path,
+) -> None:
+    from sqllens.agent import RequestContext
+    from sqllens.rule_sets import (
+        RuleSetSelection,
+        reset_rule_set_selection,
+        set_rule_set_selection,
+    )
+
+    agent = build_agent(_rule_set_cfg(tmp_path))
+    context = RequestContext(headers={}, cookies={}, metadata={})
+    token = set_rule_set_selection(RuleSetSelection("2", "5", 7))
+    try:
+        user = await agent.user_resolver.resolve_user(context)
+    finally:
+        reset_rule_set_selection(token)
+    assert user.id == "rule-set:2/account:5/user:7"
+    assert user.group_memberships == ["default"]
+    assert {t.name for t in await agent.get_available_tools(user)} >= {"run_sql"}
+
+
+async def test_rule_set_agent_prompt_differs_from_todays_by_two_lines(tmp_path: Path) -> None:
+    import difflib
+
+    pytest.importorskip("pymysql")
+    on = await _prompt_from_agent_tools(build_agent(_rule_set_cfg(tmp_path)))
+    off_cfg = Config(
+        database=DatabaseConfig(url="mysql+pymysql://u:p@db.internal:3306/shop"),
+        llm=LLMConfig(api_key=SecretStr("sk-ant-test")),
+        memory=MemoryConfig(persist_dir=tmp_path / "chroma2"),
+        auth=AuthConfig(mode="none"),
+        agent=AgentRuntimeConfig(),
+    )
+    off = await _prompt_from_agent_tools(build_agent(off_cfg))
+    diff = [d for d in difflib.ndiff(off.splitlines(), on.splitlines()) if d[:2] in ("+ ", "- ")]
+    assert [d[:2] for d in diff] == ["+ ", "+ "]
+    assert "Qualify every column" in diff[0]
+    assert "Refused by the rule set:" in diff[1]
+    for text in ("Sales reps see their customers", "confirmed_against_production"):
+        assert text not in on
