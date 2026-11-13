@@ -15,6 +15,7 @@ One database per running instance. Read-only by default, enforced by a `sqlglot`
 
 ### Database engine rule: MySQL only
 
+- **Supported scope: MySQL 8.0+ (including Aurora MySQL 3), reached through a `mysql://` or `mysql+pymysql://` URL.** MariaDB and MySQL 5.7 are not supported; do not add compatibility branches for them. This is policy, not enforcement: the code does not yet check the server version or reject other URL schemes.
 - **Do not design for, test against, or extend PostgreSQL or SQLite query-engine paths.** New guards, prompts, fixes and tests target MySQL only. A test that only parses SQL (no live database) uses the MySQL dialect (`"mysql"` in sqlglot, a `mysql+pymysql://` URL where a URL is needed).
 - **Leave the legacy engine code working, but add nothing to it.** The existing Postgres and SQLite code, the bundled SQLite demo and the SQLite-backed unit tests stay until they are removed in a later change; do not break them, and do not add new branches, cases, prompts or tests for them.
 - **When a fix touches code with per-engine branches, change the MySQL branch only.** Do not port the fix to the Postgres or SQLite branch, and do not add an engine-neutral abstraction just to cover them.
