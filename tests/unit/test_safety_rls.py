@@ -765,17 +765,12 @@ class TestMetadataPlumbing:
         )
         assert seen["metadata"] == {"tenant_id": "acme"}
 
-    def test_request_metadata_extracts_meta_extras(self) -> None:
+    def test_request_metadata_extracts_meta_keys(self) -> None:
         from sqllens.server import _request_metadata
 
-        class _Meta:
-            model_extra: dict = {"tenant_id": "acme"}  # noqa: RUF012
-            # The real ``RequestParams.Meta`` also reports every key the caller
-            # sent in ``_meta`` through ``model_fields_set``.
-            model_fields_set: set = {"tenant_id"}  # noqa: RUF012
-
         class _RC:
-            meta = _Meta()
+            # mcp 2.x request ``_meta`` is a plain dict.
+            meta = {"tenant_id": "acme", "progressToken": 3}  # noqa: RUF012
 
         class _Ctx:
             request_context = _RC()

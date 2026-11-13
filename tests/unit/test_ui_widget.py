@@ -8,7 +8,7 @@ include globs in ``pyproject.toml``; a drop, truncation, or inliner break must
 fail loudly, not silently render a blank iframe):
 
 - a missing/unreadable asset (HTML or vendored bundle) raises an *actionable*
-  ``RuntimeError`` rather than FastMCP's generic resource error,
+  ``RuntimeError`` rather than the SDK's generic resource error,
 - an empty/truncated asset raises the same actionable error instead of being
   cached and rendered as a blank iframe,
 - ``@cache`` must not poison-cache a read failure — a transient/packaging

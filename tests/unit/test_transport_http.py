@@ -9,7 +9,7 @@ These tests pin the two contracts the issue #39 refactor established:
   any out-of-tree caller that mounts it under FastAPI/Starlette gets a
   working session manager without having to wire lifespan themselves.
 - ``_build_asgi_app_bare`` returns the underlying app without the lifespan
-  adapter, plus the ``FastMCP`` handle, for callers (or future tests) that
+  adapter, plus the ``MCPServer`` handle, for callers (or future tests) that
   want manual control.
 
 The lifespan-startup happy path is exercised by the integration suite
@@ -99,14 +99,14 @@ def test_build_asgi_app_bare_returns_app_without_lifespan(tmp_path: Path) -> Non
     bypass ``_AuthMiddleware``, so orchestrator probes from an allowed host
     need no ``Authorization`` header.
     """
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
     bare, mcp = _build_asgi_app_bare(_cfg(tmp_path), _Readiness())
     assert isinstance(bare, TrustedHostMiddleware)
     # Starlette's TrustedHostMiddleware stores the wrapped app as ``.app``.
     assert isinstance(bare.app, _PathNormalizer)
     assert isinstance(bare.app.inner, _AuthMiddleware)
-    assert isinstance(mcp, FastMCP)
+    assert isinstance(mcp, MCPServer)
 
 
 def test_build_asgi_app_raises_runtimeerror_when_session_manager_missing(
@@ -115,20 +115,20 @@ def test_build_asgi_app_raises_runtimeerror_when_session_manager_missing(
     """The AttributeError guard fires when the SDK removes ``session_manager``.
 
     Simulates a hypothetical future mcp SDK upgrade by patching the
-    ``session_manager`` property on ``FastMCP`` itself to raise
+    ``session_manager`` property on ``MCPServer`` itself to raise
     ``AttributeError``. Without the guard, this would surface as an opaque
     ``AttributeError`` at the property-access line with no hint that an mcp
     SDK upgrade is the cause; the guard converts it to a ``RuntimeError``
     whose message names the file to update.
     """
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
-    def raise_attribute_error(self: FastMCP) -> None:
+    def raise_attribute_error(self: MCPServer) -> None:
         raise AttributeError("session_manager")
 
-    monkeypatch.setattr(FastMCP, "session_manager", property(raise_attribute_error))
+    monkeypatch.setattr(MCPServer, "session_manager", property(raise_attribute_error))
 
-    with pytest.raises(RuntimeError, match="FastMCP no longer exposes"):
+    with pytest.raises(RuntimeError, match="MCPServer no longer exposes"):
         build_asgi_app(_cfg(tmp_path))
 
 
@@ -136,7 +136,7 @@ def test_build_asgi_app_raises_runtimeerror_when_session_manager_missing(
 
 
 class _FakeSessionManager:
-    """Stand-in for FastMCP's session manager.
+    """Stand-in for MCPServer's session manager.
 
     ``run()`` returns an async context manager whose ``__aexit__`` raises
     ``shutdown_exc`` if set. ``__aenter__`` raises ``startup_exc`` if set.
@@ -601,7 +601,7 @@ def test_lifespan_post_shutdown_shutdown_is_idempotent() -> None:
     Latent reuse bug: before issue #60's hardening, ``_cm`` still referenced
     the already-exited context manager after shutdown, so a second shutdown
     would call ``__aexit__`` again. Double-exit is per-CM-specific and
-    FastMCP's session manager expects an exactly-once enter/exit pair;
+    MCPServer's session manager expects an exactly-once enter/exit pair;
     tracking ``aexit_calls`` pins that the adapter exits exactly once
     across two shutdown scopes and still acknowledges the second one
     cleanly.
@@ -1194,7 +1194,7 @@ def test_readyz_returns_200_after_warmup() -> None:
 
 def test_readyz_short_circuits_before_inner_no_auth_needed() -> None:
     """``/readyz`` is answered by ``_PathNormalizer`` itself — its inner
-    layer (``_AuthMiddleware`` then FastMCP) is never reached, so no
+    layer (``_AuthMiddleware`` then MCPServer) is never reached, so no
     ``Authorization`` header is required. (``TrustedHostMiddleware`` now
     fronts ``_PathNormalizer`` in the real stack, so a disallowed ``Host``
     is still rejected upstream of this short-circuit; this test exercises

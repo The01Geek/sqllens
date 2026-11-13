@@ -3,7 +3,7 @@
 
 """Streamable HTTP transport for SQL Lens.
 
-The MCP Python SDK's ``FastMCP.streamable_http_app()`` returns a Starlette app
+The MCP Python SDK's ``MCPServer.streamable_http_app()`` returns a Starlette app
 that registers its endpoint at the path ``/mcp``. See ``_build_asgi_app_bare``
 for the HTTP middleware composition and ``build_asgi_app`` for the outer
 session-manager lifespan adapter.
@@ -35,7 +35,7 @@ from sqllens.server import build_server
 from sqllens.tools.query_database import prime_agent
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
 logger = logging.getLogger("sqllens.transport.http")
 
@@ -43,7 +43,7 @@ MCP_PATH = "/mcp/"
 """Canonical client-facing URL path. Matches the convention IDE clients expect
 (Cursor, Claude Desktop, MCP Inspector all configure URLs ending in ``/mcp/``).
 
-Internally, FastMCP's Streamable HTTP app registers its handler at ``/mcp`` —
+Internally, MCPServer's Streamable HTTP app registers its handler at ``/mcp`` —
 the bare-prefix form. ``_PathNormalizer`` bridges the gap so clients can use
 either form."""
 
@@ -180,7 +180,7 @@ def build_asgi_app(cfg: Config) -> ASGIApp:
         session_manager = mcp.session_manager
     except AttributeError as exc:
         raise RuntimeError(
-            "FastMCP no longer exposes a session_manager attribute; the mcp "
+            "MCPServer no longer exposes a session_manager attribute; the mcp "
             "SDK likely renamed or removed it. Pin a compatible mcp version "
             "or update sqllens.transport.http.build_asgi_app."
         ) from exc
@@ -196,13 +196,13 @@ def build_asgi_app(cfg: Config) -> ASGIApp:
     )
 
 
-def _build_asgi_app_bare(cfg: Config, readiness: _Readiness) -> tuple[ASGIApp, FastMCP]:
+def _build_asgi_app_bare(cfg: Config, readiness: _Readiness) -> tuple[ASGIApp, MCPServer]:
     """Build the path-normalized, host-validated, authenticated ASGI app WITHOUT
     the lifespan adapter.
 
     "Bare" means lifespan-bare only: path normalization, host validation, and
     authentication middleware are still applied. Returns the app and the
-    underlying ``FastMCP`` instance so the caller can wire up the
+    underlying ``MCPServer`` instance so the caller can wire up the
     session-manager lifespan itself. Production callers reach this only via
     ``build_asgi_app``; the unit suite also calls it directly to assert the
     inner stack composition. The split exists to keep the SDK-attribute reach
@@ -211,7 +211,7 @@ def _build_asgi_app_bare(cfg: Config, readiness: _Readiness) -> tuple[ASGIApp, F
     Composition (outermost → innermost):
     ``TrustedHostMiddleware`` → optional insecure-mode response marker →
     ``_PathNormalizer`` → ``_AuthMiddleware`` →
-    FastMCP. ``TrustedHostMiddleware`` gates the handlers so a disallowed
+    MCPServer. ``TrustedHostMiddleware`` gates the handlers so a disallowed
     ``Host`` is rejected with 400 before *anything* downstream sees the
     request — including the ``/healthz`` / ``/readyz`` short-circuits in
     ``_PathNormalizer``. This denies the DNS-rebinding fingerprint of a
@@ -230,6 +230,9 @@ def _build_asgi_app_bare(cfg: Config, readiness: _Readiness) -> tuple[ASGIApp, F
     if insecure_bind and not cfg.auth.insecure:
         raise ValueError(INSECURE_NON_LOOPBACK_MESSAGE.format(host=cfg.server.host))
     mcp = build_server(cfg)
+    # Pass no host= / transport_security=: the 127.0.0.1 default keeps the
+    # SDK's own Host check, which answers a non-loopback Host with 421 behind
+    # our allowlist and auth. Changing either silently changes that check.
     inner = mcp.streamable_http_app()
     authenticator = build_authenticator(cfg.auth)
     normalized = _PathNormalizer(
@@ -286,14 +289,14 @@ class _InsecureAuthMarker:
 class _PathNormalizer:
     """Normalize incoming paths so trailing-slash sloppiness doesn't 404.
 
-    FastMCP registers its endpoint at ``/mcp`` (bare, no trailing slash).
+    MCPServer registers its endpoint at ``/mcp`` (bare, no trailing slash).
     Most IDE clients and our own docs use the canonical ``/mcp/`` form.
     To make either work:
 
     - ``/``      → 307 redirect to ``/mcp/`` (browser-friendly).
-    - ``/mcp/``  → rewrite scope.path to ``/mcp`` so FastMCP's Route matches.
+    - ``/mcp/``  → rewrite scope.path to ``/mcp`` so MCPServer's Route matches.
                    No redirect, so POST clients that don't follow 307 work.
-    - ``/mcp``   → pass through unchanged (matches FastMCP directly).
+    - ``/mcp``   → pass through unchanged (matches MCPServer directly).
     - ``/healthz`` → 200 liveness JSON, short-circuited here (pre-auth, but
                      post-host-check — ``TrustedHostMiddleware`` fronts this
                      layer and a disallowed ``Host`` is rejected before
@@ -370,9 +373,9 @@ class _AuthMiddleware:
 
 
 class _SessionManagerLifespan:
-    """Adapter that runs FastMCP's session manager inside ASGI lifespan events.
+    """Adapter that runs MCPServer's session manager inside ASGI lifespan events.
 
-    FastMCP exposes a session manager that must be active while requests are
+    MCPServer exposes a session manager that must be active while requests are
     served (it owns the per-session state). The ASGI host (uvicorn, FastAPI
     mount, custom Starlette app) drives lifespan startup and shutdown; we
     intercept those events to start/stop the manager.
@@ -578,7 +581,7 @@ class _SessionManagerLifespan:
                     # Already finalized on a prior scope. Acknowledge cleanly
                     # so the host doesn't hang; never call __aexit__ a second
                     # time on the same CM — double-exit is per-CM-specific
-                    # and FastMCP's session manager in particular expects an
+                    # and MCPServer's session manager in particular expects an
                     # exactly-once enter/exit pair.
                     logger.debug(
                         "lifespan.shutdown after shutdown; treating as idempotent"

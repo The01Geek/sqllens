@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult
 
 import sqllens.server as server_module
@@ -106,7 +107,7 @@ async def test_success_footer_follows_setting(
     result = await _call(cfg, "rows?")
 
     assert isinstance(result, CallToolResult)
-    assert result.isError is False
+    assert result.is_error is False
     assert result.content[0].text == ("the answer" + _FOOTER if footer else "the answer")
     assert result.meta == {
         "sqllens/conversation": {"conversation_id": _CONV},
@@ -134,11 +135,13 @@ async def test_footer_on_details_off_failure_is_raised_with_tail(
 ) -> None:
     _failing_real_agent(monkeypatch)
 
-    with pytest.raises(AgentRunError) as excinfo:
+    with pytest.raises(ToolError) as excinfo:
         await _call(_cfg(tmp_path, footer=True))
 
     assert str(excinfo.value) == f"SQL execution error: {_CARD}{_TAIL}"
-    assert excinfo.value.agent_trace is None
+    cause = excinfo.value.__cause__
+    assert isinstance(cause, AgentRunError)
+    assert cause.agent_trace is None
 
 
 async def test_footer_on_details_on_failure_keeps_tail(
@@ -149,7 +152,7 @@ async def test_footer_on_details_on_failure_keeps_tail(
     result = await _call(_cfg(tmp_path, footer=True, details=True))
 
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
     assert result.content[0].text == f"{_PREFIX}{_CARD}{_TAIL}"
     assert set(result.meta) == {"sqllens/conversation", "sqllens/agent_trace"}
     assert result.meta["sqllens/conversation"] == {"conversation_id": _CONV}
@@ -164,7 +167,7 @@ async def test_footer_off_failure_is_returned_without_tail(
     result = await _call(_cfg(tmp_path, footer=False, details=details))
 
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
     assert result.content[0].text == f"{_PREFIX}{_CARD}"
     assert _CONV not in result.content[0].text
     expected_keys = {"sqllens/conversation"} | ({"sqllens/agent_trace"} if details else set())
@@ -186,7 +189,7 @@ async def test_footer_off_memory_unavailable_message_is_unchanged(
     result = await _call(_cfg(tmp_path, footer=False), "plain question")
 
     assert isinstance(result, CallToolResult)
-    assert result.isError is True
+    assert result.is_error is True
     assert result.content[0].text == (
         f"Error executing tool query_database: {qd._MEMORY_UNAVAILABLE_MESSAGE}"
     )
@@ -202,7 +205,7 @@ async def test_footer_off_keeps_id_that_is_not_the_trailing_tail(
 
     result = await _call(_cfg(tmp_path, footer=False), "rows?")
 
-    assert result.isError is True
+    assert result.is_error is True
     assert result.content[0].text == f"Error executing tool query_database: {message}"
 
 
@@ -211,8 +214,8 @@ async def test_footer_off_non_agent_run_error_is_still_raised(
 ) -> None:
     _patch_impl(monkeypatch, raises=RuntimeError(qd._INTERNAL_ERROR_MESSAGE))
 
-    with pytest.raises(RuntimeError) as excinfo:
+    with pytest.raises(ToolError) as excinfo:
         await _call(_cfg(tmp_path, footer=False), "rows?")
 
-    assert not isinstance(excinfo.value, AgentRunError)
+    assert type(excinfo.value.__cause__) is RuntimeError
     assert str(excinfo.value) == qd._INTERNAL_ERROR_MESSAGE

@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Daniel Radman
 # SPDX-License-Identifier: Apache-2.0
 
-"""FastMCP server wiring.
+"""MCP server wiring (mcp 2.x ``MCPServer``).
 
-Builds the FastMCP instance and registers the two always-on tools
+Builds the ``MCPServer`` instance and registers the two always-on tools
 (``query_database``, ``list_data_sources``) plus the single ``ui://`` widget
 resource that renders the agent's ordered ``blocks`` array (text, table, and
 chart blocks in stream order). An opt-in third tool (``import_memory``) is
@@ -16,12 +16,16 @@ middleware (none / bearer / jwt) and path normalization.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import uuid
-from typing import Annotated, Any, get_args
+from collections.abc import Awaitable, Callable
+from typing import Annotated, Any, ParamSpec, TypeVar, get_args
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ResourceError, ToolError
+from mcp.shared.exceptions import MCPError
 from mcp.types import CallToolResult, TextContent
 from pydantic import Field, ValidationError
 
@@ -167,9 +171,10 @@ def _agent_error_result(
 ) -> CallToolResult:
     """Build the ``isError`` CallToolResult for an ``AgentRunError``.
 
-    The text mirrors FastMCP's own tool-error format
-    (``Error executing tool query_database: <message>`` — see
-    ``mcp.server.fastmcp.tools.base.Tool.run``). When the caller passes the
+    The text mirrors the SDK's own tool-error format
+    (``Error executing tool query_database: <message>``, which
+    ``mcp.server.mcpserver.tools.base.Tool.run`` builds from the ``ToolError``
+    that ``_tool_errors`` raises). When the caller passes the
     exception message unchanged (``agent.show_conversation_footer`` on), the
     text is byte-for-byte what the re-raise path would produce; with the
     setting off the caller strips the conversation-id tail first, so the text
@@ -192,22 +197,83 @@ def _agent_error_result(
     )
 
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _tool_errors(fn: Callable[_P, Awaitable[_R]]) -> Callable[_P, Awaitable[_R]]:
+    """Keep 1.x's client-visible text for an ``Exception`` a tool raises.
+
+    mcp 2.x shows the client only ``Error executing tool <name>`` for an
+    exception other than ``ToolError``/``ResourceError``/``MCPError``. Raising
+    ``ToolError(str(exc))`` instead makes the SDK send
+    ``Error executing tool <name>: <message>``, the text 1.x sent. A
+    ``BaseException`` that is not an ``Exception`` (``CancelledError``,
+    ``KeyboardInterrupt``) is not caught, so a cancelled call still unwinds.
+    ``functools.wraps`` must stay: the SDK derives the tool's name,
+    description, input schema and ``Context`` parameter from the wrapped
+    function.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        try:
+            return await fn(*args, **kwargs)
+        except (ToolError, MCPError):
+            raise
+        except Exception as exc:
+            raise ToolError(str(exc)) from exc
+
+    return wrapper
+
+
+def _resource_errors(uri: str) -> Callable[[Callable[[], str]], Callable[[], str]]:
+    """Keep 1.x's client-visible text for an ``Exception`` a resource raises.
+
+    mcp 2.x replaces any exception other than ``ResourceError``/``MCPError``
+    with ``Error reading resource <uri>``, dropping the message. Raising
+    ``ResourceError`` with the 1.x text keeps it.
+    """
+
+    def decorate(fn: Callable[[], str]) -> Callable[[], str]:
+        @functools.wraps(fn)
+        def wrapper() -> str:
+            try:
+                return fn()
+            except (ResourceError, MCPError):
+                raise
+            except Exception as exc:
+                raise ResourceError(f"Error reading resource {uri}: {exc}") from exc
+
+        return wrapper
+
+    return decorate
+
+
+# Request ``_meta`` keys that belong to the protocol, not the caller: the
+# progress token (either spelling) and the reserved ``io.modelcontextprotocol/``
+# namespace the 2026-07-28 protocol stamps onto every request.
+_PROGRESS_TOKEN_KEYS = frozenset({"progressToken", "progress_token"})
+_RESERVED_META_PREFIX = "io.modelcontextprotocol/"
+
+
 def _request_metadata(ctx: Context, *, count_declared_keys: bool = False) -> dict[str, Any]:
     """Extract caller-supplied per-request metadata from the MCP request.
 
     The calling application asserts per-request identity via the MCP request's
-    ``_meta`` object; the MCP SDK parses unknown ``_meta`` keys onto
-    ``RequestParams.Meta`` as model extras (``progressToken`` is the only
-    declared field and is excluded). This is the dynamic-value source the
-    row-level-security guard reads.
+    ``_meta`` object, which mcp 2.x exposes as a plain dict. Every key is
+    forwarded except the progress token (``progressToken`` or
+    ``progress_token``) and keys starting with ``io.modelcontextprotocol/``.
+    The rule fails open: any other SDK-managed key is forwarded like a caller
+    key. This is the dynamic-value source the row-level-security guard reads.
 
-    Forward at most 64 extra keys, 16 KiB of compact ASCII-escaped JSON,
+    Forward at most 64 keys, 16 KiB of compact ASCII-escaped JSON,
     1024 nodes (including keys), and eight nesting levels below the root. With
-    ``count_declared_keys`` the limit instead counts every key the caller sent
-    in ``_meta``, the declared ``progressToken`` included; a rule-set request
-    passes it, so that a request whose ``_meta`` carries more than 64 keys is
-    refused as rule-set key missing. Without it the count is unchanged, so a
-    request made with no rule-set file configured behaves as before.
+    ``count_declared_keys`` the 64-key limit instead counts every key in
+    ``_meta``, the progress token and reserved keys included; a rule-set
+    request passes it, so that a request whose ``_meta`` carries more than 64
+    keys is refused as rule-set key missing. Without it the count is unchanged,
+    so a request made with no rule-set file configured behaves as before.
     Invalid or oversized trees are discarded as a whole. These bounds apply
     after the MCP transport has parsed the request, not to HTTP body parsing.
 
@@ -215,7 +281,7 @@ def _request_metadata(ctx: Context, *, count_declared_keys: bool = False) -> dic
     dynamic RLS rule then sees its key as missing and blocks the query (static
     rules are unaffected), rather than the tool crashing or, worse, a request
     influencing the query unfiltered. Metadata is read from the MCP request
-    context on either transport; requests without extras receive ``{}``.
+    context on either transport; requests without ``_meta`` receive ``{}``.
     """
     try:
         meta = ctx.request_context.meta
@@ -238,28 +304,25 @@ def _request_metadata(ctx: Context, *, count_declared_keys: bool = False) -> dic
         return {}
     if meta is None:
         return {}
-    # Keep extras diagnostics content-free, including unexpected SDK/helper
+    # Keep metadata diagnostics content-free, including unexpected SDK/helper
     # faults: exception messages and tracebacks can contain metadata values.
+    if not isinstance(meta, dict):
+        logger.warning("invalid or oversized request metadata; returning empty metadata")
+        return {}
     try:
-        extra = getattr(meta, "model_extra", None)
-        # ``progressToken`` is a declared field, so it is absent from the
-        # extras; counting every key the caller sent needs ``model_fields_set``.
-        sent = getattr(meta, "model_fields_set", None) if count_declared_keys else ()
+        forwarded = {
+            key: value
+            for key, value in meta.items()
+            if key not in _PROGRESS_TOKEN_KEYS
+            and not (isinstance(key, str) and key.startswith(_RESERVED_META_PREFIX))
+        }
     except Exception:
-        logger.warning("failed to read request metadata extras; returning empty metadata")
-        return {}
-    if extra is None:
-        logger.debug("request _meta exposes no model_extra; returning empty metadata")
-        return {}
-    if sent is None:
-        logger.debug("request _meta exposes no model_fields_set; returning empty metadata")
+        logger.warning("failed to read request metadata; returning empty metadata")
         return {}
     try:
-        # Both counts are bounded, so the limit still holds if a future SDK
-        # stops recording the extras in ``model_fields_set``.
-        if type(extra) is not dict or len(extra) > 64 or len(sent) > 64:
-            raise JsonBoundsError("request metadata key limit or shape")
-        bounded, _ = copy_bounded_json(extra)
+        if len(forwarded) > 64 or (count_declared_keys and len(meta) > 64):
+            raise JsonBoundsError("request metadata key limit")
+        bounded, _ = copy_bounded_json(forwarded)
         return bounded
     except JsonBoundsError:
         # A rejected tree is never partially forwarded to dynamic RLS rules.
@@ -270,11 +333,26 @@ def _request_metadata(ctx: Context, *, count_declared_keys: bool = False) -> dic
         return {}
 
 
-def build_server(cfg: Config) -> FastMCP:
-    """Create a FastMCP instance with tools registered against ``cfg``."""
-    mcp = FastMCP("sqllens")
+def build_server(cfg: Config) -> MCPServer:
+    """Create an ``MCPServer`` instance with tools registered against ``cfg``."""
+    mcp = MCPServer("sqllens")
 
-    @mcp.resource(
+    # Register tools and widget resources only through these two helpers, never
+    # ``@mcp.tool``/``@mcp.resource`` directly: a bypassing registration loses
+    # the error-text wrapper and its client sees a bare "Error executing tool".
+    def _tool(**kwargs: Any) -> Callable[[Callable[..., Awaitable[Any]]], Any]:
+        def decorate(fn: Callable[..., Awaitable[Any]]) -> Any:
+            return mcp.tool(**kwargs)(_tool_errors(fn))
+
+        return decorate
+
+    def _resource(uri: str, **kwargs: Any) -> Callable[[Callable[[], str]], Any]:
+        def decorate(fn: Callable[[], str]) -> Any:
+            return mcp.resource(uri, **kwargs)(_resource_errors(uri)(fn))
+
+        return decorate
+
+    @_resource(
         _WIDGET_URI,
         mime_type="text/html;profile=mcp-app",
         meta={"ui": {"prefersBorder": True}},
@@ -313,9 +391,9 @@ def build_server(cfg: Config) -> FastMCP:
             )
 
     # structured_output=False: the success path may return a CallToolResult
-    # carrying _meta; an auto-derived outputSchema would make FastMCP validate
+    # carrying _meta; an auto-derived outputSchema would make the SDK validate
     # a (deliberately absent) structuredContent and reject it.
-    @mcp.tool(meta={"ui": {"resourceUri": _WIDGET_URI}}, structured_output=False)
+    @_tool(meta={"ui": {"resourceUri": _WIDGET_URI}}, structured_output=False)
     async def query_database(
         question: str,
         ctx: Context,
@@ -373,7 +451,7 @@ def build_server(cfg: Config) -> FastMCP:
 
         When the server's vector memory store could not be opened, the call
         returns an error result whose message is ``Memory store unavailable: ...``
-        (after the MCP framework's ``Error executing tool`` prefix) instead of
+        (after the MCP SDK's ``Error executing tool query_database:`` prefix) instead of
         an answer produced without saved memory.
         """
         metadata = _request_metadata(
@@ -401,8 +479,9 @@ def build_server(cfg: Config) -> FastMCP:
                 # id leaks back into the text.
                 message = str(exc).removesuffix(f"\n\nConversation ID: {conversation_id}")
                 return _agent_error_result(message, conversation_id, exc.agent_trace)
-            # Footer on: a details-off failure (no trace) is re-raised so FastMCP
-            # formats it with no _meta, unchanged from before the setting existed.
+            # Footer on: a details-off failure (no trace) is re-raised so the
+            # SDK formats it (via _tool_errors' ToolError) with no _meta,
+            # unchanged from before the setting existed.
             if exc.agent_trace is None:
                 raise
             return _agent_error_result(str(exc), conversation_id, exc.agent_trace)
@@ -430,7 +509,7 @@ def build_server(cfg: Config) -> FastMCP:
             show_footer=cfg.agent.show_conversation_footer,
         )
 
-    @mcp.tool()
+    @_tool()
     async def list_data_sources() -> str:
         """Describe the configured database."""
         return list_data_sources_impl(cfg)
@@ -448,7 +527,7 @@ def build_server(cfg: Config) -> FastMCP:
         # documented "re-import is safe" guarantee. Single-writer it is.
         import_lock = asyncio.Lock()
 
-        @mcp.tool()
+        @_tool()
         async def import_memory(bundle_json: str) -> str:
             """Bulk-load a curated memory bundle (JSON) into the store.
 
@@ -522,7 +601,7 @@ def build_server(cfg: Config) -> FastMCP:
         # Self-driving memory-administration widget. Gated on the same flag as
         # the seven backing tools so a host never advertises a widget it can't
         # power — resources/list shows it iff allow_admin_tools is set.
-        @mcp.resource(
+        @_resource(
             _MEMORY_WIDGET_URI,
             mime_type="text/html;profile=mcp-app",
             meta={"ui": {"prefersBorder": True}},
@@ -557,7 +636,7 @@ def build_server(cfg: Config) -> FastMCP:
 
         _json_error = _json_error_result
 
-        @mcp.tool(structured_output=False)
+        @_tool(structured_output=False)
         async def list_memories(
             data_source_id: str,
             memory_type: str | None = None,
@@ -591,7 +670,7 @@ def build_server(cfg: Config) -> FastMCP:
                 ) from None
             return json.dumps(result)
 
-        @mcp.tool(structured_output=False)
+        @_tool(structured_output=False)
         async def get_memory(data_source_id: str, memory_id: str) -> str | CallToolResult:
             """Fetch one memory by id (including its full embedding).
 
@@ -611,7 +690,7 @@ def build_server(cfg: Config) -> FastMCP:
                 ) from None
             return json.dumps(result)
 
-        @mcp.tool(structured_output=False)
+        @_tool(structured_output=False)
         async def delete_memory(
             data_source_id: str, memory_id: str
         ) -> str | CallToolResult:
@@ -639,7 +718,7 @@ def build_server(cfg: Config) -> FastMCP:
                 ) from None
             return json.dumps(result)
 
-        @mcp.tool(structured_output=False)
+        @_tool(structured_output=False)
         async def clear_memories(
             data_source_id: str, memory_type: str | None = None
         ) -> str:
@@ -663,7 +742,7 @@ def build_server(cfg: Config) -> FastMCP:
                 ) from None
             return json.dumps(result)
 
-        @mcp.tool(structured_output=False)
+        @_tool(structured_output=False)
         async def add_memories(
             data_source_id: str,
             sql_pairs: list[dict[str, Any]] | None = None,
@@ -709,7 +788,7 @@ def build_server(cfg: Config) -> FastMCP:
                 return _json_error(result)
             return json.dumps(result)
 
-        @mcp.tool(structured_output=False)
+        @_tool(structured_output=False)
         async def export_memories(
             data_source_id: str, format: str = "json"
         ) -> str | CallToolResult:
@@ -754,7 +833,7 @@ def build_server(cfg: Config) -> FastMCP:
                 return _json_error(result)
             return json.dumps(result)
 
-        @mcp.tool(structured_output=False)
+        @_tool(structured_output=False)
         async def get_memory_stats(data_source_id: str) -> str:
             """Return aggregate memory stats: counts, recent hits, top-hit pairs.
 
@@ -781,7 +860,7 @@ def build_server(cfg: Config) -> FastMCP:
         # Same widget/host advertisement contract as the memory-admin widget:
         # gated on the admin flag so a host never sees a widget whose backing
         # tools are off.
-        @mcp.resource(
+        @_resource(
             _CONFIG_WIDGET_URI,
             mime_type="text/html;profile=mcp-app",
             meta={"ui": {"prefersBorder": True}},
@@ -820,7 +899,7 @@ def build_server(cfg: Config) -> FastMCP:
         # extended by hand.
         _PROFILE_BOUNDS = _profile_field_bounds()
 
-        @mcp.tool(structured_output=False)
+        @_tool(structured_output=False)
         async def list_profiles() -> str | CallToolResult:
             """List stored named profiles plus base-config values and per-knob bounds.
 
@@ -856,7 +935,7 @@ def build_server(cfg: Config) -> FastMCP:
                 return _profile_error(payload)
             return json.dumps(payload)
 
-        @mcp.tool(structured_output=False)
+        @_tool(structured_output=False)
         async def get_profile(name: str) -> str | CallToolResult:
             """Fetch one named profile by name.
 
@@ -890,7 +969,7 @@ def build_server(cfg: Config) -> FastMCP:
                 {"name": name, "knobs": profile.model_dump(exclude_none=True)}
             )
 
-        @mcp.tool(structured_output=False)
+        @_tool(structured_output=False)
         async def upsert_profile(
             name: str, knobs: dict[str, Any]
         ) -> str | CallToolResult:
@@ -922,8 +1001,8 @@ def build_server(cfg: Config) -> FastMCP:
                 # phantom-validation chase. Pydantic raises ValidationError
                 # for body-shape problems; anything else is real signal and
                 # should reach the server log via the broad-except branch
-                # below on store.upsert (or surface through the FastMCP
-                # wrapper if it escapes here).
+                # below on store.upsert (or surface through the
+                # _tool_errors wrapper if it escapes here).
                 return _profile_error(
                     {"error": f"invalid profile body: {exc}"}
                 )
@@ -942,7 +1021,7 @@ def build_server(cfg: Config) -> FastMCP:
                 {"name": name, "knobs": saved.model_dump(exclude_none=True)}
             )
 
-        @mcp.tool(structured_output=False)
+        @_tool(structured_output=False)
         async def delete_profile(name: str) -> str | CallToolResult:
             """Delete the named profile (write-guarded).
 

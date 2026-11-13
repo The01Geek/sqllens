@@ -15,18 +15,10 @@ from sqllens.server import _request_metadata
 from sqllens.tools._format import build_agent_trace
 
 
-def metadata(value, fields_set=None, count_declared_keys=False):
-    # The real ``RequestParams.Meta`` reports every key the caller sent in
-    # ``_meta`` through ``model_fields_set``, declared fields included, and only
-    # the undeclared ones through ``model_extra``.
-    if fields_set is None:
-        fields_set = set(value) if isinstance(value, dict) else set()
+def metadata(value, count_declared_keys=False):
+    # mcp 2.x hands the request ``_meta`` over as a plain dict.
     return _request_metadata(
-        SimpleNamespace(
-            request_context=SimpleNamespace(meta=SimpleNamespace(
-                model_extra=value, model_fields_set=fields_set
-            ))
-        ),
+        SimpleNamespace(request_context=SimpleNamespace(meta=value)),
         count_declared_keys=count_declared_keys,
     )
 
@@ -54,46 +46,17 @@ def test_oversized_metadata_is_discarded_and_dynamic_rls_fails_closed(extras):
         )], metadata=result, dialect="sqlite")
 
 
-def test_rule_set_key_limit_counts_every_meta_key_not_only_the_extras():
+def test_rule_set_key_limit_counts_every_meta_key_not_only_the_forwarded_ones():
     extras = {str(i): i for i in range(64)}
-    beside_declared = set(extras) | {"progressToken"}
     assert metadata(extras, count_declared_keys=True) == extras
-    # 64 extras beside the declared ``progressToken`` is 65 keys in ``_meta``.
-    assert metadata(extras, fields_set=beside_declared, count_declared_keys=True) == {}
+    # 64 caller keys beside ``progressToken`` is 65 keys in ``_meta``.
+    assert metadata(extras | {"progressToken": "p"}, count_declared_keys=True) == {}
 
 
-def test_without_rule_sets_the_key_limit_still_counts_only_the_extras():
+def test_without_rule_sets_the_key_limit_still_counts_only_the_forwarded_keys():
     extras = {str(i): i for i in range(64)}
-    beside_declared = set(extras) | {"progressToken"}
-    assert metadata(extras, fields_set=beside_declared) == extras
+    assert metadata(extras | {"progressToken": "p"}) == extras
     assert metadata({str(i): i for i in range(65)}) == {}
-
-
-def test_rule_set_request_without_model_fields_set_is_discarded(caplog):
-    caplog.set_level("DEBUG")
-    assert _request_metadata(
-        SimpleNamespace(
-            request_context=SimpleNamespace(meta=SimpleNamespace(model_extra={"tenant": "alpha"}))
-        ),
-        count_declared_keys=True,
-    ) == {}
-    assert caplog.messages == [
-        "request _meta exposes no model_fields_set; returning empty metadata"
-    ]
-
-
-def test_without_rule_sets_a_meta_without_model_fields_set_is_still_forwarded():
-    assert _request_metadata(SimpleNamespace(
-        request_context=SimpleNamespace(meta=SimpleNamespace(model_extra={"tenant": "alpha"}))
-    )) == {"tenant": "alpha"}
-
-
-def test_sdk_meta_reports_declared_keys_in_fields_set_but_not_in_extras():
-    from mcp.types import RequestParams
-
-    meta = RequestParams.Meta.model_validate({"progressToken": "p", "tenant": "alpha"})
-    assert meta.model_fields_set == {"progressToken", "tenant"}
-    assert set(meta.model_extra) == {"tenant"}
 
 
 def test_metadata_ordinary_values_and_exact_byte_boundary():
@@ -103,6 +66,60 @@ def test_metadata_ordinary_values_and_exact_byte_boundary():
     assert result is not extras
     assert metadata({"a": "x" * 16376}) == {"a": "x" * 16376}
     assert metadata({"a": "x" * 16377}) == {}
+
+
+@pytest.mark.parametrize("meta,expected", [
+    ({"tenant": "alpha"}, {"tenant": "alpha"}),
+    ({"tenant": "alpha", "progressToken": 7}, {"tenant": "alpha"}),
+    ({"tenant": "alpha", "progress_token": 7}, {"tenant": "alpha"}),
+    (
+        {
+            "tenant": "alpha",
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {"name": "c", "version": "1"},
+            "io.modelcontextprotocol/clientCapabilities": {},
+        },
+        {"tenant": "alpha"},
+    ),
+    # Fails open: an SDK-managed key outside the reserved prefix is forwarded.
+    ({"tenant": "alpha", "sdkManaged": "x"}, {"tenant": "alpha", "sdkManaged": "x"}),
+    ({"io.modelcontextprotocol.notreserved": 1}, {"io.modelcontextprotocol.notreserved": 1}),
+    ({}, {}),
+])
+def test_metadata_forwarding_rule(meta, expected):
+    assert metadata(meta) == expected
+
+
+def test_metadata_key_limit_counts_forwarded_keys_only():
+    caller = {str(i): i for i in range(64)}
+    assert metadata({**caller, "progressToken": 1,
+                     "io.modelcontextprotocol/protocolVersion": "2026-07-28"}) == caller
+    assert metadata({**caller, "one-more": 1}) == {}
+
+
+def test_metadata_absent_meta_and_no_active_request():
+    assert metadata(None) == {}
+
+    class NoRequest:
+        @property
+        def request_context(self):
+            raise ValueError("Context is not available outside of a request")
+
+    assert _request_metadata(NoRequest()) == {}
+
+
+@pytest.mark.parametrize("depth,expected_empty", [(8, False), (9, True)])
+def test_metadata_nesting_limit(depth, expected_empty):
+    value: object = "leaf"
+    for _ in range(depth - 1):
+        value = {"k": value}
+    assert (metadata({"v": value}) == {}) is expected_empty
+
+
+def test_metadata_node_limit():
+    # Root dict + key + list + items: 1024 nodes at 1021 items.
+    assert metadata({"v": list(range(1021))}) != {}
+    assert metadata({"v": list(range(1022))}) == {}
 
 
 def test_metadata_deep_and_cyclic_values_are_discarded():
@@ -117,15 +134,14 @@ def test_metadata_deep_and_cyclic_values_are_discarded():
 
 @pytest.mark.parametrize("failure", [RuntimeError, JsonBoundsError])
 def test_metadata_accessor_failure_is_distinct_and_content_free(failure, caplog):
-    class BrokenMeta:
-        @property
-        def model_extra(self):
+    class BrokenMeta(dict):
+        def items(self):
             raise failure("synthetic-private-detail")
 
     context = SimpleNamespace(request_context=SimpleNamespace(meta=BrokenMeta()))
     assert _request_metadata(context) == {}
     assert caplog.messages == [
-        "failed to read request metadata extras; returning empty metadata"
+        "failed to read request metadata; returning empty metadata"
     ]
     assert all(record.exc_info is None and record.stack_info is None for record in caplog.records)
     assert "synthetic-private-detail" not in caplog.text

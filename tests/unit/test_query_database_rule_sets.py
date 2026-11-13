@@ -140,13 +140,11 @@ async def test_request_class_refusal_comes_before_profile_lookup(tmp_path: Path)
 def test_over_limit_meta_is_refused_as_key_missing(tmp_path: Path) -> None:
     from sqllens.rule_sets import select_rule_set
 
-    # Exactly 64 extras, so only counting the declared ``progressToken`` beside
+    # Exactly 64 forwarded keys, so only counting ``progressToken`` beside
     # them puts this request over the limit.
     extras = {f"k{i}": i for i in range(61)} | OWNER
     assert len(extras) == 64
-    sent_meta = SimpleNamespace(
-        model_extra=extras, model_fields_set=set(extras) | {"progressToken"}
-    )
+    sent_meta = extras | {"progressToken": "p"}
     context = SimpleNamespace(request_context=SimpleNamespace(meta=sent_meta))
     loaded = rule_set_config(tmp_path).rule_sets.loaded
     assert loaded is not None
@@ -156,8 +154,8 @@ def test_over_limit_meta_is_refused_as_key_missing(tmp_path: Path) -> None:
         select_rule_set(loaded, meta)
     assert str(info.value) == REFUSED_RULE_SET_KEY_MISSING
 
-    # The same request is forwarded whole when the caller does not ask for the
-    # declared keys to be counted, so the flag is what refuses it.
+    # The same request is forwarded whole when the caller does not ask for
+    # every key to be counted, so the flag is what refuses it.
     assert _request_metadata(context) == extras
 
 
@@ -303,6 +301,7 @@ def test_query_database_counts_declared_meta_keys_only_under_rule_sets(
         build_test_config(persist_dir=tmp_path / "chroma"),
     ):
         tool = server_module.build_server(cfg)._tool_manager.get_tool("query_database").fn
-        with pytest.raises(RuntimeError, match="stop before the agent runs"):
+        # The tool wrapper re-raises the error as the SDK's ``ToolError``.
+        with pytest.raises(Exception, match="stop before the agent runs"):
             asyncio.run(tool(question="q", ctx=SimpleNamespace()))
     assert seen == [True, False]

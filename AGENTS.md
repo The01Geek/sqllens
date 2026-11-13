@@ -36,7 +36,7 @@ src/sqllens/
 ├── cli.py                   # Typer: version | init | serve | validate | claude-desktop install
 │                            #   | import-memory | verify-memory | export-memory
 ├── config.py                # pydantic-settings: TOML + SQLLENS_ env vars
-├── server.py                # FastMCP factory; dispatches to stdio or HTTP
+├── server.py                # MCPServer factory (mcp 2.x); dispatches to stdio or HTTP
 ├── preflight.py             # eager infrastructure checks run by `sqllens serve`
 ├── profiles.py, runtime.py  # named per-request config profiles; request-local effective settings
 ├── conversation_store.py    # bounded, in-process multi-turn conversation store
@@ -212,7 +212,7 @@ PyPI versions are immutable after publish — you can yank but not re-upload the
 - **Unanchored `.gitignore` entries match anywhere.** A bare `data/` rule silently ignored `src/sqllens/agent/components/rich/data/`, breaking CI. Anchor local-data ignores with a leading slash (`/data/`, `/chroma/`).
 - **OCI image references must be all lowercase.** `${{ github.repository_owner }}` preserves GitHub's case — buildx tolerates uppercase with a warning, but syft (SBOM) and cosign reject it. The Docker workflow lowercases via bash `${VAR,,}` and re-exports through `$GITHUB_ENV`.
 - **Docker `--network=host` on Docker Desktop / WSL2** puts the container in Docker Desktop's internal WSL distro, which is a *different* network namespace than the user's WSL. Native processes in user-WSL (curl, MCP Inspector, IDEs) can't reach `127.0.0.1:<port>` on the container even though sibling containers can. **Always use port mapping** (`-p HOST:CONTAINER`) for local dev unless you specifically need host-shared networking.
-- **FastMCP rejects non-loopback `Host` headers** by default ("421 Misdirected Request"). When connecting from a docker container to `host.docker.internal:<port>`, the inbound `Host` header is `host.docker.internal:<port>` and gets rejected. Either bind from the same network namespace (so `127.0.0.1` resolves locally) or configure FastMCP's transport security if exposing remotely.
+- **The MCP SDK rejects non-loopback `Host` headers** ("421 Misdirected Request"). `transport/http.py` calls `MCPServer.streamable_http_app()` with no `host=` or `transport_security=`, so the SDK keeps its loopback default (`host="127.0.0.1"`) and turns on its DNS-rebinding Host check, which answers a request that passed our own Host allowlist and auth but carries a non-loopback `Host` with 421. When connecting from a docker container to `host.docker.internal:<port>`, the inbound `Host` header is `host.docker.internal:<port>` and gets rejected. Either connect from the same network namespace (so `127.0.0.1` resolves locally) or configure the SDK's transport security if exposing remotely.
 
 ## Debugging checklist
 

@@ -6,6 +6,7 @@
 import json
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult
 
 from sqllens.config import AuthConfig
@@ -43,7 +44,7 @@ async def test_invalid_names_fail_without_echo_or_persistence(tmp_path, name, to
     mcp = build_server(config(tmp_path))
     fn = mcp._tool_manager.get_tool(tool).fn
     result = await fn(name, {}) if tool == "upsert_profile" else await fn(name)
-    assert isinstance(result, CallToolResult) and result.isError
+    assert isinstance(result, CallToolResult) and result.is_error
     text = result.content[0].text
     assert "profile name must" in text
     assert len(text) < 200
@@ -77,7 +78,7 @@ async def test_write_auth_precedes_name_validation(tmp_path):
     mcp = build_server(config(tmp_path, insecure=False))
     for tool in ["upsert_profile", "delete_profile"]:
         fn = mcp._tool_manager.get_tool(tool).fn
-        with pytest.raises(RuntimeError, match="unauthenticated"):
+        with pytest.raises(ToolError, match="unauthenticated"):
             await fn("bad/name", {}) if tool == "upsert_profile" else await fn("bad/name")
 
 
