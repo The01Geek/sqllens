@@ -44,7 +44,7 @@ Connection probes catch the driver / SDK exception base for the subsystem they v
 
 ### `probe_database`
 
-Opens and immediately closes a connection to `cfg.database.url`. **Does not run a query** (except the SQLite read-only schema-header read described below) — that would burn a round-trip and could trigger permission errors unrelated to reachability.
+Opens and immediately closes a connection to `cfg.database.url`. **Runs no query of its own** (except the SQLite read-only schema-header read described below; on MySQL the driver's connect still sends `SET NAMES`) — that would burn a round-trip and could trigger permission errors unrelated to reachability.
 
 Scheme handling:
 

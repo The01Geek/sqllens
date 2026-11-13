@@ -3,8 +3,8 @@
 
 """Regression tests for secondary-exception masking on SqlRunner cleanup paths.
 
-When a SELECT raises mid-execution (timeout, lost connection, aborted
-transaction), the outer ``finally:`` cleanup must not let a *secondary*
+When a SELECT raises mid-execution (timeout, lost connection), the outer
+``finally:`` cleanup must not let a *secondary*
 exception from ``cursor.close()`` / ``conn.close()`` shadow the primary error
 — otherwise the LLM receives a generic transport error instead of the
 timeout signal it needs to re-issue with a tighter ``LIMIT`` or ``WHERE``.
@@ -27,7 +27,7 @@ from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs
 
 
 class _PrimaryError(Exception):
-    """Stand-in for ``OperationalError('max_statement_time exceeded')`` etc."""
+    """Stand-in for the driver's ``OperationalError`` on a timeout and the like."""
 
 
 class _SecondaryCloseError(Exception):

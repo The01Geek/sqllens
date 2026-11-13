@@ -192,6 +192,26 @@ class TestNestedDmlInCte:
                 dialect="mysql",
             )
 
+    @pytest.mark.parametrize(
+        "action",
+        [
+            "MATCHED THEN DELETE",
+            "MATCHED THEN UPDATE SET value = s.value",
+            "NOT MATCHED THEN INSERT (id) VALUES (s.id)",
+            "MATCHED THEN DO NOTHING",
+        ],
+    )
+    def test_merge_in_cte_rejected(self, action: str) -> None:
+        # The root is a SELECT, so only the nested-write walk's exp.Merge entry
+        # refuses it.
+        with pytest.raises(UnsafeSqlError, match="nested MERGE"):
+            assert_select_only(
+                "WITH changed AS ("
+                f"MERGE INTO target t USING source s ON t.id = s.id WHEN {action}"
+                ") SELECT * FROM changed",
+                dialect="mysql",
+            )
+
 
 # (sql, dialect) pairs that the guard MUST reject. Every entry is a documented
 # bypass of the root-type / DML-DDL walk — a syntactically valid statement that
