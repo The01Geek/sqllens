@@ -8,7 +8,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 from anthropic.types import Message
 
@@ -119,10 +119,10 @@ async def test_real_sdk_stream_retains_signature_and_tool_input() -> None:
     ]
     sse = "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events)
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, headers={"content-type": "text/event-stream"}, text=sse)
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, text=sse)
 
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as client:
         service = AnthropicLlmService(api_key="test-key", http_client=client)
         chunks = [chunk async for chunk in service.stream_request(
             LlmRequest(messages=[], user=User(id="test")),
@@ -138,10 +138,10 @@ async def test_real_sdk_create_retains_signature_and_tool_input() -> None:
         "stop_sequence": None, "usage": {"input_tokens": 3, "output_tokens": 12},
     }
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=message)
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json=message)
 
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as client:
         service = AnthropicLlmService(api_key="test-key", http_client=client)
         response = await service.send_request(LlmRequest(messages=[], user=User(id="test")))
 

@@ -1334,7 +1334,6 @@ You can:
             messages=messages,
             tools=tool_schemas if tool_schemas else None,
             user=user,
-            temperature=self.config.temperature,
             effort=self.config.effort,
             max_tokens=self.config.max_tokens,
             stream=self.config.stream_responses,
