@@ -196,6 +196,10 @@ When at least one `[[rls]]` rule is configured (the `cfg.rls` list is non-empty)
 
 Full reference in [row-level-security.md](row-level-security.md).
 
+### Composition with rule sets
+
+While `[rule_sets] file` is set, `build_agent` also wraps `RuleSetGuardRunner` outside `RlsGuardRunner` and inside `WholeRowSelectGuardRunner`, and `RefusalRedactingRunner` outside every guard and inside `ResultMaskingRunner`. See [rule-sets.md](rule-sets.md#agent-wiring-while-a-file-is-configured). <!-- canonical: database-connectors/rule-sets.md -->
+
 ## Whole-row select guard
 
 [src/sqllens/safety/whole_row.py](../../../src/sqllens/safety/whole_row.py) refuses SQL whose `*` or `alias.*` expands a table or view, before the query runs. A star over a table returns every column, including columns the question never needed; refusing it makes the agent rewrite the query with a column list. It is a separate decision from the read-only guard: it applies whatever `database.read_only` is, and `database.refuse_whole_row_selects = false` (default `true`) turns it off.

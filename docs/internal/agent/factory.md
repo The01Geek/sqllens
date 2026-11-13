@@ -62,7 +62,7 @@ ToolRegistry    →  RunSqlTool                          (executes generated SQL
 
 ## `allow_memory_writes` — verification builds
 
-`build_agent(cfg, *, allow_memory_writes=True)`. Passing `False` omits both memory-writing tools (`save_question_tool_args`, `save_text_memory`) regardless of `cfg.memory`, and disables retrieval counter and timestamp updates with `ChromaAgentMemory(track_usage=False)`. Memory search and context injection remain available. Only `sqllens verify-memory` (`src/sqllens/eval/runner.py`) passes `False`. Any config gate on a save tool must be ANDed with it, never ORed. See [memory.md § Verifying an import](memory.md#verifying-an-import-verify-memory).
+`build_agent(cfg, *, allow_memory_writes=True)`. Passing `False` omits both memory-writing tools (`save_question_tool_args`, `save_text_memory`) regardless of `cfg.memory`, and disables retrieval counter and timestamp updates with `ChromaAgentMemory(track_usage=False)`. Memory search and context injection remain available. Only `sqllens verify-memory` (`src/sqllens/eval/runner.py`) passes `False`. Any config gate on a save tool must be ANDed with it, never ORed. While a rule-set file is configured, `build_agent` also forces `allow_memory_writes` off and swaps in `_RuleSetUserResolver`, a session `sql_mode` cleanup, and the rule-set guards; see [database-connectors/rule-sets.md](../database-connectors/rule-sets.md#agent-wiring-while-a-file-is-configured). <!-- canonical: database-connectors/rule-sets.md --> See [memory.md § Verifying an import](memory.md#verifying-an-import-verify-memory).
 
 ## Opus 5.5 defaults and conversation history
 
