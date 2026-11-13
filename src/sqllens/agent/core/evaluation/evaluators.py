@@ -179,19 +179,15 @@ class LLMAsJudgeEvaluator(Evaluator):
         self,
         judge_llm: LlmService,
         criteria: str,
-        temperature: Optional[float] = None,
     ):
         """Initialize LLM-as-judge evaluator.
 
         Args:
             judge_llm: The LLM service to use for judging
             criteria: Natural language description of what to evaluate
-            temperature: Sampling temperature for the judge request; None sends
-                none (some models reject any temperature)
         """
         self.judge_llm = judge_llm
         self.criteria = criteria
-        self.temperature = temperature
 
     @property
     def name(self) -> str:
@@ -241,7 +237,6 @@ REASONING: <your explanation>
             request = LlmRequest(
                 user=test_case.user,
                 messages=[LlmMessage(role="user", content=judge_prompt)],
-                temperature=self.temperature,
             )
 
             response = await self.judge_llm.send_request(request)
