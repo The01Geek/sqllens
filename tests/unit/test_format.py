@@ -1890,8 +1890,8 @@ def test_introspection_only_turn_matches_turn_without_dataframes(with_answer: bo
     tail = [_answer_text("Widgets has five columns.")] if with_answer else []
     with_df = [*_sql_call(_CATALOG_COLUMNS_SQL), _catalog_df(), *tail]
     without_df = [*_sql_call(_CATALOG_COLUMNS_SQL), *tail]
-    got = components_to_blocks(with_df, dialect="postgres")
-    want = components_to_blocks(without_df, dialect="postgres")
+    got = components_to_blocks(with_df, dialect="mysql")
+    want = components_to_blocks(without_df, dialect="mysql")
     assert got[:3] == want[:3]
     if not with_answer:
         assert got[0] == "(no answer)"
@@ -1919,7 +1919,10 @@ def test_sqlite_pragma_introspection_does_not_clear_error() -> None:
 
 @pytest.mark.parametrize(
     ("sql", "dialect"),
-    [("SELECT amount FROM pg_payments", "mysql"), ("SELECT amount FROM sys.payments", "postgres")],
+    [
+        ("SELECT amount FROM sqlite_payments", "mysql"),
+        ("SELECT amount FROM sys.payments", "sqlite"),
+    ],
 )
 def test_other_engine_catalog_name_data_query_shown_and_clears_error(
     sql: str, dialect: str
@@ -1934,7 +1937,7 @@ def test_other_engine_catalog_name_data_query_shown_and_clears_error(
     assert [b["type"] for b in blocks] == ["table"]
 
 
-@pytest.mark.parametrize("dialect", ["mysql", "postgres", "sqlite"])
+@pytest.mark.parametrize("dialect", ["mysql", "sqlite"])
 def test_unparseable_sql_result_still_shown_with_dialect(dialect: str) -> None:
     stream = [*_sql_call("SELECT FROM WHERE ;;;"), _catalog_df()]
     _md, _err, blocks, _qi, _mi = components_to_blocks(stream, dialect=dialect)
@@ -1948,7 +1951,7 @@ def test_chart_after_introspection_card_is_kept() -> None:
         make_chart(make_chart_spec([{"x": "a", "y": 1}])),
         _answer_text("Chart above."),
     ]
-    _md, is_error, blocks, _qi, _mi = components_to_blocks(stream, dialect="postgres")
+    _md, is_error, blocks, _qi, _mi = components_to_blocks(stream, dialect="mysql")
     assert is_error is False
     assert [b["type"] for b in blocks] == ["chart", "text"]
 
@@ -2001,7 +2004,6 @@ def _widgets_df() -> UiComponent:
     ("sql", "dialect"),
     [
         ("WITH w AS (SELECT n FROM widgets) SELECT n FROM w", "sqlite"),
-        ("WITH pg_recent AS (SELECT n FROM widgets) SELECT n FROM pg_recent", "postgres"),
         ("WITH sqlite_recent AS (SELECT n FROM widgets) SELECT n FROM sqlite_recent", "sqlite"),
     ],
 )

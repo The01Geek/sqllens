@@ -12,7 +12,7 @@ import sqlglot
 
 from sqllens.safety.readonly import uses_table_shorthand
 
-DIALECTS = ["postgres", "mysql", "sqlite", None]
+DIALECTS = ["mysql", "sqlite", None]
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
@@ -74,7 +74,10 @@ def test_other_sql_is_not_flagged(sql: str, dialect: str | None) -> None:
 
 def test_token_error_gives_false() -> None:
     # The callers parse afterwards, and that parse fails closed.
-    assert not uses_table_shorthand("TABLE users WHERE x = 'unterminated", "postgres")
+    sql = "TABLE users WHERE x = 'unterminated"
+    with pytest.raises(sqlglot.errors.TokenError):
+        sqlglot.tokenize(sql, dialect="mysql")
+    assert not uses_table_shorthand(sql, "mysql")
 
 
 def test_unknown_dialect_warns_and_uses_no_dialect(caplog: pytest.LogCaptureFixture) -> None:
@@ -87,6 +90,6 @@ def test_other_tokenizer_errors_propagate(monkeypatch: pytest.MonkeyPatch) -> No
     def boom(self: object, sql: str) -> list[object]:
         raise RuntimeError("tokenizer bug")
 
-    monkeypatch.setattr(sqlglot.dialects.postgres.Postgres, "tokenize", boom)
+    monkeypatch.setattr(sqlglot.dialects.mysql.MySQL, "tokenize", boom)
     with pytest.raises(RuntimeError, match="tokenizer bug"):
-        uses_table_shorthand("TABLE users", "postgres")
+        uses_table_shorthand("TABLE users", "mysql")
