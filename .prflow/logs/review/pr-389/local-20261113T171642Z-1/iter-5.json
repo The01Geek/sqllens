@@ -1,0 +1,1278 @@
+{
+  "iter": 5,
+  "loop_role": "fix",
+  "dispatch_mode": "fanned-out",
+  "dispatch_disposition": null,
+  "fix_commit_sha": null,
+  "fix_decisions": [
+    {
+      "finding_id": "VC-133",
+      "decision": "pushed_back",
+      "source_file": "src/sqllens/cli.py",
+      "claim_text": "While a rule-set file is configured, sqllens verify-memory exits non-zero before running any case, with a message that it does not support rule sets yet.",
+      "skip_category": "uncategorized",
+      "evidence": "Remaining case is a configured rule-set file that fails validation: Config.load raises inside verify-memory, which exits 2 before any case with the validation error naming the record and problem (the behavior criteria 2 and 4 require of validate and serve). Replacing that with the 'does not support rule sets yet' text would hide the actionable error, and adding it beside the error needs a pre-validation read of the raw [rule_sets] key from TOML and env, a design choice the issue leaves open. Revisit if the issue author wants the unsupported message for invalid files too. The valid-file path conforms (cli.py rule-set check right after Config.load, tested)."
+    }
+  ],
+  "telemetry": "unavailable",
+  "phase3_failed_agents": [],
+  "diff_produced_at_head": "30f03e90e551ae70e13617df373c05a35f6eb4e9",
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "severity": "suggestion",
+      "agent": "prflow:comment-analyzer",
+      "description": "The comment above _PARSE_REFUSAL_MARKERS says test_safety_rule_sets pins every marker to its message, but no test exercises the 'could not resolve SQL dialect' or 'empty parse tree' markers; a reworded readonly.py message would silently stop redaction matching.",
+      "defect_signature": {
+        "file": "src/sqllens/safety/rule_sets.py",
+        "line_range": [
+          390,
+          391
+        ],
+        "kind": "comment_drift"
+      },
+      "corroboration_count": 1
+    },
+    {
+      "finding_id": "F-2",
+      "severity": "suggestion",
+      "agent": "prflow:comment-analyzer",
+      "description": "safety/__init__.py docstring (and whole_row.py:197, read-only-safety.md:17 and :207) says the whole-row guard sits directly beneath result masking; with a rule-set file RefusalRedactingRunner sits between them.",
+      "defect_signature": {
+        "file": "src/sqllens/safety/__init__.py",
+        "line_range": [
+          35,
+          36
+        ],
+        "kind": "comment_drift"
+      },
+      "corroboration_count": 1
+    },
+    {
+      "finding_id": "F-3",
+      "severity": "suggestion",
+      "agent": "prflow:silent-failure-hunter",
+      "description": "_check_rule_set_catalog reports every non-RuleSetCatalogError failure as an information_schema privilege problem, so a lost connection, timeout or programming error gets a misleading remedy (fails closed, cause chained).",
+      "defect_signature": {
+        "file": "src/sqllens/preflight.py",
+        "line_range": [
+          162,
+          174
+        ],
+        "kind": "other"
+      },
+      "corroboration_count": 1
+    }
+  ],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": true,
+    "test_relevant": true,
+    "detect_all_audit": false,
+    "checklist_skipped": null
+  },
+  "phase3_dispatched": [
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer"
+  ],
+  "expected_reviewers": [
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer"
+  ],
+  "cap_drops": {
+    "count": 0,
+    "by_category": {}
+  },
+  "checklist": [
+    {
+      "id": "VC-1",
+      "claim_signature": "api_contract:389.added.md:changelog-behavior-summary",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-12",
+      "claim_signature": "api_contract:factory.md:rule-set-wiring-summary",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-26",
+      "claim_signature": "api_contract:rule-sets.md:verify-memory-exit-code",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-27",
+      "claim_signature": "data_format_assumption:rule_sets.py:url-check-order",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-35",
+      "claim_signature": "dependency_interaction:rule_sets.py:select-from-arg-key:238",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "important"
+    },
+    {
+      "id": "VC-36",
+      "claim_signature": "dependency_interaction:rule_sets.py:scope-sources-tables:168",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "important"
+    },
+    {
+      "id": "VC-38",
+      "claim_signature": "dependency_interaction:rule_sets.py:hint-node-removal:224",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "important"
+    },
+    {
+      "id": "VC-62",
+      "claim_signature": "dependency_interaction:rule_sets.py:lateral-scope:168",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "important"
+    },
+    {
+      "id": "VC-96",
+      "claim_signature": "api_contract:rule_sets.py:table-shorthand-call:118",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-97",
+      "claim_signature": "api_contract:query_database.py:catalog-check-order:669",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-98",
+      "claim_signature": "test_mock_alignment:test_query_database_rule_sets.py:owner-meta-keys:43",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-99",
+      "claim_signature": "dependency_interaction:test_safety_rule_sets.py:mysql-output-pins:157",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "important"
+    },
+    {
+      "id": "VC-100",
+      "claim_signature": "dependency_interaction:test_safety_rule_sets.py:deep-nesting-refusal:251",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "id": "VC-101",
+      "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:tool-context-construct:326",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "suggestion"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-1",
+      "id": "VC-102",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-2",
+      "id": "VC-103",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-3",
+      "id": "VC-104",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-4",
+      "id": "VC-105",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-5",
+      "id": "VC-106",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-6",
+      "id": "VC-107",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-7",
+      "id": "VC-108",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-8",
+      "id": "VC-109",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-9",
+      "id": "VC-110",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-10",
+      "id": "VC-111",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-11",
+      "id": "VC-112",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-12",
+      "id": "VC-113",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-13",
+      "id": "VC-114",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-14",
+      "id": "VC-115",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-15",
+      "id": "VC-116",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-16",
+      "id": "VC-117",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-17",
+      "id": "VC-118",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-18",
+      "id": "VC-119",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-19",
+      "id": "VC-120",
+      "reused_from_iter_prev": false,
+      "verdict": "INCONCLUSIVE",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-20",
+      "id": "VC-121",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-21",
+      "id": "VC-122",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-22",
+      "id": "VC-123",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-23",
+      "id": "VC-124",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-24",
+      "id": "VC-125",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-25",
+      "id": "VC-126",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-26",
+      "id": "VC-127",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-27",
+      "id": "VC-128",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-28",
+      "id": "VC-129",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-29",
+      "id": "VC-130",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-30",
+      "id": "VC-131",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-31",
+      "id": "VC-132",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-32",
+      "id": "VC-133",
+      "reused_from_iter_prev": false,
+      "verdict": "FAIL",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-33",
+      "id": "VC-134",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-34",
+      "id": "VC-135",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-35",
+      "id": "VC-136",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "verification_mode": "agent",
+      "claim_signature": "issue-acceptance-36",
+      "id": "VC-137",
+      "reused_from_iter_prev": false,
+      "verdict": "PASS",
+      "severity": "critical"
+    },
+    {
+      "id": "VC-3",
+      "claim_signature": "data_format_assumption:sql_runner.py:sql-mode-flag-list",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-6",
+      "claim_signature": "dependency_interaction:cli.py:unconfirmed-warning-logging",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-15",
+      "claim_signature": "data_format_assumption:rule_sets.py:user-id-digit-regex",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-17",
+      "claim_signature": "data_format_assumption:rule_sets.py:catalog-multi-set-columns",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-24",
+      "claim_signature": "api_contract:rule-sets.md:records-strict-frozen",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-25",
+      "claim_signature": "api_contract:rule-sets.md:memory-writes-off",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-28",
+      "claim_signature": "api_contract:read-only-safety.md:rule-set-composition",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-32",
+      "claim_signature": "api_contract:factory.py:rule-set-user-group",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-33",
+      "claim_signature": "api_contract:preflight.md:probe-runs-no-query",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-37",
+      "claim_signature": "dependency_interaction:rule_sets.py:parenthesized-join-shape",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-46",
+      "claim_signature": "dependency_interaction:rule_sets.py:generate-unsupported-raise",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-72",
+      "claim_signature": "api_contract:query_database.py:stripped-metadata-key-count",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-73",
+      "claim_signature": "test_mock_alignment:test_factory_wiring.py:private-attribute-names",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-74",
+      "claim_signature": "api_contract:test_factory_wiring.py:rule-set-user-id-format",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-75",
+      "claim_signature": "test_mock_alignment:test_rule_sets_mysql.py:fixture-expected-rows",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-88",
+      "claim_signature": "test_mock_alignment:test_query_database_rule_sets.py:catalog-check-patch-target",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-90",
+      "claim_signature": "test_mock_alignment:test_query_database_rule_sets.py:resolver-store-signatures",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-91",
+      "claim_signature": "api_contract:test_rule_set_selection.py:selection-fields-user-key",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-92",
+      "claim_signature": "api_contract:test_rule_set_file.py:loaded-rule-sets-attrs",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-93",
+      "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:whole-row-patch-target",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-94",
+      "claim_signature": "api_contract:test_safety_rule_sets.py:runner-constructors",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-95",
+      "claim_signature": "api_contract:test_safety_rule_sets.py:selection-contextvar-token",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 4
+    },
+    {
+      "id": "VC-4",
+      "claim_signature": "api_contract:cli.py:verify-memory-check-order",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-5",
+      "claim_signature": "dependency_interaction:rule_sets.py:connect-kwargs-port-error",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-8",
+      "claim_signature": "dependency_interaction:rule_sets.py:lock-created-at-load",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-9",
+      "claim_signature": "dependency_interaction:rule_sets.py:run-blocking-sql-call",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-10",
+      "claim_signature": "data_format_assumption:rule_sets.py:toml-strict-types",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-11",
+      "claim_signature": "dependency_interaction:rule_sets.py:validation-error-format",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-13",
+      "claim_signature": "data_format_assumption:rule_sets.py:row-rule-detection",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-16",
+      "claim_signature": "api_contract:config.py:rule-set-load-error-exit",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-19",
+      "claim_signature": "data_format_assumption:config.py:rule-set-file-relative-path",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-20",
+      "claim_signature": "data_format_assumption:rule_sets.py:information-schema-rows",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-23",
+      "claim_signature": "issue_acceptance:rule_sets.py:catalog-case-mismatch",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-30",
+      "claim_signature": "api_contract:preflight.md:invalid-url-fixed-text",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-31",
+      "claim_signature": "api_contract:preflight.py:confirmed-shared-object",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-34",
+      "claim_signature": "dependency_interaction:rule_sets.py:from-dual-shape:148",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-39",
+      "claim_signature": "dependency_interaction:rule_sets.py:parse-statements-contract:108",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-40",
+      "claim_signature": "dependency_interaction:rule_sets.py:denylist-call:352",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-44",
+      "claim_signature": "api_contract:rule_sets.py:relation-executor-check:331",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-45",
+      "claim_signature": "api_contract:rule_sets.py:require-base-tables-forward:453",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-47",
+      "claim_signature": "data_format_assumption:rule_sets.py:parse-refusal-markers:392",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-48",
+      "claim_signature": "data_format_assumption:rule_sets.py:rls-message-markers:413",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-49",
+      "claim_signature": "dependency_interaction:rule_sets.py:redacted-exception-build:462",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-50",
+      "claim_signature": "absolute_claim:rule_sets.py:logged-by-guard-causes",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-52",
+      "claim_signature": "absolute_claim:rule_sets.py:model-text-never-reaches",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-55",
+      "claim_signature": "absolute_claim:rule_sets.py:redaction-every-refusal",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-59",
+      "claim_signature": "api_contract:rule_sets.py:rls-inside-derived",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-60",
+      "claim_signature": "api_contract:rule_sets.py:tables-for-contract:347",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-65",
+      "claim_signature": "test_mock_alignment:test_rule_sets_mysql.py:refused-exception-types:413",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-68",
+      "claim_signature": "data_format_assumption:_rule_set_fixtures.py:toml-serializer:81",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-69",
+      "claim_signature": "dependency_interaction:test_cli_rule_sets.py:clirunner-stderr",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-70",
+      "claim_signature": "test_mock_alignment:test_cli_rule_sets.py:expected-error-texts:67",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-71",
+      "claim_signature": "test_mock_alignment:test_cli_rule_sets.py:patch-targets",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-76",
+      "claim_signature": "test_mock_alignment:test_rule_set_file.py:catalog-cursor-fake:332",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-77",
+      "claim_signature": "test_mock_alignment:test_rule_set_file.py:preflight-pymysql-connect:429",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-78",
+      "claim_signature": "data_format_assumption:test_rule_set_file.py:error-location-format:243",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-80",
+      "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:mysql-runner-fake-conn:629",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-81",
+      "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:setup-statements-log:676",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-82",
+      "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:redaction-error-texts:487",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-83",
+      "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:relation-parse-error-logged:595",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-84",
+      "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:whole-row-unexpected-log:575",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-85",
+      "claim_signature": "dependency_interaction:test_safety_rule_sets.py:guard-step-names:376",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-86",
+      "claim_signature": "dependency_interaction:test_safety_rule_sets.py:relation-check-executor:443",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-87",
+      "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:rls-runner-signature:455",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-89",
+      "claim_signature": "api_contract:test_rule_set_selection.py:account-decimal-text:98",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 3
+    },
+    {
+      "id": "VC-7",
+      "claim_signature": "dependency_interaction:config.py:private-attr-forward-ref",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 2
+    },
+    {
+      "id": "VC-41",
+      "claim_signature": "api_contract:query_database.py:selection-token-reset",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 2
+    },
+    {
+      "id": "VC-42",
+      "claim_signature": "test_mock_alignment:test_rule_sets_mysql.py:unknown-column-error-propagates",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 2
+    },
+    {
+      "id": "VC-43",
+      "claim_signature": "test_mock_alignment:test_rule_sets_mysql.py:stored-function-rlserror",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 2
+    },
+    {
+      "id": "VC-2",
+      "claim_signature": "dependency_interaction:config.py:private-loaded-survives-copy",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-14",
+      "claim_signature": "dependency_interaction:sql_runner.py:session-sql-mode-reset",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-18",
+      "claim_signature": "api_contract:conversation_store.py:owner-id-no-recency",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-21",
+      "claim_signature": "issue_acceptance:preflight.py:catalog-preflight-exit",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "important",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-22",
+      "claim_signature": "api_contract:preflight.py:invalid-url-message",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-29",
+      "claim_signature": "issue_acceptance:default.py:prompt-rule-set-rules",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-51",
+      "claim_signature": "api_contract:__init__.py:protection-count",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-53",
+      "claim_signature": "dependency_interaction:query_database.py:conversation-owner-lookup",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-54",
+      "claim_signature": "api_contract:query_database.py:select-rule-set-errors",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-56",
+      "claim_signature": "api_contract:query_database.py:owner-check-fail-closed",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-57",
+      "claim_signature": "test_mock_alignment:test_rule_sets_mysql.py:mysqlrunner-kwargs:145",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-58",
+      "claim_signature": "test_mock_alignment:test_rule_sets_mysql.py:chain-matches-factory:169",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-61",
+      "claim_signature": "data_format_assumption:_rule_set_fixtures.py:full-source-fields:36",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-63",
+      "claim_signature": "test_mock_alignment:test_query_database_rule_sets.py:agent-stub-send-message:64",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-64",
+      "claim_signature": "absolute_claim:test_query_database_rule_sets.py:ownership-is-real:7",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-66",
+      "claim_signature": "test_mock_alignment:test_query_database_rule_sets.py:request-metadata-shape:149",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-67",
+      "claim_signature": "dependency_interaction:test_query_database_rule_sets.py:conversation-queues:48",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    },
+    {
+      "id": "VC-79",
+      "claim_signature": "test_mock_alignment:test_system_prompt.py:prompt-builder-rule-sets:713",
+      "verification_mode": "agent",
+      "reused_from_iter_prev": true,
+      "verdict": "PASS",
+      "severity": "suggestion",
+      "reused_from_iter": 1
+    }
+  ],
+  "fix_files": [],
+  "synthesized": false
+}
