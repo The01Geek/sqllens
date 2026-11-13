@@ -191,7 +191,8 @@ def _verify_relations(cursor: Any, relations: list[exp.Table], dialect: str) -> 
 def _refuse_database_routines(cursor: Any, names: list[str]) -> None:
     """Refuse a call whose name matches a MySQL stored function.
 
-    Checks stored functions in ``information_schema.ROUTINES``. Matching is by
+    MySQL only: the caller runs it only under dialect ``mysql``. Checks stored
+    functions in ``information_schema.ROUTINES``. Matching is by
     name alone across schemas, so a built-in call is refused too when such a
     routine shares its name.
     """

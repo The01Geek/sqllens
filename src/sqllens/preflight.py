@@ -87,8 +87,8 @@ def _probe_sqlite(url: str, *, read_only: bool) -> None:
 def probe_database(cfg: Config) -> None:
     """Open and immediately close a connection to the configured database.
 
-    Runs no SQL of its own against MySQL (the driver's connect still sets the
-    character set) — a query would burn round-trips and
+    Runs no SQL of its own against MySQL (the driver's connect still sends its
+    own session setup statements) — a query would burn round-trips and
     could trigger permission checks unrelated to reachability. A read-only
     SQLite probe does read the schema header (``PRAGMA schema_version``) so a
     directory or a non-empty non-database file fails here. For MySQL the connect

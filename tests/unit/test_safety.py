@@ -1043,9 +1043,12 @@ class TestAdditionalSideEffectFunctions:
 
     @pytest.mark.parametrize(("sql", "dialect", "function"), [
         ("SELECT GET_LOCK('a', 1)", "mysql", "get_lock"),
+        ("SELECT shop.GET_LOCK('a', 1)", "mysql", "get_lock"),
+        ("SELECT `shop`.`SLEEP`(1)", "mysql", "sleep"),
+        ("SELECT shop.sleep(1)", None, "sleep"),
     ])
     def test_qualified_and_uppercase_calls_refused(
-        self, sql: str, dialect: str, function: str,
+        self, sql: str, dialect: str | None, function: str,
     ) -> None:
         with pytest.raises(UnsafeSqlError, match=f"function '{function}' is not allowed"):
             assert_select_only(sql, dialect=dialect)

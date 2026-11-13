@@ -67,7 +67,7 @@ async def test_mysql_runner_preserves_primary_when_close_raises(
     ``execute()`` error must still reach the caller.
     """
     cursor = MagicMock()
-    cursor.execute.side_effect = _PrimaryError("max_statement_time exceeded")
+    cursor.execute.side_effect = _PrimaryError("MAX_EXECUTION_TIME exceeded")
     cursor.close.side_effect = _SecondaryCloseError("cursor close failed")
 
     conn = MagicMock()
@@ -85,7 +85,7 @@ async def test_mysql_runner_preserves_primary_when_close_raises(
         host="h", database="d", user="u", password="p", read_only=False
     )
 
-    with pytest.raises(_PrimaryError, match="max_statement_time"):
+    with pytest.raises(_PrimaryError, match="MAX_EXECUTION_TIME"):
         await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
 
     conn.close.assert_called_once()
