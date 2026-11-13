@@ -11,7 +11,7 @@ cfg.llm         →  AnthropicLlmService
 cfg.database    →  build_sql_runner(url,
                                     statement_timeout_ms,
                                     max_rows,
-                                    read_only)       →  Sqlite/Postgres/MySQLRunner
+                                    read_only)       →  Sqlite/MySQLRunner
                                                           ↓
                                                         RowCapRunner (max_rows belt-and-suspenders)
                                                           ↓ (if cfg.database.read_only)
@@ -167,14 +167,13 @@ Dialect picked from the URL scheme prefix:
 | Scheme | Runner | Notes |
 |---|---|---|
 | `sqlite://` | `SqliteRunner` | Path from `sqlite_path_from_url` (SQLAlchemy `make_url` rules): three slashes = relative path (`sqlite:///rel.db` → `rel.db`, resolved against the working directory), four slashes = absolute path (`sqlite:////abs/path.db` → `/abs/path.db`), `sqlite:///C:/x.db` → `C:/x.db`; `sqlite://`, `sqlite:///`, `sqlite://:memory:`, `sqlite:///:memory:` → `:memory:`. Raises `ValueError` for a URL with query parameters, a host, user, password or port. |
-| `postgres://`, `postgresql://`, `postgresql+psycopg2://`, … | `PostgresRunner` | SQLAlchemy-style schemes are normalized to `postgresql://` for psycopg2. |
-| `mysql://` | `MySQLRunner` | Parsed with `urlparse`; requires user, host, and database name. `urllib.parse.unquote` is applied to the username and password so percent-encoded characters (e.g. `%2F` → `/`) are decoded before being passed to pymysql — matching the behaviour of SQLAlchemy's `make_url`. |
+| any scheme starting with `mysql` (`mysql://`, `mysql+pymysql://`, …) | `MySQLRunner` | Parsed with `urlparse`; requires user, host, and database name. `urllib.parse.unquote` is applied to the username and password so percent-encoded characters (e.g. `%2F` → `/`) are decoded before being passed to pymysql — matching the behaviour of SQLAlchemy's `make_url`. |
 
-Unsupported schemes raise `ValueError` — the calling CLI layer turns that into a "Config error: …" exit 2.
+Any other scheme raises `ValueError` (`unsupported database scheme: … (expected sqlite/mysql)`). Config loading already refuses every scheme other than `mysql`, `mysql+<driver>` and `sqlite…` (the `DatabaseConfig.url` validator; see [setup/config-loading.md](../setup/config-loading.md)), so only a programmatic caller that bypasses validation, or a `mysqlx://` URL passed straight to `build_sql_runner`, reaches this branch with an unexpected scheme.
 
-`statement_timeout_ms`, `max_rows`, and `read_only` are threaded as keyword arguments into every runner. `read_only` (default `True`) causes each connector to enforce read-only at the driver/session layer before any user SQL runs — SQLite via the `mode=ro` URI plus `PRAGMA query_only=ON`, Postgres via psycopg2's `conn.set_session(readonly=True)`, MySQL via `SET SESSION TRANSACTION READ ONLY`. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full story. Callers outside `build_agent` (programmatic embedders, tests) can pass any of these keywords; defaults match `DatabaseConfig` (`30_000` ms timeout, `10_000` rows, `read_only=True`).
+`statement_timeout_ms`, `max_rows`, and `read_only` are threaded as keyword arguments into every runner. `read_only` (default `True`) causes each connector to enforce read-only at the driver/session layer before any user SQL runs — SQLite via the `mode=ro` URI plus `PRAGMA query_only=ON`, MySQL via `SET SESSION TRANSACTION READ ONLY`. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md) for the full story. Callers outside `build_agent` (programmatic embedders, tests) can pass any of these keywords; defaults match `DatabaseConfig` (`30_000` ms timeout, `10_000` rows, `read_only=True`).
 
-`sqlglot_dialect_for_url(url)` (in `sqllens.safety`) maps the same scheme to a sqlglot dialect name (`"sqlite"`, `"postgres"`, `"mysql"`) that `build_agent` hands to the read-only guard, the RLS guard, `RunSqlTool` (which classifies each statement as read-shaped or not with it) and the agent's `DefaultSystemPromptBuilder` (which names the engine in a `Database:` section and shows only its catalog in the introspection example; an unrecognized scheme maps to `None` and keeps the engine-neutral prompt); `query_database` passes the same dialect to the formatter, which uses it for the introspection classifier and for `query_info["query_type"]`. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md).
+`sqlglot_dialect_for_url(url)` (in `sqllens.safety`) maps the same scheme to a sqlglot dialect name (`"sqlite"`, `"mysql"`) that `build_agent` hands to the read-only guard, the RLS guard, `RunSqlTool` (which classifies each statement as read-shaped or not with it) and the agent's `DefaultSystemPromptBuilder` (which names the engine in a `Database:` section and shows only its catalog in the introspection example; an unrecognized scheme maps to `None` and keeps the engine-neutral prompt); `query_database` passes the same dialect to the formatter, which uses it for the introspection classifier and for `query_info["query_type"]`. See [database-connectors/read-only-safety.md](../database-connectors/read-only-safety.md).
 
 ## The user resolver is intentionally static
 

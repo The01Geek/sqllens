@@ -43,7 +43,7 @@ port = 8765
 `sqllens init` writes a starter `sqllens.toml`. Every field can be overridden by environment variables — nested fields use double-underscore:
 
 ```bash
-export SQLLENS_DATABASE__URL="postgresql://user:pw@host/db"
+export SQLLENS_DATABASE__URL="mysql+pymysql://user:pw@host:3306/db"
 export SQLLENS_LLM__API_KEY="sk-ant-..."
 export SQLLENS_AUTH__MODE="bearer"
 export SQLLENS_AUTH__BEARER_TOKEN="abc-123"
@@ -55,9 +55,10 @@ Env vars beat TOML — the convention containerized deploys expect.
 
 | Dialect | Example |
 |---|---|
+| MySQL 8.0+ | `mysql+pymysql://user:pw@host:3306/dbname` (or `mysql://...`) |
 | SQLite | `sqlite:///./demo.db` |
-| Postgres | `postgresql://user:pw@host:5432/dbname` |
-| MySQL | `mysql+pymysql://user:pw@host:3306/dbname` |
+
+Any other URL scheme fails every `sqllens` command that loads the config, `validate` and `serve` included.
 
 ### Auth modes
 

@@ -71,16 +71,15 @@ Expected answer: 2 albums.
 Re-run the installer with the new DSN:
 
 ```powershell
-sqllens claude-desktop install --db "postgresql://user:pw@host:5432/dbname" --name analytics
+sqllens claude-desktop install --db "mysql+pymysql://user:pw@host:3306/dbname" --name analytics
 ```
 
 This regenerates `sqllens.toml`, regenerates the `.cmd`, and replaces the `mcpServers["analytics"]` entry. Re-running with the same `--name` overwrites that one entry in place; a different `--name` adds a new sibling server alongside the existing one. Then quit + relaunch Claude Desktop. Keep the default `--read-only` unless you specifically need writes.
 
 | Dialect | URL form |
 |---|---|
+| MySQL 8.0+ | `mysql+pymysql://user:pw@host:3306/dbname` |
 | SQLite | `sqlite:///C:/path/to/file.db` (forward slashes) |
-| Postgres | `postgresql://user:pw@host:5432/dbname` |
-| MySQL | `mysql+pymysql://user:pw@host:3306/dbname` |
 
 ## Troubleshooting
 
