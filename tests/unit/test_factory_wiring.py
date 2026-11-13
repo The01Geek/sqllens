@@ -674,6 +674,7 @@ def test_rule_sets_drop_both_save_tools_even_when_enabled(tmp_path: Path) -> Non
     assert "save_question_tool_args" not in agent.tool_registry._tools
     assert "save_text_memory" not in agent.tool_registry._tools
     assert "search_saved_correct_tool_uses" in agent.tool_registry._tools
+    assert agent.agent_memory._track_usage is False
 
 
 def test_runner_chain_with_rule_sets(tmp_path: Path) -> None:

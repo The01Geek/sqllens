@@ -93,7 +93,7 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     ``sqllens verify-memory`` builds its agent this way.
     Save-tool registration composes with any per-tool config gate
     as a logical AND. While a rule-set file is configured
-    (``cfg.rule_sets.loaded``), neither save tool is registered.
+    (``cfg.rule_sets.loaded``), it behaves as ``allow_memory_writes=False``.
     """
     # Every CLI-launched transport already exits 2 in ``cli.serve`` before reaching
     # here. This guard catches the residual bypass paths — programmatic embedders
@@ -146,6 +146,11 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
         unmasked_columns=cfg.result_masking.unmasked_columns,
         unmasked_words=cfg.result_masking.unmasked_words,
     )
+    # While a rule-set file is configured the agent writes no memory (no save
+    # tools, no retrieval counter or timestamp updates), whatever
+    # memory.save_queries and memory.save_text_memories say: memory is shared
+    # by every rule set.
+    allow_memory_writes = allow_memory_writes and rule_sets is None
     memory = ChromaAgentMemory(
         persist_directory=str(cfg.memory.persist_dir),
         collection_name=cfg.memory.collection,
@@ -183,10 +188,6 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
     # memory. Gated by memory.save_queries (OFF by default); the default system
     # prompt switches its save instructions on the tool's presence, so dropping
     # the registration cleanly drops the prompt guidance too.
-    # While a rule-set file is configured the agent writes no memory, whatever
-    # memory.save_queries and memory.save_text_memories say: memory is shared
-    # by every rule set.
-    allow_memory_writes = allow_memory_writes and rule_sets is None
     if cfg.memory.save_queries and allow_memory_writes:
         tools.register_local_tool(SaveQuestionToolArgsTool(), access_groups=access)
     tools.register_local_tool(
