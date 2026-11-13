@@ -9,7 +9,7 @@ These tests pin the two contracts the issue #39 refactor established:
   any out-of-tree caller that mounts it under FastAPI/Starlette gets a
   working session manager without having to wire lifespan themselves.
 - ``_build_asgi_app_bare`` returns the underlying app without the lifespan
-  adapter, plus the ``FastMCP`` handle, for callers (or future tests) that
+  adapter, plus the ``MCPServer`` handle, for callers (or future tests) that
   want manual control.
 
 The lifespan-startup happy path is exercised by the integration suite
@@ -136,7 +136,7 @@ def test_build_asgi_app_raises_runtimeerror_when_session_manager_missing(
 
 
 class _FakeSessionManager:
-    """Stand-in for FastMCP's session manager.
+    """Stand-in for MCPServer's session manager.
 
     ``run()`` returns an async context manager whose ``__aexit__`` raises
     ``shutdown_exc`` if set. ``__aenter__`` raises ``startup_exc`` if set.
@@ -601,7 +601,7 @@ def test_lifespan_post_shutdown_shutdown_is_idempotent() -> None:
     Latent reuse bug: before issue #60's hardening, ``_cm`` still referenced
     the already-exited context manager after shutdown, so a second shutdown
     would call ``__aexit__`` again. Double-exit is per-CM-specific and
-    FastMCP's session manager expects an exactly-once enter/exit pair;
+    MCPServer's session manager expects an exactly-once enter/exit pair;
     tracking ``aexit_calls`` pins that the adapter exits exactly once
     across two shutdown scopes and still acknowledges the second one
     cleanly.
@@ -1194,7 +1194,7 @@ def test_readyz_returns_200_after_warmup() -> None:
 
 def test_readyz_short_circuits_before_inner_no_auth_needed() -> None:
     """``/readyz`` is answered by ``_PathNormalizer`` itself — its inner
-    layer (``_AuthMiddleware`` then FastMCP) is never reached, so no
+    layer (``_AuthMiddleware`` then MCPServer) is never reached, so no
     ``Authorization`` header is required. (``TrustedHostMiddleware`` now
     fronts ``_PathNormalizer`` in the real stack, so a disallowed ``Host``
     is still rejected upstream of this short-circuit; this test exercises

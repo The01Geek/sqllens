@@ -25,31 +25,31 @@ The lazy import matters: stdio is the common case for IDE installations (Claude 
 
 ## stdio mode
 
-The FastMCP library handles everything — framing, request/response cycle, lifecycle. Auth is not applicable (the parent process owns the pipe), so `_AuthMiddleware` is not in the picture. If you set `auth.mode = "bearer"` and `transport = "stdio"`, the auth config is silently unused.
+The MCP SDK's `MCPServer` (mcp 2.x, `mcp.server.mcpserver`) handles everything — framing, request/response cycle, lifecycle. Auth is not applicable (the parent process owns the pipe), so `_AuthMiddleware` is not in the picture. If you set `auth.mode = "bearer"` and `transport = "stdio"`, the auth config is silently unused.
 
 ### stdout is the JSON-RPC channel — operator messages go to stderr
 
-Under stdio transport, FastMCP reads/writes JSON-RPC frames on the same stdout the CLI inherits from its parent. Anything else written to stdout — a Rich-rendered `Config error: …` line, a Python traceback, a stray `print` — is interleaved into the protocol stream and surfaces on the client side as a parse error.
+Under stdio transport, MCPServer reads/writes JSON-RPC frames on the same stdout the CLI inherits from its parent. Anything else written to stdout — a Rich-rendered `Config error: …` line, a Python traceback, a stray `print` — is interleaved into the protocol stream and surfaces on the client side as a parse error.
 
-The CLI defends against this by routing every operator-facing error through a dedicated `err_console = Console(stderr=True)` defined at module scope in [src/sqllens/cli.py](../../../src/sqllens/cli.py). All error paths that fire *before* `run(cfg)` — i.e. before FastMCP has taken over stdout — use `err_console`:
+The CLI defends against this by routing every operator-facing error through a dedicated `err_console = Console(stderr=True)` defined at module scope in [src/sqllens/cli.py](../../../src/sqllens/cli.py). All error paths that fire *before* `run(cfg)` — i.e. before MCPServer has taken over stdout — use `err_console`:
 
 - `sqllens init` "already exists" failure.
 - `sqllens serve` `Config.load` exception and the `cfg.llm.api_key is None` precondition failure (both labelled `Config error:`), the non-loopback/insecure refusal (labelled `Refusing to start:`), the `SQLLENS_AUTH__INSECURE=1` and `--no-preflight` warnings, and the `Preflight failed:` error.
 - `sqllens validate` `Config.load` exception and the non-loopback/insecure refusal (both labelled `Invalid:`), plus any `Preflight failed:` from a `--check-*` probe.
 - `sqllens claude-desktop install` `InstallError` (labelled `Error:`) and the unexpected-exception framing (labelled `Unexpected error:` with a "file an issue" line).
 
-Success/data output stays on stdout — `sqllens version`, `Wrote <path>` from `init`, `Config OK` + the validate summary, and the installer's `format_install_result` table. None of those belong to `serve`: the commands that write them (`init`, `validate`, `version`, `claude-desktop install`) never start FastMCP, so their stdout writes can't collide with the JSON-RPC frame stream. `serve` itself emits *no* success output to stdout — every operator message before `run(cfg)` goes to `err_console`, and once `run(cfg)` is reached FastMCP owns stdout.
+Success/data output stays on stdout — `sqllens version`, `Wrote <path>` from `init`, `Config OK` + the validate summary, and the installer's `format_install_result` table. None of those belong to `serve`: the commands that write them (`init`, `validate`, `version`, `claude-desktop install`) never start MCPServer, so their stdout writes can't collide with the JSON-RPC frame stream. `serve` itself emits *no* success output to stdout — every operator message before `run(cfg)` goes to `err_console`, and once `run(cfg)` is reached MCPServer owns stdout.
 
 Tests pin the contract from both sides: the expected error substring lands on stderr **and** stdout is asserted to be empty for the same invocation (`tests/unit/test_cli.py::test_config_load_failure_goes_to_stderr`, `test_init_already_exists_error_goes_to_stderr`; matching stderr-side assertions in `tests/unit/test_cli_claude_desktop.py` and `tests/unit/test_config_smoke.py`). When adding a new operator-error site in `cli.py`, use `err_console.print(...)` rather than `console.print(...)`.
 
 ## HTTP mode — the middleware stack
 
-`build_asgi_app(cfg)` in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py) builds the full stack around FastMCP's Streamable HTTP app and returns the **mount-ready** ASGI app:
+`build_asgi_app(cfg)` in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py) builds the full stack around MCPServer's Streamable HTTP app and returns the **mount-ready** ASGI app:
 
 ```
 ASGI host (uvicorn, FastAPI mount, Starlette, …)
   ↓
-_SessionManagerLifespan   — starts/stops FastMCP's session manager via ASGI
+_SessionManagerLifespan   — starts/stops MCPServer's session manager via ASGI
                              lifespan; also runs the best-effort eager-agent
                              warmup hook (readiness latches after the attempt)
   ↓
@@ -67,7 +67,7 @@ _PathNormalizer            — fixes "/" and "/mcp/" path mismatches; serves
   ↓
 _AuthMiddleware            — runs the configured Authenticator
   ↓
-mcp.streamable_http_app()  — FastMCP's Streamable HTTP handler
+mcp.streamable_http_app()  — MCPServer's Streamable HTTP handler
 ```
 
 `run(cfg)` is a thin uvicorn launcher that delegates to `build_asgi_app(cfg)` — there is no longer a duplicated middleware-stack assembly in `run`.
@@ -77,13 +77,13 @@ mcp.streamable_http_app()  — FastMCP's Streamable HTTP handler
 ### `build_asgi_app` vs `_build_asgi_app_bare`
 
 - `build_asgi_app(cfg) -> ASGIApp` is the **only** supported public entry point. The returned app includes the lifespan adapter, so callers mounting it under FastAPI/Starlette/uvicorn get a working session manager without having to wire lifespan themselves. It also wires the best-effort eager-agent warmup hook into the adapter (see *Eager agent warmup* below), so the agent cold-start is paid at server boot for any host that drives lifespan.
-- `_build_asgi_app_bare(cfg, readiness) -> tuple[ASGIApp, FastMCP]` is a private helper that returns the path-normalized + host-validated + authenticated app **without** the lifespan adapter, plus the underlying `FastMCP` instance. It takes the shared `_Readiness` holder so `_PathNormalizer` can answer `/readyz`. It exists for two reasons: (1) so `build_asgi_app` itself can wrap the bare app with the lifespan adapter at a single, guarded SDK-access site, and (2) so the unit suite can assert the inner stack composition without bringing up a session manager. Out-of-tree code should not depend on it.
+- `_build_asgi_app_bare(cfg, readiness) -> tuple[ASGIApp, MCPServer]` is a private helper that returns the path-normalized + host-validated + authenticated app **without** the lifespan adapter, plus the underlying `MCPServer` instance. It takes the shared `_Readiness` holder so `_PathNormalizer` can answer `/readyz`. It exists for two reasons: (1) so `build_asgi_app` itself can wrap the bare app with the lifespan adapter at a single, guarded SDK-access site, and (2) so the unit suite can assert the inner stack composition without bringing up a session manager. Out-of-tree code should not depend on it.
 
 The integration test fixture (`tests/integration/conftest.py`) calls `build_asgi_app(cfg)` directly and hands the result to a real `uvicorn.Server` with `lifespan="on"` — there is no longer a hand-rolled `_AuthMiddleware` + `_PathNormalizer` + `_SessionManagerLifespan` stack in the fixture.
 
 ## Footgun 1: trailing slash
 
-FastMCP registers its endpoint at the **bare** path `/mcp`. Every MCP client we care about (Cursor, Claude Desktop, MCP Inspector) configures URLs ending in `/mcp/` (with trailing slash). Without intervention, `POST /mcp/` would 404.
+MCPServer registers its endpoint at the **bare** path `/mcp`. Every MCP client we care about (Cursor, Claude Desktop, MCP Inspector) configures URLs ending in `/mcp/` (with trailing slash). Without intervention, `POST /mcp/` would 404.
 
 `_PathNormalizer` (in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py)) bridges the gap:
 
@@ -94,7 +94,7 @@ FastMCP registers its endpoint at the **bare** path `/mcp`. Every MCP client we 
 | `/mcp` | Pass through unchanged. |
 | `/healthz` | **Short-circuit**: emit a 200 liveness JSON and return, *before* `_AuthMiddleware` (no `Authorization` required) but *after* `TrustedHostMiddleware` (a disallowed `Host` is rejected upstream — issue #186 S-13). See "Liveness probe" below. |
 | `/readyz` | **Short-circuit**: emit a 200/503 readiness JSON and return, with the same pre-auth / post-host-check ordering as `/healthz`. See "Readiness probe" below. |
-| Anything else | Pass through to `_AuthMiddleware`; FastMCP will 404 if the path is unrecognized. `TrustedHostMiddleware` has already validated `Host` upstream. |
+| Anything else | Pass through to `_AuthMiddleware`; MCPServer will 404 if the path is unrecognized. `TrustedHostMiddleware` has already validated `Host` upstream. |
 
 See the `build_asgi_app` docstring in [src/sqllens/transport/http.py](../../../src/sqllens/transport/http.py) for why this uses middleware instead of a Starlette `Mount`.
 
@@ -118,7 +118,7 @@ Two properties are deliberate and pinned by tests:
   - **Cancellation limit.** Cancelling the caller drops a call that is still waiting for a slot, but not one that has started: its thread and connection stay busy until the driver returns. `database.statement_timeout_ms` ends a started query early only where the runner applies it, and `0` disables it everywhere. MySQL's `MAX_EXECUTION_TIME` covers only `SELECT`, so a write with `read_only = false` is not bounded. SQLite's progress-handler deadline covers statement execution and fetching, but not the connect or a wait on a database lock, which `sqlite3`'s default 5-second busy timeout bounds instead. When a started query finishes after its caller was cancelled, a log line records it: `INFO` if it succeeded, since a write may have been committed, or `WARNING` with the exception type if it failed. Neither line carries the SQL, the data or the exception message.
   - **Process exit.** The executor's threads are not daemon threads, and Python joins them at interpreter exit. A query still running at shutdown therefore delays process exit until it returns or its statement timeout fires, or until a container's stop grace period ends and the process is killed. This is accepted in exchange for using the standard executor rather than a custom pool.
 - **Vector memory.** `ChromaAgentMemory` already runs its ChromaDB calls on its own two-thread executor (see [agent/memory.md](../agent/memory.md)).
-- **Memory store calls (issue #303).** The tools registered by `memory.allow_admin_tools` and `memory.allow_import` reach the store through synchronous `MemoryStore` reads and deletes. They await those calls through `run_memory_call` ([src/sqllens/memory/store.py](../../../src/sqllens/memory/store.py)), which runs them on a process-wide `ThreadPoolExecutor` with **one** thread named `sqllens-memory_*`. The six tools other than `add_memories` and `import_memory` pass their whole synchronous `memory.admin` function, so every page fetch of a listing and the `last_skipped_rows` read after an export's `iter_all` happen in one call. `import_bundle` (used by `add_memories`, `import_memory` and the CLI `import-memory`) passes its optional clear plus the de-duplication read as one call; its per-entry writes stay on `ChromaAgentMemory`'s executor. The handlers' own input checks (FastMCP's argument validation, the memory-type and export-format checks, `add_memories`' per-item validation), bundle parsing, the per-item de-duplication check and the final `json.dumps` stay on the loop. Checks inside a `memory.admin` function move with it: `list_memories`' own `limit` range check runs on the worker thread. One thread, rather than `asyncio.to_thread` or `ChromaAgentMemory`'s two-thread executor, keeps these calls from running at the same time as each other, as running them all on the loop did: each `MemoryStore` instance's `last_skipped_rows` is shared by every caller of that instance.
+- **Memory store calls (issue #303).** The tools registered by `memory.allow_admin_tools` and `memory.allow_import` reach the store through synchronous `MemoryStore` reads and deletes. They await those calls through `run_memory_call` ([src/sqllens/memory/store.py](../../../src/sqllens/memory/store.py)), which runs them on a process-wide `ThreadPoolExecutor` with **one** thread named `sqllens-memory_*`. The six tools other than `add_memories` and `import_memory` pass their whole synchronous `memory.admin` function, so every page fetch of a listing and the `last_skipped_rows` read after an export's `iter_all` happen in one call. `import_bundle` (used by `add_memories`, `import_memory` and the CLI `import-memory`) passes its optional clear plus the de-duplication read as one call; its per-entry writes stay on `ChromaAgentMemory`'s executor. The handlers' own input checks (MCPServer's argument validation, the memory-type and export-format checks, `add_memories`' per-item validation), bundle parsing, the per-item de-duplication check and the final `json.dumps` stay on the loop. Checks inside a `memory.admin` function move with it: `list_memories`' own `limit` range check runs on the worker thread. One thread, rather than `asyncio.to_thread` or `ChromaAgentMemory`'s two-thread executor, keeps these calls from running at the same time as each other, as running them all on the loop did: each `MemoryStore` instance's `last_skipped_rows` is shared by every caller of that instance.
   - **Cancellation.** A call cancelled while it waits in the queue usually never runs. asyncio cancels the executor future one loop tick after the caller is cancelled, so if the worker picks the call up within that tick, it still runs, and is handled like a started call. A call that has started runs to completion, and calls submitted after it wait behind it, even though the `asyncio.Lock`s the handlers hold (`admin_write_lock`, `import_lock`) are released as soon as the cancelled task unwinds. Because the handler has already unwound, its own error logging does not see the outcome; `run_memory_call` logs it instead, at `INFO` naming the store function if the call succeeded, since a delete or clear may have taken effect, or at `WARNING` with the exception and its traceback if it failed.
   - **Trade-offs.** A store call that hangs now stalls later memory tool calls instead of the whole server. Because the loop keeps running during a listing, writes submitted meanwhile can start mid-listing, so `list_memories` fails with its retryable "changed during listing" error more often under concurrent imports; it still never returns a partial result. The thread is not a daemon thread, so a store call still running at shutdown, including a CLI `import-memory` interrupted during its baseline read or `--clear`, delays process exit until it returns.
 
@@ -135,7 +135,7 @@ Regression coverage: `tests/integration/test_slow_agent_run_responsiveness.py` r
 - **Not ready** → HTTP `503` with body exactly `{"status":"not ready"}` (compact `json.dumps(..., separators=(",", ":"))`, no spaces).
 - **Ready** → HTTP `200` with body exactly `{"status":"ready"}`.
 
-The flag flips exactly once. A shared `_Readiness` holder object (a `__slots__` class wrapping a single `ready: bool`, **not** a bare bool — so writer and reader share it by reference) is created in `build_asgi_app`, threaded through `_build_asgi_app_bare` into `_PathNormalizer`, and also handed to `_SessionManagerLifespan`. At lifespan startup, after the FastMCP session-manager CM is entered **and** the best-effort eager-warmup hook has been attempted (whether it succeeded or failed — see "Eager agent warmup (`on_startup` hook, issue #116)" below), `_SessionManagerLifespan` calls `readiness.mark_ready()` (the write-once latch; `ready` is a read-only property) and then sends `lifespan.startup.complete`. This is single-threaded (one startup, pre-request) so no lock is used. A failed warmup does **not** keep `/readyz` at 503: the server can still serve (the request path rebuilds on the first query), so readiness reflects "startup finished", not "warmup succeeded".
+The flag flips exactly once. A shared `_Readiness` holder object (a `__slots__` class wrapping a single `ready: bool`, **not** a bare bool — so writer and reader share it by reference) is created in `build_asgi_app`, threaded through `_build_asgi_app_bare` into `_PathNormalizer`, and also handed to `_SessionManagerLifespan`. At lifespan startup, after the MCPServer session-manager CM is entered **and** the best-effort eager-warmup hook has been attempted (whether it succeeded or failed — see "Eager agent warmup (`on_startup` hook, issue #116)" below), `_SessionManagerLifespan` calls `readiness.mark_ready()` (the write-once latch; `ready` is a read-only property) and then sends `lifespan.startup.complete`. This is single-threaded (one startup, pre-request) so no lock is used. A failed warmup does **not** keep `/readyz` at 503: the server can still serve (the request path rebuilds on the first query), so readiness reflects "startup finished", not "warmup succeeded".
 
 Deliberate, test-pinned properties:
 
@@ -162,9 +162,13 @@ The allowlist comes from `_allowed_hosts(cfg)`:
 
 `_allowed_hosts` assumes `cfg.server.host` is a bare host with **no embedded port**: `TrustedHostMiddleware` strips the port from the inbound `Host` header before matching but **not** from the allowlist entries, so an entry like `example.com:8443` would never match a port-stripped header.
 
-### FastMCP's own Host-header check (footgun)
+### MCPServer's own Host-header check (footgun)
 
-Separately, FastMCP defaults to rejecting non-loopback `Host` headers with HTTP 421 ("Misdirected Request") — its own DNS-rebinding defense, which bites when running SQL Lens in a container and connecting from a host process. AGENTS.md "Gotchas" covers the specifics — short version: connect from the same network namespace so `127.0.0.1` resolves locally, or configure FastMCP's transport security explicitly when exposing remotely. SQL Lens does not currently expose a knob for relaxing this; it inherits the FastMCP default. Note this is a *distinct* layer from our `TrustedHostMiddleware`: a disallowed host hits our 400 first; an allowed-but-non-loopback host can still trip FastMCP's 421.
+Separately, the SDK rejects non-loopback `Host` headers with HTTP 421 ("Misdirected Request") — its own DNS-rebinding defense, which bites when running SQL Lens in a container and connecting from a host process. `_build_asgi_app_bare` calls `MCPServer.streamable_http_app()` with no `host=` or `transport_security=` argument, so the SDK keeps its `host="127.0.0.1"` default and, with `transport_security` left `None`, turns on DNS-rebinding protection for that loopback host. AGENTS.md "Gotchas" covers the specifics — short version: connect from the same network namespace so `127.0.0.1` resolves locally, or configure the SDK's transport security explicitly when exposing remotely. SQL Lens does not currently expose a knob for relaxing this; it inherits the SDK default. Note this is a *distinct* layer from our `TrustedHostMiddleware`: a disallowed host hits our 400 first; an allowed-but-non-loopback host (for example any host on a `0.0.0.0` bind, where our allowlist is `*`) passes our allowlist and auth and then gets the SDK's 421. `tests/integration/test_http_transport.py::TestTrustedHost::test_wildcard_bind_non_loopback_host_gets_sdk_421` pins this.
+
+### Large widget reads from a Python 2.x client
+
+The mcp 2.x Python client's `streamable_http_client` refuses a single SSE event over `max_sse_event_size` (1 MiB by default). The query-results and memory-admin widgets inline their JavaScript and are each larger than that, so a Python 2.x client reading them over Streamable HTTP must pass a larger `max_sse_event_size`, as `tests/integration/test_http_transport.py::TestNoAuth::test_widget_resource_read_through_auth` does. The server's response is unchanged; this is a client-side limit.
 
 ## HTTP construction policy and posture
 
@@ -180,7 +184,7 @@ AGENTS.md "Gotchas" again: `--network=host` on Docker Desktop puts the container
 
 ## `_AuthMiddleware` — auth runs per-request
 
-Even though FastMCP multiplexes sessions, the auth check runs per HTTP request, not per MCP session. The `Authenticator` is built once in `build_asgi_app` in [transport/http.py](../../../src/sqllens/transport/http.py); each request's headers are passed to `authenticator.authenticate(headers)`.
+Even though MCPServer multiplexes sessions, the auth check runs per HTTP request, not per MCP session. The `Authenticator` is built once in `build_asgi_app` in [transport/http.py](../../../src/sqllens/transport/http.py); each request's headers are passed to `authenticator.authenticate(headers)`.
 
 On success, the resulting `AuthContext` is stashed on `scope["state"]["auth"]` so downstream handlers can read it. Today nothing reads it — the tools are single-user closures over `cfg` — but the seam exists for future per-principal logic.
 
@@ -194,13 +198,13 @@ Lifespan and websocket scopes bypass both `_AuthMiddleware` and `_PathNormalizer
 
 ## `_SessionManagerLifespan` — why this exists
 
-FastMCP exposes a session manager that must be active while requests are served — it owns per-session state. The ASGI host (uvicorn, FastAPI mount, custom Starlette app) drives lifespan startup/shutdown events; `_SessionManagerLifespan` intercepts them to call `session_manager.run().__aenter__()` on startup and `__aexit__` on shutdown.
+MCPServer exposes a session manager that must be active while requests are served — it owns per-session state. The ASGI host (uvicorn, FastAPI mount, custom Starlette app) drives lifespan startup/shutdown events; `_SessionManagerLifespan` intercepts them to call `session_manager.run().__aenter__()` on startup and `__aexit__` on shutdown.
 
 ### Eager agent warmup at startup (O-5, superseded by issue #116)
 
 The original O-5 design called `build_agent(self._cfg)` inline inside the startup `try`, making a warmup failure fatal (`lifespan.startup.failed`) and building a *throwaway* agent that did not seed the request-path cache. Issue #116 replaced this: the warmup now runs through the best-effort `on_startup` hook (next section), priming the *same* `get_agent` singleton the request path serves (now defined in [`tools/_agent.py`](../../../src/sqllens/tools/_agent.py) and used by `query_database`), and a warmup failure no longer blocks boot. Readiness still latches once per startup — now after the warmup *attempt*, success or failure — and is what `GET /readyz` reports (see "Readiness probe" above). The O-5 issue number is retained for the readiness endpoint itself; the warmup mechanism is documented in the next section.
 
-If the lifespan adapter is missing, requests reach the routing layer but then fail inside FastMCP with an opaque SDK assertion (`"Task group is not initialized. Make sure to use run()."`) on the first call. Issue #39 was exactly this: `build_asgi_app` used to return a bare app without the lifespan wrapper, so any external mount silently skipped session-manager startup. The fix in PR #43 moved the wrapper inside `build_asgi_app`, and `tests/unit/test_transport_http.py::test_build_asgi_app_returns_lifespan_wrapped` pins the contract at construction time.
+If the lifespan adapter is missing, requests reach the routing layer but then fail inside MCPServer with an opaque SDK assertion (`"Task group is not initialized. Make sure to use run()."`) on the first call. Issue #39 was exactly this: `build_asgi_app` used to return a bare app without the lifespan wrapper, so any external mount silently skipped session-manager startup. The fix in PR #43 moved the wrapper inside `build_asgi_app`, and `tests/unit/test_transport_http.py::test_build_asgi_app_returns_lifespan_wrapped` pins the contract at construction time.
 
 ### Single-shot instance semantics (issue #60)
 
@@ -211,7 +215,7 @@ If the lifespan adapter is missing, requests reach the routing layer but then fa
 - `lifespan.startup` raised in `__aenter__` (the partially-acquired CM reference is dropped *without* calling `__aexit__` — PEP 343 makes `__aexit__` on a never-entered CM undefined). An `Exception` is reported to the host as `lifespan.startup.failed`; a `BaseException` (most relevantly `asyncio.CancelledError`, plus `KeyboardInterrupt` / `SystemExit` / `GeneratorExit`) interrupting startup finalizes the instance with **no** protocol message sent and is re-raised, so cancellation propagates cooperatively instead of being acked complete, or
 - `lifespan.shutdown` arrived with **no prior `lifespan.startup`** — a misbehaving host. The instance is finalized and that shutdown is answered `shutdown.failed`, not `shutdown.complete` (see *Lifespan failure-path contract* below).
 
-After finalization the CM reference is gone (`self._cm = None`) and the `self._shutdown_done` flag is set. A subsequent `lifespan.shutdown` is acknowledged with `shutdown.complete` **without** re-entering `__aexit__` (except the shutdown-without-startup path above, whose *own* shutdown is answered `shutdown.failed`), so the exactly-once enter/exit pair that FastMCP's session manager expects is preserved. A subsequent `lifespan.startup` on a new scope is rejected with `lifespan.startup.failed` and the message `"single-shot instance already shut down"` — distinct from the `"duplicate lifespan.startup"` rejection raised when two startups arrive within the same not-yet-shut-down instance. Hosts that drive more than one lifespan scope against the same app (uncommon outside test harnesses) should mount a fresh adapter via `build_asgi_app` per scope.
+After finalization the CM reference is gone (`self._cm = None`) and the `self._shutdown_done` flag is set. A subsequent `lifespan.shutdown` is acknowledged with `shutdown.complete` **without** re-entering `__aexit__` (except the shutdown-without-startup path above, whose *own* shutdown is answered `shutdown.failed`), so the exactly-once enter/exit pair that MCPServer's session manager expects is preserved. A subsequent `lifespan.startup` on a new scope is rejected with `lifespan.startup.failed` and the message `"single-shot instance already shut down"` — distinct from the `"duplicate lifespan.startup"` rejection raised when two startups arrive within the same not-yet-shut-down instance. Hosts that drive more than one lifespan scope against the same app (uncommon outside test harnesses) should mount a fresh adapter via `build_asgi_app` per scope.
 
 Implementation notes: the shutdown path captures `cm = self._cm` and clears `self._cm = None` **before** awaiting `__aexit__`, so even a refactor that inserted another `__aexit__` site before the `_shutdown_done` assignment could not double-exit the same CM. The startup-failure branch also clears `self._cm` and sets `self._shutdown_done = True`, so a partially-acquired CM is never reachable from any later message. There are two startup-failure arms: an `except Exception` arm (logs, drops `_cm`, sends `lifespan.startup.failed`, returns) and an `except BaseException` arm (logs via `logger.exception(...)`, drops `_cm`, sets `_shutdown_done = True`, sends **no** protocol message, and re-raises with a bare `raise` so the *same* exception instance — not a wrapped/chained substitute — propagates). Both apply identical state finalization; only the host-facing signalling differs. Both failure messages on the `Exception` arm are formatted as `f"{type(exc).__name__}: {exc}"` (e.g. `"RuntimeError: boom"`) so hosts logging the wire message can distinguish exception types, not just values.
 
@@ -251,7 +255,7 @@ If `__call__` receives a `lifespan` message whose `type` is neither `lifespan.st
 
 ### SDK-attribute access — `mcp.session_manager`
 
-`_SessionManagerLifespan` needs a handle to FastMCP's session manager. We read the documented public `session_manager` property on `FastMCP` (not the private `_session_manager` attribute) so that a future `mcp` SDK rename/removal is a build-time failure, not a request-time `AttributeError`. The access is guarded with `try/except AttributeError` inside `build_asgi_app`; on miss it raises `RuntimeError("FastMCP no longer exposes a session_manager attribute; the mcp SDK likely renamed or removed it. …")` naming this file as the place to update. The guard is exercised by `tests/unit/test_transport_http.py::test_build_asgi_app_raises_runtimeerror_when_session_manager_missing`.
+`_SessionManagerLifespan` needs a handle to MCPServer's session manager. We read the documented public `session_manager` property on `MCPServer` (not the private `_session_manager` attribute) so that a future `mcp` SDK rename/removal is a build-time failure, not a request-time `AttributeError`. The access is guarded with `try/except AttributeError` inside `build_asgi_app`; on miss it raises `RuntimeError("MCPServer no longer exposes a session_manager attribute; the mcp SDK likely renamed or removed it. …")` naming this file as the place to update. The guard is exercised by `tests/unit/test_transport_http.py::test_build_asgi_app_raises_runtimeerror_when_session_manager_missing`.
 
 ### Lifespan failure-path contract
 
@@ -273,7 +277,7 @@ Three incidental defensive properties round out the contract:
 
 ## What does **not** sit on the HTTP transport
 
-- **Logging middleware.** Logging is configured globally; the per-request log line comes from FastMCP, not our wrapper.
+- **Logging middleware.** Logging is configured globally; the per-request log line comes from MCPServer, not our wrapper.
 - **Rate limiting.** None. Add it externally if you need it (reverse proxy, cloud LB).
 - **CORS.** None. The MCP protocol is request/response over POST and isn't browser-driven, so CORS isn't a concern for our use case.
 - **TLS.** Run behind a reverse proxy. uvicorn could do it, but baking certs into the server is out of scope for v1.

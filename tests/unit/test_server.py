@@ -427,7 +427,7 @@ async def test_query_database_attaches_trace_on_error_result(
 ) -> None:
     # show_details on + agent-reported failure: the impl raises AgentRunError
     # carrying the trace; the server returns an isError result with the trace
-    # (and conversation id) in _meta, and the client text mirrors FastMCP's
+    # (and conversation id) in _meta, and the client text mirrors the SDK's
     # own tool-error format so the message is unchanged from the details-off path.
     cfg = build_test_config(persist_dir=tmp_path / "chroma")
     mcp = build_server(cfg)
