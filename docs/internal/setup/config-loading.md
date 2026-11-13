@@ -1,5 +1,7 @@
 # Config loading and error handling
 
+<!-- verified-against: caaa838 2026-11-12 (the `[database]` row) -->
+
 How `sqllens` resolves its runtime configuration, and where the current implementation surfaces unclear errors. This is the source-of-truth reference for [src/sqllens/config.py](../../../src/sqllens/config.py) and its callers.
 
 ## Resolution order

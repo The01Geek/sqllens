@@ -1,6 +1,6 @@
 # Agent factory (the only sanctioned seam into `sqllens.agent`)
 
-<!-- verified-against: 0fbeec6 2026-10-30 -->
+<!-- verified-against: caaa838 2026-11-12 -->
 
 `build_agent(cfg)` and `build_sql_runner(url)` in [src/sqllens/agent/factory.py](../../../src/sqllens/agent/factory.py) are the **only** entry points that callers outside `sqllens.agent` should use. Everything else in `agent/` is vendored framework code — reach into it directly and the next sync from upstream will silently break your call sites.
 

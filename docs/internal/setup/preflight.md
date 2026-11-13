@@ -1,6 +1,6 @@
 # Eager preflight on `sqllens serve`
 
-<!-- verified-against: 8d44a95 2026-10-30 -->
+<!-- verified-against: caaa838 2026-11-12 -->
 
 Source-of-truth reference for [src/sqllens/preflight.py](../../../src/sqllens/preflight.py) and its integration into the [CLI](../../../src/sqllens/cli.py). Tracks production-readiness item **S-4** in [production-readiness-v0.1.0.md](../production-readiness-v0.1.0.md).
 
