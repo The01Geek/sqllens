@@ -11,6 +11,16 @@ Guidance for AI coding assistants (Claude Code, Codex, and others) working in th
 
 One database per running instance. Read-only by default, enforced by a `sqlglot` parser guard. Anthropic-only LLM in v1; the LLM interface is pluggable for future providers.
 
+**MySQL is the only supported database engine.** All known deployments run MySQL. Anything in the repository that still names or serves PostgreSQL or SQLite as a query engine is legacy, inherited from the code SQL Lens was extracted from, and awaits removal (#382 for PostgreSQL, #383 for SQLite). That covers code (`agent/integrations/postgres/`, `agent/integrations/sqlite/`, per-dialect branches in `safety/`, `preflight.py`), tests, CI, and user-facing surfaces: the README's database-URL table and SQLite quick start, `docs/external/`, the MCPB DSN examples and the `sqllens init` default URL (`sqlite:///./demo.db`). Those surfaces are known to be out of date, not a statement of support; update them in the removal changes, not piecemeal. See the engine rule below.
+
+### Database engine rule: MySQL only
+
+- **Supported scope: MySQL 8.0+ (including Aurora MySQL 3), reached through a `mysql://` or `mysql+pymysql://` URL.** MariaDB and MySQL 5.7 are not supported; do not add compatibility branches for them. This is policy, not enforcement: the code does not yet check the server version or reject other URL schemes.
+- **Do not design for, test against, or extend PostgreSQL or SQLite query-engine paths.** New guards, prompts, fixes and tests target MySQL only. A test that only parses SQL (no live database) uses the MySQL dialect (`"mysql"` in sqlglot, a `mysql+pymysql://` URL where a URL is needed).
+- **Leave the legacy engine code working, but add nothing to it.** The existing Postgres and SQLite code, the bundled SQLite demo and the SQLite-backed unit tests stay until they are removed in a later change; keep their existing tests passing (CI's connector job still runs the Postgres cases), and do not add new branches, cases, prompts or tests for them.
+- **ChromaDB is not affected.** `chroma.sqlite3` is ChromaDB's own storage file for memory records, not a query engine. ChromaDB, its `chroma.sqlite3`, and the preflight writability check on it in `src/sqllens/preflight.py` stay.
+- Specs, plans and issue designs follow the same rule: do not scope work, acceptance criteria or test matrices across engines.
+
 **License:** Apache 2.0. SPDX headers on all first-party `.py` files. Lifted code under `src/sqllens/agent/` is governed by `LICENSES/THIRD-PARTY.txt` — keep that file's copyright line intact.
 
 **Repo:** https://github.com/The01Geek/sqllens (public, owner `The01Geek`).
@@ -80,7 +90,9 @@ pip install -c requirements.txt -c docker/requirements-drivers.txt -e ".[dev,all
 ruff check .
 pytest -q
 
-# Connector tests (need SQLLENS_TEST_POSTGRES_URL + SQLLENS_TEST_MYSQL_URL)
+# Connector tests (need SQLLENS_TEST_POSTGRES_URL + SQLLENS_TEST_MYSQL_URL).
+# The Postgres cases are legacy (see the MySQL-only engine rule): keep them
+# passing, but add new connector tests for MySQL only.
 pytest -q tests/connectors
 
 # Run the server (after `sqllens init` writes a sqllens.toml)
@@ -101,7 +113,7 @@ Python 3.11+ required (CI tests 3.11–3.14). Config can come from `./sqllens.to
 - Type hints on every public signature.
 - No new top-level dependencies without discussion.
 - Tools (in `tools/`) are thin: parse args → call agent → format result. Business logic belongs in `agent/`.
-- **Use sqlglot wherever SQL text is parsed, tokenized, classified, split or rewritten.** One parser gives the guards and the runners one view of a statement in every dialect, so they cannot disagree about it. Parse with `sqlglot.parse` / `parse_one` (or tokenize with sqlglot's tokenizer) under the dialect from the database URL (`sqlglot_dialect_for_url` in `src/sqllens/safety/readonly.py`), and work on the expression tree. This covers keyword and statement-type detection, comment stripping and statement splitting: no regexes, `.split()` or first-word checks on SQL text.
+- **Use sqlglot wherever SQL text is parsed, tokenized, classified, split or rewritten.** One parser gives the guards and the runners one view of a statement, so they cannot disagree about it. Parse with `sqlglot.parse` / `parse_one` (or tokenize with sqlglot's tokenizer) under the dialect from the database URL (`sqlglot_dialect_for_url` in `src/sqllens/safety/readonly.py`), and work on the expression tree; the only supported dialect is MySQL (see the MySQL-only engine rule), so new handling and its tests target the `mysql` dialect. This covers keyword and statement-type detection, comment stripping and statement splitting: no regexes, `.split()` or first-word checks on SQL text.
   - **Every sqlglot call on untrusted SQL has a defined, tested failure path:** which errors it catches (`sqlglot.errors.ParseError`, `TokenError`, an empty parse, an unknown dialect) and whether it fails closed or open. The precedents are in `readonly.py`: `assert_select_only` fails closed (a parse or tokenize error, or a dialect that does not resolve, raises `UnsafeSqlError`); `is_introspection_query` fails open to "data query" on a parse or tokenize error or an empty parse (a statement whose leading keyword is `SHOW` is introspection before any parse), lets any other parser exception propagate, and on any exception from identifier normalization or scope analysis excludes no CTE reference (every table counts toward the catalog check); `first_sql_keyword` treats a `TokenError` as "no leading keyword" (`""`) and lets any other tokenizer exception propagate. Both `is_introspection_query` and `first_sql_keyword` log a warning and fall back to no dialect when the dialect does not resolve.
   - **Behavior that depends on sqlglot's AST shape or tokenizer needs a test.** `pyproject.toml` allows sqlglot `>=30.22,<31` and `requirements.txt` locks the exact version CI tests against; its node names and tokenizer rules change between releases (30.22 is the first whose MySQL tokenizer ends a line comment only at a newline).
   - **Existing hand-written SQL string handling is known debt; replace it when you touch that code.** `_mysql_parse_sql` is the deliberate exception: it refuses MySQL input that MySQL and sqlglot would split into tokens differently, which sqlglot cannot detect on its own.
@@ -187,6 +199,7 @@ PyPI versions are immutable after publish — you can yank but not re-upload the
 ## What not to add
 
 - Multi-tenancy. One database per running instance. If you need many, run many servers.
+- Other database engines. MySQL is the only supported engine; do not add or extend support for PostgreSQL, SQLite or any other query engine (see the MySQL-only engine rule).
 - A user model, login flow, or session storage. Authentication is delegated to upstream IdPs (JWT) or static bearer tokens.
 - A document RAG pipeline. SQL Lens is SQL-only.
 - A web UI. The MCP transport is the UI.
@@ -202,7 +215,7 @@ PyPI versions are immutable after publish — you can yank but not re-upload the
 
 ## Debugging checklist
 
-1. Reproduce against the bundled SQLite demo first. If it fails there, the issue is local; if not, the user's database/config is involved.
+1. Reproduce against MySQL. Only when the bug clearly does not depend on the engine (agent loop, memory, transport) may you reproduce against the bundled SQLite demo first, which is legacy: if it fails there, the issue is local; if not, the user's database/config is involved. Land any fix in the MySQL path, never in the SQLite one.
 2. If the agent runs out of tool iterations exploring schema (especially against an untrained DB), the configured `max_tool_iterations` may be too low — or the agent has no memory yet. ChromaDB needs time to build, and the first query downloads ~80 MB of embedding model.
 3. If the answer is wrong, look at memory hits — `SQLLENS_MEMORY__SIMILARITY_THRESHOLD` may be too high or too low.
 4. If a tool errors out in an unfamiliar way, **diff our agent file against the upstream source** to see if we missed a code path during the lift.
