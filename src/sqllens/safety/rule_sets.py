@@ -379,6 +379,7 @@ class RuleSetGuardRunner(SqlRunner):
 
 REDACTED_WHOLE_ROW = "refusing to execute query: " + WHOLE_ROW_REFUSAL
 REDACTED_PARSE = "refusing to execute SQL: could not parse SQL"
+REDACTED_GUARD_ERROR = "refusing to execute query: " + KIND_UNCHECKED
 REDACTED_FUNCTION = "refusing to execute SQL: the query calls a function the guard does not allow"
 REDACTED_READ_ONLY = "refusing to execute SQL: only a single SELECT query is allowed"
 REDACTED_VIEW = "refusing to execute query: the query reads a database view"
@@ -407,8 +408,6 @@ def redacted_refusal_text(exc: Exception) -> str:
     """The client-facing text for a guard refusal: its kind, naming nothing in the database."""
     if isinstance(exc, RuleSetRefusal):
         return str(exc)
-    if isinstance(exc, WholeRowSelectError):
-        return REDACTED_WHOLE_ROW
     message = str(exc)
     if isinstance(exc, RlsError):
         if "database views are not supported" in message:
@@ -418,10 +417,16 @@ def redacted_refusal_text(exc: Exception) -> str:
         if "could not verify" in message or "cannot verify" in message:
             return REDACTED_RELATION
         return REDACTED_RLS
-    if "side-effecting / DoS / RCE" in message:
-        return REDACTED_FUNCTION
     if any(marker in message for marker in _PARSE_REFUSAL_MARKERS):
         return REDACTED_PARSE
+    if _logged_by_guard(exc):
+        # A guard's own internal error, not a refusal of the statement: naming
+        # a refusal kind would send the model to fix SQL that may be fine.
+        return REDACTED_GUARD_ERROR
+    if isinstance(exc, WholeRowSelectError):
+        return REDACTED_WHOLE_ROW
+    if "side-effecting / DoS / RCE" in message:
+        return REDACTED_FUNCTION
     return REDACTED_READ_ONLY
 
 

@@ -149,6 +149,19 @@ def test_verify_memory_with_an_invalid_rule_set_file_names_both(tmp_path: Path) 
     run.assert_not_called()
 
 
+def test_verify_memory_names_rule_sets_when_another_config_error_hides_the_file(
+    tmp_path: Path,
+) -> None:
+    golden = tmp_path / "golden.json"
+    golden.write_text('{"sql_pairs": [{"question": "q", "sql": "SELECT 1"}]}')
+    config = _write(tmp_path, url="postgresql://u@h/shop")
+    with patch("sqllens.eval.run_verification") as run:
+        result = runner.invoke(app, ["verify-memory", str(golden), "-c", str(config)])
+    assert result.exit_code == 2
+    assert "does not support rule sets yet" in _unwrapped(result.stderr)
+    run.assert_not_called()
+
+
 def test_verify_memory_other_config_errors_omit_the_rule_set_message(tmp_path: Path) -> None:
     golden = tmp_path / "golden.json"
     golden.write_text('{"sql_pairs": [{"question": "q", "sql": "SELECT 1"}]}')

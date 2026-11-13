@@ -96,6 +96,29 @@ def _is_rule_set_file_error(exc: Exception) -> bool:
     )
 
 
+def _rule_set_file_configured(config: Path | None) -> bool:
+    """Whether the env or TOML source names a rule-set file, read without validation.
+
+    For a configuration that failed to load. A file that cannot be read or
+    parsed as TOML gives ``False``.
+    """
+    if os.environ.get("SQLLENS_RULE_SETS__FILE"):
+        return True
+    try:
+        if config is None:
+            from sqllens.config import _resolved_toml_path
+
+            config = _resolved_toml_path()
+        if config is None:
+            return False
+        with config.open("rb") as source:
+            data = tomllib.load(source)
+        section = data.get("rule_sets")
+        return isinstance(section, dict) and bool(section.get("file"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return False
+
+
 def _format_config_error(exc: Exception) -> str:
     """Render a config-load exception for stderr without leaking secrets.
 
@@ -597,9 +620,9 @@ def verify_memory(
         cfg = Config.load(config)
     except Exception as e:
         err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
-        if _is_rule_set_file_error(e):
-            # A configured rule-set file that fails validation still gets
-            # the unsupported message, beside the error naming the problem.
+        if _is_rule_set_file_error(e) or _rule_set_file_configured(config):
+            # A configuration naming a rule-set file that fails to load still
+            # gets the unsupported message, beside the error naming the problem.
             err_console.print(f"[red]Error:[/red] {escape(VERIFY_MEMORY_UNSUPPORTED_MESSAGE)}")
         raise typer.Exit(code=2) from e
     # Checked before the --format and API-key checks, so a rule-set file that

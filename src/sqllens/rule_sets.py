@@ -290,10 +290,9 @@ def _url_database(url: str) -> str:
 def load_rule_sets(path: Path, *, database_url: str) -> LoadedRuleSets:
     """Read, parse and validate the rule-set file at ``path`` against ``database_url``.
 
-    Raises ``RuleSetFileError`` naming the file and each problem as a record
-    path and a message: an unreadable file, a file that is not UTF-8 text,
-    invalid TOML, a format violation,
-    a ``row_rule``, a ``database_url`` that is not a MySQL URL, or a
+    Raises ``RuleSetFileError`` for an unreadable file, a file that is not
+    UTF-8 text, invalid TOML, a format violation (each problem named by its
+    record path), a ``row_rule``, a ``database_url`` that is not a MySQL URL, or a
     ``binding.database`` that differs, byte for byte, from the database the
     URL's path names.
     """
@@ -397,7 +396,11 @@ def _user_id(value: object) -> int | None:
     if isinstance(value, int):
         return value if value > 0 else None
     if isinstance(value, str) and _ASCII_DIGITS_RE.fullmatch(value):
-        number = int(value)
+        try:
+            number = int(value)
+        except ValueError:
+            # Past Python's int/str digit limit: no user ID is that long.
+            return None
         return number if number > 0 else None
     return None
 

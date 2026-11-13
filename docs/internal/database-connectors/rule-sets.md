@@ -18,12 +18,12 @@ How a rule-set file limits each `query_database` request to one application role
 - `[[rule_sets]]`: `name` (a decimal string, unique), `scope`, `source`, and one or more `[[rule_sets.tables]]`. Each table has `name`, `columns` (one or more, distinct), and optional `predicate_columns` that may not overlap `columns`. A `row_rule` key fails the load with `ROW_RULE_MESSAGE`; row rules are not supported yet.
 - `source` is provenance, validated and never sent to the model. `confirmed_against_production` (Boolean) is required; when `role_id` is set it must equal the set's `name`.
 
-`load_rule_sets` raises `RuleSetFileError` naming the file and each problem as a record path and message. It also refuses a `database.url` whose scheme is not `mysql` or `mysql+<driver>`, and a `binding.database` that differs, byte for byte, from the database the URL's path names.
+`load_rule_sets` raises `RuleSetFileError`; a format violation names each problem by its record path. It also refuses a `database.url` whose scheme is not `mysql` or `mysql+<driver>`, and a `binding.database` that differs, byte for byte, from the database the URL's path names.
 
 ## Startup signals
 
 - `sqllens serve` and `sqllens validate` warn once for each set whose `source.confirmed_against_production` is not `true`; requests that select it are refused.
-- `sqllens verify-memory` exits 1 while a rule-set file is configured, and `run_verification` raises `ValueError` with `VERIFY_MEMORY_UNSUPPORTED_MESSAGE` before any case runs.
+- `sqllens verify-memory` refuses to run while a rule-set file is configured, printing `VERIFY_MEMORY_UNSUPPORTED_MESSAGE` (exit 1 when the configuration loads, exit 2 beside the configuration error when it does not), and `run_verification` raises `ValueError` with `VERIFY_MEMORY_UNSUPPORTED_MESSAGE` before any case runs.
 - `probe_database` runs `check_catalog` on its MySQL connection. See [setup/preflight.md](../setup/preflight.md). <!-- canonical: setup/preflight.md -->
 
 ## Per-request selection

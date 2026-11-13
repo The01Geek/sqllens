@@ -112,7 +112,8 @@ def test_user_id_normalizes_to_integer(loaded: LoadedRuleSets, user: object) -> 
 
 
 @pytest.mark.parametrize(
-    "user", [0, -1, "7a", True, 7.0, "", "0", "-1", "\u0667", None, [7], "7\n", " 7"]
+    "user",
+    [0, -1, "7a", True, 7.0, "", "0", "-1", "\u0667", None, [7], "7\n", " 7", "9" * 5000],
 )
 def test_invalid_user_ids_are_refused(loaded: LoadedRuleSets, user: object) -> None:
     with pytest.raises(RuleSetRequestError) as info:

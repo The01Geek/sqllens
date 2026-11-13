@@ -584,7 +584,7 @@ async def test_guard_logged_unexpected_error_writes_one_warning(monkeypatch, cap
     with caplog.at_level(logging.WARNING):
         with pytest.raises(WholeRowSelectError) as info:
             await _run(RefusalRedactingRunner(inner), "SELECT name FROM customers")
-    assert "email" not in str(info.value)
+    assert str(info.value) == guard.REDACTED_GUARD_ERROR
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
     assert warnings[0].exc_info is not None
