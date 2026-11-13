@@ -101,7 +101,7 @@ The `_readonly_uri(path)` helper in [src/sqllens/agent/integrations/sqlite/sql_r
 
 | Engine | Primitive | Where it lives |
 |---|---|---|
-| MySQL | `SET SESSION MAX_EXECUTION_TIME = <ms>` (MySQL 5.7.4+ / MariaDB; SELECT-only — non-SELECTs are no-ops, acceptable since the parser rejects those upstream) | [src/sqllens/agent/integrations/mysql/sql_runner.py](../../../src/sqllens/agent/integrations/mysql/sql_runner.py) |
+| MySQL | `SET SESSION MAX_EXECUTION_TIME = <ms>` (SELECT-only — non-SELECTs are no-ops, acceptable since the parser rejects those upstream) | [src/sqllens/agent/integrations/mysql/sql_runner.py](../../../src/sqllens/agent/integrations/mysql/sql_runner.py) |
 | SQLite | `conn.set_progress_handler` deadline (interrupts after a fixed number of VM instructions once `time.monotonic() >= deadline`) — raises `sqlite3.OperationalError('interrupted')` | [src/sqllens/agent/integrations/sqlite/sql_runner.py](../../../src/sqllens/agent/integrations/sqlite/sql_runner.py) |
 
 `statement_timeout_ms = 0` disables the timeout on MySQL (the `SET SESSION` is skipped entirely). On SQLite, `0` means no progress handler is registered.
@@ -269,7 +269,7 @@ Unit tests live under [tests/unit/](../../../tests/unit/). When extending the ru
 - A nested smuggle attempt (CTE / subquery — to prove the walk still catches it).
 - A set-operation-operand smuggle attempt (`SELECT ... UNION SELECT ...`) — `walk()` descends into operands, so the rule should still fire from the `Union` / `Intersect` / `Except` root.
 
-The `SELECT ... INTO` rule (rule 6) is regression-tested by `TestSelectIntoRejected` in [tests/unit/test_safety.py](../../../tests/unit/test_safety.py), parametrised over MySQL and T-SQL for the base, CTE-nested and UNION-operand forms (MySQL as `SELECT ... INTO @var`).
+The `SELECT ... INTO` rule (rule 6) is regression-tested by `TestSelectIntoRejected` in [tests/unit/test_safety.py](../../../tests/unit/test_safety.py), parametrised over MySQL and T-SQL for the base, CTE-nested and UNION-operand forms (MySQL also as `SELECT ... INTO @var`).
 
 Other regression classes in [tests/unit/test_safety.py](../../../tests/unit/test_safety.py) pin the rest of the surface:
 

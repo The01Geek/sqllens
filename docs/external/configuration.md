@@ -44,7 +44,7 @@ Both `statement_timeout_ms` and `max_rows` are safety bounds that protect SQL Le
 | MySQL 8.0+ | `mysql://user:password@host:3306/dbname` or `mysql+<driver>://...`, such as `mysql+pymysql://user:password@host:3306/dbname` |
 | SQLite | `sqlite:///data/app.db` (relative), `sqlite:////var/data/app.db` (absolute), `sqlite:///C:/data/app.db` (Windows) |
 
-Any other URL scheme, `mysqlx://` included (any scheme that starts with `sqlite` counts as SQLite), or a URL with no `://`, fails every `sqllens` command that loads the config, `validate` and `serve` included, with `unsupported database URL scheme; use a mysql:// or mysql+pymysql:// URL (MySQL 8.0+)`. The scheme is compared without regard to case.
+Only a URL whose scheme is `mysql`, starts with `mysql+` (any driver) or starts with `sqlite` loads. Any other URL scheme, `mysqlx://` included, or a URL with no `://`, fails every `sqllens` command that loads the config, `validate` and `serve` included, with `unsupported database URL scheme; use a mysql:// or mysql+pymysql:// URL (MySQL 8.0+)`. The scheme is compared without regard to case.
 
 On Windows, always use forward slashes inside the URL even though the underlying file path uses backslashes.
 

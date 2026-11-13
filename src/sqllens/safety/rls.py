@@ -314,5 +314,5 @@ def apply_rls(
 
     # normalize_functions=False: the default upper-cases unrecognised function
     # names, quoted ones included, so the database would receive a function
-    # name the query did not write.
+    # name the query did not write (pinned by test_safety_rls.py).
     return tree.sql(dialect=dialect, normalize_functions=False)

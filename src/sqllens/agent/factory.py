@@ -230,8 +230,7 @@ def build_sql_runner(
     """Pick the right SQL runner from the database URL prefix.
 
     ``statement_timeout_ms`` and ``max_rows`` are threaded through so the
-    per-engine timeout (SET statement_timeout / MAX_EXECUTION_TIME / progress
-    handler) and ``fetchmany(max_rows + 1)`` stream cap run inside the runner.
+    per-engine timeout (MAX_EXECUTION_TIME / progress handler) and ``fetchmany(max_rows + 1)`` stream cap run inside the runner.
 
     ``read_only`` is threaded through so the connector enforces read-only at
     the driver/session layer (SQLite ``mode=ro`` URI, MySQL read-only

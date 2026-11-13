@@ -62,7 +62,7 @@ class DatabaseConfig(BaseModel):
     url: str = Field(
         ...,
         description=(
-            "SQLAlchemy-style DSN: mysql://... or mysql+<driver>://..., e.g. "
+            "SQLAlchemy-style DSN whose scheme is mysql or starts with mysql+, e.g. "
             "mysql+pymysql://u:p@h:3306/db. Any other scheme, or a value with no "
             "'://', is refused at load (a scheme starting with sqlite is still accepted "
             "until SQLite's removal)."
