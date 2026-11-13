@@ -1,0 +1,50 @@
+[
+  {
+    "criterion": 1,
+    "text": "`pyproject.toml` declares the anthropic dependency as `anthropic>=2.8,<3`, and its `dev` extras declare `httpx2`."
+  },
+  {
+    "criterion": 2,
+    "text": "`requirements.txt` pins anthropic to a 2.x release at or above 2.8, and sqlglot stays at its locked 30.31.0 (the header's regeneration command carries no sqlglot constraint, which commit ec3c67f removed after #372). `pytest -q tests/unit/test_lockfile_guard.py` passes, which asserts that each runtime dependency in `pyproject.toml` is pinned in `requirements.txt` at a version inside its declared range."
+  },
+  {
+    "criterion": 3,
+    "text": "`test_real_sdk_stream_retains_signature_and_tool_input` and `test_real_sdk_create_retains_signature_and_tool_input` in `tests/unit/test_opus_history.py` run the locked 2.x SDK against a mock HTTP transport and pass. Their assertions on `provider_content`, `content`, `finish_reason`, `usage` and tool calls are unchanged."
+  },
+  {
+    "criterion": 4,
+    "text": "With `[llm] effort = \"high\"`, the HTTP request body that the locked 2.x SDK sends from both `send_request` and `stream_request` contains `\"output_config\": {\"effort\": \"high\"}` and no `temperature` key. A test asserts this on the body the mock transport captures, not on a stubbed `messages` object."
+  },
+  {
+    "criterion": 5,
+    "text": "`sqllens validate -c <path>` exits with code 2 and prints a message that names `temperature` and tells the operator to remove it, for each of these inputs, at minimum: TOML `temperature = 0.2`, TOML `temperature = 0.0`, TOML `temperature = 3`, TOML `temperature = \"low\"`, and `SQLLENS_LLM__TEMPERATURE=0.2` with no TOML key. `sqllens serve` with the TOML `temperature = 0.2` config exits with code 2 before it starts a server. With `temperature` unset, `sqllens validate` prints `Config OK` and exits 0."
+  },
+  {
+    "criterion": 6,
+    "text": "`LlmRequest` and `AgentConfig` declare no `temperature` field, `LLMAsJudgeEvaluator.__init__` has no `temperature` parameter, and no payload `AnthropicLlmService._build_payload` returns contains a `temperature` key."
+  },
+  {
+    "criterion": 7,
+    "text": "`probe_llm` still raises `PreflightError` with subsystem `\"llm\"` when building `AnthropicLlmService` raises an `anthropic.AnthropicError`, and `probe_llm` with a configured API key returns without error when it builds the real 2.x client."
+  },
+  {
+    "criterion": 8,
+    "text": "`git grep -n -e 'anthropic>=0.49'` returns no line, so no comment or doc still gives the old 0.49 floor as a reason."
+  },
+  {
+    "criterion": 9,
+    "text": "`docs/external/configuration.md`'s `[llm]` table states that `temperature` is no longer accepted and that a config that sets it fails to load. `docs/internal/agent/factory.md` states that `temperature` is rejected at config load and that no request carries it. The config template that `sqllens init` writes has no `temperature` line."
+  },
+  {
+    "criterion": 10,
+    "text": "A `changelog.d/<PR>.<category>.md` fragment for this change states each of these: SQL Lens now requires the anthropic 2.x SDK; `[llm] temperature`, added earlier in this unreleased cycle, is no longer accepted and a config that sets it fails to load; the 2.x SDK sends the API key as `Authorization: Bearer`; SQL Lens has no setting to send the key as `X-Api-Key`; and a gateway behind `ANTHROPIC_BASE_URL` that reads only `X-Api-Key` should be changed to read the `Authorization` header."
+  },
+  {
+    "criterion": 11,
+    "text": "The change adds no SQL Lens setting for the API key header or for extra request headers, so with a configured API key SQL Lens leaves the 2.x SDK's `Authorization: Bearer <key>` header in place."
+  },
+  {
+    "criterion": 12,
+    "text": "The change leaves `changelog.d/+legacy-004.added.md` unchanged, so the next release's notes still list `llm.temperature` as added, next to this change's fragment saying it is no longer accepted."
+  }
+]
