@@ -64,7 +64,7 @@ _PathNormalizer        — rewrites scope.path "/mcp/" → "/mcp" so MCPServer m
   ↓
 _AuthMiddleware        — runs the configured Authenticator; 401 on AuthError
   ↓
-MCPServer                — dispatches to the registered tool
+MCPServer              — dispatches to the registered tool
   ↓
 query_database(...)    — tools/query_database.py
                           fetches the shared singleton via tools/_agent.py::get_agent

@@ -471,7 +471,7 @@ Registration-time wiring inside the `if cfg.memory.allow_admin_tools:` block:
 - **`_require_write_auth`** enforces "destructive tools require auth": if `cfg.auth.mode == "none"` and `cfg.auth.insecure` is not set, the mutating tools raise a `RuntimeError` refusing to run on an unauthenticated endpoint. The read-only tools are not gated this way.
 - **`_json_error(payload)`** returns a `CallToolResult` carrying the structured `payload` as JSON text **and** `isError=True`, so the caller sees both the per-row detail (e.g. `add_memories.errors[]`) and the failure signal.
 
-Every tool is decorated `@mcp.tool(structured_output=False)` and returns a JSON string (success) or a `_json_error` `CallToolResult`. Each tool accepts a required `data_source_id` that is **advisory** — SQL Lens is single-tenant, so it does not partition storage (Option A, issue #181). `memory_id` is the stable Chroma document UUID.
+Every tool is registered with `@_tool(structured_output=False)` (the error-wrapping helper; never `@mcp.tool` directly) and returns a JSON string (success) or a `_json_error` `CallToolResult`. Each tool accepts a required `data_source_id` that is **advisory** — SQL Lens is single-tenant, so it does not partition storage (Option A, issue #181). `memory_id` is the stable Chroma document UUID.
 
 | Tool | Args | Success shape | Notes |
 |---|---|---|---|
@@ -507,7 +507,7 @@ Unlike `query_results.html` (a *push* widget — the model invokes `query_databa
 
 ### `_RECIPES` (the per-widget inlining table)
 
-Both widgets share the same recipe (echarts first, then app SDK). Adding a new widget is the same shape: register an HTML file under `src/sqllens/ui/`, add a `_RECIPES` entry naming the bundles to splice in, and (only) inside the right gating block in `server.py` add a `@mcp.resource(...)` that returns `load_widget_html("your_widget.html")`.
+Both widgets share the same recipe (echarts first, then app SDK). Adding a new widget is the same shape: register an HTML file under `src/sqllens/ui/`, add a `_RECIPES` entry naming the bundles to splice in, and (only) inside the right gating block in `server.py` add a `@_resource(...)` (never `@mcp.resource` directly, which skips the `_resource_errors` wrapper) that returns `load_widget_html("your_widget.html")`.
 
 ## Eager warmup shares the request-path singleton (issue #116)
 
