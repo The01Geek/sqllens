@@ -767,3 +767,52 @@ async def test_rule_set_agent_prompt_differs_from_todays_by_two_lines(tmp_path: 
     assert "Refused by the rule set:" in diff[1]
     for text in ("Sales reps see their customers", "confirmed_against_production"):
         assert text not in on
+
+
+@pytest.mark.parametrize("refuse_whole_row_selects", [True, False])
+@pytest.mark.parametrize("sql", ["", "   ", "-- note", "/* note */", "# note"])
+async def test_rule_set_chain_refuses_a_statementless_argument(
+    tmp_path: Path, sql: str, refuse_whole_row_selects: bool
+) -> None:
+    """An argument whose parse yields no statement never reaches MySQL.
+
+    With the whole-row guard on it refuses first, so the text is its parse
+    refusal; with it off the rule-set guard refuses it.
+    """
+    from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs
+    from sqllens.agent.core.tool import ToolContext
+    from sqllens.agent.integrations.mysql import MySQLRunner
+    from sqllens.rule_sets import (
+        RuleSetSelection,
+        reset_rule_set_selection,
+        set_rule_set_selection,
+    )
+    from sqllens.safety.readonly import UnsafeSqlError
+    from sqllens.safety.rule_sets import REDACTED_PARSE
+
+    cfg = _rule_set_cfg(tmp_path, refuse_whole_row_selects=refuse_whole_row_selects)
+    runner = _unwrap(build_agent(cfg).tool_registry._tools["run_sql"]).sql_runner  # type: ignore[attr-defined]
+    engine = runner
+    while not isinstance(engine, MySQLRunner):
+        engine = engine._inner
+    reached: list[str] = []
+
+    async def _record(args: RunSqlToolArgs, context: ToolContext, **_: object) -> None:
+        reached.append(args.sql)
+
+    engine.run_sql = _record  # type: ignore[method-assign]
+    token = set_rule_set_selection(RuleSetSelection("2", "5", 7))
+    try:
+        with pytest.raises(UnsafeSqlError) as caught:
+            await runner.run_sql(RunSqlToolArgs(sql=sql), None)  # type: ignore[arg-type]
+    finally:
+        reset_rule_set_selection(token)
+    assert reached == []
+    text = str(caught.value)
+    if refuse_whole_row_selects:
+        assert text == REDACTED_PARSE
+        assert not text.startswith("Refused by the rule set:")
+    else:
+        assert text.startswith("Refused by the rule set:")
+    for name in ("customers", "orders", "email", "name"):
+        assert name not in text

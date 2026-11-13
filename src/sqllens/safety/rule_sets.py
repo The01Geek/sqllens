@@ -111,9 +111,8 @@ def _parse(sql: str) -> exp.Expression:
     except UnsafeSqlError as exc:
         raise RuleSetRefusal(KIND_UNPARSEABLE, str(exc)) from exc
     if len(statements) != 1 or statements[0] is None:
-        raise RuleSetRefusal(
-            KIND_NOT_ONE_SELECT, f"expected one statement, got {len(statements)}"
-        )
+        found = sum(statement is not None for statement in statements)
+        raise RuleSetRefusal(KIND_NOT_ONE_SELECT, f"expected one statement, got {found}")
     tree = statements[0]
     if uses_table_shorthand(sql, _DIALECT):
         raise RuleSetRefusal(KIND_NOT_ONE_SELECT, "TABLE statement")
