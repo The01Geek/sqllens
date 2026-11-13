@@ -192,7 +192,7 @@ def _agent_error_result(
     )
 
 
-def _request_metadata(ctx: Context) -> dict[str, Any]:
+def _request_metadata(ctx: Context, *, count_declared_keys: bool = False) -> dict[str, Any]:
     """Extract caller-supplied per-request metadata from the MCP request.
 
     The calling application asserts per-request identity via the MCP request's
@@ -201,8 +201,13 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
     declared field and is excluded). This is the dynamic-value source the
     row-level-security guard reads.
 
-    Forward at most 64 ``_meta`` keys, 16 KiB of compact ASCII-escaped JSON,
-    1024 nodes (including keys), and eight nesting levels below the root.
+    Forward at most 64 extra keys, 16 KiB of compact ASCII-escaped JSON,
+    1024 nodes (including keys), and eight nesting levels below the root. With
+    ``count_declared_keys`` the limit instead counts every key the caller sent
+    in ``_meta``, the declared ``progressToken`` included; a rule-set request
+    passes it, so that a request whose ``_meta`` carries more than 64 keys is
+    refused as rule-set key missing. Without it the count is unchanged, so a
+    request made with no rule-set file configured behaves as before.
     Invalid or oversized trees are discarded as a whole. These bounds apply
     after the MCP transport has parsed the request, not to HTTP body parsing.
 
@@ -237,10 +242,9 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
     # faults: exception messages and tracebacks can contain metadata values.
     try:
         extra = getattr(meta, "model_extra", None)
-        # The key limit counts every key the caller sent in ``_meta``, not only
-        # the extras: ``progressToken`` is a declared field, so counting extras
-        # alone would admit 64 extras beside it.
-        sent = getattr(meta, "model_fields_set", None)
+        # ``progressToken`` is a declared field, so it is absent from the
+        # extras; counting every key the caller sent needs ``model_fields_set``.
+        sent = getattr(meta, "model_fields_set", None) if count_declared_keys else ()
     except Exception:
         logger.warning("failed to read request metadata extras; returning empty metadata")
         return {}
@@ -372,7 +376,9 @@ def build_server(cfg: Config) -> FastMCP:
         (after the MCP framework's ``Error executing tool`` prefix) instead of
         an answer produced without saved memory.
         """
-        metadata = _request_metadata(ctx)
+        metadata = _request_metadata(
+            ctx, count_declared_keys=cfg.rule_sets.loaded is not None
+        )
         # Mint a stable id when the caller did not supply one, so the resolved
         # id can be returned for the caller to thread on the next turn (passing
         # None down would let the agent mint one we never see).

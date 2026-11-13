@@ -15,17 +15,20 @@ from sqllens.server import _request_metadata
 from sqllens.tools._format import build_agent_trace
 
 
-def metadata(value, fields_set=None):
+def metadata(value, fields_set=None, count_declared_keys=False):
     # The real ``RequestParams.Meta`` reports every key the caller sent in
     # ``_meta`` through ``model_fields_set``, declared fields included, and only
     # the undeclared ones through ``model_extra``.
     if fields_set is None:
         fields_set = set(value) if isinstance(value, dict) else set()
-    return _request_metadata(SimpleNamespace(
-        request_context=SimpleNamespace(meta=SimpleNamespace(
-            model_extra=value, model_fields_set=fields_set
-        ))
-    ))
+    return _request_metadata(
+        SimpleNamespace(
+            request_context=SimpleNamespace(meta=SimpleNamespace(
+                model_extra=value, model_fields_set=fields_set
+            ))
+        ),
+        count_declared_keys=count_declared_keys,
+    )
 
 
 def trace(value):
@@ -51,21 +54,38 @@ def test_oversized_metadata_is_discarded_and_dynamic_rls_fails_closed(extras):
         )], metadata=result, dialect="sqlite")
 
 
-def test_metadata_key_limit_counts_every_meta_key_not_only_the_extras():
+def test_rule_set_key_limit_counts_every_meta_key_not_only_the_extras():
     extras = {str(i): i for i in range(64)}
-    assert metadata(extras) == extras
+    beside_declared = set(extras) | {"progressToken"}
+    assert metadata(extras, count_declared_keys=True) == extras
     # 64 extras beside the declared ``progressToken`` is 65 keys in ``_meta``.
-    assert metadata(extras, fields_set=set(extras) | {"progressToken"}) == {}
+    assert metadata(extras, fields_set=beside_declared, count_declared_keys=True) == {}
 
 
-def test_metadata_without_model_fields_set_is_discarded(caplog):
+def test_without_rule_sets_the_key_limit_still_counts_only_the_extras():
+    extras = {str(i): i for i in range(64)}
+    beside_declared = set(extras) | {"progressToken"}
+    assert metadata(extras, fields_set=beside_declared) == extras
+    assert metadata({str(i): i for i in range(65)}) == {}
+
+
+def test_rule_set_request_without_model_fields_set_is_discarded(caplog):
     caplog.set_level("DEBUG")
-    assert _request_metadata(SimpleNamespace(
-        request_context=SimpleNamespace(meta=SimpleNamespace(model_extra={"tenant": "alpha"}))
-    )) == {}
+    assert _request_metadata(
+        SimpleNamespace(
+            request_context=SimpleNamespace(meta=SimpleNamespace(model_extra={"tenant": "alpha"}))
+        ),
+        count_declared_keys=True,
+    ) == {}
     assert caplog.messages == [
         "request _meta exposes no model_fields_set; returning empty metadata"
     ]
+
+
+def test_without_rule_sets_a_meta_without_model_fields_set_is_still_forwarded():
+    assert _request_metadata(SimpleNamespace(
+        request_context=SimpleNamespace(meta=SimpleNamespace(model_extra={"tenant": "alpha"}))
+    )) == {"tenant": "alpha"}
 
 
 def test_sdk_meta_reports_declared_keys_in_fields_set_but_not_in_extras():

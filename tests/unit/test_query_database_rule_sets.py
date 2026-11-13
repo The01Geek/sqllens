@@ -146,7 +146,8 @@ def test_over_limit_meta_is_refused_as_key_missing(tmp_path: Path) -> None:
             request_context=SimpleNamespace(
                 meta=SimpleNamespace(model_extra=extras, model_fields_set=set(extras))
             )
-        )
+        ),
+        count_declared_keys=True,
     )
     loaded = rule_set_config(tmp_path).rule_sets.loaded
     assert loaded is not None
