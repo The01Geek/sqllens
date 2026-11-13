@@ -66,7 +66,7 @@ What each part means:
 - `[rule_sets.source]`: Where the rule set came from. `confirmed_against_production = true` is required and records that you checked the set against your production permissions. `role_id`, `role_name`, `role_copy`, `permission_list_version`, `global_switches`, `permission_fingerprint`, `application_commit` and `generated_on` are optional. When you set `role_id`, it must equal the set's `name`. None of this is ever sent to the model.
 - `[[rule_sets.tables]]`: One block per table the role may read, with `columns` listing every column it may read. `predicate_columns` names columns that are reserved for future row rules; they may not also appear in `columns`.
 
-Every key is checked, and an unknown key makes the file fail to load. When a value is wrong, the error names the exact place in the file, for example `rule_sets.0.tables.1.columns`.
+Every key is checked, and an unknown key makes the file fail to load. When a value is wrong, the error names the exact place in the file.
 
 **Warning:** Every table and column you list must exist in the connected database with exactly that spelling, down to letter case. SQL Lens checks this when the server starts, or on the first request if it could not check at startup, and refuses requests until it matches.
 
