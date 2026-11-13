@@ -269,7 +269,7 @@ Unit tests live under [tests/unit/](../../../tests/unit/). When extending the ru
 - A nested smuggle attempt (CTE / subquery — to prove the walk still catches it).
 - A set-operation-operand smuggle attempt (`SELECT ... UNION SELECT ...`) — `walk()` descends into operands, so the rule should still fire from the `Union` / `Intersect` / `Except` root.
 
-The `SELECT ... INTO` rule (rule 6) is regression-tested by `TestSelectIntoRejected` in [tests/unit/test_safety.py](../../../tests/unit/test_safety.py), parametrised over MySQL and T-SQL for the base, CTE-nested and UNION-operand forms (MySQL also as `SELECT ... INTO @var`).
+The `SELECT ... INTO` rule (rule 6) is regression-tested by `TestSelectIntoRejected` in [tests/unit/test_safety.py](../../../tests/unit/test_safety.py), parametrised over MySQL and T-SQL for the base, CTE-nested and UNION-operand forms.
 
 Other regression classes in [tests/unit/test_safety.py](../../../tests/unit/test_safety.py) pin the rest of the surface:
 
