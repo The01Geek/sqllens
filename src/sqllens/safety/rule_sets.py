@@ -36,6 +36,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import pandas as pd
+import sqlglot.errors
 from sqlglot import expressions as exp
 from sqlglot.errors import ErrorLevel
 from sqlglot.optimizer.scope import traverse_scope
@@ -425,6 +426,20 @@ def redacted_refusal_text(exc: Exception) -> str:
     return REDACTED_READ_ONLY
 
 
+def _logged_by_guard(exc: Exception) -> bool:
+    """Whether a guard already logged this refusal at WARNING, with its cause.
+
+    Each guard's fail-closed path for an unexpected exception logs it with a
+    traceback and raises its refusal from that exception; every other refusal
+    either has no cause or is raised from another guard refusal or a parse error.
+    """
+    cause = exc.__cause__
+    return cause is not None and not isinstance(
+        cause,
+        UnsafeSqlError | RlsError | sqlglot.errors.ParseError | sqlglot.errors.TokenError,
+    )
+
+
 class RefusalRedactingRunner(SqlRunner):
     """Replace every guard refusal's text with its kind; log the full reason at WARNING.
 
@@ -448,7 +463,8 @@ class RefusalRedactingRunner(SqlRunner):
             # Already logged with its full reason by RuleSetGuardRunner.
             raise
         except (UnsafeSqlError, RlsError) as exc:
-            logger.warning("guard refused a statement: %s", exc)
+            if not _logged_by_guard(exc):
+                logger.warning("guard refused a statement: %s", exc)
             redacted = type(exc).__new__(type(exc))
             Exception.__init__(redacted, redacted_refusal_text(exc))
             raise redacted from None

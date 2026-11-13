@@ -140,14 +140,14 @@ class Source(_Record):
     @field_validator("permission_fingerprint")
     @classmethod
     def _fingerprint(cls, value: str | None) -> str | None:
-        if value is not None and not _FINGERPRINT_RE.match(value):
+        if value is not None and not _FINGERPRINT_RE.fullmatch(value):
             raise ValueError("must be 'sha256:' followed by 64 lowercase hexadecimal digits")
         return value
 
     @field_validator("application_commit")
     @classmethod
     def _commit(cls, value: str | None) -> str | None:
-        if value is not None and not _COMMIT_RE.match(value):
+        if value is not None and not _COMMIT_RE.fullmatch(value):
             raise ValueError("must be 40 or 64 lowercase hexadecimal digits")
         return value
 
@@ -156,7 +156,7 @@ class Source(_Record):
     def _date(cls, value: str | None) -> str | None:
         if value is None:
             return value
-        if not _DATE_RE.match(value):
+        if not _DATE_RE.fullmatch(value):
             raise ValueError("must be an ISO calendar date string YYYY-MM-DD")
         try:
             datetime.date.fromisoformat(value)
@@ -396,7 +396,7 @@ def _user_id(value: object) -> int | None:
         return None
     if isinstance(value, int):
         return value if value > 0 else None
-    if isinstance(value, str) and _ASCII_DIGITS_RE.match(value):
+    if isinstance(value, str) and _ASCII_DIGITS_RE.fullmatch(value):
         number = int(value)
         return number if number > 0 else None
     return None

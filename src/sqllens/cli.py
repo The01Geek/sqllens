@@ -578,22 +578,24 @@ def verify_memory(
     from sqllens.eval import load_golden, run_verification
     from sqllens.memory.io import VALID_FORMATS, BundleFormatError
 
-    if fmt not in VALID_FORMATS:
-        err_console.print(f"[red]Error:[/red] --format must be 'json' or 'csv' (got {escape(fmt)})")
-        raise typer.Exit(code=1)
     try:
         cfg = Config.load(config)
     except Exception as e:
         err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
         raise typer.Exit(code=2) from e
-    if cfg.llm.api_key is None:
-        err_console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
-        raise typer.Exit(code=2)
+    # Checked before every other argument and config check, so a configured
+    # rule-set file always gets this message rather than an unrelated one.
     if cfg.rule_sets.loaded is not None:
         from sqllens.rule_sets import VERIFY_MEMORY_UNSUPPORTED_MESSAGE
 
         err_console.print(f"[red]Error:[/red] {escape(VERIFY_MEMORY_UNSUPPORTED_MESSAGE)}")
         raise typer.Exit(code=1)
+    if fmt not in VALID_FORMATS:
+        err_console.print(f"[red]Error:[/red] --format must be 'json' or 'csv' (got {escape(fmt)})")
+        raise typer.Exit(code=1)
+    if cfg.llm.api_key is None:
+        err_console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
+        raise typer.Exit(code=2)
     try:
         with path.open(encoding="utf-8", newline="") as source:
             text = source.read()

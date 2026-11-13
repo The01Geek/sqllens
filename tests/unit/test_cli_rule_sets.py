@@ -133,6 +133,26 @@ def test_verify_memory_refuses_before_running_any_case(tmp_path: Path) -> None:
     run.assert_not_called()
 
 
+@pytest.mark.parametrize("bad_format", [True, False])
+def test_verify_memory_rule_set_message_precedes_other_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad_format: bool
+) -> None:
+    """Neither a bad --format nor a missing LLM API key replaces the rule-set message."""
+    golden = tmp_path / "golden.json"
+    golden.write_text('{"sql_pairs": [{"question": "q", "sql": "SELECT 1"}]}')
+    config = _write(tmp_path)
+    config.write_text(config.read_text().replace('api_key = "sk-ant-test"\n', ""))
+    monkeypatch.delenv("SQLLENS_LLM__API_KEY", raising=False)
+    args = ["verify-memory", str(golden), "-c", str(config)]
+    if bad_format:
+        args += ["--format", "xml"]
+    with patch("sqllens.eval.run_verification") as run:
+        result = runner.invoke(app, args)
+    assert result.exit_code != 0
+    assert "does not support rule sets yet" in _unwrapped(result.stderr)
+    run.assert_not_called()
+
+
 async def test_run_verification_refuses_rule_sets(tmp_path: Path) -> None:
     from sqllens.eval import run_verification
 

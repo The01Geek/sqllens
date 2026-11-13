@@ -571,6 +571,26 @@ async def test_whole_row_parse_failure_is_redacted_end_to_end(tmp_path, selected
         assert "email" not in text and "customers" not in text
 
 
+@pytest.mark.asyncio
+async def test_guard_logged_unexpected_error_writes_one_warning(monkeypatch, caplog) -> None:
+    """A guard's fail-closed path already logs the cause; the redactor adds no second record."""
+    from sqllens.safety import whole_row
+
+    def boom(sql: str, dialect: str | None = None) -> None:
+        raise RuntimeError("scope analysis failed near customers.email")
+
+    monkeypatch.setattr(whole_row, "assert_no_whole_row_select", boom)
+    inner = WholeRowSelectGuardRunner(_Recorder(), dialect="mysql")
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(WholeRowSelectError) as info:
+            await _run(RefusalRedactingRunner(inner), "SELECT name FROM customers")
+    assert "email" not in str(info.value)
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert warnings[0].exc_info is not None
+    assert "customers.email" in str(warnings[0].exc_info[1])
+
+
 @pytest.mark.parametrize(
     "sql",
     [
