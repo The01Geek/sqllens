@@ -141,7 +141,6 @@ class TestRejectsMixed:
 class TestTokenizerFailures:
     @pytest.mark.parametrize(("sql", "dialect"), [
         ("SELECT 'unterminated", "sqlite"),
-        ("SELECT 'unterminated", "postgres"),
         ("SELECT 'unterminated", "mysql"),
         ("SELECT 'unterminated", None),
         ("SELECT `unterminated", "mysql"),
@@ -153,7 +152,7 @@ class TestTokenizerFailures:
             assert_select_only(sql, dialect=dialect)
         assert isinstance(exc.value.__cause__, TokenError)
 
-    @pytest.mark.parametrize("dialect", ["sqlite", "postgres"])
+    @pytest.mark.parametrize("dialect", ["sqlite", "mysql"])
     async def test_tokenization_refusal_never_reaches_runner(self, dialect: str) -> None:
         inner = _RecordingRunner()
         with pytest.raises(UnsafeSqlError, match="could not parse SQL"):
@@ -172,7 +171,7 @@ class TestNestedDmlInCte:
                 "WITH inserted AS ("
                 "INSERT INTO log (msg) VALUES ('x') RETURNING id"
                 ") SELECT * FROM inserted",
-                dialect="postgres",
+                dialect="mysql",
             )
 
     def test_update_in_cte_rejected(self) -> None:
@@ -181,7 +180,7 @@ class TestNestedDmlInCte:
                 "WITH bumped AS ("
                 "UPDATE accounts SET bal = bal + 1 RETURNING id"
                 ") SELECT * FROM bumped",
-                dialect="postgres",
+                dialect="mysql",
             )
 
     def test_delete_in_cte_rejected(self) -> None:
@@ -190,7 +189,7 @@ class TestNestedDmlInCte:
                 "WITH gone AS ("
                 "DELETE FROM accounts WHERE id = 1 RETURNING id"
                 ") SELECT * FROM gone",
-                dialect="postgres",
+                dialect="mysql",
             )
 
 
@@ -199,153 +198,42 @@ class TestNestedDmlInCte:
 # nonetheless mutates, exfiltrates, or DoSes. This list is the regression
 # safety net referenced by ``TestCorpusStaysRejected``: a future sqlglot
 # bump that silently re-opens any of these holes fails the suite.
-_BYPASS_CORPUS: list[tuple[str, str | None]] = [
+# An entry may carry a third element, the refusal reason its test asserts
+# with ``match=``.
+_BYPASS_CORPUS: list[tuple[str, str | None] | tuple[str, str | None, str]] = [
     # Weekly audit regressions (#221, #237, #261).
-    ("SELECT pg_catalog.set_config('search_path', 'public', true)", "postgres"),
-    ("WITH q AS (SELECT PG_ADVISORY_LOCK(0)) SELECT * FROM q", "postgres"),
-    ("SELECT public.dblink_get_result('synthetic')", "postgres"),
-    ("SELECT set_config('search_path', 'public', true)", None),
-    ("SELECT dblink_get_notify('synthetic')", "postgres"),
     ('SELECT 1 /*!50000 UNION SELECT sleep(0) */', 'mysql'),
     ('SELECT 1 /*! UNION SELECT sleep(0) */', 'mysql'),
     ('SELECT 1 /*M!100100 UNION SELECT sleep(0) */', 'mysql'),
     ("SELECT 1 INTO OUTFILE 'synthetic.csv'", 'mysql'),
     ("SELECT 1 INTO DUMPFILE 'synthetic.bin'", 'mysql'),
-    ('SELECT pg_catalog.pg_sleep(0)', 'postgres'),
-    (
-        'WITH changed AS (MERGE INTO target t USING source s ON t.id=s.id '
-        'WHEN MATCHED THEN DELETE RETURNING t.id) SELECT * FROM changed',
-        'postgres',
-    ),
-    (
-        'WITH changed AS (MERGE INTO target t USING source s ON t.id=s.id '
-        'WHEN MATCHED THEN UPDATE SET value=s.value RETURNING t.id) SELECT * FROM changed',
-        'postgres',
-    ),
-    (
-        'WITH changed AS (MERGE INTO target t USING source s ON t.id=s.id '
-        'WHEN NOT MATCHED THEN INSERT (id) VALUES (s.id) RETURNING t.id) SELECT * FROM changed',
-        'postgres',
-    ),
-    (
-        'WITH changed AS (MERGE INTO target t USING source s ON t.id=s.id '
-        'WHEN MATCHED THEN DO NOTHING RETURNING t.id) SELECT * FROM changed',
-        'postgres',
-    ),
-    ("SELECT dblink('synthetic', 'SELECT 1')", 'postgres'),
-    ("SELECT dblink_connect('synthetic')", 'postgres'),
-    ("SELECT dblink_connect_u('synthetic')", 'postgres'),
-    ("SELECT dblink_disconnect('synthetic')", 'postgres'),
-    ("SELECT dblink_open('cursor', 'SELECT 1')", 'postgres'),
-    ("SELECT dblink_fetch('cursor', 1)", 'postgres'),
-    ("SELECT dblink_close('cursor')", 'postgres'),
-    ("SELECT dblink_send_query('synthetic', 'SELECT 1')", 'postgres'),
-    ("SELECT dblink_get_result('synthetic')", 'postgres'),
-    ("SELECT dblink_cancel_query('synthetic')", 'postgres'),
-    ("SELECT set_config('search_path', 'public', true)", 'postgres'),
-    ("SELECT pg_notify('test', 'test')", 'postgres'),
-    ('SELECT pg_reload_conf()', 'postgres'),
-    ('SELECT pg_promote()', 'postgres'),
-    ('SELECT pg_rotate_logfile()', 'postgres'),
-    ('SELECT pg_switch_wal()', 'postgres'),
-    ('SELECT pg_advisory_lock(0)', 'postgres'),
-    ('SELECT pg_advisory_lock_shared(0)', 'postgres'),
-    ('SELECT pg_advisory_xact_lock(0)', 'postgres'),
-    ('SELECT pg_advisory_xact_lock_shared(0)', 'postgres'),
-    ('SELECT pg_try_advisory_lock(0)', 'postgres'),
-    ('SELECT pg_try_advisory_lock_shared(0)', 'postgres'),
-    ('SELECT pg_try_advisory_xact_lock(0)', 'postgres'),
-    ('SELECT pg_try_advisory_xact_lock_shared(0)', 'postgres'),
-    ('SELECT pg_advisory_unlock(0)', 'postgres'),
-    ('SELECT pg_advisory_unlock_shared(0)', 'postgres'),
-    ('SELECT pg_advisory_unlock_all()', 'postgres'),
-    ('SELECT pg_stat_reset()', 'postgres'),
-    ("SELECT pg_stat_reset_shared('wal')", 'postgres'),
-    ('SELECT pg_stat_reset_single_table_counters(0)', 'postgres'),
-    ('SELECT pg_stat_reset_single_function_counters(0)', 'postgres'),
-    ("SELECT pg_stat_reset_slru('notify')", 'postgres'),
-    ("SELECT pg_stat_reset_replication_slot('test')", 'postgres'),
-    ('SELECT pg_stat_reset_subscription_stats(0)', 'postgres'),
-    ('SELECT pg_stat_reset_backend_stats(0)', 'postgres'),
-    ("SELECT query_to_xml('SELECT 1', true, false, '')", 'postgres'),
-    ("SELECT query_to_xmlschema('SELECT 1', true, false, '')", 'postgres'),
-    ("SELECT query_to_xml_and_xmlschema('SELECT 1', true, false, '')", 'postgres'),
-    ("SELECT table_to_xml('synthetic', true, false, '')", 'postgres'),
-    ("SELECT table_to_xmlschema('synthetic', true, false, '')", 'postgres'),
-    ("SELECT table_to_xml_and_xmlschema('synthetic', true, false, '')", 'postgres'),
-    ("SELECT schema_to_xml('synthetic', true, false, '')", 'postgres'),
-    ("SELECT schema_to_xmlschema('synthetic', true, false, '')", 'postgres'),
-    ("SELECT schema_to_xml_and_xmlschema('synthetic', true, false, '')", 'postgres'),
-    ("SELECT database_to_xml(true, false, '')", 'postgres'),
-    ("SELECT database_to_xmlschema(true, false, '')", 'postgres'),
-    ("SELECT database_to_xml_and_xmlschema(true, false, '')", 'postgres'),
-    ("SELECT cursor_to_xml('test', 1, true, false, '')", 'postgres'),
-    ("SELECT cursor_to_xmlschema('test', true, false, '')", 'postgres'),
-    # Functions that run query text passed as a string, or read a relation
-    # named by a text argument.
-    ("SELECT * FROM ts_stat('SELECT doc FROM synthetic')", 'postgres'),
-    ("SELECT ts_rewrite('a'::tsquery, 'SELECT t, s FROM synthetic')", 'postgres'),
-    ("SELECT * FROM crosstab('SELECT 1, 2, 3') AS t(a int, b int)", 'postgres'),
-    ("SELECT * FROM crosstab('SELECT 1, 2, 3', 'SELECT 2') AS t(a int, b int)", 'postgres'),
-    ("SELECT * FROM crosstab2('SELECT 1, 2, 3')", 'postgres'),
-    ("SELECT * FROM crosstab3('SELECT 1, 2, 3')", 'postgres'),
-    ("SELECT * FROM crosstab4('SELECT 1, 2, 3')", 'postgres'),
-    (
-        "SELECT * FROM connectby('synthetic', 'id', 'parent_id', '1', 0) "
-        "AS t(id text, parent_id text, level int)",
-        'postgres',
-    ),
-    (
-        "SELECT * FROM xpath_table('id', 'doc', 'synthetic', '/a', 'true') "
-        "AS t(id int, a text)",
-        'postgres',
-    ),
-    ("SELECT dblink_build_sql_insert('synthetic', '1', 1, '{1}', '{1}')", 'postgres'),
-    ("SELECT dblink_build_sql_update('synthetic', '1', 1, '{1}', '{1}')", 'postgres'),
-    ("SELECT get_raw_page('synthetic', 0)", 'postgres'),
-    ("SELECT * FROM bt_page_items('synthetic_pkey', 1)", 'postgres'),
-    ("SELECT * FROM pg_catalog.ts_stat('SELECT doc FROM synthetic')", 'postgres'),
-    ("SELECT * FROM public.crosstab('SELECT 1, 2, 3') AS t(a int, b int)", 'postgres'),
-    ("SELECT TS_STAT('SELECT doc FROM synthetic')", 'postgres'),
-    ("SELECT ts_stat('SELECT doc FROM synthetic')", None),
     # Side-effecting / RCE / DoS functions, per dialect.
     ("SELECT load_extension('evil.so')", "sqlite"),  # SQLite RCE (default deploy)
-    ("SELECT dblink_exec('dbname=x', 'DROP TABLE t')", "postgres"),
-    ("SELECT pg_sleep(3600)", "postgres"),
-    ("SELECT pg_terminate_backend(1234)", "postgres"),
-    ("SELECT pg_cancel_backend(1234)", "postgres"),
-    ("SELECT pg_read_file('/etc/passwd')", "postgres"),
-    ("SELECT pg_read_binary_file('/etc/passwd')", "postgres"),
-    ("SELECT pg_ls_dir('/')", "postgres"),
-    ("SELECT pg_stat_file('/etc/passwd')", "postgres"),
-    ("SELECT pg_read_server_files('/etc/passwd')", "postgres"),
-    ("SELECT pg_ls_logdir()", "postgres"),
-    ("SELECT pg_ls_waldir()", "postgres"),
-    ("SELECT lo_import('/etc/passwd')", "postgres"),
-    ("SELECT lo_export(1, '/tmp/x')", "postgres"),
     ("SELECT SLEEP(3600)", "mysql"),
     ("SELECT load_file('/etc/passwd')", "mysql"),
     ("SELECT benchmark(100000000, md5('a'))", "mysql"),
     ("SELECT sys_exec('id')", "mysql"),
     ("SELECT sys_eval('id')", "mysql"),
     # Dialect-agnostic resource-exhaustion DoS.
-    ("SELECT * FROM generate_series(1, 1000000000)", "postgres"),
+    ("SELECT * FROM generate_series(1, 1000000000)", "mysql", "function 'generate_series'"),
     ("SELECT * FROM generate_series(1, 1000000000)", "sqlite"),
     # Unknown/None dialect must fail-closed against the union of denylists.
     ("SELECT load_extension('evil.so')", None),
-    ("SELECT pg_sleep(3600)", None),
     # CTE-nested DML.
     (
         "WITH x AS (INSERT INTO log (m) VALUES ('x') RETURNING id) SELECT * FROM x",
-        "postgres",
+        "mysql",
+        "found nested INSERT",
     ),
     (
         "WITH x AS (UPDATE accounts SET bal = bal + 1 RETURNING id) SELECT * FROM x",
-        "postgres",
+        "mysql",
+        "found nested UPDATE",
     ),
     (
         "WITH x AS (DELETE FROM accounts WHERE id = 1 RETURNING id) SELECT * FROM x",
-        "postgres",
+        "mysql",
+        "found nested DELETE",
     ),
     # Info-leaking SHOW variants — allowed at parse time as exp.Show under
     # MySQL but rejected by the structural-SHOW allowlist (not schema-discovery).
@@ -360,7 +248,7 @@ _BYPASS_CORPUS: list[tuple[str, str | None]] = [
     # A structural SHOW must not be a vector for smuggling a side-effecting fn.
     ("SHOW COLUMNS FROM t WHERE Field = sleep(1)", "mysql"),
     # SELECT ... INTO — kept in the corpus so it stays pinned.
-    ("SELECT * INTO new_tbl FROM users", "postgres"),
+    ("SELECT * INTO new_tbl FROM users", "mysql", r"SELECT \.\.\. INTO"),
     # Plain DML/DDL roots.
     ("INSERT INTO users VALUES (1, 'a')", "sqlite"),
     ("DROP TABLE users", "sqlite"),
@@ -378,14 +266,10 @@ class TestSideEffectFunctionsRejected:
         ("sql", "dialect"),
         [
             ("SELECT load_extension('evil.so')", "sqlite"),
-            ("SELECT dblink_exec('dbname=x', 'DROP TABLE t')", "postgres"),
-            ("SELECT pg_sleep(3600)", "postgres"),
-            ("SELECT pg_terminate_backend(1234)", "postgres"),
-            ("SELECT pg_read_file('/etc/passwd')", "postgres"),
             ("SELECT SLEEP(3600)", "mysql"),
             ("SELECT load_file('/etc/passwd')", "mysql"),
             ("SELECT benchmark(100000000, md5('a'))", "mysql"),
-            ("SELECT * FROM generate_series(1, 1000000000)", "postgres"),
+            ("SELECT * FROM generate_series(1, 1000000000)", "mysql"),
             ("SELECT * FROM generate_series(1, 1000000000)", "sqlite"),
         ],
     )
@@ -398,15 +282,15 @@ class TestSideEffectFunctionsRejected:
             assert_select_only("SELECT load_extension('x.so')", dialect="sqlite")
 
     def test_unknown_dialect_applies_union(self) -> None:
-        # No dialect → union of all denylists (fail-closed): a Postgres-only
+        # No dialect → union of all denylists (fail-closed): a MySQL-only
         # function must still be refused.
-        with pytest.raises(UnsafeSqlError, match="not allowed"):
-            assert_select_only("SELECT pg_read_file('/etc/passwd')")
+        with pytest.raises(UnsafeSqlError, match="function 'load_file' is not allowed"):
+            assert_select_only("SELECT load_file('/etc/passwd')")
 
     @pytest.mark.parametrize(
         ("sql", "dialect"),
         [
-            ("SELECT count(*) FROM users", "postgres"),
+            ("SELECT count(*) FROM users", None),
             ("SELECT lower(name) FROM users", "mysql"),
             ("SELECT abs(x), max(y) FROM t GROUP BY z", "sqlite"),
         ],
@@ -456,9 +340,8 @@ class TestReadOnlyGuardRunner:
         assert df.to_dict() == {"ok": {0: 1}}
 
     async def test_guard_uses_constructed_dialect(self, monkeypatch) -> None:
-        # The Postgres-only function is refused only when the runner was built
-        # with the postgres dialect — proves the constructed dialect is the one
-        # passed to assert_select_only.
+        # Proves the constructed dialect is the one passed to
+        # assert_select_only.
         seen: list[str | None] = []
         import sqllens.safety as safety_pkg
 
@@ -469,10 +352,10 @@ class TestReadOnlyGuardRunner:
             return real(sql, dialect=dialect)
 
         monkeypatch.setattr(safety_pkg, "assert_select_only", spy)
-        guard = ReadOnlyGuardRunner(_RecordingRunner(), dialect="postgres")
+        guard = ReadOnlyGuardRunner(_RecordingRunner(), dialect="mysql")
         await guard.run_sql(RunSqlToolArgs(sql="SELECT 1"), ToolContext.model_construct())
 
-        assert seen == ["postgres"]
+        assert seen == ["mysql"]
 
 
 class TestSqliteReadOnlyUri:
@@ -508,11 +391,12 @@ class TestCorpusStaysRejected:
     version shim was removed.
     """
 
-    @pytest.mark.parametrize(("sql", "dialect"), _BYPASS_CORPUS)
+    @pytest.mark.parametrize("entry", _BYPASS_CORPUS)
     def test_corpus_entry_still_rejected(
-        self, sql: str, dialect: str | None
+        self, entry: tuple[str, str | None] | tuple[str, str | None, str]
     ) -> None:
-        with pytest.raises(UnsafeSqlError):
+        sql, dialect, *reason = entry
+        with pytest.raises(UnsafeSqlError, match=reason[0] if reason else None):
             assert_select_only(sql, dialect=dialect)
 
 
@@ -522,17 +406,17 @@ class TestGuardDoesNotCrashOnPinnedSqlglot:
     deny-walk lists.
     """
 
-    @pytest.mark.parametrize("dialect", [None, "sqlite", "postgres", "mysql"])
+    @pytest.mark.parametrize("dialect", [None, "sqlite", "mysql"])
     def test_trivial_select_passes(self, dialect: str | None) -> None:
         assert_select_only("SELECT 1", dialect=dialect)
 
     def test_alter_rejected(self) -> None:
         with pytest.raises(UnsafeSqlError):
             assert_select_only(
-                "ALTER TABLE users ADD COLUMN x INT", dialect="postgres"
+                "ALTER TABLE users ADD COLUMN x INT", dialect="mysql"
             )
 
-    @pytest.mark.parametrize("dialect", [None, "sqlite", "postgres", "mysql"])
+    @pytest.mark.parametrize("dialect", [None, "sqlite", "mysql"])
     def test_alter_parses_to_deny_walk_node(self, dialect: str | None) -> None:
         # The root-type gate rejects a root-level ALTER before the deny-walk
         # runs, so pin the AST shape the deny-walk's ``exp.Alter`` entry needs.
@@ -550,21 +434,19 @@ class TestBenignTypedFunctionLiteralsPass:
     """A string literal equal to a denied function name must not be rejected.
 
     On a typed ``exp.Func`` node, sqlglot's ``.name`` is the value of the
-    first argument, not the function name (e.g. ``md5('pg_sleep')`` →
-    ``.name == 'pg_sleep'``). Folding that into the denylist candidate set
+    first argument, not the function name (e.g. ``md5('sleep')`` →
+    ``.name == 'sleep'``). Folding that into the denylist candidate set
     would reject benign reads — this pins that it does not.
     """
 
     @pytest.mark.parametrize(
         ("sql", "dialect"),
         [
-            ("SELECT md5('pg_sleep')", "postgres"),
-            ("SELECT lower('set_config')", "postgres"),
-            ("SELECT xmlconcat('<a/>', '<b/>')", "postgres"),
-            ("SELECT current_setting('server_version')", "postgres"),
+            ("SELECT md5('sleep')", "mysql"),
+            ("SELECT lower('load_file')", "mysql"),
             ("SELECT lower('load_extension')", "sqlite"),
             ("SELECT length('benchmark') FROM t", "mysql"),
-            ("SELECT upper('generate_series')", "postgres"),
+            ("SELECT upper('generate_series')", "mysql"),
         ],
     )
     def test_literal_matching_denied_name_still_passes(
@@ -577,49 +459,12 @@ class TestDenylistEdgeCases:
     def test_unknown_non_none_dialect_applies_union(self) -> None:
         # An unrecognized (but non-None) dialect string must still fail-closed
         # against the union — not silently disarm the denylist.
-        with pytest.raises(UnsafeSqlError, match="not allowed"):
-            assert_select_only("SELECT pg_read_file('/etc/passwd')", dialect="oracle")
+        with pytest.raises(UnsafeSqlError, match="function 'load_file' is not allowed"):
+            assert_select_only("SELECT load_file('/etc/passwd')", dialect="oracle")
 
     def test_denylist_matching_is_case_insensitive(self) -> None:
         with pytest.raises(UnsafeSqlError, match="not allowed"):
             assert_select_only("SELECT LOAD_EXTENSION('x.so')", dialect="sqlite")
-
-    @pytest.mark.parametrize(
-        ("name", "args"),
-        [
-            ("ts_stat", "'SELECT doc FROM synthetic'"),
-            ("ts_rewrite", "'a'::tsquery, 'SELECT t, s FROM synthetic'"),
-            ("crosstab", "'SELECT 1, 2, 3'"),
-            ("crosstab2", "'SELECT 1, 2, 3'"),
-            ("crosstab3", "'SELECT 1, 2, 3'"),
-            ("crosstab4", "'SELECT 1, 2, 3'"),
-            ("connectby", "'synthetic', 'id', 'parent_id', '1', 0"),
-            ("xpath_table", "'id', 'doc', 'synthetic', '/a', 'true'"),
-            ("dblink_build_sql_insert", "'synthetic', '1', 1, '{1}', '{1}'"),
-            ("dblink_build_sql_update", "'synthetic', '1', 1, '{1}', '{1}'"),
-            ("get_raw_page", "'synthetic', 0"),
-            ("bt_page_items", "'synthetic_pkey', 1"),
-        ],
-    )
-    @pytest.mark.parametrize(
-        "template",
-        [
-            "SELECT {call}",
-            "SELECT * FROM {call}",
-            "SELECT * FROM pg_catalog.{call}",
-            "SELECT {upper_call}",
-        ],
-    )
-    def test_query_text_functions_rejected_by_name(
-        self, name: str, args: str, template: str
-    ) -> None:
-        # The error names the function, so each entry is refused by the
-        # denylist itself (an Anonymous node carrying the written name), in
-        # select-list, FROM-clause, schema-qualified and upper-case forms.
-        call = f"{name}({args})"
-        sql = template.format(call=call, upper_call=call.upper())
-        with pytest.raises(UnsafeSqlError, match=f"function '{name}' is not allowed"):
-            assert_select_only(sql, dialect="postgres")
 
 
 class TestSqliteConnectorReadOnlyEnforced:
@@ -716,7 +561,7 @@ class TestGuardFailsClosedOnUnexpectedError:
 
 
 class TestSelectIntoRejected:
-    """``SELECT ... INTO`` is a write on both Postgres and T-SQL.
+    """``SELECT ... INTO`` writes on MySQL (user variables, files) and T-SQL (a new table).
 
     sqlglot parses it as ``exp.Select`` with ``args["into"]`` set rather than
     as ``exp.Create``, so the DML/DDL deny-walk would miss it without the
@@ -726,9 +571,7 @@ class TestSelectIntoRejected:
     @pytest.mark.parametrize(
         ("sql", "dialect"),
         [
-            ("SELECT * INTO new_tbl FROM users", "postgres"),
-            ("SELECT * INTO TEMP tmp FROM users", "postgres"),
-            ("SELECT * INTO UNLOGGED u FROM users", "postgres"),
+            ("SELECT * INTO new_tbl FROM users", "mysql"),
             ("SELECT * INTO new_tbl FROM users", "tsql"),
             # MySQL `SELECT ... INTO @var` is a session-variable write; same
             # parse shape, same guard catches it.
@@ -739,24 +582,30 @@ class TestSelectIntoRejected:
         with pytest.raises(UnsafeSqlError, match=r"SELECT \.\.\. INTO"):
             assert_select_only(sql, dialect=dialect)
 
-    @pytest.mark.parametrize("dialect", ["postgres", "tsql"])
-    def test_select_into_in_cte_rejected(self, dialect: str) -> None:
+    @pytest.mark.parametrize(
+        ("sql", "dialect"),
+        [
+            ("WITH x AS (SELECT 1 AS a) SELECT a INTO @v FROM x", "mysql"),
+            ("WITH x AS (SELECT 1 AS a) SELECT * INTO y FROM x", "tsql"),
+        ],
+    )
+    def test_select_into_in_cte_rejected(self, sql: str, dialect: str) -> None:
         with pytest.raises(UnsafeSqlError, match=r"SELECT \.\.\. INTO"):
-            assert_select_only(
-                "WITH x AS (SELECT 1 AS a) SELECT * INTO y FROM x",
-                dialect=dialect,
-            )
+            assert_select_only(sql, dialect=dialect)
 
-    @pytest.mark.parametrize("dialect", ["postgres", "tsql"])
-    def test_select_into_in_set_op_rejected(self, dialect: str) -> None:
+    @pytest.mark.parametrize(
+        ("sql", "dialect"),
+        [
+            ("SELECT a INTO @v FROM users UNION SELECT a FROM admins", "mysql"),
+            ("SELECT * INTO new_tbl FROM users UNION SELECT * FROM admins", "tsql"),
+        ],
+    )
+    def test_select_into_in_set_op_rejected(self, sql: str, dialect: str) -> None:
         # ``SELECT ... INTO`` as an operand of UNION / INTERSECT / EXCEPT —
         # walk() descends into the operands so the inner Select-with-into is
         # reachable from the Union/Intersect/Except root.
         with pytest.raises(UnsafeSqlError, match=r"SELECT \.\.\. INTO"):
-            assert_select_only(
-                "SELECT * INTO new_tbl FROM users UNION SELECT * FROM admins",
-                dialect=dialect,
-            )
+            assert_select_only(sql, dialect=dialect)
 
 
 class TestStructuralShowAllowed:
@@ -819,7 +668,7 @@ class TestUnsafeShowRejected:
                 "SHOW COLUMNS FROM t WHERE Field = sleep(1)", dialect="mysql"
             )
 
-    @pytest.mark.parametrize("dialect", ["sqlite", "postgres", "tsql", None])
+    @pytest.mark.parametrize("dialect", ["sqlite", "tsql", None])
     def test_show_rejected_on_non_mysql_dialects(self, dialect: str | None) -> None:
         # SHOW falls back to an opaque exp.Command outside MySQL; the root-type
         # gate rejects it (the structural allowlist is MySQL-only in practice).
@@ -830,8 +679,8 @@ class TestUnsafeShowRejected:
 class TestShowIsReadShaped:
     """A guard-approved SHOW must route through the row-returning runner branch.
 
-    Without this, ``is_read_shaped`` would be False and the MySQL/Postgres/
-    SQLite runners would take the write branch — returning a ``rows_affected``
+    Without this, ``is_read_shaped`` would be False and the MySQL/SQLite
+    runners would take the write branch — returning a ``rows_affected``
     count instead of the actual SHOW result rows.
     """
 
@@ -842,13 +691,13 @@ class TestShowIsReadShaped:
     def test_show_is_read_shaped(self, sql: str) -> None:
         assert is_read_shaped(sql) is True
 
-    @pytest.mark.parametrize("dialect", ["postgres", "mysql", None])
+    @pytest.mark.parametrize("dialect", ["mysql", None])
     def test_table_shorthand_is_read_shaped(self, dialect: str | None) -> None:
         # With read_only off, ``TABLE t`` reaches the runner and returns rows.
         assert is_read_shaped("TABLE orders", dialect) is True
 
 
-@pytest.mark.parametrize("dialect", ["postgres", "mysql", "sqlite", None])
+@pytest.mark.parametrize("dialect", ["mysql", "sqlite", None])
 @pytest.mark.parametrize(
     "sql",
     ["TABLE users", "SELECT id FROM a UNION TABLE users", "WITH x AS (SELECT 1) TABLE users"],
@@ -875,8 +724,6 @@ class TestIsIntrospectionQuery:
             "SELECT column_name FROM information_schema.columns WHERE table_name = 'orders'",
             "SELECT * FROM information_schema.tables",
             "select name from sqlite_master where type = 'table'",
-            "SELECT relname FROM pg_catalog.pg_class",
-            "SELECT * FROM pg_attribute",
         ],
     )
     def test_introspection_queries_detected(self, sql: str) -> None:
@@ -906,8 +753,6 @@ class TestIsIntrospectionQueryPerDialect:
     @pytest.mark.parametrize(
         ("sql", "dialect"),
         [
-            ("SELECT tablename FROM pg_catalog.pg_tables", "postgres"),
-            ("SELECT relname FROM pg_class", "postgres"),
             ("SELECT name FROM mysql.user", "mysql"),
             ("SELECT * FROM sys.schema_table_statistics", "mysql"),
             ("SELECT * FROM performance_schema.threads", "mysql"),
@@ -926,24 +771,21 @@ class TestIsIntrospectionQueryPerDialect:
                 "ON p.name = 'id'",
                 "sqlite",
             ),
-            ("SELECT * FROM information_schema.tables", "postgres"),
             ("SELECT * FROM information_schema.tables", "mysql"),
             ("SELECT * FROM information_schema.tables", "sqlite"),
-            ("SHOW TABLES", "postgres"),
             ("SHOW TABLES", "sqlite"),
             ("/* look up tables */ SHOW TABLES", "mysql"),
             ("-- columns\nSHOW COLUMNS FROM widgets", "mysql"),
-            ("/* look up tables */ SHOW TABLES", "postgres"),
             ("/* look up tables */ SHOW TABLES", "sqlite"),
             # The tokenizer drops an inline comment right after SHOW.
             ("SHOW/**/TABLES", "mysql"),
             ("SHOW/* c */ COLUMNS FROM widgets", "mysql"),
-            ("/* a /* b */ c */ SHOW TABLES", "postgres"),
             # A real catalog table inside or beside a CTE still counts.
-            ("WITH x AS (SELECT * FROM pg_class) SELECT * FROM x", "postgres"),
+            ("WITH x AS (SELECT * FROM mysql.user) SELECT * FROM x", "mysql"),
             (
-                "WITH pg_recent AS (SELECT 1) SELECT * FROM pg_recent JOIN pg_class ON true",
-                "postgres",
+                "WITH sqlite_recent AS (SELECT 1) "
+                "SELECT * FROM sqlite_recent JOIN sqlite_master ON true",
+                None,
             ),
             # Scope analysis builds no scope for DESCRIBE; its table still counts.
             ("DESCRIBE information_schema.tables", "mysql"),
@@ -966,12 +808,12 @@ class TestIsIntrospectionQueryPerDialect:
             ),
             # A CTE defined inside a derived table is not visible outside it.
             (
-                "SELECT * FROM (WITH pg_a AS (SELECT 1) SELECT * FROM pg_a) AS s, pg_a",
-                "postgres",
+                "SELECT * FROM (WITH sqlite_a AS (SELECT 1) SELECT * FROM sqlite_a) AS s, sqlite_a",
+                None,
             ),
         ],
     )
-    def test_own_engine_catalogs_detected(self, sql: str, dialect: str) -> None:
+    def test_own_engine_catalogs_detected(self, sql: str, dialect: str | None) -> None:
         assert is_introspection_query(sql, dialect=dialect) is True
 
     @pytest.mark.parametrize(
@@ -979,7 +821,7 @@ class TestIsIntrospectionQueryPerDialect:
         [
             ("# tables\n/* again */ SHOW 'abc", "mysql"),
             ("/* c */ SHOW 'abc", "mysql"),
-            ("-- c\nSHOW 'abc", "postgres"),
+            ("-- c\nSHOW 'abc", "mysql"),
         ],
     )
     def test_untokenizable_show_is_data(self, sql: str, dialect: str) -> None:
@@ -990,28 +832,32 @@ class TestIsIntrospectionQueryPerDialect:
     @pytest.mark.parametrize(
         ("sql", "dialect"),
         [
-            ("WITH pg_recent AS (SELECT 1 AS n) SELECT * FROM pg_recent", "postgres"),
-            ("WITH PG_RECENT AS (SELECT 1 AS n) SELECT * FROM pg_recent", "postgres"),
             ("WITH sqlite_recent AS (SELECT 1) SELECT * FROM sqlite_recent", "sqlite"),
+            ("WITH SQLITE_RECENT AS (SELECT 1 AS n) SELECT * FROM sqlite_recent", None),
             # References from a later CTE, a recursive CTE, a derived table and
             # a subquery resolve to the enclosing query's CTE.
             (
-                "WITH pg_a AS (SELECT 1), pg_b AS (SELECT * FROM pg_a) SELECT * FROM pg_b",
-                "postgres",
+                "WITH sqlite_a AS (SELECT 1), sqlite_b AS (SELECT * FROM sqlite_a) "
+                "SELECT * FROM sqlite_b",
+                None,
             ),
             (
-                "WITH RECURSIVE pg_r(n) AS (SELECT 1 UNION ALL "
-                "SELECT n + 1 FROM pg_r WHERE n < 3) SELECT * FROM pg_r",
-                "postgres",
+                "WITH RECURSIVE sqlite_r(n) AS (SELECT 1 UNION ALL "
+                "SELECT n + 1 FROM sqlite_r WHERE n < 3) SELECT * FROM sqlite_r",
+                None,
             ),
-            ("WITH pg_a AS (SELECT 1) SELECT * FROM (SELECT * FROM pg_a) AS s", "postgres"),
             (
-                "WITH pg_a AS (SELECT 1) SELECT * FROM t WHERE EXISTS (SELECT 1 FROM pg_a)",
-                "postgres",
+                "WITH sqlite_a AS (SELECT 1) SELECT * FROM (SELECT * FROM sqlite_a) AS s",
+                None,
+            ),
+            (
+                "WITH sqlite_a AS (SELECT 1) SELECT * FROM t "
+                "WHERE EXISTS (SELECT 1 FROM sqlite_a)",
+                None,
             ),
         ],
     )
-    def test_catalog_prefixed_cte_is_data(self, sql: str, dialect: str) -> None:
+    def test_catalog_prefixed_cte_is_data(self, sql: str, dialect: str | None) -> None:
         assert is_introspection_query(sql, dialect=dialect) is False
 
     def test_scope_failure_excludes_no_cte(
@@ -1023,9 +869,9 @@ class TestIsIntrospectionQueryPerDialect:
             raise RuntimeError("scope failed")
 
         monkeypatch.setattr(readonly_mod, "traverse_scope", boom)
-        sql = "WITH pg_recent AS (SELECT 1) SELECT * FROM pg_recent"
+        sql = "WITH sqlite_recent AS (SELECT 1) SELECT * FROM sqlite_recent"
         with caplog.at_level("INFO", logger="sqllens.safety.readonly"):
-            assert is_introspection_query(sql, dialect="postgres") is True
+            assert is_introspection_query(sql, dialect=None) is True
         assert "RuntimeError" in caplog.text
 
     def test_hash_is_not_a_comment_without_dialect(self) -> None:
@@ -1034,12 +880,10 @@ class TestIsIntrospectionQueryPerDialect:
     @pytest.mark.parametrize(
         ("sql", "dialect"),
         [
-            ("SELECT amount FROM pg_payments", "mysql"),
-            ("SELECT amount FROM pg_payments", "sqlite"),
-            ("SELECT id FROM sys.accounts", "postgres"),
-            ("SELECT id FROM mysql.accounts", "postgres"),
+            ("SELECT id FROM sys.accounts", "sqlite"),
+            ("SELECT id FROM mysql.accounts", "sqlite"),
             ("SELECT id FROM performance_schema.runs", "sqlite"),
-            ("SELECT id FROM sqlite_events", "postgres"),
+            ("SELECT id FROM sqlite_events", "mysql"),
             ("SELECT name FROM pragma_widgets", "mysql"),
             ("SELECT id FROM widgets", "sqlite"),
         ],
@@ -1050,8 +894,6 @@ class TestIsIntrospectionQueryPerDialect:
     @pytest.mark.parametrize(
         "sql",
         [
-            "SELECT relname FROM pg_catalog.pg_class",
-            "SELECT * FROM pg_attribute",
             "SELECT id FROM sys.accounts",
             "SELECT name FROM mysql.user",
             "SELECT * FROM performance_schema.threads",
@@ -1080,7 +922,6 @@ class TestIsIntrospectionQueryPerDialect:
     @pytest.mark.parametrize(
         "sql",
         [
-            "SELECT * FROM pg_class",
             "SELECT name FROM sqlite_master",
             "SELECT name FROM pragma_table_info('widgets')",
             "SELECT name FROM mysql.user",
@@ -1097,8 +938,8 @@ class TestIsIntrospectionQueryPerDialect:
         assert is_introspection_query("SELECT id FROM widgets", dialect="postgresql") is False
 
     def test_hash_is_not_a_comment_outside_mysql(self) -> None:
-        # "#" opens a line comment only in MySQL; on Postgres this is not a SHOW.
-        assert is_introspection_query("#x\nSHOW 'abc", dialect="postgres") is False
+        # "#" opens a line comment only in MySQL; elsewhere this is not a SHOW.
+        assert is_introspection_query("#x\nSHOW 'abc", dialect="sqlite") is False
 
     @pytest.mark.parametrize(
         "sql",
@@ -1113,8 +954,6 @@ class TestSqlglotDialectForUrl:
         ("url", "expected"),
         [
             ("sqlite:///demo.db", "sqlite"),
-            ("postgresql+psycopg://u:p@h/db", "postgres"),
-            ("postgres://u:p@h/db", "postgres"),
             ("mysql+pymysql://u:p@h/db", "mysql"),
             ("MySQL://u:p@h/db", "mysql"),
             ("mssql://u:p@h/db", None),
@@ -1124,6 +963,14 @@ class TestSqlglotDialectForUrl:
         from sqllens.safety.readonly import sqlglot_dialect_for_url
 
         assert sqlglot_dialect_for_url(url) == expected
+
+    @pytest.mark.parametrize(
+        "url", ["postgresql+psycopg://u:p@h/db", "postgres://u:p@h/db", "postgresql://u:p@h/db"]
+    )
+    def test_postgresql_url_maps_to_no_dialect(self, url: str) -> None:
+        from sqllens.safety.readonly import sqlglot_dialect_for_url
+
+        assert sqlglot_dialect_for_url(url) is None
 
 
 class TestResolvedDialectBoundaries:
@@ -1161,24 +1008,6 @@ class TestResolvedDialectBoundaries:
 
 class TestAdditionalSideEffectFunctions:
     @pytest.mark.parametrize(("sql", "dialect", "function"), [
-        ("SELECT lo_create(0)", "postgres", "lo_create"),
-        ("SELECT lo_creat(0)", "postgres", "lo_creat"),
-        ("SELECT lo_from_bytea(0, 'x')", "postgres", "lo_from_bytea"),
-        ("SELECT lo_put(1, 0, 'x')", "postgres", "lo_put"),
-        ("SELECT lowrite(1, 'x')", "postgres", "lowrite"),
-        ("SELECT lo_truncate(1, 0)", "postgres", "lo_truncate"),
-        ("SELECT lo_truncate64(1, 0)", "postgres", "lo_truncate64"),
-        ("SELECT lo_unlink(1)", "postgres", "lo_unlink"),
-        ("SELECT pg_file_write('a', 'b', false)", "postgres", "pg_file_write"),
-        ("SELECT pg_file_rename('a', 'b', 'c')", "postgres", "pg_file_rename"),
-        ("SELECT pg_file_unlink('a')", "postgres", "pg_file_unlink"),
-        ("SELECT pg_file_sync('a')", "postgres", "pg_file_sync"),
-        ("SELECT pg_logdir_ls()", "postgres", "pg_logdir_ls"),
-        ("SELECT pg_ls_tmpdir()", "postgres", "pg_ls_tmpdir"),
-        ("SELECT pg_ls_archive_statusdir()", "postgres", "pg_ls_archive_statusdir"),
-        ("SELECT pg_ls_logicalmapdir()", "postgres", "pg_ls_logicalmapdir"),
-        ("SELECT pg_ls_logicalsnapdir()", "postgres", "pg_ls_logicalsnapdir"),
-        ("SELECT pg_ls_replslotdir('a')", "postgres", "pg_ls_replslotdir"),
         ("SELECT get_lock('a', 1)", "mysql", "get_lock"),
         ("SELECT release_lock('a')", "mysql", "release_lock"),
         ("SELECT release_all_locks()", "mysql", "release_all_locks"),
@@ -1193,8 +1022,6 @@ class TestAdditionalSideEffectFunctions:
             assert_select_only(sql, dialect=None if unspecified else dialect)
 
     @pytest.mark.parametrize(("sql", "dialect", "function"), [
-        ("SELECT pg_catalog.lo_unlink(1)", "postgres", "lo_unlink"),
-        ("SELECT public.pg_file_write('a', 'b', false)", "postgres", "pg_file_write"),
         ("SELECT GET_LOCK('a', 1)", "mysql", "get_lock"),
     ])
     def test_qualified_and_uppercase_calls_refused(
@@ -1204,8 +1031,6 @@ class TestAdditionalSideEffectFunctions:
             assert_select_only(sql, dialect=dialect)
 
     @pytest.mark.parametrize(("sql", "dialect"), [
-        ("SELECT lo_get(1)", "postgres"),
-        ("SELECT lower('lo_unlink')", "postgres"),
         ("SELECT is_free_lock('a')", "mysql"),
         ("SELECT length('get_lock')", "mysql"),
     ])
@@ -1218,7 +1043,7 @@ class TestUnspecifiedDialectBoundaries:
     @pytest.mark.parametrize("sql", [
         "SELECT 1 -- c\r; DROP TABLE t",
         "SELECT 1 # c\r; DROP TABLE t",
-        "SELECT 1 -- c\r + pg_sleep(0)",
+        "SELECT 1 -- c\r + sleep(0)",
         "SELECT 1 # c\r + sleep(0)",
         "SELECT 1 -- c\r/*! + sleep(0) */",
         "SELECT 1 # c\r/*! + sleep(0) */",
@@ -1349,7 +1174,7 @@ class TestBlockCommentBoundaries:
 
     @pytest.mark.parametrize(("dialect", "call", "reason"), [
         ("sqlite", "load_extension('x')", "function 'load_extension' is not allowed"),
-        ("postgres", "pg_sleep(0)", "function 'pg_sleep' is not allowed"),
+        ("mysql", "sleep(0)", "Nested MySQL comments"),
     ])
     def test_call_after_nested_comment_markers_is_checked(
         self, dialect: str, call: str, reason: str,
@@ -1359,6 +1184,72 @@ class TestBlockCommentBoundaries:
                 f"SELECT 1 /* outer /* nested */ -- */\n + {call}", dialect=dialect,
             )
 
-    @pytest.mark.parametrize("dialect", ["sqlite", "postgres"])
+    @pytest.mark.parametrize("dialect", ["sqlite"])
     def test_read_after_nested_comment_markers_passes(self, dialect: str) -> None:
         assert_select_only("SELECT 1 /* outer /* nested */ -- */\n + 2", dialect=dialect)
+
+
+_DENYLIST_MESSAGE = (
+    r"is not allowed: side-effecting / DoS / RCE function refused by the read-only "
+    r"guard's function denylist"
+)
+
+
+class TestDenylistUnionFallback:
+    """With no dialect, or one with no denylist entry, the guard applies the
+    union of the remaining dialects' denylists (its fail-closed path)."""
+
+    @pytest.mark.parametrize("dialect", [None, "oracle"])
+    @pytest.mark.parametrize(
+        ("sql", "function"),
+        [("SELECT load_file('/etc/passwd')", "load_file"), ("SELECT sleep(1)", "sleep")],
+    )
+    def test_mysql_functions_refused_by_union(
+        self, sql: str, function: str, dialect: str | None
+    ) -> None:
+        with pytest.raises(UnsafeSqlError, match=f"function '{function}' {_DENYLIST_MESSAGE}"):
+            assert_select_only(sql, dialect=dialect)
+
+    def test_side_effect_funcs_has_no_postgres_entry(self) -> None:
+        from sqllens.safety.readonly import _SIDE_EFFECT_FUNCS
+
+        assert set(_SIDE_EFFECT_FUNCS) == {"mysql", "sqlite"}
+
+    @pytest.mark.parametrize("dialect", [None, "oracle", "postgres"])
+    @pytest.mark.parametrize("function", ["pg_read_file", "dblink", "lo_import"])
+    def test_removed_postgres_names_are_not_denied(
+        self, function: str, dialect: str | None
+    ) -> None:
+        """Names only the removed PostgreSQL entry held are no longer denied,
+        including under dialect ``postgres``, which now has no entry."""
+        from sqllens.safety.readonly import _denied_funcs
+
+        assert function not in _denied_funcs(dialect)
+        assert_select_only(f"SELECT {function}('x')", dialect=dialect)
+
+
+class TestCatalogUnionFallback:
+    """With no dialect, or one with no catalog entry, every remaining engine's
+    catalogs count as introspection."""
+
+    @pytest.mark.parametrize("dialect", [None, "oracle"])
+    @pytest.mark.parametrize(
+        "sql",
+        ["SELECT * FROM performance_schema.threads", "SELECT * FROM information_schema.tables"],
+    )
+    def test_union_catalogs_detected(self, sql: str, dialect: str | None) -> None:
+        assert is_introspection_query(sql, dialect=dialect) is True
+
+    def test_catalogs_by_dialect_has_no_postgres_entry(self) -> None:
+        from sqllens.safety.readonly import _CATALOGS_BY_DIALECT
+
+        assert set(_CATALOGS_BY_DIALECT) == {"mysql", "sqlite"}
+
+    @pytest.mark.parametrize("dialect", [None, "oracle", "postgres"])
+    @pytest.mark.parametrize(
+        "sql", ["SELECT relname FROM pg_catalog.pg_class", "SELECT * FROM pg_tables"]
+    )
+    def test_postgres_catalogs_are_not_classified(self, sql: str, dialect: str | None) -> None:
+        """``pg_catalog`` and ``pg_``-prefixed names are no catalog under any
+        dialect, ``postgres`` included."""
+        assert is_introspection_query(sql, dialect=dialect) is False

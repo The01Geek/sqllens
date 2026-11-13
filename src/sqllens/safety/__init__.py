@@ -18,8 +18,8 @@ Six orthogonal protections, composed at the factory:
   failure (parse error, scope-analysis error, missing/suspicious dynamic
   value, unprovable protected-table reference), any other view or
   unverifiable relation, and any failed catalog lookup blocks the query.
-* Per-runner statement timeouts (``SET SESSION MAX_EXECUTION_TIME`` on MySQL, ``set_progress_handler``
-  deadline on SQLite) — server- or driver-side time bound.
+* Per-runner statement timeouts (``SET SESSION MAX_EXECUTION_TIME`` on MySQL,
+  ``set_progress_handler`` deadline on SQLite) — server- or driver-side time bound.
 * ``RowCapRunner`` — per-runner streaming via ``fetchmany`` stops at
   ``max_rows``; this decorator is the secondary belt-and-suspenders check
   on the returned DataFrame.

@@ -615,7 +615,9 @@ def test_build_sql_runner_refuses_postgresql_url(url: str) -> None:
     unsupported scheme: a ``ValueError``, never an import or driver error."""
     from sqllens.agent.factory import build_sql_runner
 
-    with pytest.raises(ValueError, match=r"unsupported database scheme: .* \(expected sqlite/mysql\)"):
+    with pytest.raises(
+        ValueError, match=r"unsupported database scheme: .* \(expected sqlite/mysql\)"
+    ):
         build_sql_runner(url)
 
 

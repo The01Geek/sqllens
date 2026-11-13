@@ -173,7 +173,8 @@ def test_allowed_dialect_specific_shapes(sql: str, dialect: str | None) -> None:
         ("SELECT * FROM `users`", "mysql"),
         ("SELECT `u`.* FROM `users` AS `u`", "mysql"),
         ("SELECT * FROM shop.users", "mysql"),
-        ("SELECT * FROM sqlite_users_backup", "mysql"),  # sqlite_ is a catalog prefix only on sqlite
+        # sqlite_ is a catalog prefix only on sqlite.
+        ("SELECT * FROM sqlite_users_backup", "mysql"),
         # UNNEST is a table-valued function too, whatever its argument.
         ("SELECT * FROM UNNEST(ARRAY[1, 2]) AS t(x)", "mysql"),
         ("SELECT t.* FROM UNNEST(ARRAY[1, 2]) AS t(x)", "mysql"),

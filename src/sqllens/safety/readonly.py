@@ -630,11 +630,10 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
         if isinstance(sub, _DML_DDL_TYPES):
             kind = type(sub).__name__.upper()
             raise UnsafeSqlError(f"only SELECT statements are allowed (found nested {kind})")
-        # ``SELECT ... INTO`` writes on several engines (a new table, or MySQL
-        # user variables and files) — sqlglot parses it as ``exp.Select`` with ``args["into"]`` set rather
-        # than as ``exp.Create``, so the DML/DDL deny-walk above misses it.
-        # Covers root-level and CTE-nested occurrences; ``INTO TEMP`` /
-        # ``INTO UNLOGGED`` variants are the same node shape.
+        # ``SELECT ... INTO`` writes (MySQL user variables or files, a new table
+        # elsewhere) — sqlglot parses it as ``exp.Select`` with ``args["into"]``
+        # set rather than as ``exp.Create``, so the DML/DDL deny-walk above
+        # misses it. Covers root-level, CTE-nested and set-operation occurrences.
         if isinstance(sub, exp.Select) and sub.args.get("into"):
             raise UnsafeSqlError("SELECT ... INTO is not allowed (creates a table)")
         # Side-effecting / DoS / RCE function calls. A valid SELECT can still

@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Daniel Radman
 # SPDX-License-Identifier: Apache-2.0
 
-"""Integration tests for the Postgres and MySQL SqlRunner adapters.
+"""Integration tests for the MySQL SqlRunner adapter.
 
-These tests run against **real** Postgres and MySQL instances.
+These tests run against a **real** MySQL instance.
 ``tests/conftest.py``'s ``collect_ignore`` excludes this directory, so the
 default ``pytest`` run does not collect them; they run in CI's connector job, and locally with
 ``pytest tests/connectors``.
@@ -55,11 +55,6 @@ def _need(env_var: str) -> str:
 
 
 @pytest.fixture
-def postgres_url() -> str:
-    return _need("SQLLENS_TEST_POSTGRES_URL")
-
-
-@pytest.fixture
 def mysql_url() -> str:
     return _need("SQLLENS_TEST_MYSQL_URL")
 
@@ -79,10 +74,10 @@ def _ctx() -> Any:
     return _Ctx()
 
 
-async def _assert_rls_view_blocked(url: str, dialect: str, *, materialized: bool = False) -> None:
+async def test_mysql_rls_views(mysql_url) -> None:
+    url, dialect = mysql_url, "mysql"
     table = f"rls_{uuid.uuid4().hex}"
     view = f"{table}_view"
-    view_kind = "MATERIALIZED VIEW" if materialized else "VIEW"
     writer = build_sql_runner(url, read_only=False)
 
     async def execute(sql: str) -> None:
@@ -91,7 +86,7 @@ async def _assert_rls_view_blocked(url: str, dialect: str, *, materialized: bool
     await execute(f"CREATE TABLE {table} (id INTEGER, tenant_id TEXT)")
     try:
         await execute(f"INSERT INTO {table} VALUES (1, 'alpha'), (2, 'beta')")
-        await execute(f"CREATE {view_kind} {view} AS SELECT * FROM {table}")
+        await execute(f"CREATE VIEW {view} AS SELECT * FROM {table}")
         guard = RlsGuardRunner(
             ReadOnlyGuardRunner(
                 RowCapRunner(build_sql_runner(url), max_rows=10), dialect=dialect
@@ -103,37 +98,13 @@ async def _assert_rls_view_blocked(url: str, dialect: str, *, materialized: bool
         assert result["id"].tolist() == [1]
         with pytest.raises(RlsError, match="view"):
             await guard.run_sql(RunSqlToolArgs(sql=f"SELECT id FROM {view}"), _ctx())
-        if dialect == "postgres":
-            # A quoted uppercase CTE must not shadow an unquoted database name.
-            result = await guard.run_sql(
-                RunSqlToolArgs(sql=(
-                    f'WITH "{table.upper()}" AS (SELECT 1) SELECT id FROM {table.upper()}'
-                )), _ctx()
-            )
-            assert result["id"].tolist() == [1]
-            with pytest.raises(RlsError, match="view"):
-                await guard.run_sql(
-                    RunSqlToolArgs(sql=(
-                        f'WITH "{view.upper()}" AS (SELECT 1) SELECT id FROM {view.upper()}'
-                    )), _ctx()
-                )
     finally:
-        await execute(f"DROP {view_kind} IF EXISTS {view}")
+        await execute(f"DROP VIEW IF EXISTS {view}")
         await execute(f"DROP TABLE IF EXISTS {table}")
 
 
-@pytest.mark.parametrize("materialized", [False, True])
-async def test_postgres_rls_views(postgres_url, materialized) -> None:
-    await _assert_rls_view_blocked(postgres_url, "postgres", materialized=materialized)
-
-
-async def test_mysql_rls_views(mysql_url) -> None:
-    await _assert_rls_view_blocked(mysql_url, "mysql")
-
-
-@pytest.mark.parametrize("engine", ["postgres", "mysql"])
-async def test_select_star_masks_driver_labelled_secret_column(request, engine: str) -> None:
-    url = request.getfixturevalue(f"{engine}_url")
+async def test_select_star_masks_driver_labelled_secret_column(mysql_url) -> None:
+    url = mysql_url
     table = f"mask_{uuid.uuid4().hex}"
     writer = build_sql_runner(url, read_only=False)
 
@@ -153,31 +124,6 @@ async def test_select_star_masks_driver_labelled_secret_column(request, engine: 
         await execute(f"DROP TABLE IF EXISTS {table}")
 
 
-async def test_postgres_rls_keeps_quoted_builtin_function_case(postgres_url) -> None:
-    table = f"rls_{uuid.uuid4().hex}"
-    writer = build_sql_runner(postgres_url, read_only=False)
-
-    async def execute(sql: str) -> None:
-        await writer.run_sql(RunSqlToolArgs(sql=sql), _ctx())
-
-    await execute(f"CREATE TABLE {table} (id INTEGER, tenant_id TEXT)")
-    try:
-        await execute(f"INSERT INTO {table} VALUES (1, 'alpha'), (2, 'beta')")
-        guard = RlsGuardRunner(
-            ReadOnlyGuardRunner(
-                RowCapRunner(build_sql_runner(postgres_url), max_rows=10), dialect="postgres"
-            ),
-            [RlsRule(table=table, column="tenant_id", value="alpha")],
-            dialect="postgres",
-        )
-        result = await guard.run_sql(
-            RunSqlToolArgs(sql=f'SELECT "quote_ident"(tenant_id) FROM {table}'), _ctx()
-        )
-        assert result.iloc[:, 0].tolist() == ["alpha"]
-    finally:
-        await execute(f"DROP TABLE IF EXISTS {table}")
-
-
 def _rls_guard(url: str, dialect: str) -> RlsGuardRunner:
     return RlsGuardRunner(
         ReadOnlyGuardRunner(RowCapRunner(build_sql_runner(url), max_rows=10), dialect=dialect),
@@ -187,15 +133,6 @@ def _rls_guard(url: str, dialect: str) -> RlsGuardRunner:
 
 
 @pytest.mark.parametrize(("dialect", "allowed", "blocked"), [
-    (
-        "postgres",
-        [
-            "SELECT column_name FROM information_schema.columns LIMIT 1",
-            "SELECT table_name FROM information_schema.tables LIMIT 1",
-            "SELECT tablename FROM pg_catalog.pg_tables LIMIT 1",
-        ],
-        ["SELECT * FROM pg_catalog.pg_stats LIMIT 1"],
-    ),
     (
         "mysql",
         [
@@ -223,59 +160,6 @@ def _rls_guard_with(url: str, dialect: str, tables: list[str]) -> RlsGuardRunner
         [RlsRule(table=table, column="tenant_id", value="alpha") for table in tables],
         dialect=dialect,
     )
-
-
-async def test_postgres_rls_blocks_child_tables_and_functions(postgres_url) -> None:
-    suffix = uuid.uuid4().hex
-    parted, partition = f"rls_parted_{suffix}", f"rls_parted_{suffix}_p"
-    parent, child = f"rls_inh_{suffix}", f"rls_inh_{suffix}_c"
-    function = f"rls_fn_{suffix}"
-    writer = build_sql_runner(postgres_url, read_only=False)
-
-    async def execute(sql: str) -> None:
-        await writer.run_sql(RunSqlToolArgs(sql=sql), _ctx())
-
-    try:
-        await execute(
-            f"CREATE TABLE {parted} (id INTEGER, tenant_id TEXT) PARTITION BY LIST (tenant_id)"
-        )
-        await execute(
-            f"CREATE TABLE {partition} PARTITION OF {parted} FOR VALUES IN ('alpha', 'beta')"
-        )
-        await execute(f"INSERT INTO {parted} VALUES (1, 'alpha'), (2, 'beta')")
-        await execute(f"CREATE TABLE {parent} (id INTEGER, tenant_id TEXT)")
-        await execute(f"CREATE TABLE {child} () INHERITS ({parent})")
-        await execute(f"INSERT INTO {parent} VALUES (1, 'alpha'), (2, 'beta')")
-        await execute(f"INSERT INTO {child} VALUES (3, 'alpha'), (4, 'beta')")
-        await execute(
-            f"CREATE FUNCTION {function}() RETURNS BIGINT LANGUAGE sql "
-            f"AS 'SELECT count(*) FROM {parent}'"
-        )
-        # A rule naming a child does not make the child queryable.
-        guard = _rls_guard_with(postgres_url, "postgres", [parted, parent, partition])
-
-        async def ids(sql: str) -> list[int]:
-            return sorted((await guard.run_sql(RunSqlToolArgs(sql=sql), _ctx()))["id"].tolist())
-
-        assert await ids(f"SELECT id FROM {parted}") == [1]
-        # The parent's rule scopes rows stored in its inheritance child too.
-        assert await ids(f"SELECT id FROM {parent}") == [1, 3]
-        for table in (partition, child):
-            with pytest.raises(RlsError, match="child tables"):
-                await guard.run_sql(RunSqlToolArgs(sql=f"SELECT id FROM {table}"), _ctx())
-        for call in (f"SELECT {function}()", f"SELECT public.{function}()"):
-            with pytest.raises(RlsError, match=f"database function '{function}'"):
-                await guard.run_sql(RunSqlToolArgs(sql=call), _ctx())
-        result = await guard.run_sql(
-            RunSqlToolArgs(sql=(
-                f"SELECT count(*) AS n, upper(min(tenant_id)) AS t, "
-                f"min(strpos(tenant_id, 'l')) AS p FROM {parent}"
-            )), _ctx()
-        )
-        assert result[["n", "t", "p"]].values.tolist() == [[2, "ALPHA", 2]]
-    finally:
-        await execute(f"DROP FUNCTION IF EXISTS {function}()")
-        await execute(f"DROP TABLE IF EXISTS {child}, {parent}, {parted} CASCADE")
 
 
 async def test_mysql_rls_blocks_stored_functions(mysql_url) -> None:
@@ -308,67 +192,6 @@ async def test_mysql_rls_blocks_stored_functions(mysql_url) -> None:
     finally:
         await execute(f"DROP FUNCTION IF EXISTS {function}")
         await execute(f"DROP TABLE IF EXISTS {table}")
-
-
-# ─────────────────────────────── postgres ───────────────────────────────────
-
-
-class TestPostgresRunner:
-    async def test_select_one(self, postgres_url: str) -> None:
-        runner = build_sql_runner(postgres_url)
-        df = await runner.run_sql(RunSqlToolArgs(sql="SELECT 1 AS n"), _ctx())
-        assert df.shape == (1, 1)
-        assert int(df.iloc[0]["n"]) == 1
-
-    async def test_writes_blocked_by_guard(self, postgres_url: str) -> None:
-        runner = ReadOnlyGuardRunner(build_sql_runner(postgres_url), dialect="postgres")
-        with pytest.raises(UnsafeSqlError):
-            await runner.run_sql(
-                RunSqlToolArgs(sql=f"CREATE TABLE t_{uuid.uuid4().hex} (a INT)"),
-                _ctx(),
-            )
-
-    async def test_connector_read_only_blocks_write_without_guard(
-        self, postgres_url: str
-    ) -> None:
-        """S-7: the connector-level read-only backstop rejects a write even
-        when the parser guard is NOT in the stack (a guard miss must still be
-        unable to mutate). ``build_sql_runner`` defaults ``read_only=True``.
-        """
-        import psycopg2
-
-        runner = build_sql_runner(postgres_url)  # no ReadOnlyGuardRunner wrap
-        with pytest.raises(psycopg2.errors.ReadOnlySqlTransaction):
-            await runner.run_sql(
-                RunSqlToolArgs(sql=f"CREATE TABLE t_{uuid.uuid4().hex} (a INT)"),
-                _ctx(),
-            )
-
-    async def test_max_rows_cap_truncates(self, postgres_url: str) -> None:
-        """generate_series of max_rows + 1 must return exactly max_rows with a truncation marker."""
-        max_rows = 50
-        runner = build_sql_runner(postgres_url, max_rows=max_rows)
-        df = await runner.run_sql(
-            RunSqlToolArgs(sql=f"SELECT generate_series(1, {max_rows + 1}) AS n"),
-            _ctx(),
-        )
-        assert len(df) == max_rows
-        assert df.attrs[TRUNCATED_ATTR] is True
-        assert df.attrs[MAX_ROWS_ATTR] == max_rows
-
-    async def test_statement_timeout_raises_within_a_second(self, postgres_url: str) -> None:
-        """pg_sleep(2) with a 500ms timeout must error in under 1s."""
-        import psycopg2
-
-        runner = build_sql_runner(postgres_url, statement_timeout_ms=500)
-        start = time.monotonic()
-        # Catch QueryCanceled specifically — a bare ``Exception`` would also
-        # pass for unrelated failures (connection refused, ImportError on a
-        # missing driver) and silently mis-pass when the timeout never fires.
-        with pytest.raises(psycopg2.errors.QueryCanceled):
-            await runner.run_sql(RunSqlToolArgs(sql="SELECT pg_sleep(2)"), _ctx())
-        elapsed = time.monotonic() - start
-        assert elapsed < 1.5, f"timeout fired too slowly ({elapsed:.2f}s)"
 
 
 # ──────────────────────────────── mysql ─────────────────────────────────────
@@ -522,12 +345,8 @@ class TestMysqlRunner:
 # ──────────────────────────────── factory ───────────────────────────────────
 
 
-class TestFactoryAcceptsBoth:
-    """Smoke check that both schemes route through ``build_sql_runner``."""
-
-    def test_postgres_url_routes_to_postgres_runner(self, postgres_url: str) -> None:
-        runner = build_sql_runner(postgres_url)
-        assert type(runner).__name__ == "PostgresRunner"
+class TestFactoryRoutesMysql:
+    """Smoke check that the MySQL scheme routes through ``build_sql_runner``."""
 
     def test_mysql_url_routes_to_mysql_runner(self, mysql_url: str) -> None:
         runner = build_sql_runner(mysql_url)
@@ -543,8 +362,7 @@ class TestConfigConstruction:
     @pytest.mark.parametrize(
         "url",
         [
-            "postgresql://u:p@h:5432/db",
-            "postgresql+psycopg2://u:p@h:5432/db",
+            "mysql://u:p@h:3306/db",
             "mysql+pymysql://u:p@h:3306/db",
         ],
     )
