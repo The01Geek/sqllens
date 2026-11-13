@@ -140,20 +140,25 @@ async def test_request_class_refusal_comes_before_profile_lookup(tmp_path: Path)
 def test_over_limit_meta_is_refused_as_key_missing(tmp_path: Path) -> None:
     from sqllens.rule_sets import select_rule_set
 
-    extras = {f"k{i}": i for i in range(65)} | OWNER
-    meta = _request_metadata(
-        SimpleNamespace(
-            request_context=SimpleNamespace(
-                meta=SimpleNamespace(model_extra=extras, model_fields_set=set(extras))
-            )
-        ),
-        count_declared_keys=True,
+    # Exactly 64 extras, so only counting the declared ``progressToken`` beside
+    # them puts this request over the limit.
+    extras = {f"k{i}": i for i in range(61)} | OWNER
+    assert len(extras) == 64
+    sent_meta = SimpleNamespace(
+        model_extra=extras, model_fields_set=set(extras) | {"progressToken"}
     )
+    context = SimpleNamespace(request_context=SimpleNamespace(meta=sent_meta))
     loaded = rule_set_config(tmp_path).rule_sets.loaded
     assert loaded is not None
+
+    meta = _request_metadata(context, count_declared_keys=True)
     with pytest.raises(RuleSetRequestError) as info:
         select_rule_set(loaded, meta)
     assert str(info.value) == REFUSED_RULE_SET_KEY_MISSING
+
+    # The same request is forwarded whole when the caller does not ask for the
+    # declared keys to be counted, so the flag is what refuses it.
+    assert _request_metadata(context) == extras
 
 
 @pytest.mark.parametrize(
@@ -277,3 +282,27 @@ async def test_without_rule_sets_nothing_is_selected_or_refused(tmp_path: Path) 
     markdown, *_ = await _ask(cfg, agent, {})
     assert "answered q" in markdown
     assert agent.selections == [None]
+
+
+def test_query_database_counts_declared_meta_keys_only_under_rule_sets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The tool passes the declared-key count exactly when a rule-set file is loaded."""
+    import sqllens.server as server_module
+
+    seen: list[bool] = []
+
+    def record(ctx, *, count_declared_keys: bool = False) -> dict[str, object]:
+        seen.append(count_declared_keys)
+        raise RuntimeError("stop before the agent runs")
+
+    monkeypatch.setattr(server_module, "_request_metadata", record)
+
+    for cfg in (
+        rule_set_config(tmp_path),
+        build_test_config(persist_dir=tmp_path / "chroma"),
+    ):
+        tool = server_module.build_server(cfg)._tool_manager.get_tool("query_database").fn
+        with pytest.raises(RuntimeError, match="stop before the agent runs"):
+            asyncio.run(tool(question="q", ctx=SimpleNamespace()))
+    assert seen == [True, False]
