@@ -255,7 +255,6 @@ def build_agent(cfg: Config, *, allow_memory_writes: bool = True) -> Agent:
         config=AgentConfig(
             max_tool_iterations=cfg.agent.max_tool_iterations,
             max_tokens=cfg.llm.max_tokens,
-            temperature=cfg.llm.temperature,
             effort=cfg.llm.effort,
             ui_features=ui_features,
         ),

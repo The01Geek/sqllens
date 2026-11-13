@@ -2,7 +2,7 @@
 Anthropic LLM service implementation.
 
 Implements the LlmService interface using Anthropic's Messages API
-(anthropic>=0.49). Supports non-streaming and streaming text output.
+(anthropic 2.x). Supports non-streaming and streaming text output.
 Tool-calls (tool_use blocks) are surfaced at the end of a stream or after a
 non-streaming call as ToolCall entries.
 """
@@ -240,13 +240,8 @@ class AnthropicLlmService(LlmService):
             # Anthropic requires max_tokens; default if not provided
             "max_tokens": request.max_tokens if request.max_tokens is not None else 8192,
         }
-        # Omit unset values: models such as Claude Opus 5.5 reject any temperature.
-        if request.temperature is not None:
-            payload["temperature"] = request.temperature
-        # Via extra_body, not an `output_config` kwarg: SDK versions at the
-        # anthropic>=0.49 floor are not known to accept that keyword.
         if request.effort is not None:
-            payload["extra_body"] = {"output_config": {"effort": request.effort}}
+            payload["output_config"] = {"effort": request.effort}
         if tools_payload:
             payload["tools"] = tools_payload
             payload["tool_choice"] = {"type": "auto"}

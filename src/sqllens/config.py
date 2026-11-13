@@ -133,6 +133,12 @@ class DatabaseConfig(BaseModel):
 # not imported so config loading stays free of the agent package.
 EffortLevel = Literal["low", "medium", "high", "xhigh", "max"]
 
+TEMPERATURE_REMOVED_MESSAGE = (
+    "llm.temperature is no longer accepted: the Anthropic API and SDK SQL Lens "
+    "uses reject a sampling temperature. Remove `temperature` from the [llm] "
+    "section (and unset SQLLENS_LLM__TEMPERATURE)."
+)
+
 
 class LLMConfig(BaseModel):
     """LLM provider settings. v1: Anthropic only."""
@@ -158,13 +164,6 @@ class LLMConfig(BaseModel):
             "tool calls; the model's own output limit still applies."
         ),
     )
-    # None omits the key from the request; Claude Opus 5.5 rejects any temperature.
-    temperature: float | None = Field(
-        default=None,
-        ge=0.0,
-        le=2.0,
-        description="Sampling temperature sent on every agent LLM call; unset sends none.",
-    )
     effort: EffortLevel | None = Field(
         default=None,
         description=(
@@ -172,6 +171,15 @@ class LLMConfig(BaseModel):
             "call; unset sends none and the model uses its default."
         ),
     )
+
+    # Do not drop this guard: LLMConfig ignores unknown keys, so without it a
+    # leftover `temperature` would load silently and have no effect.
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_temperature(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "temperature" in data:
+            raise ValueError(TEMPERATURE_REMOVED_MESSAGE)
+        return data
 
 
 _DEFAULT_SIMILARITY_THRESHOLD = 0.7

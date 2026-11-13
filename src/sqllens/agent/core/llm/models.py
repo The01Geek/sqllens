@@ -35,8 +35,6 @@ class LlmRequest(BaseModel):
     )  # Will be ToolSchema but avoiding circular import
     user: User = Field(description="User making the request")
     stream: bool = Field(default=False, description="Whether to stream response")
-    # None omits the key: some models (Claude Opus 5.5) reject any temperature.
-    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     effort: Optional[EffortLevel] = Field(default=None)
     max_tokens: Optional[int] = Field(default=None, gt=0)
     system_prompt: Optional[str] = Field(
