@@ -388,7 +388,7 @@ REDACTED_RLS = "refusing to execute query: row-level security could not be appli
 
 
 # Text of the read-only guard's parse refusals (``readonly._parse_statements``
-# and ``_mysql_parse_sql``); any other UnsafeSqlError is a statement-type refusal.
+# and ``_mysql_parse_sql``). test_safety_rule_sets pins them to those messages.
 _PARSE_REFUSAL_MARKERS = (
     "could not parse SQL",
     "empty SQL",

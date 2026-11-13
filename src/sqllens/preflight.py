@@ -29,12 +29,16 @@ import contextlib
 import errno
 from pathlib import Path
 from typing import Literal
-from urllib.parse import unquote, urlparse
 
 from sqllens.agent.integrations.sqlite.sql_runner import connect_sqlite, sqlite_path_from_url
 from sqllens.auth import build_authenticator
 from sqllens.config import API_KEY_MISSING_MESSAGE, Config
-from sqllens.rule_sets import LoadedRuleSets, RuleSetCatalogError, check_catalog
+from sqllens.rule_sets import (
+    LoadedRuleSets,
+    RuleSetCatalogError,
+    check_catalog,
+    mysql_connect_kwargs,
+)
 
 Subsystem = Literal["database", "llm", "memory", "auth"]
 
@@ -129,27 +133,15 @@ def probe_database(cfg: Config) -> None:
             ) from exc
 
         try:
-            parsed = urlparse(url)
-            host, user, port = parsed.hostname, parsed.username, parsed.port
+            connect_kwargs = mysql_connect_kwargs(url)
         except ValueError as exc:
+            # Fixed text: the URL can carry a password.
             raise PreflightError(
-                "database", "invalid MySQL URL; check its format and port"
+                "database", "invalid MySQL URL; it must name a user and host and a numeric port"
             ) from exc
-        if not host or not user:
-            raise PreflightError(
-                "database", "mysql url must include user and host"
-            )
         try:
             connection = pymysql.connect(
-                host=host,
-                port=port or 3306,
-                # urlparse does not percent-decode credentials; SQLAlchemy's
-                # make_url does. Decode here so a password containing e.g. '/'
-                # written as %2F authenticates instead of being sent literally.
-                user=unquote(user),
-                password=unquote(parsed.password) if parsed.password else "",
-                database=(parsed.path or "").lstrip("/"),
-                connect_timeout=_DB_CONNECT_TIMEOUT_SECONDS,
+                **connect_kwargs, connect_timeout=_DB_CONNECT_TIMEOUT_SECONDS
             )
         except pymysql.MySQLError as exc:
             raise PreflightError(

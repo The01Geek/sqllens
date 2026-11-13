@@ -291,7 +291,8 @@ def load_rule_sets(path: Path, *, database_url: str) -> LoadedRuleSets:
     """Read, parse and validate the rule-set file at ``path`` against ``database_url``.
 
     Raises ``RuleSetFileError`` naming the file and each problem as a record
-    path and a message: an unreadable file, invalid TOML, a format violation,
+    path and a message: an unreadable file, a file that is not UTF-8 text,
+    invalid TOML, a format violation,
     a ``row_rule``, a ``database_url`` that is not a MySQL URL, or a
     ``binding.database`` that differs, byte for byte, from the database the
     URL's path names.
