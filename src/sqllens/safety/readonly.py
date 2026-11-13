@@ -630,7 +630,7 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
         if isinstance(sub, _DML_DDL_TYPES):
             kind = type(sub).__name__.upper()
             raise UnsafeSqlError(f"only SELECT statements are allowed (found nested {kind})")
-        # ``SELECT ... INTO`` writes (MySQL user variables or files, a new table
+        # ``SELECT ... INTO`` writes (MySQL user variables, a new table
         # elsewhere) — sqlglot parses it as ``exp.Select`` with ``args["into"]``
         # set rather than as ``exp.Create``, so the DML/DDL deny-walk above
         # misses it. Covers root-level, CTE-nested and set-operation occurrences.

@@ -561,7 +561,7 @@ class TestGuardFailsClosedOnUnexpectedError:
 
 
 class TestSelectIntoRejected:
-    """``SELECT ... INTO`` writes on MySQL (user variables, files) and T-SQL (a new table).
+    """``SELECT ... INTO`` writes on MySQL (user variables) and T-SQL (a new table).
 
     sqlglot parses it as ``exp.Select`` with ``args["into"]`` set rather than
     as ``exp.Create``, so the DML/DDL deny-walk would miss it without the

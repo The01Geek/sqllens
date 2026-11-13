@@ -77,8 +77,7 @@ def _called_names(sql: str, dialect: str) -> list[str]:
     built-ins (``locate`` parses to ``StrPosition``), and a keyword such as
     ``replace`` is a call name too. Keyword and type names before ``(``
     (``IN (``, ``DECIMAL(``) are collected as well. Each name is returned as
-    written, lower-cased and ASCII-lower-cased, so a lookup matches whether or
-    not the server folds non-ASCII letters.
+    written, lower-cased and ASCII-lower-cased.
     """
     parser_dialect = sqlglot.Dialect.get_or_raise(dialect)
     keywords = type(parser_dialect).tokenizer_class.KEYWORDS
