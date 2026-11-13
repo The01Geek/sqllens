@@ -1184,9 +1184,8 @@ class TestBlockCommentBoundaries:
                 f"SELECT 1 /* outer /* nested */ -- */\n + {call}", dialect=dialect,
             )
 
-    @pytest.mark.parametrize("dialect", ["sqlite"])
-    def test_read_after_nested_comment_markers_passes(self, dialect: str) -> None:
-        assert_select_only("SELECT 1 /* outer /* nested */ -- */\n + 2", dialect=dialect)
+    def test_read_after_nested_comment_markers_passes(self) -> None:
+        assert_select_only("SELECT 1 /* outer /* nested */ -- */\n + 2", dialect="sqlite")
 
 
 _DENYLIST_MESSAGE = (

@@ -63,8 +63,8 @@ class DatabaseConfig(BaseModel):
         ...,
         description=(
             "SQLAlchemy-style DSN: mysql://... or mysql+<driver>://..., e.g. "
-            "mysql+pymysql://u:p@h:3306/db. Any other scheme is refused at load "
-            "(sqlite:// is still accepted until its removal)."
+            "mysql+pymysql://u:p@h:3306/db. Any other scheme, or a value with no "
+            "'://', is refused at load (sqlite:// is still accepted until its removal)."
         ),
     )
     name: str = Field(default="primary", description="Display name shown via list_data_sources")

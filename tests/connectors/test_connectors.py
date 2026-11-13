@@ -104,9 +104,8 @@ async def test_mysql_rls_views(mysql_url) -> None:
 
 
 async def test_select_star_masks_driver_labelled_secret_column(mysql_url) -> None:
-    url = mysql_url
     table = f"mask_{uuid.uuid4().hex}"
-    writer = build_sql_runner(url, read_only=False)
+    writer = build_sql_runner(mysql_url, read_only=False)
 
     async def execute(sql: str) -> None:
         await writer.run_sql(RunSqlToolArgs(sql=sql), _ctx())
@@ -114,7 +113,7 @@ async def test_select_star_masks_driver_labelled_secret_column(mysql_url) -> Non
     await execute(f"CREATE TABLE {table} (id INTEGER, password_hash TEXT)")
     try:
         await execute(f"INSERT INTO {table} VALUES (1, 'SENTINEL-HASH'), (2, NULL)")
-        guard = ResultMaskingRunner(RowCapRunner(build_sql_runner(url), max_rows=10))
+        guard = ResultMaskingRunner(RowCapRunner(build_sql_runner(mysql_url), max_rows=10))
         df = await guard.run_sql(
             RunSqlToolArgs(sql=f"SELECT * FROM {table} ORDER BY id"), _ctx()
         )
@@ -132,21 +131,13 @@ def _rls_guard(url: str, dialect: str) -> RlsGuardRunner:
     )
 
 
-@pytest.mark.parametrize(("dialect", "allowed", "blocked"), [
-    (
-        "mysql",
-        [
-            "SELECT column_name FROM information_schema.columns LIMIT 1",
-            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES LIMIT 1",
-        ],
-        ["SELECT * FROM information_schema.COLUMN_STATISTICS LIMIT 1"],
-    ),
-])
-async def test_rls_keeps_metadata_views_and_blocks_value_statistics(
-    request, dialect, allowed, blocked
-) -> None:
-    url = request.getfixturevalue(f"{dialect}_url")
-    guard = _rls_guard(url, dialect)
+async def test_rls_keeps_metadata_views_and_blocks_value_statistics(mysql_url) -> None:
+    allowed = [
+        "SELECT column_name FROM information_schema.columns LIMIT 1",
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES LIMIT 1",
+    ]
+    blocked = ["SELECT * FROM information_schema.COLUMN_STATISTICS LIMIT 1"]
+    guard = _rls_guard(mysql_url, "mysql")
     for sql in allowed:
         await guard.run_sql(RunSqlToolArgs(sql=sql), _ctx())
     for sql in blocked:

@@ -29,7 +29,7 @@ class SqlRunner(ABC):
             context: Tool execution context
             require_base_tables: Verify referenced relations and called routines on
                 the execution connection and refuse views, unverified relation kinds,
-                child tables, calls whose names match database-defined routines, and
+                calls whose names match database-defined routines, and
                 failed catalog lookups before running SQL.
                 Required by RLS; implementations must not ignore this flag.
 

@@ -98,7 +98,7 @@ Keep `read_only = true` unless you specifically need to allow writes.
 | MySQL 8.0+ | `mysql+pymysql://user:password@host:3306/dbname` (or `mysql://...`) |
 | SQLite | `sqlite:///data/app.db` (relative), `sqlite:////var/data/app.db` (absolute), `sqlite:///C:/data/app.db` (Windows) |
 
-Any other URL scheme fails at config load; see [Database URL formats](configuration.md#database-url-formats).
+Any other URL scheme, or a URL with no `://`, fails at config load; see [Database URL formats](configuration.md#database-url-formats).
 
 For SQLite, three slashes followed by a path (`sqlite:///data/app.db`) is a path relative to the directory the server was started from; four slashes (`sqlite:////var/data/app.db`) is an absolute path. On Windows, write the drive after three slashes (`sqlite:///C:/data/app.db`). A SQLite URL must not contain a host, user, password, port or `?...` query parameters; SQL Lens rejects such a URL. With `read_only = true` (the default), SQL Lens opens the file read-only and never creates it: if the file does not exist, `sqllens serve` stops at startup with an error naming the path.
 

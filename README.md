@@ -58,7 +58,7 @@ Env vars beat TOML — the convention containerized deploys expect.
 | MySQL 8.0+ | `mysql+pymysql://user:pw@host:3306/dbname` (or `mysql://...`) |
 | SQLite | `sqlite:///./demo.db` |
 
-Any other URL scheme fails every `sqllens` command that loads the config, `validate` and `serve` included.
+Any other URL scheme, or a URL with no `://`, fails every `sqllens` command that loads the config, `validate` and `serve` included.
 
 ### Auth modes
 

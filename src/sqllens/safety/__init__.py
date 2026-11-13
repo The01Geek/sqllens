@@ -156,7 +156,7 @@ class RlsGuardRunner(SqlRunner):
     With active rules, the rewritten SQL must pass the read-only guard's
     function denylist (``UnsafeSqlError``), and the inner runner must also
     verify relations and called functions on its execution connection; stored
-    views, child tables and calls matching database-defined functions (as
+    views and calls matching database-defined functions (as
     ``verify_base_tables`` scopes them) are refused rather than expanded.
     """
 

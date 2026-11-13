@@ -19,7 +19,7 @@ Python's exception-chaining rules say that an exception raised inside a `finally
 
 ## The contract
 
-The runner wraps each cleanup call in `try / except Exception` and logs and swallows the secondary error so the **primary** exception reaches the caller unchanged. The write path closes its cursor this way; the outer `finally:` closes the connection the same way on every path:
+The runner wraps the write-path `cursor.close()` and the final `conn.close()` in `try / except Exception` and logs and swallows the secondary error so the **primary** exception reaches the caller unchanged; the outer `finally:` closes the connection this way on every path. The session-setup cursor's `close()` is not guarded, so an error from it replaces a setup failure:
 
 ```python
 finally:

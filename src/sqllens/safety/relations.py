@@ -97,7 +97,7 @@ def _called_names(sql: str, dialect: str) -> list[str]:
 
 
 def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
-    """Refuse views, child tables, database routines and failed lookups under RLS.
+    """Refuse views, database routines and failed lookups under RLS.
 
     The caller supplies its live execution connection. No catalog result is
     cached across queries; CTE names are resolved by SQL scope analysis.
@@ -105,8 +105,8 @@ def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
     schema introspection keeps working; every other view is refused. Under
     dialect ``mysql`` a name in call position that matches, ignoring case, a
     MySQL stored function is refused, whether or not the statement references
-    a relation. A dialect with no entry here refuses any statement that
-    references a relation, before querying the connection.
+    a relation. A dialect with no entry here refuses, for example, any
+    statement that references a relation, before querying the connection.
     """
     try:
         relations = _relations(sql, dialect)
@@ -142,9 +142,8 @@ def verify_base_tables(connection: Any, sql: str, *, dialect: str) -> None:
 def _verify_relations(cursor: Any, relations: list[exp.Table], dialect: str) -> None:
     """Raise ``RlsError`` for a relation that is not a verified base table.
 
-    A lookup that raises, or a non-boolean child flag, propagates as another
-    exception, which the caller, ``verify_base_tables``, logs before refusing the
-    query.
+    A lookup that raises propagates as another exception, which the caller,
+    ``verify_base_tables``, logs before refusing the query.
     """
     mysql_fold = False
     if dialect == "mysql":
