@@ -29,6 +29,15 @@ from sqllens.agent.core.user import User
 from sqllens.config import RESERVED_METADATA_KEYS, Config
 from sqllens.conversation_store import ConversationOwnerMismatchError
 from sqllens.profiles import ProfileStore, resolve_effective_settings
+from sqllens.rule_sets import (
+    REFUSED_CONVERSATION_OWNER,
+    RuleSetRequestError,
+    RuleSetSelection,
+    ensure_catalog_confirmed,
+    reset_rule_set_selection,
+    select_rule_set,
+    set_rule_set_selection,
+)
 from sqllens.runtime import (
     EffectiveSettings,
     reset_effective_settings,
@@ -215,6 +224,32 @@ async def _conversation_turn(conversation_id: str | None) -> AsyncIterator[str |
     finally:
         entry.lock.release()
         _release_queue_entry(conversation_id, entry)
+
+
+async def _check_conversation_owner(
+    agent: Any, request_context: RequestContext, conversation_id: str
+) -> None:
+    """Refuse a request whose identity differs from the one that started the conversation.
+
+    Raises ``RuleSetRequestError`` on a mismatch, before the agent runs, so the
+    stored conversation keeps its history for its owner. A store with no
+    ``owner_id`` lookup, or a resolver or store that raises, fails closed with
+    the sanitized internal error.
+    """
+    owner_lookup = getattr(agent.conversation_store, "owner_id", None)
+    try:
+        if owner_lookup is None:
+            raise TypeError(
+                f"{type(agent.conversation_store).__name__} has no owner_id lookup"
+            )
+        user = await agent.user_resolver.resolve_user(request_context)
+        owner = owner_lookup(conversation_id)
+    except Exception as e:
+        logger.exception("conversation owner check failed")
+        raise RuntimeError(_INTERNAL_ERROR_MESSAGE) from e
+    if owner is not None and owner != user.id:
+        logger.info("query_database refused: conversation owned by another identity")
+        raise RuleSetRequestError(REFUSED_CONVERSATION_OWNER)
 
 
 async def _conversation_baseline(
@@ -597,10 +632,21 @@ async def query_database_impl_with_widgets(
     # run-loop iteration cap, the search-memory threshold fallback) reads the
     # request-local value. An unknown valid or omitted profile name resolves through
     # ``default`` to base config. Invalid non-empty names fail before agent work.
+    # While a rule-set file is configured, the five request classes run first,
+    # before the named-profile lookup, so a refused request does no other work.
+    rule_sets = cfg.rule_sets.loaded
+    selection: RuleSetSelection | None = None
+    if rule_sets is not None:
+        try:
+            selection = select_rule_set(rule_sets, strip_reserved_metadata(metadata))
+        except RuleSetRequestError as e:
+            logger.info("query_database refused before the agent ran: %s", e)
+            raise
     effective: EffectiveSettings = resolve_effective_settings(
         cfg, profile, store=profile_store
     )
     _profile_token = set_effective_settings(effective)
+    _rule_set_token = set_rule_set_selection(selection)
     try:
         try:
             if agent is None:
@@ -620,6 +666,12 @@ async def query_database_impl_with_widgets(
         # an earlier call on the same conversation does not report that wait as
         # part of its own duration.
         async with _conversation_turn(conversation_id) as queued_id:
+            if rule_sets is not None:
+                # Inside the turn lock, so a request under another identity
+                # that waited for the owner's running turn sees the owner.
+                if queued_id is not None:
+                    await _check_conversation_owner(agent, request_context, queued_id)
+                await ensure_catalog_confirmed(cfg.database.url, rule_sets)
             baseline_user: User | None = None
             baseline_messages = 0
             if queued_id is not None:
@@ -780,4 +832,5 @@ async def query_database_impl_with_widgets(
         markdown = _append_sql_block(answer, query_info)
         return markdown, blocks, query_info, memory_info, agent_trace
     finally:
+        reset_rule_set_selection(_rule_set_token)
         reset_effective_settings(_profile_token)

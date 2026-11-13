@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import tomllib
@@ -127,6 +128,19 @@ def _loopback_policy_violated(cfg: Config) -> bool:
     """
     return cfg.server.transport == "http" and unauthenticated_non_loopback(cfg)
 
+def _unconfirmed_rule_sets(cfg: Config) -> list[str]:
+    loaded = cfg.rule_sets.loaded
+    return [] if loaded is None else loaded.unconfirmed
+
+
+def _unconfirmed_message(name: str) -> str:
+    return (
+        f"rule set {name!r} is not confirmed against production "
+        "(source.confirmed_against_production is not true); requests that select it "
+        "are refused"
+    )
+
+
 def _version_callback(value: bool) -> None:
     if value:
         console.print(f"sqllens {__version__}")
@@ -220,6 +234,8 @@ def serve(
             f"unauthenticated HTTP server on {escape(cfg.server.host)}. "
             "Closed-network deployments only."
         )
+    for name in _unconfirmed_rule_sets(cfg):
+        logging.getLogger("sqllens.rule_sets").warning(_unconfirmed_message(name))
     if no_preflight:
         err_console.print("[yellow]Preflight skipped (--no-preflight).[/yellow]")
     else:
@@ -281,6 +297,8 @@ def validate(
         )
     console.print(auth_line)
     console.print(f"  transport: {cfg.server.transport}")
+    for name in _unconfirmed_rule_sets(cfg):
+        err_console.print(f"[yellow]Warning:[/yellow] {escape(_unconfirmed_message(name))}")
 
     selected: list[tuple[str, Callable[..., None]]] = []
     if check_db:
@@ -571,6 +589,11 @@ def verify_memory(
     if cfg.llm.api_key is None:
         err_console.print(f"[red]Config error:[/red] {escape(API_KEY_MISSING_MESSAGE)}")
         raise typer.Exit(code=2)
+    if cfg.rule_sets.loaded is not None:
+        from sqllens.rule_sets import VERIFY_MEMORY_UNSUPPORTED_MESSAGE
+
+        err_console.print(f"[red]Error:[/red] {escape(VERIFY_MEMORY_UNSUPPORTED_MESSAGE)}")
+        raise typer.Exit(code=1)
     try:
         with path.open(encoding="utf-8", newline="") as source:
             text = source.read()

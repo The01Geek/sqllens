@@ -23,16 +23,20 @@ import os
 import re
 import shlex
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     SecretStr,
     field_validator,
     model_validator,
 )
+
+if TYPE_CHECKING:
+    from sqllens.rule_sets import LoadedRuleSets
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -745,6 +749,31 @@ class RlsRule(BaseModel):
         return self
 
 
+class RuleSetsConfig(BaseModel):
+    """Per-role rule sets: the version-1 rule-set file to load, if any.
+
+    With ``file`` unset, nothing about rule sets applies. With it set, the file
+    is read and validated whenever config loads (see :mod:`sqllens.rule_sets`),
+    and every ``query_database`` request must select one of its sets.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    file: Path | None = Field(
+        default=None,
+        description=(
+            "Path of the version-1 rule-set file (MySQL only). Read once when config "
+            "loads; a change takes effect after a restart."
+        ),
+    )
+    _loaded: LoadedRuleSets | None = PrivateAttr(default=None)
+
+    @property
+    def loaded(self) -> LoadedRuleSets | None:
+        """The validated file, or ``None`` when no rule-set file is configured."""
+        return self._loaded
+
+
 # Set by Config.load to the single resolved TOML Path for the duration of one
 # load; settings_customise_sources reads it instead of re-resolving. Unset
 # (LookupError on .get()) for direct Config() construction. A ContextVar keeps
@@ -778,6 +807,17 @@ class Config(BaseSettings):
     result_masking: ResultMaskingConfig = Field(default_factory=lambda: ResultMaskingConfig())
     # Opt-in row-level-security predicates; empty disables the guard entirely.
     rls: list[RlsRule] = Field(default_factory=list)
+    rule_sets: RuleSetsConfig = Field(default_factory=lambda: RuleSetsConfig())
+
+    @model_validator(mode="after")
+    def _load_rule_sets(self) -> Config:
+        if self.rule_sets.file is not None:
+            from sqllens.rule_sets import load_rule_sets
+
+            self.rule_sets._loaded = load_rule_sets(
+                self.rule_sets.file, database_url=self.database.url
+            )
+        return self
 
     @classmethod
     def settings_customise_sources(

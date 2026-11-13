@@ -16,7 +16,8 @@ existing ``chroma.sqlite3`` is opened for writing but left unchanged. Even
 ``probe_memory`` avoids opening a Chroma collection so the ~80 MB embedding
 download stays lazy. The remaining probes are non-mutating, except that a
 ``read_only = false`` SQLite probe creates a missing database file: open and
-immediately close a connection (no query; a read-only SQLite probe reads the
+immediately close a connection (no query, except the rule-set catalog check
+when a rule-set file is configured; a read-only SQLite probe reads the
 schema header), construct the LLM client (no
 API round-trip), and build the authenticator (catches bearer-mode configs
 missing a token).
@@ -33,6 +34,7 @@ from urllib.parse import unquote, urlparse
 from sqllens.agent.integrations.sqlite.sql_runner import connect_sqlite, sqlite_path_from_url
 from sqllens.auth import build_authenticator
 from sqllens.config import API_KEY_MISSING_MESSAGE, Config
+from sqllens.rule_sets import LoadedRuleSets, RuleSetCatalogError, check_catalog
 
 Subsystem = Literal["database", "llm", "memory", "auth"]
 
@@ -87,9 +89,13 @@ def _probe_sqlite(url: str, *, read_only: bool) -> None:
 def probe_database(cfg: Config) -> None:
     """Open and immediately close a connection to the configured database.
 
-    Runs no SQL of its own against MySQL (the driver's connect still sends its
-    own session setup statements) — a query would burn round-trips and
-    could trigger permission checks unrelated to reachability. A read-only
+    Without a rule-set file, runs no SQL of its own against MySQL (the
+    driver's connect still sends its own session setup statements) — a query
+    would burn round-trips and could trigger permission checks unrelated to
+    reachability. With a rule-set file configured, reads
+    ``information_schema`` on that connection to confirm every listed table
+    and column exists as listed (``sqllens.rule_sets.check_catalog``); a
+    mismatch, or a catalog read that fails, raises ``PreflightError``. A read-only
     SQLite probe does read the schema header (``PRAGMA schema_version``) so a
     directory or a non-empty non-database file fails here. For MySQL the connect
     timeout is bounded by ``_DB_CONNECT_TIMEOUT_SECONDS`` so a wedged host
@@ -134,30 +140,46 @@ def probe_database(cfg: Config) -> None:
                 "database", "mysql url must include user and host"
             )
         try:
-            with contextlib.closing(
-                pymysql.connect(
-                    host=host,
-                    port=port or 3306,
-                    # urlparse does not percent-decode credentials; SQLAlchemy's
-                    # make_url does. Decode here so a password containing e.g. '/'
-                    # written as %2F authenticates instead of being sent literally.
-                    user=unquote(user),
-                    password=unquote(parsed.password) if parsed.password else "",
-                    database=(parsed.path or "").lstrip("/"),
-                    connect_timeout=_DB_CONNECT_TIMEOUT_SECONDS,
-                )
-            ):
-                pass
+            connection = pymysql.connect(
+                host=host,
+                port=port or 3306,
+                # urlparse does not percent-decode credentials; SQLAlchemy's
+                # make_url does. Decode here so a password containing e.g. '/'
+                # written as %2F authenticates instead of being sent literally.
+                user=unquote(user),
+                password=unquote(parsed.password) if parsed.password else "",
+                database=(parsed.path or "").lstrip("/"),
+                connect_timeout=_DB_CONNECT_TIMEOUT_SECONDS,
+            )
         except pymysql.MySQLError as exc:
             raise PreflightError(
                 "database", f"{type(exc).__name__}: connection failed; check connection settings."
             ) from exc
+        with contextlib.closing(connection):
+            rule_sets = cfg.rule_sets.loaded
+            if rule_sets is not None:
+                _check_rule_set_catalog(connection, rule_sets)
         return
 
     raise PreflightError(
         "database",
         "unsupported database scheme (expected sqlite/mysql)",
     )
+
+
+def _check_rule_set_catalog(connection: object, rule_sets: LoadedRuleSets) -> None:
+    """Run the rule-set catalog existence check; a pass confirms it for request handling."""
+    try:
+        check_catalog(connection, rule_sets)
+    except RuleSetCatalogError as exc:
+        raise PreflightError("database", str(exc)) from exc
+    except Exception as exc:
+        raise PreflightError(
+            "database",
+            f"{type(exc).__name__}: the rule-set catalog check could not read "
+            "information_schema; check the database user's privileges.",
+        ) from exc
+    rule_sets.catalog.confirmed = True
 
 
 def probe_llm(cfg: Config) -> None:

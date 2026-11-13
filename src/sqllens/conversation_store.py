@@ -76,6 +76,14 @@ class BoundedConversationStore(ConversationStore):
             return conversation
         return None
 
+    def owner_id(self, conversation_id: str) -> str | None:
+        """The id of the user who owns ``conversation_id``, or ``None`` if it is not stored.
+
+        Does not touch LRU recency.
+        """
+        conversation = self._conversations.get(conversation_id)
+        return None if conversation is None else conversation.user.id
+
     async def update_conversation(self, conversation: Conversation) -> None:
         self._remember(conversation)
 
