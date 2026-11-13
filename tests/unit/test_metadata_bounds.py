@@ -58,10 +58,14 @@ def test_metadata_key_limit_counts_every_meta_key_not_only_the_extras():
     assert metadata(extras, fields_set=set(extras) | {"progressToken"}) == {}
 
 
-def test_metadata_without_model_fields_set_is_discarded():
+def test_metadata_without_model_fields_set_is_discarded(caplog):
+    caplog.set_level("DEBUG")
     assert _request_metadata(SimpleNamespace(
         request_context=SimpleNamespace(meta=SimpleNamespace(model_extra={"tenant": "alpha"}))
     )) == {}
+    assert caplog.messages == [
+        "request _meta exposes no model_fields_set; returning empty metadata"
+    ]
 
 
 def test_sdk_meta_reports_declared_keys_in_fields_set_but_not_in_extras():

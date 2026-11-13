@@ -251,7 +251,9 @@ def _request_metadata(ctx: Context) -> dict[str, Any]:
         logger.debug("request _meta exposes no model_fields_set; returning empty metadata")
         return {}
     try:
-        if type(extra) is not dict or len(sent) > 64:
+        # Both counts are bounded, so the limit still holds if a future SDK
+        # stops recording the extras in ``model_fields_set``.
+        if type(extra) is not dict or len(extra) > 64 or len(sent) > 64:
             raise JsonBoundsError("request metadata key limit or shape")
         bounded, _ = copy_bounded_json(extra)
         return bounded
