@@ -1,0 +1,66 @@
+[
+  {
+    "criterion": 1,
+    "text": "After the removal PR, `git grep -i -l -E 'postgres|psycopg|libpq|pg_'` lists no file outside exactly these 7 entries — complete by construction: `CHANGELOG.md`, `docs/external/release-notes.md`, files under `changelog.d/`, `docs/internal/production-readiness-v0.1.0.md`, `.prflow/config.schema.json`, `AGENTS.md`, and test files under `tests/`. In `AGENTS.md` every match is in the list of upstream directories to consult or in a sentence that names PostgreSQL only as unsupported, removed, or not to be designed for, tested against, added or extended; in a test file every match is inside a test asserting that SQL Lens refuses PostgreSQL input (a PostgreSQL URL, the dialect name `postgres` or `postgresql`) or maps it to no dialect or treats it as a dialect SQL Lens has no entry for, its name, docstring and comments included. `src/sqllens/agent/integrations/postgres/` and `tests/unit/test_postgres_connect_timeout.py` no longer exist."
+  },
+  {
+    "criterion": 2,
+    "text": "Loading a config succeeds as before when `database.url`'s scheme (the text before the first `://`, compared case-insensitively) is `mysql`, starts with `mysql+` (at minimum `mysql+pymysql`, `mysql+mysqldb` and `mysql+mysqlconnector`), or starts with `sqlite`. Loading fails with a pydantic validation error on `database.url` whose message is exactly `unsupported database URL scheme; use a mysql:// or mysql+pymysql:// URL (MySQL 8.0+)` (pydantic's `Value error, ` prefix aside) for any other string value — at minimum `postgresql://`, `postgres://`, `postgresql+psycopg2://`, `mysqlx://`, `mariadb://`, an empty string, and a URL with no `://` — and that message is the same fixed text for every refused URL."
+  },
+  {
+    "criterion": 3,
+    "text": "`sqllens validate -c <file>` on a TOML whose `database.url` is `postgresql://u:CANARY-PW@h/db` exits 2 and prints an `Invalid:` line carrying the scheme message, and `sqllens serve -c <file>` on the same file exits 2 with a `Config error:` line before any preflight runs; neither output contains `CANARY-PW`."
+  },
+  {
+    "criterion": 4,
+    "text": "Called directly with a `postgresql://` URL, bypassing config validation, `build_sql_runner` raises `ValueError` and `probe_database` raises `PreflightError` with subsystem `database`; neither raises `ImportError`, `AttributeError` or a driver error; `compare_sql` called with dialect `\"postgresql\"` raises sqlglot's unknown-dialect `ValueError`."
+  },
+  {
+    "criterion": 5,
+    "text": "With dialect `None` and with a dialect SQL Lens has no entry for, `\"oracle\"`, `assert_select_only` refuses `SELECT load_file('/etc/passwd')` and `SELECT sleep(1)` with the function-denylist message, asserted with `match=`. `_SIDE_EFFECT_FUNCS` has no PostgreSQL entry, so function names that only the removed PostgreSQL entry held (for example `pg_read_file`, `dblink`, `lo_import`) are not in the function denylist under dialect `None` or a dialect SQL Lens has no entry for, `postgres` included."
+  },
+  {
+    "criterion": 6,
+    "text": "With dialect `None` and with a dialect SQL Lens has no entry for, `\"oracle\"`, `is_introspection_query` returns `True` for `SELECT * FROM performance_schema.threads` and `SELECT * FROM information_schema.tables`. `_CATALOGS_BY_DIALECT` has no PostgreSQL entry, so under dialect `None` or a dialect SQL Lens has no entry for, `postgres` included, `pg_catalog` and `pg_`-prefixed names are not classified as catalogs."
+  },
+  {
+    "criterion": 7,
+    "text": "Under dialect `mysql`, `assert_select_only` refuses `SELECT a INTO @var FROM users`, `WITH x AS (SELECT 1 AS a) SELECT a INTO @v FROM x` and `SELECT a INTO @v FROM users UNION SELECT a FROM admins`, each asserted with `match=r\"SELECT \\.\\.\\. INTO\"`, under the sqlglot version `requirements.txt` locks."
+  },
+  {
+    "criterion": 8,
+    "text": "Every `_BYPASS_CORPUS` entry in `tests/unit/test_safety.py` that the change moves from dialect `postgres` to another dialect asserts its refusal reason with `match=`, and no corpus entry uses dialect `postgres`."
+  },
+  {
+    "criterion": 9,
+    "text": "Called directly with dialect `\"postgres\"` on a query that references a table, `verify_base_tables` raises `RlsError` and issues no query on the connection's cursor; on a query that references no table but calls a function, it returns without querying the connection; and called directly with dialect `\"postgres\"`, `apply_rls` neither folds unquoted identifiers nor refuses an unquoted non-ASCII identifier."
+  },
+  {
+    "criterion": 10,
+    "text": "`pyproject.toml` has no `postgres` extra and its `all` extra installs only the MySQL driver; `pip install -c requirements.txt -c docker/requirements-drivers.txt -e \".[dev,all]\"` followed by `pip check` succeeds; `docker/requirements-drivers.txt` pins no psycopg2; and `tests/unit/test_docker_inputs.py` passes while comparing the driver pins with the `mysql` extra."
+  },
+  {
+    "criterion": 11,
+    "text": "`docker/Dockerfile` installs neither `libpq-dev` nor `libpq5` and still installs SQL Lens with `.[all]` under `requirements.txt` and `requirements-drivers.txt` constraints."
+  },
+  {
+    "criterion": 12,
+    "text": "The CI connector job is named `Connector tests (MySQL)`, starts only a MySQL service, sets only `SQLLENS_TEST_MYSQL_URL`, imports only pymysql in its readiness step, and passes on the removal PR; `tests/unit/test_action_security.py` asserts the new name; `tests/connectors/` contains no Postgres case."
+  },
+  {
+    "criterion": 13,
+    "text": "`AGENTS.md` names only SQLite (#383) as legacy engine code awaiting removal; its MySQL-only engine rule's supported-scope sentence names `mysql://` and `mysql+<driver>://` URLs as the supported forms and states that config loading refuses every other scheme, `mysqlx://` included (SQLite URLs still accepted until #383), and that the server version is not checked; its legacy-code bullet and connector-test command comment name no Postgres code, case or `SQLLENS_TEST_POSTGRES_URL`; and its repo-conventions bullet names the connector check `Connector tests (MySQL)`."
+  },
+  {
+    "criterion": 14,
+    "text": "`docs/external/configuration.md`'s database URL formats section lists only MySQL (`mysql://`, `mysql+<driver>://` such as `mysql+pymysql://`) and SQLite URLs and states that any other scheme fails every `sqllens` command that loads the config, `validate` and `serve` included."
+  },
+  {
+    "criterion": 15,
+    "text": "The removal PR leaves every `changelog.d` fragment present on its base byte-for-byte unchanged and adds `changelog.d/<PR>.removed.md`, which states that PostgreSQL support is removed (the runner, the `postgres` extra and libpq in the Docker image), that `sqllens[postgres]` installs no driver, that a `database.url` whose scheme is not `mysql://` or `mysql+<driver>://` (SQLite until its own removal) now fails every `sqllens` command that loads the config, `validate` and `serve` included, that earlier entries in the same release describing PostgreSQL support or PostgreSQL fixes no longer apply, that affected users move to MySQL 8.0+, and that a config using a non-MySQL URL only as a stand-in for `sqllens validate` without `--check-db` switches to a MySQL URL, since that run opens no database connection."
+  },
+  {
+    "criterion": 16,
+    "text": "The change leaves `CHANGELOG.md`, `docs/external/release-notes.md`, `.prflow/config.schema.json` and `docs/internal/production-readiness-v0.1.0.md` unchanged."
+  }
+]

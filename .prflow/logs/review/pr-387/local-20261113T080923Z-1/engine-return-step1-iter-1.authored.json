@@ -1,0 +1,102 @@
+{
+  "root_completeness": "established",
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "corroboration": 1,
+      "description": "The supported database URL scheme rule is written four times with different checks: DatabaseConfig._supported_url_scheme accepts only mysql, mysql+... and sqlite..., while build_sql_runner (factory.py), probe_database (preflight.py) and sqlglot_dialect_for_url (readonly.py) test only startswith('mysql'), so a mysqlx:// URL that skips config validation still builds a MySQL runner.",
+      "defect_signature": {"file": "src/sqllens/config.py", "line_range": [109, 116], "kind": "type_design"}
+    },
+    {
+      "finding_id": "F-2",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "corroboration": 1,
+      "description": "The _SQLGLOT_DIALECT_MAP comment in eval/compare.py says it translates URL schemes, but its remaining keys mssql and mariadb can no longer reach it because config loading refuses both schemes; the mariadb entry also hints at MariaDB support the project rules out.",
+      "defect_signature": {"file": "src/sqllens/eval/compare.py", "line_range": [13, 17], "kind": "type_design"}
+    },
+    {
+      "finding_id": "F-3",
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "suggestion",
+      "corroboration": 1,
+      "description": "The new mysql/sleep(0) row of test_call_after_nested_comment_markers_is_checked is refused by the nested-comment check before the function denylist runs, so it does not test what the test name says and duplicates coverage at lines 1145 and 1178; the sqlite row still covers the denylist path.",
+      "defect_signature": {"file": "tests/unit/test_safety.py", "line_range": [1195, 1205], "kind": "test_gap"}
+    },
+    {
+      "finding_id": "F-4",
+      "agent": "prflow:silent-failure-hunter",
+      "severity": "suggestion",
+      "corroboration": 1,
+      "description": "verify_base_tables returns without a log line or refusal for a function-only query under a dialect with no table entry; acceptance criterion 9 requires this, only a custom runner under RlsGuardRunner can reach it, and the docstring does not mention the pass-through.",
+      "defect_signature": {"file": "src/sqllens/safety/relations.py", "line_range": [112, 114], "kind": "logic_error"}
+    },
+    {
+      "finding_id": "F-5",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "corroboration": 1,
+      "description": "configuration.md, README.md and the changelog fragment say any mysql+<driver>:// URL loads but do not say the driver name is ignored and PyMySQL is always used.",
+      "defect_signature": {"file": "docs/external/configuration.md", "line_range": [44, 47], "kind": "other"}
+    },
+    {
+      "finding_id": "F-6",
+      "agent": "prflow:requesting-code-review",
+      "severity": "suggestion",
+      "corroboration": 1,
+      "description": "docs/internal/index.md line 34 now has a singular subject ('the MySQL SqlRunner implementation') but still says 'what they log when they do'.",
+      "defect_signature": {"file": "docs/internal/index.md", "line_range": [34, 34], "kind": "style"}
+    }
+  ],
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "plan_eligible": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": true,
+    "test_relevant": true,
+    "detect_all_audit": false,
+    "checklist_skipped": null,
+    "file_count": 67,
+    "changed_lines": 2720
+  },
+  "cap_drops": {
+    "count": 72,
+    "by_category": {
+      "api_contract": 27,
+      "data_format_assumption": 27,
+      "test_mock_alignment": 14,
+      "dependency_interaction": 4
+    }
+  },
+  "phase4_demoted": [],
+  "reject_drivers": [],
+  "criterion_exempt": [],
+  "verdict": "APPROVE with notes"
+}

@@ -1,0 +1,162 @@
+[
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "The supported database URL scheme rule is written four times with different checks: DatabaseConfig._supported_url_scheme accepts only mysql, mysql+... and sqlite..., while build_sql_runner (factory.py), probe_database (preflight.py) and sqlglot_dialect_for_url (readonly.py) test only startswith('mysql'), so a mysqlx:// URL that skips config validation still builds a MySQL runner.",
+  "defect_signature": {
+   "file": "src/sqllens/config.py",
+   "line_range": [
+    109,
+    116
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "deferred",
+  "iter": 1
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "The _SQLGLOT_DIALECT_MAP comment in eval/compare.py says it translates URL schemes, but its remaining keys mssql and mariadb can no longer reach it because config loading refuses both schemes; the mariadb entry also hints at MariaDB support the project rules out.",
+  "defect_signature": {
+   "file": "src/sqllens/eval/compare.py",
+   "line_range": [
+    13,
+    17
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "deferred",
+  "iter": 1
+ },
+ {
+  "agent": "prflow:pr-test-analyzer",
+  "severity": "suggestion",
+  "description": "The new mysql/sleep(0) row of test_call_after_nested_comment_markers_is_checked is refused by the nested-comment check before the function denylist runs, so it does not test what the test name says and duplicates coverage at lines 1145 and 1178; the sqlite row still covers the denylist path.",
+  "defect_signature": {
+   "file": "tests/unit/test_safety.py",
+   "line_range": [
+    1195,
+    1205
+   ],
+   "kind": "test_gap"
+  },
+  "fix_decision": "deferred",
+  "iter": 1
+ },
+ {
+  "agent": "prflow:silent-failure-hunter",
+  "severity": "suggestion",
+  "description": "verify_base_tables returns without a log line or refusal for a function-only query under a dialect with no table entry; acceptance criterion 9 requires this, only a custom runner under RlsGuardRunner can reach it, and the docstring does not mention the pass-through.",
+  "defect_signature": {
+   "file": "src/sqllens/safety/relations.py",
+   "line_range": [
+    112,
+    114
+   ],
+   "kind": "logic_error"
+  },
+  "fix_decision": "deferred",
+  "iter": 1
+ },
+ {
+  "agent": "prflow:comment-analyzer",
+  "severity": "suggestion",
+  "description": "configuration.md, README.md and the changelog fragment say any mysql+<driver>:// URL loads but do not say the driver name is ignored and PyMySQL is always used.",
+  "defect_signature": {
+   "file": "docs/external/configuration.md",
+   "line_range": [
+    44,
+    47
+   ],
+   "kind": "other"
+  },
+  "fix_decision": "deferred",
+  "iter": 1
+ },
+ {
+  "agent": "prflow:requesting-code-review",
+  "severity": "suggestion",
+  "description": "docs/internal/index.md line 34 now has a singular subject ('the MySQL SqlRunner implementation') but still says 'what they log when they do'.",
+  "defect_signature": {
+   "file": "docs/internal/index.md",
+   "line_range": [
+    34,
+    34
+   ],
+   "kind": "style"
+  },
+  "fix_decision": "deferred",
+  "iter": 1
+ },
+ {
+  "agent": "prflow:pr-test-analyzer",
+  "severity": "suggestion",
+  "description": "test_qualified_and_uppercase_calls_refused now has only the unqualified SELECT GET_LOCK('a', 1) row; the diff deleted every schema-qualified denylist case and ported none to mysql or no dialect.",
+  "defect_signature": {
+   "file": "tests/unit/test_safety.py",
+   "line_range": [
+    1044,
+    1051
+   ],
+   "kind": "test_gap"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "DatabaseConfig.url scheme validator runs only at construction; no validate_assignment, so later assignment or model_copy(update=...) skips it.",
+  "defect_signature": {
+   "file": "src/sqllens/config.py",
+   "line_range": [
+    109,
+    116
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "pushed_back"
+ },
+ {
+  "agent": "prflow:type-design-analyzer",
+  "severity": "suggestion",
+  "description": "_refuse_database_routines always sends a MySQL ROUTINES query; correct only because its single caller gates on dialect == mysql, an unstated precondition.",
+  "defect_signature": {
+   "file": "src/sqllens/safety/relations.py",
+   "line_range": [
+    191,
+    204
+   ],
+   "kind": "type_design"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:comment-analyzer",
+  "severity": "suggestion",
+  "description": "preflight.py docstring and preflight.md name only the character-set statement the driver's connect sends; PyMySQL also sends SET AUTOCOMMIT = 0.",
+  "defect_signature": {
+   "file": "src/sqllens/preflight.py",
+   "line_range": [
+    90,
+    91
+   ],
+   "kind": "documented_falsehood"
+  },
+  "fix_decision": "applied"
+ },
+ {
+  "agent": "prflow:comment-analyzer",
+  "severity": "suggestion",
+  "description": "test_sql_runner_cleanup.py still raises and matches _PrimaryError('max_statement_time exceeded').",
+  "defect_signature": {
+   "file": "tests/unit/test_sql_runner_cleanup.py",
+   "line_range": [
+    70,
+    88
+   ],
+   "kind": "comment_drift"
+  },
+  "fix_decision": "applied"
+ }
+]

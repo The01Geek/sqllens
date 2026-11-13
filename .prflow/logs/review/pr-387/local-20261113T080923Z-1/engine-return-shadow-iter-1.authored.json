@@ -1,0 +1,115 @@
+{
+  "root_completeness": "established",
+  "verdict": "REJECT",
+  "phase3_findings": [
+    {
+      "finding_id": "F-1",
+      "agent": "prflow:pr-test-analyzer",
+      "severity": "suggestion",
+      "description": "test_qualified_and_uppercase_calls_refused now has only the unqualified SELECT GET_LOCK('a', 1) row; the diff deleted every schema-qualified denylist case and ported none to mysql or no dialect, so no test checks that a <schema>.<denied_fn>(...) call is refused and the test name claims coverage it lacks.",
+      "defect_signature": {"file": "tests/unit/test_safety.py", "line_range": [1044, 1051], "kind": "test_gap"},
+      "corroboration": 1,
+      "carve_out": "self-contradicting-diff"
+    },
+    {
+      "finding_id": "F-2",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "description": "DatabaseConfig.url scheme validator runs only at construction; no validate_assignment, so later assignment or model_copy(update=...) skips it. No src caller does this today.",
+      "defect_signature": {"file": "src/sqllens/config.py", "line_range": [109, 116], "kind": "type_design"},
+      "corroboration": 1
+    },
+    {
+      "finding_id": "F-3",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "description": "Downstream code keeps a looser startswith(\"mysql\") scheme test than the validator: build_sql_runner (factory.py:250), probe_database (preflight.py:116) and sqlglot_dialect_for_url (readonly.py:187) accept mysqlx:// when called directly.",
+      "defect_signature": {"file": "src/sqllens/agent/factory.py", "line_range": [250, 250], "kind": "type_design"},
+      "corroboration": 1
+    },
+    {
+      "finding_id": "F-4",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "description": "_SQLGLOT_DIALECT_MAP still maps mssql and mariadb, which config loading now refuses; dead entries, and mariadb reads as unsupported compatibility.",
+      "defect_signature": {"file": "src/sqllens/eval/compare.py", "line_range": [14, 17], "kind": "type_design"},
+      "corroboration": 1
+    },
+    {
+      "finding_id": "F-5",
+      "agent": "prflow:type-design-analyzer",
+      "severity": "suggestion",
+      "description": "_refuse_database_routines lost its dialect parameter and always sends a MySQL information_schema.ROUTINES query; correct only because its single caller gates on dialect == \"mysql\" (line 112), an unstated precondition.",
+      "defect_signature": {"file": "src/sqllens/safety/relations.py", "line_range": [191, 204], "kind": "type_design"},
+      "corroboration": 1
+    },
+    {
+      "finding_id": "F-6",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "description": "preflight.py docstring (and docs/internal/setup/preflight.md:47) names only the character-set statement the MySQL driver's connect sends; PyMySQL also sends SET AUTOCOMMIT = 0. The main 'no SQL of its own' claim holds.",
+      "defect_signature": {"file": "src/sqllens/preflight.py", "line_range": [90, 91], "kind": "documented_falsehood"},
+      "corroboration": 1,
+      "inertness_cap": "suggestion"
+    },
+    {
+      "finding_id": "F-7",
+      "agent": "prflow:comment-analyzer",
+      "severity": "suggestion",
+      "description": "test_sql_runner_cleanup.py still raises and matches _PrimaryError(\"max_statement_time exceeded\"), the MariaDB variable name, while nearby text now says MAX_EXECUTION_TIME.",
+      "defect_signature": {"file": "tests/unit/test_sql_runner_cleanup.py", "line_range": [70, 88], "kind": "comment_drift"},
+      "corroboration": 1,
+      "inertness_cap": "suggestion"
+    },
+    {
+      "finding_id": "F-8",
+      "agent": "prflow:requesting-code-review",
+      "severity": "suggestion",
+      "description": "docs/internal/index.md row names one MySQL SqlRunner implementation but keeps plural pronouns ('they log when they do').",
+      "defect_signature": {"file": "docs/internal/index.md", "line_range": [34, 34], "kind": "style"},
+      "corroboration": 1,
+      "inertness_cap": "suggestion"
+    }
+  ],
+  "phase3_dispatched": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "expected_reviewers": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "plan_eligible": [
+    "prflow:code-reviewer",
+    "prflow:silent-failure-hunter",
+    "prflow:comment-analyzer",
+    "prflow:requesting-code-review",
+    "prflow:type-design-analyzer",
+    "prflow:pr-test-analyzer"
+  ],
+  "plan_exclusions": [],
+  "phase3_failed_agents": [],
+  "diff_profile": {
+    "small_diff": false,
+    "config_only": false,
+    "has_new_types": true,
+    "test_relevant": true,
+    "detect_all_audit": false,
+    "checklist_skipped": null
+  },
+  "cap_drops": {
+    "count": 64,
+    "by_category": {"data_format_assumption": 18, "api_contract": 34, "test_mock_alignment": 12}
+  },
+  "phase4_demoted": [],
+  "reject_drivers": ["F-1", "VC-45"],
+  "criterion_exempt": []
+}
