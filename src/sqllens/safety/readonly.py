@@ -179,7 +179,7 @@ def sqlglot_dialect_for_url(url: str) -> str | None:
     """Map a database URL to the sqlglot dialect name used by the safety guards.
 
     The dialect is the ``_CATALOGS_BY_DIALECT`` key the URL scheme starts with
-    (``postgresql+psycopg`` → ``postgres``), so every dialect this returns has
+    (``mysql+pymysql`` → ``mysql``), so every dialect this returns has
     a catalog entry; any other scheme returns ``None``.
     """
     scheme = url.split("://", 1)[0].lower()
@@ -192,13 +192,12 @@ def sqlglot_dialect_for_url(url: str) -> str | None:
 # Catalog schemas and object-name prefixes that mark a read as schema
 # introspection rather than a data-answering query. Keyed by sqlglot dialect:
 # an engine-specific catalog counts only on its own engine, so a data table
-# that merely starts with another engine's prefix (``pg_payments`` on MySQL)
+# that merely starts with another engine's prefix (``sqlite_events`` on MySQL)
 # is not misread as a catalog. ``sqlglot_dialect_for_url`` derives its
 # dialects from these keys; any other dialect falls back to the union.
 _SHARED_CATALOG_SCHEMAS: frozenset[str] = frozenset({"information_schema"})
 # dialect -> (catalog schemas, catalog object-name prefixes)
 _CATALOGS_BY_DIALECT: dict[str, tuple[frozenset[str], tuple[str, ...]]] = {
-    "postgres": (frozenset({"pg_catalog"}), ("pg_",)),
     "mysql": (frozenset({"mysql", "sys", "performance_schema"}), ()),
     "sqlite": (frozenset(), ("sqlite_", "pragma_")),
 }
@@ -260,7 +259,6 @@ def is_introspection_query(sql: str, *, dialect: str | None = None) -> bool:
     even alongside data tables. A reference that sqlglot's scope analysis
     resolves to a CTE is not a catalog table, whatever its name. The catalogs are
     ``information_schema`` for every dialect, plus the engine's own: the
-    ``pg_catalog`` schema and ``pg_`` name prefix for ``postgres``; the
     ``mysql``, ``sys`` and ``performance_schema`` schemas for ``mysql``; the
     ``sqlite_`` and ``pragma_`` name prefixes for ``sqlite``. A name prefix
     matches, in any casing, a table name or a table-valued function called in
@@ -386,122 +384,11 @@ _DML_DDL_TYPES: tuple[type[exp.Expression], ...] = (
 # Per-dialect denylist of side-effecting / DoS / RCE functions. A syntactically
 # valid ``SELECT`` that *calls* one of these passes the root-type / DML-DDL
 # walk untouched, so without this the guard is RCE on the default SQLite
-# deployment (``load_extension``) and a write/DoS vector on Postgres/MySQL.
+# deployment (``load_extension``) and a write/DoS vector on MySQL.
 # Names are matched case-insensitively against the parsed function node.
 # CWE-89 / CWE-284 / CWE-770 / CWE-94.
 _SIDE_EFFECT_FUNCS: dict[str, frozenset[str]] = {
     "sqlite": frozenset({"load_extension"}),
-    "postgres": frozenset(
-        {
-            "dblink_exec",
-            "dblink",
-            "dblink_connect",
-            "dblink_connect_u",
-            "dblink_disconnect",
-            "dblink_open",
-            "dblink_fetch",
-            "dblink_close",
-            "dblink_send_query",
-            "dblink_get_result",
-            "dblink_get_notify",
-            "dblink_cancel_query",
-            "set_config",
-            "pg_notify",
-            "pg_reload_conf",
-            "pg_promote",
-            "pg_rotate_logfile",
-            "pg_switch_wal",
-            "pg_advisory_lock",
-            "pg_advisory_lock_shared",
-            "pg_advisory_xact_lock",
-            "pg_advisory_xact_lock_shared",
-            "pg_try_advisory_lock",
-            "pg_try_advisory_lock_shared",
-            "pg_try_advisory_xact_lock",
-            "pg_try_advisory_xact_lock_shared",
-            "pg_advisory_unlock",
-            "pg_advisory_unlock_shared",
-            "pg_advisory_unlock_all",
-            "pg_stat_reset",
-            "pg_stat_reset_shared",
-            "pg_stat_reset_single_table_counters",
-            "pg_stat_reset_single_function_counters",
-            "pg_stat_reset_slru",
-            "pg_stat_reset_replication_slot",
-            "pg_stat_reset_subscription_stats",
-            "pg_stat_reset_backend_stats",
-            "query_to_xml",
-            "query_to_xmlschema",
-            "query_to_xml_and_xmlschema",
-            "table_to_xml",
-            "table_to_xmlschema",
-            "table_to_xml_and_xmlschema",
-            "schema_to_xml",
-            "schema_to_xmlschema",
-            "schema_to_xml_and_xmlschema",
-            "database_to_xml",
-            "database_to_xmlschema",
-            "database_to_xml_and_xmlschema",
-            "cursor_to_xml",
-            "cursor_to_xmlschema",
-            # Like ``query_to_xml``, these run query text passed as a string,
-            # or read a relation named by a text argument, so the statement
-            # they read is never part of the parsed tree. Blocking by name
-            # covers every overload (e.g. the tsquery-only ``ts_rewrite``).
-            # Text search: ts_stat, ts_rewrite. tablefunc: crosstab*,
-            # connectby. xml2: xpath_table. dblink: dblink_build_sql_insert /
-            # _update (copy a named table's row into the returned text).
-            # pageinspect: get_raw_page, bt_page_items (raw page / index
-            # contents of a named relation).
-            "ts_stat",
-            "ts_rewrite",
-            "crosstab",
-            "crosstab2",
-            "crosstab3",
-            "crosstab4",
-            "connectby",
-            "xpath_table",
-            "dblink_build_sql_insert",
-            "dblink_build_sql_update",
-            "get_raw_page",
-            "bt_page_items",
-            "pg_sleep",
-            "pg_terminate_backend",
-            "pg_cancel_backend",
-            "pg_file_write",
-            "pg_file_rename",
-            "pg_file_unlink",
-            "pg_file_sync",
-            "pg_logdir_ls",
-            "pg_read_file",
-            "pg_read_binary_file",
-            "pg_ls_dir",
-            # Path / log file disclosure on Postgres (pg_stat_file has been
-            # around since 9.x; pg_ls_logdir / pg_ls_waldir since 10;
-            # pg_read_server_files since 11 — none are new in PG 14). Parse as
-            # exp.Anonymous and would otherwise slip the guard, exposing the
-            # on-disk WAL/log layout to anyone who can issue a SELECT.
-            "pg_stat_file",
-            "pg_read_server_files",
-            "pg_ls_logdir",
-            "pg_ls_waldir",
-            "pg_ls_tmpdir",
-            "pg_ls_archive_statusdir",
-            "pg_ls_logicalmapdir",
-            "pg_ls_logicalsnapdir",
-            "pg_ls_replslotdir",
-            "lo_import",
-            "lo_export",
-            "lo_create",
-            "lo_creat",
-            "lo_from_bytea",
-            "lo_put",
-            "lowrite",
-            "lo_truncate",
-            "lo_truncate64",
-            "lo_unlink",
-        }
-    ),
     # ``sys_exec`` / ``sys_eval`` are lib_mysqludf_sys UDFs: where the UDF is
     # installed and the configured DB role has EXECUTE, they are an RCE seam.
     # They parse as exp.Anonymous and need explicit naming to stay refused.
@@ -570,7 +457,7 @@ def _func_name_candidates(node: exp.Func) -> set[str]:
 
     For a typed node we deliberately do NOT consult ``node.name``: on a typed
     ``exp.Func`` ``.name`` is the value of the node's first argument, not the
-    function name (e.g. ``md5('pg_sleep')`` → ``.name == 'pg_sleep'``). Mixing
+    function name (e.g. ``md5('sleep')`` → ``.name == 'sleep'``). Mixing
     that into the candidate set would reject benign reads whose string literal
     happens to equal a denied function name. ``sql_names()`` already yields the
     canonical name for every typed function we deny (e.g. ``GENERATE_SERIES``).
@@ -743,14 +630,14 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
         if isinstance(sub, _DML_DDL_TYPES):
             kind = type(sub).__name__.upper()
             raise UnsafeSqlError(f"only SELECT statements are allowed (found nested {kind})")
-        # ``SELECT ... INTO new_tbl`` is a write on both Postgres and T-SQL —
-        # sqlglot parses it as ``exp.Select`` with ``args["into"]`` set rather
+        # ``SELECT ... INTO`` writes on several engines (a new table, or MySQL
+        # user variables and files) — sqlglot parses it as ``exp.Select`` with ``args["into"]`` set rather
         # than as ``exp.Create``, so the DML/DDL deny-walk above misses it.
         # Covers root-level and CTE-nested occurrences; ``INTO TEMP`` /
         # ``INTO UNLOGGED`` variants are the same node shape.
         if isinstance(sub, exp.Select) and sub.args.get("into"):
             raise UnsafeSqlError("SELECT ... INTO is not allowed (creates a table)")
         # Side-effecting / DoS / RCE function calls. A valid SELECT can still
-        # call e.g. ``load_extension`` (SQLite RCE) or ``pg_read_file`` (data
-        # exfiltration); the root-type/DML walk above does not see these.
+        # call e.g. ``load_extension`` (SQLite RCE) or ``load_file`` (MySQL
+        # data exfiltration); the root-type/DML walk above does not see these.
         _refuse_denied_function(sub, denied_funcs)

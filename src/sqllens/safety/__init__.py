@@ -13,15 +13,12 @@ Six orthogonal protections, composed at the factory:
   also applies the read-only guard's function denylist to the rewritten SQL,
   whatever ``database.read_only`` is. The engine runner then verifies on
   its execution connection that every referenced relation is a base table
-  or an allowlisted metadata-only system view, that no PostgreSQL relation
-  is a partition or inheritance child, and that no called name matches a
-  PostgreSQL function outside ``pg_catalog`` and ``information_schema`` or a
-  MySQL stored function. Fail-secure: any rewrite
+  or an allowlisted metadata-only system view, and, on MySQL, that no called
+  name matches a stored function. Fail-secure: any rewrite
   failure (parse error, scope-analysis error, missing/suspicious dynamic
   value, unprovable protected-table reference), any other view or
   unverifiable relation, and any failed catalog lookup blocks the query.
-* Per-runner statement timeouts (``SET statement_timeout`` on Postgres,
-  ``SET SESSION MAX_EXECUTION_TIME`` on MySQL, ``set_progress_handler``
+* Per-runner statement timeouts (``SET SESSION MAX_EXECUTION_TIME`` on MySQL, ``set_progress_handler``
   deadline on SQLite) — server- or driver-side time bound.
 * ``RowCapRunner`` — per-runner streaming via ``fetchmany`` stops at
   ``max_rows``; this decorator is the secondary belt-and-suspenders check

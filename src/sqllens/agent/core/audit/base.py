@@ -29,12 +29,12 @@ class AuditLogger(ABC):
 
     Implementations can:
     - Write to files (JSON, CSV, etc.)
-    - Send to databases (Postgres, MongoDB, etc.)
+    - Send to databases (MySQL, MongoDB, etc.)
     - Stream to cloud services (CloudWatch, Datadog, etc.)
     - Send to SIEM systems (Splunk, Elastic, etc.)
 
     Example:
-        class PostgresAuditLogger(AuditLogger):
+        class DatabaseAuditLogger(AuditLogger):
             async def log_event(self, event: AuditEvent) -> None:
                 await self.db.execute(
                     "INSERT INTO audit_log (...) VALUES (...)",
@@ -43,7 +43,7 @@ class AuditLogger(ABC):
 
         agent = Agent(
             llm_service=...,
-            audit_logger=PostgresAuditLogger(db_pool)
+            audit_logger=DatabaseAuditLogger(db_pool)
         )
     """
 

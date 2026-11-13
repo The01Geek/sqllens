@@ -49,12 +49,23 @@ logger = logging.getLogger(__name__)
 # SQLLENS_<SECTION>__<FIELD> spelling.
 
 
+# Must stay fixed text, never built from the URL: the CLI prints each
+# validation error's message, and a database URL can carry a password.
+UNSUPPORTED_DATABASE_URL_MESSAGE = (
+    "unsupported database URL scheme; use a mysql:// or mysql+pymysql:// URL (MySQL 8.0+)"
+)
+
+
 class DatabaseConfig(BaseModel):
     """Single-database connection settings."""
 
     url: str = Field(
         ...,
-        description="SQLAlchemy-style DSN, e.g. sqlite:///demo.db, postgresql://u:p@h/db, mysql+pymysql://...",
+        description=(
+            "SQLAlchemy-style DSN: mysql://... or mysql+<driver>://..., e.g. "
+            "mysql+pymysql://u:p@h:3306/db. Any other scheme is refused at load "
+            "(sqlite:// is still accepted until its removal)."
+        ),
     )
     name: str = Field(default="primary", description="Display name shown via list_data_sources")
     read_only: bool = Field(default=True, description="Reject non-SELECT statements via SQL parser")
@@ -78,8 +89,8 @@ class DatabaseConfig(BaseModel):
         le=24 * 60 * 60 * 1000,
         description=(
             "Server-side statement timeout in milliseconds. Applied via "
-            "SET statement_timeout (Postgres), SET SESSION MAX_EXECUTION_TIME (MySQL), "
-            "or a progress-handler deadline (SQLite). 0 disables (Postgres/MySQL only). "
+            "SET SESSION MAX_EXECUTION_TIME (MySQL) "
+            "or a progress-handler deadline (SQLite). 0 disables (MySQL only). "
             "Upper bound is 24h (86_400_000) to catch unit-confusion typos."
         ),
     )
@@ -94,12 +105,20 @@ class DatabaseConfig(BaseModel):
         ),
     )
 
+    @field_validator("url")
+    @classmethod
+    def _supported_url_scheme(cls, value: str) -> str:
+        if "://" in value:
+            scheme = value.split("://", 1)[0].lower()
+            if scheme == "mysql" or scheme.startswith(("mysql+", "sqlite")):
+                return value
+        raise ValueError(UNSUPPORTED_DATABASE_URL_MESSAGE)
+
     @property
     def dialect(self) -> str:
         """SQLAlchemy URL scheme with any ``+driver`` suffix stripped.
 
-        ``sqlite:///demo.db`` → ``sqlite``; ``mysql+pymysql://...`` → ``mysql``;
-        ``postgresql+psycopg://...`` → ``postgresql``.
+        ``sqlite:///demo.db`` → ``sqlite``; ``mysql+pymysql://...`` → ``mysql``.
         """
         scheme = self.url.split("://", 1)[0]
         return scheme.split("+", 1)[0]

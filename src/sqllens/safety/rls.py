@@ -181,28 +181,6 @@ def _predicate(rule: RlsRule, qualifier: str, value: _Scalar | list[_Scalar]) ->
     return op_cls(this=col, expression=exp.convert(value))
 
 
-def normalize_rls_identifiers(tree: exp.Expression, dialect: str | None) -> None:
-    """Fold unquoted PostgreSQL identifiers in ``tree`` to lowercase, in place.
-
-    Mirrors the server's folding so scope analysis keeps PostgreSQL's
-    quoted/unquoted distinction. Other dialects are left unchanged.
-
-    Raises:
-        RlsError: An unquoted identifier contains non-ASCII characters.
-    """
-    if dialect != "postgres":
-        return
-    for identifier in tree.find_all(exp.Identifier):
-        if not identifier.args.get("quoted"):
-            # Non-ASCII folding depends on the server encoding/locale, which
-            # this parser-only stage cannot verify. Quoting is unambiguous.
-            if not identifier.name.isascii():
-                raise RlsError(
-                    "quote non-ASCII PostgreSQL identifiers when using row-level security"
-                )
-            identifier.set("this", identifier.name.lower())
-
-
 def apply_rls(
     sql: str,
     rules: list[RlsRule],
@@ -221,7 +199,7 @@ def apply_rls(
         return sql
     meta: Mapping[str, Any] = metadata or {}
 
-    # ``TABLE orders`` (PostgreSQL/MySQL shorthand for ``SELECT * FROM orders``)
+    # ``TABLE orders`` (MySQL shorthand for ``SELECT * FROM orders``)
     # is refused in any statement or subquery whatever the sqlglot version:
     # before 30.30 it parses to a shape the scope walk cannot see, from 30.30
     # to a SELECT. Found with the tokenizer so both parses are refused alike.
@@ -242,7 +220,6 @@ def apply_rls(
             f"(got {len(statements)})"
         )
     tree = statements[0]
-    normalize_rls_identifiers(tree, dialect)
 
     # Fail-secure on non-query shapes. Scope analysis can only reason about
     # SELECT/UNION-shaped reads (``TABLE orders`` was refused above). The
@@ -336,6 +313,6 @@ def apply_rls(
         )
 
     # normalize_functions=False: the default upper-cases unrecognised function
-    # names, quotes included, and PostgreSQL resolves quoted names
-    # case-sensitively, so "quote_ident"(x) would become a missing function.
+    # names, quoted ones included, so the database would receive a function
+    # name the query did not write.
     return tree.sql(dialect=dialect, normalize_functions=False)

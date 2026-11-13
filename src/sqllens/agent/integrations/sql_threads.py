@@ -3,7 +3,7 @@
 
 """Dedicated worker threads for the SQL runners' blocking driver calls.
 
-``sqlite3``, PyMySQL and psycopg2 are synchronous, and the server runs every
+``sqlite3`` and PyMySQL are synchronous, and the server runs every
 request on one event loop. Each runner's ``run_sql`` therefore hands its driver
 work to :func:`run_blocking_sql`, which runs it on a ``ThreadPoolExecutor`` of
 :data:`SQL_WORKER_THREADS` threads reserved for SQL:
