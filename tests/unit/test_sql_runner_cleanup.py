@@ -116,108 +116,18 @@ async def test_mysql_runner_close_failure_alone_does_not_raise(
     conn.close.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# Postgres
-# ---------------------------------------------------------------------------
-
-
-def _install_fake_psycopg2(
-    monkeypatch: pytest.MonkeyPatch, connect_factory: Any
-) -> None:
-    psycopg2 = types.ModuleType("psycopg2")
-    extras_mod = types.ModuleType("psycopg2.extras")
-    extras_mod.RealDictCursor = type("RealDictCursor", (), {})
-    psycopg2.extras = extras_mod
-    extensions_mod = types.ModuleType("psycopg2.extensions")
-    # Existing fixtures use DSNs without explicit connection options.
-    extensions_mod.parse_dsn = lambda _dsn: {}
-    psycopg2.extensions = extensions_mod
-    psycopg2.connect = connect_factory
-    psycopg2.Error = Exception
-    monkeypatch.setitem(sys.modules, "psycopg2", psycopg2)
-    monkeypatch.setitem(sys.modules, "psycopg2.extras", extras_mod)
-    monkeypatch.setitem(sys.modules, "psycopg2.extensions", extensions_mod)
-
-
-async def test_postgres_runner_preserves_primary_when_close_raises(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Both cursor.close() and conn.close() failures must be suppressed."""
-    cursor = MagicMock()
-    cursor.execute.side_effect = _PrimaryError("statement_timeout")
-    cursor.close.side_effect = _SecondaryCloseError("cursor close failed")
-
-    conn = MagicMock()
-    conn.cursor.return_value = cursor
-    conn.close.side_effect = _SecondaryCloseError(
-        "InternalError: current transaction is aborted"
-    )
-
-    _install_fake_psycopg2(monkeypatch, lambda *_a, **_k: conn)
-
-    from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
-
-    # read_only=False — see the read_only note above; this test pins exact
-    # cursor/conn close call counts, orthogonal to the read-only session SET.
-    runner = PostgresRunner(
-        connection_string="postgresql://u:p@h/d", read_only=False
-    )
-
-    with pytest.raises(_PrimaryError, match="statement_timeout"):
-        await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
-
-    cursor.close.assert_called_once()
-    conn.close.assert_called_once()
-
-
-async def test_postgres_runner_close_failure_alone_does_not_raise(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """If the SELECT succeeds but cleanup fails, the caller still gets results.
-
-    The Postgres SELECT path uses a server-side named cursor and streams via
-    ``fetchmany``; both the per-cursor close and the connection teardown raise
-    secondary errors here and must both be swallowed.
-    """
-    cursor = MagicMock()
-    cursor.execute.return_value = None
-    cursor.fetchmany.return_value = [{"x": 1}]
-    cursor.close.side_effect = _SecondaryCloseError("cursor close failed")
-
-    conn = MagicMock()
-    conn.cursor.return_value = cursor
-    conn.close.side_effect = _SecondaryCloseError(
-        "InternalError: current transaction is aborted"
-    )
-
-    _install_fake_psycopg2(monkeypatch, lambda *_a, **_k: conn)
-
-    from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
-
-    # read_only=False — see the read_only note above; this test pins exact
-    # cursor/conn close call counts, orthogonal to the read-only session SET.
-    runner = PostgresRunner(
-        connection_string="postgresql://u:p@h/d", read_only=False
-    )
-    df = await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
-
-    assert df.to_dict(orient="records") == [{"x": 1}]
-    cursor.close.assert_called_once()
-    conn.close.assert_called_once()
-
-
-async def test_postgres_runner_closes_conn_when_cursor_allocation_raises(
+async def test_mysql_runner_closes_conn_when_cursor_allocation_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If conn.cursor() itself raises, conn.close() must still run (no leak)."""
     conn = MagicMock()
     conn.cursor.side_effect = _PrimaryError("connection died before cursor allocation")
 
-    _install_fake_psycopg2(monkeypatch, lambda *_a, **_k: conn)
+    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
 
-    from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
+    from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 
-    runner = PostgresRunner(connection_string="postgresql://u:p@h/d")
+    runner = MySQLRunner(host="h", database="d", user="u", password="p")
 
     with pytest.raises(_PrimaryError, match="connection died"):
         await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
@@ -225,24 +135,27 @@ async def test_postgres_runner_closes_conn_when_cursor_allocation_raises(
     conn.close.assert_called_once()
 
 
-
-async def test_postgres_runner_closes_conn_when_set_session_raises(
+async def test_mysql_runner_closes_conn_when_read_only_session_setup_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If the read-only session setup raises, conn.close() must still run (no leak)."""
+    setup = MagicMock()
+    setup.execute.side_effect = _PrimaryError("SET SESSION TRANSACTION READ ONLY failed")
     conn = MagicMock()
-    conn.set_session.side_effect = _PrimaryError("set_session failed")
+    conn.cursor.return_value = setup
 
-    _install_fake_psycopg2(monkeypatch, lambda *_a, **_k: conn)
+    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
 
-    from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
+    from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 
-    runner = PostgresRunner(connection_string="postgresql://u:p@h/d")
+    runner = MySQLRunner(host="h", database="d", user="u", password="p")
 
-    with pytest.raises(_PrimaryError, match="set_session failed"):
+    with pytest.raises(_PrimaryError, match="READ ONLY failed"):
         await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
 
+    setup.execute.assert_called_once_with("SET SESSION TRANSACTION READ ONLY")
     conn.close.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # BaseException propagation
@@ -275,7 +188,7 @@ async def test_mysql_runner_propagates_cancellation(
     conn.close.assert_called_once()
 
 
-async def test_postgres_runner_propagates_keyboard_interrupt(
+async def test_mysql_runner_propagates_keyboard_interrupt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cursor = MagicMock()
@@ -284,11 +197,11 @@ async def test_postgres_runner_propagates_keyboard_interrupt(
     conn = MagicMock()
     conn.cursor.return_value = cursor
 
-    _install_fake_psycopg2(monkeypatch, lambda *_a, **_k: conn)
+    _install_fake_pymysql(monkeypatch, lambda **_kwargs: conn)
 
-    from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
+    from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 
-    runner = PostgresRunner(connection_string="postgresql://u:p@h/d")
+    runner = MySQLRunner(host="h", database="d", user="u", password="p")
 
     with pytest.raises(KeyboardInterrupt):
         await runner.run_sql(RunSqlToolArgs(sql="SELECT 1"), context=MagicMock())
@@ -301,10 +214,10 @@ async def test_postgres_runner_propagates_keyboard_interrupt(
 # ---------------------------------------------------------------------------
 
 
-async def test_mysql_runner_streams_hash_comment_led_read(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("sql", ["# c\nSELECT 1", "-- c\nSELECT 1"])
+async def test_mysql_runner_streams_comment_led_read(
+    monkeypatch: pytest.MonkeyPatch, sql: str
 ) -> None:
-    sql = "# c\nSELECT 1"
     cursor = MagicMock()
     cursor.fetchmany.return_value = [{"x": 1}]
     conn = MagicMock()
@@ -318,27 +231,5 @@ async def test_mysql_runner_streams_hash_comment_led_read(
 
     assert df.to_dict(orient="records") == [{"x": 1}]
     conn.cursor.assert_called_once_with(sys.modules["pymysql.cursors"].SSDictCursor)
-    cursor.execute.assert_called_once_with(sql)
-    conn.commit.assert_not_called()
-
-
-async def test_postgres_runner_streams_comment_led_read_on_named_cursor(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    sql = "-- c\nSELECT 1"
-    cursor = MagicMock()
-    cursor.fetchmany.return_value = [{"x": 1}]
-    conn = MagicMock()
-    conn.cursor.return_value = cursor
-    _install_fake_psycopg2(monkeypatch, lambda *_a, **_k: conn)
-
-    from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
-
-    runner = PostgresRunner(connection_string="postgresql://u:p@h/d", read_only=False)
-    df = await runner.run_sql(RunSqlToolArgs(sql=sql), context=MagicMock())
-
-    assert df.to_dict(orient="records") == [{"x": 1}]
-    conn.cursor.assert_called_once()
-    assert conn.cursor.call_args.kwargs["name"].startswith("sqllens_")
     cursor.execute.assert_called_once_with(sql)
     conn.commit.assert_not_called()

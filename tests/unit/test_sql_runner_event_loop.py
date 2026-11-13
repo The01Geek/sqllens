@@ -3,7 +3,7 @@
 
 """A slow query must not stall the event loop.
 
-The database drivers (``sqlite3``, PyMySQL, psycopg2) are synchronous. Each
+The database drivers (``sqlite3``, PyMySQL) are synchronous. Each
 runner's ``run_sql`` is a coroutine, so calling the driver directly inside it
 would freeze every other request the server handles until the query returned.
 The runner tests make the driver deliberately slow and count how often a concurrent
@@ -27,7 +27,7 @@ import pytest
 
 from sqllens.agent.capabilities.sql_runner import RunSqlToolArgs
 
-from .test_sql_runner_cleanup import _install_fake_psycopg2, _install_fake_pymysql
+from .test_sql_runner_cleanup import _install_fake_pymysql
 
 SLOW_S = 0.4
 TICK_S = 0.02
@@ -92,22 +92,6 @@ async def test_mysql_runner_does_not_block_event_loop(
     from sqllens.agent.integrations.mysql.sql_runner import MySQLRunner
 
     runner = MySQLRunner(host="h", database="d", user="u", password="p", read_only=False)
-    df, ticks = await _run_with_heartbeat(runner)
-
-    assert df.to_dict(orient="records") == [{"x": 1}]
-    assert ticks >= MIN_TICKS
-
-
-async def test_postgres_runner_does_not_block_event_loop(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    conn = MagicMock()
-    conn.cursor.return_value = _slow_cursor()
-    _install_fake_psycopg2(monkeypatch, lambda *_a, **_k: conn)
-
-    from sqllens.agent.integrations.postgres.sql_runner import PostgresRunner
-
-    runner = PostgresRunner(connection_string="postgresql://u:p@h/d", read_only=False)
     df, ticks = await _run_with_heartbeat(runner)
 
     assert df.to_dict(orient="records") == [{"x": 1}]

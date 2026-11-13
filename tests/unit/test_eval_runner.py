@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from sqllens.config import Config
+from sqllens.config import Config, DatabaseConfig
 from sqllens.eval.compare import Status
 from sqllens.eval.golden import GoldenCase
 from sqllens.eval.runner import CaseResult, RunReport, run_verification
@@ -199,12 +199,16 @@ def test_dialect_threaded_from_config(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_unknown_dialect_surfaces_per_case_error(tmp_path: Path) -> None:
-    """An unknown dialect produces a per-case diagnostic."""
+    """An unknown dialect produces a per-case diagnostic.
+
+    Config loading refuses such a URL, so the database section is swapped in
+    without validation, as a programmatic caller can.
+    """
     cfg_path = tmp_path / "sqllens.toml"
     cfg_path.write_text(
         f"""
 [database]
-url = "cockroachdb_no_such://localhost/db"
+url = "sqlite:///:memory:"
 name = "primary"
 
 [llm]
@@ -218,6 +222,13 @@ mode = "none"
 """
     )
     cfg = Config.load(cfg_path)
+    cfg = cfg.model_copy(
+        update={
+            "database": DatabaseConfig.model_construct(
+                url="cockroachdb_no_such://localhost/db", name="primary"
+            )
+        }
+    )
     cases = [GoldenCase("q1", "SELECT 1")]
     driver = _scripted_driver(
         [("ok", [], {"sql": "SELECT 1"}, None, None)]

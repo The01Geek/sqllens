@@ -179,7 +179,6 @@ class TestDeriveDefaultName:
             ("sqlite:///./chinook.db", "chinook"),
             ("sqlite:////absolute/path/db.sqlite", "db"),
             ("sqlite:///./data.sqlite3", "data"),
-            ("postgresql://u:p@h:5432/mydb", "mydb"),
             ("mysql+pymysql://u:p@h:3306/orders", "orders"),
         ],
     )
@@ -719,7 +718,7 @@ class TestRunInstall:
 
         def boom(*_: object, **__: object) -> None:
             try:
-                _M(dsn=f"postgresql://u:{secret}@h/db")
+                _M(dsn=f"mysql+pymysql://u:{secret}@h/db")
             except ValidationError as exc:
                 raise exc
 
