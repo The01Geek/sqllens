@@ -169,7 +169,8 @@ def _check_rule_set_catalog(connection: object, rule_sets: LoadedRuleSets) -> No
         raise PreflightError(
             "database",
             f"{type(exc).__name__}: the rule-set catalog check could not read "
-            "information_schema; check the database user's privileges.",
+            "information_schema (check the connection and the database user's "
+            "privileges on it).",
         ) from exc
     rule_sets.catalog.confirmed = True
 

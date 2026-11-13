@@ -32,8 +32,9 @@ Seven orthogonal protections, composed at the factory:
   on the returned DataFrame.
 * ``assert_no_whole_row_select`` / ``WholeRowSelectGuardRunner`` — refuses a
   ``*`` or ``alias.*`` that expands a table or view before the query runs;
-  composed directly beneath ``ResultMaskingRunner`` and outside every other
-  runner, unless ``database.refuse_whole_row_selects`` is off.
+  composed beneath ``ResultMaskingRunner`` (and, with a rule-set file,
+  ``RefusalRedactingRunner``) and outside every other runner, unless
+  ``database.refuse_whole_row_selects`` is off.
 * ``ResultMaskingRunner`` — outermost; replaces every value in a result
   column whose label matches the secret-word rule with ``[withheld]``.
 """

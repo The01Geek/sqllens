@@ -82,6 +82,20 @@ _SAFE_CONFIG_ERROR_TYPES = (
 )
 
 
+def _is_rule_set_file_error(exc: Exception) -> bool:
+    """Whether a config-load failure came from loading the configured rule-set file."""
+    from sqllens.rule_sets import RuleSetFileError
+
+    if isinstance(exc, RuleSetFileError):
+        return True
+    if not isinstance(exc, ValidationError):
+        return False
+    return any(
+        isinstance((error.get("ctx") or {}).get("error"), RuleSetFileError)
+        for error in exc.errors()
+    )
+
+
 def _format_config_error(exc: Exception) -> str:
     """Render a config-load exception for stderr without leaking secrets.
 
@@ -577,17 +591,20 @@ def verify_memory(
     from sqllens.config import Config
     from sqllens.eval import load_golden, run_verification
     from sqllens.memory.io import VALID_FORMATS, BundleFormatError
+    from sqllens.rule_sets import VERIFY_MEMORY_UNSUPPORTED_MESSAGE
 
     try:
         cfg = Config.load(config)
     except Exception as e:
         err_console.print(f"[red]Config error:[/red] {escape(_format_config_error(e))}")
+        if _is_rule_set_file_error(e):
+            # A configured rule-set file that fails validation still gets
+            # the unsupported message, beside the error naming the problem.
+            err_console.print(f"[red]Error:[/red] {escape(VERIFY_MEMORY_UNSUPPORTED_MESSAGE)}")
         raise typer.Exit(code=2) from e
     # Checked before the --format and API-key checks, so a rule-set file that
     # loads gets this message rather than an unrelated one.
     if cfg.rule_sets.loaded is not None:
-        from sqllens.rule_sets import VERIFY_MEMORY_UNSUPPORTED_MESSAGE
-
         err_console.print(f"[red]Error:[/red] {escape(VERIFY_MEMORY_UNSUPPORTED_MESSAGE)}")
         raise typer.Exit(code=1)
     if fmt not in VALID_FORMATS:

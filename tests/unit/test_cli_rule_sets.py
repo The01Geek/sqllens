@@ -133,6 +133,32 @@ def test_verify_memory_refuses_before_running_any_case(tmp_path: Path) -> None:
     run.assert_not_called()
 
 
+def test_verify_memory_with_an_invalid_rule_set_file_names_both(tmp_path: Path) -> None:
+    document = example_document()
+    document["rule_sets"][0]["tables"][0]["row_rule"] = "rep_id = 1"
+    golden = tmp_path / "golden.json"
+    golden.write_text('{"sql_pairs": [{"question": "q", "sql": "SELECT 1"}]}')
+    with patch("sqllens.eval.run_verification") as run:
+        result = runner.invoke(
+            app, ["verify-memory", str(golden), "-c", str(_write(tmp_path, document))]
+        )
+    assert result.exit_code == 2
+    stderr = _unwrapped(result.stderr)
+    assert "does not support rule sets yet" in stderr
+    assert "row" in stderr
+    run.assert_not_called()
+
+
+def test_verify_memory_other_config_errors_omit_the_rule_set_message(tmp_path: Path) -> None:
+    golden = tmp_path / "golden.json"
+    golden.write_text('{"sql_pairs": [{"question": "q", "sql": "SELECT 1"}]}')
+    cfg = tmp_path / "sqllens.toml"
+    cfg.write_text('[database]\nurl = "mysql+pymysql://u@h/shop"\nbogus = 1\n')
+    result = runner.invoke(app, ["verify-memory", str(golden), "-c", str(cfg)])
+    assert result.exit_code == 2
+    assert "rule sets" not in _unwrapped(result.stderr)
+
+
 @pytest.mark.parametrize("bad_format", [True, False])
 def test_verify_memory_rule_set_message_precedes_other_checks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad_format: bool
