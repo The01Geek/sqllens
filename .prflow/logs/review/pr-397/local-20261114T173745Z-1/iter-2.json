@@ -1,0 +1,66 @@
+{
+  "iter": 2,
+  "loop_role": "promoted",
+  "promotion_provenance": "shadow",
+  "fix_commit_sha": "95f927187860b20c6dc54cf3a4a8fdc2eeef6c22",
+  "phase3_failed_agents": [],
+  "checklist": [
+    {
+      "id": "VC-18",
+      "verdict": "FAIL",
+      "severity": "important",
+      "claim_signature": "absolute_claim:rule-sets.md:drift-database-error",
+      "verification_mode": "agent"
+    }
+  ],
+  "fix_decisions": [
+    {
+      "finding_id": "VC-18",
+      "decision": "applied",
+      "commit": "95f927187860b20c6dc54cf3a4a8fdc2eeef6c22",
+      "source_file": "docs/external/rule-sets.md",
+      "claim_text": "Until restart, a query reaching a renamed or dropped name fails with the database's own error",
+      "evidence": "Verified: MySQL runner calls verify_base_tables before execution (agent/integrations/mysql/sql_runner.py:156-157); relations.py:186-190 raises RlsError for a missing table, so a dropped/renamed table is refused, not passed through. Rewrote the clause to split table (refused before it runs) from column (database's own error). AC 'database-error pass-through ... renamed or dropped column' compared: column case unchanged, consistent. Class sweep: no other copy of the claim in docs/ or changelog.d/."
+    },
+    {
+      "finding_id": "D-1",
+      "decision": "pushed_back",
+      "original_severity": "important",
+      "source_file": "docs/external/rule-sets.md",
+      "claim_text": "New sentence says a query reaching a renamed or dropped table is refused before it runs; guard only checks the loaded tables mapping, so the old name reaches the database and fails with its own error",
+      "skip_category": "claim-quality",
+      "evidence": "RuleSetGuardRunner.run_sql always calls the inner runner with require_base_tables=True (src/sqllens/safety/rule_sets.py:894-896); the MySQL runner then runs verify_base_tables on the rewritten SQL before executing it (src/sqllens/agent/integrations/mysql/sql_runner.py:156-157); a table absent from information_schema.TABLES gets kind None and raises RlsError 'could not verify a base table; query blocked' (src/sqllens/safety/relations.py:186-190), which RefusalRedactingRunner redacts. The old name is therefore refused before execution.",
+      "parking_evidence": {
+        "basis": "the cited pre-execution base-table check refuses a missing table",
+        "failing_input": "query naming a listed table dropped after load",
+        "source": "src/sqllens/agent/integrations/mysql/sql_runner.py:156-157",
+        "finding_ref": {
+          "iter": 2,
+          "index": null
+        }
+      }
+    },
+    {
+      "finding_id": null,
+      "decision": "applied",
+      "commit": "930d0fbe1a3f1681365d898df1b6f9b240ba0584",
+      "source_file": "tests/connectors/test_row_rule_additions_mysql.py",
+      "claim_text": "failing check: pytest tests/unit/test_connector_suite_contract.py: connector suite has a pytest.importorskip (contract merged from main by the iteration-2 checkpoint)",
+      "evidence": "Replaced importorskip with a plain import, matching tests/connectors/test_row_rules_mysql.py on main. Unit suite 3472 passed, ruff clean, connector tests 74 passed against local MySQL 8.0."
+    }
+  ],
+  "iteration_head": "930d0fbe1a3f1681365d898df1b6f9b240ba0584",
+  "reference_reads": {
+    "fix_delta": {
+      "status": "verified",
+      "outcome": "pushed_back",
+      "reason": null
+    }
+  },
+  "phase3_findings": [],
+  "fix_files": [
+    "docs/external/rule-sets.md"
+  ],
+  "synthesized": false,
+  "telemetry": "unavailable"
+}

@@ -1,0 +1,415 @@
+{
+ "dispatch_mode": "fanned-out",
+ "root_completeness": "established",
+ "verdict": "APPROVE with notes",
+ "phase3_findings": [
+  {
+   "finding_id": "F-1",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "Suggestion",
+   "description": "InheritRule.parent_rule is typed as the full RowRule union; the column-local limit is enforced only by the RuleSet validator, and _COLUMN_LOCAL must be kept in sync with the union by hand.",
+   "defect_signature": {
+    "file": "src/sqllens/rule_sets.py",
+    "line_range": [
+     281,
+     281
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-2",
+   "agent": "prflow:type-design-analyzer",
+   "severity": "Suggestion",
+   "description": "The refusal message reads kind names via kind.model_fields['kind'].annotation.__args__[0], which breaks if a kind annotation changes form.",
+   "defect_signature": {
+    "file": "src/sqllens/rule_sets.py",
+    "line_range": [
+     434,
+     434
+    ],
+    "kind": "type_design"
+   }
+  },
+  {
+   "finding_id": "F-3",
+   "agent": "prflow:requesting-code-review",
+   "severity": "Suggestion",
+   "description": "Test helper _orders_matching_link counts orders reads with re.findall on generated SQL text, against the sqlglot rule; startswith/substring checks on SQL text at lines 994, 1006, 1045, 1059, 1074.",
+   "defect_signature": {
+    "file": "tests/unit/test_row_rule_additions.py",
+    "line_range": [
+     986,
+     988
+    ],
+    "kind": "style"
+   }
+  },
+  {
+   "finding_id": "F-4",
+   "agent": "prflow:pr-test-analyzer",
+   "severity": "Suggestion",
+   "description": "No test builds a cycle closing only through a listed referenced_by link table, nor shows an unlisted link table adds no edge in _rule_edges.",
+   "defect_signature": {
+    "file": "src/sqllens/rule_sets.py",
+    "line_range": [
+     206,
+     221
+    ],
+    "kind": "test_gap"
+   }
+  },
+  {
+   "finding_id": "F-5",
+   "agent": "prflow:comment-analyzer",
+   "severity": "Suggestion",
+   "description": "Test comment at line 408 says NOT over a bare IS, but the planted tree is NOT over an unparenthesized OR. Capped by the behavior-inert prose cap (all limbs held).",
+   "defect_signature": {
+    "file": "tests/unit/test_row_rule_additions.py",
+    "line_range": null,
+    "kind": "comment_drift"
+   }
+  }
+ ],
+ "phase3_dispatched": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "expected_reviewers": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_eligible": [
+  "prflow:code-reviewer",
+  "prflow:silent-failure-hunter",
+  "prflow:comment-analyzer",
+  "prflow:requesting-code-review",
+  "prflow:type-design-analyzer",
+  "prflow:pr-test-analyzer"
+ ],
+ "plan_exclusions": [],
+ "phase3_failed_agents": [],
+ "diff_profile": {
+  "small_diff": false,
+  "config_only": false,
+  "has_new_types": true,
+  "test_relevant": true,
+  "detect_all_audit": false
+ },
+ "cap_drops": {
+  "count": 0,
+  "by_category": {}
+ },
+ "phase4_demoted": [],
+ "reject_drivers": [],
+ "criterion_exempt": [],
+ "report": "## Verdict: APPROVE with notes (five Suggestion findings; all 37 checklist items passed)\nThe PR is ready to merge: every checklist item and all sixteen acceptance criteria passed verification, and the review agents raised only Suggestion-level notes.\nRule applied: rule 6 — only findings below the threshold remain → APPROVE with notes\n\n## Code Review Findings\n### 🟡 Suggestion / Minor (5)\n<details><summary>5 items</summary>\n\n1. `src/sqllens/rule_sets.py` line 281: `InheritRule.parent_rule` is typed as the full `RowRule` union, so the column-local limit lives only in the `RuleSet` validator (lines 427-441, `_COLUMN_LOCAL` at line 330), and `_COLUMN_LOCAL` must be kept in sync with the union by hand. (raised by 1/6 agents)\n2. `src/sqllens/rule_sets.py` line 434: the refusal message reads kind names through `kind.model_fields[\"kind\"].annotation.__args__[0]`, which breaks if a `kind` annotation changes form. (raised by 1/6 agents)\n3. `tests/unit/test_row_rule_additions.py` lines 986-988: the `_orders_matching_link` helper counts `orders` reads with `re.findall` on generated SQL text, against the repository's sqlglot rule; the same file also checks raw SQL text with `startswith` and substring tests (lines 994, 1006, 1045, 1059, 1074). (raised by 1/6 agents)\n4. `src/sqllens/rule_sets.py` lines 206-221: no test builds a cycle that closes only through a listed `referenced_by` link table, and no test shows that an unlisted link table adds no graph edge. (raised by 1/6 agents)\n5. `tests/unit/test_row_rule_additions.py` line 408: the test comment says the planted condition is NOT over a bare IS, but the code builds NOT over an unparenthesized OR. (raised by 1/6 agents) <!-- inertness: first-conjunct=held limb-one=held limb-two=held; evidence: test comment, no mechanism under discussion; git grep for 'NOT over a bare IS' finds only the comment itself; internal test file, not published -->\n\n</details>\n\n\n## Run details\n<details><summary>Run details</summary>\n\n- Diff profile: has_new_types + test_relevant, 6 changed files; full Phase 1+2 ran; detect_all_audit not set.\n- Working tree: check skipped in pr mode; dirty-tree check reported no change.\n- Review prompt extension: content-present. requesting-code-review extension: content-present.\n- CI evidence: none held for this head; no test suite was run.\n- Severity threshold: important.\n- Normalized (wording-only): 0\n- Engine root: `.prflow/vendor/prflow/skills/review` and `.devflow/vendor/devflow/skills/review` do not exist; used the plugin's own engine.\n- Verifier dispatch: 18 of 37 launches were refused by the concurrent-agent limit and launched again in a second wave; all 37 returned PASS.\n- Finding rejected lines not counted (no Finding rejected line)\n- Checklist: 37 passed, 0 failed, 0 inconclusive\n- <details><summary>✅ Passed items (37 of 37)</summary>\n\n  - VC-1: In the pydantic version the lock pins, `kind.model_fields[\"kind\"].annotation.__args__[0]` yields the literal string of each _COLUMN_LOCAL record's `kind: Literal[...]` field, so the refusal message lists the allowed kinds. [src/sqllens/rule_sets.py:434]\n  - VC-2: `InheritRule.parent_rule: RowRule | None` resolves its forward reference to the discriminated RowRule union after `InheritRule.model_rebuild()`, so nested parent_rule nodes parse and unknown fields are refused with `extra` forbidden. [src/sqllens/rule_sets.py:281]\n  - VC-3: The is_not_null condition built as exp.Not(exp.Paren(exp.Is(col, exp.Null()))) generates as `NOT (x IS NULL)` under the mysql dialect and re-parses to the same tree, so prove_compiled_rule accepts it. [src/sqllens/rule_sets.py:636]\n  - VC-4: The comment asserts that under HIGH_NOT_PRECEDENCE MySQL reads a bare `NOT x IS NULL` as `(NOT x) IS NULL`, which motivates the parentheses. [src/sqllens/rule_sets.py:637]\n  - VC-5: With parent_rule, the compiled inherit EXISTS ANDs the parent's own rule (including the match) with parent_rule compiled at the same parent slot, so both test one parent row; and the parent table is included in CompiledRule.tables. [src/sqllens/rule_sets.py:668]\n  - VC-6: For an unlisted referenced_by link table, the compiler's `_own_rule` adds no own-rule condition (link rows read with no row rule), while a listed link table still gets its own rule. [src/sqllens/rule_sets.py]\n  - VC-7: An unlisted referenced_by link table is not added to the guard's listed tables (spec.tables), so the guard refuses model SQL naming it, case-insensitively, and catalog reads omit it, while the filter's own reads of it are permitted and covered by CTE renaming. [src/sqllens/rule_sets.py]\n  - VC-8: _catalog_reads adds each unlisted referenced_by link table with its source_column and target_column to the tables check_catalog verifies (existence, BASE TABLE, columns), and adds parent_rule compare columns to typed checks on parent_table. [src/sqllens/rule_sets.py:1079]\n  - VC-9: _catalog_reads walks parent_rule only for top-level inherit nodes yielded by _rule_nodes (including those nested in any_of/all_of), but its elif chain means an InheritRule without parent_rule falls through unchanged; parent_rule compare type checks cover every nesting depth. [src/sqllens/rule_sets.py:1079]\n  - VC-10: _rule_edges adds no edge for an unlisted referenced_by link table or a parent_rule, and still adds an edge for a listed link table, so _check_acyclic behaves as before for the six original shapes. [src/sqllens/rule_sets.py:360]\n  - VC-11: The doc states that a rule may read an unlisted table in exactly two places, owner_via.link_table and referenced_by.link.table. [docs/external/rule-sets.md]\n  - VC-12: The doc says an unlisted link table cannot be seen in the catalog by the assistant. [docs/external/rule-sets.md]\n  - VC-13: The doc states a reader knowing only the six original kinds refuses any file using is_null, is_not_null, parent_rule or an unlisted referenced_by link table (also the changelog). [docs/external/rule-sets.md]\n  - VC-14: The doc's TOML example loads: customers declares region_id (stated), products' referenced_by through unlisted customer_products, and orders rule all_of inherit+parent_rule and is_null on predicate column deleted_at. [docs/external/rule-sets.md]\n  - VC-15: The internal doc says the unlisted link table and parent_rule parent are in CompiledRule.tables so guard prefix choice and model-CTE renaming cover them. [docs/internal/database-connectors/rule-sets.md]\n  - VC-16: The changelog states the assistant still cannot query an unlisted referenced_by link table and its two columns are read only inside the row rule. [changelog.d/397.added.md:10]\n  - VC-17: The test _Cursor mock returns (TABLE_NAME, TABLE_TYPE) rows for TABLES queries and (TABLE_NAME, COLUMN_NAME, DATA_TYPE) rows otherwise, matching the column order and shape check_catalog reads. [tests/unit/test_row_rule_additions.py]\n  - VC-18: The tests rely on private helpers guard._generate, guard._rewalk(tree, tables, None, guard._Scoping(rules, 7, \"sl0_\")), guard.KIND_UNLISTED_TABLE and KIND_UNCHECKED with those signatures and the `sl0_` prefix and `sl0_c0`/`sl0_0_1` alias formats. [tests/unit/test_row_rule_additions.py]\n  - VC-19: The connector test imports `_chain(url, loaded, init_command=...)`, `_connect`, `_run` and `_url` from tests/connectors/test_rule_sets_mysql.py, and `_chain` accepts an init_command that sets the session sql_mode on the connection. [tests/connectors/test_row_rule_additions_mysql.py]\n  - VC-20: The connector test assumes a MySQL error raised by the runner is a pymysql.err.MySQLError whose args[0] is the error code (1690 for EXP overflow, 1054 for unknown column) and propagates through the guard runner chain unwrapped. [tests/connectors/test_row_rule_additions_mysql.py]\n  - VC-21: The connector test's catalog-read assertion expects only ra_customers and ra_products in information_schema.TABLES and COLUMNS results, assuming the guard scopes those reads to listed tables in the current database. [tests/connectors/test_row_rule_additions_mysql.py]\n  - VC-22: A version-1 rule-set file loads when a table's `row_rule` uses `{ kind = \"is_null\", column = \"<c>\" }` or `{ kind = \"is_not_null\", column = \"<c>\" }`, alone or inside `any_of` or `all_of`, where `<c>` is in that table's `columns` or `predicate_columns`. [src/sqllens/rule_sets.py:256-267,314-330,400-418,634-643]\n  - VC-23: Loading refuses a null-test node, naming its record path, when at minimum: its column is not declared on its table; it has no `column`; it has any field besides `kind` and `column`. [src/sqllens/rule_sets.py:256-267,409-418,770-785]\n  - VC-24: On MySQL, with no flat `[[rls]]` rules configured, a `query_database` request under a set whose `orders` rule is `is_null` on `deleted_at` returns every orders row whose `deleted_at` is NULL and no row whose `deleted_at` is not NULL; with `is_not_null` it returns the reverse. Both hold when the connection starts with `HIGH_NOT_PRECEDENCE` in its session `sql_mode`. [src/sqllens/rule_sets.py:634-643]\n  - VC-25: On MySQL, under a set whose `orders` rule is `is_null` on `deleted_at`, where order 42 has a non-NULL `deleted_at`, `SELECT id FROM orders WHERE IF(id = 42, EXP(1000), 0) > 0` returns no row and raises no error. The same holds when row 42 is hidden instead by a `referenced_by` rule through an unlisted link table, and when it is hidden by an `inherit` rule's `parent_rule`. [tests/connectors/test_row_rule_additions_mysql.py]\n  - VC-26: A version-1 file loads when a `referenced_by` link variant names a `link.table` the set does not list. Under that set, with no flat `[[rls]]` rules configured, a row is visible exactly when a visible source row references it through a link row, and link rows are read with no row rule of their own. [src/sqllens/rule_sets.py:450]\n  - VC-27: Under such a set, model-written SQL that reads the unlisted link table as a base table is refused as an unlisted table, and the table appears in no catalog read the model receives. [src/sqllens/safety/rule_sets.py:247-260]\n  - VC-28: Under a set with an unlisted link table or an `inherit` rule with `parent_rule`, a statement whose model-written SQL defines a CTE named like that link table or that `parent_table`, with the same letters or differing only in letter case, returns no row that the rule hides. [src/sqllens/safety/rule_sets.py:365-402,816-824]\n  - VC-29: A `referenced_by` link variant whose `link.table` is listed still requires each link row it uses to pass the link table's own row rule. [src/sqllens/rule_sets.py:616-699]\n  - VC-30: The catalog existence check treats an unlisted link table and its `source_column` and `target_column` as it treats a listed table and its columns: a missing table, a table that is not a base table, or a missing column fails the check. [src/sqllens/rule_sets.py:1056-1176]\n  - VC-31: A version-1 file loads when an `inherit` node has a `parent_rule` that is a column-local node whose columns are declared on `parent_table`. Under that set, with no flat `[[rls]]` rules configured, a row is visible only when at least one parent row matching it on `column` = `parent_column` passes both the parent table's own row rule (when it has one) and `parent_rule`, on that same parent row. [src/sqllens/rule_sets.py:668]\n  - VC-32: Loading refuses, naming the record path, a `parent_rule` that holds an `owner_via`, `inherit` or `referenced_by` node at any depth, or that names a column not declared on `parent_table`. [src/sqllens/rule_sets.py:424-442]\n  - VC-33: A file that uses only the six existing shapes loads and scopes rows exactly as before this change. [src/sqllens/rule_sets.py:401-452]\n  - VC-34: The SQL for the new conditions is built as sqlglot expression nodes, never as SQL text, and a statement that fails the guard's re-walk or re-parse after the conditions are added is refused, never run. [src/sqllens/safety/rule_sets.py:798-833]\n  - VC-35: `docs/external/rule-sets.md` documents `is_null` and `is_not_null`, the unlisted link table of `referenced_by` (its two internal-only columns, no row rule of its own, no graph edge), and `parent_rule` with its column-local limit. It states that the format's unlisted-table exceptions are exactly the `owner_via` link table and the `referenced_by` link table. [docs/external/rule-sets.md:115-140]\n  - VC-36: `docs/external/rule-sets.md` tells operators to restart SQL Lens after renaming or dropping a table or column a rule set names. [docs/external/rule-sets.md]\n  - VC-37: The change leaves the database-error pass-through of the rule-set guard unchanged, so a MySQL error raised by a row-rule read of an unlisted link table reaches the model with its text, which can name that table and column. For example, this happens when one of its columns is renamed or dropped after the catalog check has passed, or when the database user may not read one of its columns. [src/sqllens/safety/rule_sets.py:983-1016]\n\n  </details>\n- Reviewed against issue #377 — criteria from the workpad; scope unchanged.\n\n</details>\n",
+ "acceptance_criteria": "- [ ] A version-1 rule-set file loads when a table's `row_rule` uses `{ kind = \"is_null\", column = \"<c>\" }` or `{ kind = \"is_not_null\", column = \"<c>\" }`, alone or inside `any_of` or `all_of`, where `<c>` is in that table's `columns` or `predicate_columns`.\n- [ ] Loading refuses a null-test node, naming its record path, when at minimum: its column is not declared on its table; it has no `column`; it has any field besides `kind` and `column`.\n- [ ] On MySQL, with no flat `[[rls]]` rules configured, a `query_database` request under a set whose `orders` rule is `is_null` on `deleted_at` returns every orders row whose `deleted_at` is NULL and no row whose `deleted_at` is not NULL; with `is_not_null` it returns the reverse. Both hold when the connection starts with `HIGH_NOT_PRECEDENCE` in its session `sql_mode`.\n- [ ] On MySQL, under a set whose `orders` rule is `is_null` on `deleted_at`, where order 42 has a non-NULL `deleted_at`, `SELECT id FROM orders WHERE IF(id = 42, EXP(1000), 0) > 0` returns no row and raises no error. The same holds when row 42 is hidden instead by a `referenced_by` rule through an unlisted link table, and when it is hidden by an `inherit` rule's `parent_rule`.\n- [ ] A version-1 file loads when a `referenced_by` link variant names a `link.table` the set does not list. Under that set, with no flat `[[rls]]` rules configured, a row is visible exactly when a visible source row references it through a link row, and link rows are read with no row rule of their own.\n- [ ] Under such a set, model-written SQL that reads the unlisted link table as a base table is refused as an unlisted table, and the table appears in no catalog read the model receives.\n- [ ] Under a set with an unlisted link table or an `inherit` rule with `parent_rule`, a statement whose model-written SQL defines a CTE named like that link table or that `parent_table`, with the same letters or differing only in letter case, returns no row that the rule hides.\n- [ ] A `referenced_by` link variant whose `link.table` is listed still requires each link row it uses to pass the link table's own row rule.\n- [ ] The catalog existence check treats an unlisted link table and its `source_column` and `target_column` as it treats a listed table and its columns: a missing table, a table that is not a base table, or a missing column fails the check.\n- [ ] A version-1 file loads when an `inherit` node has a `parent_rule` that is a column-local node whose columns are declared on `parent_table`. Under that set, with no flat `[[rls]]` rules configured, a row is visible only when at least one parent row matching it on `column` = `parent_column` passes both the parent table's own row rule (when it has one) and `parent_rule`, on that same parent row.\n- [ ] Loading refuses, naming the record path, a `parent_rule` that holds an `owner_via`, `inherit` or `referenced_by` node at any depth, or that names a column not declared on `parent_table`.\n- [ ] A file that uses only the six existing shapes loads and scopes rows exactly as before this change.\n- [ ] The SQL for the new conditions is built as sqlglot expression nodes, never as SQL text, and a statement that fails the guard's re-walk or re-parse after the conditions are added is refused, never run.\n- [ ] `docs/external/rule-sets.md` documents `is_null` and `is_not_null`, the unlisted link table of `referenced_by` (its two internal-only columns, no row rule of its own, no graph edge), and `parent_rule` with its column-local limit. It states that the format's unlisted-table exceptions are exactly the `owner_via` link table and the `referenced_by` link table.\n- [ ] `docs/external/rule-sets.md` tells operators to restart SQL Lens after renaming or dropping a table or column a rule set names.\n- [ ] The change leaves the database-error pass-through of the rule-set guard unchanged, so a MySQL error raised by a row-rule read of an unlisted link table reaches the model with its text, which can name that table and column. For example, this happens when one of its columns is renamed or dropped after the catalog check has passed, or when the database user may not read one of its columns.",
+ "diff_produced_at_head": "0104898b8b4773f5b43ee0b043d92c4b76a92783",
+ "checklist": [
+  {
+   "id": "VC-1",
+   "claim_signature": "dependency_interaction:rule_sets.py:literal-kind-args:434",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-2",
+   "claim_signature": "dependency_interaction:rule_sets.py:parent-rule-forward-ref:281",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-3",
+   "claim_signature": "dependency_interaction:rule_sets.py:is-not-null-paren:636",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-4",
+   "claim_signature": "absolute_claim:rule_sets.py:high-not-precedence:637",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-5",
+   "claim_signature": "data_format_assumption:rule_sets.py:parent-rule-same-slot:668",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-6",
+   "claim_signature": "api_contract:rule_sets.py:unlisted-link-no-own-rule",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-7",
+   "claim_signature": "api_contract:rule_sets.py:unlisted-link-guard-hidden",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-8",
+   "claim_signature": "api_contract:rule_sets.py:catalog-unlisted-link",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-9",
+   "claim_signature": "data_format_assumption:rule_sets.py:parent-rule-typed-depth:1079",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-10",
+   "claim_signature": "api_contract:rule_sets.py:acyclic-edges:360",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-11",
+   "claim_signature": "absolute_claim:rule-sets.md:unlisted-exactly-two",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-12",
+   "claim_signature": "api_contract:rule-sets.md:catalog-hidden",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-13",
+   "claim_signature": "absolute_claim:rule-sets.md:older-reader-refuses",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-14",
+   "claim_signature": "data_format_assumption:rule-sets.md:toml-example",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-15",
+   "claim_signature": "api_contract:rule-sets.md:compiled-tables-cte",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-16",
+   "claim_signature": "absolute_claim:397.added.md:link-unqueryable",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-17",
+   "claim_signature": "test_mock_alignment:test_row_rule_additions.py:catalog-cursor",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-18",
+   "claim_signature": "test_mock_alignment:test_row_rule_additions.py:guard-private-api",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-19",
+   "claim_signature": "dependency_interaction:test_row_rule_additions_mysql.py:chain-init-command",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-20",
+   "claim_signature": "dependency_interaction:test_row_rule_additions_mysql.py:mysql-error-passthrough",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "id": "VC-21",
+   "claim_signature": "data_format_assumption:test_row_rule_additions_mysql.py:catalog-names",
+   "verification_mode": "agent",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "suggestion"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-1",
+   "id": "VC-22",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-2",
+   "id": "VC-23",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-3",
+   "id": "VC-24",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-4",
+   "id": "VC-25",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-5",
+   "id": "VC-26",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-6",
+   "id": "VC-27",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-7",
+   "id": "VC-28",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-8",
+   "id": "VC-29",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-9",
+   "id": "VC-30",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-10",
+   "id": "VC-31",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-11",
+   "id": "VC-32",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-12",
+   "id": "VC-33",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-13",
+   "id": "VC-34",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-14",
+   "id": "VC-35",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-15",
+   "id": "VC-36",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  },
+  {
+   "verification_mode": "agent",
+   "claim_signature": "issue-acceptance-16",
+   "id": "VC-37",
+   "reused_from_iter_prev": false,
+   "verdict": "PASS",
+   "severity": "critical"
+  }
+ ]
+}
