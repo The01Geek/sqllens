@@ -513,6 +513,24 @@ class _Raises(SqlRunner):
             guard.REDACTED_READ_ONLY,
         ),
         (
+            UnsafeSqlError(
+                "refusing to execute non-SELECT SQL: locking reads are not allowed"
+                " (found FOR UPDATE)"
+            ),
+            UnsafeSqlError,
+            "refusing to execute SQL: locking reads (FOR UPDATE, FOR SHARE, LOCK IN SHARE MODE)"
+            " are not allowed",
+        ),
+        (
+            UnsafeSqlError(
+                "refusing to execute non-SELECT SQL: locking reads are not allowed"
+                " (found FOR SHARE / LOCK IN SHARE MODE)"
+            ),
+            UnsafeSqlError,
+            "refusing to execute SQL: locking reads (FOR UPDATE, FOR SHARE, LOCK IN SHARE MODE)"
+            " are not allowed",
+        ),
+        (
             RlsError("database views are not supported while row-level security is active"),
             RlsError,
             guard.REDACTED_VIEW,

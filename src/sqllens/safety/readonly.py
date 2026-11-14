@@ -636,6 +636,13 @@ def assert_select_only(sql: str, *, dialect: str | None = None) -> None:
         # misses it. Covers root-level, CTE-nested and set-operation occurrences.
         if isinstance(sub, exp.Select) and sub.args.get("into"):
             raise UnsafeSqlError("SELECT ... INTO is not allowed")
+        # Locking reads. MySQL's read-only session runs ``FOR SHARE`` and holds
+        # its row locks. Check every node, not only ``Select``: sqlglot can hang
+        # the lock on a ``Union``. Do not build the text from ``sub.sql()``: it
+        # copies the ``OF`` table names and comments into the refusal.
+        if isinstance(sub, exp.Lock):
+            found = "FOR UPDATE" if sub.args.get("update") else "FOR SHARE / LOCK IN SHARE MODE"
+            raise UnsafeSqlError(f"locking reads are not allowed (found {found})")
         # Side-effecting / DoS / RCE function calls. A valid SELECT can still
         # call e.g. ``load_extension`` (SQLite RCE) or ``load_file`` (MySQL
         # data exfiltration); the root-type/DML walk above does not see these.

@@ -255,6 +255,11 @@ _BYPASS_CORPUS: list[tuple[str, str | None] | tuple[str, str | None, str]] = [
         "mysql",
         "found nested DELETE",
     ),
+    # Locking reads (#385): MySQL's read-only session runs the share forms.
+    ("SELECT a FROM t FOR UPDATE", "mysql", "locking reads"),
+    ("SELECT a FROM t FOR SHARE", "mysql", "locking reads"),
+    ("SELECT a FROM t LOCK IN SHARE MODE", "mysql", "locking reads"),
+    ("SELECT a FROM t UNION (SELECT a FROM u) FOR UPDATE", "mysql", "locking reads"),
     # Info-leaking SHOW variants — allowed at parse time as exp.Show under
     # MySQL but rejected by the structural-SHOW allowlist (not schema-discovery).
     ("SHOW GRANTS", "mysql"),
@@ -626,6 +631,111 @@ class TestSelectIntoRejected:
         # reachable from the Union/Intersect/Except root.
         with pytest.raises(UnsafeSqlError, match=r"SELECT \.\.\. INTO"):
             assert_select_only(sql, dialect=dialect)
+
+
+_LOCK_FOR_UPDATE = "locking reads are not allowed (found FOR UPDATE)"
+_LOCK_FOR_SHARE = "locking reads are not allowed (found FOR SHARE / LOCK IN SHARE MODE)"
+
+
+class TestLockingReadsRejected:
+    """MySQL lock clauses, at any depth (#385).
+
+    MySQL 8.0's read-only session refuses ``FOR UPDATE`` but runs ``FOR SHARE``
+    and ``LOCK IN SHARE MODE``, whose row locks block other sessions' writes.
+    """
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT a FROM t FOR UPDATE",
+            "SELECT a FROM t FOR SHARE",
+            "SELECT a FROM t LOCK IN SHARE MODE",
+            "SELECT a FROM t FOR UPDATE NOWAIT",
+            "SELECT a FROM t FOR UPDATE SKIP LOCKED",
+            "SELECT a FROM t FOR SHARE OF t",
+            "SELECT a FROM t FOR UPDATE OF t FOR SHARE OF u",
+            "WITH x AS (SELECT a FROM t FOR UPDATE) SELECT a FROM x",
+            "SELECT a FROM (SELECT a FROM t FOR SHARE) s",
+            "SELECT a FROM t WHERE a IN (SELECT a FROM u FOR UPDATE)",
+            "(SELECT a FROM t) UNION (SELECT a FROM u FOR SHARE)",
+            "SELECT a FROM t UNION SELECT a FROM u FOR UPDATE",
+            # The lock hangs on the Union node, not on either Select.
+            "SELECT a FROM t UNION (SELECT a FROM u) FOR UPDATE",
+        ],
+    )
+    def test_lock_clause_rejected(self, sql: str) -> None:
+        with pytest.raises(UnsafeSqlError, match="locking reads are not allowed"):
+            assert_select_only(sql, dialect="mysql")
+
+    @pytest.mark.parametrize(
+        ("sql", "expected"),
+        [
+            ("SELECT a FROM t FOR UPDATE", _LOCK_FOR_UPDATE),
+            ("SELECT a FROM t FOR SHARE", _LOCK_FOR_SHARE),
+            ("SELECT a FROM t LOCK IN SHARE MODE", _LOCK_FOR_SHARE),
+        ],
+    )
+    def test_message_names_lock_strength(self, sql: str, expected: str) -> None:
+        with pytest.raises(UnsafeSqlError) as info:
+            assert_select_only(sql, dialect="mysql")
+        assert str(info.value) == expected
+
+    def test_message_names_no_table_or_comment(self) -> None:
+        with pytest.raises(UnsafeSqlError) as info:
+            assert_select_only(
+                "SELECT a FROM t FOR SHARE OF secret_table /* note */", dialect="mysql"
+            )
+        assert "secret_table" not in str(info.value)
+        assert "note" not in str(info.value)
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT a FROM t",
+            "SELECT a FROM t WHERE a IN (SELECT a FROM u)",
+            "(SELECT a FROM t) UNION (SELECT a FROM u)",
+            "SELECT `lock`, `share` FROM `update`",
+        ],
+    )
+    def test_no_lock_clause_accepted(self, sql: str) -> None:
+        assert_select_only(sql, dialect="mysql")
+
+    @pytest.mark.parametrize(
+        ("sql", "update"),
+        [
+            ("SELECT a FROM t FOR UPDATE", True),
+            ("SELECT a FROM t FOR SHARE", False),
+            ("SELECT a FROM t LOCK IN SHARE MODE", False),
+        ],
+    )
+    def test_pinned_sqlglot_lock_shape(self, sql: str, update: bool) -> None:
+        import sqlglot
+        from sqlglot import exp
+
+        locks = list(sqlglot.parse_one(sql, read="mysql").find_all(exp.Lock))
+        assert len(locks) == 1
+        assert bool(locks[0].args.get("update")) is update
+
+    async def test_guard_runner_refuses_before_inner(self) -> None:
+        class _Inner:
+            called = False
+
+            async def run_sql(self, args, context):
+                _Inner.called = True
+                return pd.DataFrame()
+
+        inner = _Inner()
+        guard = ReadOnlyGuardRunner(inner, dialect="mysql")
+        with pytest.raises(UnsafeSqlError, match="locking reads are not allowed"):
+            await guard.run_sql(
+                RunSqlToolArgs(sql="SELECT a FROM t FOR SHARE"), ToolContext.model_construct()
+            )
+        assert inner.called is False
+
+    def test_function_denylist_check_ignores_lock_clause(self) -> None:
+        from sqllens.safety.readonly import assert_no_denied_functions
+
+        assert_no_denied_functions("SELECT a FROM t FOR SHARE", dialect="mysql")
 
 
 class TestStructuralShowAllowed:
