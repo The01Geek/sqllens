@@ -1,0 +1,765 @@
+[
+  {
+    "id": "VC-1",
+    "category": "dependency_interaction",
+    "claim": "`pymysql[rsa]>=1.1,<2` is a valid PyPI requirement: PyMySQL publishes an `rsa` extra that pulls in `cryptography`, and version 1.2.4 (the requirements.txt pin) satisfies the bound.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "pyproject.toml",
+    "source_line": 55,
+    "verify_against": "PyMySQL package metadata (its own `extras_require`/`project.optional-dependencies`) and the pin in requirements.txt",
+    "verify_hint": "Check PyMySQL's declared extras for `rsa` and confirm `pymysql==1.2.4` in `requirements.txt` falls inside `>=1.1,<2`",
+    "claim_signature": "dependency_interaction:pyproject.toml:pymysql-rsa-extra-bound",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "data_format_assumption",
+    "claim": "Declaring `mysql = []` and `all = []` under `[project].optional-dependencies` keeps both extras present in the built wheel/sdist metadata, so `pip install \".[mysql]\"` and `\".[all]\"` resolve without pip's \"does not provide the extra\" warning.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "pyproject.toml",
+    "source_line": 58,
+    "source_line_end": 61,
+    "verify_against": "hatchling's handling of empty optional-dependency lists and PEP 621 / core metadata `Provides-Extra`",
+    "verify_hint": "Check whether hatchling emits `Provides-Extra: mysql`/`all` for empty extra lists (build the wheel and inspect METADATA)",
+    "claim_signature": "data_format_assumption:pyproject.toml:empty-extras-still-declared",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "api_contract",
+    "claim": "The `rsa` extra (cryptography) is needed by caching_sha2_password on non-TLS connections.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# The rsa extra (cryptography) is needed by caching_sha2_password on non-TLS connections.",
+    "source_file": "pyproject.toml",
+    "source_line": 54,
+    "verify_against": "PyMySQL's `_auth.py` / caching_sha2_password implementation and its use of the `cryptography` package",
+    "verify_hint": "Check PyMySQL's `pymysql/_auth.py` sha2_rsa_encrypt path and its `rsa` extra definition",
+    "claim_signature": "api_contract:pyproject.toml:rsa-extra-rationale",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "dependency_interaction",
+    "claim": "`requirements.txt` is a complete constraint closure for `.[dev,all]` and `.[all]` installs now that `docker/requirements-drivers.txt` is deleted — it pins every core runtime package including `pymysql==1.2.4` and the `cryptography` the `rsa` extra adds, so the constrained CI/Docker installs resolve and `pip check` passes.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "requirements.txt",
+    "source_line": 88,
+    "verify_against": "the full generated closure in `requirements.txt` versus `pyproject.toml`'s core dependencies",
+    "verify_hint": "Check that `requirements.txt` contains `cryptography` (and any other transitive of `pymysql[rsa]`) alongside the new `pymysql==1.2.4` line",
+    "claim_signature": "dependency_interaction:requirements.txt:rsa-closure-complete",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "api_contract",
+    "claim": "No tracked file outside the excluded changelog/history paths still references `docker/requirements-drivers.txt`, `sqllens[mysql]`, or describes the database driver as an optional extra now that the drivers file is deleted.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docker/requirements-drivers.txt",
+    "verify_against": "a case-insensitive search of the tracked tree for `requirements-drivers`, `sqllens[mysql]`, `optional database driver`, `optional DB driver`, `optional extra`, `all DB drivers`, `pinned database drivers`, `driver constraints`",
+    "verify_hint": "Grep the head view (excluding CHANGELOG.md, docs/external/release-notes.md, changelog.d/, docs/internal/production-readiness-v0.1.0.md) for each of those strings, including README.md, docs/, scripts/ and .github/",
+    "claim_signature": "api_contract:repo:requirements-drivers-references",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "api_contract",
+    "claim": "The Docker builder stage no longer needs `docker/requirements-drivers.txt` copied in: nothing later in the Dockerfile (or the runtime stage) reads `requirements-drivers.txt`, and `.[all]` constrained by `requirements.txt` alone yields the same runtime closure the image shipped before.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "docker/Dockerfile",
+    "source_line": 24,
+    "verify_against": "the rest of `docker/Dockerfile` and `tests/unit/test_docker_inputs.py`",
+    "verify_hint": "Check the runtime stage of `docker/Dockerfile` and the constraint-file assertions in `tests/unit/test_docker_inputs.py`",
+    "claim_signature": "api_contract:Dockerfile:single-constraint-file",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "api_contract",
+    "claim": "The three `ci.yml` install steps, the `.prflow/config.json` setup install and the AGENTS.md command are now one identical string `pip install -c requirements.txt -e \".[dev,all]\"`, which is exactly what `tests/unit/test_dependency_ci.py` compares them against.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/ci.yml",
+    "source_line": 49,
+    "verify_against": "the canonical install string asserted in `tests/unit/test_dependency_ci.py`",
+    "verify_hint": "Check the expected-command constant and the ci.yml/.prflow/config.json job lookups in `tests/unit/test_dependency_ci.py`",
+    "claim_signature": "api_contract:ci.yml:canonical-install-command",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "dependency_interaction",
+    "claim": "Dropping `-r docker/requirements-drivers.txt` leaves the `pip-audit` step auditing PyMySQL, because `requirements.txt` now pins it, and the step keeps exactly its four `--ignore-vuln` exclusions.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/dependency-audit.yml",
+    "source_line": 40,
+    "source_line_end": 48,
+    "verify_against": "`tests/unit/test_dependency_ci.py`'s assertions on the pip-audit step's requirements files and ignore list",
+    "verify_hint": "Check the pip-audit assertions in `tests/unit/test_dependency_ci.py` against the full run block in `.github/workflows/dependency-audit.yml`",
+    "claim_signature": "dependency_interaction:dependency-audit.yml:pip-audit-single-requirements",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "api_contract",
+    "claim": "The new preflight message for a missing PyMySQL — \"PyMySQL is missing, so this sqllens installation is broken — reinstall sqllens\" — contains no `sqllens[` substring and is the exact text `tests/unit/test_preflight.py` and the CLI tests assert reaches the `Preflight failed: database: …` output.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/preflight.py",
+    "source_line": 130,
+    "source_line_end": 134,
+    "verify_against": "`tests/unit/test_preflight.py` and the `sqllens validate --check-db` / `serve` assertions in the CLI tests",
+    "verify_hint": "Check the missing-driver test in `tests/unit/test_preflight.py` and any message assertions in `tests/unit/test_cli.py`",
+    "claim_signature": "api_contract:preflight.py:pymysql-missing-message:130",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "absolute_claim",
+    "claim": "The preflight doc table asserts that because PyMySQL is a core dependency, its absence always raises a `PreflightError` asking to reinstall `sqllens`, and that the MySQL probe propagates everything else as-is.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "everything else (the explicit `ImportError` branch above this catch reports a broken install: PyMySQL is a core dependency, so its absence raises a `PreflightError` asking to reinstall `sqllens`)",
+    "source_file": "docs/internal/setup/preflight.md",
+    "source_line": 37,
+    "verify_against": "the `probe_database` mysql branch in `src/sqllens/preflight.py`",
+    "verify_hint": "Check `probe_database` in `src/sqllens/preflight.py`: whether an ImportError raised from inside `mysql_connect_kwargs`/`pymysql.connect` (not the import) also lands in that branch, and what the rule-set catalog call can raise",
+    "claim_signature": "absolute_claim:preflight.md:mysql-importerror-branch",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "test_mock_alignment",
+    "claim": "`from _settings import MYSQL_URL, require_setting` resolves at collection time for `tests/connectors/test_connectors.py` — the connector directory is importable with a bare top-level module name under this repo's pytest import mode and rootdir settings, in the same file that also imports `tests.unit._rule_set_fixtures` as a package path.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_connectors.py",
+    "source_line": 23,
+    "verify_against": "pytest import mode / rootdir configuration and the presence or absence of `__init__.py` under `tests/` and `tests/connectors/`",
+    "verify_hint": "Check `[tool.pytest.ini_options]` in `pyproject.toml` for `importmode`/`pythonpath`, and whether `tests/__init__.py` and `tests/connectors/__init__.py` exist",
+    "claim_signature": "test_mock_alignment:test_connectors.py:bare-settings-import:23",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "test_mock_alignment",
+    "claim": "`from _settings import MYSQL_URL, require_setting` resolves at collection time for `tests/connectors/test_row_rules_mysql.py`, which also imports `tests.unit._rule_set_fixtures` by package path in the same module.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_row_rules_mysql.py",
+    "source_line": 28,
+    "verify_against": "pytest import mode / rootdir configuration and `sys.path` insertion for `tests/connectors/`",
+    "verify_hint": "Check `[tool.pytest.ini_options]` in `pyproject.toml` and whether a `tests/connectors/conftest.py` exists to insert the directory on `sys.path`",
+    "claim_signature": "test_mock_alignment:test_row_rules_mysql.py:bare-settings-import:28",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "dependency_interaction",
+    "claim": "Replacing `pymysql = pytest.importorskip(\"pymysql\")` with a module-level `import pymysql` makes an unimportable PyMySQL a collection error rather than a skip for `tests/connectors/test_row_rules_mysql.py`, and the module-level `pymysql` name is still bound for every later use in the file.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_row_rules_mysql.py",
+    "source_line": 26,
+    "verify_against": "the remaining `pymysql.` references in `tests/connectors/test_row_rules_mysql.py`",
+    "verify_hint": "Grep `pymysql` in `tests/connectors/test_row_rules_mysql.py` and confirm every use resolves to the new module-level import",
+    "claim_signature": "dependency_interaction:test_row_rules_mysql.py:pymysql-direct-import:26",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "test_mock_alignment",
+    "claim": "`require_setting` calling `pytest.fail(..., pytrace=False)` inside a fixture produces pytest's fail outcome (not an error or skip) for every connector test needing the setting, and the message names the setting.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/_settings.py",
+    "source_line": 18,
+    "source_line_end": 21,
+    "verify_against": "pytest's handling of `Failed` raised during fixture setup, and `tests/unit/test_connector_suite_contract.py`",
+    "verify_hint": "Check the `require_setting` assertions in `tests/unit/test_connector_suite_contract.py` and how the connector fixtures (`mysql_url`, `_url`) invoke it",
+    "claim_signature": "test_mock_alignment:_settings.py:fail-not-skip-outcome",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "absolute_claim",
+    "claim": "The `_settings.py` module docstring asserts that a missing setting fails the test and never skips it.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"Connector-suite settings. A missing setting fails the test; it never skips it.\"\"\"",
+    "source_file": "tests/connectors/_settings.py",
+    "source_line": 4,
+    "verify_against": "`require_setting` in the same file and every skip path remaining in `tests/connectors/`",
+    "verify_hint": "Check `require_setting` in `tests/connectors/_settings.py` and grep `tests/connectors/` for any remaining skip/importorskip/xfail usage",
+    "claim_signature": "absolute_claim:_settings.py:never-skips",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "absolute_claim",
+    "claim": "AGENTS.md's Commands block asserts the connector suite fails without `SQLLENS_TEST_MYSQL_URL` and `SQLLENS_TEST_MYSQL_OTHER_DATABASE`, and that the second names a second database the test user can write.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "# Connector tests (live MySQL 8.0+). They fail without SQLLENS_TEST_MYSQL_URL and\n# SQLLENS_TEST_MYSQL_OTHER_DATABASE, a second database the test user can write.",
+    "source_file": "AGENTS.md",
+    "source_line": 96,
+    "source_line_end": 97,
+    "verify_against": "`tests/connectors/_settings.py`, the fixtures in `tests/connectors/test_rule_sets_mysql.py`, and the env values set by `ci.yml`'s connector jobs",
+    "verify_hint": "Check that every connector test needing a database routes through `require_setting`, and whether `test_connectors.py` tests also require `SQLLENS_TEST_MYSQL_OTHER_DATABASE`",
+    "claim_signature": "absolute_claim:AGENTS.md:connector-settings-required",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "absolute_claim",
+    "claim": "The changelog fragment asserts that `pip install sqllens` now includes PyMySQL with the `rsa` extra that MySQL 8.0's default authentication needs, that the `mysql` and `all` extras are still accepted and add nothing, and that a missing PyMySQL makes `sqllens serve` and `sqllens validate --check-db` report a broken install and ask to reinstall `sqllens`.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "`pip install sqllens` now includes the MySQL driver (PyMySQL, with the `rsa`\nextra MySQL 8.0's default authentication needs). The `mysql` and `all` extras\nare still accepted but add nothing beyond the core install.",
+    "source_file": "changelog.d/396.changed.md",
+    "source_line": 1,
+    "source_line_end": 5,
+    "verify_against": "`pyproject.toml`'s core dependencies and extras, and the `probe_database` mysql branch in `src/sqllens/preflight.py`",
+    "verify_hint": "Check `pyproject.toml` lines 54-61 and the ImportError branch in `src/sqllens/preflight.py`; also confirm `changelog.d/396.changed.md` matches the category/filename `scripts/changelog.py check` requires",
+    "claim_signature": "absolute_claim:396.changed.md:core-driver-release-note",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "absolute_claim",
+    "claim": "The dependency-audit doc asserts that `requirements.txt` pins the MySQL driver with the rest of the core closure and is the only constraint file for CI and the image install, and that the `all` extra adds nothing beyond the core closure.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "It pins the MySQL driver (PyMySQL) with the rest of the core closure and is the only constraint file for CI and the image install.",
+    "source_file": "docs/internal/operations/dependency-audit.md",
+    "source_line": 3,
+    "verify_against": "every `pip install -c` invocation in `.github/workflows/` and `docker/Dockerfile`, plus `pyproject.toml`'s extras",
+    "verify_hint": "Grep `-c ` / `--constraint` across `.github/workflows/` and `docker/` to confirm no other constraint file is passed anywhere",
+    "claim_signature": "absolute_claim:dependency-audit.md:only-constraint-file",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "absolute_claim",
+    "claim": "The getting-started doc asserts that plain `pip install sqllens` suffices because the MySQL driver is included.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Install SQL Lens. The MySQL driver is included:",
+    "source_file": "docs/external/getting-started.md",
+    "source_line": 13,
+    "verify_against": "`pyproject.toml`'s core `[project].dependencies` and the rest of `docs/external/getting-started.md`",
+    "verify_hint": "Check that the remainder of `docs/external/getting-started.md` (quick start, DSN examples) does not still instruct installing an extra for a driver",
+    "claim_signature": "absolute_claim:getting-started.md:driver-included",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "api_contract",
+    "claim": "`src/sqllens/connectors/__init__.py` keeps its SPDX header and its docstring no longer describes per-dialect drivers as optional extras.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"Database connectors. Backed by SQLAlchemy.\"\"\"",
+    "source_file": "src/sqllens/connectors/__init__.py",
+    "source_line": 4,
+    "verify_against": "AGENTS.md's SPDX header rule and the MySQL-only engine rule",
+    "verify_hint": "Check the SPDX header lines at the top of `src/sqllens/connectors/__init__.py`",
+    "claim_signature": "api_contract:connectors/__init__.py:docstring-no-optional-extras",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "dependency_interaction",
+    "claim": "`test_rule_sets_mysql.py` can import the connector settings helper with the top-level form `from _settings import MYSQL_OTHER_DATABASE, MYSQL_URL, require_setting`, i.e. `tests/connectors/` is on `sys.path` at collection time (rootdir/conftest insertion, no package `__init__.py`).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_rule_sets_mysql.py",
+    "source_line": 27,
+    "verify_against": "pytest import mode and path configuration",
+    "verify_hint": "Check `[tool.pytest.ini_options]` in `pyproject.toml` (importmode, rootdir, testpaths), whether `tests/connectors/__init__.py` or a `conftest.py` exists in `tests/connectors/`, and how `tests/connectors/test_connectors.py` imports `_settings`",
+    "claim_signature": "dependency_interaction:test_rule_sets_mysql.py:settings-module-import:27",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "dependency_interaction",
+    "claim": "`pymysql` is imported unconditionally at module scope, so an unimportable PyMySQL makes this module a collection error rather than a skip, and `pymysql.connect` / `pymysql.err.MySQLError` are the API used.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_rule_sets_mysql.py",
+    "source_line": 25,
+    "verify_against": "PyMySQL package API and the packaging change making it a core dependency",
+    "verify_hint": "Check `pymysql.connect` and `pymysql.err.MySQLError` exist in the PyMySQL version pinned in `requirements.txt`, and that `pyproject.toml` core dependencies now include `pymysql[rsa]`",
+    "claim_signature": "dependency_interaction:test_rule_sets_mysql.py:pymysql-hard-import:25",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "dependency_interaction",
+    "claim": "`require_setting` raises an exception matching `pytest.fail.Exception` whose message contains the setting name, so `pytest.raises(pytest.fail.Exception, match=name)` catches it even though `require_setting` passes `pytrace=False`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_connector_suite_contract.py",
+    "source_line": 44,
+    "source_line_end": 45,
+    "verify_against": "`require_setting` in `tests/connectors/_settings.py` and pytest's `fail` API",
+    "verify_hint": "Check `require_setting` in `tests/connectors/_settings.py` and pytest's `pytest.fail` / `Failed` exception type",
+    "claim_signature": "dependency_interaction:test_connector_suite_contract.py:pytest-fail-exception:44",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "dependency_interaction",
+    "claim": "`_load_settings` can execute `tests/connectors/_settings.py` standalone via `importlib.util.spec_from_file_location`/`exec_module`, i.e. that file has no imports resolvable only from within the connector test package.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_connector_suite_contract.py",
+    "source_line": 25,
+    "source_line_end": 30,
+    "verify_against": "`tests/connectors/_settings.py` module-level imports",
+    "verify_hint": "Check the module-level imports and names (`MYSQL_URL`, `MYSQL_OTHER_DATABASE`, `require_setting`) in `tests/connectors/_settings.py`",
+    "claim_signature": "dependency_interaction:test_connector_suite_contract.py:exec-settings-module:25",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "data_format_assumption",
+    "claim": "The skip scan reads only the non-recursive `*.py` glob of `tests/connectors/`, so every connector test file sits directly in that directory with no subdirectory.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_connector_suite_contract.py",
+    "source_line": 117,
+    "source_line_end": 122,
+    "verify_against": "the layout of `tests/connectors/`",
+    "verify_hint": "List `tests/connectors/` for subdirectories or nested `.py` files the `*.py` glob would miss",
+    "claim_signature": "data_format_assumption:test_connector_suite_contract.py:nonrecursive-py-glob:117",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "absolute_claim",
+    "claim": "The module docstring asserts the connector suite fails and never skips when its database settings are missing.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "\"\"\"The connector suite fails, never skips, when its database settings are missing.",
+    "source_file": "tests/unit/test_connector_suite_contract.py",
+    "source_line": 4,
+    "verify_against": "the connector test modules and the scan's detection limits",
+    "verify_hint": "Craft a connector-file skip the scan misses (dynamic `getattr(pytest, \"skip\")`, a skip raised from a helper outside `tests/connectors/`, or a conftest-level skip) and check every settings lookup in `tests/connectors/*.py` goes through `require_setting`",
+    "claim_signature": "absolute_claim:test_connector_suite_contract.py:never-skips:4",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "absolute_claim",
+    "claim": "The updated module docstring asserts a test fails when either `SQLLENS_TEST_MYSQL_URL` or `SQLLENS_TEST_MYSQL_OTHER_DATABASE` is missing.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "that user can write); a test fails when either is missing.",
+    "source_file": "tests/connectors/test_rule_sets_mysql.py",
+    "source_line": 8,
+    "verify_against": "the settings lookups in this module",
+    "verify_hint": "Check every use of `_url()` / `_other_database()` in `tests/connectors/test_rule_sets_mysql.py` reaches each test, including tests not using the `database` fixture",
+    "claim_signature": "absolute_claim:test_rule_sets_mysql.py:either-setting-missing-fails:8",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "api_contract",
+    "claim": "The Docker builder stage contains exactly one line containing `pip install`, and it is verbatim `RUN pip install --user -c requirements.txt \".[all]\"`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_docker_inputs.py",
+    "source_line": 30,
+    "source_line_end": 33,
+    "verify_against": "`docker/Dockerfile`",
+    "verify_hint": "Check the builder stage `RUN pip install` line (spacing, flags, continuation) in `docker/Dockerfile`",
+    "claim_signature": "api_contract:test_docker_inputs.py:dockerfile-install-line:30",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "api_contract",
+    "claim": "`CONSTRAINED_INSTALL` (`pip install -c requirements.txt -e \".[dev,all]\"`) appears verbatim as a step `run` value in the `unit`, `connectors` and `connectors-mysql84` jobs of `ci.yml`, each of which also has a `pip check` step.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_dependency_ci.py",
+    "source_line": 15,
+    "source_line_end": 21,
+    "verify_against": "`.github/workflows/ci.yml`",
+    "verify_hint": "Check the `steps` of jobs `unit`, `connectors` and `connectors-mysql84` in `.github/workflows/ci.yml` for the exact install string and a `pip check` step",
+    "claim_signature": "api_contract:test_dependency_ci.py:ci-constrained-install:15",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "api_contract",
+    "claim": "`.prflow/config.json`'s `setup.install` list contains exactly one project install line and it equals `CONSTRAINED_INSTALL`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_dependency_ci.py",
+    "source_line": 28,
+    "source_line_end": 33,
+    "verify_against": "`.prflow/config.json` and AGENTS.md's install command",
+    "verify_hint": "Check `setup.install` in `.prflow/config.json` and the `pip install -c requirements.txt -e \".[dev,all]\"` command in AGENTS.md's Commands section",
+    "claim_signature": "api_contract:test_dependency_ci.py:prflow-constrained-install:28",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "data_format_assumption",
+    "claim": "The audit step's `run` splits on whitespace such that each `-r` is followed by its requirements file as a separate token, yielding exactly `[\"requirements.txt\"]`, and `--ignore-vuln` occurs exactly four times.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_dependency_ci.py",
+    "source_line": 59,
+    "source_line_end": 64,
+    "verify_against": "`.github/workflows/dependency-audit.yml`",
+    "verify_hint": "Check the `id: audit` step's `run` block in `.github/workflows/dependency-audit.yml` for `-r` usage (including `-r=` or multi-line continuations) and the number of `--ignore-vuln` flags",
+    "claim_signature": "data_format_assumption:test_dependency_ci.py:audit-arg-token-split:59",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "api_contract",
+    "claim": "`ci.yml` defines a job keyed `connectors-mysql84` whose `name` is exactly `Connector tests (MySQL 8.4)`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_action_security.py",
+    "source_line": 64,
+    "verify_against": "`.github/workflows/ci.yml` job names and the branch ruleset's check names",
+    "verify_hint": "Check the `jobs.connectors-mysql84.name` value in `.github/workflows/ci.yml`",
+    "claim_signature": "api_contract:test_action_security.py:connectors-mysql84-job-name:64",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "api_contract",
+    "claim": "`probe_database` on a `mysql://` URL with pymysql unimportable raises `PreflightError(subsystem=\"database\")` whose `detail` contains `PyMySQL` and `reinstall sqllens` and no `sqllens[`, with `__cause__` an `ImportError`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_preflight.py",
+    "source_line": 124,
+    "source_line_end": 131,
+    "verify_against": "the MySQL ImportError branch in `src/sqllens/preflight.py`",
+    "verify_hint": "Check the `ImportError` handling in `probe_database` in `src/sqllens/preflight.py` for the exact message wording and `raise ... from` chaining",
+    "claim_signature": "api_contract:test_preflight.py:mysql-importerror-message:124",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "absolute_claim",
+    "claim": "The updated comment asserts that `_format_config_error`'s allowlisted ImportError messages are a module name only, arising from a broken install missing a dependency, and carry no config value.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    # ImportError messages are a module name only (a broken install missing a\n    # dependency) — allowlisted and actionable, no config value.",
+    "source_file": "tests/unit/test_cli.py",
+    "source_line": 1207,
+    "source_line_end": 1208,
+    "verify_against": "`_format_config_error` in `src/sqllens/cli.py`",
+    "verify_hint": "Check `_format_config_error` in `src/sqllens/cli.py` for an ImportError whose message is not a bare module name (e.g. one raised by preflight with a reinstall sentence)",
+    "claim_signature": "absolute_claim:test_cli.py:importerror-module-name-only:1207",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`pyproject.toml`'s core `[project].dependencies` declares `pymysql[rsa]` with a floor no lower than `1.1` and an upper bound of `<2`, so `pip install sqllens` with no extras installs PyMySQL and `cryptography`.",
+    "claim_signature": "issue-acceptance-1",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "source_file": "pyproject.toml",
+    "source_line": 55,
+    "verify_hint": "Check the `[project].dependencies` list in `pyproject.toml`",
+    "id": "VC-35",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The `mysql` and `all` extras still exist and add no requirement beyond the core install. `pip install -c requirements.txt \".[mysql]\"` and `pip install -c requirements.txt \".[all]\"` each succeed without pip's \"does not provide the extra\" warning, and `pip check` then reports no broken requirements.",
+    "claim_signature": "issue-acceptance-2",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-396/43621583826-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: The `mysql` and `all` extras still exist and add no requirement beyond the core install. `pip install -c requirements.txt \".[mysql]\"` and `pip install -c requirements.txt \".[all]\"` each succeed without pip's \"does not provide the extra\" warning, and `pip check` then reports no broken requirements.",
+    "id": "VC-36",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`requirements.txt` pins PyMySQL with `==`. With that pin removed, the lockfile guard in the default `pytest -q` run (`tests/unit/test_lockfile_guard.py`) reports PyMySQL as a core dependency missing from the lockfile.",
+    "claim_signature": "issue-acceptance-3",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-396/43621583826-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: `requirements.txt` pins PyMySQL with `==`. With that pin removed, the lockfile guard in the default `pytest -q` run (`tests/unit/test_lockfile_guard.py`) reports PyMySQL as a core dependency missing from the lockfile.",
+    "id": "VC-37",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`docker/requirements-drivers.txt` no longer exists. Each of these installs with `-c requirements.txt` as its only constraint file: the `ci.yml` jobs `unit`, `connectors` and `connectors-mysql84`, the Docker builder stage, the `.prflow/config.json` setup install and the AGENTS.md install command. The three CI jobs, the PRFlow setup install and the AGENTS.md command use one identical command, and `tests/unit/test_dependency_ci.py` fails when any of the three CI jobs or the PRFlow setup install diverges from it.",
+    "claim_signature": "issue-acceptance-4",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "source_file": "docker/Dockerfile",
+    "source_line": 24,
+    "verify_hint": "Check `docker/Dockerfile`, the three `ci.yml` install steps, `.prflow/config.json` and AGENTS.md's Commands block, and confirm `docker/requirements-drivers.txt` is absent from the head view",
+    "id": "VC-38",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The dependency-audit workflow's `pip-audit` step reads `requirements.txt` as its only requirements file and keeps exactly its current four `--ignore-vuln` exclusions. `tests/unit/test_dependency_ci.py` asserts both.",
+    "claim_signature": "issue-acceptance-5",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "source_file": "tests/unit/test_dependency_ci.py",
+    "source_line": 60,
+    "verify_hint": "Check `test_advisory_scan_keeps_narrow_documented_exclusions` in `tests/unit/test_dependency_ci.py` against `.github/workflows/dependency-audit.yml`",
+    "id": "VC-39",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`tests/unit/test_docker_inputs.py` asserts that the Docker builder stage installs with `requirements.txt` as its only constraint file. It no longer contains a check that reads the deleted file.",
+    "claim_signature": "issue-acceptance-6",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "source_file": "tests/unit/test_docker_inputs.py",
+    "source_line": 30,
+    "verify_hint": "Check `test_image_install_uses_only_the_core_lockfile` in `tests/unit/test_docker_inputs.py` and that no test there reads `docker/requirements-drivers.txt`",
+    "id": "VC-40",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "With `pymysql` unimportable and an otherwise valid config (an API key included, so `sqllens serve` reaches preflight), `probe_database` on a `mysql://` URL raises a `PreflightError` for the `database` subsystem whose `__cause__` is the `ImportError`. Its message names PyMySQL, says to reinstall `sqllens`, and contains no `sqllens[`. As a result, `sqllens serve` and `sqllens validate --check-db` print `Preflight failed: database: …` with that message and exit with status 2. `tests/unit/test_preflight.py` asserts the probe outcome and the message.",
+    "claim_signature": "issue-acceptance-7",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "source_file": "src/sqllens/preflight.py",
+    "source_line": 127,
+    "verify_hint": "Check the mysql ImportError branch in `probe_database` in `src/sqllens/preflight.py` and its test in `tests/unit/test_preflight.py`",
+    "id": "VC-41",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`docs/internal/setup/preflight.md`'s exception-narrowing table describes the MySQL `ImportError` branch as reporting a broken install with a reinstall message, not a missing optional driver.",
+    "claim_signature": "issue-acceptance-8",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-396/43621583826-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: `docs/internal/setup/preflight.md`'s exception-narrowing table describes the MySQL `ImportError` branch as reporting a broken install with a reinstall message, not a missing optional driver.",
+    "id": "VC-42",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Running `pytest tests/connectors`, in CI or locally, has these outcomes: - with `SQLLENS_TEST_MYSQL_URL` unset or empty, every connector test in either file that needs the URL fails or errors (none is skipped) with a message naming `SQLLENS_TEST_MYSQL_URL`, and the run exits non-zero; the change leaves `TestConfigConstruction.test_db_url_accepted` in `test_connectors.py`, which reads no setting and needs no database, passing in this case; - with the URL set and `SQLLENS_TEST_MYSQL_OTHER_DATABASE` unset or empty, every `test_rule_sets_mysql.py` test fails or errors (none is skipped) with a message naming `SQLLENS_TEST_MYSQL_OTHER_DATABASE`, and the run exits non-zero; - with PyMySQL not importable, `test_rule_sets_mysql.py` is reported as an error, not a skip, and the run exits non-zero; - with both settings set and PyMySQL importable, the connector suite runs the same tests it ran before this change.",
+    "claim_signature": "issue-acceptance-9",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "source_file": "tests/connectors/test_rule_sets_mysql.py",
+    "source_line": 53,
+    "verify_hint": "Check `_url`, `_other_database` and the `database` fixture in `tests/connectors/test_rule_sets_mysql.py`, plus the settings use in `tests/connectors/test_connectors.py`",
+    "id": "VC-43",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A unit test in the default `pytest -q` run asserts that the connector suite's lookup of each of the two settings fails (pytest's fail outcome, not its skip outcome) with the setting named, in both the unset and the empty case.",
+    "claim_signature": "issue-acceptance-10",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "source_file": "tests/connectors/test_row_rules_mysql.py",
+    "source_line": 56,
+    "verify_hint": "Check the source scan in `tests/unit/test_connector_suite_contract.py` against every file in `tests/connectors/`",
+    "id": "VC-44",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A source check in the default `pytest -q` run reads every `.py` file in `tests/connectors/` and fails, naming the file and line, when a file contains any of these, at minimum: a call to `pytest.skip`, `pytest.importorskip` or `pytest.xfail`; a use of `pytest.mark.skip`, `pytest.mark.skipif` or `pytest.mark.xfail`; any of those reached through `import pytest as <name>` or `from pytest import <name>`; and a `raise` of `unittest.SkipTest` or `SkipTest`. It passes on the connector files as this change leaves them, including the keyword argument `skip_catalog_views=True`. It does not detect a skip raised from code outside `tests/connectors/` or reached through dynamic attribute access, such as `getattr(pytest, \"skip\")`.",
+    "claim_signature": "issue-acceptance-11",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "source_file": "tests/unit/test_connector_suite_contract.py",
+    "source_line": 125,
+    "verify_hint": "Check `skip_forms`, `_violations` and `test_connector_suite_has_no_skip_or_xfail` in `tests/unit/test_connector_suite_contract.py` against the forms criterion 11 lists",
+    "id": "VC-45",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "`tests/unit/test_action_security.py` asserts that the `ci.yml` job `connectors-mysql84` is named `Connector tests (MySQL 8.4)`, as it already asserts `connectors` is named `Connector tests (MySQL)`.",
+    "claim_signature": "issue-acceptance-12",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "source_file": "AGENTS.md",
+    "source_line": 96,
+    "verify_hint": "Check the Commands block in `AGENTS.md` (head view `AGENTS.md.src`)",
+    "id": "VC-46",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "AGENTS.md's *Commands* comment for the connector suite says it fails without `SQLLENS_TEST_MYSQL_URL` and `SQLLENS_TEST_MYSQL_OTHER_DATABASE`, and that the second names a database the test user can write.",
+    "claim_signature": "issue-acceptance-13",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-396/43621583826-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: AGENTS.md's *Commands* comment for the connector suite says it fails without `SQLLENS_TEST_MYSQL_URL` and `SQLLENS_TEST_MYSQL_OTHER_DATABASE`, and that the second names a database the test user can write.",
+    "id": "VC-47",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "No tracked file names `requirements-drivers` or `sqllens[mysql]`, or describes SQL Lens's database driver as an optional extra or as pinned outside `requirements.txt`. This excludes `CHANGELOG.md`, `docs/external/release-notes.md`, `changelog.d/`, and the frozen historical snapshot `docs/internal/production-readiness-v0.1.0.md`. A case-insensitive search of the tracked tree outside those paths returns no hit for any of these strings: - `requirements-drivers` - `sqllens[mysql]` - `optional database driver` - `optional DB driver` - `optional extra` - `all DB drivers` - `pinned database drivers` - `driver constraints`",
+    "claim_signature": "issue-acceptance-14",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-396/43621583826-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: No tracked file names `requirements-drivers` or `sqllens[mysql]`, or describes SQL Lens's database driver as an optional extra or as pinned outside `requirements.txt`. This excludes `CHANGELOG.md`, `docs/external/release-notes.md`, `changelog.d/`, and the frozen historical snapshot `docs/internal/production-readiness-v0.1.0.md`. A case-insensitive search of the tracked tree outside those paths returns no hit for any of these strings: - `requirements-drivers` - `sqllens[mysql]` - `optional database driver` - `optional DB driver` - `optional extra` - `all DB drivers` - `pinned database drivers` - `driver constraints`",
+    "id": "VC-48",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A new `changelog.d/<PR>.changed.md` fragment says `pip install sqllens` now includes the MySQL driver and that the `mysql` and `all` extras are still accepted.",
+    "claim_signature": "issue-acceptance-15",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-396/43621583826-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: A new `changelog.d/<PR>.changed.md` fragment says `pip install sqllens` now includes the MySQL driver and that the `mysql` and `all` extras are still accepted.",
+    "id": "VC-49",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "The implementation PR leaves these unchanged: - `MySQLRunner.__init__`'s `ImportError` wrapper and its \"Install with: pip install pymysql\" message, so a missing PyMySQL at runner construction still raises that message. - The names `Connector tests (MySQL)` and `Connector tests (MySQL 8.4)`, and each connector job's single MySQL server version (`mysql:8.0` and `mysql:8.4`), so the checks the ruleset will require are the ones that report. - AGENTS.md's statement that `Connector tests (MySQL)` and `Connector tests (MySQL 8.4)` are not in the ruleset's required set, so it stays true until the ruleset change.",
+    "claim_signature": "issue-acceptance-16",
+    "criteria_file": ".prflow/tmp/review/pr-396/43621583826-1/criteria.json",
+    "verify_hint": "No generator hint located this criterion. Read .prflow/tmp/review/pr-396/43621583826-1/diff.patch to find where the diff meets the criterion, then cite that head-view file. Criterion: The implementation PR leaves these unchanged: - `MySQLRunner.__init__`'s `ImportError` wrapper and its \"Install with: pip install pymysql\" message, so a missing PyMySQL at runner construction still raises that message. - The names `Connector tests (MySQL)` and `Connector tests (MySQL 8.4)`, and each connector job's single MySQL server version (`mysql:8.0` and `mysql:8.4`), so the checks the ruleset will require are the ones that report. - AGENTS.md's statement that `Connector tests (MySQL)` and `Connector tests (MySQL 8.4)` are not in the ruleset's required set, so it stays true until the ruleset change.",
+    "id": "VC-50",
+    "reused_from_iter_prev": false
+  }
+]

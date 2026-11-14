@@ -1,0 +1,66 @@
+[
+  {
+    "criterion": 1,
+    "text": "`pyproject.toml`'s core `[project].dependencies` declares `pymysql[rsa]` with a floor no lower than `1.1` and an upper bound of `<2`, so `pip install sqllens` with no extras installs PyMySQL and `cryptography`."
+  },
+  {
+    "criterion": 2,
+    "text": "The `mysql` and `all` extras still exist and add no requirement beyond the core install. `pip install -c requirements.txt \".[mysql]\"` and `pip install -c requirements.txt \".[all]\"` each succeed without pip's \"does not provide the extra\" warning, and `pip check` then reports no broken requirements."
+  },
+  {
+    "criterion": 3,
+    "text": "`requirements.txt` pins PyMySQL with `==`. With that pin removed, the lockfile guard in the default `pytest -q` run (`tests/unit/test_lockfile_guard.py`) reports PyMySQL as a core dependency missing from the lockfile."
+  },
+  {
+    "criterion": 4,
+    "text": "`docker/requirements-drivers.txt` no longer exists. Each of these installs with `-c requirements.txt` as its only constraint file: the `ci.yml` jobs `unit`, `connectors` and `connectors-mysql84`, the Docker builder stage, the `.prflow/config.json` setup install and the AGENTS.md install command. The three CI jobs, the PRFlow setup install and the AGENTS.md command use one identical command, and `tests/unit/test_dependency_ci.py` fails when any of the three CI jobs or the PRFlow setup install diverges from it."
+  },
+  {
+    "criterion": 5,
+    "text": "The dependency-audit workflow's `pip-audit` step reads `requirements.txt` as its only requirements file and keeps exactly its current four `--ignore-vuln` exclusions. `tests/unit/test_dependency_ci.py` asserts both."
+  },
+  {
+    "criterion": 6,
+    "text": "`tests/unit/test_docker_inputs.py` asserts that the Docker builder stage installs with `requirements.txt` as its only constraint file. It no longer contains a check that reads the deleted file."
+  },
+  {
+    "criterion": 7,
+    "text": "With `pymysql` unimportable and an otherwise valid config (an API key included, so `sqllens serve` reaches preflight), `probe_database` on a `mysql://` URL raises a `PreflightError` for the `database` subsystem whose `__cause__` is the `ImportError`. Its message names PyMySQL, says to reinstall `sqllens`, and contains no `sqllens[`. As a result, `sqllens serve` and `sqllens validate --check-db` print `Preflight failed: database: …` with that message and exit with status 2. `tests/unit/test_preflight.py` asserts the probe outcome and the message."
+  },
+  {
+    "criterion": 8,
+    "text": "`docs/internal/setup/preflight.md`'s exception-narrowing table describes the MySQL `ImportError` branch as reporting a broken install with a reinstall message, not a missing optional driver."
+  },
+  {
+    "criterion": 9,
+    "text": "Running `pytest tests/connectors`, in CI or locally, has these outcomes: - with `SQLLENS_TEST_MYSQL_URL` unset or empty, every connector test in either file that needs the URL fails or errors (none is skipped) with a message naming `SQLLENS_TEST_MYSQL_URL`, and the run exits non-zero; the change leaves `TestConfigConstruction.test_db_url_accepted` in `test_connectors.py`, which reads no setting and needs no database, passing in this case; - with the URL set and `SQLLENS_TEST_MYSQL_OTHER_DATABASE` unset or empty, every `test_rule_sets_mysql.py` test fails or errors (none is skipped) with a message naming `SQLLENS_TEST_MYSQL_OTHER_DATABASE`, and the run exits non-zero; - with PyMySQL not importable, `test_rule_sets_mysql.py` is reported as an error, not a skip, and the run exits non-zero; - with both settings set and PyMySQL importable, the connector suite runs the same tests it ran before this change."
+  },
+  {
+    "criterion": 10,
+    "text": "A unit test in the default `pytest -q` run asserts that the connector suite's lookup of each of the two settings fails (pytest's fail outcome, not its skip outcome) with the setting named, in both the unset and the empty case."
+  },
+  {
+    "criterion": 11,
+    "text": "A source check in the default `pytest -q` run reads every `.py` file in `tests/connectors/` and fails, naming the file and line, when a file contains any of these, at minimum: a call to `pytest.skip`, `pytest.importorskip` or `pytest.xfail`; a use of `pytest.mark.skip`, `pytest.mark.skipif` or `pytest.mark.xfail`; any of those reached through `import pytest as <name>` or `from pytest import <name>`; and a `raise` of `unittest.SkipTest` or `SkipTest`. It passes on the connector files as this change leaves them, including the keyword argument `skip_catalog_views=True`. It does not detect a skip raised from code outside `tests/connectors/` or reached through dynamic attribute access, such as `getattr(pytest, \"skip\")`."
+  },
+  {
+    "criterion": 12,
+    "text": "`tests/unit/test_action_security.py` asserts that the `ci.yml` job `connectors-mysql84` is named `Connector tests (MySQL 8.4)`, as it already asserts `connectors` is named `Connector tests (MySQL)`."
+  },
+  {
+    "criterion": 13,
+    "text": "AGENTS.md's *Commands* comment for the connector suite says it fails without `SQLLENS_TEST_MYSQL_URL` and `SQLLENS_TEST_MYSQL_OTHER_DATABASE`, and that the second names a database the test user can write."
+  },
+  {
+    "criterion": 14,
+    "text": "No tracked file names `requirements-drivers` or `sqllens[mysql]`, or describes SQL Lens's database driver as an optional extra or as pinned outside `requirements.txt`. This excludes `CHANGELOG.md`, `docs/external/release-notes.md`, `changelog.d/`, and the frozen historical snapshot `docs/internal/production-readiness-v0.1.0.md`. A case-insensitive search of the tracked tree outside those paths returns no hit for any of these strings: - `requirements-drivers` - `sqllens[mysql]` - `optional database driver` - `optional DB driver` - `optional extra` - `all DB drivers` - `pinned database drivers` - `driver constraints`"
+  },
+  {
+    "criterion": 15,
+    "text": "A new `changelog.d/<PR>.changed.md` fragment says `pip install sqllens` now includes the MySQL driver and that the `mysql` and `all` extras are still accepted."
+  },
+  {
+    "criterion": 16,
+    "text": "The implementation PR leaves these unchanged: - `MySQLRunner.__init__`'s `ImportError` wrapper and its \"Install with: pip install pymysql\" message, so a missing PyMySQL at runner construction still raises that message. - The names `Connector tests (MySQL)` and `Connector tests (MySQL 8.4)`, and each connector job's single MySQL server version (`mysql:8.0` and `mysql:8.4`), so the checks the ruleset will require are the ones that report. - AGENTS.md's statement that `Connector tests (MySQL)` and `Connector tests (MySQL 8.4)` are not in the ruleset's required set, so it stays true until the ruleset change."
+  }
+]
