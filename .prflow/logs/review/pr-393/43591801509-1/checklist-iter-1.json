@@ -1,0 +1,1090 @@
+[
+  {
+    "id": "VC-1",
+    "category": "data_format_assumption",
+    "claim": "The `fields` tuples in `_CATALOG_VIEWS` list every column of MySQL 8.0+'s `information_schema.TABLES`, `COLUMNS` and `KEY_COLUMN_USAGE`, in each view's own column order, so a `SELECT *` over the rewritten derived table returns the same field set and order as the real view.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 120,
+    "source_line_end": 161,
+    "verify_against": "MySQL 8.0/8.4 INFORMATION_SCHEMA view definitions (column names and ordinal order) for TABLES, COLUMNS and KEY_COLUMN_USAGE",
+    "verify_hint": "Compare each `fields` tuple in `_CATALOG_VIEWS` in `src/sqllens/safety/rule_sets.py` against `SHOW COLUMNS FROM information_schema.TABLES` / `COLUMNS` / `KEY_COLUMN_USAGE` on MySQL 8.0 and 8.4",
+    "claim_signature": "data_format_assumption:rule_sets.py:catalog-view-field-lists",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-2",
+    "category": "data_format_assumption",
+    "claim": "The `kept` frozensets name exactly the 25 fields across the three views that carry values; every other field is projected as `NULL AS <field>`, and no kept field leaks data outside the rule set.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 128,
+    "source_line_end": 159,
+    "verify_against": "Acceptance criterion about the 25 kept fields and the unit test pinning kept fields against `_CATALOG_VIEWS`",
+    "verify_hint": "Count the union of `kept` in `_CATALOG_VIEWS` (`src/sqllens/safety/rule_sets.py`) and compare with the kept-field assertions in `tests/unit/test_safety_rule_sets.py`",
+    "claim_signature": "data_format_assumption:rule_sets.py:kept-fields-25",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-3",
+    "category": "dependency_interaction",
+    "claim": "`exp.CurrentSchema()` generates MySQL text equivalent to `DATABASE()` (as `SCHEMA()`) under sqlglot's mysql dialect, and `exp.DataType.build(\"BINARY\", dialect=_DIALECT)` inside `exp.Cast` generates a byte-comparison cast MySQL accepts in a WHERE clause.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 341,
+    "source_line_end": 350,
+    "verify_against": "sqlglot (>=30.22,<31) MySQL generator for `exp.CurrentSchema` and `exp.Cast` to BINARY",
+    "verify_hint": "Check `_binary` and `_in_schema` in `src/sqllens/safety/rule_sets.py` against sqlglot's mysql dialect generator output for `CurrentSchema` and `CAST(... AS BINARY)`",
+    "claim_signature": "dependency_interaction:rule_sets.py:currentschema-binary-cast",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-4",
+    "category": "dependency_interaction",
+    "claim": "`exp.Select(...).limit(exp.Literal.number(\"18446744073709551615\"))` generates a MySQL `LIMIT` MySQL accepts, and that limit on the derived table prevents MySQL from merging it into the outer query or pushing outer conditions into it.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 416,
+    "source_line_end": 421,
+    "verify_against": "MySQL derived-table merge rules (LIMIT prevents merge) and sqlglot's MySQL LIMIT generation",
+    "verify_hint": "Check `_MATERIALIZE_LIMIT` and `_catalog_body` in `src/sqllens/safety/rule_sets.py` and the connector test asserting the `IF(..., EXP(1000), 0)` condition never raises",
+    "claim_signature": "dependency_interaction:rule_sets.py:materialize-limit-blocks-merge",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-5",
+    "category": "api_contract",
+    "claim": "`_analyze` now returns a 2-tuple `(base, catalog)` instead of a list, and every caller of `_analyze`, `_rewrite` and `_rewalk` in the repository and in tests passes the new signatures.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 269,
+    "source_line_end": 271,
+    "verify_against": "All callers of `_analyze`/`_rewrite`/`_rewalk`",
+    "verify_hint": "Grep for `_analyze(`, `_rewrite(` and `_rewalk(` across `src/sqllens/` and `tests/unit/test_safety_rule_sets.py`",
+    "claim_signature": "api_contract:rule_sets.py:analyze-returns-tuple",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-6",
+    "category": "dependency_interaction",
+    "claim": "`_is_catalog_derived` relies on `exp.Select.args` using the key `\"from_\"` (not `\"from\"`) for the FROM clause in the pinned sqlglot version; if the key differs the check returns False and every catalog read is refused.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 481,
+    "source_line_end": 483,
+    "verify_against": "sqlglot's `exp.Select` arg_types key for the FROM clause at the version locked in `requirements.txt`",
+    "verify_hint": "Check `body.args.get(\"from_\")` in `_is_catalog_derived` and `_is_guard_derived` in `src/sqllens/safety/rule_sets.py` against sqlglot's `exp.Select.arg_types`",
+    "claim_signature": "dependency_interaction:rule_sets.py:select-from-arg-key:481",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-7",
+    "category": "api_contract",
+    "claim": "`_is_catalog_derived` and `_BodyTextCache` are referenced in `_rewalk` and defined in an order that resolves at import and at type-check time (`_BodyTextCache` is annotated in `_is_catalog_derived`'s signature before its class statement).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 469,
+    "source_line_end": 512,
+    "verify_against": "Module-level definition order and whether `from __future__ import annotations` is present in the file",
+    "verify_hint": "Check the top of `src/sqllens/safety/rule_sets.py` for `from __future__ import annotations` relative to `_is_catalog_derived`'s `expected: _BodyTextCache` annotation",
+    "claim_signature": "api_contract:rule_sets.py:bodytextcache-forward-ref",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-8",
+    "category": "dependency_interaction",
+    "claim": "`_BodyTextCache.text` compares `tables` by object identity (`is not`), so every call path reaches it with the very same mapping object `tables_for` returned for the request; a copied or re-fetched mapping would raise `ValueError` and fail the query.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 507,
+    "source_line_end": 512,
+    "verify_against": "`LoadedRuleSets.tables_for` in `src/sqllens/rule_sets.py` and the call chain in `apply_rule_set`",
+    "verify_hint": "Check whether `tables_for` in `src/sqllens/rule_sets.py` returns a cached object or a fresh mapping per call, and trace it into `apply_rule_set`/`_rewalk`",
+    "claim_signature": "dependency_interaction:rule_sets.py:bodytextcache-identity-check",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-9",
+    "category": "dependency_interaction",
+    "claim": "A catalog reference refused by the re-walk or by a `ValueError` from `_catalog_filter`/`_BodyTextCache` surfaces as a structured refusal to the MCP client rather than an unguarded crash.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 629,
+    "source_line_end": 640,
+    "verify_against": "`RuleSetGuardRunner.run_sql`'s exception handling and AGENTS.md's structured-failure rule",
+    "verify_hint": "Check the `except Exception` branch of `RuleSetGuardRunner.run_sql` in `src/sqllens/safety/rule_sets.py` and `RefusalRedactingRunner`",
+    "claim_signature": "dependency_interaction:rule_sets.py:catalog-error-structured-refusal",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-10",
+    "category": "api_contract",
+    "claim": "`_catalog_view` and `rls._is_rule_set_catalog_view` recognize the same set of three `information_schema` views under the same qualification rules, so a view the rule-set guard rewrites is always one RLS skips.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rls.py",
+    "source_line": 185,
+    "source_line_end": 203,
+    "verify_against": "`_CATALOG_VIEWS` keys and `_catalog_view` in `src/sqllens/safety/rule_sets.py`",
+    "verify_hint": "Compare `_RULE_SET_CATALOG_VIEWS`/`_is_rule_set_catalog_view` in `src/sqllens/safety/rls.py` with `_CATALOG_VIEWS` and `_catalog_view` in `src/sqllens/safety/rule_sets.py`",
+    "claim_signature": "api_contract:rls.py:catalog-view-set-parity",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-11",
+    "category": "dependency_interaction",
+    "claim": "`_is_rule_set_catalog_view` gates on `dialect == \"mysql\"`, the exact string `sqlglot_dialect_for_url` produces for a `mysql+pymysql://` URL and passed to `RlsGuardRunner` as `dialect`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rls.py",
+    "source_line": 198,
+    "verify_against": "`sqlglot_dialect_for_url` in `src/sqllens/safety/readonly.py` and `build_agent`'s `dialect` value",
+    "verify_hint": "Check the return value of `sqlglot_dialect_for_url` in `src/sqllens/safety/readonly.py` for MySQL URLs against the `dialect == \"mysql\"` comparison in `src/sqllens/safety/rls.py`",
+    "claim_signature": "dependency_interaction:rls.py:mysql-dialect-string",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-12",
+    "category": "api_contract",
+    "claim": "`RlsGuardRunner.__init__` accepting a new keyword-only `skip_catalog_views` and forwarding it to `apply_rls` keeps every other construction site of `RlsGuardRunner` and call site of `apply_rls` working with the default `False`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/__init__.py",
+    "source_line": 174,
+    "source_line_end": 204,
+    "verify_against": "All constructors of `RlsGuardRunner` and callers of `apply_rls`",
+    "verify_hint": "Grep for `RlsGuardRunner(` and `apply_rls(` across `src/sqllens/` and `tests/`",
+    "claim_signature": "api_contract:__init__.py:rlsguard-skip-catalog-views-kwarg",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-13",
+    "category": "api_contract",
+    "claim": "`build_agent` passes `skip_catalog_views=rule_sets is not None` only when `cfg.rls` is truthy, so RLS catalog-view skipping is active exactly while a rule-set file is configured, matching the docs' \"only while a rule-set file is configured\".",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/factory.py",
+    "source_line": 127,
+    "source_line_end": 130,
+    "verify_against": "`docs/internal/database-connectors/row-level-security.md` sentence about `skip_catalog_views=True` and `build_agent`",
+    "verify_hint": "Check `build_agent` in `src/sqllens/agent/factory.py` against the `_METADATA_VIEWS` paragraph in `docs/internal/database-connectors/row-level-security.md`",
+    "claim_signature": "api_contract:factory.py:skip-catalog-views-wiring",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-14",
+    "category": "absolute_claim",
+    "claim": "The system prompt asserts that under a rule set no SHOW statement, DESCRIBE or other catalog lookup is permitted, and that NULL fields in the three views say nothing about the database.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Look up tables, columns and keys only with a SELECT against INFORMATION_SCHEMA.TABLES, INFORMATION_SCHEMA.COLUMNS or INFORMATION_SCHEMA.KEY_COLUMN_USAGE. Fields such as row counts, sizes, defaults, comments and constraint names are withheld there and read as NULL, so such a NULL says nothing about the database. No SHOW statement, DESCRIBE or other catalog lookup is permitted.",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "source_line": 192,
+    "verify_against": "The rule-set guard's actual refusals in `src/sqllens/safety/rule_sets.py`",
+    "verify_hint": "Find the branch in `_parse`/`_check_reference`/`_analyze` in `src/sqllens/safety/rule_sets.py` that refuses a SHOW statement and a DESCRIBE under a rule set; falsify with a SHOW or DESCRIBE statement that the guard carries through",
+    "claim_signature": "absolute_claim:default.py:rule-set-introspection-sentence:192",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-15",
+    "category": "absolute_claim",
+    "claim": "The module docstring asserts that every catalog relation other than the three rewritten views is refused.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "ends in a ``LIMIT`` so MySQL materializes it before the model's expressions\nread it. Every other catalog relation is refused.",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 74,
+    "source_line_end": 75,
+    "verify_against": "`_check_reference` / `_catalog_view` / `_CATALOG_SCHEMAS` in the same module",
+    "verify_hint": "Trace a reference to `information_schema.STATISTICS`, `mysql.user`, `performance_schema.*` and `sys.*` through `_analyze` in `src/sqllens/safety/rule_sets.py`; falsify with an unqualified or differently-qualified catalog reference that escapes `_check_reference`",
+    "claim_signature": "absolute_claim:rule_sets.py:every-other-catalog-refused",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-16",
+    "category": "absolute_claim",
+    "claim": "The internal docs assert that `apply_rls` never matches a rule against the three MySQL `information_schema` views by their own names while `skip_catalog_views=True`, and that matching is unchanged without a rule-set file.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "With `skip_catalog_views=True`, which `build_agent` sets only while a rule-set file is configured, `apply_rls` never matches a rule against the MySQL `information_schema` views `TABLES`, `COLUMNS` and `KEY_COLUMN_USAGE` by their own names (`_is_rule_set_catalog_view`)",
+    "source_file": "docs/internal/database-connectors/row-level-security.md",
+    "source_line": 50,
+    "verify_against": "`apply_rls` in `src/sqllens/safety/rls.py`",
+    "verify_hint": "Check both match sites in `apply_rls` (`src/sqllens/safety/rls.py`, the base-source loop and the final `find_all(exp.Table)` backstop) for a path where a catalog view still matches by its own name",
+    "claim_signature": "absolute_claim:row-level-security.md:skip-catalog-views-never-matches",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-17",
+    "category": "absolute_claim",
+    "claim": "The internal rule-sets doc asserts that the re-walk accepts a catalog view only inside a derived table whose body generates the same MySQL text `_catalog_body` builds for that view and the selected set.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "The re-walk accepts a catalog view only inside a derived table whose body generates the same MySQL text as the one `_catalog_body` builds for that view and the selected set.",
+    "source_file": "docs/internal/database-connectors/rule-sets.md",
+    "source_line": 62,
+    "verify_against": "`_is_catalog_derived` and `_rewalk` in `src/sqllens/safety/rule_sets.py`",
+    "verify_hint": "Check `_is_catalog_derived` in `src/sqllens/safety/rule_sets.py`; falsify with a catalog view reference outside any derived table, or inside one whose body text differs only in whitespace or quoting",
+    "claim_signature": "absolute_claim:rule-sets.md:rewalk-accepts-only-guard-body",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-18",
+    "category": "absolute_claim",
+    "claim": "The changelog asserts that under a rule set a SELECT on the three views returns only the selected set's tables, listed columns and keys among them in the connected database, every other field NULL, and that other catalog views, the `mysql`/`performance_schema`/`sys` schemas and SHOW statements are still refused.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Other catalog views, the `mysql`, `performance_schema` and `sys`\nschemas, and `SHOW` statements are still refused.",
+    "source_file": "changelog.d/393.added.md",
+    "source_line": 6,
+    "source_line_end": 7,
+    "verify_against": "`src/sqllens/safety/rule_sets.py` refusal paths and the connector tests",
+    "verify_hint": "Check `_check_reference`/`_catalog_view` in `src/sqllens/safety/rule_sets.py` and the refusal assertions in `tests/connectors/test_rule_sets_mysql.py`",
+    "claim_signature": "absolute_claim:393.added.md:catalog-refusals-still-hold",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-19",
+    "category": "absolute_claim",
+    "claim": "The fixed changelog asserts that without a rule-set file, row-level security is unchanged.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "Without a rule-set file,\nrow-level security is unchanged. (#379)",
+    "source_file": "changelog.d/393.fixed.md",
+    "source_line": 4,
+    "source_line_end": 5,
+    "verify_against": "`apply_rls`'s `skip_catalog_views` default and `build_agent`'s wiring",
+    "verify_hint": "Check that `skip_catalog_views` defaults to `False` in `apply_rls` and `RlsGuardRunner.__init__`, and is only set true when `cfg.rule_sets.loaded is not None` in `src/sqllens/agent/factory.py`",
+    "claim_signature": "absolute_claim:393.fixed.md:rls-unchanged-without-rule-set",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-20",
+    "category": "absolute_claim",
+    "claim": "The external doc asserts that under a rule set the three views show only the selected set's tables, its listed columns and the keys among them, in the connected database, with every other field NULL.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "To look up the schema, the assistant can read `information_schema.TABLES`, `COLUMNS` and `KEY_COLUMN_USAGE`. Under a rule set these show only the selected set's tables, its listed columns and the keys among them, in the connected database. Their names, types and key details are filled in; every other field, such as row counts, sizes, defaults, comments and constraint names, comes back as `NULL`.",
+    "source_file": "docs/external/rule-sets.md",
+    "source_line": 120,
+    "verify_against": "`_catalog_filter` and `_catalog_body` in `src/sqllens/safety/rule_sets.py`",
+    "verify_hint": "Check `_catalog_filter` in `src/sqllens/safety/rule_sets.py`; falsify with a row whose referenced side is in another database or whose table matches case-insensitively",
+    "claim_signature": "absolute_claim:rule-sets.md:external-catalog-visibility",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-21",
+    "category": "dependency_interaction",
+    "claim": "The new `connectors-mysql84` CI job's MySQL 8.4 service accepts the setup steps written for 8.0 — `SET GLOBAL log_bin_trust_function_creators = 1` and the `GRANT ALL ON sqllens_other.*` to an already-created user — and `mysqladmin ping` exists in the `mysql:8.4` image for the health check.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/ci.yml",
+    "source_line": 136,
+    "source_line_end": 220,
+    "verify_against": "MySQL 8.4 release notes on removed/changed server variables and the `mysql:8.4` Docker image contents",
+    "verify_hint": "Check the `connectors-mysql84` job steps in `.github/workflows/ci.yml` against MySQL 8.4's handling of `log_bin_trust_function_creators` and `mysqladmin`",
+    "claim_signature": "dependency_interaction:ci.yml:mysql84-setup-steps",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-22",
+    "category": "data_format_assumption",
+    "claim": "Connector tests read the second database's name from the `SQLLENS_TEST_MYSQL_OTHER_DATABASE` environment variable that both connector CI jobs set to `sqllens_other`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": ".github/workflows/ci.yml",
+    "source_line": 141,
+    "source_line_end": 142,
+    "verify_against": "`tests/connectors/` fixtures that read the environment variable",
+    "verify_hint": "Grep `tests/connectors/` for `SQLLENS_TEST_MYSQL_OTHER_DATABASE` (conftest and `test_rule_sets_mysql.py`) and check the skip/failure behaviour when it is unset",
+    "claim_signature": "data_format_assumption:ci.yml:other-database-env-var",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-23",
+    "category": "api_contract",
+    "claim": "The new job's display name `Connector tests (MySQL 8.4)` matches the name AGENTS.md now lists as a non-required but must-pass check, and `request-review` needing `connectors-mysql84` does not block on a job name the ruleset expects differently.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "AGENTS.md",
+    "source_line": 188,
+    "verify_against": "The `name:` of the `connectors-mysql84` job in `.github/workflows/ci.yml` and the `main-protected` ruleset's required check names",
+    "verify_hint": "Compare `name: Connector tests (MySQL 8.4)` in `.github/workflows/ci.yml` with the check-name list in `AGENTS.md` under 'Repo conventions'",
+    "claim_signature": "api_contract:AGENTS.md:ci-check-name-parity",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch1:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-24",
+    "category": "test_mock_alignment",
+    "claim": "The test's pinned DERIVED_TABLES text is byte-for-byte what `apply_rule_set` emits for INFORMATION_SCHEMA.TABLES under EXAMPLE_TABLES, including the `CAST(... AS BINARY)` comparisons, the `SCHEMA()` call and the trailing `LIMIT 18446744073709551615`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "source_line": 320,
+    "source_line_end": 325,
+    "verify_against": "the catalog body builder in the rule-set guard",
+    "verify_hint": "Check `_catalog_body`, `_catalog_filter` and `_MATERIALIZE_LIMIT` in `src/sqllens/safety/rule_sets.py`",
+    "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:derived-tables-body-text:320",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-1"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-25",
+    "category": "test_mock_alignment",
+    "claim": "The pinned `_COLUMNS_FILTER` and `_KCU_FILTER` texts, including the `_PAIRS` tuple list order ('customers','id'), ('customers','name'), ('orders','id'), ('orders','customer_id'), ('orders','total'), match the WHERE clause the guard builds for COLUMNS and KEY_COLUMN_USAGE.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "source_line": 326,
+    "source_line_end": 342,
+    "verify_against": "the per-view row filter builder in the rule-set guard",
+    "verify_hint": "Check `_catalog_filter` and the `row_filter` branches in `src/sqllens/safety/rule_sets.py`",
+    "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:columns-kcu-filter-text:326",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-2"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-26",
+    "category": "dependency_interaction",
+    "claim": "`guard._CATALOG_VIEWS` is a mapping keyed by the uppercase view names 'TABLES', 'COLUMNS' and 'KEY_COLUMN_USAGE' whose values expose `.fields` (a sequence) and `.kept` (a set).",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "source_line": 392,
+    "source_line_end": 400,
+    "verify_against": "the `_CATALOG_VIEWS` definition in the guard module",
+    "verify_hint": "Check `_CATALOG_VIEWS` and `_CatalogView` in `src/sqllens/safety/rule_sets.py`",
+    "claim_signature": "dependency_interaction:test_safety_rule_sets.py:catalog-views-mapping-shape:392",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-3"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-27",
+    "category": "data_format_assumption",
+    "claim": "INFORMATION_SCHEMA.TABLES has exactly 21 fields, COLUMNS 22 and KEY_COLUMN_USAGE 12, and the kept fields across the three views total 25.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "source_line": 394,
+    "source_line_end": 397,
+    "verify_against": "MySQL 8.0 INFORMATION_SCHEMA view definitions and the `fields` tuples in `_CATALOG_VIEWS`",
+    "verify_hint": "Check the `fields`/`kept` tuples in `_CATALOG_VIEWS` in `src/sqllens/safety/rule_sets.py` against MySQL 8.0's documented columns for these three views",
+    "claim_signature": "data_format_assumption:test_safety_rule_sets.py:view-field-counts:394",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-4"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-28",
+    "category": "dependency_interaction",
+    "claim": "`guard._CatalogView` accepts keyword arguments `fields`, `kept` and `row_filter` and raises ValueError with messages containing 'kept fields not in the view', 'unknown catalog row filter' and 'distinct' for those three invalid inputs.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "source_line": 498,
+    "source_line_end": 504,
+    "verify_against": "the `_CatalogView` validator in the guard module",
+    "verify_hint": "Check `_CatalogView.__post_init__` (or its validator) in `src/sqllens/safety/rule_sets.py`",
+    "claim_signature": "dependency_interaction:test_safety_rule_sets.py:catalogview-validation-messages:498",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-5"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-29",
+    "category": "dependency_interaction",
+    "claim": "`guard._BodyTextCache(tables)` exposes `.text(view_name, tables)` which returns the body SQL and raises ValueError matching 'another rule set' when called with a different table mapping.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "source_line": 507,
+    "source_line_end": 511,
+    "verify_against": "the `_BodyTextCache` class in the guard module",
+    "verify_hint": "Check `_BodyTextCache` and its `text` method in `src/sqllens/safety/rule_sets.py`",
+    "claim_signature": "dependency_interaction:test_safety_rule_sets.py:bodytextcache-text-signature:507",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-6"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-30",
+    "category": "dependency_interaction",
+    "claim": "`guard._catalog_filter(view_name, tables)` raises ValueError matching 'no catalog filter' for a view it has no filter for, such as 'STATISTICS'.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "source_line": 514,
+    "source_line_end": 516,
+    "verify_against": "the `_catalog_filter` function in the guard module",
+    "verify_hint": "Check `_catalog_filter` in `src/sqllens/safety/rule_sets.py`",
+    "claim_signature": "dependency_interaction:test_safety_rule_sets.py:catalog-filter-unknown-view:514",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-7"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-31",
+    "category": "api_contract",
+    "claim": "`guard._rewalk` takes a third, optional parameter (defaulting to None) after `tree` and `tables`, so a monkeypatched replacement with signature `(tree, tables, expected=None)` matches every call site.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "source_line": 623,
+    "source_line_end": 627,
+    "verify_against": "the `_rewalk` definition and all its call sites",
+    "verify_hint": "Check `_rewalk`'s signature and every `_rewalk(` call in `src/sqllens/safety/rule_sets.py`",
+    "claim_signature": "api_contract:test_safety_rule_sets.py:rewalk-third-parameter:623",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-8"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-32",
+    "category": "dependency_interaction",
+    "claim": "A rewritten catalog statement parsed by sqlglot's mysql dialect exposes the outer FROM under the arg key `from_` with `.this` carrying a settable `joins` key, so the planted-defect test mutates the real outer FROM.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "source_line": 440,
+    "source_line_end": 445,
+    "verify_against": "sqlglot's expression arg names for `exp.From`/`exp.Select` at the locked version",
+    "verify_hint": "Check the sqlglot version pinned in `requirements.txt` and `exp.Select`/`exp.From` arg keys ('from' vs 'from_') in sqlglot's `expressions.py`",
+    "claim_signature": "dependency_interaction:test_safety_rule_sets.py:sqlglot-from-arg-key:440",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-9"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-33",
+    "category": "dependency_interaction",
+    "claim": "In the built TABLES body, `body.expressions[7]` is the `TABLE_ROWS` projection (the eighth field) and `body.find(exp.In).expressions[1]` is the second literal table name, so the 'kept-hidden-field' and 'other-table' tampers alter what their ids say.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "source_line": 450,
+    "source_line_end": 458,
+    "verify_against": "the TABLES field order in `_CATALOG_VIEWS` and the IN-list construction",
+    "verify_hint": "Check the `fields` tuple order for TABLES in `_CATALOG_VIEWS` and the `exp.In` list built by `_catalog_filter` in `src/sqllens/safety/rule_sets.py`",
+    "claim_signature": "dependency_interaction:test_safety_rule_sets.py:tamper-index-positions:450",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-10"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-34",
+    "category": "api_contract",
+    "claim": "`RlsGuardRunner` accepts a keyword argument `skip_catalog_views`, and `apply_rls` accepts the same keyword, with the default (omitted) behaviour still matching a catalog view by name.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "source_line": 702,
+    "source_line_end": 731,
+    "verify_against": "the RLS guard's public signatures",
+    "verify_hint": "Check `RlsGuardRunner.__init__` and `apply_rls` in `src/sqllens/safety/rls.py`",
+    "claim_signature": "api_contract:repo:rls-skip-catalog-views-kwarg",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-11"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-35",
+    "category": "api_contract",
+    "claim": "With `skip_catalog_views` either True or False, a catalog view aliased like a protected table still raises `RlsError` with a message matching 'could not prove'.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "source_line": 734,
+    "source_line_end": 745,
+    "verify_against": "the alias backstop branch in the RLS guard",
+    "verify_hint": "Check the alias/unproven-relation branch and its message in `src/sqllens/safety/rls.py`",
+    "claim_signature": "api_contract:test_safety_rule_sets.py:rls-alias-backstop:734",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-12"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-36",
+    "category": "test_mock_alignment",
+    "claim": "`apply_rule_set` applied to a catalog view produces an alias equal to the original reference's letter case (`` `tables` ``, `` `TABLES` ``, `` `Tables` ``) or the user alias, for all five parametrized reference forms.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "source_line": 355,
+    "source_line_end": 369,
+    "verify_against": "the catalog-reference rewrite in the guard",
+    "verify_hint": "Check how the catalog rewrite sets the derived table's alias in `src/sqllens/safety/rule_sets.py`",
+    "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:catalog-alias-letter-case:355",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-13"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-37",
+    "category": "data_format_assumption",
+    "claim": "A statement whose only change is a `FORCE INDEX (PRIMARY)` on INFORMATION_SCHEMA.TABLES is refused with kind `KIND_TABLE_OPTIONS`, and `SELECT * FROM def.information_schema.tables` (three-part name) is refused with `KIND_CATALOG`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "source_line": 345,
+    "verify_against": "the refusal-kind dispatch in the guard",
+    "verify_hint": "Check the `KIND_TABLE_OPTIONS` and `KIND_CATALOG` branches in `_analyze` in `src/sqllens/safety/rule_sets.py`",
+    "claim_signature": "data_format_assumption:test_safety_rule_sets.py:refusal-kinds-for-catalog-variants:345",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-14"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-38",
+    "category": "dependency_interaction",
+    "claim": "The connector fixture's `SET FOREIGN_KEY_CHECKS = 0` run once at the start of `_TEARDOWN` is still in effect for the FK-dropping and FK-creating statements that follow it on the same connection, including the separate teardown connection opened after the yield.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_rule_sets_mysql.py",
+    "source_line": 73,
+    "source_line_end": 181,
+    "verify_against": "MySQL session-variable scope for `FOREIGN_KEY_CHECKS` and pymysql connection/cursor semantics",
+    "verify_hint": "Check that the `database` fixture at lines 153-181 of `tests/connectors/test_rule_sets_mysql.py` executes the `SET FOREIGN_KEY_CHECKS = 0` statement on each connection it reuses for drops",
+    "claim_signature": "dependency_interaction:test_rule_sets_mysql.py:fk-checks-session-scope:73",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-15"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-39",
+    "category": "dependency_interaction",
+    "claim": "`_SETUP` creates `rs_customers` with a foreign key referencing `rs_salaries (id)` before `rs_salaries` is created, which MySQL accepts only because foreign-key checks are off.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_rule_sets_mysql.py",
+    "source_line": 85,
+    "source_line_end": 92,
+    "verify_against": "MySQL 8.0 behaviour for CREATE TABLE with a forward FK reference under FOREIGN_KEY_CHECKS=0",
+    "verify_hint": "Check the ordering of `_SETUP` statements in `tests/connectors/test_rule_sets_mysql.py` against MySQL's FOREIGN_KEY_CHECKS semantics",
+    "claim_signature": "dependency_interaction:test_rule_sets_mysql.py:forward-fk-reference:85",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-16"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-40",
+    "category": "dependency_interaction",
+    "claim": "`SQLLENS_TEST_MYSQL_OTHER_DATABASE` names a second database the connector test user may create and drop tables in, and CI sets it for the MySQL connector job.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_rule_sets_mysql.py",
+    "source_line": 135,
+    "source_line_end": 150,
+    "verify_against": "the connector job in the CI workflow",
+    "verify_hint": "Check the `Connector tests (MySQL)` job in `.github/workflows/ci.yml` for the `sqllens_other` database creation, grant and `SQLLENS_TEST_MYSQL_OTHER_DATABASE` env",
+    "claim_signature": "dependency_interaction:test_rule_sets_mysql.py:other-database-env-var:135",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-17"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-41",
+    "category": "test_mock_alignment",
+    "claim": "The connector refusal list's replacements — `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.VIEWS` and `SHOW COLUMNS FROM rs_customers` — are still refused with `UnsafeSqlError` under the guard chain the test builds.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_rule_sets_mysql.py",
+    "source_line": 467,
+    "source_line_end": 468,
+    "verify_against": "the rule-set guard's catalog and statement-kind refusals",
+    "verify_hint": "Check the catalog-relation and non-single-SELECT refusal branches in `src/sqllens/safety/rule_sets.py` and `RuleSetRefusal`'s relation to `UnsafeSqlError`",
+    "claim_signature": "test_mock_alignment:test_rule_sets_mysql.py:remaining-catalog-refusals:467",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-18"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-42",
+    "category": "data_format_assumption",
+    "claim": "`frame.isna().all().all()` holds for the withheld-field reads, i.e. the NULL projections come back to pandas as NaN/NA rather than as the string 'NULL' or an object column of None that `isna` would miss.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_rule_sets_mysql.py",
+    "source_line": 641,
+    "source_line_end": 650,
+    "verify_against": "the DataFrame construction in the MySQL runner",
+    "verify_hint": "Check how `MySQLRunner.run_sql` builds the DataFrame in `src/sqllens/agent/integrations/mysql.py`",
+    "claim_signature": "data_format_assumption:test_rule_sets_mysql.py:null-fields-read-as-na:641",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-19"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-43",
+    "category": "data_format_assumption",
+    "claim": "`SELECT *` over a rewritten catalog view returns columns in the same order and with the same names as `SELECT * FROM information_schema.<view> LIMIT 0` reports through pymysql's `cursor.description`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_rule_sets_mysql.py",
+    "source_line": 653,
+    "source_line_end": 672,
+    "verify_against": "the field order in `_CATALOG_VIEWS` against MySQL's actual view column order",
+    "verify_hint": "Check the `fields` tuple order in `_CATALOG_VIEWS` in `src/sqllens/safety/rule_sets.py`",
+    "claim_signature": "data_format_assumption:test_rule_sets_mysql.py:star-column-order:653",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-20"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-44",
+    "category": "test_mock_alignment",
+    "claim": "The pinned `_MYSQL_INTROSPECTION` line, assembled from `_INTROSPECTION_PREFIX` and `_INTROSPECTION_SUFFIX`, is byte-identical to a line the default (no rule set) MySQL system prompt emits.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_system_prompt.py",
+    "source_line": 733,
+    "source_line_end": 742,
+    "verify_against": "the schema-introspection text in the default system prompt builder",
+    "verify_hint": "Check the introspection bullet in `src/sqllens/agent/core/system_prompt/default.py`",
+    "claim_signature": "test_mock_alignment:test_system_prompt.py:mysql-introspection-line-pinned:733",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-21"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-45",
+    "category": "test_mock_alignment",
+    "claim": "The pinned `_RULE_SET_INTROSPECTION` line is byte-identical to the schema-lookup line the prompt builder emits with `rule_sets=True`, including the withheld-fields sentence and the 'No SHOW statement, DESCRIBE or other catalog lookup is permitted.' sentence.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_system_prompt.py",
+    "source_line": 743,
+    "source_line_end": 752,
+    "verify_against": "the rule-set branch of the schema-introspection text",
+    "verify_hint": "Check the `rule_sets` branch of the introspection bullet in `src/sqllens/agent/core/system_prompt/default.py`",
+    "claim_signature": "test_mock_alignment:test_system_prompt.py:rule-set-introspection-line-pinned:743",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-22"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-46",
+    "category": "absolute_claim",
+    "claim": "The authored comment asserts that swapping the new schema-lookup line back for today's leaves exactly #374's rule-set prompt, so the line switch is the only other difference between the two prompts.",
+    "claim_provenance": "source_authored",
+    "source_excerpt": "    # #374's rule-set prompt kept today's schema-lookup line; swapping it back\n    # leaves exactly that prompt, so the switch is the only other difference.",
+    "source_file": "tests/unit/test_system_prompt.py",
+    "source_line": 768,
+    "source_line_end": 769,
+    "verify_against": "the full prompt text produced with `rule_sets=True` at this head versus at #374",
+    "verify_hint": "Check every `rule_sets`-conditional branch in `src/sqllens/agent/core/system_prompt/default.py`, including any branch that changes a line without adding or removing one",
+    "claim_signature": "absolute_claim:test_system_prompt.py:switch-is-only-difference:768",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-23"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-47",
+    "category": "test_mock_alignment",
+    "claim": "The assertion `\"SHOW TABLES\" not in \"\\n\".join(on)` holds for the whole rule-set prompt, not only its schema-lookup line.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_system_prompt.py",
+    "source_line": 774,
+    "verify_against": "every occurrence of SHOW in the system prompt under `rule_sets=True`",
+    "verify_hint": "Grep for 'SHOW' in `src/sqllens/agent/core/system_prompt/default.py` and check which occurrences survive the `rule_sets` branches",
+    "claim_signature": "test_mock_alignment:test_system_prompt.py:no-show-tables-in-prompt:774",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-24"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-48",
+    "category": "test_mock_alignment",
+    "claim": "In the factory-wiring diff the three added lines appear in the order qualify-rule, rule-set-error-rule, rule-set schema-lookup line, and the single removed line is the one containing 'structural SHOW variants'.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_factory_wiring.py",
+    "source_line": 766,
+    "source_line_end": 773,
+    "verify_against": "the prompt assembled by `build_agent` for a rule-set config",
+    "verify_hint": "Check the ordering of the rule-set bullets in `src/sqllens/agent/core/system_prompt/default.py` and `_prompt_from_agent_tools` in `tests/unit/test_factory_wiring.py`",
+    "claim_signature": "test_mock_alignment:test_factory_wiring.py:prompt-diff-line-order:766",
+    "verification_mode": "agent",
+    "merged_from": [
+      "batch2:VC-25"
+    ],
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Under the example set, `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE()` returns exactly `customers` and `orders`, and the same query written as `select table_name from information_schema.tables where table_schema = database()` returns the same rows.",
+    "claim_signature": "issue-acceptance-1",
+    "criteria_file": ".prflow/tmp/review/pr-393/43591801509-1/criteria.json",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 247,
+    "verify_hint": "Check `_catalog_view`'s case folding (`table.name.upper()`, `db.name.lower()`) in `src/sqllens/safety/rule_sets.py` and the TABLES connector test in `tests/connectors/test_rule_sets_mysql.py`",
+    "id": "VC-49",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Under the example set, `INFORMATION_SCHEMA.COLUMNS` returns exactly the five listed columns, with no row for `email`, `discount` or `rep_id`.",
+    "claim_signature": "issue-acceptance-2",
+    "criteria_file": ".prflow/tmp/review/pr-393/43591801509-1/criteria.json",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 382,
+    "verify_hint": "Check the `column` branch of `_catalog_filter` in `src/sqllens/safety/rule_sets.py` and the COLUMNS connector test in `tests/connectors/test_rule_sets_mysql.py`",
+    "id": "VC-50",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Under the example set, `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` returns the primary-key rows for `customers.id` and `orders.id` and the foreign-key row from `orders.customer_id` to `customers.id`, and it returns no row whose table, column, referenced table or referenced column is outside the set, and no row whose schema or referenced schema is another database (a same-named `orders` table in another database the SQL Lens user can read included).",
+    "claim_signature": "issue-acceptance-3",
+    "criteria_file": ".prflow/tmp/review/pr-393/43591801509-1/criteria.json",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 386,
+    "verify_hint": "Check the `key` branch of `_catalog_filter` in `src/sqllens/safety/rule_sets.py` and the KEY_COLUMN_USAGE connector test (including the same-named table in `sqllens_other`) in `tests/connectors/test_rule_sets_mysql.py`",
+    "id": "VC-51",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Under the example set, `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE IF(TABLE_NAME = 'salaries', EXP(1000), 0) > 0` returns no row and raises no error.",
+    "claim_signature": "issue-acceptance-4",
+    "criteria_file": ".prflow/tmp/review/pr-393/43591801509-1/criteria.json",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 163,
+    "verify_hint": "Check `_MATERIALIZE_LIMIT`'s use in `_catalog_body` (`src/sqllens/safety/rule_sets.py`) and the `EXP(1000)` connector test in `tests/connectors/test_rule_sets_mysql.py`",
+    "id": "VC-52",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Under the example set, a catalog read of a field outside the 25 kept fields (for example `TABLE_ROWS`, `COLUMN_DEFAULT` or `CONSTRAINT_NAME`) returns `NULL` for it, and `SELECT *` over a rewritten view returns every field of that view, each field outside the kept fields `NULL`.",
+    "claim_signature": "issue-acceptance-5",
+    "criteria_file": ".prflow/tmp/review/pr-393/43591801509-1/criteria.json",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 403,
+    "verify_hint": "Check the projection loop in `_catalog_body` (`src/sqllens/safety/rule_sets.py`) and the NULL-field and `SELECT *` connector tests in `tests/connectors/test_rule_sets_mysql.py`",
+    "id": "VC-53",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "A rewritten statement in which a reference to `INFORMATION_SCHEMA.TABLES`, `COLUMNS` or `KEY_COLUMN_USAGE` sits outside the catalog derived table the guard builds for it is refused (a planted defect in a unit test), and a read of `INFORMATION_SCHEMA.STATISTICS` or `SHOW TABLES` is still refused.",
+    "claim_signature": "issue-acceptance-6",
+    "criteria_file": ".prflow/tmp/review/pr-393/43591801509-1/criteria.json",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "source_line": 530,
+    "verify_hint": "Check `_rewalk`'s refusal branch in `src/sqllens/safety/rule_sets.py` and the planted-defect and STATISTICS/SHOW TABLES tests in `tests/unit/test_safety_rule_sets.py` and `tests/connectors/test_rule_sets_mysql.py`",
+    "id": "VC-54",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "While a rule-set file is configured, the system prompt's MySQL schema-lookup guidance names `INFORMATION_SCHEMA.TABLES`, `COLUMNS` and `KEY_COLUMN_USAGE` and permits no `SHOW` statement, and the prompt differs from #374's rule-set prompt for the same configuration by that change only.",
+    "claim_signature": "issue-acceptance-7",
+    "criteria_file": ".prflow/tmp/review/pr-393/43591801509-1/criteria.json",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "source_line": 189,
+    "verify_hint": "Check the `introspection_how` branch in `build_system_prompt` (`src/sqllens/agent/core/system_prompt/default.py`) and the rule-set prompt tests in `tests/unit/test_system_prompt.py`",
+    "id": "VC-55",
+    "reused_from_iter_prev": false
+  },
+  {
+    "category": "issue_acceptance",
+    "verification_mode": "agent",
+    "claim_provenance": "generated_paraphrase",
+    "claim": "Without a rule-set file configured, catalog reads return what they return today, and the system prompt is byte-identical to today's for the same configuration.",
+    "claim_signature": "issue-acceptance-8",
+    "criteria_file": ".prflow/tmp/review/pr-393/43591801509-1/criteria.json",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "source_line": 194,
+    "verify_hint": "Compare the `else` branch's `introspection_how` string in `src/sqllens/agent/core/system_prompt/default.py` byte for byte with the base-revision sentence, and check the no-rule-set prompt test in `tests/unit/test_system_prompt.py`",
+    "id": "VC-56",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-57",
+    "category": "api_contract",
+    "claim": "Without a rule-set file configured, catalog reads return what they returned before this change and the system prompt is byte-identical to today's for the same configuration; in particular `apply_rls` must not have changed row-level-security behavior for deployments with no rule-set file.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rls.py",
+    "verify_against": "The `_is_mysql_metadata_relation` skip in `apply_rls` and the eighth acceptance criterion",
+    "verify_hint": "Check `apply_rls` and `_is_mysql_metadata_relation` in `src/sqllens/safety/rls.py`, the rule_sets=False branch in `src/sqllens/agent/core/system_prompt/default.py`, and `changelog.d/393.fixed.md`",
+    "prior_ref": "VC-51",
+    "prior_evidence": "Criteria file counts (criterion 8 present). Prompt half holds: default.py (diff lines 125-130) keeps the original sentence verbatim in the `else` branch when rule_sets is False, and tests/unit/test_system_prompt.py:786-791 asserts the rule_sets=False prompt equals the default builder's. Catalog-read half has a departure inside the trigger: the PR also changes src/sqllens/safety/rls.py (diff lines 152-187) so apply_rls never matches an [[rls]] rule against a MySQL information_schema.<name> reference (_is_mysql_metadata_relation), independent of any rule-set file. At base, apply_rls matched by `table.name.lower()` alone (`if name not in rules_by_table: continue`), so with [[rls]] rules for an application table named tables/columns/key_column_usage and no rule-set file configured, a catalog read had the rule's column injected and MySQL rejected it. At head the same read succeeds. changelog.d/393.fixed.md states this behavior change. No sibling criterion names it: criteria 1-7 are all 'under the example set', and criterion 8 says reads 'return what they return today'. The test test_without_a_rule_set_catalog_reads_are_unchanged (tests/connectors/test_rule_sets_mysql.py:662-672) only covers a guard chain without RLS rules, so it does not cover this case. Trigger split: rule_sets False/no file -> prompt branch unchanged (in trigger, conforms); `_is_mysql_metadata_relation` true for information_schema refs with an rls rule named like a view -> departure (needs no fault, fires with no rule-set file). The departure turns an error into a success, so its impact is small.",
+    "claim_signature": "api_contract:rls.py:no-rule-set-behavior-unchanged",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-58",
+    "category": "data_format_assumption",
+    "claim": "The rule-set system-prompt sentence's assertion that fields of the three views other than names, types and keys are withheld and read as NULL matches the kept field sets in `_CATALOG_VIEWS`.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/agent/core/system_prompt/default.py",
+    "verify_against": "The `kept` sets of `_CATALOG_VIEWS` in `src/sqllens/safety/rule_sets.py`",
+    "verify_hint": "Compare the rule-set introspection sentence in `src/sqllens/agent/core/system_prompt/default.py` against the COLUMNS and KEY_COLUMN_USAGE kept sets in `_CATALOG_VIEWS` (`src/sqllens/safety/rule_sets.py`), notably IS_NULLABLE and ORDINAL_POSITION",
+    "prior_ref": "VC-19",
+    "prior_evidence": "default.py:192 says fields other than names, types and keys are withheld and read as NULL. In rule_sets.py the COLUMNS kept set (lines 129-133) includes IS_NULLABLE, which is a nullability flag and neither a name, a type nor a key. It also keeps CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE and DATETIME_PRECISION, which are only loosely 'types'. KEY_COLUMN_USAGE keeps ORDINAL_POSITION and POSITION_IN_UNIQUE_CONSTRAINT (lines 142-146), which are loosely 'keys'. So IS_NULLABLE returns real values although the prompt says it reads NULL. The prompt would lead a model to disregard real nullability data. The 'no SHOW/DESCRIBE/other catalog lookup' half is consistent with the comment at default.py:190-191 and the guard's design, and I did not trace it further. The mismatch is narrow, and the rest of the sentence is accurate.",
+    "claim_signature": "data_format_assumption:default.py:prompt-null-fields-claim",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-59",
+    "category": "test_mock_alignment",
+    "claim": "The test's description of guard ordering must match the production chain: the rule-set guard wraps the RLS runner (rule-set rewrite runs first, RLS sees the rewritten SQL), and the composed test asserts output equal to `apply_rule_set(sql, EXAMPLE_TABLES)` with no tenant predicate inside the catalog body.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "verify_against": "The runner composition in `src/sqllens/agent/factory.py` and `RuleSetGuardRunner.run_sql` in `src/sqllens/safety/rule_sets.py`",
+    "verify_hint": "Check the wrapping order around lines 127-132 of `src/sqllens/agent/factory.py` and `RuleSetGuardRunner.run_sql` in `src/sqllens/safety/rule_sets.py` against the composed test in `tests/unit/test_safety_rule_sets.py`",
+    "prior_ref": "VC-32",
+    "prior_evidence": "The claim's ordering premise is wrong. factory.py:127-132 wraps RlsGuardRunner first (inner), then RuleSetGuardRunner around it (outer), and the comment at 129-130 says 'The rule-set guard sits outside flat RLS'. The RuleSetGuardRunner docstring (rule_sets.py:563-566) says the same. RuleSetGuardRunner.run_sql (rule_sets.py:603-616) rewrites the SQL first and then calls inner.run_sql, so the rule-set guard runs BEFORE RLS and RLS sees the already-rewritten SQL. The test at tests/unit/test_safety_rule_sets.py:683-699 does compose RuleSetGuardRunner(rls, loaded), which matches the real order, and asserts out == apply_rule_set(sql, EXAMPLE_TABLES) and 'tenant_id' not in out. So the test and the factory both place RLS inside the rule-set guard. The claim's statement that RLS runs before the rule-set guard is the reverse of the code. I did not execute the test, so I did not check that the byte-identical output assertion holds.",
+    "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:guard-chain-order",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-60",
+    "category": "data_format_assumption",
+    "claim": "The field names pinned in `_CATALOG_VIEWS` are every field, in view order, of the three `information_schema` views on every supported MySQL server (8.0+ including Aurora MySQL 3), so `SELECT *` over a rewritten view returns the view's full field set.",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "verify_against": "MySQL's documented INFORMATION_SCHEMA.TABLES/COLUMNS/KEY_COLUMN_USAGE column lists and the connector test's live-server check",
+    "verify_hint": "Check `_CATALOG_VIEWS` in `src/sqllens/safety/rule_sets.py` and `test_star_returns_every_field_of_the_view` in `tests/connectors/test_rule_sets_mysql.py`, plus the MySQL service version in `.github/workflows/ci.yml`",
+    "prior_ref": "VC-53",
+    "prior_evidence": "The finding still holds at head. src/sqllens/safety/rule_sets.py:107-148 still hardcodes the field tuples in _CATALOG_VIEWS (21 + 22 + 12 = 55 names) as 'MySQL 8.0+'. The only readers are the derived-table builder (rule_sets.py:389-394, which iterates spec.fields), the unit tests (tests/unit/test_safety_rule_sets.py:393-400, which check only internal consistency and counts), and the connector test test_star_returns_every_field_of_the_view (tests/connectors/test_rule_sets_mysql.py:641-656), which compares against a live server. The CI workflow (.github/workflows/ci.yml:81-82) provisions only mysql:8.0, so no other server version or Aurora MySQL 3 is checked, and the code has no runtime discovery of the fields. Criterion 5 requires SELECT * over a rewritten view to return every field of that view, and a newer server whose view gained a field would break that. No defect does not apply because that failure is reachable and criterion 5 requires the property. Impact is small: the omission direction fails safe, and no field outside kept is ever exposed. Severity is suggestion.",
+    "claim_signature": "data_format_assumption:rule_sets.py:pinned-catalog-field-lists",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-61",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 1. The hard-coded `information_schema` column lists in `src/sqllens/safety/rule_sets.py` are a hand-maintained copy of MySQL 8.0's view definitions, and nothing in the running program notices when a server's view does not match them; a field the server has but the list lacks disappears from `SELECT *`, and a field the list has but the server lacks makes every schema lookup under a rule set fail with an unknown-column error. The only check is the connector test `test_star_returns_every_field_of_the_view`, which compares against whichever server continuous integration provides, and that is MySQL 8.0 only, while the supported range also covers MySQL 8.4 and Aurora MySQL 3. (raised by 3/6 agents, corroborated in prose rather than by matching signatures)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "verify_against": "`_CATALOG_VIEWS` and the connector test that compares against a live server",
+    "verify_hint": "Check `_CATALOG_VIEWS` in `src/sqllens/safety/rule_sets.py` and `test_star_returns_every_field_of_the_view` in `tests/connectors/test_rule_sets_mysql.py`",
+    "prior_ref": "finding 1 (suggestion)",
+    "prior_evidence": "1. The hard-coded `information_schema` column lists in `src/sqllens/safety/rule_sets.py` are a hand-maintained copy of MySQL 8.0's view definitions, and nothing in the running program notices when a server's view does not match them; a field the server has but the list lacks disappears from `SELECT *`, and a field the list has but the server lacks makes every schema lookup under a rule set fail with an unknown-column error. The only check is the connector test `test_star_returns_every_field_of_the_view`, which compares against whichever server continuous integration provides, and that is MySQL 8.0 only, while the supported range also covers MySQL 8.4 and Aurora MySQL 3. (raised by 3/6 agents, corroborated in prose rather than by matching signatures)",
+    "claim_signature": "data_format_assumption:rule_sets.py:catalog-field-drift-detection",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-62",
+    "category": "dependency_interaction",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 2. The cached expected-body key in `src/sqllens/safety/rule_sets.py` includes `id(tables)`, and the comment above it describes that identity as a protection against comparing text built for a different rule set, but `apply_rule_set` creates the mapping and the cache together for one statement, so two different mappings can never meet in one cache; the identity part of the key can never do the work the comment gives it, and object identities are reused after a dictionary is collected, so it would not be a sound protection if it ever did span calls. (raised by 2/6 agents, corroborated in prose rather than by matching signatures)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "verify_against": "The call graph of `apply_rule_set`, `_rewalk` and `_is_catalog_derived`",
+    "verify_hint": "Check the `expected` cache key and its comment in `_is_catalog_derived`/`_rewalk`, and how `apply_rule_set` creates the mapping, in `src/sqllens/safety/rule_sets.py`",
+    "prior_ref": "finding 2 (suggestion)",
+    "prior_evidence": "2. The cached expected-body key in `src/sqllens/safety/rule_sets.py` includes `id(tables)`, and the comment above it describes that identity as a protection against comparing text built for a different rule set, but `apply_rule_set` creates the mapping and the cache together for one statement, so two different mappings can never meet in one cache; the identity part of the key can never do the work the comment gives it, and object identities are reused after a dictionary is collected, so it would not be a sound protection if it ever did span calls. (raised by 2/6 agents, corroborated in prose rather than by matching signatures)",
+    "claim_signature": "dependency_interaction:rule_sets.py:expected-cache-key-identity",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-63",
+    "category": "api_contract",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 3. The new `information_schema` skip in `src/sqllens/safety/rls.py` returns early before the alias backstop that the surrounding comment describes as a deliberate catch for misparsed statements, so it also silences the \"could not prove row-level-security scoping\" refusal for shapes such as `information_schema.tables AS orders` under a rule for `orders`, and for names under `information_schema` that are not in the metadata-view allowlist at all. No application rows become reachable, because MySQL has no such relation and the statement errors, but a check written to fail closed now covers less than it did. (raised by 2/6 agents, corroborated in prose rather than by matching signatures)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rls.py",
+    "verify_against": "The alias backstop and unaccounted-reference sweep in `apply_rls`",
+    "verify_hint": "Check `_is_mysql_metadata_relation` and the final `find_all(exp.Table)` loop plus the alias backstop in `src/sqllens/safety/rls.py`",
+    "prior_ref": "finding 3 (suggestion)",
+    "prior_evidence": "3. The new `information_schema` skip in `src/sqllens/safety/rls.py` returns early before the alias backstop that the surrounding comment describes as a deliberate catch for misparsed statements, so it also silences the \"could not prove row-level-security scoping\" refusal for shapes such as `information_schema.tables AS orders` under a rule for `orders`, and for names under `information_schema` that are not in the metadata-view allowlist at all. No application rows become reachable, because MySQL has no such relation and the statement errors, but a check written to fail closed now covers less than it did. (raised by 2/6 agents, corroborated in prose rather than by matching signatures)",
+    "claim_signature": "api_contract:rls.py:metadata-skip-before-alias-backstop",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-64",
+    "category": "data_format_assumption",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 4. The `_CatalogView` type in `src/sqllens/safety/rule_sets.py` carries the field list and the kept-field set, but not the row filter that is the one thing making a view safe to rewrite; that filter lives in a separate literal tuple and an if-ladder, so adding a fourth view to the dictionary would stop the guard refusing that view while the filter builder raises an error, and the view-name list is now written in three places. The failure direction stays closed, through the runner's generic exception handler, but neither the type nor construction enforces the pairing. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "src/sqllens/safety/rule_sets.py",
+    "verify_against": "`_CatalogView`, `_CATALOG_VIEWS` and `_catalog_filter`",
+    "verify_hint": "Check `_CatalogView`, the `_CATALOG_VIEWS` mapping and the if-ladder in `_catalog_filter` in `src/sqllens/safety/rule_sets.py`",
+    "prior_ref": "finding 4 (suggestion)",
+    "prior_evidence": "4. The `_CatalogView` type in `src/sqllens/safety/rule_sets.py` carries the field list and the kept-field set, but not the row filter that is the one thing making a view safe to rewrite; that filter lives in a separate literal tuple and an if-ladder, so adding a fourth view to the dictionary would stop the guard refusing that view while the filter builder raises an error, and the view-name list is now written in three places. The failure direction stays closed, through the runner's generic exception handler, but neither the type nor construction enforces the pairing. (raised by 1/6 agents)",
+    "claim_signature": "data_format_assumption:rule_sets.py:catalogview-filter-pairing",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-65",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 5. The cross-database test `test_other_database_keys_exist_but_are_hidden` in `tests/connectors/test_rule_sets_mysql.py` skips when `SQLLENS_TEST_MYSQL_OTHER_DATABASE` is unset, and the shared fixture then also skips creating the second database's same-named tables; its sibling `test_key_column_usage_lists_only_keys_inside_the_set` keeps asserting its exact three rows and still passes, so the third acceptance criterion's cross-database half goes unchecked while the suite reports success. Only the continuous-integration connector job sets that variable. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_rule_sets_mysql.py",
+    "verify_against": "The fixture and skip logic in the connector test module and the env var set by the CI connector job",
+    "verify_hint": "Check `test_other_database_keys_exist_but_are_hidden`, `test_key_column_usage_lists_only_keys_inside_the_set` and the shared fixture in `tests/connectors/test_rule_sets_mysql.py`, plus the connector job env in `.github/workflows/ci.yml`",
+    "prior_ref": "finding 5 (suggestion)",
+    "prior_evidence": "5. The cross-database test `test_other_database_keys_exist_but_are_hidden` in `tests/connectors/test_rule_sets_mysql.py` skips when `SQLLENS_TEST_MYSQL_OTHER_DATABASE` is unset, and the shared fixture then also skips creating the second database's same-named tables; its sibling `test_key_column_usage_lists_only_keys_inside_the_set` keeps asserting its exact three rows and still passes, so the third acceptance criterion's cross-database half goes unchecked while the suite reports success. Only the continuous-integration connector job sets that variable. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:test_rule_sets_mysql.py:other-database-skip",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-66",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 6. The release-note fragment `changelog.d/393.fixed.md` describes a deployment that has row-level-security rules and no rule set, but every test of `_is_mysql_metadata_relation` runs through the rule-set guard, and `tests/unit/test_safety_rls.py` has no `information_schema` case at all, so the shipped claim's own configuration has no direct assertion at the module that owns the behavior. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "changelog.d/393.fixed.md",
+    "verify_against": "Tests of `_is_mysql_metadata_relation` and `apply_rls`",
+    "verify_hint": "Check `tests/unit/test_safety_rls.py` for an `information_schema` case against `_is_mysql_metadata_relation` in `src/sqllens/safety/rls.py`",
+    "prior_ref": "finding 6 (suggestion)",
+    "prior_evidence": "6. The release-note fragment `changelog.d/393.fixed.md` describes a deployment that has row-level-security rules and no rule set, but every test of `_is_mysql_metadata_relation` runs through the rule-set guard, and `tests/unit/test_safety_rls.py` has no `information_schema` case at all, so the shipped claim's own configuration has no direct assertion at the module that owns the behavior. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:393.fixed.md:rls-claim-untested",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-67",
+    "category": "test_mock_alignment",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 7. The placement matrix in `tests/unit/test_safety_rule_sets.py` covers a catalog view inside a common table expression, a derived table, a union and a parenthesized join, but not inside a predicate subquery such as `WHERE x IN (SELECT TABLE_NAME FROM information_schema.tables)`, which is a shape the model plausibly writes. The unaccounted-table sweep makes the untested case fail closed, so the risk is a refusal the user did not expect rather than a hole. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/unit/test_safety_rule_sets.py",
+    "verify_against": "The placement matrix cases and the rewrite/re-walk handling in `apply_rule_set`",
+    "verify_hint": "Check the placement matrix cases in `tests/unit/test_safety_rule_sets.py` against `_wrap`/`_rewalk` in `src/sqllens/safety/rule_sets.py`",
+    "prior_ref": "finding 7 (suggestion)",
+    "prior_evidence": "7. The placement matrix in `tests/unit/test_safety_rule_sets.py` covers a catalog view inside a common table expression, a derived table, a union and a parenthesized join, but not inside a predicate subquery such as `WHERE x IN (SELECT TABLE_NAME FROM information_schema.tables)`, which is a shape the model plausibly writes. The unaccounted-table sweep makes the untested case fail closed, so the risk is a refusal the user did not expect rather than a hole. (raised by 1/6 agents)",
+    "claim_signature": "test_mock_alignment:test_safety_rule_sets.py:predicate-subquery-placement",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  },
+  {
+    "id": "VC-68",
+    "category": "dependency_interaction",
+    "claim": "This finding from the previous review no longer holds at the reviewed head: 8. The connector fixture in `tests/connectors/test_rule_sets_mysql.py` runs its setup and teardown statements between opening and closing the connection with no `try`/`finally`, so a failing data-definition statement leaves an open MySQL session and the test tables behind for the next run; the newly added `SET FOREIGN_KEY_CHECKS = 0` and forward-referencing foreign keys make such a failure more likely than before. (raised by 1/6 agents)",
+    "claim_provenance": "generated_paraphrase",
+    "source_file": "tests/connectors/test_rule_sets_mysql.py",
+    "verify_against": "The fixture's connection handling and the pymysql connection API",
+    "verify_hint": "Check the module fixture (setup/teardown, `SET FOREIGN_KEY_CHECKS = 0`, connection open/close) in `tests/connectors/test_rule_sets_mysql.py`",
+    "prior_ref": "finding 8 (suggestion)",
+    "prior_evidence": "8. The connector fixture in `tests/connectors/test_rule_sets_mysql.py` runs its setup and teardown statements between opening and closing the connection with no `try`/`finally`, so a failing data-definition statement leaves an open MySQL session and the test tables behind for the next run; the newly added `SET FOREIGN_KEY_CHECKS = 0` and forward-referencing foreign keys make such a failure more likely than before. (raised by 1/6 agents)",
+    "claim_signature": "dependency_interaction:test_rule_sets_mysql.py:fixture-connection-leak",
+    "verification_mode": "agent",
+    "reused_from_iter_prev": false
+  }
+]
