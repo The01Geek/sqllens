@@ -197,6 +197,17 @@ def _parse(sql: str) -> exp.Expression:
     return tree
 
 
+def _check_wrappable(table: exp.Table, allowed: frozenset[str]) -> None:
+    """Refuse table options, any argument outside ``allowed``, and column aliases."""
+    extra = _set_args(table) - allowed
+    if extra:
+        kind = KIND_TABLE_OPTIONS if extra & _TABLE_OPTION_ARGS else KIND_UNSUPPORTED
+        raise RuleSetRefusal(kind, f"table {table.name} carries {sorted(extra)}")
+    alias = table.args.get("alias")
+    if alias is not None and alias.args.get("columns"):
+        raise RuleSetRefusal(KIND_UNSUPPORTED, f"column aliases on table {table.name}")
+
+
 def _check_reference(table: exp.Table, tables: Mapping[str, tuple[str, ...]]) -> None:
     """Refuse a base-table reference the guard cannot wrap."""
     if not isinstance(table.this, exp.Identifier):
@@ -206,13 +217,7 @@ def _check_reference(table: exp.Table, tables: Mapping[str, tuple[str, ...]]) ->
         schema = (table.db or table.catalog or "").lower()
         kind = KIND_CATALOG if schema in _CATALOG_SCHEMAS else KIND_QUALIFIED_TABLE
         raise RuleSetRefusal(kind, f"qualified table {table.sql(_DIALECT)}")
-    extra = _set_args(table) - _TABLE_ARGS
-    if extra:
-        kind = KIND_TABLE_OPTIONS if extra & _TABLE_OPTION_ARGS else KIND_UNSUPPORTED
-        raise RuleSetRefusal(kind, f"table {table.name} carries {sorted(extra)}")
-    alias = table.args.get("alias")
-    if alias is not None and alias.args.get("columns"):
-        raise RuleSetRefusal(KIND_UNSUPPORTED, f"column aliases on table {table.name}")
+    _check_wrappable(table, _TABLE_ARGS)
     if table.name.lower() == "dual" and table.name not in tables:
         raise RuleSetRefusal(KIND_TABLE_FUNCTION, "FROM DUAL")
     if table.name not in tables:
@@ -233,17 +238,6 @@ def _catalog_view(table: exp.Table) -> str | None:
     return view if view in _CATALOG_VIEWS else None
 
 
-def _check_catalog_reference(table: exp.Table) -> None:
-    """Refuse a rewritable catalog-view reference the guard cannot wrap."""
-    extra = _set_args(table) - _TABLE_ARGS - {"db"}
-    if extra:
-        kind = KIND_TABLE_OPTIONS if extra & _TABLE_OPTION_ARGS else KIND_UNSUPPORTED
-        raise RuleSetRefusal(kind, f"catalog view {table.name} carries {sorted(extra)}")
-    alias = table.args.get("alias")
-    if alias is not None and alias.args.get("columns"):
-        raise RuleSetRefusal(KIND_UNSUPPORTED, f"column aliases on catalog view {table.name}")
-
-
 def _is_cte_reference(table: exp.Table, scope: object) -> bool:
     return (
         not table.args.get("db")
@@ -254,10 +248,10 @@ def _is_cte_reference(table: exp.Table, scope: object) -> bool:
 
 def _analyze(
     tree: exp.Expression, tables: Mapping[str, tuple[str, ...]]
-) -> tuple[list[exp.Table], list[exp.Table]]:
-    """Return ``tree``'s listed-table and catalog-view references; refuse any other table."""
+) -> tuple[list[exp.Table], list[tuple[exp.Table, str]]]:
+    """Return ``tree``'s listed-table and (catalog reference, view) pairs; refuse any other."""
     base: list[exp.Table] = []
-    catalog: list[exp.Table] = []
+    catalog: list[tuple[exp.Table, str]] = []
     accounted: set[int] = set()
     for scope in traverse_scope(tree):
         sources = [s for s in scope.sources.values() if isinstance(s, exp.Table)]
@@ -271,9 +265,10 @@ def _analyze(
                 raise RuleSetRefusal(KIND_TABLE_OPTIONS, f"options on CTE {table.name}")
             accounted.add(id(table))
         for table in sources:
-            if _catalog_view(table) is not None:
-                _check_catalog_reference(table)
-                catalog.append(table)
+            view = _catalog_view(table)
+            if view is not None:
+                _check_wrappable(table, _TABLE_ARGS | {"db"})
+                catalog.append((table, view))
             else:
                 _check_reference(table, tables)
                 base.append(table)
@@ -399,15 +394,12 @@ def _catalog_body(view: str, tables: Mapping[str, tuple[str, ...]]) -> exp.Selec
 def _rewrite(
     tree: exp.Expression,
     base: list[exp.Table],
-    catalog: list[exp.Table],
+    catalog: list[tuple[exp.Table, str]],
     tables: Mapping[str, tuple[str, ...]],
 ) -> exp.Expression:
     for table in base:
         table.replace(_derived(table, tables[table.name]))
-    for table in catalog:
-        view = _catalog_view(table)
-        if view is None:
-            raise RuleSetRefusal(KIND_UNCHECKED, f"table {table.name} is not a catalog view")
+    for table, view in catalog:
         table.replace(_wrap(table, _catalog_body(view, tables)))
     for hint in list(tree.find_all(exp.Hint)):
         hint.pop()
@@ -444,12 +436,14 @@ def _is_guard_derived(table: exp.Table, tables: Mapping[str, tuple[str, ...]]) -
     return alias is None or not alias.args.get("columns")
 
 
-def _is_catalog_derived(table: exp.Table, tables: Mapping[str, tuple[str, ...]]) -> bool:
+def _is_catalog_derived(
+    table: exp.Table, tables: Mapping[str, tuple[str, ...]], expected: dict[str, str]
+) -> bool:
     """True if ``table`` is a catalog view inside exactly the derived table the guard builds.
 
     The body must generate the same MySQL text as :func:`_catalog_body` for
     that view and ``tables``; text, not sqlglot's node equality, which folds
-    letter case.
+    letter case. ``expected`` caches that text per view for one statement.
     """
     view = _catalog_view(table)
     if view is None or _set_args(table) != {"this", "db"}:
@@ -466,17 +460,31 @@ def _is_catalog_derived(table: exp.Table, tables: Mapping[str, tuple[str, ...]])
     alias = wrapper.args.get("alias")
     if alias is not None and alias.args.get("columns"):
         return False
-    return _generate(body) == _generate(_catalog_body(view, tables))
+    if view not in expected:
+        expected[view] = _generate(_catalog_body(view, tables))
+    return _generate(body) == expected[view]
 
 
-def _rewalk(tree: exp.Expression, tables: Mapping[str, tuple[str, ...]]) -> None:
-    """Refuse ``tree`` unless every base-table and catalog reference is in a guard-built wrapper."""
+def _rewalk(
+    tree: exp.Expression,
+    tables: Mapping[str, tuple[str, ...]],
+    expected: dict[str, str] | None = None,
+) -> None:
+    """Refuse ``tree`` unless every base-table and catalog reference is in a guard-built wrapper.
+
+    ``expected`` caches each catalog view's body text across the two re-walks
+    of one statement; it must be built from this same ``tables``.
+    """
+    expected = {} if expected is None else expected
     accounted: set[int] = set()
     for scope in traverse_scope(tree):
         sources = [s for s in scope.sources.values() if isinstance(s, exp.Table)]
         source_ids = {id(s) for s in sources}
         for table in sources:
-            if not (_is_guard_derived(table, tables) or _is_catalog_derived(table, tables)):
+            if not (
+                _is_guard_derived(table, tables)
+                or _is_catalog_derived(table, tables, expected)
+            ):
                 raise RuleSetRefusal(
                     KIND_UNCHECKED, f"re-walk: table {table.name} is not wrapped"
                 )
@@ -520,7 +528,8 @@ def apply_rule_set(sql: str, tables: Mapping[str, tuple[str, ...]]) -> str:
     tree = _parse(sql)
     base, catalog = _analyze(tree, tables)
     _rewrite(tree, base, catalog, tables)
-    _rewalk(tree, tables)
+    expected: dict[str, str] = {}
+    _rewalk(tree, tables, expected)
     output = _generate(tree)
     try:
         reparsed = _reparse(output)
@@ -528,7 +537,7 @@ def apply_rule_set(sql: str, tables: Mapping[str, tuple[str, ...]]) -> str:
         if isinstance(exc, RuleSetRefusal):
             raise
         raise RuleSetRefusal(KIND_UNCHECKED, f"re-parse failed: {exc}") from exc
-    _rewalk(reparsed, tables)
+    _rewalk(reparsed, tables, expected)
     return output
 
 

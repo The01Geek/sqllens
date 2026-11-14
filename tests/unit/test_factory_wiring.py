@@ -748,7 +748,9 @@ async def test_rule_set_user_resolver_keys_by_identity_and_keeps_default_group(
     assert {t.name for t in await agent.get_available_tools(user)} >= {"run_sql"}
 
 
-async def test_rule_set_agent_prompt_differs_from_todays_by_two_lines(tmp_path: Path) -> None:
+async def test_rule_set_agent_prompt_adds_two_lines_and_switches_schema_lookup(
+    tmp_path: Path,
+) -> None:
     import difflib
 
     pytest.importorskip("pymysql")
@@ -762,9 +764,13 @@ async def test_rule_set_agent_prompt_differs_from_todays_by_two_lines(tmp_path: 
     )
     off = await _prompt_from_agent_tools(build_agent(off_cfg))
     diff = [d for d in difflib.ndiff(off.splitlines(), on.splitlines()) if d[:2] in ("+ ", "- ")]
-    assert [d[:2] for d in diff] == ["+ ", "+ "]
-    assert "Qualify every column" in diff[0]
-    assert "Refused by the rule set:" in diff[1]
+    added = [d[2:] for d in diff if d.startswith("+ ")]
+    removed = [d[2:] for d in diff if d.startswith("- ")]
+    assert len(added) == 3 and len(removed) == 1
+    assert "Qualify every column" in added[0]
+    assert "Refused by the rule set:" in added[1]
+    assert "INFORMATION_SCHEMA.KEY_COLUMN_USAGE" in added[2] and "SHOW TABLES" not in added[2]
+    assert "structural SHOW variants" in removed[0]
     for text in ("Sales reps see their customers", "confirmed_against_production"):
         assert text not in on
 
