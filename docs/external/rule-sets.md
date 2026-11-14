@@ -82,7 +82,7 @@ While a rule-set file is configured, every `query_database` request must carry t
 
 SQL Lens checks these before the assistant does any work. A request that does not pass is refused with one of these messages, and nothing is sent to the model or the database:
 
-- `Request refused: rule-set key missing` — the rule-set field is absent or empty.
+- `Request refused: rule-set key missing` — the rule-set field is absent or empty. The same refusal applies when the whole `_meta` is dropped for exceeding its limits (more than 64 keys, or more than 16 KiB as JSON).
 - `Request refused: no such rule set` — the named set is not in the file.
 - `Request refused: account not bound` — the account field is absent, or the account is not listed in `binding.account_ids`.
 - `Request refused: user ID invalid` — the user field is absent or is not a positive whole number.
@@ -92,7 +92,7 @@ The messages name only what class of problem occurred. They never name a table, 
 
 ## What Changes While Rule Sets Are On
 
-- **Answers are limited to the selected set.** SQL Lens rewrites every query so it can read only the tables and columns the selected set lists. A query that reaches for anything else is refused before it runs.
+- **Answers are limited to the selected set.** SQL Lens rewrites every query so it can read only the tables and columns the selected set lists. A query that reaches for an unlisted table is refused before it runs; one that reads an unlisted column fails in MySQL as an unknown column (see below).
 - **Nothing is saved to memory.** The assistant saves no questions and no notes while a rule-set file is configured, whatever your `[memory]` settings say, because memory is shared by every rule set. Loading memory with `sqllens import-memory`, and the memory administration tools, are not affected.
 - **A conversation belongs to one identity.** When a follow-up question carries a conversation identifier, the rule set, account and user must be the same ones that started the conversation. A follow-up under a different identity is refused.
 - **`sqllens verify-memory` is not available.** It prints `sqllens verify-memory does not support rule sets yet; run it against a config without [rule_sets] file` and stops. Run it against a configuration that has no `[rule_sets] file`.

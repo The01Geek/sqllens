@@ -284,7 +284,9 @@ def _validation_problems(exc: ValidationError) -> list[str]:
 
 
 def _url_database(url: str) -> str:
-    return (urlparse(url).path or "").removeprefix("/")
+    # Must name the database the MySQL runner connects to for the same URL;
+    # build_sql_runner in agent/factory.py strips every leading slash.
+    return (urlparse(url).path or "").lstrip("/")
 
 
 def load_rule_sets(path: Path, *, database_url: str) -> LoadedRuleSets:

@@ -287,6 +287,16 @@ def test_binding_database_must_equal_url_database_byte_for_byte(tmp_path: Path) 
         _load(tmp_path, document)
 
 
+def test_url_database_matches_the_runner_database(tmp_path: Path) -> None:
+    # The MySQL runner strips every leading slash (agent/factory.py), so the
+    # binding check and the catalog check must too.
+    from sqllens.rule_sets import mysql_connect_kwargs
+
+    doubled = "mysql+pymysql://u:p@db.internal:3306//shop"
+    assert mysql_connect_kwargs(doubled)["database"] == "shop"
+    assert _load(tmp_path, example_document(), url=doubled) is not None
+
+
 def test_config_load_refuses_binding_equal_to_display_name_only(tmp_path: Path) -> None:
     """``binding.database`` is checked against the URL's database, never ``[database] name``."""
     document = example_document()
