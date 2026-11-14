@@ -430,10 +430,13 @@ class RuleSet(_Record):
                             node.parent_rule, f"{path}.parent_rule"
                         ):
                             if not isinstance(local, _COLUMN_LOCAL):
+                                allowed = ", ".join(
+                                    kind.model_fields["kind"].annotation.__args__[0]
+                                    for kind in _COLUMN_LOCAL
+                                )
                                 raise ValueError(
                                     f"{local_path}: parent_rule cannot hold a "
-                                    f"{local.kind!r} node, only compare, is_null, "
-                                    "is_not_null, any_of and all_of"
+                                    f"{local.kind!r} node, only {allowed}"
                                 )
                             if not isinstance(local, AnyOfRule | AllOfRule):
                                 column(node.parent_table, local.column, local_path)

@@ -9,7 +9,6 @@ Tree shapes and generated text depend on the sqlglot version
 
 from __future__ import annotations
 
-import copy
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -508,7 +507,7 @@ def test_catalog_check_covers_the_additions(tmp_path: Path, mutate, expected: st
     tables, columns = _catalog()
     mutate(tables, columns)
     with pytest.raises(RuleSetCatalogError) as info:
-        _check(tmp_path, copy.deepcopy(document), tables, columns)
+        _check(tmp_path, document, tables, columns)
     assert expected in str(info.value)
 
 
